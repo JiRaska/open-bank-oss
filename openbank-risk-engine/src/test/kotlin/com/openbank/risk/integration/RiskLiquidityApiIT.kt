@@ -7,6 +7,8 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.risk.application.port.out.TreasuryDealBook
+import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.lendingLoan
 import com.openbank.risk.domain.Fixtures.sl
@@ -18,10 +20,14 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * ADR-0313 phase 1 LCR / NSFR end to end: ledger and lending doubles at the ports, a snapshot that
@@ -41,33 +47,74 @@ class RiskLiquidityApiIT {
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
     @Inject
-    lateinit var treasury: com.openbank.risk.application.port.out.TreasuryDealBook
+    lateinit var treasury: TreasuryDealBook
 
     /** With the treasury read on, 1510 and 2320 are contract-level: each balance needs its deal. */
-    private val cnbDeposit = java.util.UUID.randomUUID()
-    private val cnbLombard = java.util.UUID.randomUUID()
+    private val cnbLombard = UUID.randomUUID()
+
+    private val placementIn20d = UUID.randomUUID()
+    private val placementIn61d = UUID.randomUUID()
+    private val cnbDeposit = UUID.randomUUID()
 
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
-        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$cnbDeposit', '$cnbLombard')")
+        TestDb.execute(
+            "DELETE FROM treasury_deal WHERE deal_id IN ('$placementIn20d', '$placementIn61d', '$cnbDeposit', '$cnbLombard')",
+        )
     }
 
-    private fun seedDeal(id: java.util.UUID, product: String, principal: String) = kotlinx.coroutines.runBlocking {
+    private fun seedDeal(id: UUID, product: String, principal: String): Unit =
+        seedDeal(id, product, principal, "2026-10-01")
+
+    private fun seedDeal(id: UUID, product: String, principal: String, maturity: String): Unit = runBlocking {
         treasury.apply(
-            com.openbank.risk.application.port.out.TreasuryDealEvent(
+            TreasuryDealEvent(
                 state = "SETTLED",
                 dealId = id,
                 product = product,
-                counterpartyId = "CNB",
+                counterpartyId = if (product.startsWith("CNB_")) "CNB" else "BANK-A",
                 currency = "CZK",
-                principal = java.math.BigDecimal(principal),
-                rate = java.math.BigDecimal("2.50"),
-                valueDate = java.time.LocalDate.parse("2026-09-30"),
-                maturityDate = java.time.LocalDate.parse("2026-10-01"),
+                principal = BigDecimal(principal),
+                rate = BigDecimal("3.00"),
+                valueDate = LocalDate.parse("2026-09-15"),
+                maturityDate = LocalDate.parse(maturity),
             ),
         )
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a placement due within 30 days is a 100 percent inflow, a later one and the CNB deposit are not`() {
+        ledger.inputs = LedgerInputs(
+            asOf = LocalDate.parse("2026-10-07"),
+            trialBalance = listOf(
+                tb("1500", "ASSET", "CZK", "3000.00", "0"),
+                tb("1510", "ASSET", "CZK", "4000.00", "0"),
+                tb("1001", "ASSET", "CZK", "3000.00", "0"),
+                tb("2310", "LIABILITY", "CZK", "0", "10000.00"),
+            ),
+            subLedger = emptyList(),
+        )
+        seedDeal(placementIn20d, "MM_PLACEMENT", "2000.00", "2026-10-27")
+        seedDeal(placementIn61d, "MM_PLACEMENT", "1000.00", "2026-12-07")
+        seedDeal(cnbDeposit, "CNB_DEPOSIT_FACILITY", "4000.00", "2026-10-08")
+        val lcr = liquidity(snapshot("2026-10-07", "TIED_OUT"))["total"]["lcr"]
+
+        val placements = lcr["inflows"].filter { it["factorKey"].asText() == "lcr-inflow-fi-placement-30d" }
+        assertThat(placements).hasSize(1)
+        assertThat(placements.single()["amount"].decimalValue()).isEqualByComparingTo("2000.00")
+        assertThat(placements.single()["glAccountCode"].asText()).isEqualTo("1500")
+        assertThat(placements.single()["weighted"].decimalValue()).isEqualByComparingTo("2000.00")
+        // The ČNB deposit is HQLA Level 1 and never also an inflow; the 1001 nostro is operational (0%).
+        assertThat(lcr["inflows"].none { it["glAccountCode"].asText() == "1510" }).isTrue()
+        assertThat(lcr["hqla"]["stock"].decimalValue()).isEqualByComparingTo("4000.00")
+        assertThat(lcr["totalOutflows"].decimalValue()).isEqualByComparingTo("10000.00")
+        assertThat(lcr["totalInflows"].decimalValue()).isEqualByComparingTo("2000.00")
+        assertThat(lcr["cappedInflows"].decimalValue()).isEqualByComparingTo("2000.00")
+        // 4000 / (10000 − 2000) = 0.5; without the placement inflow it would be 0.4.
+        assertThat(lcr["ratio"].decimalValue()).isEqualByComparingTo("0.5")
     }
 
     private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
@@ -100,7 +147,7 @@ class RiskLiquidityApiIT {
 
         // EU rules are the default for this bank (#10860): Delegated Regulation (EU) 2015/61 + CRR2.
         assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("3")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
@@ -127,7 +174,7 @@ class RiskLiquidityApiIT {
         val a = body["assumptions"]
         assertThat(a["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
         assertThat(a["scope"].asText()).contains("2015/61").contains("575/2013")
-        assertThat(a["factors"].size()).isEqualTo(31)
+        assertThat(a["factors"].size()).isEqualTo(32)
         assertThat(
             a["factors"].all {
                 it["citation"].asText().let { c -> c.startsWith("EU 2015/61") || c.startsWith("CRR ") }

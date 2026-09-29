@@ -10,72 +10,123 @@ import java.math.BigDecimal
 enum class FactorKind { RISK_WEIGHT, MINIMUM_RATIO }
 
 /**
- * Every factor the Pillar 1 standardised approach for credit risk applies here, with the paragraph
- * it comes from. The VALUES are not here: they arrive from configuration
- * (`openbank.risk.capital.sa.factors`), and [CapitalParameters] refuses a set missing any key or
- * carrying one not listed. So a risk weight is never a code default, and every one has a citation.
+ * Every factor the Pillar 1 standardised approach for credit risk applies here, with the provision
+ * it comes from under each [CapitalRegime]: [citation] for a BCBS set, [euCitation] for an EU set.
+ * The VALUES are not here: they arrive from configuration
+ * (`openbank.risk.capital.sa.parameter-sets.<id>.factors`), and [CapitalParameters] refuses a set
+ * missing any key or carrying one not listed. So a risk weight is never a code default, and every
+ * one has a citation.
  *
  * d424 = BCBS, "Basel III: Finalising post-crisis reforms", December 2017, Part I (standardised
  * approach for credit risk). bcbs189 = BCBS, "Basel III: A global regulatory framework for more
- * resilient banks and banking systems", December 2010 (rev. June 2011). EU CRR Part Three Title II
- * Chapter 2 is NOT applied.
+ * resilient banks and banking systems", December 2010 (rev. June 2011). CRR = Regulation (EU)
+ * 575/2013 as amended by CRR2 (EU) 2019/876 and CRR3 (EU) 2024/1623, Part Three Title II Chapter 2
+ * (risk weights) and Art. 92(1) (own-funds requirements).
+ *
+ * UNVERIFIED under EU law (the article and the weight are relied on; the PARAGRAPH is not confirmed
+ * against the consolidated CRR3 text, and each citation says so — tracked in #11107):
+ *  - [RW_BANK_SCRA_GRADE_A], [RW_BANK_SCRA_GRADE_B], [RW_BANK_SCRA_GRADE_C]: CRR3 Art. 121 SCRA
+ *    grade weights 40 / 75 / 150 % — which paragraph of the recast Art. 121 carries the table.
+ *  - [RW_RETAIL_REGULATORY]: Art. 123 75 % — the paragraph after the CRR3 recast of Art. 123.
+ *  - [RW_CORPORATE_UNRATED]: Art. 122 unrated 100 % — the paragraph after the CRR3 recast.
+ *  - [RW_CASH], [RW_CASH_ITEMS_IN_COLLECTION]: Art. 134 0 % / 20 % — which of Art. 134(2)-(3)
+ *    carries which sentence. Neither is mapped to any GL account today, so no result depends on it.
+ *
+ * [RW_RETAIL_OTHER] has NO EU counterpart: CRR has no "other retail" class — an exposure that does
+ * not meet Art. 123 is a corporate exposure (Art. 122) — so an EU set refuses `other-retail`.
  */
-enum class CapitalFactor(val key: String, val kind: FactorKind, val citation: String) {
+enum class CapitalFactor(val key: String, val kind: FactorKind, val citation: String, val euCitation: String) {
     RW_SOVEREIGN_UNRATED(
         "rw-sovereign-unrated",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶7 Table 1 (sovereigns and central banks, unrated: 100%)",
+        "CRR Art. 114(1) (central governments and central banks, no treatment of Art. 114(2)-(7): 100%)",
     ),
     RW_SOVEREIGN_DOMESTIC_CURRENCY(
         "rw-sovereign-domestic-currency",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶8 (national discretion: lower risk weight for the own sovereign / central bank, " +
             "domestic currency, funded in that currency)",
+        "CRR Art. 114(4) (Member State central government / central bank, denominated and funded in its domestic currency: 0%)",
     ),
     RW_BANK_SCRA_GRADE_A(
         "rw-bank-scra-grade-a",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶21 Table 7, ¶22-23 (SCRA Grade A base: 40%)",
+        "CRR Art. 121 (unrated institution, SCRA Grade A: 40%; paragraph UNVERIFIED)",
     ),
     RW_BANK_SCRA_GRADE_B(
         "rw-bank-scra-grade-b",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶21 Table 7, ¶25-27 (SCRA Grade B base: 75%)",
+        "CRR Art. 121 (unrated institution, SCRA Grade B: 75%; paragraph UNVERIFIED)",
     ),
     RW_BANK_SCRA_GRADE_C(
         "rw-bank-scra-grade-c",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶21 Table 7, ¶26, ¶28-29 (SCRA Grade C base: 150%)",
+        "CRR Art. 121 (unrated institution, SCRA Grade C: 150%; paragraph UNVERIFIED)",
     ),
     RW_RETAIL_REGULATORY(
         "rw-retail-regulatory",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶55 (regulatory retail meeting all criteria: 75%)",
+        "CRR Art. 123 (retail exposure meeting all Art. 123 criteria: 75%; paragraph UNVERIFIED)",
     ),
-    RW_RETAIL_OTHER("rw-retail-other", FactorKind.RISK_WEIGHT, "BCBS d424 ¶57 (other retail: 100%)"),
+    RW_RETAIL_OTHER(
+        "rw-retail-other",
+        FactorKind.RISK_WEIGHT,
+        "BCBS d424 ¶57 (other retail: 100%)",
+        "No CRR counterpart: an exposure not meeting Art. 123 is a corporate exposure (Art. 122); an EU set " +
+            "refuses retail-treatment other-retail, so this value is never applied",
+    ),
     RW_CORPORATE_UNRATED(
         "rw-corporate-unrated",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶40 Table 10, ¶41 (unrated corporate: 100%)",
+        "CRR Art. 122 (corporate without a credit assessment by a nominated ECAI: 100%; paragraph UNVERIFIED)",
     ),
     RW_DEFAULTED(
         "rw-defaulted",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶90, ¶92 (defaulted, specific provisions < 20% of the outstanding amount: 150%)",
+        "CRR Art. 127(1) (exposure in default, specific credit risk adjustments < 20% of the unsecured part: 150%)",
     ),
-    RW_CASH("rw-cash", FactorKind.RISK_WEIGHT, "BCBS d424 ¶96(i) (cash owned and held at the bank or in transit: 0%)"),
+    RW_CASH(
+        "rw-cash",
+        FactorKind.RISK_WEIGHT,
+        "BCBS d424 ¶96(i) (cash owned and held at the bank or in transit: 0%)",
+        "CRR Art. 134 (cash in hand and equivalent cash items: 0%; paragraph UNVERIFIED)",
+    ),
     RW_CASH_ITEMS_IN_COLLECTION(
         "rw-cash-items-in-collection",
         FactorKind.RISK_WEIGHT,
         "BCBS d424 ¶97 (cash items in the process of collection: 20%)",
+        "CRR Art. 134 (cash items in the process of collection: 20%; paragraph UNVERIFIED)",
     ),
-    RW_OTHER_ASSET("rw-other-asset", FactorKind.RISK_WEIGHT, "BCBS d424 ¶95 (all other assets: 100%)"),
-    MIN_CET1_RATIO("min-cet1-ratio", FactorKind.MINIMUM_RATIO, "BCBS bcbs189 ¶50 (CET1 ≥ 4.5% of RWA)"),
-    MIN_TIER1_RATIO("min-tier1-ratio", FactorKind.MINIMUM_RATIO, "BCBS bcbs189 ¶50 (Tier 1 ≥ 6.0% of RWA)"),
+    RW_OTHER_ASSET(
+        "rw-other-asset",
+        FactorKind.RISK_WEIGHT,
+        "BCBS d424 ¶95 (all other assets: 100%)",
+        "CRR Art. 134(1) (other items: 100%)",
+    ),
+    MIN_CET1_RATIO(
+        "min-cet1-ratio",
+        FactorKind.MINIMUM_RATIO,
+        "BCBS bcbs189 ¶50 (CET1 ≥ 4.5% of RWA)",
+        "CRR Art. 92(1)(a) (CET1 capital ratio ≥ 4.5%)",
+    ),
+    MIN_TIER1_RATIO(
+        "min-tier1-ratio",
+        FactorKind.MINIMUM_RATIO,
+        "BCBS bcbs189 ¶50 (Tier 1 ≥ 6.0% of RWA)",
+        "CRR Art. 92(1)(b) (Tier 1 capital ratio ≥ 6%)",
+    ),
     MIN_TOTAL_CAPITAL_RATIO(
         "min-total-capital-ratio",
         FactorKind.MINIMUM_RATIO,
         "BCBS bcbs189 ¶50 (Total Capital ≥ 8.0% of RWA: the own-funds requirement)",
+        "CRR Art. 92(1)(c) (total capital ratio ≥ 8%: the own-funds requirement)",
     ),
     ;
 
@@ -194,6 +245,30 @@ data class CapitalClassification(
         glAccountCode?.let { glAccounts[it] } ?: glAccountType?.let { glAccountTypes[it.uppercase()] }
 }
 
+/** Which body of rules a parameter set implements, and so which citation each factor carries. */
+enum class CapitalRegime(val wire: String, val scope: String) {
+    BCBS(
+        "bcbs",
+        "BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. Pillar 1 credit risk only.",
+    ),
+    EU(
+        "eu",
+        "EU CRR SA weights: Regulation (EU) 575/2013 as amended by (EU) 2019/876 and (EU) 2024/1623, Part Three " +
+            "Title II Chapter 2, and Art. 92(1) minima, for the exposure classes this engine models; citations " +
+            "marked UNVERIFIED name the article but not a confirmed paragraph. Pillar 1 credit risk only.",
+    ),
+    ;
+
+    companion object {
+        fun parse(raw: String): CapitalRegime = entries.firstOrNull { it.wire == raw.trim().lowercase() }
+            ?: throw IllegalArgumentException(
+                "unknown capital regime '$raw'; one of ${entries.joinToString {
+                    it.wire
+                }}",
+            )
+    }
+}
+
 /** A versioned, cited parameter set: every result names the [id] and [version] it was computed with. */
 data class CapitalParameters(
     val id: String,
@@ -201,9 +276,14 @@ data class CapitalParameters(
     val source: String,
     val factors: Map<CapitalFactor, BigDecimal>,
     val classification: CapitalClassification,
+    val regime: CapitalRegime,
 ) {
     init {
         require(id.isNotBlank() && version.isNotBlank()) { "capital parameter set needs an id and a version" }
+        require(regime != CapitalRegime.EU || classification.retailTreatment != RetailTreatment.OTHER_RETAIL) {
+            "capital parameter set $id is an EU set: retail-treatment 'other-retail' has no CRR counterpart " +
+                "(an exposure not meeting Art. 123 is corporate, Art. 122); use corporate-unrated or regulatory-retail"
+        }
         val missing = CapitalFactor.entries.filter { it !in factors }
         require(missing.isEmpty()) {
             "capital parameter set $id v$version is missing factors: ${missing.joinToString { it.key }}"
@@ -222,6 +302,12 @@ data class CapitalParameters(
 
     operator fun get(factor: CapitalFactor): BigDecimal = factors.getValue(factor)
 
+    /** The citation for [factor] under this set's [regime]. */
+    fun citation(factor: CapitalFactor): String = when (regime) {
+        CapitalRegime.BCBS -> factor.citation
+        CapitalRegime.EU -> factor.euCitation
+    }
+
     companion object {
         /** 1250%: the highest risk weight the Basel framework assigns; anything above is a typo. */
         val MAX_RISK_WEIGHT = BigDecimal("12.5")
@@ -233,11 +319,12 @@ data class CapitalParameters(
             source: String,
             factorsByKey: Map<String, BigDecimal>,
             classification: CapitalClassification,
+            regime: CapitalRegime,
         ): CapitalParameters {
             val unknown = factorsByKey.keys.filter { CapitalFactor.byKey(it) == null }
             require(unknown.isEmpty()) { "unknown capital factor keys: ${unknown.sorted().joinToString()}" }
             val factors = factorsByKey.mapKeys { (k, _) -> CapitalFactor.byKey(k)!! }
-            return CapitalParameters(id, version, source, factors, classification)
+            return CapitalParameters(id, version, source, factors, classification, regime)
         }
     }
 }

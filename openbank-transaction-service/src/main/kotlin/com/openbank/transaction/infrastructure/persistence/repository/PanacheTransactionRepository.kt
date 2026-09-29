@@ -239,6 +239,7 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         originatingPaymentId = originatingPaymentId,
         reversalOf = reversalOf,
         isReversal = isReversal,
+        counterpartyName = counterpartyName,
     )
 }
 
@@ -276,6 +277,7 @@ private fun com.openbank.transaction.domain.model.Transaction.toEntity() = Trans
     originatingPaymentId = this@toEntity.originatingPaymentId
     reversalOf = this@toEntity.reversalOf
     isReversal = this@toEntity.isReversal
+    counterpartyName = this@toEntity.counterpartyName
 }
 
 /**

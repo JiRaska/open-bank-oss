@@ -100,19 +100,22 @@ class RiskCapitalApiIT {
         seedCnbDeposit("4000.00")
         val body = capital(snapshot("2026-05-29", "TIED_OUT"))
 
-        assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d424-sa")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
+        // The default set is the EU CRR one (application.yaml parameter-set-id).
+        assertThat(body["parameterSetId"].asText()).isEqualTo("eu-crr3-sa")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
-        // nostro 1500 × 150% (SCRA Grade C) + ČNB 4000 × 0% (¶8) + loan × 100% (other retail, ¶57)
+        // nostro 1500 × 150% (SCRA Grade C, CRR Art. 121) + ČNB 4000 × 0% (Art. 114(4))
+        // + loan × 100% (not verifiably Art. 123 retail, so corporate, Art. 122)
         val rwa = BigDecimal("2250.00").add(l)
         assertThat(total["totalRwa"].decimalValue()).isEqualByComparingTo(rwa)
         assertThat(body["ownFundsRequirement"].decimalValue())
             .isEqualByComparingTo(rwa.multiply(BigDecimal("0.08")).setScale(2, java.math.RoundingMode.HALF_EVEN))
         val classes = total["classes"].associate { it["exposureClass"].asText() to it["rwa"].decimalValue() }
-        assertThat(classes.keys).containsExactlyInAnyOrder("sovereign-and-central-bank", "bank", "retail")
+        assertThat(classes.keys).containsExactlyInAnyOrder("sovereign-and-central-bank", "bank", "corporate")
         assertThat(classes["sovereign-and-central-bank"]).isEqualByComparingTo("0")
-        assertThat(total["lines"].all { it["citation"].asText().startsWith("BCBS d424 ¶") }).isTrue()
+        assertThat(total["lines"].all { it["citation"].asText().startsWith("CRR Art. ") }).isTrue()
+        assertThat(body["ratios"]["total"]["citation"].asText()).startsWith("CRR Art. 92(1)(c)")
 
         val cet1 = l.add(BigDecimal("4000.00"))
         assertThat(total["ownFunds"]["cet1"].decimalValue()).isEqualByComparingTo(cet1)
@@ -124,9 +127,8 @@ class RiskCapitalApiIT {
         assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).containsExactly("1000")
 
         val a = body["assumptions"]
-        assertThat(
-            a["scope"].asText(),
-        ).contains("BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied")
+        assertThat(a["scope"].asText()).startsWith("EU CRR SA weights")
+        assertThat(a["classification"]["retailTreatment"].asText()).isEqualTo("corporate-unrated")
         assertThat(a["factors"].size()).isEqualTo(15)
         assertThat(a["classification"]["bankScraGrade"].asText()).isEqualTo("C")
         assertThat(a["creditRiskMitigation"].asText()).startsWith("None applied")
@@ -232,10 +234,24 @@ class RiskCapitalApiIT {
         assertThat(body["totalNotStated"].isNull).isTrue()
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
-        // nostro 1500 × 150% + 1520 10 × 150% (Grade C) + 1100 16000 × 100% + 1300 50 × 100%
-        // + loan × 100%; 1400 (allowance) and 1990/1991/1995 (FX position) are not exposures.
-        val rwa = BigDecimal("2250.00").add(BigDecimal("15.00")).add(BigDecimal("16050.00")).add(l)
-        assertThat(total["totalRwa"].decimalValue()).isEqualByComparingTo(rwa)
+        // EU CRR weights (the default set). The loan's outstanding principal after 6 of 24 annuity
+        // instalments is fixed by the fixture; pinned so the total below is an exact literal.
+        assertThat(l).isEqualByComparingTo("9133.28")
+        // 1001 nostro       1 500.00 × 150% (institution, SCRA Grade C, Art. 121)   =  2 250.00
+        // 1520 accrued int.    10.00 × 150% (follows its principal 1500, Grade C)    =     15.00
+        // 1100 clearing    16 000.00 × 100% (POLICY CHOICE #11481, Art. 134(1))     = 16 000.00
+        // 1300 int. recv.      50.00 × 100% (other item, Art. 134(1))                =     50.00
+        // loan (stage 1)   9 133.28 × 100% (corporate, Art. 122)          =  9 133.28
+        // 1400 allowance and 1990 / 1991 (EUR, at the 24.40 fixing) / 1995 FX positions: not exposures.
+        assertThat(total["totalRwa"].decimalValue()).isEqualByComparingTo("27448.28")
+        val classes = total["classes"].associate { it["exposureClass"].asText() to it["rwa"].decimalValue() }
+        assertThat(classes.keys).containsExactlyInAnyOrder("bank", "other-asset", "corporate")
+        assertThat(classes["bank"]).isEqualByComparingTo("2265.00")
+        assertThat(classes["other-asset"]).isEqualByComparingTo("16050.00")
+        assertThat(classes["corporate"]).isEqualByComparingTo(l)
+        assertThat(body["ownFundsRequirement"].decimalValue()).isEqualByComparingTo("2195.86")
+        // EU-specific: under bcbs-d424-sa the loan is "retail" (d424 ¶57) and citations are d424 ¶.
+        assertThat(total["lines"].all { it["citation"].asText().startsWith("CRR Art. ") }).isTrue()
         assertThat(total["lines"].map { it["glAccountCode"].asText() })
             .doesNotContain("1400", "1990", "1991", "1995")
     }

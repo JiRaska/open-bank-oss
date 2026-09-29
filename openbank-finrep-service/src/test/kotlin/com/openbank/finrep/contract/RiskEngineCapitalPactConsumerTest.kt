@@ -98,7 +98,7 @@ class RiskEngineCapitalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("runId", java.util.UUID.fromString(EXAMPLE_RUN_ID))
                 o.stringValue("asOf", REPORTING_DATE)
-                o.stringType("parameterSetId", "bcbs-d424-sa")
+                o.stringType("parameterSetId", "eu-crr3-sa")
                 o.stringType("parameterSetVersion", "1")
                 o.eachLike("currencies") { c -> currency(c) }
                 // The engine's total is the whole book in CZK (risk-engine API 1.11.0): C 02.00 renders it

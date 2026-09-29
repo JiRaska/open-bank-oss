@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.20.0...risk-engine-v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** compute Pillar 1 credit risk under EU CRR by default ([#11496](https://github.com/JiRaska/open-bank-oss/issues/11496)) ([c6a02ac](https://github.com/JiRaska/open-bank-oss/commit/c6a02ac30783ac45aa92566ff2a34d515016c978))
+
+
+### Bug Fixes
+
+* **risk-engine:** count eligible maturing placements in LCR ([#11102](https://github.com/JiRaska/open-bank-oss/issues/11102)) ([a2c0d90](https://github.com/JiRaska/open-bank-oss/commit/a2c0d9035819ed69bdb15792818d78bce6b0f53e))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.19.0...risk-engine-v0.20.0) (2026-09-29)
 
 
