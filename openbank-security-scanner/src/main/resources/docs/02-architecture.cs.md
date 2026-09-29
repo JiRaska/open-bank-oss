@@ -32,8 +32,9 @@ graph TB
     rest[REST<br/>SecurityScannerResource<br/>IctIncidentResource]
     scanner[Application<br/>SecurityScannerService<br/>IctIncidentService]
     dom[Domain<br/>SecurityScanResult / PlatformSecurityReport<br/>IctIncident / SecurityFinding<br/>Severity / OwaspCategory / IncidentStatus]
-    mem[In-memory stav<br/>ConcurrentHashMap<br/>lastResults / lastReport / incidenty]
-    emit["Kafka emitter<br/>@Channel ict-incident-events-out"]
+    mem[In-memory stav skenů<br/>ConcurrentHashMap<br/>lastResults / lastReport]
+    db[(Postgres<br/>ict_incidents + outbox)]
+    emit["Outbox relay<br/>@Channel ict-incident-outbox-out"]
     sched["Scheduler<br/>@Scheduled každých 30m"]
   end
 
@@ -41,7 +42,7 @@ graph TB
   rest --> scanner
   scanner --> dom
   scanner --> mem
-  scanner --> emit
+  scanner --> db --> emit
   scanner -- "HTTP sondy" --> fleet[(fleet služby)]
 
   emit -.-> kafka[(Kafka<br/>security.ict.incident)]
@@ -59,8 +60,8 @@ com.openbank.securityscanner/          ◄── jediný kořen balíčků
 │   └── IctIncident                    IctIncident, IncidentSeverity, IncidentStatus, IncidentCategory
 ├── application/
 │   ├── SecurityScannerService         scan pipeline, in-memory cache výsledků
-│   └── IctIncidentService             DORA incident lifecycle, in-memory úložiště,
-│                                      přímý @Channel Kafka emitter
+│   └── IctIncidentService             DORA incident lifecycle, trvalé Postgres úložiště,
+│                                      transakční outbox relay
 └── infrastructure/
     └── rest/
         ├── SecurityScannerResource    scan + report endpointy, @Scheduled trigger
@@ -112,15 +113,17 @@ fun scheduledScan() { scanner.scanAll(serviceList()) }
 
 ```
 IctIncidentService (nahlášení / změna stavu / regulatorní report)
-    ↓ @Channel("ict-incident-events-out") — přímý SmallRye emitter
+    ↓ jedna DB transakce — stav incidentu + revize agregátu + outbox řádek
+IctIncidentOutboxDispatcher
+    ↓ @Channel("ict-incident-outbox-out")
 openbank.security.ict.incident
     ↓
 audit-service
 ```
 
 Výsledky skenů se jako eventy **nevysílají** vůbec — jsou dostupné přes REST
-(`GET /api/v1/security/report`) a nikde jinde. Vysílání je fire-and-forget: outbox neexistuje,
-takže výpadek Kafky znamená ztrátu eventu incidentu bez jakéhokoli lokálního záznamu (#4709).
+(`GET /api/v1/security/report`) a nikde jinde. Event incidentu lze zopakovat z outboxu;
+výpadek Kafky ponechá řádek zpracovatelný místo ztráty eventu.
 
 ## Komponenty z `openbank-libs`
 

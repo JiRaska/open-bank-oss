@@ -146,7 +146,7 @@ POST /api/v1/sanctions/lists/refresh-all
 | `UN_CONSOLIDATED` | Rada bezpečnosti OSN | Konsolidovaný seznam OSN |
 | `HM_TREASURY` | UK HM Treasury | UK finanční sankce |
 | `FATF_HIGH_RISK` | FATF | Vysoce rizikové a sledované jurisdikce |
-| `CNB_DOMESTIC` | Česká národní banka | Domácí české sankce |
+| `CNB_DOMESTIC` | Ministerstvo zahraničních věcí (MZV) | Vnitrostátní sankční seznam ČR (zákon č. 1/2023 Sb.) |
 
 ## Error model
 

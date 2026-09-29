@@ -46,7 +46,7 @@ spec:
   authorization:
     type: simple
     acls:
-      # mp.messaging.outgoing.ict-incident-events-out.topic — DORA ICT incidents.
+      # mp.messaging.outgoing.ict-incident-outbox-out.topic — durable DORA ICT incident relay.
       - resource:
           type: topic
           name: openbank.security.ict.incident
@@ -60,7 +60,7 @@ spec:
 # Role's `resourceNames` (components/payments/kafka-scheme-accepted-acl.yaml) is what makes it
 # readable — omitting it is the #2749/#2872 failure: the ExternalSecret sits at
 # SecretSyncedError, ArgoCD never advances past sync-wave -1, and no pod is ever created.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -82,7 +82,7 @@ spec:
 ---
 # Projects the cluster CA truststore (messaging/openbank-cluster-cluster-ca-cert) into the
 # security-scanner namespace. Shared pattern with every other mTLS client.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

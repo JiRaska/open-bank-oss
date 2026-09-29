@@ -86,6 +86,34 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
+- **2026-09-14** — Clearing acknowledgement evidence (ADR-0306): every item transition increments
+  its persisted `aggregate_revision`, and batch settlement commits one
+  `openbank.clearing.item.cleared` outbox row per settled item in the same database transaction as
+  the batch, item rows and net-settlement command. The payload exposes only existing opaque item,
+  payment and batch references, status, currency, amount and revision; context-service minimizes
+  this further to references and a bounded label. Risk class = integrity and bounded
+  confidentiality. `V10` is additive; rollback is to stop consuming the field/event and leave the
+  column in place, avoiding a destructive down migration. Availability is bounded by the existing
+  1,000-item cycle ceiling plus a 250-row atomic outbox claim every 2 seconds: one maximum cycle is
+  four claims rather than forty default claims, while each claim remains bounded and cross-pod safe
+  through `FOR UPDATE SKIP LOCKED`. The 30-second scheduler timeout remains the overload fuse;
+  rollback is a configuration-only reduction of `openbank.outbox.batch-size`.
+
 - **2026-09-02** — Doc correction, no behavior change: §3 credited the role-gating regression guard
   to `ClearingResourceSecurityTest`, a class that is in no Kotlin source in this repository. **The
   guard is real** and is `ClearingSecurityContractTest`, which asserts by reflection that
@@ -143,3 +171,30 @@ not change any existing request's outcome until explicitly flipped.
   original item, so nothing downstream can distinguish replay from first submit. Rollback:
   revert the commit and `DROP INDEX IF EXISTS uq_clearing_items_payment` — pre-duplicate data
   must be cleaned before V9 (detection query in the migration).
+
+- **2026-09-20** — **New outbound edge: clearing-service → ledger-service over ledger's new
+  private-CA mTLS listener** (8443, client auth REQUIRED, TLSv1.3; client cert
+  `clearing-internal-tls`, `%prod` TLS bucket `ledger-authority`). The ADR-0281 net-settlement
+  journal posting had no `LEDGER_SERVICE_URL` in this service's gitops manifest, so
+  `ClearingLedgerRestClient` used the `application.yaml` fallback `http://localhost:8101` inside its
+  own pod: every `POST /api/v1/journals` was a connection refused and the net-settlement leg never
+  reached the book of record. The action (`ledger.create`) and the identity (the shared
+  `service-account-openbank-services` bearer minted by `OidcClientRequestReactiveFilter`) are
+  unchanged — `ledger_rest_ext.rego`'s `service-ledger-post` already admits them, so no policy
+  change. **Risk class:** integrity/availability of net-settlement journal posting (a money-path
+  write that has never landed now lands); the new material is a private-CA client key mounted
+  read-only from a cert-manager Secret, scoped to this one upstream. No inbound surface, no new
+  role, no new data class. Rollback: drop the env var and the `%prod` bucket.
+- **2026-09-21** — **Own machine identity for the net-settlement journal (#10486 batch 1).** `ClearingLedgerRestClient` now mints its bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-clearing` (`ROLE_API` only); ledger-service grants it exactly `ledger.create` (`service-clearing-ledger-post`). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/clearing-service` (`client_secret`), projected by the `clearing-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `ledger.create`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11061),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.

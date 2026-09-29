@@ -5,7 +5,7 @@
 package com.openbank.sepa.infrastructure.client
 
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.HeaderParam
@@ -25,7 +25,10 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "aml-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 3: this client's bearer for the AML case open (amlCase.create) is minted by the NAMED
+// oidc-client `m2m` - Keycloak client `openbank-sepa-payment` (ROLE_API only) - never the shared
+// `openbank-services` default client.
+@OidcClientFilter("m2m")
 @Path("/api/v1/aml/cases")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

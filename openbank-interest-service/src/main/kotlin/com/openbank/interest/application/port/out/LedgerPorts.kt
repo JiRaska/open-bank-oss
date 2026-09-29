@@ -75,3 +75,17 @@ data class CapitalizationPosting(
 interface LedgerPostingPort {
     fun post(posting: CapitalizationPosting): Uni<Unit>
 }
+
+/**
+ * The ledger refused the posting **deterministically** (an HTTP 4xx other than 408/429): the same
+ * request is refused the same way on every retry. It says something about the REQUEST, not about the
+ * ledger's health, so it is neither retried nor counted against the ledger call's circuit breaker —
+ * a breaker it tripped would fail every other capitalization's post while the ledger was answering
+ * perfectly well (#10404).
+ *
+ * The claim is deliberately NOT released on this failure. Releasing it and re-claiming under a later
+ * period would mint a new idempotency key and could book a second journal for money the first may
+ * already carry; it stays `CAPITALIZING`, counted on its own metric, for a person to look at.
+ */
+class LedgerPostingRejectedException(val status: Int, message: String, cause: Throwable? = null) :
+    RuntimeException(message, cause)

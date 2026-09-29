@@ -5,7 +5,7 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Domestic Payment Service — events
-  version: 1.1.0
+  version: 1.2.0
   description: >-
     Events produced by the Czech domestic-payment lifecycle. A delegated payment carries one
     indivisible delegationId/reservationId pair from creation through every status transition;
@@ -164,6 +164,10 @@ components:
               priority: {type: string, enum: [STANDARD, URGENT, INSTANT]}
               endToEndId: {type: string}
               occurredAt: {type: string, format: date-time}
+              aggregateRevision:
+                type: integer
+                minimum: 1
+                description: Database-backed monotonic ordering token; optional only for retained pre-1.2 events.
               eventType: {type: string, const: DOMESTIC_PAYMENT_CREATED}
               sourceService: {type: string, const: domestic-payment}
 
@@ -190,6 +194,10 @@ components:
               rejectReason: {type: [string, 'null']}
               rejectDetail: {type: [string, 'null']}
               occurredAt: {type: string, format: date-time}
+              aggregateRevision:
+                type: integer
+                minimum: 1
+                description: Database-backed monotonic ordering token; optional only for retained pre-1.2 events.
               eventType: {type: string, const: DOMESTIC_PAYMENT_STATUS_CHANGED}
               sourceService: {type: string, const: domestic-payment}
 

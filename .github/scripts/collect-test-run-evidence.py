@@ -54,6 +54,46 @@ def trusted_run_url(url: str, run_id: str) -> bool:
             and re.fullmatch(rf"/[^/]+/[^/]+/actions/runs/{re.escape(str(run_id))}", parsed.path) is not None)
 
 
+SHA_PATTERN = re.compile(r"[0-9a-f]{7,40}")
+
+
+def matching_build_shas(requested: str, observed: str | None) -> bool:
+    # The deployed image currently attests its abbreviated tag SHA. Accept either
+    # prefix direction, as the browser probe does, without accepting unrelated SHAs.
+    return observed is not None and (observed.startswith(requested) or requested.startswith(observed))
+
+
+def build_attestation_from(vitals: dict | None) -> dict | None:
+    """The rollout attestation the browser synthetic recorded, or None when none was requested.
+
+    Returned only when the run was ASKED to prove a specific build (`requestedSha` present). A run
+    with no requested SHA is ordinary CI/browser evidence and must not acquire an attestation it
+    never made. `matched` is derived here from the two SHAs, never trusted from the sidecar: the
+    script that wrote the sidecar is the thing being checked, and a boolean it asserts about
+    itself is not evidence (#7451).
+    """
+    raw = (vitals or {}).get("buildAttestation")
+    if not isinstance(raw, dict):
+        return None
+    requested = raw.get("requestedSha")
+    observed = raw.get("observedSha")
+    if not isinstance(requested, str) or not SHA_PATTERN.fullmatch(requested.lower()):
+        return None
+    requested = requested.lower()
+    observed = observed.lower() if isinstance(observed, str) and SHA_PATTERN.fullmatch(observed.lower()) else None
+    matched = matching_build_shas(requested, observed)
+    return {"requestedSha": requested, "observedSha": observed, "matched": matched}
+
+
+def valid_build_attestation(value) -> bool:
+    return (isinstance(value, dict) and set(value) == {"requestedSha", "observedSha", "matched"}
+            and isinstance(value["requestedSha"], str) and SHA_PATTERN.fullmatch(value["requestedSha"]) is not None
+            and (value["observedSha"] is None
+                 or (isinstance(value["observedSha"], str) and SHA_PATTERN.fullmatch(value["observedSha"]) is not None))
+            and isinstance(value["matched"], bool)
+            and value["matched"] == matching_build_shas(value["requestedSha"], value["observedSha"]))
+
+
 def validate_envelope(envelope: dict) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
@@ -121,12 +161,22 @@ def validate_envelope(envelope: dict) -> None:
         if observed_at - run_observed_at > MAX_FUTURE_SKEW:
             raise ValueError("runtime observation occurs after its run beyond the allowed clock skew")
     for item in envelope.get("specializedEvidence", []):
-        if set(item) - {"kind", "state", "source", "detail", "variant"} or not {"kind", "state", "source"}.issubset(item):
+        if set(item) - {"kind", "state", "source", "detail", "variant", "buildAttestation", "thresholdResults"} or not {"kind", "state", "source"}.issubset(item):
             raise ValueError("specialized evidence fields are invalid")
         if item["kind"] not in SPECIALIZED_KINDS or item["state"] not in SPECIALIZED_STATES or not item["source"]:
             raise ValueError("specialized evidence values are invalid")
         if "variant" in item and (item["kind"] != "synthetic" or item["variant"] not in {"chromium", "firefox", "webkit"}):
             raise ValueError("synthetic evidence variant is invalid")
+        if "buildAttestation" in item and (item["kind"] != "synthetic" or not valid_build_attestation(item["buildAttestation"])):
+            raise ValueError("synthetic build attestation is invalid")
+        if "thresholdResults" in item:
+            results = item["thresholdResults"]
+            if (item["kind"] not in {"performance", "synthetic"}
+                    or not isinstance(results, dict) or set(results) != {"evaluated", "breached"}
+                    or any(not isinstance(results[key], int) or isinstance(results[key], bool)
+                           for key in ("evaluated", "breached"))
+                    or results["evaluated"] < 1 or not 0 <= results["breached"] <= results["evaluated"]):
+                raise ValueError("specialized threshold results are invalid")
     for item in envelope.get("testCases", []):
         required_case_fields = {"fingerprint", "kind", "classname", "name", "state", "durationMs"}
         retry_fields = {"retryFlaky", "failedAttemptCount", "failedAttemptDurationMs"}
@@ -512,14 +562,31 @@ def coverage(service: Path) -> dict | None:
 
 
 def declared_infrastructure(service: Path) -> list[str]:
-    text = "\n".join(path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt"))
+    sources = [path.read_text(errors="ignore") for path in service.glob("src/test/**/*.kt")]
+    text = "\n".join(sources)
     build_file = service / "build.gradle.kts"
     build = build_file.read_text(errors="ignore") if build_file.exists() else ""
-    values = []
-    if "PostgreSQLContainer" in text or "testcontainers.postgresql" in build: values.append("postgres")
-    if "RedpandaContainer" in text or "testcontainers.redpanda" in build: values.append("redpanda")
-    if re.search(r"valkey|redis", text, re.I) and "GenericContainer" in text: values.append("valkey")
-    return values
+    values = set()
+    if "PostgreSQLContainer" in text or "testcontainers.postgresql" in build: values.add("postgres")
+    if "RedpandaContainer" in text or "testcontainers.redpanda" in build: values.add("redpanda")
+    if re.search(r"valkey|redis", text, re.I) and "GenericContainer" in text: values.add("valkey")
+
+    # Services using the shared test resources no longer declare the container
+    # classes or dependencies locally. Count only resources actually attached to
+    # a test, not an unused import or a mention in a comment.
+    shared_resources = {
+        "PostgresTestResource": {"postgres"},
+        "PostgresRedisTestResource": {"postgres", "valkey"},
+        "PostgresRedpandaTestResource": {"postgres", "redpanda"},
+        "PostgresRedpandaRedisTestResource": {"postgres", "redpanda", "valkey"},
+    }
+    for source in sources:
+        for name, infrastructure in shared_resources.items():
+            imported = re.search(rf"(?m)^import com\.openbank\.libs\.testing\.containers\.{name}\s*$", source)
+            attached = re.search(rf"(?m)^\s*@QuarkusTestResource\s*\(\s*(?:value\s*=\s*)?{name}::class\b", source)
+            if imported and attached:
+                values.update(infrastructure)
+    return [name for name in ("postgres", "redpanda", "valkey") if name in values]
 
 
 def runtime_image_identity(image: str) -> str:
@@ -556,7 +623,7 @@ def public_runtime_image(resource: str, image: object) -> str:
 
 def observations(service: Path) -> list[dict]:
     result = []
-    for file in (service / "build" / "test-intelligence" / "runtime").glob("*.jsonl"):
+    for file in (service / "build" / "test-intelligence" / "runtime").rglob("*.jsonl"):
         for line in file.read_text().splitlines():
             try:
                 item = json.loads(line)
@@ -685,8 +752,13 @@ def specialized_evidence(
         failed = sum(1 for value in thresholds if value is True or (isinstance(value, dict) and value.get("ok") is False))
         detail = (performance_not_run_detail or "performance summary absent") if summary is None \
             else f"{len(thresholds)} threshold result(s), {failed} breached"
-        specialized.append({"kind": "performance", "state": "not-run" if summary is None else "failed" if failed else "passed",
-                            "source": str(summary_file), "detail": detail})
+        specialized.append({
+            "kind": "performance",
+            "state": "not-run" if summary is None else "unknown" if not thresholds else "failed" if failed else "passed",
+            "source": str(summary_file),
+            "detail": detail,
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if thresholds else {}),
+        })
     if mutation_report:
         mutation_file = Path(mutation_report)
         if mutation_file.exists():
@@ -714,10 +786,11 @@ def specialized_evidence(
                      (isinstance(value, dict) and value.get("ok") is False))
         specialized.append({
             "kind": "synthetic",
-            "state": "not-run" if summary is None else "failed" if failed else "passed",
+            "state": "not-run" if summary is None else "unknown" if not thresholds else "failed" if failed else "passed",
             "source": f"journey:{synthetic_journey}",
             "detail": "synthetic summary absent" if summary is None else
                       f"{len(thresholds)} threshold result(s), {failed} breached",
+            **({"thresholdResults": {"evaluated": len(thresholds), "breached": failed}} if thresholds else {}),
         })
     elif synthetic_journey:
         if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?", synthetic_journey):
@@ -744,9 +817,17 @@ def specialized_evidence(
         state = e2e["state"] if e2e and e2e["state"] == "failed" else "passed" if e2e and valid else "not-run"
         detail = (f"{e2e['executed']}/{e2e['discovered']} browser E2E checks; FCP {round(metrics['fcpMs'])}ms, CLS {metrics['cls']:.3f}"
                   if e2e and valid else "browser Web Vitals sample absent or unattributable" if e2e else "browser E2E JUnit report absent")
+        attestation = build_attestation_from(vitals)
+        if attestation and not attestation["matched"]:
+            # The run was asked to prove one build and saw another (or none). Whatever else passed,
+            # it did not validate the requested build, so it must never read as a pass for it.
+            state = "failed" if e2e else "not-run"
+            detail = (f"deployed build {attestation['observedSha'] or 'attestation unavailable'} "
+                      f"does not match requested {attestation['requestedSha']}")
         specialized.append({"kind": "synthetic", "state": state,
                             "source": f"journey:{synthetic_journey}", "detail": detail,
-                            **({"variant": variant} if variant else {})})
+                            **({"variant": variant} if variant else {}),
+                            **({"buildAttestation": attestation} if attestation else {})})
     return specialized
 
 
@@ -783,7 +864,9 @@ def main() -> None:
             # The shared recorder and daemon event stream observe the same
             # lifecycle at slightly different instants. Keep one event per
             # lifecycle rather than inflating the UI's runtime evidence count.
-            (runtime / "testcontainers.jsonl").write_text(
+            test_runtime = runtime / "test"
+            test_runtime.mkdir()
+            (test_runtime / "testcontainers.jsonl").write_text(
                 # The shared recorder may be configured through an internal image
                 # mirror. Its hostname/namespace are not allowed in the aggregate.
                 '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
@@ -832,6 +915,24 @@ def main() -> None:
             source = service / "src/test/kotlin/com/openbank/GuardTest.kt"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("package com.openbank\nclass GuardTest\n")
+            topology_service = service / "topology-service"
+            topology_test = topology_service / "src/test/kotlin/TopologyIT.kt"
+            topology_test.parent.mkdir(parents=True)
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedpandaTestResource\n"
+                "@QuarkusTestResource(\n    value = PostgresRedpandaTestResource::class,\n)\n"
+            )
+            assert declared_infrastructure(topology_service) == ["postgres", "redpanda"]
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedisTestResource\n"
+                "@QuarkusTestResource(PostgresRedisTestResource::class)\n"
+            )
+            assert declared_infrastructure(topology_service) == ["postgres", "valkey"]
+            topology_test.write_text(
+                "import com.openbank.libs.testing.containers.PostgresRedisTestResource\n"
+                "// @QuarkusTestResource(PostgresRedisTestResource::class)\n"
+            )
+            assert declared_infrastructure(topology_service) == []
             quarkus_source = service / "src/test/kotlin/com/openbank/CatalogPlatformResourceTest.kt"
             quarkus_source.write_text("package com.openbank\n@QuarkusTest\nclass CatalogPlatformResourceTest\n")
             discovered = {row["kind"]: row for row in suites("openbank-admin-ui", service)}
@@ -1078,8 +1179,16 @@ def main() -> None:
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres@sha256:" + "A" * 64) == "postgres@sha256:" + "a" * 64
             assert public_runtime_image("postgres", "registry.openbank.invalid/team/postgres:tag?credential=secret") == "postgres"
             assert all("containerId" not in item and "_dockerContainerId" not in item for item in observed)
+            pact_runtime = runtime / "providerPactTest"
+            pact_runtime.mkdir()
+            (pact_runtime / "testcontainers.jsonl").write_text(
+                '{"schemaVersion":1,"resource":"valkey","image":"valkey/valkey:7.2-alpine","lifecycle":"started","observedAt":"2026-08-22T21:12:00Z"}\n'
+                '{"schemaVersion":1,"resource":"valkey","image":"valkey/valkey:7.2-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:13:00Z"}\n'
+            )
+            assert [item["lifecycle"] for item in observations(service) if item["resource"] == "valkey"] == ["started", "stopped"]
             specialized = specialized_evidence(str(performance), str(mutation), mutation_threshold=70)
             assert [(item["kind"], item["state"]) for item in specialized] == [("performance", "failed"), ("mutation", "failed")]
+            assert specialized[0]["thresholdResults"] == {"evaluated": 1, "breached": 1}
             assert "target 70%" in specialized[1]["detail"]
             rounded = specialized_evidence(None, str(rounded_mutation), mutation_threshold=63)
             assert rounded == [{
@@ -1089,18 +1198,53 @@ def main() -> None:
             absent = specialized_evidence(str(service / "missing-summary.json"), None, "no safe target configured")
             assert absent == [{"kind": "performance", "state": "not-run", "source": str(service / "missing-summary.json"), "detail": "no safe target configured"}]
             synthetic = specialized_evidence(None, None, synthetic_summary=str(performance), synthetic_journey="public-edge")
-            assert synthetic == [{"kind": "synthetic", "state": "failed", "source": "journey:public-edge", "detail": "1 threshold result(s), 1 breached"}]
+            assert synthetic == [{
+                "kind": "synthetic", "state": "failed", "source": "journey:public-edge",
+                "detail": "1 threshold result(s), 1 breached",
+                "thresholdResults": {"evaluated": 1, "breached": 1},
+            }]
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]])
             assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable"}]
             browser_vitals = service / "browser-vitals.json"
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert browser_synthetic == [{"kind": "synthetic", "state": "passed", "source": "journey:admin-ui-sso-boundary", "detail": "1/1 browser E2E checks; FCP 321ms, CLS 0.004", "variant": "chromium"}]
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-security-excellence","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004}}')
+            wrong_journey = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            right_journey = specialized_evidence(None, None, synthetic_journey="admin-ui-security-excellence", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert wrong_journey[0]["state"] == "not-run", wrong_journey
+            assert right_journey[0]["state"] == "passed" and right_journey[0]["source"] == "journey:admin-ui-security-excellence", right_journey
             # A browser summary may encode an unavailable FCP as zero. That must stay
             # explicit instead of becoming a green Web Vitals sample; zero CLS remains valid.
             browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":0,"cls":0}}')
             browser_synthetic = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
             assert browser_synthetic == [{"kind": "synthetic", "state": "not-run", "source": "journey:admin-ui-sso-boundary", "detail": "browser Web Vitals sample absent or unattributable", "variant": "chromium"}]
+            # #7451: a run asked to prove a build carries the attestation; a matching one stays a pass,
+            # a mismatching or unavailable one can never read as a pass for the requested build.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"abc1234def5678"}}')
+            attested = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert attested[0]["state"] == "passed", attested
+            assert attested[0]["buildAttestation"] == {"requestedSha": "abc1234", "observedSha": "abc1234def5678", "matched": True}, attested
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234def5678","observedSha":"abc1234"}}')
+            abbreviated = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert abbreviated[0]["state"] == "passed" and abbreviated[0]["buildAttestation"]["matched"] is True, abbreviated
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"9999999aaaa"}}')
+            mismatch = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert mismatch[0]["state"] == "failed" and mismatch[0]["buildAttestation"]["matched"] is False, mismatch
+            assert "does not match requested abc1234" in mismatch[0]["detail"], mismatch
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":null}}')
+            unavailable = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert unavailable[0]["state"] == "failed" and unavailable[0]["buildAttestation"]["observedSha"] is None, unavailable
+            assert "attestation unavailable" in unavailable[0]["detail"], unavailable
+            # The sidecar's own claim of a match is ignored: `matched` is derived, never trusted.
+            browser_vitals.write_text('{"schemaVersion":1,"journey":"admin-ui-sso-boundary","browser":"chromium","metrics":{"fcpMs":321,"cls":0.004},"buildAttestation":{"requestedSha":"abc1234","observedSha":"9999999aaaa","matched":true}}')
+            forged = specialized_evidence(None, None, synthetic_journey="admin-ui-sso-boundary", suite_evidence=[discovered["e2e"]], browser_vitals=str(browser_vitals))
+            assert forged[0]["buildAttestation"]["matched"] is False and forged[0]["state"] == "failed", forged
+            # And the envelope validator refuses an attestation whose `matched` disagrees with its SHAs.
+            assert valid_build_attestation({"requestedSha": "abc1234", "observedSha": "abc1234def", "matched": True})
+            assert valid_build_attestation({"requestedSha": "abc1234def", "observedSha": "abc1234", "matched": True})
+            assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": "9999999", "matched": True})
+            assert not valid_build_attestation({"requestedSha": "abc1234", "observedSha": None, "matched": True, "extra": 1})
             valid = {
                 "schemaVersion": 1,
                 "run": {"id": "1", "attempt": 1, "commit": "1234567", "branch": "main", "workflow": "CI", "url": "https://github.com/JiRaska/open-bank-oss/actions/runs/1", "observedAt": "2026-08-22T21:12:00Z"},
@@ -1112,6 +1256,23 @@ def main() -> None:
                 "testCases": [],
                 "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
             }
+            structured = json.loads(json.dumps(valid))
+            structured["specializedEvidence"][0]["thresholdResults"] = {"evaluated": 2, "breached": 0}
+            validate_envelope(structured)
+            for bad_results in (
+                {"evaluated": 0, "breached": 0},
+                {"evaluated": 2, "breached": 3},
+                {"evaluated": True, "breached": 0},
+                {"evaluated": 2, "breached": 0, "extra": 1},
+            ):
+                invalid = json.loads(json.dumps(structured))
+                invalid["specializedEvidence"][0]["thresholdResults"] = bad_results
+                try:
+                    validate_envelope(invalid)
+                except ValueError:
+                    pass
+                else:
+                    raise AssertionError(f"accepted invalid threshold results: {bad_results}")
             retry_envelope = json.loads(json.dumps(valid))
             retry_envelope["testCases"] = [retry_flaky]
             validate_envelope(retry_envelope)

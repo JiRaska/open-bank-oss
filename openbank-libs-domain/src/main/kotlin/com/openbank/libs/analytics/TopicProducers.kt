@@ -54,6 +54,7 @@ object TopicProducers {
         "openbank.sanctions.screening.event" to "sanctions-service",
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
+        "openbank.fx.fixing.published" to "fx-service",
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
         "openbank.lending.events" to "lending-service",
@@ -74,6 +75,8 @@ object TopicProducers {
         // older lifecycle events do not yet, and resolve TOPIC through this row.
         "openbank.delegation.events" to "delegation-service",
         "openbank.delegation.spend-reservation-state" to "delegation-service",
+        // ADR-0312 business-signing lifecycle; its events also state sourceService themselves.
+        "openbank.delegation.approval-events" to "delegation-service",
         // Issue #6035: four more money-path producers were absent from all three places at once
         // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
         // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set
@@ -118,6 +121,10 @@ object TopicProducers {
         // openbank-standing-order-service/src/main/resources/application.yaml ->
         // standing-order-events-out.
         "openbank.standing-orders.order.event" to "standing-order-service",
+        // ADR-0315 (#10618): openbank-treasury-service/src/main/resources/application.yaml ->
+        // treasury-events-out. Its payloads also carry "sourceService": "treasury-service", so the
+        // rows resolve AttributionSource.EVENT; this entry is the fallback and the coverage fact.
+        "openbank.treasury.deal.events" to "treasury-service",
         // #8792: the four topics analytics-sink subscribes to that audit-service does not, added
         // when this table became the shared definition. Same rule as every row above — read off the
         // module that DECLARES the outgoing channel, not from the topic segment, which would have

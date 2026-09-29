@@ -44,6 +44,12 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: accounts
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aml
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:
@@ -59,10 +65,16 @@ spec:
               kubernetes.io/metadata.name: kyc
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: notifications
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: onboarding
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: payments
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: sca
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: security-scanner

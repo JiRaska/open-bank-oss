@@ -7,6 +7,7 @@ package com.openbank.psd2.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.psd2.application.port.`in`.GetPaymentStatusQuery
 import com.openbank.psd2.application.port.`in`.InitiatePaymentCommand
 import com.openbank.psd2.application.port.`in`.PaymentInitiationUseCase
@@ -112,19 +113,28 @@ class PisResource(
         if (idempotencyKey.isNullOrBlank()) throw Psd2RequestFormatException("Idempotency-Key header is required")
 
         val cacheKey = paymentCreateKey(tppId, product, idempotencyKey)
-        idempotencyStore.get(cacheKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
-                .type(MediaType.APPLICATION_JSON)
-                .header("X-Idempotency-Replayed", "true")
-                .build()
-        }
-
-        val result = pis.initiatePayment(
-            InitiatePaymentCommand(tppId, consentId, product, payment, idempotencyKey),
+        val requestHash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/open-banking/v2/payments/${BerlinXs2aMappers.productSegment(product)}",
+            mapOf("consentId" to consentId, "payment" to payment),
         )
-        idempotencyStore.save(cacheKey, 201, objectMapper.writeValueAsString(result))
-        return Response.status(201).entity(result).build()
+        return Psd2Idempotency.execute(
+            idempotencyStore,
+            cacheKey,
+            requestHash,
+            replay = { cached -> Response.status(cached.statusCode) },
+            conflict = Psd2Idempotency::conflictResponse,
+        ) {
+            val result = pis.initiatePayment(
+                InitiatePaymentCommand(tppId, consentId, product, payment, idempotencyKey),
+            )
+            Psd2Idempotency.Completed(
+                Response.status(201).entity(result).build(),
+                201,
+                objectMapper.writeValueAsString(result),
+            )
+        }
     }
 
     private fun tppMissing() = Response.status(401)

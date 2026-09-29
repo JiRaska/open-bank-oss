@@ -10,6 +10,7 @@ import {
 } from 'recharts'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import type { Decision, ReasonCount, StageRow, WeeklyOutcome } from './model'
+import { C_STAGE } from './palette'
 
 // Theme-agnostic chart palette. recharts writes `fill`/`stroke` as SVG attributes, where CSS
 // variables do not resolve — same constraint as the onboarding funnel page. One colour per
@@ -17,7 +18,6 @@ import type { Decision, ReasonCount, StageRow, WeeklyOutcome } from './model'
 export const C_APPROVE = '#22c55e'
 export const C_REFER = '#f59e0b'
 export const C_DECLINE = '#ef4444'
-export const C_STAGE: Record<string, string> = { STAGE_1: '#6366f1', STAGE_2: '#f59e0b', STAGE_3: '#ef4444' }
 const C_BUCKET = ['#6366f1', '#a5b4fc', '#f59e0b', '#fb923c', '#ef4444']
 const OUTCOME_COLOUR: Record<string, string> = { APPROVE: C_APPROVE, REFER: C_REFER, DECLINE: C_DECLINE }
 

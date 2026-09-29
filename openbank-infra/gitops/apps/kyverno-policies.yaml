@@ -1,8 +1,9 @@
 # Kyverno ClusterPolicies (ADR-0029/0030 D4). Separate from the `kyverno` app
 # (the Helm chart / engine) so the policy manifests under gitops/components/
 # kyverno/ are GitOps-owned instead of applied out-of-band with kubectl. Holds
-# the `verify-openbank-image-signatures` policy that verifies every openbank-*
-# image against the Cosign KMS public key at admission.
+# the `verify-openbank-image-sbom-attestation` policy that verifies every openbank-*
+# image's Cosign signature and CycloneDX attestation against the KMS public key
+# at admission.
 #
 # Namespace is nominal (ClusterPolicy is cluster-scoped); the kyverno ns already
 # exists from the `kyverno` app. The retry backoff rides out the brief window
@@ -35,3 +36,9 @@ spec:
         maxDuration: 5m
     syncOptions:
       - CreateNamespace=false
+      # Kyverno v1 -> CEL stage 2 (#11437) lands as one sync that updates the
+      # -cel twin to Deny and prunes the deleted v1 ClusterPolicy. Without
+      # PruneLast the prune runs first, leaving seconds with NEITHER policy
+      # enforcing; with it the CEL policy is applied before the v1 twin is
+      # deleted, so the gap becomes a harmless overlap (identical verdicts).
+      - PruneLast=true

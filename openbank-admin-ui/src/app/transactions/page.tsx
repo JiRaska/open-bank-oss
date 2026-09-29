@@ -18,16 +18,28 @@ import {
   TRANSACTION_STATUSES,
   TRANSACTION_TYPES,
   type TransactionSearchResult,
+  type TransactionStatus,
+  type TransactionType,
 } from '@/lib/transactions/transactionSearchContract'
 
-const TYPE_COLOR: Record<string, string> = {
-  DEBIT:      'var(--danger)',
-  CREDIT:     'var(--success)',
-  TRANSFER:   'var(--accent)',
-  FEE:        'var(--warning)',
-  INTEREST:   '#7c3aed',
-  REVERSAL:   'var(--text-tertiary)',
-  ADJUSTMENT: 'var(--text-tertiary)',
+// A transaction type describes the movement; it is not a success/failure verdict.
+// Keep its taxonomy visually neutral and reserve semantic colour for lifecycle status.
+const TYPE_LABELS: Record<TransactionType, { cs: string; en: string }> = {
+  DEBIT: { cs: 'Debet', en: 'Debit' },
+  CREDIT: { cs: 'Kredit', en: 'Credit' },
+  TRANSFER: { cs: 'Převod', en: 'Transfer' },
+  FEE: { cs: 'Poplatek', en: 'Fee' },
+  INTEREST: { cs: 'Úrok', en: 'Interest' },
+  REVERSAL: { cs: 'Storno', en: 'Reversal' },
+  ADJUSTMENT: { cs: 'Úprava', en: 'Adjustment' },
+}
+
+const STATUS_LABELS: Record<TransactionStatus, { cs: string; en: string }> = {
+  PENDING: { cs: 'Čeká', en: 'Pending' },
+  PROCESSING: { cs: 'Zpracovává se', en: 'Processing' },
+  COMPLETED: { cs: 'Dokončeno', en: 'Completed' },
+  FAILED: { cs: 'Selhalo', en: 'Failed' },
+  REVERSED: { cs: 'Stornováno', en: 'Reversed' },
 }
 
 const PAGE_SIZE = 50
@@ -68,6 +80,11 @@ export default function TransactionsPage() {
   const hasSearchCriteria = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].some(Boolean)
   const queryKey = [accountId, iban, bban, referenceNumber, endToEndId, counterparty, status, type, dateFrom, dateTo, amountMin, amountMax].join('\u0000')
   const queryChanged = result !== null && resultQueryKey !== queryKey
+  const invalidDateRange = Boolean(dateFrom && dateTo && dateFrom > dateTo)
+  const invalidAmountRange = Boolean(amountMin && amountMax && Number(amountMin) > Number(amountMax))
+  const invalidSearchRange = invalidDateRange || invalidAmountRange
+  const typeLabel = (value: TransactionType) => TYPE_LABELS[value][language]
+  const statusLabel = (value: TransactionStatus) => STATUS_LABELS[value][language]
 
   useEffect(() => () => {
     searchGeneration.current += 1
@@ -87,6 +104,7 @@ export default function TransactionsPage() {
   }
 
   async function search(offset = 0) {
+    if (invalidSearchRange) return
     const generation = ++searchGeneration.current
     activeRequest.current?.abort()
     const controller = new AbortController()
@@ -191,8 +209,7 @@ export default function TransactionsPage() {
         <ContextualInsights dashboardUid="openbank-sla" panels={PAYMENT_INSIGHTS}
           titleCs="Zdraví plateb" titleEn="Payment health"
           descriptionCs="Úspěšnost, rychlost a SLA napříč platebními cestami."
-          descriptionEn="Success, speed and SLA across payment rails."
-          from={dateFrom || undefined} to={dateTo || undefined} />
+          descriptionEn="Success, speed and SLA across payment rails." />
       </Can>
 
       <div className="card" style={{ marginBottom: '16px' }}>
@@ -224,11 +241,18 @@ export default function TransactionsPage() {
             <Filter size={13} />
             {hasFilters ? <span style={{ color: 'var(--accent)' }}>{t('Filtry', 'Filters')} ({[iban,bban,referenceNumber,endToEndId,counterparty,status,type,dateFrom,dateTo,amountMin,amountMax].filter(Boolean).length})</span> : t('Filtry', 'Filters')}
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
+          <button type="button" className="btn btn-primary" onClick={() => search()} disabled={loading || invalidSearchRange} aria-busy={loading} aria-label={loading ? t('Vyhledávání transakcí', 'Searching transactions') : t('Vyhledat transakce', 'Search transactions')}>
             {loading ? <RefreshCw size={13} aria-hidden="true" className="animate-spin" /> : <Search size={13} aria-hidden="true" />}
             {loading ? t('Hledám…', 'Searching…') : t('Hledat', 'Search')}
           </button>
         </div>
+
+        {invalidDateRange && <div id="transaction-date-range-error" role="alert" style={{ padding: '10px 16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px' }}>
+          {t('Datum od musí být nejpozději datem do.', 'The start date must be on or before the end date.')}
+        </div>}
+        {invalidAmountRange && <div id="transaction-amount-range-error" role="alert" style={{ padding: '10px 16px', color: 'var(--danger-text)', background: 'var(--danger-bg)', borderBottom: '1px solid var(--danger-border)', fontSize: '12px' }}>
+          {t('Částka od nesmí být vyšší než částka do.', 'The minimum amount cannot exceed the maximum amount.')}
+        </div>}
 
         {/* Extended filters */}
         {showFilters && (
@@ -250,31 +274,31 @@ export default function TransactionsPage() {
                 <label htmlFor="transaction-status" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Status', 'Status')}</label>
                 <select id="transaction-status" className="input" style={{ width: '100%' }} value={status} onChange={e => updateSearchField(setStatus, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {TRANSACTION_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
+                  {TRANSACTION_STATUSES.map(s => <option key={s} value={s}>{statusLabel(s)} ({s})</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-type" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Typ transakce', 'Transaction type')}</label>
                 <select id="transaction-type" className="input" style={{ width: '100%' }} value={type} onChange={e => updateSearchField(setType, e.target.value)}>
                   <option value="">{t('Vše', 'All')}</option>
-                  {TRANSACTION_TYPES.map(ty => <option key={ty} value={ty}>{ty}</option>)}
+                  {TRANSACTION_TYPES.map(ty => <option key={ty} value={ty}>{typeLabel(ty)} ({ty})</option>)}
                 </select>
               </div>
               <div>
                 <label htmlFor="transaction-date-from" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum od', 'Date from')}</label>
-                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} value={dateFrom} onChange={e => updateSearchField(setDateFrom, e.target.value)} />
+                <input id="transaction-date-from" className="input" type="date" style={{ width: '100%' }} aria-invalid={invalidDateRange} aria-describedby={invalidDateRange ? 'transaction-date-range-error' : undefined} value={dateFrom} onChange={e => updateSearchField(setDateFrom, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-date-to" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Datum do', 'Date to')}</label>
-                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} value={dateTo} onChange={e => updateSearchField(setDateTo, e.target.value)} />
+                <input id="transaction-date-to" className="input" type="date" style={{ width: '100%' }} aria-invalid={invalidDateRange} aria-describedby={invalidDateRange ? 'transaction-date-range-error' : undefined} value={dateTo} onChange={e => updateSearchField(setDateTo, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-min" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka od (CZK)', 'Amount from (CZK)')}</label>
-                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} placeholder="0.00" value={amountMin} onChange={e => updateSearchField(setAmountMin, e.target.value)} />
+                <input id="transaction-amount-min" className="input" type="number" style={{ width: '100%' }} aria-invalid={invalidAmountRange} aria-describedby={invalidAmountRange ? 'transaction-amount-range-error' : undefined} placeholder="0.00" value={amountMin} onChange={e => updateSearchField(setAmountMin, e.target.value)} />
               </div>
               <div>
                 <label htmlFor="transaction-amount-max" style={{ fontSize: '11px', color: 'var(--text-tertiary)', display: 'block', marginBottom: '4px' }}>{t('Částka do (CZK)', 'Amount to (CZK)')}</label>
-                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} placeholder="999999.00" value={amountMax} onChange={e => updateSearchField(setAmountMax, e.target.value)} />
+                <input id="transaction-amount-max" className="input" type="number" style={{ width: '100%' }} aria-invalid={invalidAmountRange} aria-describedby={invalidAmountRange ? 'transaction-amount-range-error' : undefined} placeholder="999999.00" value={amountMax} onChange={e => updateSearchField(setAmountMax, e.target.value)} />
               </div>
             </div>
             {hasFilters && (
@@ -301,8 +325,8 @@ export default function TransactionsPage() {
               </span>
               <span>{t(`Stránka ${Math.floor(result.offset / PAGE_SIZE) + 1}`, `Page ${Math.floor(result.offset / PAGE_SIZE) + 1}`)}</span>
             </div>
-            <div style={{ overflowX: 'auto' }}>
-              <table className="table">
+            <div className="table-scroll-region" role="region" aria-label={t('Posuvná tabulka výsledků transakcí', 'Scrollable transaction results table')} tabIndex={0}>
+              <table className="table" style={{ minWidth: 820 }}>
                 <thead>
                   <tr>
                     <th>{t('Reference', 'Reference')}</th>
@@ -336,11 +360,11 @@ export default function TransactionsPage() {
                   ) : result.data.map(tx => (
                     <tr key={tx.id}>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '11px' }}>{tx.referenceNumber}</td>
-                      <td><span style={{ fontSize: '11px', fontWeight: 600, color: TYPE_COLOR[tx.type] || 'var(--text-secondary)' }}>{tx.type}</span></td>
+                      <td><StatusBadge status={tx.type} tone="neutral" label={typeLabel(tx.type)} /></td>
                       <td style={{ fontWeight: 600, fontVariantNumeric: 'tabular-nums' }}>
                         {tx.amount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB', { minimumFractionDigits: 2 })} {tx.currencyCode}
                       </td>
-                      <td><StatusBadge status={tx.status} /></td>
+                      <td><StatusBadge status={tx.status} label={statusLabel(tx.status)} /></td>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.sourceAccountId ? `${tx.sourceAccountId.slice(0, 8)}…` : '—'}</td>
                       <td style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '10px', color: 'var(--text-tertiary)' }}>{tx.targetAccountId ? `${tx.targetAccountId.slice(0, 8)}…` : '—'}</td>
                       <td style={{ maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: '12px' }}>{tx.description || '—'}</td>

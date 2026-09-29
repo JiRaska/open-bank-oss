@@ -39,6 +39,7 @@ class SepaPaymentMapperTest {
             completedAt = Instant.parse("2026-01-02T10:16:00Z"),
             createdAt = Instant.parse("2026-01-02T10:00:00Z"),
             updatedAt = Instant.parse("2026-01-02T10:16:00Z"),
+            revision = 7,
         )
 
         val roundTripped = original.toEntity().toDomain()
@@ -113,5 +114,6 @@ class SepaPaymentMapperTest {
         assertThat(entity.creditorBic).isEqualTo("DEUTDEFF")
         assertThat(entity.rejectReason).isNull()
         assertThat(entity.amount).isEqualByComparingTo(BigDecimal("99.000000"))
+        assertThat(entity.revision).isZero()
     }
 }

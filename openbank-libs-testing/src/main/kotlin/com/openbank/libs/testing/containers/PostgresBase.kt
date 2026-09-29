@@ -6,8 +6,6 @@ package com.openbank.libs.testing.containers
 
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
-import org.opentest4j.TestAbortedException
-import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 
@@ -37,10 +35,8 @@ abstract class PostgresBase(
     }
 
     protected fun startPostgres(): PostgreSQLContainer<*> {
-        if (!DockerClientFactory.instance().isDockerAvailable) {
-            throw TestAbortedException("Docker not available — skipping Testcontainers IT")
-        }
-        val pg = PostgreSQLContainer(DockerImageName.parse("postgres:16.3-alpine"))
+        DockerRequirement.require()
+        val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
@@ -67,7 +63,11 @@ abstract class PostgresBase(
         if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", resourceScopeId)
     }
 
-    private companion object {
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+    companion object {
+        /**
+         * Same major.minor as the CNPG `imageName` every gitops cluster runs, so ITs
+         * exercise the production dialect. Bump together with the fleet.
+         */
+        const val POSTGRES_IMAGE = "postgres:18.6-alpine"
     }
 }

@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.rest
 
+import com.openbank.ledger.application.port.`in`.GetAccountCurrencyBalanceQuery
 import com.openbank.ledger.application.port.`in`.GetJournalQuery
 import com.openbank.ledger.application.port.`in`.GetJournalsByTransactionQuery
 import com.openbank.ledger.application.port.`in`.GetSubLedgerBalancesQuery
@@ -16,6 +17,7 @@ import com.openbank.ledger.application.port.`in`.ReplayBookedChangesCommand
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesResult
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
+import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
@@ -103,6 +105,36 @@ class LedgerResource(
     }
 
     @GET
+    @Path("/accounts/{code}/balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "")
+    @Operation(
+        summary = "A GL account's balance in one transaction currency (native amounts, #11107)",
+        description = "Sums the native amount of booked lines in `currency` up to and including " +
+            "`asOf`; base-only CZK lines (FX revaluation) never move a foreign-currency balance.",
+    )
+    suspend fun accountCurrencyBalance(
+        @PathParam("code") code: String,
+        @QueryParam("asOf") asOf: String?,
+        @QueryParam("currency") currency: String?,
+        @QueryParam("scope") scope: String?,
+    ): Response {
+        requireNotNull(asOf) { "query parameter 'asOf' is required" }
+        requireNotNull(currency) { "query parameter 'currency' is required" }
+        require(CURRENCY_CODE.matches(currency)) { "query parameter 'currency' must be an ISO 4217 code" }
+        val date = try {
+            LocalDate.parse(asOf)
+        } catch (e: java.time.format.DateTimeParseException) {
+            throw IllegalArgumentException("query parameter 'asOf' must be YYYY-MM-DD", e)
+        }
+        val ledgerScope = LedgerScope.parse(scope)
+        val balance = ledgerUseCase.getAccountCurrencyBalance(
+            GetAccountCurrencyBalanceQuery(code, currency, date, ledgerScope),
+        )
+        return Response.ok(balance.toResponse(ledgerScope.name)).build()
+    }
+
+    @GET
     @Path("/sub-ledger-balances")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
@@ -141,7 +173,11 @@ class LedgerResource(
     }
 
     @POST
-    @RolesAllowed(Roles.OPERATOR)
+    // ROLE_API admits per-service M2M identities (#10486: interest-service's own client
+    // `openbank-interest` holds ROLE_API only). RBAC is the coarse gate; WHICH ROLE_API holder may
+    // post is decided by identity in ledger_rest_ext.rego, and any other ROLE_API principal is
+    // denied there (ledger_rest_ext_test.rego: test_other_role_api_service_account_may_not_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.create", resource = "")
     @Operation(summary = "Post a balanced journal entry")
     suspend fun postJournal(
@@ -165,16 +201,23 @@ class LedgerResource(
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
             synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
-        val entry = ledgerUseCase.postJournal(command)
+        val outcome = ledgerUseCase.postJournalWithOutcome(command)
+        val entry = outcome.entry
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))
             .entity(entry.toResponse())
             .type(MediaType.APPLICATION_JSON)
+            // #10904: a replayed idempotency key answers with the same 201 and the same body as the
+            // original posting. This header is the only thing telling the caller nothing was posted.
+            .header(IDEMPOTENT_REPLAYED_HEADER, outcome.replayed.toString())
             .build()
     }
 
     @POST
     @Path("/{journalId}/reverse")
-    @RolesAllowed(Roles.OPERATOR)
+    // #10486 batch 2: ROLE_API admitted so transaction-service's own identity (ROLE_API only) reaches
+    // OPA; ledger_rest_ext.rego grants ledger.reverse to service-account-openbank-transaction ALONE
+    // and denies every other ROLE_API holder (test_other_role_api_sa_may_not_reverse_or_create).
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "ledger.reverse", resource = "#journalId")
     @Operation(summary = "Reverse a posted journal entry")
     suspend fun reverseJournal(@PathParam("journalId") journalId: UUID, request: ReverseJournalRequest): Response {
@@ -341,6 +384,28 @@ data class SubLedgerBalanceResponse(
     val net: BigDecimal,
 )
 
+data class AccountCurrencyBalanceResponse(
+    val code: String,
+    val currency: String,
+    val asOf: String,
+    val scope: String,
+    val debit: BigDecimal,
+    val credit: BigDecimal,
+    val net: BigDecimal,
+)
+
+private val CURRENCY_CODE = Regex("^[A-Z]{3}$")
+
+private fun AccountCurrencyBalance.toResponse(scope: String) = AccountCurrencyBalanceResponse(
+    code = code,
+    currency = currency,
+    asOf = asOf.toString(),
+    scope = scope,
+    debit = totalDebit,
+    credit = totalCredit,
+    net = net,
+)
+
 data class SubLedgerBalancesResponse(val asOf: String, val balances: List<SubLedgerBalanceResponse>)
 
 private fun SubLedgerBalance.toResponse() = SubLedgerBalanceResponse(
@@ -392,3 +457,9 @@ private fun ReplayBookedChangesResult.toResponse() = ReplayBookedChangesResponse
     accountsTouched = accountsTouched,
     netDeltaByCurrency = netDeltaByCurrency,
 )
+
+/**
+ * Response header on `POST /api/v1/journals`: `true` when the idempotency key had already been posted
+ * and the call only replayed it, `false` when this call posted the journal (#10904).
+ */
+const val IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"

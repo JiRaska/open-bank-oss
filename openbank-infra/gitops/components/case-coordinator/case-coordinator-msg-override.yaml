@@ -1,0 +1,24 @@
+# Authoritative migration of the agent-kill-switch-events-in consumer settings (ADR-0244 P2).
+#
+# These values also appear in case-coordinator-agent/src/main/resources/application.yaml,
+# but the keys affected by smallrye/smallrye-reactive-messaging#2028 (dotted leaf keys on a
+# hyphenated channel) only resolve when supplied from a non-YAML config source. Mounting them
+# as a properties file via QUARKUS_CONFIG_LOCATIONS keeps the committed YAML defaults viable
+# for local dev/tests while guaranteeing the deployed pod uses the correct values.
+#
+# See transaction-service-msg-override.yaml (#2945) and the AGENTS.md Kafka dotted-key bullet
+# for the fleet-wide rationale.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: case-coordinator-msg-override
+  namespace: platform
+  labels:
+    app.kubernetes.io/name: case-coordinator-agent
+    app.kubernetes.io/part-of: platform
+data:
+  override.properties: |
+    config_ordinal=500
+    mp.messaging.incoming.agent-kill-switch-events-in.group.id=case-coordinator-agent
+    mp.messaging.incoming.agent-kill-switch-events-in.auto.offset.reset=earliest
+    mp.messaging.incoming.agent-kill-switch-events-in.dead-letter-queue.topic=openbank.dlq.case-coordinator.agent-kill-switch-events-in

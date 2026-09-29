@@ -51,6 +51,7 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 | **S**poofing | Forged initiation | OIDC + role; mTLS for service callers |
 | **S**poofing | Forged `pacs.002` ACSC from clearing-simulator (ADR-0104 D3) | clearing-simulator is cluster-internal only; OIDC CC verifies identity; `Pacs002Reader` validates XML schema before parsing; scheme accept moves payment to PROCESSING (money does not leave until settlement) |
 | **T**ampering | Alter amount/IBAN in flight | Server-validated, immutable once accepted; audit |
+| **T**ampering | Reuse an `Idempotency-Key` with a different payment body so the first payment's response is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing created. Durable second check: `sepa_payments.request_hash` (V12) refuses a reused key after the Redis record expired. Rows/records written before this change carry no fingerprint and still replay by key alone |
 | **R**epudiation | Deny initiating a transfer | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Payment history harvesting | AuthZ scoping; `ROLE_VIEWER` owner-scoped read |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the `openbank.outbox.backlog` gauge is tagged only by `service` (`"sepa-payment"`) — never a payment id, debtor/creditor IBAN, amount, or any PII. The gauge exposes only a read-only **count** of processable (PENDING + FAILED) outbox rows, cached and refreshed off the scrape thread (no DB query on the Prometheus worker thread). `/q/metrics` is cluster-internal |
@@ -141,6 +142,36 @@ unreachable document-service fails only the download, never a payment transition
 simply stops existing).
 
 ## 6. Change log
+
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, status codes, JSON field names and `openapi.yaml` are unchanged,
+  and the intentionally asymmetric role sets stay exactly as before — `listPending` stays
+  `ROLE_OPERATOR`/`ROLE_ADMIN` only, `decide` additionally admits `ROLE_PAYMENTS` — only the
+  `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag` annotations remain per-service, and
+  `checkerId(identity)` is resolved AFTER the null-body check (same ordering `decide` documents in
+  libs-runtime, fixed in #11033/#11047).
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
+  persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
+  carry that revision. The existing `sepa.payment.returned` evidence remains atomic with
+  `RETURNED`; context-service reads only payment id, reason code, reversal outcome, revision and
+  event time. Risk class = integrity and bounded confidentiality. `V9` is additive; rollback is to
+  stop consuming the revision and leave the column in place, avoiding a destructive down migration.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or payment-control bypass: screening and SCA still run. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
 
@@ -356,3 +387,77 @@ simply stops existing).
   indistinguishable. Residual: `null` still does not distinguish "no such account" from "lookup
   failed" at the *data* level, and the case row itself carries no marker of which branch produced
   it. Rollback: revert; the adapter's previous behaviour was to store the account id in `partyId`.
+
+- **2026-09-20** — **No boundary change for this service.** Recorded because
+  `openbank-infra/gitops/components/payments/payments-services.yaml` is a shared multi-service
+  manifest and the threat-model gate attributes a Deployment/Rollout hunk in it to every money-path
+  service whose name appears in the file, not to the workload the hunk actually sits in. The change
+  in question belongs to the co-tenant **clearing-service** Rollout: a `LEDGER_SERVICE_URL` pointing
+  at ledger-service's new mTLS listener, plus the client-certificate volume it needs. sepa-payment's
+  own container spec, ports, identity, privilege, NetworkPolicy and rest-clients are byte-identical
+  to `main`. **Risk class:** none — no surface, principal, action or data flow of this service is
+  touched. Nothing to roll back here.
+
+- **2026-09-20** — **New outbound edge: document-service over private-CA mTLS (8443).** `DocumentPreviewAdapter`
+  now reaches `document-service.documents.svc:8443` with the client certificate `sepa-payment-internal-tls`
+  (`%prod` TLS bucket `document-authority`, TLSv1.3). Previously `DOCUMENT_SERVICE_URL` was unset in
+  gitops and the client dialled `localhost:8143` inside this pod, so the render path never left the
+  process (#10383). No new inbound edge, no new principal, no money mutation: the call is a read of
+  template metadata plus a preview render. **Risk class:** confidentiality of the rendered payment
+  confirmation in transit, now protected by mutual TLS rather than plaintext. Rollback: drop
+  `DOCUMENT_SERVICE_URL` and the `document-tls` volume.
+
+- **2026-09-20** — **No boundary change for this service** (second shared-manifest attribution; see
+  the entry above for the mechanism). This PR adds transaction-service's private-CA mTLS listener
+  (8443) to the co-tenant transaction-service Rollout in
+  `openbank-infra/gitops/components/payments/payments-services.yaml`, and the regenerated
+  `network-policies.yaml` gains an `interest` + 8443 ingress rule scoped to
+  `transaction-service-ingress-allow-list`. sepa-payment's own Rollout, ports, identity, privilege
+  and rest-clients are byte-identical to `main`, and its own ingress allow-list is unchanged — the
+  policy file is shared per component directory, not per workload. **Risk class:** none for this
+  service. Nothing to roll back here.
+
+- **2026-09-20** — **No boundary change for this service** (third shared-manifest attribution; see
+  the entries above for the mechanism). This PR adds transaction-service's CLIENT certificate for
+  its outbound fx-service call — a `fx-tls` volume and mount on the co-tenant transaction-service
+  Rollout in `openbank-infra/gitops/components/payments/payments-services.yaml`, plus
+  `FX_SERVICE_URL`. sepa-payment's own Rollout, ports, identity, privilege and rest-clients are
+  byte-identical to `main`. **Risk class:** none for this service. Nothing to roll back here.
+- **2026-09-21** — **Own machine identity for the settlement leg and reversal (#10486 batch 1).** `SettlementAdapter` and `ReversalAdapter` now resolve the NAMED oidc-client `m2m` (`@NamedOidcClient`), Keycloak client `openbank-sepa-payment` (`ROLE_API` only); transaction-service grants it `transaction.create` and `transaction.reverse` (`service-sepa-payment-transaction-write`). `transaction.reverse` stays four-eyes in transaction-service, unchanged. **Inbound:** `createPayment`'s RBAC widens to admit `ROLE_API` (RBAC runs before OPA), so standing-order-service's own identity can reach `sepaPayment.create`; OPA grants that action to `service-account-openbank-standing-order` by identity and denies every other `ROLE_API` holder (`sepa_payment_rest_ext_test.rego`). **STRIDE-E:** that widening is the new exposure — OPA is the whole control for ROLE_API callers on `createPayment`, which holds because `AUTHZ_ENFORCE` is `"true"` for sepa-payment (and transaction-service) in `payments-services.yaml`. **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/sepa-payment` (`client_secret`), projected by the `sepa-payment-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `transaction.create` and `transaction.reverse`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 2 adds an `OIDC_M2M_CLIENT_SECRET` env ref to the co-tenant transaction-service, domestic-payment, sepa-instant, settlement-service and swift-service Rollouts in `openbank-infra/gitops/components/payments/payments-services.yaml` and restamps the transaction policy checksum. sepa-payment's own Rollout, identity, rest-clients and OPA grants are byte-identical to batch 1. **Risk class:** none for this service. Nothing to roll back here.
+- **2026-09-21** — **AML case open moves to the service's own machine identity (#10486 batch 3).** `AmlServiceClient` (`POST /api/v1/aml/cases`) now mints its bearer from the NAMED oidc-client `m2m` the service already has for its money-path booking, Keycloak client `openbank-sepa-payment` (`ROLE_API` only), instead of the shared `openbank-services` client. aml-service admits it by identity: `@RolesAllowed` on `createCase` gains `ROLE_API`, `@Authorize("amlCase.create")` is added with the rego rule `service-aml-case-create-m2m`, and because aml-service runs `AUTHZ_ENFORCE=false` a Kotlin check (`requireNamedMachineCaller`) refuses any ROLE_API-only caller not on its four-principal list. **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches `amlCase.create` and nothing else new. **Repudiation improves:** a referred case now names this service. **Availability:** unchanged path; if the named client were missing the call would fail and the screening gate's existing failure handling applies, exactly as for a shared-client outage. Rollback: revert the commit (the client returns to the shared token).
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 5 restamps the transaction-service policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding a transaction read rule for party-service. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `SepaPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only) instead of the shared client. sepa-payment deliberately grants it nothing and its RBAC is unchanged: the MCP tool behind it (`get_payment_confirmation`, `query.payment_confirmation.readonly`) is held by no charter, so the call was already refused at the MCP gate. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. sepa-payment's own Rollout, identity and OPA grants are unchanged. Nothing to roll back here.
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/sepa-payments` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different payment was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed create releases the claim so a retry can run. Because the Redis record expires (24 h) while the UNIQUE `idempotency_key` row does not, migration V12 adds nullable `sepa_payments.request_hash`, written on create; `SepaPaymentService` refuses a key whose stored hash differs (409), so the check survives Redis expiry or eviction. **Residual window:** Redis records and payment rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely). No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE sepa_payments DROP COLUMN request_hash` (see V12 header).
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** SepaPaymentNotFoundMapper/InvalidSepaPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `SepaPaymentService.kt`, which document the deletion rather than contradict it).
+  `SepaPaymentNotFoundException`/`InvalidSepaPaymentStateTransitionException` now extend
+  `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
+  by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
+  unused, by #10923). Both already used the base's default codes (`NOT_FOUND`/`CONFLICT`), so
+  status, `code` and `message` are byte-identical to the deleted mappers' output — verified by
+  `SepaPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (`Ids.randomId()` →
+  the correlation MDC), which #10911 phase 1 established is not part of the wire contract. No
+  other mapper in this file (`PaymentNotCompletedMapper`, `DocumentTemplateUnavailableMapper`)
+  is touched. **Risk class:** none — response-plumbing de-duplication only; the payment workflow,
+  reversal port and Temporal orchestration are untouched. Rollback: restore the deleted mapper
+  classes and revert the exception base classes.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site (stranded on the
+  older `support.decide(id, request, identity)` form by #11079 merging just ahead of this fix) is
+  migrated to `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

@@ -22,7 +22,7 @@ Tato dokumentace je vystavena přímo službou na management endpointu `/q/openb
 - **Auth:** OIDC vypnuto (interní platformová služba, žádná externí expozice)
 - **Scheduler:** prověřuje všech 27 fleet služeb každých 30 minut (`@Scheduled(every = "30m")`)
 - **Prověřované kontroly:** OWASP Top 10 2021, security headers, CORS, neautentizované aktuátory, expozice OpenAPI
-- **Stav:** nic se neukládá — výsledky skenů i ICT incidenty žijí v in-memory mapách a zanikají s restartem podu
-- **Eventy:** jediný topic `openbank.security.ict.incident`, vysílaný přímo do Kafky (žádný outbox; nepoužívaný byl odstraněn v #4709)
+- **Stav:** výsledky skenů zůstávají in-memory; ICT incidenty a jejich revize jsou uložené v Postgresu
+- **Eventy:** `openbank.security.ict.incident` se ukládá atomicky s incidentem a odesílá z dedikovaného outboxu
 - **ICT incidenty:** DORA čl. 17 životní cyklus (OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED)
 - **Skórování:** 0–100 na službu, písmenkový grade A+ / A / B / C / D / F

@@ -4,12 +4,14 @@
 
 package com.openbank.consent.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
 import org.testcontainers.DockerClientFactory
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
+import java.util.UUID
 
 /**
  * Isolated PostgreSQL + Valkey (Redis) containers for [com.openbank.consent.integration.ConsentBootSmokeIT].
@@ -24,12 +26,18 @@ class ConsentPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
     private var postgres: PostgreSQLContainer<*>? = null
     private var redis: GenericContainer<*>? = null
 
+    private companion object {
+        val RESOURCE_SCOPE_ID = UUID.randomUUID().toString()
+        const val POSTGRES_IMAGE = "docker.io/library/postgres:18.6-alpine"
+        const val VALKEY_IMAGE = "docker.io/valkey/valkey:7.2-alpine"
+    }
+
     override fun start(): Map<String, String> {
         if (!DockerClientFactory.instance().isDockerAvailable) {
             throw TestAbortedException("Docker not available — skipping Testcontainers IT")
         }
         val pg = PostgreSQLContainer(
-            DockerImageName.parse("docker.io/library/postgres:16.3-alpine")
+            DockerImageName.parse(POSTGRES_IMAGE)
                 .asCompatibleSubstituteFor("postgres"),
         )
             .withUsername("openbank")
@@ -37,10 +45,12 @@ class ConsentPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
             .withDatabaseName("openbank_consents_it")
         pg.start()
         postgres = pg
+        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", RESOURCE_SCOPE_ID)
 
-        val rd = GenericContainer(DockerImageName.parse("docker.io/valkey/valkey:7.2-alpine")).withExposedPorts(6379)
+        val rd = GenericContainer(DockerImageName.parse(VALKEY_IMAGE)).withExposedPorts(6379)
         rd.start()
         redis = rd
+        TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "started", RESOURCE_SCOPE_ID)
 
         val pgHost = pg.host
         val pgPort = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
@@ -57,7 +67,13 @@ class ConsentPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        redis?.stop()
-        postgres?.stop()
+        redis?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("valkey", VALKEY_IMAGE, "stopped", RESOURCE_SCOPE_ID)
+        }
+        postgres?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", RESOURCE_SCOPE_ID)
+        }
     }
 }

@@ -123,14 +123,14 @@ class ClearingEventPublisherImpl @Inject constructor(
         ),
     )
 
-    override fun publishItemCleared(item: ClearingItem): Uni<Void> {
-        val message = OutboxMessage(
-            aggregateId = item.id,
-            eventType = ITEM_CLEARED_EVENT,
-            payload = itemClearedPayload(item),
-        )
-        return Panache.withTransaction { outboxRepo.persistInTransaction(message) }
-    }
+    override fun publishItemCleared(item: ClearingItem): Uni<Void> =
+        Panache.withTransaction { outboxRepo.persistInTransaction(itemClearedMessage(item)) }
+
+    override fun itemClearedMessage(item: ClearingItem): OutboxMessage = OutboxMessage(
+        aggregateId = item.id,
+        eventType = ITEM_CLEARED_EVENT,
+        payload = itemClearedPayload(item),
+    )
 
     /** The `item.cleared` JSON body. See [batchSettledPayload] for why this is split out. */
     internal fun itemClearedPayload(item: ClearingItem): String = objectMapper.writeValueAsString(
@@ -144,6 +144,7 @@ class ClearingEventPublisherImpl @Inject constructor(
             "amount" to item.amount,
             "currency" to item.currency,
             "status" to item.status.name,
+            "version" to item.revision,
             // #3914: ClearingItem has no per-transition instant, so `updatedAt` — the
             // instant the row last changed state, which for a cleared item IS the clearing
             // — is the truest available business time. Same Instant-vs-offset note as

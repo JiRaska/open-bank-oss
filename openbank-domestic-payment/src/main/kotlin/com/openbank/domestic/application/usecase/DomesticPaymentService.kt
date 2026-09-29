@@ -22,6 +22,8 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.temporal.client.WorkflowClient
@@ -34,8 +36,16 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-class DomesticPaymentNotFoundException(paymentId: UUID) : RuntimeException("Domestic payment not found: $paymentId")
-class InvalidDomesticPaymentStateTransitionException(message: String) : RuntimeException(message)
+// #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
+// ResourceNotFoundExceptionMapper handles the 404 (default code "NOT_FOUND", matching the
+// deleted local DomesticPaymentNotFoundMapper's ErrorCode.NOT_FOUND.code byte for byte). See
+// DomesticPaymentExceptionMapperEquivalenceTest.
+class DomesticPaymentNotFoundException(paymentId: UUID) :
+    ResourceNotFoundException("Domestic payment not found: $paymentId")
+
+// Same as above, mapped 409 by ResourceConflictExceptionMapper (default code "CONFLICT",
+// matching the deleted local InvalidDomesticPaymentStateTransitionMapper byte for byte).
+class InvalidDomesticPaymentStateTransitionException(message: String) : ResourceConflictException(message)
 class DomesticPaymentIdempotencyConflictException :
     RuntimeException(
         "Idempotency-Key is already bound to another domestic payment request",

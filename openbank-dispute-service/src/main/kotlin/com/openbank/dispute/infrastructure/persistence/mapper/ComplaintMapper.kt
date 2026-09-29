@@ -31,6 +31,7 @@ class ComplaintMapper {
         it.closedAt = c.closedAt
         it.createdAt = c.createdAt
         it.updatedAt = c.updatedAt
+        it.aggregateRevision = c.aggregateRevision
     }
 
     fun toDomain(e: ComplaintEntity) = Complaint(
@@ -42,5 +43,6 @@ class ComplaintMapper {
         resolvedAt = e.resolvedAt, outcome = e.outcome, redressGranted = e.redressGranted,
         rootCauseCode = e.rootCauseCode, closedAt = e.closedAt,
         createdAt = e.createdAt, updatedAt = e.updatedAt,
+        aggregateRevision = e.aggregateRevision,
     )
 }

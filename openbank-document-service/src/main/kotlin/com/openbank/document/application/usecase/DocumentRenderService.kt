@@ -69,7 +69,7 @@ class DocumentRenderService(
             contentType = cmd.contentType,
             sizeBytes = pdf.size.toLong(),
             status = DocumentStatus.GENERATED,
-            metadata = mapOf(
+            metadata = cmd.metadata + mapOf(
                 "templateCode" to template.code,
                 "templateVersion" to template.version,
                 "locale" to template.locale,

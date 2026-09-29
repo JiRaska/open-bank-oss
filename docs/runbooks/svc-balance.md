@@ -30,7 +30,7 @@ triaging an incident that starts on `balance`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8103` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `balances`); dashboards in Grafana.
 - Logs: `kubectl logs -n balances -l app.kubernetes.io/name=balance-service -f`, or Loki
   `{namespace="balances"}`.

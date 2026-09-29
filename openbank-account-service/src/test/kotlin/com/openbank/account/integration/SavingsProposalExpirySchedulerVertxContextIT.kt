@@ -7,9 +7,10 @@ package com.openbank.account.integration
 import com.openbank.account.application.port.out.WithdrawalProposalRepository
 import com.openbank.account.domain.model.WithdrawalProposal
 import com.openbank.account.domain.model.WithdrawalProposalStatus
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -38,7 +39,10 @@ import java.util.UUID
  * for a genuinely scheduler-dispatched run to leave its mark.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @TestProfile(SavingsProposalExpirySchedulerVertxContextIT.FastExpiryProfile::class)
 class SavingsProposalExpirySchedulerVertxContextIT {
 

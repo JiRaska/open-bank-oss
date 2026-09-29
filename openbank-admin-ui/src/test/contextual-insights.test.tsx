@@ -7,10 +7,13 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.restoreAllMocks() })
 
+// A browser returns a cross-origin frame's window and throws only on reading its location;
+// jsdom >= 30.1 reads contentWindow itself on every frame insertion, so the getter must not throw.
 function blockGrafanaUntilExplicitLoad() {
-  vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockImplementation(() => {
-    throw new DOMException('Cross-origin frame')
+  const crossOriginWindow = Object.defineProperty({}, 'location', {
+    get() { throw new DOMException('Cross-origin frame', 'SecurityError') },
   })
+  vi.spyOn(HTMLIFrameElement.prototype, 'contentWindow', 'get').mockReturnValue(crossOriginWindow as Window)
 }
 
 function completeGrafanaLoad(panel: HTMLElement) {
@@ -38,7 +41,7 @@ it('presents selected Grafana panels as native, period-aware insight cards', () 
   const controlled = document.getElementById(toggle.getAttribute('aria-controls') ?? '')
   expect(controlled).toHaveAttribute('role', 'region')
   expect(controlled).toHaveAccessibleName('Payment health')
-  const panel = screen.getByTitle('Payment success rate')
+  const panel = screen.getByTitle('Request success rate')
   expect(document.querySelectorAll('iframe')).toHaveLength(1)
   expect(panel).toHaveAttribute('src', expect.stringContaining('/tools/grafana/d-solo/openbank-sla?'))
   expect(panel).toHaveAttribute('src', expect.stringContaining('panelId=6'))
@@ -63,7 +66,7 @@ it('recovers when Grafana becomes ready after the slow-connection warning', () =
     <ContextualInsights dashboardUid="openbank-slo" panels={PAYMENT_INSIGHTS.slice(0, 1)}
       titleCs="Dopad" titleEn="Impact" descriptionCs="Stav" descriptionEn="Health" defaultOpen />
   </LanguageProvider>)
-  const panel = screen.getByTitle('Payment success rate')
+  const panel = screen.getByTitle('Request success rate')
   act(() => vi.advanceTimersByTime(20_500))
   expect(screen.getByText('Connection is taking longer; still trying…')).toBeInTheDocument()
   completeGrafanaLoad(panel)
@@ -78,7 +81,7 @@ it('reveals a panel when its Grafana frame finishes loading', () => {
     <ContextualInsights dashboardUid="openbank-slo" panels={PAYMENT_INSIGHTS.slice(0, 1)}
       titleCs="Dopad" titleEn="Impact" descriptionCs="Stav" descriptionEn="Health" defaultOpen />
   </LanguageProvider>)
-  const panel = screen.getByTitle('Payment success rate')
+  const panel = screen.getByTitle('Request success rate')
   completeGrafanaLoad(panel)
   expect(panel).toBeVisible()
   expect(screen.queryByText('Loading data…')).not.toBeInTheDocument()
@@ -91,7 +94,7 @@ it('keeps optional operational context collapsed until requested', () => {
   </LanguageProvider>)
   const toggle = screen.getByRole('button', { name: /Event processing/ })
   expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  expect(screen.queryByTitle('Payment success rate')).not.toBeInTheDocument()
+  expect(screen.queryByTitle('Request success rate')).not.toBeInTheDocument()
   fireEvent.click(toggle)
-  expect(screen.getByTitle('Payment success rate')).toBeInTheDocument()
+  expect(screen.getByTitle('Request success rate')).toBeInTheDocument()
 })

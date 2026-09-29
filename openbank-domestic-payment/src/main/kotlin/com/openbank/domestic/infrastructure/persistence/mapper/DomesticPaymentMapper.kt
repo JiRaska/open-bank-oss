@@ -44,6 +44,7 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.requestFingerprint = requestFingerprint
     it.delegationId = delegationId
     it.reservationId = reservationId
+    it.aggregateRevision = aggregateRevision
 }
 
 fun DomesticPaymentEntity.toDomain() = DomesticPayment(
@@ -79,4 +80,5 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     requestFingerprint = requestFingerprint,
     delegationId = delegationId,
     reservationId = reservationId,
+    aggregateRevision = aggregateRevision,
 )

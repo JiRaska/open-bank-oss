@@ -5,4 +5,4 @@ Contact: mailto:security@open-bank.tech
 Expires: 2027-06-15T00:00:00.000Z
 Preferred-Languages: en, cs
 Canonical: https://developer.open-bank.tech/.well-known/security.txt
-Policy: https://developer.open-bank.tech/.well-known/security.txt
+Policy: https://github.com/JiRaska/open-bank-oss/blob/main/SECURITY.md

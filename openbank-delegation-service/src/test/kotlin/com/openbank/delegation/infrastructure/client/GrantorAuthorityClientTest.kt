@@ -41,6 +41,8 @@ class GrantorAuthorityClientTest {
 
         assertThat(result.verdict).isEqualTo(GrantorAuthorityVerdict.AUTHORIZED)
         assertThat(result.displayName).isEqualTo("Acme s.r.o.")
+        assertThat(result.partyType).isEqualTo("COMPANY")
+        coVerify(exactly = 1) { rest.getParty(principal) }
     }
 
     @Test

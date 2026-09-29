@@ -53,11 +53,10 @@
 # puts a named human in the loop. Non-transient (a real permission answer) exits 1 immediately.
 #
 # WHAT THIS CANNOT DO
-# A human who cancels a run WHILE its jobs are running is indistinguishable from a spot reclaim
-# with the data GitHub exposes — both leave `cancelled` jobs carrying recorded steps — and is
-# still re-run once. That is the accepted waste #2330 priced, not an oversight. The only human
-# cancel this can rule out is the queue drain, where no cancelled job ever started a step
-# (#3208); the self-test proves that one is declined.
+# A human who cancels a CURRENT run WHILE its jobs are running is indistinguishable from a spot
+# reclaim with the data GitHub exposes — both leave `cancelled` jobs carrying recorded steps —
+# and is still re-run once. A superseded PR head is distinguishable using the live PR endpoint;
+# a queue drain is distinguishable because no cancelled job started a step (#3208).
 #
 # EXIT CODES
 #   0  a decision was reached and acted on (re-run issued, or correctly declined)
@@ -67,6 +66,7 @@
 #   GITHUB_REPOSITORY  owner/repo
 #   RUN_ID             the triggering run id
 #   CONCLUSION         its conclusion: `cancelled` or `failure`
+#   RUN_EVENT          event from the discovery API (`pull_request`, `push`, ...)
 #   RUN_URL            its html_url (for the human-readable notices)
 #   GITHUB_STEP_SUMMARY  optional; the `decide` table is appended here when set
 #   GH_BIN             optional; the `gh` executable (the self-test points it at a stub)
@@ -164,8 +164,95 @@ jobs_query() { # jobs_query <jq>
   gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/1/jobs?per_page=100" --jq "$1"
 }
 
+# A cancelled PR run can have executed steps because a newer push cancelled it, not because
+# spot capacity vanished. Re-running that OLD SHA uses the PR's concurrency group and can
+# cancel the NEW head's valid jobs. This happened on #9971: run 35296255139 (88cbf0b58) was
+# auto-rerun by 35297029298 and cancelled head a01b680e0's graph producer. Check the live PR
+# head immediately before issuing any rerun, not when candidates are discovered minutes earlier.
+# Return 10 for a stale/previously rerun PR (a completed decision), 1 for unreadable evidence.
+guarded_rerun() { # guarded_rerun [--failed]
+  local detail event run_sha current_sha pr_count pr_number pr_detail pr_state attempt
+  case "${RUN_EVENT:-}" in
+    pull_request|pull_request_target)
+      detail="$(with_retry "run metadata API" gh_ api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")" || return 1
+      event="$(jq -r '.event // ""' <<< "${detail}")" || return 1
+      run_sha="$(jq -r '.head_sha // ""' <<< "${detail}")" || return 1
+      pr_count="$(jq -r '(.pull_requests // []) | length' <<< "${detail}")" || return 1
+      pr_number="$(jq -r '(.pull_requests // [])[0].number // 0' <<< "${detail}")" || return 1
+      attempt="$(jq -r '.run_attempt // 0' <<< "${detail}")" || return 1
+      if [ "${event}" != "${RUN_EVENT}" ] || [ "${pr_count}" -ne 1 ] ||
+         [[ ! "${run_sha}" =~ ^[0-9a-f]{40}$ ]] || [[ ! "${pr_number}" =~ ^[1-9][0-9]*$ ]] ||
+         [[ ! "${attempt}" =~ ^[0-9]+$ ]]; then
+        echo "::error title=spot-kill auto-retry::Cannot establish the current PR head for ${RUN_URL:-${RUN_ID}}; refusing to rerun." >&2
+        decide pr-head-undetermined "the live run metadata did not establish exactly one current PR head"
+        return 1
+      fi
+      pr_detail="$(with_retry "PR head API" gh_ api "repos/${GITHUB_REPOSITORY}/pulls/${pr_number}")" || return 1
+      pr_state="$(jq -r '.state // ""' <<< "${pr_detail}")" || return 1
+      current_sha="$(jq -r '.head.sha // ""' <<< "${pr_detail}")" || return 1
+      if [[ ! "${current_sha}" =~ ^[0-9a-f]{40}$ ]] || [ -z "${pr_state}" ]; then
+        echo "::error title=spot-kill auto-retry::Cannot read current head of PR #${pr_number}; refusing to rerun." >&2
+        decide pr-head-undetermined "the current PR endpoint had no valid head SHA"
+        return 1
+      fi
+      if [ "${pr_state}" != "open" ] || [ "${attempt}" -ne 1 ] || [ "${run_sha}" != "${current_sha}" ]; then
+        echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — run head ${run_sha} is not the current PR head ${current_sha}, or it was already retried."
+        decide skipped-stale-pr-head "the PR advanced or this run already has another attempt; an old rerun could cancel current CI"
+        return 10
+      fi
+      ;;
+    push|workflow_dispatch) ;;
+    *)
+      echo "::error title=spot-kill auto-retry::Unknown run event ${RUN_EVENT:-<empty>} for ${RUN_URL:-${RUN_ID}}; refusing to rerun." >&2
+      decide run-event-undetermined "the discovery API did not identify a supported run event"
+      return 1 ;;
+  esac
+  with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" "$@"
+}
+
+# ── THE TEXTUAL SIGNATURE (#9787) ────────────────────────────────────────────────────────────
+# The structural rule above models a reclaim as "the runner agent marked the step cancelled". That
+# is not what happens when the step's OWN process takes the SIGTERM and exits first: GitHub then
+# records a COMPLETED step with a non-zero exit, i.e. `failure`, and the job carries no cancelled
+# step at all. A long-running child that traps SIGTERM produces exactly that — measured on PR
+# #9172, run 34678808656, `Admin UI build` (Playwright with its web server): `cancelled_steps=0
+# failed_steps=1`, while the log ended with the canonical reclaim text and `exit code 143`.
+#
+# So this is a SECOND, independent recogniser, consulted only when the structural one declines.
+# It is deliberately narrow — BOTH the shutdown line and a 143 exit must be present in the same
+# job's log. Either alone is a normal thing: 143 is any SIGTERM (an OOM kill, a `timeout`), and
+# the shutdown line appears in jobs that were cancelled cleanly and already match the rule above.
+# Requiring the pair is what keeps this from becoming "retry every red job".
+RECLAIM_SHUTDOWN_TEXT="The runner has received a shutdown signal"
+RECLAIM_EXIT_TEXT="Process completed with exit code 143"
+
+failed_job_ids() {
+  jobs_query '.jobs[] | select(.conclusion == "failure") | .id'
+}
+
+# 0 = this job's log carries the pair. Non-zero = it does not, OR the log could not be read.
+# NOT retried and NOT escalated on an unreadable log: the structural rule has already declined,
+# so the run stays red either way, and the worst case of a missing log is the behaviour that was
+# there before this recogniser existed.
+job_log_shows_reclaim() { # job_log_shows_reclaim <job_id>
+  local log
+  log="$(gh_ api "repos/${GITHUB_REPOSITORY}/actions/jobs/$1/logs" 2>/dev/null)" || return 1
+  case "${log}" in *"${RECLAIM_SHUTDOWN_TEXT}"*) ;; *) return 1 ;; esac
+  case "${log}" in *"${RECLAIM_EXIT_TEXT}"*) ;; *) return 1 ;; esac
+  return 0
+}
+
+# The id of the first failed job whose log carries the pair, or empty.
+reclaimed_job_from_logs() {
+  local id
+  for id in $(failed_job_ids); do
+    if job_log_shows_reclaim "${id}"; then printf '%s' "${id}"; return 0; fi
+  done
+  return 1
+}
+
 main() {
-  : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}"
+  : "${GITHUB_REPOSITORY:?}" "${RUN_ID:?}" "${CONCLUSION:?}" "${RUN_EVENT:?}"
   if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
     printf '%s\n' '| triggering conclusion | run | decision | detail |' '|---|---|---|---|' \
       >> "${GITHUB_STEP_SUMMARY}"
@@ -179,7 +266,18 @@ main() {
     #
     # ONE-DIRECTIONAL on purpose: this rules a reclaim OUT, it never claims one happened. See
     # the WHAT THIS CANNOT DO note in the header.
-    q='[.jobs[] | select(.conclusion == "cancelled") | select((.steps | length) > 0)] | length'
+    # Dependency submission has a 30-minute job limit. Its cancelled resolver at
+    # that limit is a timeout, not a spot reclaim; retrying it repeats the same
+    # work. A shorter cancellation (or any other job) still takes the ordinary
+    # reclaim path. Missing timestamps make this query fail closed instead of
+    # authorizing an unclassified rerun.
+    q='{running: ([.jobs[] | select(.conclusion == "cancelled")
+                    | select((.steps | length) > 0)] | length),
+        timed_out: ([.jobs[] | select(.conclusion == "cancelled")
+                    | select(.name == "Submit fleet dependency graph")
+                    | select((.steps | length) > 0)
+                    | select((.completed_at | fromdateiso8601) -
+                             (.started_at | fromdateiso8601) >= 1800)] | length)}'
   else
     # conclusion == failure: retry ONLY on the partial-spot-kill signature — a failed job with a
     # cancelled step and no failed step (issue #2841).
@@ -203,6 +301,22 @@ main() {
   fi
 
   if [ "${CONCLUSION}" = "cancelled" ]; then
+    local timed_out
+    timed_out="$(jq -er '.timed_out | numbers' <<< "${count}")" || {
+      echo "::error title=spot-kill auto-retry::Malformed cancelled-job classification; refusing to rerun."
+      decide jobs-unreadable "the jobs API returned an invalid cancelled-job classification"
+      return 1
+    }
+    count="$(jq -er '.running | numbers' <<< "${count}")" || {
+      echo "::error title=spot-kill auto-retry::Malformed cancelled-job count; refusing to rerun."
+      decide jobs-unreadable "the jobs API returned an invalid cancelled-job count"
+      return 1
+    }
+    if [ "${timed_out}" -gt 0 ]; then
+      echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — dependency graph resolver reached its 30-minute job limit; a full rerun would repeat the timeout."
+      decide skipped-job-timeout "dependency-submission resolver reached its configured job limit"
+      return 0
+    fi
     if [ "${count}" -eq 0 ]; then
       echo "::notice title=spot-kill auto-retry::NOT re-running ${RUN_URL:-${RUN_ID}} — no cancelled job had started a step, so no runner was reclaimed. Treating it as a deliberate cancel (#3208)."
       decide skipped-queue-cancel "0 cancelled jobs had started a step — deliberate cancel, not a reclaim (#3208)"
@@ -210,19 +324,41 @@ main() {
     fi
     echo "Re-running cancelled run ${RUN_URL:-${RUN_ID}} (${count} job(s) interrupted mid-flight; issue #2330)"
     # `--failed` is a no-op against `cancelled`, so this is always the full re-run.
-    with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" || return 1
+    local rerun_rc=0
+    guarded_rerun || rerun_rc=$?
+    [ "${rerun_rc}" -eq 10 ] && return 0
+    [ "${rerun_rc}" -eq 0 ] || return 1
     echo "::notice title=spot-kill auto-retry::Re-ran cancelled run ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
     decide rerun-cancelled "${count} job(s) interrupted mid-flight — full re-run issued (attempt 2 of max 2)"
     return 0
   fi
 
   if [ "${count}" -eq 0 ]; then
-    echo "::notice title=spot-kill auto-retry::${RUN_URL:-${RUN_ID}} failed with no spot-kill signature (no job has a cancelled step and no failed step) — treating it as a real failure and NOT re-running."
-    decide no-spot-kill-signature "no failed job has a cancelled step and no failed step — a real build failure"
+    # The structural rule declined. Before calling this a real failure, ask the logs (#9787) —
+    # a step that took the SIGTERM itself leaves no cancelled step anywhere in the job data, so
+    # the reclaim is visible ONLY as text, and the red check is otherwise indistinguishable from
+    # a genuine test failure at every level a human or a gate looks at.
+    local reclaimed_id=""
+    reclaimed_id="$(reclaimed_job_from_logs || true)"
+    if [ -n "${reclaimed_id}" ]; then
+      echo "Re-running ${RUN_URL:-${RUN_ID}}: job ${reclaimed_id} has no cancelled step, but its log carries the reclaim signature and exit 143 (issue #9787)"
+      local rerun_rc=0
+      guarded_rerun --failed || rerun_rc=$?
+      [ "${rerun_rc}" -eq 10 ] && return 0
+      [ "${rerun_rc}" -eq 0 ] || return 1
+      echo "::notice title=spot-kill auto-retry::Re-ran ${RUN_URL:-${RUN_ID}} — job ${reclaimed_id}'s own process took the SIGTERM and exited 143, so no step was marked cancelled (attempt 2 of max 2)."
+      decide rerun-log-signature "job ${reclaimed_id} exited 143 after a runner shutdown signal — failed jobs re-run (attempt 2 of max 2)"
+      return 0
+    fi
+    echo "::notice title=spot-kill auto-retry::${RUN_URL:-${RUN_ID}} failed with no spot-kill signature (no job has a cancelled step and no failed step, and no failed job's log carries a shutdown signal with exit 143) — treating it as a real failure and NOT re-running."
+    decide no-spot-kill-signature "no failed job has the structural or the textual reclaim signature — a real build failure"
     return 0
   fi
   echo "Re-running ${RUN_URL:-${RUN_ID}}: ${count} job(s) killed mid-step by a runner reclaim (issue #2841)"
-  with_retry "gh run rerun" gh_ run rerun -R "${GITHUB_REPOSITORY}" "${RUN_ID}" --failed || return 1
+  local rerun_rc=0
+  guarded_rerun --failed || rerun_rc=$?
+  [ "${rerun_rc}" -eq 10 ] && return 0
+  [ "${rerun_rc}" -eq 0 ] || return 1
   echo "::notice title=spot-kill auto-retry::Re-ran ${count} spot-killed job(s) in ${RUN_URL:-${RUN_ID}} (attempt 2 of max 2; a second kill stays for a human)"
   decide rerun-partial "${count} job(s) carry the spot-kill signature — failed jobs re-run (attempt 2 of max 2)"
 }
@@ -252,6 +388,7 @@ line="$(sed -n "${n}p" "${STUB_SCRIPT}")"
 [ -n "${line}" ] || { echo "stub: no scripted answer for call ${n}: $*" >&2; exit 99; }
 out="${line#*|}"
 case "${out}" in
+  @raw:*) cat "${FIXTURE_DIR}/${out#@raw:}.json"; exit "${line%%|*}" ;;
   @*) prog="${!#}"          # the jq program is the last argument of `api ... --jq <prog>`
       jq -r "${prog}" "${FIXTURE_DIR}/${out#@}.json" || exit 1
       exit "${line%%|*}" ;;
@@ -280,6 +417,39 @@ FIX
  {"name":"build (b)","conclusion":"cancelled","steps":[]},
  {"name":"build (c)","conclusion":"cancelled","steps":[]}]}
 FIX
+  # A cancelled step after the configured job limit is not evidence of a spot
+  # reclaim. A short cancellation still may be a reclaim.
+  cat > "${tmp}/dependency-timeout.json" <<'FIX'
+{"jobs":[{"name":"Submit fleet dependency graph","conclusion":"cancelled",
+ "started_at":"2026-09-18T10:40:18Z","completed_at":"2026-09-18T11:10:35Z",
+ "steps":[{"name":"Set up job","conclusion":"success"},
+          {"name":"Resolve fleet dependency graph","conclusion":"cancelled"}]}]}
+FIX
+  cat > "${tmp}/dependency-reclaim.json" <<'FIX'
+{"jobs":[{"name":"Submit fleet dependency graph","conclusion":"cancelled",
+ "started_at":"2026-09-18T10:40:18Z","completed_at":"2026-09-18T10:48:35Z",
+ "steps":[{"name":"Set up job","conclusion":"success"},
+          {"name":"Resolve fleet dependency graph","conclusion":"cancelled"}]}]}
+FIX
+  # GitHub's run detail for an old PR run reports its original head_sha alongside the
+  # currently associated PR's head.sha. This is the exact #9971 shape from 2026-09-18.
+  cat > "${tmp}/stale-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"88cbf0b58930f4bce63b813d6093c8d0aa4f2085","run_attempt":1,
+ "pull_requests":[{"number":9971,"head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}]}
+FIX
+  cat > "${tmp}/current-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"a01b680e0be85051435023b0adc2cce8830d23e8","run_attempt":1,
+ "pull_requests":[{"number":9971,"head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}]}
+FIX
+  cat > "${tmp}/unknown-pr.json" <<'FIX'
+{"event":"pull_request","head_sha":"a01b680e0be85051435023b0adc2cce8830d23e8","run_attempt":1,"pull_requests":[]}
+FIX
+  cat > "${tmp}/stale-pr-head.json" <<'FIX'
+{"state":"open","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
+FIX
+  cat > "${tmp}/closed-pr-head.json" <<'FIX'
+{"state":"closed","head":{"sha":"a01b680e0be85051435023b0adc2cce8830d23e8"}}
+FIX
   # A PARTIAL reclaim: the run is `failure` because one job died mid-step while a sibling passed.
   cat > "${tmp}/partial-kill.json" <<'FIX'
 {"jobs":[
@@ -291,6 +461,13 @@ FIX
 {"jobs":[
  {"name":"build (ledger)","conclusion":"failure","steps":[{"name":"Set up job","conclusion":"success"},{"name":"Gradle build","conclusion":"failure"}]},
  {"name":"build (party)","conclusion":"success","steps":[{"name":"Gradle build","conclusion":"success"}]}]}
+FIX
+
+  # The #9787 shape: a failed job with NO cancelled step — the reclaim is only in the log text.
+  # Ids are present because this is the one case that goes on to fetch a job log by id.
+  cat > "${tmp}/sigterm-kill.json" <<'FIX'
+{"jobs":[
+ {"id":103517002677,"name":"Admin UI build","conclusion":"failure","steps":[{"name":"Install","conclusion":"success"},{"name":"E2E tests (Playwright)","conclusion":"failure"},{"name":"Publish evidence","conclusion":"skipped"}]}]}
 FIX
 
   # Assign the VARIABLE, not just the env var: the cap is read from the environment at script
@@ -308,10 +485,16 @@ FIX
   GH_RETRY_GH_BIN="${tmp}/gh"; export GH_RETRY_GH_BIN
   RETRY_ERROR_FILE="${tmp}/last-error"; GH_RETRY_LAST_ERROR_FILE="${RETRY_ERROR_FILE}"
   export GH_RETRY_LAST_ERROR_FILE
-  export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1"
+  export GITHUB_REPOSITORY="owner/repo" RUN_ID=1 RUN_URL="http://x/1" RUN_EVENT=push
   unset GITHUB_STEP_SUMMARY || true
 
   local pass=0 fail=0 subjects=0
+  # Job-log fixtures for the #9787 recogniser. Written as one line each: the stub returns its
+  # scripted output verbatim, and only the presence of the two phrases is being tested.
+  local RECLAIM_LOG="[WebServer] error: aborted ##[error]The runner has received a shutdown signal. This can happen when the runner service is stopped. ##[error]Process completed with exit code 143."
+  local EXIT143_ONLY_LOG="Killed ##[error]Process completed with exit code 143."
+  local SHUTDOWN_ONLY_LOG="##[error]The runner has received a shutdown signal. ##[error]Process completed with exit code 1."
+  local PLAIN_FAILURE_LOG="1 failed - should render the audit trail ##[error]Process completed with exit code 1."
   local RL="gh: API rate limit exceeded for installation ... (HTTP 403)"
   local PERM="gh: Resource not accessible by integration (HTTP 403)"
 
@@ -342,6 +525,17 @@ FIX
   # PROVE-NO-RETRY: a deliberate cancel of a QUEUE (no cancelled job ever started a step) is NOT
   # re-run. This is the only human cancel GitHub's data can distinguish; see the header.
   case_ "deliberate queue cancel is NOT re-run" cancelled 0 0 "0|@queue-cancel"
+  case_ "dependency-submission job timeout is NOT a spot reclaim" cancelled 0 0 "0|@dependency-timeout"
+  case_ "short dependency-submission reclaim remains retryable" cancelled 0 1 "0|@dependency-reclaim" "0|ok"
+
+  # An old PR run with a real cancelled step is NOT a spot retry candidate once its branch
+  # advances: the full rerun would cancel the newer run through the same concurrency group.
+  RUN_EVENT=pull_request
+  case_ "stale PR head cannot cancel current CI" cancelled 0 0 "0|@reclaim" "0|@raw:stale-pr" "0|@raw:stale-pr-head"
+  case_ "current PR head may retry a genuine reclaim" cancelled 0 1 "0|@reclaim" "0|@raw:current-pr" "0|@raw:stale-pr-head" "0|ok"
+  case_ "missing PR association never authorizes a rerun" cancelled 1 0 "0|@reclaim" "0|@raw:unknown-pr"
+  case_ "closed PR cannot be reanimated by a spot retry" cancelled 0 0 "0|@reclaim" "0|@raw:current-pr" "0|@raw:closed-pr-head"
+  RUN_EVENT=push
 
   # ── the #6255 regression, in both directions ───────────────────────────────────────────────
   case_ "rate-limited jobs query recovers and still re-runs" cancelled 0 1 "1|${RL}" "1|${RL}" "0|@reclaim" "0|ok"
@@ -357,6 +551,26 @@ FIX
   # ── the failure branch's signature ─────────────────────────────────────────────────────────
   case_ "partial spot-kill (failure) re-runs the failed jobs" failure 0 1 "0|@partial-kill" "0|ok"
   case_ "a real build failure is NOT re-run"                  failure 0 0 "0|@real-failure"
+
+  # ── the TEXTUAL signature (#9787), in both directions ──────────────────────────────────────
+  # The scripted calls are: structural jq (0 hits) -> failed-job-id jq -> that job's log -> rerun.
+  # PROVE-RETRY: no cancelled step anywhere, but the log carries the shutdown line AND exit 143.
+  case_ "a step that exited 143 on a shutdown signal IS re-run (#9787)" failure 0 1 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${RECLAIM_LOG}" "0|ok"
+  # PROVE-NO-RETRY, half the pair: 143 with no shutdown line is an ordinary SIGTERM — an OOM
+  # kill, a `timeout(1)`, a test harness killing its own child. Not a reclaim.
+  case_ "exit 143 WITHOUT a shutdown signal is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${EXIT143_ONLY_LOG}"
+  # PROVE-NO-RETRY, the other half: the shutdown line can appear in a job that was cancelled
+  # cleanly, which the STRUCTURAL rule already covers. Without a 143 this is not our case.
+  case_ "a shutdown signal WITHOUT exit 143 is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${SHUTDOWN_ONLY_LOG}"
+  # PROVE-NO-RETRY: an ordinary red suite. This is the case the widening must not swallow.
+  case_ "an ordinary failing test log is NOT re-run" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "0|${PLAIN_FAILURE_LOG}"
+  # An unreadable log leaves the pre-#9787 behaviour: declined, exit 0, nothing escalated.
+  case_ "an unreadable job log declines rather than escalating" failure 0 0 \
+    "0|@sigterm-kill" "0|@sigterm-kill" "1|HTTP 404: Not Found"
 
   # ── the re-run call's own error classes ────────────────────────────────────────────────────
   case_ "rerun 502 then success"           cancelled 0 2 "0|@reclaim" "1|failed to rerun: HTTP 502: Server Error" "0|ok"

@@ -89,10 +89,11 @@ journeys:
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
     schedule: "*/10 * * * *"
     runtime_note: >-
-      The in-cluster network edge is live, but this protected endpoint requires a dedicated
-      read-only client-credentials identity. Until the identity owner provisions that separate
-      Vault-backed secret, failed runs mean missing authentication evidence — not a green
-      catalog or network result. Tracked by #7324.
+      The in-cluster network edge is live and the journey now authenticates as the dedicated
+      synthetic client openbank-synthetic-catalog-read (catalog:read scope only, no realm role).
+      Until the identity owner provisions its Vault-backed secret (runbook 0009), the script logs
+      "credential absent" and fails all three checks — missing authentication evidence, not a
+      green catalog or network result. Tracked by #7324.
     falsification: >-
       Scale the product-catalog Deployment to zero, break its database connectivity, or set
       CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
@@ -118,6 +119,28 @@ journeys:
     runtime_note: >-
       This is deliberately credential-free. A separate least-privilege canary identity is still
       required before an authenticated operator journey can be claimed.
+
+  - id: admin-ui-security-excellence
+    title: "Security Excellence auth boundary"
+    capability: >-
+      An unauthenticated browser request to the Security Excellence console is redirected to
+      the Keycloak SSO boundary rather than serving the protected console directly. This
+      proves the public auth gate only, not an authenticated operator session.
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    environment: sandbox
+    falsification: >-
+      Make /security/excellence return an unauthenticated 200, remove the SSO boundary, or
+      make either browser unable to render it. The scheduled variant must fail and retain its
+      immutable evidence envelope.
+    runtime_note: >-
+      Credential-free auth-gate proof only; it does not replace a least-privilege authenticated
+      operator journey.
 
   # ---------------------------------------------------------------------------------------
   # PLANNED — the journeys that would have caught the two reported outages. Both need a
@@ -402,3 +425,10 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-treasury-service
+      note: >-
+        ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
+        to the bank's own nostro and placement accounts; until the SYNTHETIC taint reaches the
+        ledger that is a synthetic movement in the balance sheet. The sandbox simulated market
+        (ADR-0315 D9) already drives settle/mature end to end, so the journey, when it lands,
+        should assert the posted journal by its idempotency key, not the HTTP status.

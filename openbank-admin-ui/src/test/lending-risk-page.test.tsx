@@ -2,7 +2,7 @@
 
 import React from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 
 vi.mock('next-auth/react', () => ({
@@ -41,12 +41,15 @@ const DECISION = {
   employmentTenureMonths: 48, humanDecidedBy: null, humanDecisionReason: null, humanDecidedAt: null,
 }
 
+const BOOK = { currency: 'CZK', asOf: '2026-09-05', loans: 10, unassessed: 0, stale: 0, demonstration: 0, pending: 0, outstanding: 100000, ecl: 2000, stage23Outstanding: 10000, over90Outstanding: 5000 }
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
 function route(url: string) {
   if (url.includes('/risk/decisions/summary')) return json([{ engineOutcome: 'APPROVE', priceBand: 'PRIME', count: 300 }, { engineOutcome: 'REFER', priceBand: null, count: 100 }])
   if (url.includes('/risk/decisions')) return json([DECISION])
+  if (url.includes('/risk/portfolio/summary')) return json([BOOK])
   if (url.includes('/risk/portfolio')) return json([])
   if (url.includes('/risk/policy')) return json(POLICY)
   return json([], 404)
@@ -68,8 +71,8 @@ describe('credit-risk console', () => {
   it('states the policy provenance and the placeholder caveats', async () => {
     render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
     await waitFor(() => expect(screen.getByText(/code-seeded/i)).toBeInTheDocument())
-    expect(screen.getByText(/Bureau port is a no-op/i)).toBeInTheDocument()
-    expect(screen.getByText(/PD\/LGD are placeholder constants/i)).toBeInTheDocument()
+    expect(screen.getByText(/Unavailable bureau evidence refers to manual review/i)).toBeInTheDocument()
+    expect(screen.getByText(/accounting use is disabled by default/i)).toBeInTheDocument()
   })
 
   it('takes the DSTI threshold from the policy response rather than a constant', async () => {
@@ -83,5 +86,39 @@ describe('credit-risk console', () => {
     await waitFor(() => expect(screen.getByText(/did not answer/i)).toBeInTheDocument())
     expect(tiles()).not.toContain('0')
     expect(tiles().filter(v => v === '—').length).toBeGreaterThan(0)
+    expect(screen.getByText(/Decisions could not be loaded/i)).toBeInTheDocument()
+    expect(screen.queryByText(/No data yet/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Engine × final disposition/i)).not.toBeInTheDocument()
   })
+
+  it('uses complete DB portfolio totals even when the detail list is empty', async () => {
+    render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
+    await waitFor(() => expect(tiles()[5]).toMatch(/^2\s?%$/))
+    expect(tiles()[4]).toMatch(/^10\s?%$/)
+    expect(tiles()[6]).toMatch(/^5\s?%$/)
+  })
+
+  it('rejects malformed successful responses instead of claiming empty or zero data', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ unexpected: 'not a response' })))
+    render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
+    await waitFor(() => expect(screen.getByText(/did not answer/i)).toBeInTheDocument())
+    expect(tiles()).toHaveLength(8)
+    expect(tiles().every(value => value === '—')).toBe(true)
+    expect(screen.queryByText(/No data yet/i)).not.toBeInTheDocument()
+    expect(screen.getByText(/Decisions could not be loaded/i)).toBeInTheDocument()
+  })
+
+  it.each(['unassessed', 'stale', 'demonstration', 'pending'] as const)('blocks ratios only for the selected currency with %s evidence', async field => {
+    vi.stubGlobal('fetch', vi.fn(async (u: string) => String(u).includes('/risk/portfolio/summary')
+      ? json([BOOK, { ...BOOK, currency: 'EUR', [field]: 1 }]) : route(String(u))))
+    render(<LanguageProvider><CreditRiskPage /></LanguageProvider>)
+    await waitFor(() => expect(tiles()[5]).toMatch(/^2\s?%$/))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Portfolio currency' }), { target: { value: 'EUR' } })
+    expect(tiles().slice(4, 7)).toEqual(['—', '—', '—'])
+    expect(screen.getByText(/Incomplete or unvalidated assessment/i)).toBeInTheDocument()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Portfolio currency' }), { target: { value: 'CZK' } })
+    expect(tiles()[5]).toMatch(/^2\s?%$/)
+    expect(screen.queryByText(/Incomplete or unvalidated assessment/i)).not.toBeInTheDocument()
+  })
+
 })

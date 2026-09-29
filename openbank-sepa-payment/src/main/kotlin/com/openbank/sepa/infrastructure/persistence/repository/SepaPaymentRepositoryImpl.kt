@@ -16,6 +16,7 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.LockModeType
 import java.util.UUID
 
 @ApplicationScoped
@@ -76,16 +77,19 @@ class SepaPaymentRepositoryImpl(private val outboxRepository: SepaPaymentOutboxR
         payment: SepaPayment,
         outboxMessages: List<SepaPaymentOutboxMessage>,
     ): SepaPayment = Panache.withTransaction {
-        find("paymentId", payment.id).firstResult()
+        find("paymentId", payment.id).withLock(LockModeType.PESSIMISTIC_WRITE).firstResult()
             .invoke { entity ->
-                if (entity != null) {
-                    entity.status = payment.status.name
-                    entity.rejectReason = payment.rejectReason?.name
-                    entity.rejectDetail = payment.rejectDetail
-                    entity.submittedAt = payment.submittedAt
-                    entity.completedAt = payment.completedAt
-                    entity.updatedAt = payment.updatedAt
+                requireNotNull(entity) { "SEPA payment ${payment.id} disappeared during transition" }
+                require(payment.revision == entity.revision + 1) {
+                    "stale SEPA payment revision ${payment.revision}; expected ${entity.revision + 1}"
                 }
+                entity.status = payment.status.name
+                entity.rejectReason = payment.rejectReason?.name
+                entity.rejectDetail = payment.rejectDetail
+                entity.submittedAt = payment.submittedAt
+                entity.completedAt = payment.completedAt
+                entity.updatedAt = payment.updatedAt
+                entity.revision = payment.revision
             }
             .flatMap {
                 outboxMessages.fold(Uni.createFrom().voidItem()) { chain, message ->

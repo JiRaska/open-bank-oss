@@ -45,6 +45,8 @@ jobs:
     timeout-minutes: 5
     outputs:
       changed: ${{ steps.check.outputs.changed }}
+      rbac_tests: ${{ steps.check.outputs.rbac_tests }}
+      registry_test: ${{ steps.check.outputs.registry_test }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -52,6 +54,7 @@ jobs:
       - id: check
         run: |
           set -euo pipefail
+          python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
           if [ "${{ github.event_name }}" = "push" ]; then
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -69,7 +72,50 @@ jobs:
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
             echo "Admin UI or governance files changed: $N"
+            # Derive cross-package guard inputs from literal backend paths.
+            # Backend-only RBAC changes get a focused test lane; UI changes run
+            # the full UI suite above. A missing/dynamic input fails detection.
+            python3 .github/scripts/select-admin-ui-rbac-tests.py --base "$BASE" >> "$GITHUB_OUTPUT"
           fi
+
+  ui-rbac-contract:
+    name: Admin UI cross-package guards
+    needs: changes-ui
+    if: needs.changes-ui.outputs.changed == 'false' && (needs.changes-ui.outputs.rbac_tests != '' || needs.changes-ui.outputs.registry_test == 'true')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    defaults:
+      run:
+        working-directory: openbank-admin-ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
+      - name: Install
+        run: npm ci --no-audit --no-fund
+      - name: Verify affected cross-package guards
+        env:
+          RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
+          REGISTRY_TEST: ${{ needs.changes-ui.outputs.registry_test }}
+        run: |
+          set -euo pipefail
+          read -r -a selected <<< "$RBAC_TESTS"
+          tests=()
+          for test in "${selected[@]}"; do
+            [[ "$test" =~ ^[a-z0-9.-]+-rbac\.guard\.test\.ts$ ]] || { echo "Invalid RBAC test name" >&2; exit 1; }
+            tests+=("src/test/$test")
+          done
+          if [ "$REGISTRY_TEST" = 'true' ]; then
+            tests+=("src/test/service-registry.guard.test.ts")
+          elif [ "$REGISTRY_TEST" != 'false' ]; then
+            echo "Invalid registry guard selection" >&2
+            exit 1
+          fi
+          (( ${#tests[@]} > 0 )) || { echo "No cross-package guards selected" >&2; exit 1; }
+          npm run test -- "${tests[@]}"
 
   ui-build:
     name: Admin UI build
@@ -118,6 +164,11 @@ jobs:
         # ADR-0076 Phase 0+1: guard tests, BFF route integration tests, docs-route,
         # health-route integration tests all run here via Vitest.
 
+      - name: Build
+        run: npm run build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+
       - name: Install Playwright browsers
         # Download the Chromium binary (always works, no root required).
         run: npx playwright install chromium
@@ -152,6 +203,8 @@ jobs:
           NEXTAUTH_URL: "http://localhost:3001"
           NEXTAUTH_SECRET: "ci-e2e-secret"
           OPENBANK_REPO_ROOT: "${{ github.workspace }}"
+          OPENBANK_E2E_SERVER: "production"
+          OPENBANK_E2E_PREBUILT: "true"
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: "build/test-results/e2e/playwright.xml"
 
       - name: Build Admin UI Test Intelligence envelope
@@ -201,11 +254,6 @@ jobs:
           path: openbank-admin-ui/playwright-report/
           retention-days: 7
 
-      - name: Build
-        run: npm run build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
-
   # Gate job — always runs, maps to the "Admin UI" required check name.
   # Passes when ui-build succeeded or was skipped (no UI changes); fails when
   # ui-build itself failed. Backend-only PRs therefore never get blocked.
@@ -230,7 +278,7 @@ jobs:
   #                      vacuous green this repo works to avoid.
   ui:
     name: Admin UI
-    needs: [changes-ui, ui-build]
+    needs: [changes-ui, ui-build, ui-rbac-contract]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -238,10 +286,23 @@ jobs:
       - name: Check build result
         env:
           RESULT: ${{ needs.ui-build.result }}
+          DETECTION_RESULT: ${{ needs.changes-ui.result }}
+          UI_CHANGED: ${{ needs.changes-ui.outputs.changed }}
+          RBAC_TESTS: ${{ needs.changes-ui.outputs.rbac_tests }}
+          REGISTRY_TEST: ${{ needs.changes-ui.outputs.registry_test }}
+          RBAC_RESULT: ${{ needs.ui-rbac-contract.result }}
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
         run: |
           set -euo pipefail
+          if [ "$DETECTION_RESULT" != "success" ]; then
+            echo "Admin UI change detection did not succeed ($DETECTION_RESULT)."
+            exit 1
+          fi
+          if [ "$UI_CHANGED" = "false" ] && { [ -n "$RBAC_TESTS" ] || [ "$REGISTRY_TEST" = 'true' ]; } && [ "$RBAC_RESULT" != "success" ]; then
+            echo "Admin UI cross-package guards did not pass ($RBAC_RESULT)."
+            exit 1
+          fi
           if [ "$RESULT" = "failure" ]; then
             echo "Admin UI build FAILED — this is a real build failure, not a superseded run."
             exit 1
@@ -273,11 +334,14 @@ jobs:
   # max(shard) rather than sum(gates) — measured locally on the full set: 500s of gate CPU,
   # 187s for the slowest single gate.
   #
-  # `Validate manifests` (below) stays a separate job with that exact name because it is a
-  # REQUIRED status check in the main-protection ruleset. Renaming or sharding it directly
-  # would have needed a GitHub-side ruleset edit, which cannot ship in the same PR as the
-  # change it protects; aggregating instead keeps the contexts stable and the fix in-repo.
-  # Same shape as services-ci.yml's `all-green`, for the same reason.
+  # `Validate manifests` (below) remains during phase 1 of the required-context migration.
+  # main-protection first gains the three direct shard contexts while this old context
+# overlaps those shards. `Admin UI` remains a separate follow-up because this updater cannot
+# itself prove the PR-only skipped-build path. This non-UI governance PR supplies reviewable
+# evidence (`Admin UI build` skipped while `Admin UI` succeeded), but does not require that
+# context yet. A later follow-up may add it, and another may remove `Validate manifests`
+# only after the three direct shard contexts are required and green on a real PR. This order keeps
+  # shard coverage intact across the GitHub-side ruleset and workflow changes.
   #
   # Shards are WALL-TIME buckets, not a taxonomy — rebalance `group:` in the manifest when
   # one gets slow. Adding a group here without one in the manifest fails loudly: run-gates.py
@@ -440,31 +504,40 @@ jobs:
       # Exported per shard because every shard may hold a `needs_base: true` gate; a gate
       # that reads it while it is empty is failed by run-gates.py rather than run vacuously.
       #
-      # The previous HEAD^2 shortcut did not survive contact with this job's fetch-depth: 1
-      # checkout: the merge commit's parent objects are not in the object database, so
-      # `rev-parse --verify HEAD^2` fails and every long-lived PR fell back to the
-      # creation-time base.sha. A branch that had absorbed main since opening then diffed
-      # the whole absorbed window — measured 2026-09-06 on #8334: a ~17-file notification
-      # PR reported 620 touched money-path files (security-checklist-money-path) and 33
-      # "changed" contract tests (adversarial-contract-test), all of them main's own merged
-      # work. Deepen the base branch until the TRUE merge-base resolves; branch refs are
-      # fetchable here while arbitrary shas are not (verified 2026-09-06: `git fetch origin
-      # <sha>` answers "couldn't find remote ref" for short shas and works for full ones,
-      # but a ref fetch is the stable path).
+      # Only `pull_request` reaches this step (the `if:` below) — `push` and `merge_group`
+      # never do, so there is no non-merge-ref EVENT to special-case here. For a
+      # `pull_request` run, GITHUB_SHA is a synthetic merge commit GitHub builds on the fly:
+      # parent 1 (HEAD^1) is the base branch tip AS OF NOW, parent 2 (HEAD^2) is the PR head.
+      # So HEAD^1 already IS the current merge-base — no search, no full `--unshallow` (which
+      # cost ~151 MiB per shard on every PR run, #11085/#11086). `--depth=2` from GITHUB_SHA
+      # is what makes it resolve: the default checkout is `fetch-depth: 1`, i.e. only the merge
+      # commit itself, with both parents cut — the prior HEAD^2 attempt (#8933) never re-fetched
+      # GITHUB_SHA at a deeper depth and so always failed `rev-parse --verify HEAD^2`, falling
+      # back to the creation-time base.sha on every long-lived PR (measured 2026-09-06 on #8334:
+      # a ~17-file notification PR reported 620 touched money-path files
+      # (security-checklist-money-path) and 33 "changed" contract tests
+      # (adversarial-contract-test), all of them main's own merged work). The guard below still
+      # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
+      # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
         if: github.event_name == 'pull_request'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          base=""
+          # Order matters: fetching the SHA before the branch ref. Doing it the other way
+          # round — branch ref first, then a bare-sha fetch — hits a git quirk on a shallow
+          # repo ("fatal: shallow file has changed since we read it"), measured reproducing
+          # this step against a real PR merge ref. Fetching the sha first avoids it.
+          git fetch -q --depth=2 origin "${GITHUB_SHA}"
+          # Still needed independently of PR_DIFF_BASE: some gates (e.g.
+          # check-openapi-version-not-taken.py --base-ref origin/main) read origin/${BASE_REF}
+          # directly rather than through PR_DIFF_BASE.
           git fetch -q --depth=1 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          for _ in 1 2 3 4 5 6 7 8; do
-            if base="$(git merge-base "origin/${BASE_REF}" HEAD 2>/dev/null)"; then break; fi
-            git fetch -q --deepen=400 origin "+refs/heads/${BASE_REF}:refs/remotes/origin/${BASE_REF}"
-          done
-          if [ -z "${base}" ]; then
-            echo "::warning::merge-base against origin/${BASE_REF} did not resolve after deepening; falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
+          if base="$(git rev-parse -q --verify 'HEAD^1' 2>/dev/null)"; then
+            :
+          else
+            echo "::warning::HEAD^1 did not resolve (not a merge-ref event?); falling back to the event base.sha, which is stale for a PR that has absorbed main since opening"
             base="${EVENT_BASE_SHA}"
           fi
           # Every gate runs `git diff "${PR_DIFF_BASE}...HEAD"`, and the THREE-DOT form needs the

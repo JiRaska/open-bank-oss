@@ -4,15 +4,8 @@
 
 'use client'
 
-// The Lípa console (ADR-0282). One workspace that teaches the programme and administers it,
-// because the two cannot usefully be separated here: almost every control in it is governed
-// somewhere else, and an operator who does not know why cannot tell a refusal from a fault.
-//
-// What "administration" means here, precisely. The earn and benefit catalogues are code, reviewed
-// in a pull request — the same discipline segments and campaign templates already use. So this page
-// does not edit them and does not pretend to: it shows what is in force, and its change action
-// produces a reviewable draft. The editable surface is deliberately empty, and that is the lesson,
-// not a gap.
+// Internal marketing workspace (ADR-0282). Catalogue changes remain reviewed code;
+// the downloadable brief is a local draft, never a mutation or submission.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -22,16 +15,15 @@ import {
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader } from '@/components/ui'
-import { Mermaid } from '@/components/docs/Mermaid'
+import styles from './loyalty.module.css'
 import {
-  AI_RED_LINES, AI_ROLES, CONNECTIONS, LEGAL, LIFECYCLE_DIAGRAM, PRINCIPLES, type Bilingual,
+  AI_RED_LINES, AI_ROLES, CONNECTIONS, LEGAL, PRINCIPLES, type Bilingual,
 } from '@/lib/loyalty/lipaContent'
 import type { LoyaltyCatalogueResponse, LoyaltyState } from '@/app/api/loyalty/route'
 import type { LoyaltyPartyResponse } from '@/app/api/loyalty/party/[partyId]/route'
 import { parseLoyaltyCatalogue, parseLoyaltyParty } from '@/lib/loyalty/evidenceContract'
 
-const TABS = ['principles', 'catalogues', 'party', 'finance', 'ai'] as const
+const TABS = ['overview', 'catalogues', 'party', 'principles', 'finance', 'ai'] as const
 type Tab = (typeof TABS)[number]
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
@@ -47,7 +39,7 @@ function unavailableKind(state: LoyaltyState): UnavailableKind | null {
 
 export default function LoyaltyPage() {
   const { t, language } = useLanguage()
-  const [tab, setTab] = useState<Tab>('principles')
+  const [tab, setTab] = useState<Tab>('overview')
   const [catalogue, setCatalogue] = useState<LoyaltyCatalogueResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [partyId, setPartyId] = useState('')
@@ -55,6 +47,9 @@ export default function LoyaltyPage() {
   const [partyLoading, setPartyLoading] = useState(false)
   const [partyError, setPartyError] = useState<string | null>(null)
   const partyRequestId = useRef(0)
+  const [refresh, setRefresh] = useState(0)
+  const [filter, setFilter] = useState('')
+  const [proposal, setProposal] = useState('')
 
   const say = useCallback((text: Bilingual) => t(text.cs, text.en), [t])
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
@@ -71,7 +66,7 @@ export default function LoyaltyPage() {
       .catch(() => { if (!cancelled) setCatalogue({ state: 'unreachable', benefits: [], earnSources: [], provisioning: null }) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [])
+  }, [refresh])
 
   const lookUpParty = useCallback(async () => {
     const requestId = ++partyRequestId.current
@@ -105,7 +100,8 @@ export default function LoyaltyPage() {
   const serviceKind = catalogue ? unavailableKind(catalogue.state) : null
 
   const tabLabel: Record<Tab, string> = {
-    principles: t('Principy', 'Principles'),
+    overview: t('Přehled', 'Overview'),
+    principles: t('Pravidla programu', 'Programme rules'),
     catalogues: t('Katalogy', 'Catalogues'),
     party: t('Klient', 'Customer'),
     finance: t('Finance a právo', 'Finance and law'),
@@ -114,35 +110,60 @@ export default function LoyaltyPage() {
 
   return (
     <AuthGuard permission="loyalty:view">
-      <div className="space-y-6">
-        <PageHeader
-          title={t('Lípa — věrnostní program', 'Lípa — the loyalty programme')}
-          subtitle={t(
-            'Lístky se získávají za finanční zdraví, ne za útratu. Tahle sekce vysvětluje proč a ukazuje, co je právě v platnosti.',
-            'Lístky are earned for financial health, not for spending. This section explains why, and shows what is in force.',
-          )}
-          icon={<Leaf className="h-6 w-6" />}
-        />
+      <div className={styles.workspace}>
+        <header className={styles.hero}>
+          <div>
+            <span className={styles.eyebrow}>{t('Marketing · věrnostní program', 'Marketing · loyalty programme')}</span>
+            <h1><Leaf aria-hidden="true" /> {t('Lípa', 'Lípa')}</h1>
+            <p>{t('Zdravé finance. Dlouhodobý vztah.', 'Healthy finances. Lasting relationships.')}</p>
+            <span>{t('Interní pracoviště pro přehled odměn, podporu klientů a přípravu změn programu.', 'Your internal workspace for rewards, customer support and programme change planning.')}</span>
+          </div>
+          <div className={styles.heroAside}>
+            <span className={styles.badge}>{t('Pro marketingový tým', 'For the marketing team')}</span>
+            <p>{t('Odměňujeme finanční zdraví', 'Rewarding financial wellbeing')}</p>
+            <span>{t('Lístky za dobré návyky, benefity od banky.', 'Lístky for good habits. Benefits from the bank.')}</span>
+          </div>
+        </header>
 
-        <nav className="flex flex-wrap gap-2" aria-label={t('Sekce Lípy', 'Lípa sections')}>
+        <nav className={styles.tabs} aria-label={t('Sekce Lípy', 'Lípa sections')}>
           {TABS.map(id => (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setTab(id)}
-              aria-current={tab === id ? 'page' : undefined}
-              className={tab === id
-                ? 'rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white'
-                : 'rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:border-violet-300 hover:text-violet-700'}
-            >
+            <button key={id} type="button" onClick={() => setTab(id)} aria-current={tab === id ? 'page' : undefined}>
               {tabLabel[id]}
             </button>
           ))}
         </nav>
 
+        {tab === 'overview' && (
+          <section className={styles.section} aria-label={tabLabel.overview}>
+            <div className={styles.sectionHeading}>
+              <div><span className={styles.eyebrow}>{t('Pracovní přehled', 'Workspace overview')}</span>
+                <h2>{t('Vše důležité pro práci s Lípou', 'Your programme at a glance')}</h2>
+                <p>{t('Nejdřív ověřte nabídku a připravenost. Potom připravte komunikaci.', 'Check the offer and readiness before preparing communications.')}</p>
+              </div>
+              <span className={styles.badge} role="status">{loading ? t('Ověřuji data…', 'Checking data…') : serviceKind ? t('Živá data nedostupná', 'Live data unavailable') : t('Data načtena', 'Data loaded')}</span>
+            </div>
+            <div className={styles.summaryGrid}>
+              {[
+                { label: t('Benefity v katalogu', 'Catalogue benefits'), value: !loading && catalogue?.state === 'ok' ? num(catalogue.benefits.length) : '—' },
+                { label: t('Způsoby získání Lístků', 'Ways to earn Lístky'), value: !loading && catalogue?.state === 'ok' ? num(catalogue.earnSources.length) : '—' },
+                { label: t('Roční strop na klienta', 'Annual cap per customer'), value: !loading && catalogue?.state === 'ok' && catalogue.provisioning ? num(catalogue.provisioning.annualCapPerParty) : '—' },
+              ].map(stat => <div key={stat.label} className={styles.metric}><span>{stat.label}</span><strong>{stat.value}</strong></div>)}
+            </div>
+            <div className={styles.actionGrid}>
+              <button onClick={() => setTab('catalogues')} className={styles.actionCard}><Gift aria-hidden="true" /><h3>{t('Prozkoumat nabídku', 'Explore rewards')}</h3><p>{t('Ověřte ceny benefitů, platnost a způsoby získání Lístků. Připravte podklady pro změnu.', 'Review benefit prices, validity and earning rules. Prepare a change brief.')}</p><span>{t('Otevřít katalogy', 'Open catalogues')} <ArrowRight aria-hidden="true" /></span></button>
+              <button onClick={() => setTab('party')} className={styles.actionCard}><Search aria-hidden="true" /><h3>{t('Prověřit konkrétní účet', 'Inspect an account')}</h3><p>{t('Dohledejte zůstatek, pohyby a expiraci pro řešení dotazu nebo kontrolu komunikace.', 'Look up balances, activity and expiry to resolve a query or check a message.')}</p><span>{t('Přejít na vyhledávání', 'Go to lookup')} <ArrowRight aria-hidden="true" /></span></button>
+            </div>
+            <div className={styles.notice}>
+              <ShieldCheck aria-hidden="true" /><div><h3>{t('Před komunikací klientům', 'Before communicating to customers')}</h3>
+              <p>{t('Záznam v katalogu není potvrzení dostupnosti. Udělený benefit znamená závazek banky, nikoli potvrzené plnění. Právní posouzení a otevřené podmínky ověřte s odpovědným útvarem.', 'A catalogue entry does not confirm availability. A granted benefit is a bank obligation, not confirmed fulfilment. Check the legal review and open conditions with the responsible team.')}</p>
+              <button className={styles.textButton} onClick={() => setTab('finance')}>{t('Zobrazit podmínky a otevřené body', 'Review conditions and open items')} <ArrowRight aria-hidden="true" /></button></div>
+            </div>
+          </section>
+        )}
+
         {tab === 'principles' && (
-          <section className="space-y-6" aria-label={tabLabel.principles}>
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-5">
+          <section className={styles.section} aria-label={tabLabel.principles}>
+            <div className={styles.card}>
               <h2 className="flex items-center gap-2 text-base font-semibold text-emerald-900">
                 <Leaf className="h-4 w-4" />
                 {t('Co je Lístek', 'What a Lístek is')}
@@ -155,14 +176,15 @@ export default function LoyaltyPage() {
               </p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className={styles.actionGrid}>
               {PRINCIPLES.map(p => (
-                <article key={p.id} className="rounded-2xl border border-slate-200 bg-white p-5">
+                <article key={p.id} className={styles.card}>
                   <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                     <ShieldCheck className="h-4 w-4 text-emerald-600" />
                     {say(p.title)}
                   </h3>
                   <p className="mt-2 text-sm text-slate-700">{say(p.rule)}</p>
+                  <details className={styles.details}><summary>{t('Souvislosti a omezení', 'Context and limitations')}</summary>
                   <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
                     {t('Proč', 'Why')}
                   </p>
@@ -170,12 +192,12 @@ export default function LoyaltyPage() {
                   <p className="mt-3 text-xs font-semibold uppercase tracking-wide text-rose-600">
                     {t('Co by to porušilo', 'What would break it')}
                   </p>
-                  <p className="text-sm text-slate-700">{say(p.breaks)}</p>
+                  <p className="text-sm text-slate-700">{say(p.breaks)}</p></details>
                 </article>
               ))}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className={styles.card}>
               <h2 className="text-base font-semibold text-slate-900">
                 {t('Životní cyklus Lístku', 'The life of a Lístek')}
               </h2>
@@ -185,18 +207,24 @@ export default function LoyaltyPage() {
                   'Note the two endings that are not errors: the cap writes nothing, and an unaffordable redemption burns nothing. Both are legitimate answers, not faults.',
                 )}
               </p>
-              <div className="mt-4 overflow-x-auto">
-                <Mermaid chart={LIFECYCLE_DIAGRAM} />
-              </div>
+              <ol className={styles.lifecycle}>
+                {[
+                  [t('Získání', 'Earn'), t('Za doložený zdravý návyk, do ročního stropu.', 'For an evidenced healthy habit, within the annual cap.')],
+                  [t('Výběr benefitu', 'Choose a benefit'), t('Klient vybírá z katalogu podle zůstatku Lístků.', 'The customer chooses from the catalogue within their balance.')],
+                  [t('Udělení', 'Grant'), t('Odečtou se nejstarší Lístky. Banka eviduje závazek.', 'Oldest Lístky are used first. The bank records an obligation.')],
+                  [t('Plnění', 'Fulfilment'), t('Zajišťuje příslušná služba. Udělení samo plnění nepotvrzuje.', 'Handled by the responsible service. A grant alone does not confirm fulfilment.')],
+                ].map(([title, description], index) => <li key={title}><span>{index + 1}</span><h3>{title}</h3><p>{description}</p></li>)}
+              </ol>
+              <p>{t('Nevyužité Lístky expirují po dvou letech.', 'Unused Lístky expire after two years.')}</p>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className={styles.card}>
               <h2 className="text-base font-semibold text-slate-900">
                 {t('Jak Lípa souvisí se zbytkem platformy', 'How Lípa connects to the rest of the platform')}
               </h2>
-              <ul className="mt-3 space-y-3">
+              <ul className={styles.list}>
                 {CONNECTIONS.map(c => (
-                  <li key={c.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                  <li key={c.id} className={styles.inset}>
                     <div className="flex items-center justify-between gap-3">
                       <h3 className="text-sm font-semibold text-slate-900">{say(c.system)}</h3>
                       {c.href && (
@@ -217,13 +245,14 @@ export default function LoyaltyPage() {
         )}
 
         {tab === 'catalogues' && (
-          <section className="space-y-5" aria-label={tabLabel.catalogues}>
-            <div className="flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4" role="note">
+          <section className={styles.section} aria-label={tabLabel.catalogues}>
+            <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t('Nabídka programu', 'Programme offer')}</span><h2>{t('Odměny a benefity', 'Earning and rewards')}</h2></div></div>
+            <div className={styles.notice} role="note">
               <FileText className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
               <p className="text-sm text-amber-900">
                 {t(
-                  'Oba katalogy jsou kód. Nejsou tu editovatelné a nikdy nebudou: změna položky prochází pull requestem a schválením, stejně jako segment nebo šablona kampaně. Tahle stránka ukazuje, co je v platnosti.',
-                  'Both catalogues are code. They are not editable here and never will be: changing an entry goes through a pull request and a review, the same as a segment or a campaign template. This page shows what is in force.',
+                  'Aktuální katalogy slouží jako podklad pro marketing. Změnu nabídky připravte jako návrh níže; před zavedením musí projít odbornou revizí a schválením.',
+                  'Use the current catalogues to plan marketing. Prepare an offer change using the brief below; changes require expert review and approval before implementation.',
                 )}
               </p>
             </div>
@@ -235,20 +264,22 @@ export default function LoyaltyPage() {
                 service="Loyalty-service"
                 feature={t('Katalogy Lípy', 'Lípa catalogues')}
                 lang={language === 'cs' ? 'cs' : 'en'}
-              />
+                detail={t('Aktuální nabídku nelze ověřit. Zkuste načtení znovu; pokud problém trvá, obraťte se na podporu s názvem sekce Lípa. Podklady pro změnu můžete připravit níže.', 'The current offer could not be verified. Retry loading; if the problem persists, contact support and mention the Lípa section. You can still prepare a change brief below.')}
+              ><button className={styles.primaryButton} onClick={() => { setLoading(true); setRefresh(value => value + 1) }}>{t('Zkusit znovu', 'Try again')}</button></DataUnavailable>
             )}
 
             {!loading && !serviceKind && catalogue && (
               <>
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <label className={styles.filter}>{t('Hledat v katalozích', 'Search catalogues')}<input type="search" value={filter} onChange={e => setFilter(e.target.value)} placeholder={t('Název nebo popis…', 'Name or description…')} /></label>
+                <div className={styles.card}>
                   <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
                     <Coins className="h-4 w-4 text-emerald-600" />
                     {t('Za co se Lístky získávají', 'What earns Lístky')}
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
                     {t(
-                      'Uvedení důvodu v katalogu neznamená, že už pro něj existuje zdroj události. Co je skutečně zapojené, odpovídají konzumenty služby, ne tenhle seznam.',
-                      'A source listed here is not a claim that a producer exists for it. What is actually wired is answered by the service consumers, not by this list.',
+                      'Katalog uvádí pravidla odměňování. Před kampaní ověřte s vlastníkem programu, že se daná aktivita skutečně vyhodnocuje a odměňuje.',
+                      'The catalogue lists earning rules. Before a campaign, confirm with the programme owner that the activity is actually tracked and rewarded.',
                     )}
                   </p>
                   <table className="mt-4 w-full text-sm">
@@ -260,7 +291,7 @@ export default function LoyaltyPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {catalogue.earnSources.map(s => (
+                      {catalogue.earnSources.filter(s => s.id.toLowerCase().includes(filter.toLowerCase())).map(s => (
                         <tr key={s.id} className="border-b border-slate-100 last:border-none">
                           <td className="py-2 font-medium text-slate-800">{s.id}</td>
                           <td className="py-2 text-right tabular-nums">{num(s.leaves)}</td>
@@ -271,30 +302,31 @@ export default function LoyaltyPage() {
                       ))}
                     </tbody>
                   </table>
+                  {catalogue.earnSources.filter(s => s.id.toLowerCase().includes(filter.toLowerCase())).length === 0 && <p role="status">{t('Žádné odpovídající způsoby získání.', 'No matching earning sources.')}</p>}
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className={styles.card}>
                   <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
                     <Gift className="h-4 w-4 text-violet-600" />
                     {t('Za co se Lístky vyměňují', 'What Lístky buy')}
                   </h2>
                   <p className="mt-1 text-sm text-slate-600">
                     {t(
-                      'Cena je v Lístcích a v ničem jiném. Sloupec Motor říká, která služba benefit doručí — Lípa sama nedoručuje nic.',
-                      'The price is in Lístky and in nothing else. The engine column says which service delivers the benefit — Lípa itself delivers nothing.',
+                      'Cena je uvedena v Lístcích. Příslušný tým musí potvrdit připravenost plnění; Lípa eviduje udělení benefitu, sama jej neposkytuje.',
+                      'Prices are in Lístky. The responsible team must confirm fulfilment readiness; Lípa records a benefit grant but does not fulfil it itself.',
                     )}
                   </p>
                   <table className="mt-4 w-full text-sm">
                     <thead>
                       <tr className="border-b border-slate-200 text-left text-xs uppercase tracking-wide text-slate-500">
                         <th className="py-2">{t('Benefit', 'Benefit')}</th>
-                        <th className="py-2">{t('Motor', 'Engine')}</th>
+                        <th className="py-2">{t('Zajišťuje', 'Handled by')}</th>
                         <th className="py-2 text-right">{t('Cena', 'Price')}</th>
                         <th className="py-2 text-right">{t('Platnost', 'Validity')}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {catalogue.benefits.map(b => (
+                      {catalogue.benefits.filter(b => `${b.id} ${b.description} ${b.engine}`.toLowerCase().includes(filter.toLowerCase())).map(b => (
                         <tr key={b.id} className="border-b border-slate-100 last:border-none align-top">
                           <td className="py-2">
                             <span className="font-medium text-slate-800">{b.id}</span>
@@ -309,23 +341,39 @@ export default function LoyaltyPage() {
                       ))}
                     </tbody>
                   </table>
+                  {catalogue.benefits.filter(b => `${b.id} ${b.description} ${b.engine}`.toLowerCase().includes(filter.toLowerCase())).length === 0 && <p role="status">{t('Žádné odpovídající benefity.', 'No matching benefits.')}</p>}
                 </div>
               </>
             )}
+            <div className={styles.card}>
+              <span className={styles.eyebrow}>{t('Příprava změny', 'Change planning')}</span>
+              <h2>{t('Připravit zadání pro schválení', 'Prepare a change brief')}</h2>
+              <p>{t('Popište cílovou skupinu, zamýšlený benefit, důvod změny a očekávaný dopad. Stažený návrh předejte ke schválení běžným interním postupem; stažením se nic neodesílá ani nemění.', 'Describe the audience, proposed benefit, rationale and expected impact. Submit the downloaded brief through your internal approval process; downloading does not submit or change anything.')}</p>
+              <label className={styles.filter} htmlFor="lipa-proposal">{t('Zadání změny (bez osobních údajů klientů)', 'Change brief (no customer personal data)')}</label>
+              <textarea id="lipa-proposal" rows={5} value={proposal} onChange={e => setProposal(e.target.value)} />
+              <button className={styles.primaryButton} disabled={!proposal.trim()} onClick={() => {
+                const url = URL.createObjectURL(new Blob([t('Lípa — návrh změny ke schválení', 'Lípa — change proposal for approval') + '\n\n' + proposal], { type: 'text/plain;charset=utf-8' }))
+                const link = document.createElement('a')
+                link.href = url
+                link.download = 'lipa-proposal.txt'
+                link.click()
+                setTimeout(() => URL.revokeObjectURL(url), 1000)
+              }}>{t('Stáhnout zadání', 'Download brief')}</button>
+            </div>
           </section>
         )}
 
         {tab === 'party' && (
-          <section className="space-y-5" aria-label={tabLabel.party}>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <section className={styles.section} aria-label={tabLabel.party}>
+            <div className={styles.card}>
               <h2 className="text-base font-semibold text-slate-900">{t('Zůstatek klienta', 'A customer balance')}</h2>
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
                 {t(
-                  'Je to přesně to, co vidí klient ve své aplikaci. Operátor tu nemá žádné pole navíc — reciproční průhlednost je smysl téhle obrazovky, ne její vedlejší efekt.',
-                  'This is exactly what the customer sees in their own app. The operator gets no extra field here — reciprocal transparency is the point of this screen, not a side effect.',
+                  'Ověřte stav programu u konkrétního klienta. Zůstatek, historie a expirace vycházejí ze stejných údajů jako klientská aplikace. Pro širší kontext otevřete Customer 360.',
+                  'Check programme activity for an individual customer. Balance, history and expiry use the same evidence as the customer app. Open Customer 360 for the broader context.',
                 )}
               </p>
-              <div className="mt-4 flex flex-wrap items-center gap-2">
+              <div className={styles.lookup}>
                 <label htmlFor="lipa-party" className="sr-only">{t('UUID klienta', 'Customer UUID')}</label>
                 <input
                   id="lipa-party"
@@ -354,6 +402,7 @@ export default function LoyaltyPage() {
               {partyError && <p role="alert" className="mt-2 text-sm text-rose-700">{partyError}</p>}
             </div>
 
+            {!party && !partyLoading && !partyError && <div className={styles.notice}><Search aria-hidden="true" /><div><h3>{t('Začněte identifikátorem klienta', 'Start with a customer ID')}</h3><p>{t('UUID najdete v detailu klienta. Vyhledávání zobrazí skutečný zůstatek a historii; neprovádí žádné změny.', 'Find the UUID in the customer record. Lookup shows the actual balance and history without changing them.')}</p><Link href="/customer-360">{t('Přejít do Customer 360', 'Go to Customer 360')} →</Link></div></div>}
             {partyLoading && <p className="text-sm text-slate-500">{t('Načítám…', 'Loading…')}</p>}
 
             {party && unavailableKind(party.state) && (
@@ -377,14 +426,14 @@ export default function LoyaltyPage() {
                       value: party.nextExpiry ? new Date(party.nextExpiry).toLocaleDateString(locale) : t('žádná', 'none'),
                     },
                   ].map(stat => (
-                    <div key={stat.label} className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div key={stat.label} className={styles.inset}>
                       <p className="text-xs uppercase tracking-wide text-slate-500">{stat.label}</p>
-                      <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">{stat.value}</p>
+                      <p className={styles.metricValue}>{stat.value}</p>
                     </div>
                   ))}
                 </div>
 
-                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className={styles.card}>
                   <h3 className="text-sm font-semibold text-slate-900">{t('Historie', 'History')}</h3>
                   {party.history.length === 0 && (
                     <p className="mt-2 text-sm text-slate-500">
@@ -426,8 +475,8 @@ export default function LoyaltyPage() {
         )}
 
         {tab === 'finance' && (
-          <section className="space-y-5" aria-label={tabLabel.finance}>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+          <section className={styles.section} aria-label={tabLabel.finance}>
+            <div className={styles.card}>
               <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
                 <Landmark className="h-4 w-4 text-slate-700" />
                 {t('Závazek banky', 'What the bank owes')}
@@ -438,35 +487,35 @@ export default function LoyaltyPage() {
                   'Unspent Lístky are an obligation. The figure below is the input to the daily provisioning journal, not the journal — billing owns that, because billing is on the money path and Lípa is not.',
                 )}
               </p>
-              {catalogue?.provisioning ? (
-                <div className="mt-4 grid gap-4 sm:grid-cols-3">
-                  <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+              {!loading && catalogue?.state === 'ok' && catalogue.provisioning ? (
+                <div className={styles.summaryGrid}>
+                  <div className={styles.inset}>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
                       {t('Nesplacený závazek', 'Outstanding obligation')}
                     </p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">
+                    <p className={styles.metricValue}>
                       {num(catalogue.provisioning.outstandingLeaves)}
                     </p>
                     <p className="text-xs text-slate-500">
                       {t('Lístků, nikoli korun. Lípa Lístek neoceňuje.', 'Lístky, not korunas. Lípa does not price a Lístek.')}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                  <div className={styles.inset}>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
                       {t('Roční strop na klienta', 'Annual cap per customer')}
                     </p>
-                    <p className="mt-1 text-2xl font-semibold tabular-nums text-slate-900">
+                    <p className={styles.metricValue}>
                       {num(catalogue.provisioning.annualCapPerParty)}
                     </p>
                     <p className="text-xs text-slate-500">
                       {t('Ohraničuje ekonomickou expozici programu.', 'It bounds the economic exposure of the programme.')}
                     </p>
                   </div>
-                  <div className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                  <div className={styles.inset}>
                     <p className="text-xs uppercase tracking-wide text-slate-500">
                       {t('Verze pravidla', 'Rule version')}
                     </p>
-                    <p className="mt-1 text-2xl font-semibold text-slate-900">{catalogue.provisioning.ruleVersion}</p>
+                    <p className={styles.metricValue}>{catalogue.provisioning.ruleVersion}</p>
                     <p className="text-xs text-slate-500">
                       {t('Zmrazí se na každém zápisu, takže změna sazby historii nepřepíše.', 'Frozen onto every entry, so changing a rate never rewrites history.')}
                     </p>
@@ -474,19 +523,20 @@ export default function LoyaltyPage() {
                 </div>
               ) : (
                 <p className="mt-3 text-sm text-slate-500">
-                  {t('Číslo závazku není k dispozici, protože služba tu neodpovídá.', 'The obligation figure is unavailable because the service does not answer here.')}
+                  {loading ? t('Načítám údaje…', 'Loading figures…') : t('Údaje o závazku nejsou dostupné.', 'Obligation figures are unavailable.')}
+                  {!loading && <button className={styles.textButton} onClick={() => { setLoading(true); setRefresh(value => value + 1) }}>{t('Zkusit znovu', 'Try again')}</button>}
                 </p>
               )}
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-5">
+            <div className={styles.card}>
               <h2 className="flex items-center gap-2 text-base font-semibold text-slate-900">
                 <Scale className="h-4 w-4 text-slate-700" />
                 {t('Právní rámec', 'The legal position')}
               </h2>
-              <ul className="mt-3 space-y-3">
+              <ul className={styles.list}>
                 {LEGAL.map(item => (
-                  <li key={item.id} className="rounded-xl border border-slate-100 bg-slate-50/60 p-4">
+                  <li key={item.id} className={styles.inset}>
                     <h3 className="text-sm font-semibold text-slate-900">{say(item.regime)}</h3>
                     <p className="mt-1 text-sm text-slate-800">{say(item.position)}</p>
                     <p className="mt-1 text-sm text-slate-600">
@@ -506,8 +556,9 @@ export default function LoyaltyPage() {
         )}
 
         {tab === 'ai' && (
-          <section className="space-y-5" aria-label={tabLabel.ai}>
-            <div className="rounded-2xl border border-violet-200 bg-violet-50/60 p-5">
+          <section className={styles.section} aria-label={tabLabel.ai}>
+            <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>{t('Rozvoj programu', 'Programme development')}</span><h2>{t('Asistenti pro marketing', 'Marketing assistants')}</h2></div><span className={styles.badge}>{t('Plánované možnosti · nejsou aktivní', 'Planned capabilities · not active')}</span></div>
+            <div className={styles.card}>
               <h2 className="flex items-center gap-2 text-base font-semibold text-violet-900">
                 <Sparkles className="h-4 w-4" />
                 {t('Kde umělá inteligence pomáhá a kde končí', 'Where AI helps and where it stops')}
@@ -522,9 +573,9 @@ export default function LoyaltyPage() {
               </ul>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className={styles.actionGrid}>
               {AI_ROLES.map(role => (
-                <article key={role.id} className="rounded-2xl border border-slate-200 bg-white p-5">
+                <article key={role.id} className={styles.card}>
                   <div className="flex items-center justify-between gap-2">
                     <h3 className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                       <Bot className="h-4 w-4 text-violet-600" />

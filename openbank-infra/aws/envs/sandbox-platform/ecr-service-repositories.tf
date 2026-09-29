@@ -67,15 +67,9 @@ locals {
   ci_runner_repository = split("@", split("/", local.runner_image)[1])[0]
 
   # A first image must exist before an independently reviewed GitOps workload can
-  # reference it. Incentive is the one bounded bootstrap exception: this creates
-  # its empty registry namespace only; it does not declare a workload, image tag,
-  # network edge, or live service. Remove this entry in the same PR that adds the
-  # first exact GitOps image pin. The resource precondition below prevents this exception from
-  # silently becoming permanent after that pin exists.
-  # Empty since 2026-09-03: gitops/components/incentive/incentive-service.yaml now
-  # carries the first exact image pin (sandbox-bd090160), so the bootstrap entry
-  # graduated to the pinned set as its own precondition required. Keep the local +
-  # precondition: the next bounded bootstrap exception lands here the same way.
+  # reference it. A bounded bootstrap entry creates only an empty registry namespace;
+  # remove it in the same change that pins the first signed image. The precondition
+  # below prevents an exception from silently becoming permanent after that pin exists.
   bootstrap_service_ecr_repositories = toset([])
 
   service_ecr_repositories = setunion(

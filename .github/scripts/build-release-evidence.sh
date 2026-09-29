@@ -157,9 +157,19 @@ ATTRIB="$( { git log "$RANGE" --pretty='%an <%ae>' -- "$MODULE_DIR" 2>/dev/null;
              git log "$RANGE" --pretty='%(trailers:key=Co-authored-by,valueonly)' -- "$MODULE_DIR" 2>/dev/null; } \
            | sed '/^$/d' | sort -u )"
 
+# ── Support period (#9881) ──────────────────────────────────────────────────────
+# Derived from SECURITY.md's rules against the RELEASE date — the tagged commit's date — never
+# from `built_at`: backfill-release-evidence.yml runs this months after a release, and deriving
+# from the build time would silently push every backfilled end-of-support into the future. Both
+# callers check out the released commit, so HEAD's committer date IS the release date.
+RELEASED_ON="$(git log -1 --format=%cs HEAD)"
+SUPPORT_JSON="$(python3 "$(dirname "$0")/release_support_period.py" "$VERSION" "$RELEASED_ON")" \
+  || { echo "::error::could not derive the support period for $TAG ($VERSION, $RELEASED_ON)"; exit 1; }
+
 # ── Evidence bundle manifest ────────────────────────────────────────────────────
 EV_OUT="${TAG}.evidence.json"
 TS="$TS" COMPONENT="$COMPONENT" VERSION="$VERSION" TAG="$TAG" SHA="$SHA" REPO="$REPO" \
+SUPPORT_JSON="$SUPPORT_JSON" \
 SBOM_BASENAME="$(basename "$SBOM_FILE")" SBOM_SHA="$SBOM_SHA" \
 SLSA_OUT="$SLSA_OUT" VEX_OUT="$VEX_OUT" RUN_URL="$RUN_URL" \
 CHANGELOG_EXCERPT="$CHANGELOG_EXCERPT" ATTRIB="$ATTRIB" \
@@ -183,6 +193,9 @@ bundle = {
     "vex": {"file": os.environ["VEX_OUT"], "format": "openvex/0.2.0",
             "sha256": sha(os.environ["VEX_OUT"]), "signature": os.environ["VEX_OUT"] + ".sig"},
     "changelog": os.environ.get("CHANGELOG_EXCERPT", "").strip(),
+    # End-of-support as data (SECURITY.md; CRA Art. 13(8)). A beta release carries only the
+    # determined floor and `open_ended: true` — its later bound depends on a future release.
+    "support": json.loads(os.environ["SUPPORT_JSON"]),
     "ai_attribution": {
         "contributors": attrib,
         "build_attribution_note": "authors + Co-Authored-By trailers since previous component tag (ADR-0029 D6)",

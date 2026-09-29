@@ -17,6 +17,7 @@ import com.openbank.ledger.domain.model.PeriodType
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -65,6 +66,9 @@ import javax.sql.DataSource
 class LedgerPactBrokerProviderVerificationTest {
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var dataSource: DataSource
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -79,7 +83,17 @@ class LedgerPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interaction expects 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including this one, and would produce a 200.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     @State("ledger has frozen monthly trial balance for the reporting date")
@@ -169,6 +183,28 @@ class LedgerPactBrokerProviderVerificationTest {
     fun stateWithNoJournalEntries() {
         // No setup needed — a fresh Testcontainer DB has no journals by default.
     }
+
+    /**
+     * Seeds exactly what [LedgerPactProviderVerificationTest.stateWithNostroJournalLine] does (shared [NostroPactSeed])
+     * (treasury-service's nostro-reconciliation reads, ADR-0315 D5, #10896) — the broker serves
+     * every consumer's pact for this provider, so a state this class lacks fails verification with
+     * MissingStateChangeMethod and blocks treasury-service deploys on can-i-deploy, the same
+     * failure mode documented above for balance-service's trial-balance pact.
+     */
+    @State("ledger has a nostro journal line on 1001 for the statement date")
+    fun stateWithNostroJournalLine() = NostroPactSeed.seedCzkNostroLine(dataSource)
+
+    /** treasury's native-currency balance read (#11107): EUR 10,000.00 Dr on 1002, base CZK differs. */
+    @State("ledger has a EUR journal line on 1002 for the statement date")
+    fun stateWithEurNostroJournalLine() = NostroPactSeed.seedEurNostroLine(dataSource)
+
+    /**
+     * treasury's unknown-account read (#11113): no setup — 9999 is in no chart migration, so the
+     * ledger's own GlAccountNotFoundExceptionMapper answers, and treasury reads exactly that body as
+     * "not held" (any other 404 is an upstream failure there).
+     */
+    @State("ledger does not hold GL account 9999")
+    fun stateWithUnknownGlAccount() = Unit
 
     private companion object {
         val PERIOD_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009601")

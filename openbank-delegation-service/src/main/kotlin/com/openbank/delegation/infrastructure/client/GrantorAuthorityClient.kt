@@ -10,7 +10,7 @@ import com.openbank.delegation.application.port.out.GrantorAuthorityClient
 import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.logging.Log
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.GET
@@ -33,8 +33,10 @@ data class AuthorityPartyResponse(
 @JsonIgnoreProperties(ignoreUnknown = true)
 data class ActingForResponse(val partyId: UUID)
 
+// #10486 batch 8: party.mandate.read is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-delegation` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/parties")
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "party-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface PartyAuthorityRestClient {
@@ -70,6 +72,7 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         GrantorAuthority(
             verdict = if (authorized) GrantorAuthorityVerdict.AUTHORIZED else GrantorAuthorityVerdict.DENIED,
             displayName = principal.legalName?.trim()?.takeIf { it.isNotEmpty() },
+            partyType = principal.partyType,
         )
     } catch (e: NotFoundException) {
         GrantorAuthority(GrantorAuthorityVerdict.DENIED)

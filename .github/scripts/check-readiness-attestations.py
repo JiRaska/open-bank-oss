@@ -110,6 +110,40 @@ EXERCISE_REF_DEBT: dict[str, str] = {}
 PENTEST_OPS_FLOOR = 5
 CI_BY_RE = re.compile(r"^ci-")
 
+# R8b (issue #9673) -- `ops` is hand-transcribed into this file next to the claim it justifies,
+# and nothing tied it to anything. Bound it by the one thing in the repo it cannot exceed: the
+# operations the service's committed OpenAPI declares (exercised = selected - auth_blocked <=
+# selected <= declared). A count above the declared surface is a typo, a sibling service's number
+# copied across, or a measurement of a surface the service no longer has -- all three were
+# undetectable. It is an upper bound only: an optimistic count BELOW the surface still passes, and
+# only the run's fuzz-reports/<svc>-ops*.json can settle that, which this offline gate cannot read.
+#
+# Counted with a line grammar, not yaml, because this gate degrades rather than requires pyyaml.
+# Checked against yaml.safe_load over all 56 committed specs: zero disagreements.
+SPEC_REL = "src/main/resources/openapi.yaml"
+_SPEC_OPERATION_RE = re.compile(r"^    (get|put|post|delete|patch|head|options|trace):\s*$")
+
+
+def spec_operation_count(module: pathlib.Path) -> int | None:
+    """Operations declared under the top-level `paths:` of the module's OpenAPI, or None."""
+    spec = module / SPEC_REL
+    if not spec.is_file():
+        return None
+    inside = False
+    count = 0
+    for line in spec.read_text(encoding="utf-8", errors="replace").splitlines():
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line.rstrip() == "paths:":
+            inside = True
+            continue
+        if inside and not line[0].isspace():
+            inside = False  # the next top-level key (components:, tags:, ...) ends `paths:`
+        if inside and _SPEC_OPERATION_RE.match(line):
+            count += 1
+    return count
+
+
 # CI-minted pentest attestations that predate R8. Shrink-only, checked BOTH WAYS:
 # a new ci-* pentest entry without ops fails, and a baselined entry that gains ops
 # (or leaves the file) is reported so the exemption cannot rot into permanence.
@@ -374,6 +408,24 @@ def check(
                         f"a meaningfully larger surface first"
                     )
                     continue
+                declared = spec_operation_count(repo / f"openbank-{svc}-service")
+                if declared is None:
+                    errors.append(
+                        f"{where}: `{debt_key}` records ops={ops}, but openbank-{svc}-service has "
+                        f"no {SPEC_REL} -- there is no declared surface a fuzz run could have "
+                        f"exercised, so the count cannot be checked against anything (#9673)"
+                    )
+                    continue
+                if ops > declared:
+                    errors.append(
+                        f"{where}: `{debt_key}` records ops={ops}, more than the {declared} "
+                        f"operation(s) openbank-{svc}-service/{SPEC_REL} declares -- exercised "
+                        f"operations cannot exceed the declared surface, so this is a "
+                        f"transcription error, a count copied from another service, or a "
+                        f"measurement of a surface the service no longer has. Re-read ops from "
+                        f"the run's fuzz-reports/<svc>-ops*.json (#9673)"
+                    )
+                    continue
 
         # Freshness. Exact calendar arithmetic, deliberately: the collector approximates a
         # month as 30 days, which lets a TTL run a day or two past its own expiry.
@@ -605,6 +657,18 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             "clean",
             True,
         ),
+        (
+            "R8b: ops one above the declared OpenAPI surface is a transcription, not a measurement (#9673)",
+            f"audit:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref}, ops: 14 }}\n",
+            "error",
+            True,
+        ),
+        (
+            "R8b: ops for a service with no committed OpenAPI cannot be checked (#9673)",
+            f"consent:\n  pentest: {{ date: 2026-08-01, ttl_days: 365, by: ci-schemathesis, ref: {good_ref}, ops: 13 }}\n",
+            "error",
+            True,
+        ),
     ]
 
     failures = 0
@@ -614,6 +678,17 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
         (tmp / "openbank-ledger-service").mkdir()
         (tmp / "openbank-consent-service").mkdir()
         (tmp / "openbank-audit-service").mkdir()
+        # R8b fixture: exactly 13 declared operations, so the TRUE ENTRY at ops: 13 sits ON the
+        # bound and ops: 14 is one above it. The trailing `components:` block carries
+        # method-shaped keys at the same indent: a counter that does not stop at the end of
+        # `paths:` reads 15 and lets ops: 14 through. A comment at column 0 inside `paths:` must
+        # not end the block either.
+        (tmp / "openbank-audit-service/src/main/resources").mkdir(parents=True)
+        (tmp / "openbank-audit-service" / SPEC_REL).write_text(
+            "openapi: 3.0.3\npaths:\n# a column-0 comment inside paths\n"
+            + "".join(f"  /r{i}:\n    get:\n      responses: {{}}\n" for i in range(13))
+            + "components:\n  x:\n    get:\n      y: 1\n    post:\n      y: 1\n"
+        )
         (tmp / "docs/runbooks").mkdir(parents=True)
         (tmp / "docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md").write_text("x")
         (tmp / "docs/bcp").mkdir(parents=True)

@@ -15,6 +15,7 @@ import com.openbank.fx.domain.model.RateType
 import com.openbank.fx.infrastructure.persistence.entity.FxConversionEntity
 import com.openbank.fx.infrastructure.persistence.entity.FxRateEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -28,21 +29,35 @@ class FxRateRepositoryImpl(private val clock: Clock) : FxRateRepository {
     @Inject
     lateinit var sf: Mutiny.SessionFactory
 
+    @Inject
+    lateinit var outboxRepo: FxOutboxRepository
+
     override suspend fun save(rate: FxRate): FxRate {
-        val e = FxRateEntity().also {
-            it.id = rate.id
-            it.baseCurrency = rate.baseCurrency
-            it.quoteCurrency = rate.quoteCurrency
-            it.bidRate = rate.bidRate
-            it.askRate = rate.askRate
-            it.rateType = rate.rateType.name
-            it.source = rate.source.name
-            it.validFrom = rate.validFrom
-            it.validTo = rate.validTo
-            it.createdAt = rate.createdAt
-        }
+        val e = rate.toEntity()
         sf.withTransaction { s, _ -> s.persist(e) }.awaitSuspending()
         return rate
+    }
+
+    override suspend fun saveAllWithOutbox(rates: List<FxRate>, outboxMessage: OutboxMessage): List<FxRate> {
+        val entities = rates.map { it.toEntity() }
+        sf.withTransaction { s, _ ->
+            entities.fold(Uni.createFrom().voidItem()) { acc, e -> acc.chain { _ -> s.persist(e) } }
+                .chain { _ -> outboxRepo.persistInTransaction(outboxMessage) }
+        }.awaitSuspending()
+        return rates
+    }
+
+    private fun FxRate.toEntity() = FxRateEntity().also {
+        it.id = id
+        it.baseCurrency = baseCurrency
+        it.quoteCurrency = quoteCurrency
+        it.bidRate = bidRate
+        it.askRate = askRate
+        it.rateType = rateType.name
+        it.source = source.name
+        it.validFrom = validFrom
+        it.validTo = validTo
+        it.createdAt = createdAt
     }
 
     override suspend fun findLatest(base: String, quote: String, type: RateType): FxRate? = sf.withSession { s ->

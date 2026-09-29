@@ -30,7 +30,7 @@ triaging an incident that starts on `lending`.
 
 ## Health & probes
 
-- Readiness: `GET :8086/q/health/ready` · Liveness: `GET :8086/q/health/live`
+- Readiness: `TCP :8126` · Liveness: `GET :8086/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `lending`); dashboards in Grafana.
 - Logs: `kubectl logs -n lending -l app.kubernetes.io/name=lending-service -f`, or Loki
   `{namespace="lending"}`.

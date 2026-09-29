@@ -20,6 +20,7 @@ import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.RepresentationDecision
 import com.openbank.kyb.domain.model.RepresentationMode
 import com.openbank.kyb.domain.model.RepresentationRule
+import com.openbank.kyb.domain.model.Representative
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -27,6 +28,7 @@ import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.Optional
 
 /** Per-entity human confirmation, and what happens when the register text moves (#9711). */
 class RepresentationAttestationServiceTest {
@@ -65,29 +67,35 @@ class RepresentationAttestationServiceTest {
         override suspend fun lookup(cmd: LookupCommand): RegistryExtract? = extract
     }
 
-    private fun extract(ruleText: String, mode: RepresentationMode = RepresentationMode.SOLE, signers: Int? = 1) =
-        RegistryExtract(
-            identifier = ico,
-            legalName = "Příklad s.r.o.",
-            legalFormCode = "112",
-            legalFormClass = LegalFormClass.LIMITED_COMPANY,
-            status = EntityStatus.ACTIVE,
-            registeredAddress = null,
-            incorporatedOn = null,
-            taxId = null,
-            representatives = emptyList(),
-            representationRule = RepresentationRule(mode, signers, ruleText),
-            source = "ares",
-            sourceRef = null,
-            verification = ExtractVerification.VERIFIED,
-            fetchedAt = now,
-        )
+    private fun extract(
+        ruleText: String,
+        mode: RepresentationMode = RepresentationMode.SOLE,
+        signers: Int? = 1,
+        members: List<String> = emptyList(),
+    ) = RegistryExtract(
+        identifier = ico,
+        legalName = "Příklad s.r.o.",
+        legalFormCode = "112",
+        legalFormClass = LegalFormClass.LIMITED_COMPANY,
+        status = EntityStatus.ACTIVE,
+        registeredAddress = null,
+        incorporatedOn = null,
+        taxId = null,
+        representatives = members.map { Representative(it, null, "jednatelé", "jednatel", null) },
+        representationRule = RepresentationRule(mode, signers, ruleText),
+        source = "ares",
+        sourceRef = null,
+        verification = ExtractVerification.VERIFIED,
+        fetchedAt = now,
+    )
 
-    private fun service(lookup: FixedLookup, store: InMemoryAttestations) = RepresentationAttestationService().apply {
-        this.attestations = store
-        this.lookup = lookup
-        this.clock = this@RepresentationAttestationServiceTest.clock
-    }
+    private fun service(lookup: FixedLookup, store: InMemoryAttestations, autoConfirm: Boolean = true) =
+        RepresentationAttestationService().apply {
+            this.autoConfirmSingleMember = Optional.of(autoConfirm)
+            this.attestations = store
+            this.lookup = lookup
+            this.clock = this@RepresentationAttestationServiceTest.clock
+        }
 
     @Test
     fun `an unconfirmed rule is Unattested and confirming it makes the same text Attested`() {
@@ -222,5 +230,106 @@ class RepresentationAttestationServiceTest {
         assertThat(history.count { it.isActive }).isEqualTo(1)
         assertThat(history.first { it.isActive }.confirmedSigners).isEqualTo(2)
         assertThat(history.first { it.isActive }.attestedBy).isEqualTo("operator-bob")
+    }
+
+    // --- the single-member exception -----------------------------------------------------------
+
+    private val soleText = "Za společnost jedná jednatel samostatně."
+
+    @Test
+    fun `one statutory member and a SOLE rule is confirmed by the system and persisted`() {
+        val ex = extract(soleText, members = listOf("Oldřich Vaněk"))
+        val store = InMemoryAttestations()
+        val decision = runBlocking { service(FixedLookup(ex), store).decide(ex) }
+
+        assertThat(decision).isInstanceOf(RepresentationDecision.Attested::class.java)
+        val a = (decision as RepresentationDecision.Attested).attestation
+        assertThat(a.attestedBy).isEqualTo("system:single-statutory-member")
+        assertThat(a.confirmedSigners).isEqualTo(1)
+        assertThat(a.confirmedRoles).isEmpty()
+        assertThat(a.parsedMode).isEqualTo(RepresentationMode.SOLE)
+        assertThat(a.parsedSigners).isEqualTo(1)
+        assertThat(a.note).contains("exactly one member")
+        assertThat(a.attestedAt).isEqualTo(now)
+        assertThat(store.rows).describedAs("persisted, so the audit trail sees it").containsExactly(a)
+        // Next time it is found as an ordinary active attestation — no second row.
+        runBlocking { service(FixedLookup(ex), store).decide(ex) }
+        assertThat(store.rows).hasSize(1)
+    }
+
+    @Test
+    fun `two statutory members stay Unattested even when the rule reads SOLE`() {
+        val ex = extract(soleText, members = listOf("Oldřich Vaněk", "Eva Dvořáková"))
+        val store = InMemoryAttestations()
+        assertThat(runBlocking { service(FixedLookup(ex), store).decide(ex) })
+            .isInstanceOf(RepresentationDecision.Unattested::class.java)
+        assertThat(store.rows).isEmpty()
+    }
+
+    @Test
+    fun `one member with a JOINT or UNKNOWN rule stays Unattested`() {
+        listOf(
+            extract("jednatelé společně", RepresentationMode.JOINT_ALL, null, listOf("Oldřich Vaněk")),
+            extract("dva jednatelé", RepresentationMode.JOINT_N, 2, listOf("Oldřich Vaněk")),
+            // A count of one is not a SOLE verdict: only the mode says the parser found no joint clause.
+            extract("jednatel spolu s prokuristou", RepresentationMode.JOINT_N, 1, listOf("Oldřich Vaněk")),
+            extract("nečitelné", RepresentationMode.UNKNOWN, null, listOf("Oldřich Vaněk")),
+        ).forEach { ex ->
+            val store = InMemoryAttestations()
+            assertThat(runBlocking { service(FixedLookup(ex), store).decide(ex) })
+                .describedAs(ex.representationRule.mode.name)
+                .isInstanceOf(RepresentationDecision.Unattested::class.java)
+            assertThat(store.rows).isEmpty()
+        }
+    }
+
+    @Test
+    fun `an unverified or inactive extract is not auto-confirmed`() {
+        listOf(
+            extract(soleText, members = listOf("Oldřich Vaněk")).copy(verification = ExtractVerification.UNVERIFIED),
+            extract(soleText, members = listOf("Oldřich Vaněk")).copy(status = EntityStatus.IN_LIQUIDATION),
+        ).forEach { ex ->
+            assertThat(runBlocking { service(FixedLookup(ex), InMemoryAttestations()).decide(ex) })
+                .isInstanceOf(RepresentationDecision.Unattested::class.java)
+        }
+    }
+
+    @Test
+    fun `a changed text over a previous human attestation is Superseded, never auto-confirmed`() {
+        val old = extract("Jednatelé jednají společně.", RepresentationMode.JOINT_ALL, null, listOf("Oldřich Vaněk"))
+        val store = InMemoryAttestations()
+        val svc = service(FixedLookup(old), store)
+        runBlocking {
+            svc.attest(
+                AttestRepresentationCommand(
+                    scheme = IdentifierScheme.CZ_ICO,
+                    identifier = "27074358",
+                    ruleTextHash = RepresentationAttestation.hashOf(old.representationRule.sourceText),
+                    confirmedSigners = 1,
+                    confirmedRoles = emptyList(),
+                    operator = "operator-anna",
+                ),
+            )
+        }
+        val amended = extract(soleText, members = listOf("Oldřich Vaněk"))
+        assertThat(runBlocking { svc.decide(amended) }).isInstanceOf(RepresentationDecision.Superseded::class.java)
+        assertThat(store.rows.map { it.attestedBy }).containsExactly("operator-anna")
+    }
+
+    @Test
+    fun `with the kill switch off a single member still goes to a human`() {
+        val ex = extract(soleText, members = listOf("Oldřich Vaněk"))
+        val store = InMemoryAttestations()
+        assertThat(runBlocking { service(FixedLookup(ex), store, autoConfirm = false).decide(ex) })
+            .isInstanceOf(RepresentationDecision.Unattested::class.java)
+        assertThat(store.rows).isEmpty()
+    }
+
+    @Test
+    fun `application yaml ships the switch ON behind an env override`() {
+        val yaml = java.io.File("src/main/resources/application.yaml").readText()
+        assertThat(yaml).contains(
+            "auto-confirm-single-member: \${OPENBANK_KYB_REPRESENTATION_AUTO_CONFIRM_SINGLE_MEMBER:true}",
+        )
     }
 }

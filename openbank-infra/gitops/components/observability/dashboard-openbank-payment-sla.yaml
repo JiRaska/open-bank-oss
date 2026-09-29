@@ -1,3 +1,7 @@
+# Contextual Admin UI panels use Tempo server-span metrics here because they exist continuously
+# while a payment-lifecycle counter is registered only after that pod processes its first payment.
+# This keeps a quiet or freshly restarted sandbox observable without presenting probes as business
+# settlement. Panel titles and descriptions therefore say "observed request", not "payment success".
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,12 +15,12 @@ data:
     {
       "id": null,
       "uid": "openbank-sla",
-      "title": "OpenBank — Payment SLA & Settlement",
+      "title": "OpenBank — Payment Rails Operational Health",
       "schemaVersion": 39,
       "version": 1,
       "refresh": "30s",
       "time": {
-        "from": "now-1h",
+        "from": "now-24h",
         "to": "now"
       },
       "timepicker": {},
@@ -49,7 +53,7 @@ data:
         {
           "id": 1,
           "type": "timeseries",
-          "title": "Processing Duration P50 / P95 / P99",
+          "title": "Observed Request Latency P50 / P95 / P99",
           "gridPos": {
             "x": 0,
             "y": 0,
@@ -60,19 +64,19 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.50, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.50, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
               "legendFormat": "P50",
               "refId": "A"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
               "legendFormat": "P95",
               "refId": "B"
             },
             {
               "datasource": "${datasource}",
-              "expr": "histogram_quantile(0.99, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{job=\"observability/openbank-services\"}[5m])))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
               "legendFormat": "P99",
               "refId": "C"
             }
@@ -99,12 +103,13 @@ data:
             "tooltip": {
               "mode": "multi"
             }
-          }
+          },
+          "description": "Server-side latency across the payment rails seen by tracing; includes synthetic probes."
         },
         {
           "id": 2,
-          "type": "gauge",
-          "title": "SEPA Instant < 10s SLA",
+          "type": "stat",
+          "title": "SEPA Instant Observed P95",
           "gridPos": {
             "x": 14,
             "y": 0,
@@ -115,7 +120,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{type=\"sepa_instant\",job=\"observability/openbank-services\"}[5m]))) < bool 10)",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-sepa-instant\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
               "legendFormat": "",
               "refId": "A"
             }
@@ -124,30 +129,34 @@ data:
             "reduceOptions": {
               "calcs": [
                 "lastNotNull"
-              ]
+              ],
+              "fields": "",
+              "values": false
             },
-            "showThresholdLabels": false,
-            "showThresholdMarkers": true
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
+              "unit": "s",
               "min": 0,
-              "max": 100,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "red",
+                    "color": "green",
                     "value": null
                   },
                   {
-                    "color": "yellow",
-                    "value": 95
+                    "color": "orange",
+                    "value": 5
                   },
                   {
-                    "color": "green",
-                    "value": 99
+                    "color": "red",
+                    "value": 10
                   }
                 ]
               },
@@ -156,12 +165,13 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Observed server-span latency over one hour; includes synthetic probes."
         },
         {
           "id": 3,
-          "type": "gauge",
-          "title": "Domestic < 60s SLA",
+          "type": "stat",
+          "title": "Domestic Payment Observed P95",
           "gridPos": {
             "x": 19,
             "y": 0,
@@ -172,7 +182,7 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (histogram_quantile(0.95, sum by (le) (rate(openbank_payment_processing_duration_seconds_bucket{type=\"domestic\",job=\"observability/openbank-services\"}[5m]))) < bool 60)",
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(traces_spanmetrics_latency_bucket{service=\"openbank-domestic-payment\",span_kind=\"SPAN_KIND_SERVER\"}[1h])))",
               "legendFormat": "",
               "refId": "A"
             }
@@ -181,30 +191,34 @@ data:
             "reduceOptions": {
               "calcs": [
                 "lastNotNull"
-              ]
+              ],
+              "fields": "",
+              "values": false
             },
-            "showThresholdLabels": false,
-            "showThresholdMarkers": true
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
           },
           "fieldConfig": {
             "defaults": {
-              "unit": "percent",
+              "unit": "s",
               "min": 0,
-              "max": 100,
               "thresholds": {
                 "mode": "absolute",
                 "steps": [
                   {
-                    "color": "red",
+                    "color": "green",
                     "value": null
                   },
                   {
-                    "color": "yellow",
-                    "value": 95
+                    "color": "orange",
+                    "value": 5
                   },
                   {
-                    "color": "green",
-                    "value": 99
+                    "color": "red",
+                    "value": 10
                   }
                 ]
               },
@@ -213,12 +227,13 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Observed server-span latency over one hour; includes synthetic probes."
         },
         {
           "id": 4,
           "type": "timeseries",
-          "title": "Payment Completion Rate by Type",
+          "title": "Observed Request Rate by Rail",
           "gridPos": {
             "x": 0,
             "y": 8,
@@ -229,8 +244,8 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum by (type, outcome) (rate(openbank_payments_completed_total{job=\"observability/openbank-services\"}[5m]))",
-              "legendFormat": "{{type}}/{{outcome}}",
+              "expr": "sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h]))",
+              "legendFormat": "{{service}}",
               "refId": "A"
             }
           ],
@@ -256,12 +271,13 @@ data:
             "tooltip": {
               "mode": "multi"
             }
-          }
+          },
+          "description": "Server requests observed by tracing, grouped by payment rail."
         },
         {
           "id": 5,
           "type": "bargauge",
-          "title": "Outcome Breakdown (all time)",
+          "title": "Observed Requests (24h)",
           "gridPos": {
             "x": 14,
             "y": 4,
@@ -272,8 +288,8 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum by (outcome) (openbank_payments_completed_total{job=\"observability/openbank-services\"})",
-              "legendFormat": "{{outcome}}",
+              "expr": "sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[24h]))",
+              "legendFormat": "{{service}}",
               "refId": "A"
             }
           ],
@@ -293,12 +309,13 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Server requests seen during the last 24 hours, including synthetic probes."
         },
         {
           "id": 6,
           "type": "timeseries",
-          "title": "Payment Success Rate %",
+          "title": "Observed Request Success Rate %",
           "gridPos": {
             "x": 0,
             "y": 15,
@@ -309,8 +326,8 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "100 * (sum(rate(openbank_payments_completed_total{outcome=~\"completed|settled\",job=\"observability/openbank-services\"}[5m])) or vector(0)) / clamp_min(sum(rate(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[5m])), 0.0001)",
-              "legendFormat": "Success Rate %",
+              "expr": "100 * (1 - ((sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\",status_code=\"STATUS_CODE_ERROR\"}[1h])) or (sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])) * 0)) / clamp_min(sum by (service) (rate(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[1h])), 0.0001)))",
+              "legendFormat": "{{service}}",
               "refId": "A"
             }
           ],
@@ -336,12 +353,13 @@ data:
             "tooltip": {
               "mode": "multi"
             }
-          }
+          },
+          "description": "Share of observed server spans without an error status, by payment rail."
         },
         {
           "id": 7,
           "type": "piechart",
-          "title": "Volume by Currency",
+          "title": "Observed Request Share (24h)",
           "gridPos": {
             "x": 12,
             "y": 15,
@@ -352,8 +370,8 @@ data:
           "targets": [
             {
               "datasource": "${datasource}",
-              "expr": "sum by (currency) (increase(openbank_payments_submitted_total{job=\"observability/openbank-services\"}[24h]))",
-              "legendFormat": "{{currency}}",
+              "expr": "sum by (service) (increase(traces_spanmetrics_calls_total{service=~\"openbank-(transaction-service|sepa-payment|sepa-instant|domestic-payment|swift-service|clearing-service)\",span_kind=\"SPAN_KIND_SERVER\"}[24h]))",
+              "legendFormat": "{{service}}",
               "refId": "A"
             }
           ],
@@ -375,7 +393,8 @@ data:
               }
             },
             "overrides": []
-          }
+          },
+          "description": "Relative request volume by payment rail over the last 24 hours."
         }
       ],
       "tags": [

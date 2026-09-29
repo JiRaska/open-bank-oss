@@ -15,6 +15,7 @@ import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
+import jakarta.persistence.LockModeType
 import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
 import java.time.Clock
@@ -106,10 +107,13 @@ class ClearingBatchRepositoryImpl @Inject constructor(
         items: List<ClearingItem>,
         events: List<OutboxMessage>,
     ): Uni<ClearingBatch> = sf.withTransaction { s ->
-        s.find(ClearingBatchEntity::class.java, batch.id).flatMap { e ->
+        s.find(ClearingBatchEntity::class.java, batch.id, LockModeType.PESSIMISTIC_WRITE).flatMap { e ->
             if (e == null) {
                 Uni.createFrom().failure(IllegalArgumentException("Batch not found"))
             } else {
+                require(e.status == ClearingStatus.IN_CLEARING) {
+                    "Cannot settle batch in status ${e.status}"
+                }
                 e.status = batch.status
                 e.settledAt = batch.settledAt
                 e.updatedAt = batch.updatedAt
@@ -119,8 +123,20 @@ class ClearingBatchRepositoryImpl @Inject constructor(
                 e.netPosition = batch.netPosition
                 s.persist(e)
                     .flatMap {
-                        Multi.createFrom().iterable(items.map(mapper::toEntity))
-                            .onItem().transformToUniAndConcatenate { s.merge(it) }
+                        Multi.createFrom().iterable(items)
+                            .onItem().transformToUniAndConcatenate { item ->
+                                s.find(ClearingItemEntity::class.java, item.id, LockModeType.PESSIMISTIC_WRITE)
+                                    .invoke { current ->
+                                        requireNotNull(current) {
+                                            "Clearing item ${item.id} disappeared during settlement"
+                                        }
+                                        require(item.revision == current.revision + 1) {
+                                            "stale clearing item revision ${item.revision}; " +
+                                                "expected ${current.revision + 1}"
+                                        }
+                                    }
+                                    .flatMap { s.merge(mapper.toEntity(item)) }
+                            }
                             .collect().asList()
                     }
                     .flatMap {
@@ -196,7 +212,8 @@ class ClearingItemRepositoryImpl @Inject constructor(
     override fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int> =
         sf.withTransaction { s ->
             s.createMutationQuery(
-                "UPDATE ClearingItemEntity SET status = :s, errorCode = :ec, errorMessage = :em, updatedAt = CURRENT_TIMESTAMP WHERE id = :id",
+                "UPDATE ClearingItemEntity SET status = :s, errorCode = :ec, errorMessage = :em, " +
+                    "revision = revision + 1, updatedAt = CURRENT_TIMESTAMP WHERE id = :id",
             )
                 .setParameter("s", status).setParameter("ec", errorCode)
                 .setParameter("em", errorMessage).setParameter("id", id).executeUpdate()

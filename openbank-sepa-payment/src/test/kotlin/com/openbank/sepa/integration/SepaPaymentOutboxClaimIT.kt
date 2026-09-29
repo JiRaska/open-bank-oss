@@ -11,6 +11,8 @@ import com.openbank.sepa.it.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -33,8 +35,20 @@ import java.time.Instant
  * strand the row forever.
  */
 @QuarkusTest
+@TestProfile(SepaPaymentOutboxClaimIT.NoDispatchProfile::class)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class SepaPaymentOutboxClaimIT {
+
+    // This test owns the first claim. The production dispatcher runs on its own schedule and
+    // would otherwise race it for the seeded row, making the first-claim assertion flaky.
+    class NoDispatchProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+            // The global WireMock test resources enable oidc-client at RUNTIME; a custom profile
+            // re-augments, so the build-time value must agree or Quarkus refuses to boot.
+            "quarkus.oidc-client.enabled" to "true",
+        )
+    }
 
     @Inject
     lateinit var repository: SepaPaymentOutboxRepositoryImpl

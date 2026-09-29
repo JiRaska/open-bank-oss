@@ -18,6 +18,7 @@ import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationUseCase
 import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthority
 import com.openbank.delegation.application.port.out.GrantorAuthorityClient
 import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
@@ -38,6 +39,7 @@ import com.openbank.delegation.domain.model.ApprovalPolicy
 import com.openbank.delegation.domain.model.DelegationCapability
 import com.openbank.delegation.domain.model.DelegationCheckResult
 import com.openbank.delegation.domain.model.DelegationGrant
+import com.openbank.delegation.domain.model.DelegationRecertificationAudience
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.ws.rs.NotFoundException
@@ -154,6 +156,7 @@ class DelegationService(
             dailyLimit = command.dailyLimit,
             monthlyLimit = command.monthlyLimit,
             exposure = command.exposure,
+            recertificationAudience = command.recertificationAudience,
             validFrom = now,
             validTo = command.validTo,
             grantScaSessionId = command.grantScaSessionId,
@@ -190,18 +193,42 @@ class DelegationService(
     private suspend fun validateCandidate(command: DelegationCandidate): CounterpartyNames {
         rejectUnsupportedExposure(command)
         requireCallerIs(command.callerPartyId, command.grantorPartyId)
-        val grantorName = verifyGrantorAuthority(command)
+        val grantorAuthority = verifyGrantorAuthority(command)
         rejectUnenforcedCeilings(command)
         rejectUnenforcedApprovalPolicy(command)
         verifyResourceOwnership(command)
-        return verifyEligibility(command, grantorName)
+        val parties = verifyEligibility(command, grantorAuthority)
+        validateRecertificationAudience(command.recertificationAudience, parties.grantorPartyType)
+        return parties
     }
 
-    private suspend fun verifyGrantorAuthority(command: DelegationCandidate): String? {
+    /**
+     * This check protects review evidence from becoming misleading. It does not grant, deny or
+     * otherwise alter any product capability; all authorization remains the resource/capability
+     * grant checked by product services.
+     */
+    private fun validateRecertificationAudience(
+        audience: DelegationRecertificationAudience?,
+        grantorPartyType: String?,
+    ) {
+        if (audience == null) return
+        val expected = when (audience) {
+            DelegationRecertificationAudience.PERSONAL -> "INDIVIDUAL"
+            DelegationRecertificationAudience.FOP -> "SOLE_TRADER"
+            DelegationRecertificationAudience.SME,
+            DelegationRecertificationAudience.CORPORATE,
+            -> "COMPANY"
+        }
+        require(grantorPartyType == expected) {
+            "recertification audience $audience is not valid for grantor party type ${grantorPartyType ?: "unknown"}"
+        }
+    }
+
+    private suspend fun verifyGrantorAuthority(command: DelegationCandidate): GrantorAuthority {
         val actor = resolveGrantorActor(command)
         val authority = grantorAuthorityClient.authorityFor(command.grantorPartyId, actor)
         return when (authority.verdict) {
-            GrantorAuthorityVerdict.AUTHORIZED -> authority.displayName
+            GrantorAuthorityVerdict.AUTHORIZED -> authority
             GrantorAuthorityVerdict.DENIED -> throw DelegationGrantorAuthorityException(
                 "actor $actor has no active authority for grantor ${command.grantorPartyId}",
             )
@@ -628,13 +655,20 @@ class DelegationService(
      * offers, never wave them through. KYC requirements: FULL for execution
      * capabilities (they move money), BASIC for everything read-only/propose-only.
      */
-    private suspend fun verifyEligibility(command: DelegationCandidate, grantorName: String?): CounterpartyNames {
+    private suspend fun verifyEligibility(
+        command: DelegationCandidate,
+        grantorAuthority: GrantorAuthority,
+    ): CounterpartyNames {
         val grantee = partyEligibilityClient.eligibilityOf(command.granteePartyId)
         if (!grantee.active) {
             throw DelegationEligibilityException("grantee party ${command.granteePartyId} is not active")
         }
         requireGranteeKyc(command, grantee)
-        return CounterpartyNames(grantorName = grantorName, granteeName = grantee.displayName)
+        return CounterpartyNames(
+            grantorName = grantorAuthority.displayName,
+            granteeName = grantee.displayName,
+            grantorPartyType = grantorAuthority.partyType,
+        )
     }
 
     /**
@@ -655,7 +689,11 @@ class DelegationService(
     }
 
     /** The two labels the eligibility lookup yields as a by-product (issue #3604). */
-    private data class CounterpartyNames(val grantorName: String?, val granteeName: String?)
+    private data class CounterpartyNames(
+        val grantorName: String?,
+        val granteeName: String?,
+        val grantorPartyType: String?,
+    )
 
     private companion object {
         const val SCA_PURPOSE_GRANT = "DELEGATION_GRANT"

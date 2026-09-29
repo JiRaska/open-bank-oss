@@ -90,6 +90,17 @@ spec:
       ports:
         - protocol: TCP
           port: 8128
+    # CreditAiLevelResolver (behind CreditAffordabilityTool) reads consent-service's
+    # GET /api/v1/consents/party/{id}/grantee/{id}/active over its private-CA mTLS listener.
+    # This policy is Egress DEFAULT-DENY, so the URL, the client certificate and the upstream's
+    # ingress allow-list are all inert without this rule — the generator emits ingress only.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: consent
+      ports:
+        - protocol: TCP
+          port: 8443
     # OTLP traces to Tempo.
     - to:
         - namespaceSelector:

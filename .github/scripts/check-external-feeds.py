@@ -214,9 +214,6 @@ NOT_PROBED = [
     # (1) IDENTIFIERS, not fetch targets. A URL-shaped string nothing dereferences.
     ("https://www.apache.org/licenses/LICENSE-2.0", "SPDX licence identifier in an embedded SQL header; never fetched"),
     ("https://cyclonedx.org/bom", "CycloneDX schema URI in a Kyverno SBOM policy; an identifier the policy matches on"),
-    ("https://slsa.dev/provenance/v0.2", "SLSA predicate-type URI in the Kyverno provenance policy and predicate builder; an identifier the policy matches on"),
-    ("https://github.com/JiRaska/open-bank-oss", "configSource URI inside the SLSA provenance predicate (as git+https://…); an identifier the admission policy pins, never fetched"),
-    ("https://openbank.dev/buildtypes/github-actions-docker-buildx/v1", "SLSA buildType identifier minted by build-slsa-provenance.py and pinned by the Kyverno policy; an identifier, not a host"),
     ("https://git.k8s.io", "upstream source link in a vendored CRD's description text; never fetched"),
     ("https://github.com/thanos-io/thanos/blob", "upstream doc link in a vendored CRD's description text; never fetched"),
     ("https://github.com/kubernetes-sigs/controller-tools/issues", "upstream issue link in a vendored CRD comment; never fetched"),
@@ -229,8 +226,10 @@ NOT_PROBED = [
     # service. A failure blocks the sync or the pull loudly — it cannot go silent the way a
     # 404 on a data feed did (#2204), which is exactly why they are declared and not probed.
     ("https://github.com/JiRaska/open-bank-oss.git", "this repo, cloned by the realm-drift and tier-classifier CronJobs; a clone failure is loud"),
+    ("https://github.com/infracost/infracost/releases/download", "pinned infracost release binary fetched by the cloud-finops-collector CronJob (ADR-0316); sha256-verified, and a failed download or checksum fails the Job"),
     ("https://gitlab.com", "upstream source repo pinned by the GlitchTip chart; deploy-time"),
     ("https://grafana.github.io", "Helm chart repository; deploy-time, a failure blocks the Argo CD sync"),
+    ("https://grafana-community.github.io", "Helm chart repository (grafana-community successor charts); deploy-time, a failure blocks the Argo CD sync"),
     ("https://open-telemetry.github.io", "Helm chart repository; deploy-time"),
     ("https://prometheus-community.github.io", "Helm chart repository; deploy-time"),
     ("https://argoproj.github.io", "Helm chart repository; deploy-time"),
@@ -270,6 +269,7 @@ NOT_PROBED = [
     # (5) OUR OWN public hostnames, each covered by its own probe or journey CronJob.
     ("https://admin.open-bank.tech", "our own admin-ui ingress; covered by the public-edge journey probe"),
     ("https://api.open-bank.tech", "our own API ingress; covered by the public-edge journey probe"),
+    ("https://pricing.open-bank.tech", "our own pricing-console ingress (internal edge, ADR-0324); its OIDC redirect base"),
     ("https://customer.open-bank.tech", "our own customer ingress; covered by the public-edge journey probe"),
     ("https://kc.open-bank.tech", "our own Keycloak ingress; covered by its own probes"),
     ("https://glitchtip.open-bank.tech", "our own GlitchTip ingress"),

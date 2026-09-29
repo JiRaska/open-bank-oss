@@ -30,6 +30,7 @@ from typing import Any
 BUILD_PREFIX = "build (openbank-"
 STEP_PREFIX = "Build + test (:openbank-"
 VERIFICATION_JOB = "verification-metadata"
+VERIFICATION_PREFIX = f"{VERIFICATION_JOB} ("
 POST_RUN_PREFIX = "Post Run "
 
 
@@ -56,7 +57,9 @@ def classify(
         if not isinstance(job, dict):
             raise ValueError("Actions jobs payload contains a non-object job")
         name = job.get("name")
-        if not isinstance(name, str) or (not name.startswith(BUILD_PREFIX) and name != VERIFICATION_JOB):
+        if not isinstance(name, str) or (not name.startswith(BUILD_PREFIX)
+                                         and name != VERIFICATION_JOB
+                                         and not name.startswith(VERIFICATION_PREFIX)):
             continue
         if job.get("status") != "in_progress":
             continue
@@ -129,7 +132,8 @@ def self_test() -> int:
         ("stalled post-action after completed build is selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
         ("fresh post-action is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:40:00Z"}]}]}, 0),
         ("post-action beside active envelope is not selected", {"jobs": [{**base, "steps": [{"name": "Build + test (:openbank-example-service)", "status": "completed"}, {"name": "Build Test Intelligence run envelope", "status": "in_progress"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 0),
-        ("verification post-action is selected", {"jobs": [{**base, "name": VERIFICATION_JOB, "steps": [{"name": "Check verification metadata", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
+        ("verification post-action is selected", {"jobs": [{**base, "name": "verification-metadata (openbank-billing-service)", "steps": [{"name": "Check verification metadata", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
+        ("legacy verification post-action remains selected", {"jobs": [{**base, "name": VERIFICATION_JOB, "steps": [{"name": "Check verification metadata", "status": "completed"}, {"name": "Post Run actions/setup-java", "status": "in_progress", "started_at": "2026-08-28T11:00:00Z"}]}]}, 1),
         ("other workflow job is not selected", {"jobs": [{**base, "name": "CodeQL (java-kotlin, manual)"}]}, 0),
         # #7477's exact evidence: started_at recorded, every step still queued (or absent).
         ("stale no-first-step job (all queued) is selected", {"jobs": [{**base, "started_at": "2026-08-28T11:50:00Z",

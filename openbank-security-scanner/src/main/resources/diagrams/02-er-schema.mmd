@@ -1,10 +1,28 @@
-%% title: Security Scanner — doménový model (žádné DB tabulky; #4709)
-%% Služba nic neperzistuje. Jediná tabulka `security_outbox` (V2/V3) neměla nikdy zapisovatele
-%% a byla zahozena migrací V4 — databáze drží už jen flyway_schema_history. Všechny entity níže
-%% žijí v paměti (ConcurrentHashMap) a po restartu podu zanikají; nejde tedy o ER schéma
-%% databáze, ale o tvar doménového modelu za REST reportem.
+%% title: Security Scanner — perzistentní ICT incidenty a in-memory výsledky skenů
+%% V6 ukládá každý přechod incidentu atomicky s outbox eventem a striktní revizí.
+%% SecurityScanResult a PlatformSecurityReport zůstávají pouze v paměti.
 erDiagram
 
+    IctIncident {
+        UUID id PK
+        STRING status
+        STRING severity
+        STRING affectedServices
+        LONG aggregateRevision
+        INSTANT updatedAt
+    }
+
+    IctIncidentOutbox {
+        LONG id PK
+        UUID eventId UK
+        UUID aggregateId FK
+        LONG aggregateRevision UK
+        STRING eventType
+        STRING status
+        INSTANT claimedAt
+    }
+
+    IctIncident ||--o{ IctIncidentOutbox : "atomický přechod"
 
     SecurityScanResult {
         UUID id PK "in-memory / report context"

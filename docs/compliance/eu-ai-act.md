@@ -29,12 +29,13 @@ it can move past *Proposed*.
 | `compliance-officer` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ledger-domain-engineer` | development | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ui-assistant` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
-| `rca-investigator` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `rca-investigator` | control | Limited / minimal risk | — | an authorized human may persist its finding only to an incident-response SHADOW case; no autonomous remediation or banking-state effect. |
 | `customer-copilot` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `mcp-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `ap2-anonymous` | customer | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `card-scheme-bulletin-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `card-dispute-evidence-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
+| `treasury-dealing-assistant` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `finops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `devops-agent` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
 | `control-liveness-sentinel` | control | Limited / minimal risk | — | produces proposals only; a human dispositions every effect (not autonomous decision-making on a natural person). |
@@ -111,7 +112,7 @@ not deployed.
 
 ## Provenance
 
-- Source: `openbank-libs/governance/agents.yaml` (sha256 `096f490854700e6a…`, 20 charters)
+- Source: `openbank-libs/governance/agents.yaml` (sha256 `de7a3c5f8ef32da9…`, 21 charters)
 - Source: `openbank-libs/governance/ml-systems.yaml` (sha256 `9cd5cb5b20918520…`, 4 non-agent systems)
 - Related: ADR-0031 (agent governance), ADR-0084 (fraud scoring plane), ADR-0139/0140
   (ML decisioning platform), ADR-0141 (model registry), ADR-0142 (credit decisioning),
