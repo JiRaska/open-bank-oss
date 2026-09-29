@@ -77,7 +77,7 @@ quarkus:
   oidc:
     auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
 
 # OPA sidecar (ADR-0034) for the AI-agent read bridge (query.catalog.readonly). Advisory by
 # default — a denied/unreachable decision is logged at WARN and the request proceeds; product
@@ -169,3 +169,9 @@ openbank:
       # readiness probe and every in-cluster plaintext caller get `connection refused`.
       # mTLS applies to the 8443 listener only. Runtime property; see #10441.
       insecure-requests: enabled
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none
