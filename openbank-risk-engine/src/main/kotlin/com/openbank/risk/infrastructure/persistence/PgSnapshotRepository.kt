@@ -11,6 +11,7 @@ import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.LoanExtension
+import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.Provenance
@@ -78,7 +79,8 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                         run.positionCount,
                         run.mismatches.size,
                         run.requestedBy,
-                    ),
+                        run.ledgerCutOff?.atOffset(ZoneOffset.UTC),
+                    ) + manifestColumns(run.modelVersions),
                 ),
             ).flatMap { result ->
                 if (result.rowCount() == 0) {
@@ -246,6 +248,8 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             positionCount = row.getInteger("position_count"),
             mismatches = mismatches,
             requestedBy = row.getString("requested_by"),
+            modelVersions = readModelVersions(row),
+            ledgerCutOff = row.getOffsetDateTime("ledger_cut_off")?.toInstant(),
         )
     }
 
@@ -257,13 +261,19 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             "SELECT DISTINCT ON (as_of) id, as_of, recorded_at, provenance, status, position_count, " +
                 "mismatch_count, requested_by FROM snapshot_run " +
                 "WHERE status = 'TIED_OUT' AND as_of BETWEEN $1 AND $2 ORDER BY as_of, recorded_at DESC, id"
+
+        const val MANIFEST_COLUMNS =
+            "engine_version, capital_set_id, capital_set_version, liquidity_set_id, liquidity_set_version, " +
+                "irrbb_shock_set_version, irrbb_shock_source, min_reserves_set_id, min_reserves_set_version, " +
+                "behavioural_model_id, behavioural_model_version"
         const val SELECT_RUN =
-            "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count, requested_by " +
-                "FROM snapshot_run"
+            "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count, requested_by, " +
+                "ledger_cut_off, $MANIFEST_COLUMNS FROM snapshot_run"
         const val INSERT_RUN =
             "INSERT INTO snapshot_run (id, as_of, recorded_at, input_hash, provenance, status, " +
-                "position_count, mismatch_count, requested_by) " +
-                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) ON CONFLICT (as_of, input_hash) DO NOTHING"
+                "position_count, mismatch_count, requested_by, ledger_cut_off, $MANIFEST_COLUMNS) " +
+                "VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, " +
+                "$20, $21) ON CONFLICT (as_of, input_hash) DO NOTHING"
         const val INSERT_MISMATCH =
             "INSERT INTO snapshot_tie_out_mismatch (run_id, gl_account_code, currency, ledger_net, positions_net) " +
                 "VALUES ($1, $2, $3, $4, $5)"
@@ -308,3 +318,36 @@ private fun Row.toSummary() = SnapshotRunSummary(
     mismatchCount = getInteger("mismatch_count"),
     requestedBy = getString("requested_by"),
 )
+
+/** In `MANIFEST_COLUMNS` order; all null for a run with no versions. */
+private fun manifestColumns(v: ModelVersions?): List<String?> = listOf(
+    v?.engineVersion,
+    v?.capitalSetId,
+    v?.capitalSetVersion,
+    v?.liquiditySetId,
+    v?.liquiditySetVersion,
+    v?.irrbbShockSetVersion,
+    v?.irrbbShockSource,
+    v?.minReservesSetId,
+    v?.minReservesSetVersion,
+    v?.behaviouralModelId,
+    v?.behaviouralModelVersion,
+)
+
+/** A historic row (recorded before V6) has no engine version, and so no versions at all. */
+private fun readModelVersions(row: Row): ModelVersions? {
+    val engineVersion = row.getString("engine_version") ?: return null
+    return ModelVersions(
+        engineVersion = engineVersion,
+        capitalSetId = row.getString("capital_set_id"),
+        capitalSetVersion = row.getString("capital_set_version"),
+        liquiditySetId = row.getString("liquidity_set_id"),
+        liquiditySetVersion = row.getString("liquidity_set_version"),
+        irrbbShockSetVersion = row.getString("irrbb_shock_set_version"),
+        irrbbShockSource = row.getString("irrbb_shock_source"),
+        minReservesSetId = row.getString("min_reserves_set_id"),
+        minReservesSetVersion = row.getString("min_reserves_set_version"),
+        behaviouralModelId = row.getString("behavioural_model_id"),
+        behaviouralModelVersion = row.getString("behavioural_model_version"),
+    )
+}
