@@ -140,6 +140,10 @@ spec:
               value: http://account-service.accounts.svc:8100
             - name: CARD_ISSUANCE_SERVICE_URL
               value: http://card-issuance-service.payments.svc:8118
+            # External disclosure (#9226): the issued disclosure is rendered, sealed and
+            # exported by document-service. Declared so gen-network-policies.py sees the edge.
+            - name: DOCUMENT_SERVICE_URL
+              value: http://document-service.documents.svc:8143
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot
             # (OIDC defers discovery to the first request) — it just makes every
             # authenticated call fail later with `Name does not resolve`.
