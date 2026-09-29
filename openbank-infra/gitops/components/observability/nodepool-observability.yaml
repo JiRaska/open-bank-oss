@@ -40,6 +40,10 @@ spec:
           value: observability
           effect: NoSchedule
       expireAfter: 720h
+      # #11304: deadline on node termination so a volume that never detaches (Prometheus,
+      # Tempo and goalert-db all hold EBS volumes here) cannot wedge a drain forever. See
+      # the default NodePool in openbank-infra/aws/envs/sandbox-platform/main.tf for why 1h.
+      terminationGracePeriod: 1h
       requirements:
         - key: kubernetes.io/arch
           operator: In
@@ -71,3 +75,8 @@ spec:
   disruption:
     consolidationPolicy: WhenEmptyOrUnderutilized
     consolidateAfter: 1h
+    # #11304: drift replaces one node at a time (default budget would be 10%).
+    budgets:
+      - nodes: "10%"
+      - nodes: "1"
+        reasons: ["Drifted"]

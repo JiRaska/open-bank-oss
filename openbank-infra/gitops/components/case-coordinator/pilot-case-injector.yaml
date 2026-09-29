@@ -1,0 +1,189 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# P3 shadow incident-response swarm case injector (ADR-0244 P3).
+#
+# Opens a single non-money-path SHADOW incident-response case on a schedule. It runs
+# in-cluster so it needs no laptop port-forwards. The case-coordinator-agent gates
+# opens by principal and hour, so the CronJob interval (4h) stays under the
+# maxOpensPerAgentPerHour=1 ceiling.
+#
+# SECURITY:
+# - Suspended by default. Enable it only in sandbox via the runbook (0024).
+# - Uses the shared openbank-services Keycloak client secret mounted from the
+#   case-coordinator-oidc ExternalSecret.
+# - Requests no Kubernetes API access; it only calls Keycloak and case-coordinator.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: p3-shadow-case-injector-script
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: case-coordinator
+    app.kubernetes.io/component: pilot-injector
+    openbank.tech/journey: swarm-shadow-pilot
+    openbank.tech/pilot-phase: p3-shadow
+    # ArgoCD annotation to keep OutOfSync clean on verify-images mutation.
+    argocd.argoproj.io/compare-options: IgnoreExtraneous
+  annotations:
+    # Derived: if the script content changes, ArgoCD must roll the CronJob.
+    openbank.tech/script-checksum: "initial"
+data:
+  injector.js: |
+    import http from 'k6/http';
+    import { check, fail } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        // A 429 means we hit the hourly open cap; that is not a failure of the
+        // service, but it is still useful evidence. The CronJob logs the status
+        // so the pilot owner can detect schedule bursts.
+        checks: ['rate==1.0'],
+      },
+      tags: { journey: 'swarm-shadow-pilot-open' },
+    };
+
+    const KEYCLOAK_URL = __ENV.KEYCLOAK_URL || 'http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.KEYCLOAK_CLIENT_ID || 'openbank-services';
+    const CLIENT_SECRET = __ENV.KEYCLOAK_CLIENT_SECRET || '';
+    const CASE_URL = __ENV.CASE_COORDINATOR_URL || 'http://case-coordinator-agent.platform.svc:8146';
+
+    function randomSubject() {
+      const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const rnd = Math.random().toString(36).slice(2, 8);
+      return `p3-shadow-pilot-${day}-${rnd}`;
+    }
+
+    export default function () {
+      if (!CLIENT_SECRET) {
+        fail('KEYCLOAK_CLIENT_SECRET is required');
+      }
+
+      const tokenRes = http.post(KEYCLOAK_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'keycloak-token' } });
+
+      check(tokenRes, { 'keycloak token 200': (r) => r.status === 200 });
+      if (tokenRes.status !== 200) {
+        console.error(`token endpoint returned ${tokenRes.status}`);
+        return;
+      }
+      const accessToken = tokenRes.json('access_token');
+      if (!accessToken) {
+        fail('access_token missing from Keycloak response');
+      }
+
+      const payload = JSON.stringify({
+        caseClass: 'incident-response',
+        subjectRef: randomSubject(),
+        openedBy: 'case-coordinator',
+        dispositionTarget: 'shadow pilot automated case',
+      });
+
+      const openRes = http.post(`${CASE_URL}/api/v1/case-coordinator/cases`, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        tags: { endpoint: 'case-open' },
+      });
+
+      check(openRes, {
+        'case open accepted': (r) => r.status === 201 || r.status === 429,
+      });
+
+      if (openRes.status === 429) {
+        console.log('case open rate-limited (429) — hourly cap reached');
+      } else if (openRes.status !== 201) {
+        console.error(`case open returned ${openRes.status}`);
+      } else {
+        const caseId = openRes.json('caseId');
+        console.log(`opened case ${caseId}`);
+      }
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: p3-shadow-case-injector
+  namespace: platform
+  labels:
+    app.kubernetes.io/part-of: case-coordinator
+    app.kubernetes.io/component: pilot-injector
+    openbank.tech/journey: swarm-shadow-pilot
+    openbank.tech/pilot-phase: p3-shadow
+spec:
+  # Suspended by default. Enable only in sandbox for the 7-day pilot.
+  suspend: true
+  # Every 4 hours UTC = 6 case-open attempts/day. Stays under maxOpensPerAgentPerHour=1
+  # even after a pod restart clears the in-memory counter.
+  schedule: "0 */4 * * *"
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 300
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 120
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: pilot-injector
+            openbank.tech/journey: swarm-shadow-pilot
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+              imagePullPolicy: IfNotPresent
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/injector.js
+              env:
+                - name: KEYCLOAK_URL
+                  value: "http://keycloak.iam.svc:8080/realms/openbank/protocol/openid-connect/token"
+                - name: KEYCLOAK_CLIENT_ID
+                  value: "openbank-services"
+                - name: KEYCLOAK_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: case-coordinator-oidc
+                      key: OIDC_CLIENT_SECRET
+                - name: CASE_COORDINATOR_URL
+                  value: "http://case-coordinator-agent.platform.svc:8146"
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+                  readOnly: true
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: p3-shadow-case-injector-script
+                defaultMode: 0444

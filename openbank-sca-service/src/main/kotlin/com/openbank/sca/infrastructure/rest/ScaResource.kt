@@ -9,7 +9,11 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.ErrorCode
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.sca.application.port.`in`.ConsumeScaCommand
 import com.openbank.sca.application.port.`in`.ConsumeScaUseCase
 import com.openbank.sca.application.port.`in`.EnrollDeviceCommand
@@ -27,6 +31,8 @@ import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
 import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
+import com.openbank.sca.application.usecase.NonNaturalPersonEnrolmentException
+import com.openbank.sca.application.usecase.PartyRegisterUnavailableException
 import com.openbank.sca.application.usecase.ScaChallengeAlreadyConsumedException
 import com.openbank.sca.application.usecase.ScaChallengeExpiredException
 import com.openbank.sca.application.usecase.ScaChallengeMaxAttemptsException
@@ -60,6 +66,8 @@ import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import java.time.Instant
 import java.util.UUID
 
@@ -69,6 +77,8 @@ data class InitiateScaRequest(
     val preferredMethod: ScaMethod?,
     val dynamicLinkingData: DynamicLinkingData?,
     val redirectUrl: String?,
+    /** The entity the human acts for (`X-Acting-For` at the edge). Context only (#10281 item 3). */
+    val onBehalfOfPartyId: UUID? = null,
 )
 
 data class VerifyScaRequest(val partyId: UUID, val otp: String?)
@@ -111,6 +121,10 @@ data class ScaChallengeResponse(
     val consumedAt: String?,
     val attemptCount: Int,
     val maxAttempts: Int,
+    /** The entity the human acted for, when the challenge was raised under `X-Acting-For`. */
+    val onBehalfOfPartyId: UUID? = null,
+    /** Whose enrolled device decided this challenge (#10281 item 3); null while undecided. */
+    val decidedByPartyId: UUID? = null,
 ) {
     companion object {
         fun from(c: ScaChallenge) = ScaChallengeResponse(
@@ -124,6 +138,8 @@ data class ScaChallengeResponse(
             consumedAt = c.consumedAt?.toString(),
             attemptCount = c.attemptCount,
             maxAttempts = c.maxAttempts,
+            onBehalfOfPartyId = c.onBehalfOfPartyId,
+            decidedByPartyId = c.decidedByPartyId,
         )
     }
 }
@@ -143,6 +159,11 @@ data class PendingScaResponse(
     val reference: String?,
     val expiresAt: String,
     val createdAt: String,
+    /** For an APPROVAL challenge: the approval request being co-signed. */
+    val approvalRequestId: String? = null,
+    /** For an APPROVAL challenge: SHA-256 of the frozen payload the signer is shown. */
+    val payloadSha256: String? = null,
+    val onBehalfOfPartyId: UUID? = null,
 ) {
     companion object {
         fun from(c: ScaChallenge) = PendingScaResponse(
@@ -156,6 +177,9 @@ data class PendingScaResponse(
             reference = c.dynamicLinkingData?.reference,
             expiresAt = c.expiresAt.toString(),
             createdAt = c.createdAt.toString(),
+            approvalRequestId = c.dynamicLinkingData?.approvalRequestId,
+            payloadSha256 = c.dynamicLinkingData?.payloadSha256,
+            onBehalfOfPartyId = c.onBehalfOfPartyId,
         )
     }
 }
@@ -179,6 +203,10 @@ data class ConsumeScaRequest(
     val cardId: String? = null,
     /** The card operation being executed (`LIMIT_INCREASE`, `REVEAL_DETAILS`, ...), for a CARD_MANAGEMENT challenge. */
     val cardAction: String? = null,
+    /** The approval request this consume is scoped to, for an APPROVAL challenge (#10281). */
+    val approvalRequestId: String? = null,
+    /** SHA-256 of the frozen payload being released or co-signed, for an APPROVAL challenge. */
+    val payloadSha256: String? = null,
 )
 
 @Path("/api/v1/sca")
@@ -211,34 +239,47 @@ class ScaResource(
         @HeaderParam("X-Request-ID") xRequestId: String?,
     ): Response {
         val requestKey = idempotencyKey?.takeIf { it.isNotBlank() } ?: xRequestId?.takeIf { it.isNotBlank() }
-        requestKey?.let { key ->
-            idempotencyStore.get(scaCreateKey(request.partyId, key))?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
-        }
-
-        val challenge = initiateSca.initiate(
-            InitiateScaCommand(
-                partyId = request.partyId,
-                purpose = request.purpose,
-                preferredMethod = request.preferredMethod,
-                dynamicLinkingData = request.dynamicLinkingData,
-                redirectUrl = request.redirectUrl,
-            ),
+        val command = InitiateScaCommand(
+            partyId = request.partyId,
+            purpose = request.purpose,
+            preferredMethod = request.preferredMethod,
+            dynamicLinkingData = request.dynamicLinkingData,
+            redirectUrl = request.redirectUrl,
+            onBehalfOfPartyId = request.onBehalfOfPartyId,
         )
-        val responseBody = ScaChallengeResponse.from(challenge)
-        requestKey?.let { key ->
-            idempotencyStore.save(
-                scaCreateKey(request.partyId, key),
-                201,
-                objectMapper.writeValueAsString(responseBody),
-                300,
-            )
+        if (requestKey == null) {
+            return Response.status(201).entity(ScaChallengeResponse.from(initiateSca.initiate(command))).build()
         }
+        // #10916: the key is bound to the request it was first used for, and claimed atomically
+        // BEFORE any challenge is minted — a concurrent duplicate sees InFlight, a different body
+        // sees Mismatch, and neither mints anything.
+        val storeKey = scaCreateKey(request.partyId, requestKey)
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CHALLENGES_PATH, request)
+        when (val reservation = idempotencyStore.reserve(storeKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
+                .type(MediaType.APPLICATION_JSON)
+                .header("X-Idempotency-Replayed", "true")
+                .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
+        }
+        // Any failure (including cancellation) drops the marker so a retry of the same request
+        // can run instead of reading InFlight until the marker's TTL lapses.
+        var completed = false
+        val responseBody = try {
+            ScaChallengeResponse.from(initiateSca.initiate(command)).also { completed = true }
+        } finally {
+            if (!completed) withContext(NonCancellable) { idempotencyStore.release(storeKey, requestHash) }
+        }
+        idempotencyStore.save(
+            storeKey,
+            requestHash = requestHash,
+            statusCode = 201,
+            responseBody = objectMapper.writeValueAsString(responseBody),
+            ttlSeconds = 300,
+        )
         return Response.status(201).entity(responseBody).build()
     }
 
@@ -375,12 +416,18 @@ class ScaResource(
                 ceremonyId = request.ceremonyId,
                 cardId = request.cardId,
                 cardAction = request.cardAction,
+                approvalRequestId = request.approvalRequestId,
+                payloadSha256 = request.payloadSha256,
             ),
         )
         return ScaChallengeResponse.from(challenge)
     }
 
     private fun scaCreateKey(partyId: UUID, requestKey: String) = "sca:initiate:$partyId:$requestKey"
+
+    private companion object {
+        const val CHALLENGES_PATH = "/api/v1/sca/challenges"
+    }
 }
 
 private fun err(code: ErrorCode, msg: String) = ApiError(
@@ -485,4 +532,19 @@ class ScaPartyMismatchMapper : ExceptionMapper<ScaChallengePartyMismatchExceptio
 class ScaDynamicLinkingMismatchMapper : ExceptionMapper<ScaDynamicLinkingMismatchException> {
     override fun toResponse(e: ScaDynamicLinkingMismatchException): Response = Response.status(Response.Status.CONFLICT)
         .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Dynamic linking mismatch")).build()
+}
+
+/** #10281 item 1: a device key belongs to a person, never to a company or trust. */
+@Provider
+class NonNaturalPersonEnrolmentMapper : ExceptionMapper<NonNaturalPersonEnrolmentException> {
+    override fun toResponse(e: NonNaturalPersonEnrolmentException): Response = Response.status(UNPROCESSABLE_ENTITY)
+        .entity(err(ErrorCode.VALIDATION_ERROR, e.message ?: "Device enrolment refused")).build()
+}
+
+/** Fail closed: the register could not say the party is a person, so nothing is enrolled. */
+@Provider
+class PartyRegisterUnavailableMapper : ExceptionMapper<PartyRegisterUnavailableException> {
+    override fun toResponse(e: PartyRegisterUnavailableException): Response =
+        Response.status(Response.Status.SERVICE_UNAVAILABLE)
+            .entity(err(ErrorCode.INTERNAL_ERROR, e.message ?: "Party register unavailable").copy(status = 503)).build()
 }

@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.19.0...delegation-service-v0.20.0) (2026-09-28)
+
+
+### Features
+
+* **delegation:** bind Idempotency-Key to a request fingerprint ([#10959](https://github.com/JiRaska/open-bank-oss/issues/10959)) ([c03b46b](https://github.com/JiRaska/open-bank-oss/commit/c03b46ba873025ad360f3bda6a724370cd022223))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.18.0...delegation-service-v0.19.0) (2026-09-27)
+
+
+### Features
+
+* **libs,delegation:** ADR-0321 resilience-profile gate + first adoption ([#11072](https://github.com/JiRaska/open-bank-oss/issues/11072)) ([3f8b9b4](https://github.com/JiRaska/open-bank-oss/commit/3f8b9b488862bf088717dabaa19208958285f968))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.1...delegation-service-v0.18.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.0...delegation-service-v0.17.1) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.16.0...delegation-service-v0.17.0) (2026-09-19)
+
+
+### Features
+
+* **delegation:** business payment signing - N-of-M approvals, trusted payees, single-use release ([#10315](https://github.com/JiRaska/open-bank-oss/issues/10315)) ([94da2b7](https://github.com/JiRaska/open-bank-oss/commit/94da2b7a8c62f9da48db60ac6477063b0af40b5b))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.15.0...delegation-service-v0.16.0) (2026-09-13)
 
 

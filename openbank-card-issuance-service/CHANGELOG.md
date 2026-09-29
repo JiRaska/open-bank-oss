@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.26.7](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.6...card-issuance-service-v0.26.7) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.26.6](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.5...card-issuance-service-v0.26.6) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
 ## [0.26.5](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.4...card-issuance-service-v0.26.5) (2026-09-13)
 
 

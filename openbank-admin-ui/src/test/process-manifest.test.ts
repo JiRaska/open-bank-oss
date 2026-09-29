@@ -7,7 +7,7 @@
 // this fails the same way `next build` does — the manifest is the contract.
 import { describe, it, expect } from 'vitest'
 import { loadAllProcesses, listProcessSlugs, loadProcess } from '@/lib/docs/process/load'
-import { overallScore } from '@/lib/docs/process/schema'
+import { overallScore } from '@/lib/docs/process/score'
 
 describe('process manifests', () => {
   it('every manifest validates against ProcessSchema', () => {

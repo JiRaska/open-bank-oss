@@ -115,4 +115,30 @@ class SignatureCeremonyTest {
     private companion object {
         val FIXED_NOW: Instant = Instant.parse("2026-01-15T10:15:30Z")
     }
+
+    @Test
+    fun `a sequential ceremony still refuses the second signer first, a parallel one accepts it`() {
+        fun ceremony(parallel: Boolean) = SignatureCeremony(
+            id = java.util.UUID.randomUUID(),
+            documentId = java.util.UUID.randomUUID(),
+            signers = listOf(
+                Signer("p1", 1, SignerStatus.PENDING, null),
+                Signer("p2", 2, SignerStatus.PENDING, null),
+            ),
+            status = CeremonyStatus.PENDING,
+            signatureLevel = SignatureLevel.ADVANCED,
+            createdAt = java.time.Instant.EPOCH,
+            parallel = parallel,
+        )
+        val now = java.time.Instant.EPOCH
+
+        org.assertj.core.api.Assertions.assertThatThrownBy {
+            ceremony(parallel = false).recordDecision("p2", SignerStatus.SIGNED, now)
+        }.isInstanceOf(IllegalArgumentException::class.java)
+
+        val partly = ceremony(parallel = true).recordDecision("p2", SignerStatus.SIGNED, now)
+        org.assertj.core.api.Assertions.assertThat(partly.status).isEqualTo(CeremonyStatus.PARTIALLY_SIGNED)
+        val done = partly.recordDecision("p1", SignerStatus.SIGNED, now)
+        org.assertj.core.api.Assertions.assertThat(done.status).isEqualTo(CeremonyStatus.COMPLETED)
+    }
 }

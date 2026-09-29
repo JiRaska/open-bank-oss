@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.0...mcp-service-v0.17.1) (2026-09-23)
+
+
+### Security
+
+* **agent:** own M2M identities for the AI-agent reads and the statement search ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 7) ([#10551](https://github.com/JiRaska/open-bank-oss/issues/10551)) ([5a25631](https://github.com/JiRaska/open-bank-oss/commit/5a25631fffd69f9f5ea653d36b5b5718bb35e951))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.16.0...mcp-service-v0.17.0) (2026-08-24)
 
 

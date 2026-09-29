@@ -6,7 +6,7 @@ package com.openbank.document.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
-import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.Path
@@ -25,7 +25,9 @@ import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
  */
 @RegisterRestClient(configKey = "account-service-api")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 5: the account lookup (account.list) is minted by the NAMED oidc-client `m2m` -
+// Keycloak client `openbank-document` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Produces(MediaType.APPLICATION_JSON)
 interface AccountClient {
     @GET

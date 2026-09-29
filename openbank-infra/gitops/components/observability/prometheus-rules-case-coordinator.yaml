@@ -1,0 +1,46 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-case-coordinator-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.case-coordinator.shadow-pilot
+      interval: 1m
+      rules:
+        - alert: ShadowPilotKillSwitchActive
+          expr: openbank_casecoordinator_kill_switch_active == 1
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Case-coordinator kill-switch is active"
+            description: "The {{ $labels.scope }} kill-switch was set and has remained active for more than 15 minutes."
+        - alert: ShadowPilotHaltLatencySlo
+          expr: |
+            histogram_quantile(0.99,
+              sum by (le, caseClass, deliveryMode) (
+                rate(openbank_casecoordinator_halt_latency_seconds_bucket[5m])
+              )
+            ) > 240
+          for: 2m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Shadow pilot halt latency exceeds the 240 s read-model SLO"
+            description: "p99 halt latency for {{ $labels.caseClass }}/{{ $labels.deliveryMode }} is {{ $value | humanizeDuration }}."
+            subject_period: continuous
+        - alert: ShadowPilotCasesStuck
+          expr: |
+            sum by (caseClass, deliveryMode) (openbank_casecoordinator_active_cases{status=~"OPEN|CONTESTED"}) > 0
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "Shadow pilot has open or contested cases for more than 30 minutes"
+            description: "There are active cases in {{ $labels.caseClass }}/{{ $labels.deliveryMode }} for more than 30 minutes; this may be expected during a drill."

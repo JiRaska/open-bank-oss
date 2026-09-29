@@ -85,6 +85,16 @@ the run dies with `QuarkusBindException`) — so a genuine lint violation reache
 gate looked like it had merely flaked. Read which tasks actually appear in the output, and re-run
 the cheap checks (`ktlintCheck detekt`, seconds) on their own after fixing a test failure.
 
+- **The shared Gradle build cache is live infrastructure while any build runs on the machine —
+  clearing it mid-build produces spurious `NoSuchFileException` task failures, not a clean slate.**
+  `~/.gradle/caches/build-cache-1` is written to and read from concurrently by every Gradle process
+  on the host; deleting it while another session's build is in flight races that build's own
+  writes/reads and fails its tasks with a missing-file error that looks like a build system bug.
+  Only clear it when nothing is building.
+- **Never `pkill -f gradle-wrapper.jar` (or any pattern-based kill) on a shared machine.** This host
+  runs multiple parallel agent sessions; a pattern match kills every Gradle daemon on the box,
+  including builds you did not start. Kill only PIDs your own session launched.
+
 ## Skills
 
 - `/ship-check` — authoritative pre-merge preflight; mirrors the CI gates.
@@ -118,6 +128,18 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   coroutine test runner.
 - **`openbank.outbox.dispatch-enabled` defaults to `false`.** Any service with an outbox entity must
   set it `true` in `application.yaml`, or events never dispatch (no error, `attempt_count` stays 0).
+- **After changing an INTERFACE, an incremental `:test` is not evidence — Gradle will not recompile
+  the anonymous implementations that no longer satisfy it.** Adding one member to
+  `CapitalizeInterestUseCase` broke both `object : CapitalizeInterestUseCase` stubs in
+  `InterestWorkflowLivenessTest`, and **every local run stayed green**: the test file had not
+  changed, so the incremental compiler left it alone and `:test` passed against a stale class file
+  while the interface beneath it had grown an abstract member. CI builds clean and failed
+  `compileTestKotlin` on the first try. Re-run `:<svc>:build --rerun-tasks` after any interface
+  change — it is the only local invocation that reproduces what CI does, and it costs ~90 s. Same
+  hazard as the constructor/`lateinit` note under Flyway ("the constructor or field shape of any
+  class a test instantiates by hand"), reached from the other side: there the test changes and the
+  class does not, here the interface changes and the test does not. Both are invisible until
+  something compiles from scratch.
 - **CDI wiring isn't validated by `ktlintCheck` + unit tests.** Add `:svc:quarkusBuild` to your
   pre-push gate; ArC/CDI failures only surface there.
 - **Panache reactive `persist()` on an application-assigned `@Id` is INSERT-only — use `merge` for
@@ -393,18 +415,56 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   attestation is earned by this workflow with its run URL as `ref`, so while a service could not be
   fuzzed, C7=Bank-grade was blocked on an event that could not happen for it.
 
+- **MicroProfile `ResponseExceptionMapper` never sees the outgoing request's headers, and a
+  connect/timeout failure produces no response for it to map at all.** It only gets a chance once a
+  response comes back, so conditioning a retry decision on a request property (e.g. an
+  idempotency/retry header) has to happen earlier in the pipeline — pair a `ClientRequestFilter`
+  (to stash the property) with a `ClientResponseFilter` (to read it back), and handle
+  `ProcessingException` separately for the no-response case (ADR-0321, #11014).
+- **Idempotency lookup-then-save is a race, not a guard.** Two concurrent requests carrying the
+  same `Idempotency-Key` can both pass a `find`-then-`persist` check and both proceed. Reserve the
+  key atomically first (Redis `SET NX`, or a Lua script) and save with a compare-and-set that never
+  overwrites a *different* request fingerprint stored under the same key; release the reservation
+  only on failure — never after a committed success and never on a replay. A durable DB-level dedupe
+  table must also compare the fingerprint, not just the key's presence, or eviction from Redis lets
+  the first payment's key replay against a different payload (#10922, #10948, #10958).
+- **A canonical form used for hashing/fingerprinting must be injective, or two different requests
+  hash the same.** `key=value` pairs joined by `\n` collide whenever a value itself contains `\n` or
+  `=` — the delimiter is ambiguous. Use a length-prefixed encoding, or RFC 8785 (JSON Canonicalization
+  Scheme, which orders keys by UTF-16 code unit) instead of an ad hoc join (#11017, #10926).
+- **`java.net.http.HttpClient` re-resolves DNS at connect time — checking a hostname's IP once and
+  proceeding does not stop DNS rebinding.** A validated-then-cached IP is not what the client
+  actually connects to; the JDK does its own resolution on every request. Pin the vetted IP into the
+  request (e.g. via a custom `Authenticator`/socket factory or an explicit connect-to override), not
+  just into a pre-flight check (#11021).
+- **RESTEasy Reactive's `UriInfo.path` starts with a leading `/` — a prefix check written without
+  it silently never matches.** `path.startsWith("api/v1/...")` against an actual path of
+  `/api/v1/...` is always false, so a filter gated on that check never runs, and nothing errors: the
+  request just skips the gate. A mock-based unit test that stubs `UriInfo` cannot see this — only a
+  real-HTTP `@QuarkusTest` reproduces the actual path shape. Two eIDAS/QSEAL/deprecation filters in
+  psd2 shipped this way (#10997, fixed by #11008; advisory gate added in #11030).
+- **OpenBao/Vault Transit `rewrap` has no documented `associated_data` parameter, and an unknown
+  field is silently ignored (with a warning), not rejected.** Passing AAD to `rewrap` the way you
+  would to `encrypt`/`decrypt` looks like it works — the call succeeds — but proves nothing about
+  whether the ciphertext is actually bound to that context. Verify AAD binding against a real
+  OpenBao/Vault container (attempt a rewrap with mismatched AAD and confirm it fails), never against
+  a stub that just echoes success (#11038).
+
 ### ktlint
 - Path-scoped CI only lints changed files, so a pre-existing wildcard import or a latent
   `function-signature` violation surfaces the first time you touch an older file. Let `ktlintFormat`
   collapse multi-line signatures; expand wildcard imports rather than hand-wrapping.
 
 ### detekt
-- **`MagicNumber` fires on the fleet-standard percentile triple.** `publishPercentiles(0.5, 0.95, 0.99)`
-  is 3 violations per call site — `DomainMetrics` only escapes via
-  `openbank-libs-runtime/detekt-baseline.xml`, a new per-service adapter has no such cover. Declare
-  `private const val P50/P95/P99` in the adapter's `companion object` (`ignoreConstantDeclaration` is
-  on by default). The `Timer.builder` and `DistributionSummary.builder` call sites usually differ in
-  indentation — a single find-and-replace fixes only one.
+- **`MagicNumber` fires on the fleet-standard percentile triple — use the shared helper, don't
+  redeclare constants.** `publishPercentiles(0.5, 0.95, 0.99)` is 3 violations per call site.
+  `com.openbank.libs.observability.Percentiles` (openbank-libs-runtime) plus the
+  `Timer.Builder`/`DistributionSummary.Builder` extension `standardPercentiles()` (#10932) replaced
+  the ten fleet-wide copies of `private const val P50/P95/P99` — call `.standardPercentiles()`
+  instead of declaring your own constants. Only `DomainMetrics` had ever accumulated an explicit
+  `openbank-libs-runtime/detekt-baseline.xml` waiver for this; the rest avoided the rule via
+  `ignoreConstantDeclaration` on their own now-redundant `private const val` fields, which the
+  helper lets you delete outright rather than baseline.
 - **`LongParameterList` fires AT the threshold, not above it.** `config/detekt/detekt.yml` sets
   `constructorThreshold: 9`, so a 9-parameter constructor is reported — adding a metrics port to an
   8-param endpoint fails the gate. Use field injection
@@ -530,6 +590,13 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   artifacts, and make the exclusions the thing a human has to justify.
 
 ### OPA / authorization
+- **`@DefaultBean` on a security producer (e.g. a `PolicyDecisionPoint`) turns a build-time
+  ambiguity into silent fail-open displacement.** `@DefaultBean` exists specifically to let a
+  second, more specific producer for the same type quietly WIN over it with no error — the opposite
+  of what a security-critical bean needs. A second `PolicyDecisionPoint` producer surviving in a
+  service's own `src/main` should fail `quarkusBuild` as an ambiguous CDI dependency, forcing a
+  human to resolve which decision point is authoritative, not have one silently displace the other.
+  Use plain `@Produces` behind an opt-in `@IfBuildProperty` instead (#10952).
 - **`input.principal.type == "SERVICE"` can never fire — don't write it.** `AuthorizeInterceptor`
   only ever emits `ANONYMOUS`/`AI_AGENT`/`HUMAN`; M2M callers authenticate with a Keycloak
   client_credentials JWT, which the interceptor classifies as `HUMAN`, and no realm client is ever
@@ -652,6 +719,12 @@ fire from *outside* it, so they stay here:
   `mermaid-parses` gate, which parses every block with admin-ui's own mermaid.
 
 ### Multi-agent / parallel work
+- **A review fix pushed to a PR branch AFTER auto-merge fires is silently lost — the squash already
+  happened.** `gh pr merge --auto` squash-merges the moment checks go green, which can be before a
+  requested review fix lands; a push after that point updates a branch whose PR is already closed,
+  and nothing errors on the push. Check `gh pr view --json state` before pushing a fix, and if the
+  PR already merged, cherry-pick the lost commit into a new PR instead of assuming the push landed
+  (#10927, recovered as #10990).
 - **Commit and push early — a `/private/tmp` worktree can vanish mid-edit.** Several agent
   sessions share this machine and a worktree directory is one `worktree remove`/cleanup away from
   gone; the branch ref survives, your uncommitted diff does not. Stage in small commits and push
@@ -722,6 +795,33 @@ fire from *outside* it, so they stay here:
   after. One command; it is knowing to run it that costs. Most exposed: JSON/YAML maps every
   service registers itself in — the release manifest, `gates.yaml`, `rules.yaml` lists,
   `event-contract-baseline.txt`.
+- **The UNION resolution has the opposite failure to a whole-file take, and it compiles or parses
+  often enough to reach CI.** Resolving an append-only conflict by keeping both sides is right for
+  a change log and wrong the moment the other side EDITED your text rather than appending next to
+  it. Three in one merge on 2026-09-20, all from the same mechanical resolver: a threat-model
+  paragraph `main` had rewritten came back as both versions spliced into one garbled sentence; an
+  add/add on a test file emitted **two** `companion object` blocks, which at least failed to
+  compile; and an `application.yaml` gained a second `rest-client:` key under the same mapping —
+  which parses, is legal YAML, and silently drops everything but the last of the duplicated key
+  (the SmallRye/SnakeYAML trap above), so the union deleted the very TLS bucket the PR existed to
+  add. Union REMOVALS freely (a line either side deleted stays deleted, which is what a shrinking
+  baseline wants); union ADDITIONS only after checking the other side did not edit the same lines.
+  Then diff the merged result against what you merged into — `git diff origin/main --name-only` —
+  and open every file whose presence you cannot explain: the domestic-payment file was in that list
+  for no reason this PR could account for, and that is what exposed all three.
+- **A diff-scoped gate must be re-run AFTER the commit, because its subject is the commit.** Same
+  merge: `check-threat-model-diff.py --base origin/main` was run against a working tree, read exit
+  0, and was believed — then the commit landed and CI failed it. Nothing had regressed; the tree
+  the green described no longer existed, because the fix that ran between them (reverting a
+  threat-model file to `main`'s content) is exactly what removed it from the diff the gate reads.
+  A file that becomes IDENTICAL to main leaves the changed set, so its paired change — here a
+  shared `payments-services.yaml` hunk — is suddenly unaccompanied. Generalises to every gate
+  keyed on "changed files": the working tree is not the diff.
+- **An advisory gate prints its finding and exits 0, so `echo $?` reads clean on a real defect.**
+  `check-duplicate-yaml-keys.sh` DID report the duplicated `rest-client:` key above, on stdout,
+  while returning 0 and a trailing `ADVISORY mode — not failing the build`. Checking the status
+  instead of the output turned a caught defect into an uncaught one. For any advisory gate, grep
+  the OUTPUT for findings; the exit code answers a different question.
 - **A finding from a CI run goes stale in MINUTES while a parallel agent is active — re-check
   before acting on it.** Three times in one session a ktlint/test failure was already fixed by the
   time the fix was written: the branch had moved (`db25c9ac8` -> `629aff176`,

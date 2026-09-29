@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.13.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.12.0...finrep-service-v0.13.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** render C 02.00 from the engine's CZK total ([#11169](https://github.com/JiRaska/open-bank-oss/issues/11169)) ([7f567a9](https://github.com/JiRaska/open-bank-oss/commit/7f567a976ca57f26daf2d3eafb2a8a68850f451d))
+
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.11.0...finrep-service-v0.12.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** COREP C 73.00 LCR outflows from the risk engine ([#11098](https://github.com/JiRaska/open-bank-oss/issues/11098)) ([5b05987](https://github.com/JiRaska/open-bank-oss/commit/5b059872ab495619f5f124554519c14b69bf77bb))
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.2...finrep-service-v0.11.0) (2026-09-27)
+
+
+### Features
+
+* **finrep:** COREP C 02.00 own funds requirements from the risk engine ([#11001](https://github.com/JiRaska/open-bank-oss/issues/11001)) ([1bd04df](https://github.com/JiRaska/open-bank-oss/commit/1bd04df13614c8d145dfb116f398d8340bbde461))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.10.1...finrep-service-v0.10.2) (2026-08-27)
 
 

@@ -6,6 +6,7 @@ package com.openbank.interest.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.DefaultValue
@@ -28,7 +29,10 @@ import java.util.UUID
  */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 5: the accrual run's account reads (account.list, account.read) are minted by the
+// NAMED oidc-client `ledger` - Keycloak client `openbank-interest` (ROLE_API only), the same
+// identity its ledger and transaction legs already use - never the shared `openbank-services` one.
+@OidcClientFilter("ledger")
 @Produces(MediaType.APPLICATION_JSON)
 @Path("/api/v1/accounts")
 interface AccountServiceClient {

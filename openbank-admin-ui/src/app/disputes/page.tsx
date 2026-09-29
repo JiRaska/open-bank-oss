@@ -134,7 +134,7 @@ export default function DisputesPage() {
                 ? t('Služba běží, zatím žádné spory.', 'The service is running; no disputes yet.')
                 : t('Žádné výsledky pro zadaný filtr.', 'No results for the applied filter.')} />
           ) : (
-            <div style={{ overflowX: 'auto' }}>
+            <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka sporů', 'Scrollable disputes table')}>
               <table className="table">
                 <thead><tr>
                   {[t('Reference', 'Reference'), t('Typ', 'Type'), t('Transakce', 'Transaction'), t('Částka', 'Amount'), t('Status', 'Status'), t('SLA', 'SLA'), t('Vytvořeno', 'Created')].map(h => (

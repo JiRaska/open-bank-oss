@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service governance manifest (ADR-0071). Declarative, curatorial facts only —
+# derived fields (Flyway/apiVersion) and runtime drift live elsewhere. Schema:
+# openbank-libs/governance/governance.schema.json
+#
+# Balance-sheet risk engine (ADR-0313, ADR-0314). Read-only: it pulls the ledger trial balance
+# and sub-ledger balances, stores a tied-out contract-level snapshot and never writes the ledger.
+dataDomain: core
+primaryDatastore: PostgreSQL
+databaseName: openbank_risk
+dataLineageRole: consumer
+dataClassification: confidential
+retentionPolicy: 10 years
+evidenceExported: false
+lineage:
+  upstream:
+    - serviceName: fx-service
+      relationType: topic
+      description: consumes openbank.fx.fixing.published into fx_fixing_rate (ADR-0314 D5)
+  downstream:
+    - serviceName: ledger-service
+      relationType: api
+      description: reads the trial balance and deposit-control sub-ledger balances via LedgerClient
+databaseLineage:
+  ownedDatabases:
+    - openbank_risk
+  dependentDatabases: []

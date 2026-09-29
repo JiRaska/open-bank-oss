@@ -175,7 +175,7 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -211,6 +211,11 @@ jobs:
                        || grep -qE '(^| )openbank-settlement-service( |$)' <<< " $CHANGED "; } \
                      && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
                     CHANGED="$CHANGED openbank-simulation"
+                  fi
+                  # Generated-client edge (ADR-0319) — same as the PR path.
+                  if grep -qE '(^| )openbank-product-catalog( |$)' <<< " $CHANGED " \
+                     && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
+                    CHANGED="$CHANGED openbank-client-product-catalog"
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
@@ -288,7 +293,7 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
@@ -346,6 +351,11 @@ jobs:
                  && ! grep -qE '(^| )openbank-simulation( |$)' <<< " $CHANGED "; then
                 echo "Decision: money-path change -> add openbank-simulation (DST harness, ADR-0115/#267)."
                 CHANGED="$CHANGED openbank-simulation"
+              fi
+              # Generated-client edge (ADR-0319): the client's input is the provider's openapi.yaml.
+              if grep -qE '(^| )openbank-product-catalog( |$)' <<< " $CHANGED " \
+                 && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
+                CHANGED="$CHANGED openbank-client-product-catalog"
               fi
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
@@ -448,7 +458,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
-        if: steps.mods.outputs.modules != ''
         with:
           distribution: temurin
           java-version: "25"

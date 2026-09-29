@@ -149,7 +149,11 @@ class TransactionResource(
     }
 
     @POST
-    @RolesAllowed(Roles.OPERATOR)
+    // #10486: ROLE_API is admitted so a per-service machine identity (ROLE_API only) can reach
+    // OPA at all — RBAC runs before it. OPA is then the whole control for ROLE_API callers, and it
+    // is identity-gated: transaction_rest_ext.rego grants transaction.create to five named
+    // service accounts and denies every other ROLE_API holder.
+    @RolesAllowed(Roles.API, Roles.OPERATOR)
     @Authorize(action = "transaction.create", resource = "")
     @Operation(summary = "Initiate a new transaction")
     suspend fun initiateTransaction(

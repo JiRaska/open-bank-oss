@@ -2,7 +2,7 @@
 
 'use client'
 
-import { FormEvent, useMemo, useState } from 'react'
+import { FormEvent, useMemo, useRef, useState } from 'react'
 import { Network, ShieldCheck } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { parseContextNeighborhood, type ContextNeighborhood } from '@/lib/context/graph'
@@ -37,16 +37,24 @@ export function ComplaintContextInvestigation() {
       || left.sourceSystem.localeCompare(right.sourceSystem)
       || left.sourceVersion - right.sourceVersion), [graph])
 
+  const requestVersion = useRef(0)
+  function clearResult() {
+    requestVersion.current++; setGraph(null); setSelected(null); setState('idle')
+  }
+
   async function investigate(event: FormEvent) {
-    event.preventDefault(); setState('loading'); setGraph(null); setSelected(null)
+    event.preventDefault(); const version = ++requestVersion.current; setState('loading'); setGraph(null); setSelected(null)
     try {
       const params = new URLSearchParams({ caseId: caseId.trim(), purpose: purpose.trim() })
       const response = await fetch(`/api/context/complaints/${encodeURIComponent(reference.trim())}?${params}`)
+      if (version !== requestVersion.current) return
       if (response.status === 403) { setState('denied'); return }
       if (response.status === 404) { setState('missing'); return }
       if (!response.ok) { setState('error'); return }
-      setGraph(parseContextNeighborhood(await response.json())); setState('idle')
-    } catch { setState('error') }
+      const result = parseContextNeighborhood(await response.json())
+      if (version !== requestVersion.current) return
+      setGraph(result); setState('idle')
+    } catch { if (version === requestVersion.current) setState('error') }
   }
 
   return <section className="card" style={{ padding: 20, marginBottom: 24 }} aria-labelledby="complaint-context-title">
@@ -60,9 +68,9 @@ export function ComplaintContextInvestigation() {
         'The graph loads only for an actively assigned case and purpose. Every read is audited.')}
     </p>
     <form onSubmit={investigate} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 10 }}>
-      <input className="input" required maxLength={200} value={reference} onChange={e => setReference(e.target.value)} placeholder={t('Reference reklamace', 'Complaint reference')} aria-label={t('Reference reklamace', 'Complaint reference')} />
-      <input className="input" required maxLength={200} value={caseId} onChange={e => setCaseId(e.target.value)} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
-      <input className="input" required maxLength={80} value={purpose} onChange={e => setPurpose(e.target.value.toUpperCase())} placeholder={t('Účel', 'Purpose')} aria-label={t('Účel vyšetřování', 'Investigation purpose')} />
+      <input className="input" required maxLength={200} value={reference} onChange={e => { clearResult(); setReference(e.target.value) }} placeholder={t('Reference reklamace', 'Complaint reference')} aria-label={t('Reference reklamace', 'Complaint reference')} />
+      <input className="input" required maxLength={200} value={caseId} onChange={e => { clearResult(); setCaseId(e.target.value) }} placeholder={t('ID případu', 'Case ID')} aria-label={t('ID případu', 'Case ID')} />
+      <input className="input" required maxLength={80} value={purpose} onChange={e => { clearResult(); setPurpose(e.target.value.toUpperCase()) }} placeholder={t('Účel', 'Purpose')} aria-label={t('Účel vyšetřování', 'Investigation purpose')} />
       <button className="btn btn-primary" disabled={state === 'loading'}>{state === 'loading' ? t('Načítám…', 'Loading…') : t('Zobrazit graf', 'Show graph')}</button>
     </form>
     {state === 'denied' && <p role="alert" style={{ color: 'var(--danger)' }}>{t('Pro tento případ nemáte aktivní oprávnění.', 'You do not have an active assignment for this case.')}</p>}

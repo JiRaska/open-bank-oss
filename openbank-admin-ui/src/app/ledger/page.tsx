@@ -208,7 +208,7 @@ export default function LedgerPage() {
         </p>}
 
         {(!unavailable || result) && (
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka hlavní knihy', 'Scrollable general ledger table')}>
           <table className="data-table">
             <thead>
               <tr>

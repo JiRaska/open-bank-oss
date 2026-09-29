@@ -25,6 +25,9 @@ dependencies {
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.opentelemetry)
     implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.oidc.client.reactive.filter)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.redis.client)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
@@ -56,6 +59,14 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // sca-events-out Kafka emitter is switched to in-memory connector in tests.
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+}
+
+tasks.test {
+    // The party-register REST + OIDC clients (#10281 item 1) pushed the module suite past Gradle's
+    // default test heap: with several Quarkus test profiles booted in one fork it died with
+    // OutOfMemoryError mid-ScaServiceTest (measured twice, reproducible). Same 2 GiB override the
+    // account/lending/delegation suites carry.
+    maxHeapSize = "2g"
 }
 
 kover {

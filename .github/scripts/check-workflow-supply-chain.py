@@ -42,6 +42,10 @@ def grant_drift(actual, expected):
 
 def findings(name, doc):
     errors = []
+    # A personal subscription credential must never be wired into CI, even if
+    # an agent workflow is accidentally re-enabled or the reference moves.
+    if 'CLAUDE_CODE_OAUTH_TOKEN' in str(doc):
+        errors.append('personal model subscription credential is forbidden in workflows')
     jobs = doc.get('jobs', {})
     events = doc.get('on', doc.get(True, {}))
     if isinstance(events, dict) and 'pull_request' in events and not doc.get('concurrency'):

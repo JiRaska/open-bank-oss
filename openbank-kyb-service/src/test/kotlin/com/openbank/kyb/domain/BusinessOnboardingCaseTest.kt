@@ -4,9 +4,11 @@
 
 package com.openbank.kyb.domain
 
+import com.openbank.kyb.domain.model.AgreementRecord
 import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.CaseTransitionException
+import com.openbank.kyb.domain.model.DisclosureAcceptance
 import com.openbank.kyb.domain.model.EntityStatus
 import com.openbank.kyb.domain.model.ExtractVerification
 import com.openbank.kyb.domain.model.IdentifierScheme
@@ -58,6 +60,27 @@ class BusinessOnboardingCaseTest {
         fetchedAt = now,
     )
 
+    private val ceremony = UUID.randomUUID()
+
+    private val record = AgreementRecord(
+        documentId = UUID.randomUUID(),
+        ceremonyId = ceremony,
+        templateCode = "RAMCOVA_SMLOUVA_PO_CS",
+        templateVersion = "1.0.0",
+        sha256 = "a".repeat(64),
+        lang = "cs",
+    )
+
+    /**
+     * [party] signs the case's ceremony, having accepted the annexes. The agreement preconditions
+     * are exercised by their own tests below; most tests here are about what a signature DOES.
+     */
+    private fun BusinessOnboardingCase.signs(party: UUID, highRisk: Set<String> = emptySet()): BusinessOnboardingCase {
+        val a = agreement ?: record
+        return copy(agreement = a.copy(acceptances = a.acceptances + DisclosureAcceptance(party, now)))
+            .signed(party, ceremony.toString(), now, highRisk)
+    }
+
     /** The initiator's identity as party-service verified it — matching is against THIS, never a claimed name. */
     private fun me(name: String, address: RegisteredAddress? = null, verified: Boolean = true) =
         InitiatorIdentity(name, address, verified)
@@ -103,7 +126,7 @@ class BusinessOnboardingCaseTest {
             .initiatorMatched(0, me("Jan Novák"), now)
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         assertThat(case.requiredSignatures).isEqualTo(1)
-        val signed = case.signed(initiator, "ceremony-1", now)
+        val signed = case.signs(initiator)
         assertThat(signed.status).isEqualTo(CaseStatus.SIGNED)
         assertThat(signed.entityPartyActivated(now).status).isEqualTo(CaseStatus.ACTIVE)
     }
@@ -129,7 +152,7 @@ class BusinessOnboardingCaseTest {
 
         // Signing before the co-signer is identified is allowed for the initiator but does not complete.
         val cosigner = UUID.randomUUID()
-        case = case.signed(initiator, "ceremony-a", now)
+        case = case.signs(initiator)
         assertThat(case.status).isEqualTo(CaseStatus.AWAITING_COSIGNERS)
 
         case = case.signerIdentified("tok-1", cosigner, now)
@@ -138,7 +161,7 @@ class BusinessOnboardingCaseTest {
             case.signerIdentified("tok-1", UUID.randomUUID(), now)
         }.isInstanceOf(CaseTransitionException::class.java)
 
-        case = case.signed(cosigner, "ceremony-b", now)
+        case = case.signs(cosigner)
         assertThat(case.status).isEqualTo(CaseStatus.SIGNED)
         assertThat(case.signedCount).isEqualTo(2)
     }
@@ -219,7 +242,7 @@ class BusinessOnboardingCaseTest {
             .entityPartyActivated(now)
         assertThat(case.status).isEqualTo(CaseStatus.READY_TO_SIGN)
         assertThat(case.entityPartyActive).isTrue()
-        assertThat(case.signed(initiator, "c", now).status).isEqualTo(CaseStatus.ACTIVE)
+        assertThat(case.signs(initiator).status).isEqualTo(CaseStatus.ACTIVE)
     }
 
     @Test
@@ -229,7 +252,7 @@ class BusinessOnboardingCaseTest {
         )
             .initiatorMatched(0, me("Jan Novák"), now)
         assertThatThrownBy {
-            case.signed(UUID.randomUUID(), "x", now)
+            case.signs(UUID.randomUUID())
         }.isInstanceOf(CaseTransitionException::class.java)
         val abandoned = case.abandoned(now)
         assertThatThrownBy { abandoned.rejected("no", now) }.isInstanceOf(IllegalArgumentException::class.java)
@@ -433,9 +456,9 @@ class BusinessOnboardingCaseTest {
 
         // And even if it somehow did, the terminal transition refuses the wrong pair.
         val forced = case.copy(status = CaseStatus.READY_TO_SIGN)
-        val afterChair = forced.signed(initiator, "ceremony-chair", now)
+        val afterChair = forced.signs(initiator)
         val member = forced.signers.first { it.fullName == "Milan Member" }.partyId!!
-        val done = afterChair.signed(member, "ceremony-member", now)
+        val done = afterChair.signs(member)
 
         assertThat(done.status)
             .describedAs("chair + ordinary member must never bind a chair + vice-chair rule")
@@ -585,8 +608,8 @@ class BusinessOnboardingCaseTest {
         case = case.signerIdentified("tok-member", UUID.randomUUID(), now)
         val member = case.signers.first { it.fullName == "Milan Member" }.partyId!!
         case = case.copy(status = CaseStatus.READY_TO_SIGN)
-            .signed(initiator, "ceremony-chair", now)
-            .signed(member, "ceremony-member", now)
+            .signs(initiator)
+            .signs(member)
         assertThat(case.status).isEqualTo(CaseStatus.MANUAL_REVIEW)
 
         val accepted = case.reviewResolved(2, now, emptyList())

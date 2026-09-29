@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for statement-service's mTLS calls to document-service (8443, client auth
+# REQUIRED) — the DocumentTemplateRestAdapter template read (#10383). Same shape as notification-internal-tls and sca-internal-tls:
+# tls.crt/tls.key identify the caller, ca.crt trusts document-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: statement-service-internal-tls
+  namespace: statements
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: statement-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: statement-service.statements.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

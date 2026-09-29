@@ -5,6 +5,7 @@ package com.openbank.interest.integration
 
 import com.openbank.interest.application.port.out.CapitalizationPosting
 import com.openbank.interest.application.port.out.LedgerPostingPort
+import com.openbank.interest.application.port.out.LedgerPostingRejectedException
 import com.openbank.interest.infrastructure.client.CapitalizationJournalFactory
 import com.openbank.interest.infrastructure.client.InterestLedgerConfig
 import com.openbank.interest.infrastructure.client.JournalLineRequest
@@ -13,6 +14,7 @@ import com.openbank.libs.domain.money.Money
 import io.quarkus.test.Mock
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.LocalDate
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 
@@ -20,7 +22,13 @@ import java.util.concurrent.atomic.AtomicReference
  * A booked journal, as ledger-service would hold it: every line already re-wrapped as [Money], which
  * is the form the amounts must survive to be booked at all.
  */
-data class BookedJournal(val idempotencyKey: String, val transactionId: UUID, val lines: List<BookedLine>) {
+data class BookedJournal(
+    val idempotencyKey: String,
+    val transactionId: UUID,
+    val lines: List<BookedLine>,
+    val entryDate: LocalDate,
+    val valueDate: LocalDate,
+) {
     fun debits(): List<BookedLine> = lines.filter { it.side == "DEBIT" }
     fun credits(): List<BookedLine> = lines.filter { it.side == "CREDIT" }
 }
@@ -69,6 +77,17 @@ class LedgerBoundary : LedgerPostingPort {
     /** Set to fail the post BEFORE anything is booked — a plain ledger outage. */
     private val failBeforeBooking = AtomicReference<String?>(null)
 
+    /**
+     * The ledger's accounting-day lock in ENFORCE mode (ADR-0207 D3, `AccountingDayLock.requireOpen`):
+     * every day up to and including this date is no longer OPEN, so a NEW posting dated into one is
+     * refused with 409 — `ClosedAccountingDayException`. Null = every day open. Checked AFTER the
+     * replay, exactly as `LedgerService.postJournalInternal` orders it.
+     */
+    private val closedThrough = AtomicReference<LocalDate?>(null)
+
+    /** Closes every accounting day up to and including [date] — sandbox's TIED_OUT days (#10404). */
+    fun closeDaysThrough(date: LocalDate) = closedThrough.set(date)
+
     /** Every journal booked, in order. More than one per period is a double credit. */
     fun booked(): List<BookedJournal> = journals.values.toList()
 
@@ -88,12 +107,19 @@ class LedgerBoundary : LedgerPostingPort {
         journals.clear()
         crashAfterBooking.set(null)
         failBeforeBooking.set(null)
+        closedThrough.set(null)
     }
 
     override fun post(posting: CapitalizationPosting): Uni<Unit> {
         failBeforeBooking.getAndSet(null)?.let { return Uni.createFrom().failure(IllegalStateException(it)) }
         return runCatching {
-            book(CapitalizationJournalFactory.buildRequest(posting, TestInterestLedgerConfig))
+            book(
+                CapitalizationJournalFactory.buildRequest(
+                    posting,
+                    TestInterestLedgerConfig,
+                    LocalDate.now(CapitalizationJournalFactory.LEDGER_ZONE),
+                ),
+            )
         }.fold(
             onSuccess = {
                 val crash = crashAfterBooking.getAndSet(null)
@@ -117,6 +143,13 @@ class LedgerBoundary : LedgerPostingPort {
     private fun book(request: PostJournalRequest): BookedJournal {
         journals[request.idempotencyKey]?.let { return it }
 
+        val entryDate = LocalDate.parse(request.entryDate)
+        closedThrough.get()?.let { closed ->
+            if (!entryDate.isAfter(closed)) {
+                throw LedgerPostingRejectedException(CONFLICT, "Accounting day $entryDate is closed")
+            }
+        }
+
         val lines = request.lines.map { l: JournalLineRequest ->
             // The invariant that 400'd every capitalization. Real Money, real init, real throw.
             val amount = Money.of(l.amount, l.currencyCode)
@@ -134,11 +167,19 @@ class LedgerBoundary : LedgerPostingPort {
                 "Journal entry does not balance in $ccy: debits=$debits credits=$credits"
             }
         }
-        val journal = BookedJournal(request.idempotencyKey, request.transactionId, lines)
+        val journal = BookedJournal(
+            request.idempotencyKey,
+            request.transactionId,
+            lines,
+            entryDate,
+            LocalDate.parse(request.valueDate),
+        )
         journals[request.idempotencyKey] = journal
         return journal
     }
 }
+
+private const val CONFLICT = 409
 
 /** The seeded defaults from `V17__interest_capitalization_accounts.sql`. */
 object TestInterestLedgerConfig : InterestLedgerConfig {

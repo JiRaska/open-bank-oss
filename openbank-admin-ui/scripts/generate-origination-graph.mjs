@@ -9,7 +9,7 @@
 // WHY THIS IS GENERATED AND NOT TYPED INTO THE UI
 // The origination console draws the state machine. If the UI carried its own copy of the
 // state list, that copy would be a second hand-maintained enumeration of something that
-// lives in `openbank-libs-domain` — and it would drift silently, because a diagram that
+// lives in `openbank-libs-lending` — and it would drift silently, because a diagram that
 // disagrees with the machine still renders perfectly. The repo has been bitten by exactly
 // that class of bug (a published NOTICE listing 4 AGPL modules against 12 in the tree). So
 // the states and the edges come from:
@@ -39,7 +39,7 @@ const getArg = (flag, dflt) => {
 const REPO = path.resolve(getArg('--repo', path.resolve(__dirname, '..', '..')))
 const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'origination-graph.json')))
 
-const ORIGIN = 'openbank-libs-domain/src/main/kotlin/com/openbank/libs/lending/origination'
+const ORIGIN = 'openbank-libs-lending/src/main/kotlin/com/openbank/libs/lending/origination'
 const STATE_KT = path.join(REPO, ORIGIN, 'OriginationState.kt')
 const POLICY_KT = path.join(REPO, ORIGIN, 'OriginationTransitionPolicy.kt')
 

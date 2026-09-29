@@ -1,5 +1,40 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.4...sepa-payment-v0.15.0) (2026-09-28)
+
+
+### Features
+
+* **sepa-payment:** bind Idempotency-Key to a request fingerprint ([#10948](https://github.com/JiRaska/open-bank-oss/issues/10948)) ([cefef67](https://github.com/JiRaska/open-bank-oss/commit/cefef673d15dec06c20c13e452e03488836dee8f))
+
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.3...sepa-payment-v0.14.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.14.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.1...sepa-payment-v0.14.2) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.14.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.0...sepa-payment-v0.14.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
 ## [0.14.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.13.3...sepa-payment-v0.14.0) (2026-09-14)
 
 

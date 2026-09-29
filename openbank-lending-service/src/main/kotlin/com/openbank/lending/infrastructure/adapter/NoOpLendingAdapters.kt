@@ -85,7 +85,7 @@ class ConservativeRiskParameterSource(
         name = "lending.risk.allow-demonstration-model",
         defaultValue = "false",
     )
-    private val allowDemonstrationModel: Boolean = false,
+    private val allowDemonstrationModel: Boolean,
 ) : RiskParameterSource {
     private val log = Logger.getLogger(ConservativeRiskParameterSource::class.java)
 
