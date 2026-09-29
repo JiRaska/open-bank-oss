@@ -27,10 +27,11 @@ controller 1.15.1 will not receive further security fixes.
 What the edge actually does today, measured on `origin/main` on 2026-09-28:
 
 - **Entry.** One controller replica behind one internet-facing NLB. It uses the in-tree
-  Service annotation, `externalTrafficPolicy: Cluster`, and an IP allow-list on the NLB
-  security group. TLS is issued by cert-manager (14 manifests carry
-  `cert-manager.io/cluster-issuer`) over DNS-01, because the IP-locked NLB cannot answer
-  HTTP-01 (`aws/envs/sandbox-substrate/main.tf`). external-dns is `v0.15.0` with
+  Service annotation and `externalTrafficPolicy: Cluster` (since changed to `Local`). It is
+  open to the internet: the sandbox edge carries no source-IP allow-list (owner decision
+  2026-09-29). TLS is issued by cert-manager (14 manifests carry
+  `cert-manager.io/cluster-issuer`) over DNS-01, which needs no inbound path
+  (`aws/envs/sandbox-substrate/main.tf`). external-dns is `v0.15.0` with
   `--source=ingress` only.
 - **Scope.** 14 manifests set `ingressClassName: nginx`, and `kube-prometheus-stack`
   renders one more with `auth-url`. The full list is in #11258.
@@ -61,7 +62,7 @@ What the edge actually does today, measured on `origin/main` on 2026-09-28:
 We will serve north-south HTTP through the Kubernetes **Gateway API**, implemented by
 **Envoy Gateway**. Its multi-arch `v1.9.1` image publishes amd64 and arm64, confirmed with
 `docker manifest inspect`. It sits behind **one** NLB with the same annotations and
-allow-list as today. There is one shared `Gateway` (class `envoy`) in a platform
+public exposure as today. There is one shared `Gateway` (class `envoy`) in a platform
 namespace, and each service owns its `HTTPRoute`.
 
 The nginx annotations map as follows:
@@ -84,7 +85,7 @@ the reason the controller was run at `Critical` risk.
 ### Migration plan
 
 - **Phase 0 — install alongside.** Install the Envoy Gateway app, the Gateway, the
-  `GatewayClass` and a second NLB with the same allow-list. Nothing is routed yet. Upgrade
+  `GatewayClass` and a second NLB with the same exposure. Nothing is routed yet. Upgrade
   external-dns to current (`v0.23.0` at the time of writing) and add
   `--source=gateway-httproute`. Before the bump, read the upgrade notes for the
   annotation-prefix change and check which of our annotations it touches. Teach

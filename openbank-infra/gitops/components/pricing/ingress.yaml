@@ -5,7 +5,6 @@ metadata:
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/custom-headers: pricing/pricing-console-edge-headers-v1
     nginx.ingress.kubernetes.io/ssl-redirect: 'true'
-    openbank.io/edge-exposure: internal
   name: pricing-console
   namespace: pricing
 spec:

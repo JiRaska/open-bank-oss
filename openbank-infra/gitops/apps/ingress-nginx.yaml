@@ -164,10 +164,9 @@ spec:
             type: LoadBalancer
             # Local: the NLB delivers only to nodes running a controller replica
             # (health-checked on healthCheckNodePort) and there is no kube-proxy SNAT,
-            # so nginx sees the real client IP. Required by the per-host source
-            # allow-list on internal Ingresses (ADR-0324 mixed edge,
-            # edge-internal-host-allowlist); with Cluster every request arrived from a
-            # node IP. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
+            # so nginx sees the real client IP (rate limits, access logs); with Cluster
+            # every request arrived from a node IP. The sandbox edge is deliberately
+            # public (owner decision 2026-09-29): no source allow-list is applied. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
             # stays off (inter-AZ data cost): the NLB drops an AZ with no healthy
             # target from its DNS answers. Hostnames come from external-dns, so nothing
             # pins a single NLB IP any more (the old sslip.io reason for Cluster).
