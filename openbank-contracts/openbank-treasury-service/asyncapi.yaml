@@ -122,10 +122,6 @@ components:
         sourceService: { $ref: '#/components/schemas/SourceService' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
-        fxSide: { $ref: '#/components/schemas/FxSide' }
-        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
-        fxSide: { $ref: '#/components/schemas/FxSide' }
-        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
 
     DealSettled:
       type: object
@@ -142,6 +138,8 @@ components:
         ledgerJournalId: { type: string, format: uuid }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        fxSide: { $ref: '#/components/schemas/FxSide' }
+        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
 
     DealMatured:
       type: object
@@ -177,3 +175,5 @@ components:
           description: Null when reversed from BOOKED, before anything had posted.
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        fxSide: { $ref: '#/components/schemas/FxSide' }
+        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
