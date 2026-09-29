@@ -74,9 +74,10 @@ spec:
             severity: critical
             service: billing
           annotations:
+            subject_period: continuous
             summary: "billing-service dead-lettered NEW outbox rows (fee postings that will never reach the ledger)"
             description: "openbank_outbox_dead_lettered{service=\"billing\"} rose above its 24h high-water mark: new billing_outbox rows went terminal DEAD. A transport fast-fail (breaker/bulkhead) does not consume the attempt budget, so a new DEAD row is a real per-row failure. Read last_error before anything else. Refs #4701, #9690."
-            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-billing.md#dead-lettered-outbox-rows"
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-billing-outbox-dead-letter.md"
         - alert: BillingOutboxDeadLettered
           expr: max by (service) (openbank_outbox_dead_lettered{service="billing"}) > 0
           for: 1h
@@ -86,4 +87,4 @@ spec:
           annotations:
             summary: "billing-service has unresolved dead-lettered outbox rows (fees never posted to the ledger)"
             description: "{{ $value }} billing_outbox row(s) are in terminal DEAD and will never be retried. Each is a fee assessed but never posted, so the GL is short by exactly those rows. Needs an operator disposition (replay or write-off), not a page. Refs #4701, #4005, #9690."
-            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-billing.md#dead-lettered-outbox-rows"
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-billing-outbox-dead-letter.md"
