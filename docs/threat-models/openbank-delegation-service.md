@@ -20,6 +20,9 @@ is now stated in the row rather than implied away.
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
 - `ApprovalGroup` rosters and thresholds used to select future corporate operation approvers.
+- `ExternalDisclosure` evidence — a short-lived, bounded release of one sealed document to an
+  external recipient. It holds only recipient label, document/delegation ids, state timestamps and
+  domain-separated SHA-256 hashes of the link secret and OTP; it never stores either raw secret.
 
 ## Lifecycle approval execution
 
@@ -60,6 +63,11 @@ and require a human operator plus OPA; client applications do not receive a bank
    after a single-use release claim. Outbound on the same boundary: live mandate reads from
    party-service and approval-linked SCA consumes at sca-service; lifecycle events on
    `openbank.delegation.approval-events` (notification-service, audit-service).
+9. External recipient → customer-edge → delegation-service disclosure endpoint. The public edge
+   owns anonymous ingress and its per-IP ingress rate limit; it authenticates upstream using only
+   its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
+   `delegation.disclosure.release` for that identity, never the shared backend client. Every
+   unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
 
 ## Threats and mitigations
 
@@ -98,7 +106,12 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T32 | Device key bound to the ENTITY signs for it (#10281 item 1) | A signer is always a natural person's party id from the edge's token and must hold a live mandate over the entity; the entity itself is never eligible (it holds no mandate over itself). The enrolment refusal and the purge of entity-bound credentials live in sca-service (#10281). |
 | T33 | Trust or policy widened without the full round | PAYEE_ADD / PAYEE_REMOVE / POLICY_CHANGE use the STRICTEST rule of the current policy, never a trusted-payee shortcut, and take effect only in the transaction that records the last signature. A trusted payee is written by no other code path. A POLICY_CHANGE prepared against an older version is refused as `SUPERSEDED` rather than applied over a newer policy; signer-group edits move the version. Trusted payees lower the signature COUNT to one — they are not the RTS Article 13 exemption; the initiator's SCA is always required. |
 | T34 | Only the edge may drive signing | `delegation_rest_ext.rego` grants the twelve `delegation.signing.*` actions to `service-account-openbank-edge` only and `prohibited` vetoes the whole family for every other principal — including the shared backend identity that base `operator-read-any` would otherwise admit, and staff operators. |
-| T35 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
+| T35 | A leaked external-link token becomes an unbounded, permanent document download | Each disclosure has a per-record SHA-256 link-secret hash, hard expiry, revocable state and a positive maximum view count. The row and its immutable view timestamps are locked and transitioned in one database transaction, so replicas cannot both consume the last allowed view. Raw secrets never persist. customer-edge maps every 4xx to the same unavailable response and is behind its per-IP ingress limit. |
+| T36 | A link alone releases a confidential document | The model requires a separate OTP hash before any view may be consumed. Invalid attempts are persisted and permanently lock the disclosure at five failures; OTP verification, revocation, expiry and view-limit denial occur before document bytes are requested. The raw OTP is generated only at issuance and never persists. Residual: an out-of-band delivery adapter remains a rollout dependency, not an API fallback. |
+| T37 | A concurrent view and revocation allow a post-revocation release | Issuance, OTP verification, view consumption and revocation are expressed as transitions on one disclosure aggregate. The repository takes `SELECT … FOR UPDATE` on the exact disclosure before executing a transition, records at most one append-only view timestamp and updates the count in that transaction. A request that locks after revocation sees unavailable and cannot issue bytes. The exporter is called before the final CAS so an outage cannot burn a view; only the CAS winner receives a derived sealed artifact, never document-service's internal original `/content`. |
+| T38 | A customer shares a document they are not entitled to disclose, or shares a broad live API | The intended issuer path will re-read the linked grant, require `ACTIVE`, require the authenticated grantor and require `DOCUMENT` + `OBJECT_READ`; D7 is an immutable single-object emission rather than a new product-service authorization path. Residual: this command/API is not yet implemented, so no production control should claim these checks have run. |
+| T39 | Disclosure evidence exposes unnecessary recipient or device data | The storage schema deliberately retains one human recipient label and the event time required for grantor transparency, but not recipient account identity, IP address, user-agent, raw link or raw OTP. View rows are append-only so a later counter update cannot erase earlier access evidence. Residual: retention, data-subject access and audit-envelope routing must be specified with the sealed-export integration before external exposure. |
+| T40 | A compromised client changes an approval-group member or threshold after the owner completes SCA, or manages an organization's roster through a stale/forged profile | The edge first requests a versioned, server-canonical SHA-256 reference over operation, owner, group id/revision, trimmed name, sorted unique members and threshold. The approving device signs that reference in `DynamicLinkingData`; sca-service compares it exactly in the atomic consume gate. The edge forwards the authenticated human separately from the selected owner, and delegation-service revalidates that actor's current organization mandate before every create, revise or deactivate and consumes that actor's SCA—not the entity's. Any changed field, revoked authority or actor mismatch refuses before persistence. Group revisions are monotonic and every full roster is stored and published transactionally, so downstream operation snapshots can retain the exact authority they evaluated. Cross-tenant reads collapse to 404. Residual: groups are configuration only; non-SOLO execution remains refused until resource-policy binding, immutable per-operation snapshots and an atomic distinct-actor decision ledger land. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -131,6 +144,10 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
+- D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
+  delivery/attempt throttling, recipient-facing rate limit and audit-envelope routing. The
+  disclosure persistence boundary is implemented, but **no external ingress is enabled** until
+  this export path and its controls ship together.
 - Exposure-shaped object disclosure (D7b): **fail closed.** New non-null `exposure` is refused
   with `EXPOSURE_UNSUPPORTED`, before SCA or persistence. Historical rows remain readable for
   audit but are excluded from the authorization decision and shared-document list. This stays the
@@ -347,6 +364,6 @@ schema/decision-ledger path is healthy; rollback flips the flag before reverting
   on the compacted `openbank.delegation.approval-group-revisions` topic (account-service, audit).
   A group change after a grant was issued does not silently re-scope it: account-service refuses a
   new proposal with "approval group changed; the grant must be reissued" when the group is inactive
-  or its revision/threshold differs from the one pinned on the grant (T35). Risk class: elevation
+  or its revision/threshold differs from the one pinned on the grant (T40). Risk class: elevation
   of privilege / tampering. Rollback: flip the flag off first (new offers refused, existing
   proposals keep their snapshots), then revert; migrations V29–V32 are additive.

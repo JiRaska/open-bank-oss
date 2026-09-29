@@ -178,6 +178,12 @@ data class DelegationCheckResponse(val granted: Boolean, val reason: String? = n
     }
 }
 
+/** Credentials supplied only through the public edge after a recipient opens a magic link. */
+data class ExternalDisclosureOtpRequest(val linkSecret: String, val otp: String, val idempotencyKey: String)
+
+/** Link credential for a verified external disclosure; never place this value in a URL or log. */
+data class ExternalDisclosureLinkRequest(val linkSecret: String, val idempotencyKey: String)
+
 data class DelegationRecertificationResponse(
     val id: UUID,
     val delegationId: UUID,
