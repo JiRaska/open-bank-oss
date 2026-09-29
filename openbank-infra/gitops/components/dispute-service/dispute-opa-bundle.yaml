@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: dispute-service
     app.kubernetes.io/part-of: dispute
   annotations:
-    openbank.tech/policy-checksum: "72af99f47103d789"
+    openbank.tech/policy-checksum: "977671097cd30005"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: party-service
     app.kubernetes.io/part-of: party
   annotations:
-    openbank.tech/policy-checksum: "d583b2463a781c89"
+    openbank.tech/policy-checksum: "824af0175c70e114"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0

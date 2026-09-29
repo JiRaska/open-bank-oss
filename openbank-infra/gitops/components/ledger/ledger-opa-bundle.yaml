@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "56daafa4503f1460"
+    openbank.tech/policy-checksum: "ff96504b665a7ac5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0

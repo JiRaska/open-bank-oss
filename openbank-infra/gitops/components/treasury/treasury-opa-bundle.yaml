@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "ef4e73ca99cf104e"
+    openbank.tech/policy-checksum: "6b9f423906fe8332"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
