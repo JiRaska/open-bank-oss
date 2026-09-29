@@ -6,15 +6,17 @@
 # its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
 #
 # STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
-# (today: deny-nginx-snippet-annotations-cel and
-# require-gated-or-declared-tool-ingress-cel, #11437). Each other ValidatingPolicy
+# (today: block-deployment-if-rollout-exists-cel, deny-nginx-snippet-annotations-cel,
+# require-gated-or-declared-tool-ingress-cel and openbank-dr-sa-pin-cel, #11437).
+# Each other ValidatingPolicy
 # below runs NEXT TO its v1 original, which stays in Enforce and remains the only
 # thing that can deny:
 #   validationActions: [Audit]   reports, never denies
 #   failurePolicy: Ignore        a webhook error on the shadow cannot block admission
 # Both are deliberate deviations from the v1 originals (Enforce / default Fail) and
 # are restored in stage 2, which flips each to [Deny] + Fail and deletes the v1
-# policy in the same PR. Names carry a -cel suffix so kyverno_policy_results_total
+# policy in the same PR (except openbank-dr-sa-pin, whose v1 lived in another Argo
+# app and was removed in a follow-up PR; see its document). Names carry a -cel suffix so kyverno_policy_results_total
 # and PolicyReports keep the two engines apart while both run: a shadow failing a
 # resource its v1 original admits fires KyvernoAuditPolicyFailingBeforeEnforce,
 # which is the parity signal stage 2 must see silent first.
@@ -24,9 +26,23 @@
 # Parity is tested with the Kyverno 1.19.1 CLI against the same positive/negative
 # resources as the v1 originals: openbank-infra/tests/kyverno-cel/.
 ---
-# Shadow of block-deployment-if-rollout-exists (rollout-bypass-prevention.yaml).
+# STAGE 2 (#11437): enforcing. The v1 original rollout-bypass-prevention.yaml was
+# deleted in the same PR, so this is the only policy stopping a plain Deployment
+# from shadowing a money-path Rollout of the same name (ADR-0098): such a
+# Deployment would take traffic without the canary steps and analysis gates.
 # The v1 apiCall LIST + fieldSelector becomes resource.List over the namespace's
 # Rollouts; LIST, as before, so a missing Rollout is an empty list, not an error.
+# DELETE stays out of scope so the Deployment->Rollout migration (Argo creates the
+# Rollout before pruning the Deployment) and cleanup keep working.
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Fail means that if
+# resource.List itself errors (Rollout CRD absent, RBAC revoked), every Deployment
+# CREATE/UPDATE in the 13 namespaces below is denied until it is fixed; v1 carried
+# exactly this exposure for the same call. Blast radius is those namespaces only,
+# never cluster-wide. Preconditions live in the cluster; re-check before touching:
+#   kubectl get crd rollouts.argoproj.io
+#   kubectl auth can-i list rollouts.argoproj.io -A \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   # yes
+# Break-glass for a List outage: runbook 0011 §4a (set failurePolicy: Ignore here).
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -35,12 +51,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL shadow
+    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL
     policies.kyverno.io/category: Progressive Delivery
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
@@ -172,9 +188,19 @@ spec:
         'openbank.io/ungated-machine-callers: \"<why, and which paths>\"' and keep its
         path list narrowed to those endpoints."
 ---
-# Shadow of openbank-dr-sa-pin (platform/dr-runner-rbac.yaml, ADR-0277). The v1
-# exclude of namespace arc-runners becomes a NotIn namespaceSelector. Pod-controller
-# autogen stays at the default, as the v1 policy's autogen rules did.
+# STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the
+# arc-runners namespace. [Deny] + Fail restore v1's Enforce / default failurePolicy.
+# Unlike the other stage-2 policies, the v1 original lived in a DIFFERENT Argo app
+# (`platform`, components/platform/dr-runner-rbac.yaml), so the two could not be
+# swapped in one sync: PruneLast only orders a prune within one app. The flip landed
+# first and ran next to the still-enforcing v1; the v1 ClusterPolicy was then
+# removed by a follow-up PR, so this is now the only policy pinning the SA, and
+# the compensating control for the openbank-dr ClusterRole. The v1 exclude of namespace arc-runners is a NotIn namespaceSelector.
+# Pod-controller autogen stays at the default, as the v1 policy's autogen rules did.
+# The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
+# The precondition lives in the cluster, not in git; re-check it before touching
+# this document (must print nothing):
+#   kubectl get pods -A -o jsonpath='{range .items[?(@.spec.serviceAccountName=="openbank-dr")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | grep -v '^arc-runners/'
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -183,8 +209,8 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false

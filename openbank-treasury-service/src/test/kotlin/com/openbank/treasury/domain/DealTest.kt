@@ -147,9 +147,26 @@ class DealTest {
             assertThatThrownBy {
                 Deal.draft(
                     placement().id, ProductType.MM_PLACEMENT, "SIMBK-A", "CZK", BigDecimal.TEN, BigDecimal.ONE,
-                    MONDAY, MONDAY, null, agent, NOW, rationale = null,
+                    MONDAY, MONDAY, null, agent, NOW, rationale = null, inputs = """{"quote":"4.10"}""",
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("rationale")
+        }
+
+        @Test
+        fun `an AI agent draft without its inputs is refused`() {
+            assertThatThrownBy {
+                Deal.draft(
+                    placement().id, ProductType.MM_PLACEMENT, "SIMBK-A", "CZK", BigDecimal.TEN, BigDecimal.ONE,
+                    MONDAY, MONDAY, null, agent, NOW, rationale = "curve says so", inputs = null,
+                )
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("inputs")
+        }
+
+        @Test
+        fun `an AI agent draft keeps its inputs and consumes no limit`() {
+            val d = placement(by = agent)
+            assertThat(d.inputs).isEqualTo("""{"quote":"4.10"}""")
+            assertThat(d.consumesLimit).isFalse()
         }
 
         @Test

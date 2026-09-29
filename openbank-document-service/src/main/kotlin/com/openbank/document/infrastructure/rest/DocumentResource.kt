@@ -8,11 +8,14 @@ import com.openbank.document.application.port.`in`.CreateTemplateCommand
 import com.openbank.document.application.port.`in`.DocumentQueryUseCase
 import com.openbank.document.application.port.`in`.DocumentRenderUseCase
 import com.openbank.document.application.port.`in`.DocumentTemplateUseCase
+import com.openbank.document.application.port.`in`.ExportExternalDisclosureCommand
+import com.openbank.document.application.port.`in`.ExternalDisclosureExportUseCase
 import com.openbank.document.application.port.`in`.OnboardingDocumentUseCase
 import com.openbank.document.application.port.`in`.RenderDocumentCommand
 import com.openbank.document.infrastructure.rest.dto.CreateTemplateRequest
 import com.openbank.document.infrastructure.rest.dto.DocumentResponse
 import com.openbank.document.infrastructure.rest.dto.EnsureOnboardingAgreementRequest
+import com.openbank.document.infrastructure.rest.dto.ExportExternalDisclosureRequest
 import com.openbank.document.infrastructure.rest.dto.OnboardingAgreementResponse
 import com.openbank.document.infrastructure.rest.dto.PreviewTemplateRequest
 import com.openbank.document.infrastructure.rest.dto.PreviewTemplateResponse
@@ -46,6 +49,7 @@ class DocumentResource(
     private val renderUseCase: DocumentRenderUseCase,
     private val queryUseCase: DocumentQueryUseCase,
     private val onboardingUseCase: OnboardingDocumentUseCase,
+    private val externalDisclosureExportUseCase: ExternalDisclosureExportUseCase,
 ) {
 
     /**
@@ -196,6 +200,32 @@ class DocumentResource(
     suspend fun getContent(@PathParam("id") id: UUID): Response {
         val bytes = queryUseCase.getContent(id) ?: throw NotFoundException()
         return Response.ok(bytes).build()
+    }
+
+    /**
+     * Internal authority boundary for delegated external disclosure. The OPA action is deliberately
+     * pinned to the dedicated delegation-service identity; this resource never validates a link
+     * secret or OTP and must not be exposed as a recipient-facing download endpoint.
+     */
+    @POST
+    @Path("/{id}/external-disclosures/export")
+    @Produces("application/pdf")
+    @RolesAllowed("ROLE_API")
+    @Authorize(action = "document.disclosure.export", resource = "#id")
+    suspend fun exportExternalDisclosure(
+        @PathParam("id") id: UUID,
+        request: ExportExternalDisclosureRequest,
+    ): Response {
+        if (request.recipientLabel.isBlank()) throw BadRequestException("recipientLabel is required")
+        val disclosure = externalDisclosureExportUseCase.export(
+            ExportExternalDisclosureCommand(
+                documentId = id,
+                disclosureId = request.disclosureId,
+                recipientLabel = request.recipientLabel,
+                issuedAt = request.issuedAt,
+            ),
+        )
+        return Response.ok(disclosure.bytes, disclosure.contentType).build()
     }
 
     private companion object {

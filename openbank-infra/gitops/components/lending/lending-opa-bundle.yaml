@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "e7d94ce9ce87e9a4"
+    openbank.tech/policy-checksum: "38967e9e6f58147a"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1160,6 +1160,27 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1846,6 +1867,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

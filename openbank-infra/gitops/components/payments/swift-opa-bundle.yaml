@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: swift-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "77300b37a64177cd"
+    openbank.tech/policy-checksum: "c05b53c118bb2e95"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -975,6 +975,27 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1661,6 +1682,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

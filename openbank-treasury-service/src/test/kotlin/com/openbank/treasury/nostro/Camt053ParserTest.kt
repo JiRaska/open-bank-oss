@@ -10,6 +10,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
 
 class Camt053ParserTest {
 
@@ -109,9 +110,30 @@ class Camt053ParserTest {
     fun `a statement spanning more than 31 days is a 400`() {
         val wide = String(
             NostroFixtures.xml(),
-        ).replaceFirst("<BookgDt><Dt>2026-09-25</Dt>", "<BookgDt><Dt>2026-08-20</Dt>")
+        ).replace("<Dt><Dt>2026-09-24</Dt></Dt>", "<Dt><Dt>2026-08-20</Dt></Dt>")
         assertThatThrownBy { Camt053Parser.parse(wide.toByteArray()) }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("more than 31 days")
+    }
+
+    @Test
+    fun `an entry outside the period between the OPBD and CLBD dates is a 400`() {
+        val after = String(
+            NostroFixtures.xml(),
+        ).replaceFirst("<BookgDt><Dt>2026-09-25</Dt>", "<BookgDt><Dt>2026-09-26</Dt>")
+        val onOpening = String(
+            NostroFixtures.xml(),
+        ).replaceFirst("<BookgDt><Dt>2026-09-25</Dt>", "<BookgDt><Dt>2026-09-24</Dt>")
+        listOf(after, onOpening).forEach {
+            assertThatThrownBy { Camt053Parser.parse(it.toByteArray()) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("outside the period")
+        }
+    }
+
+    @Test
+    fun `the opening date is the OPBD balance date`() {
+        assertThat(Camt053Parser.parse(NostroFixtures.xml()).openingDate).isEqualTo(NostroFixtures.DATE.minusDays(1))
+        assertThat(Camt053Parser.parse(NostroFixtures.eurXml()).openingDate).isEqualTo(LocalDate.parse("2026-09-23"))
     }
 }
