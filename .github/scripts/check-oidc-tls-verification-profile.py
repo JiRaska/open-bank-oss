@@ -19,12 +19,12 @@
 #   `required`, with `%dev` relaxing to `none` — and every service overrode it.
 #
 # WHAT IS CHECKED (three layers, because each can override the one before)
-#   1. openbank-*/src/main/resources/application*.yaml — any key path ending `tls.verification`
-#      (or `tls-verification`) that resolves to `none` outside a profile made only of dev/test.
+#   1. openbank-*/src/main/resources/application*.yaml/yml — OIDC or OIDC-client
+#      `tls.verification` (or `tls-verification`) resolving to `none` outside dev/test.
 #      A `${VAR:default}` value is judged by its default: that is what runs when nobody sets VAR.
 #   2. openbank-*/src/main/resources/**/*.properties — the same, for un-profiled lines.
-#   3. openbank-infra/gitops — a container env var named `*TLS_VERIFICATION` whose value is `none`
-#      (the deployed override of 1 and 2; a gate over application.yaml alone cannot see it).
+#   3. openbank-infra/gitops — direct *TLS_VERIFICATION env values and imported ConfigMap values.
+#      Unknown dynamic sources fail closed: a gate over application.yaml alone cannot see them.
 #
 # Run:  python3 .github/scripts/check-oidc-tls-verification-profile.py [--root .] [--self-test]
 
@@ -38,7 +38,7 @@ import yaml
 import gatelib
 
 RELAXED_PROFILES = {"dev", "test"}
-KEY_RE = re.compile(r"(?:^|\.)tls[.-]verification$")
+KEY_RE = re.compile(r"(?:^|\.)quarkus\.oidc(?:-client)?(?:\.[^.]+)*\.tls[.-]verification$")
 ENV_DEFAULT_RE = re.compile(r"^\$\{[^:}]+:(.*)\}$")
 PROP_RE = re.compile(r"^\s*([^#!=:\s][^=:\s]*)\s*[=:]\s*(.*?)\s*$")
 WORKLOAD_KINDS = {"Deployment", "Rollout", "StatefulSet", "Job", "CronJob", "DaemonSet"}
@@ -56,7 +56,18 @@ def relaxed(top_key: str) -> bool:
     """True for a `%dev` / `%test` / `%dev,test` profile key — never for `%prod` or a bare key."""
     if not top_key.startswith("%"):
         return False
-    return {p.strip() for p in top_key[1:].split(",")} <= RELAXED_PROFILES
+    profile = top_key[1:].split(".", 1)[0]
+    return bool(profile) and {p.strip() for p in profile.split(",")} <= RELAXED_PROFILES
+
+
+def filename_relaxed(path: pathlib.Path) -> bool:
+    """Quarkus loads application-dev/test.yaml only in that profile."""
+    return path.stem in {"application-dev", "application-test"}
+
+
+def tls_verification_env(name: str) -> bool:
+    # An OIDC config may use ${TLS_VERIFICATION:required}, without OIDC in the env name.
+    return name.endswith("TLS_VERIFICATION")
 
 
 def walk(node, path):
@@ -68,6 +79,8 @@ def walk(node, path):
 
 
 def yaml_findings(path: pathlib.Path, rel: str):
+    if filename_relaxed(path):
+        return
     doc = gatelib.load_yaml(path)
     if not isinstance(doc, dict):
         return
@@ -81,6 +94,8 @@ def yaml_findings(path: pathlib.Path, rel: str):
 
 
 def properties_findings(path: pathlib.Path, rel: str):
+    if filename_relaxed(path):
+        return
     for n, line in enumerate(gatelib.read_text(path).splitlines(), 1):
         m = PROP_RE.match(line)
         if not m:
@@ -104,6 +119,8 @@ def gitops_findings(root: pathlib.Path):
     count = 0
     findings = []
     base = root / "openbank-infra/gitops"
+    configmaps = {}
+    workloads = []
     for p in gatelib.rglob(base, "*.yaml"):
         try:
             docs = gatelib.load_yaml_all(p)
@@ -111,21 +128,68 @@ def gitops_findings(root: pathlib.Path):
             continue
         count += 1
         for d in docs:
-            if not isinstance(d, dict) or d.get("kind") not in WORKLOAD_KINDS:
+            if not isinstance(d, dict):
                 continue
-            for c in containers(d.get("spec") or {}):
-                for e in c.get("env") or []:
-                    name = str((e or {}).get("name", ""))
-                    if name.endswith("TLS_VERIFICATION") and resolved((e or {}).get("value", "")) == "none":
-                        findings.append(f"{p.relative_to(root)}: env {name}=none on "
-                                        f"{(d.get('metadata') or {}).get('name')} disables TLS verification")
+            meta = d.get("metadata") or {}
+            if d.get("kind") == "ConfigMap":
+                key = (meta.get("namespace"), meta.get("name"))
+                configmaps.setdefault(key, []).append(d)
+            elif d.get("kind") in WORKLOAD_KINDS:
+                workloads.append((p, d))
+
+    for p, d in workloads:
+        meta = d.get("metadata") or {}
+        namespace, workload = meta.get("namespace"), meta.get("name")
+        location = str(p.relative_to(root))
+
+        def configmap(name):
+            matches = configmaps.get((namespace, name), [])
+            return matches[0] if len(matches) == 1 else None
+
+        for c in containers(d.get("spec") or {}):
+            for e in c.get("env") or []:
+                e = e or {}
+                name = str(e.get("name", ""))
+                if not tls_verification_env(name):
+                    continue
+                if "value" in e:
+                    if resolved(e["value"]) == "none":
+                        findings.append(f"{location}: env {name}=none on {workload} disables OIDC TLS verification")
+                    continue
+                source = e.get("valueFrom") or {}
+                ref = source.get("configMapKeyRef") or {}
+                cm = configmap(ref.get("name")) if ref else None
+                if cm is None or ref.get("key") not in (cm.get("data") or {}):
+                    findings.append(f"{location}: env {name} on {workload} has an unverified dynamic source")
+                elif resolved(cm["data"][ref["key"]]) == "none":
+                    findings.append(f"{location}: env {name} on {workload} resolves to none from a ConfigMap")
+
+            for source in c.get("envFrom") or []:
+                source = source or {}
+                prefix = str(source.get("prefix") or "")
+                ref = source.get("configMapRef") or {}
+                if not ref:
+                    # Secret keys are opaque in a public repo. Importing all of them could
+                    # silently override an OIDC TLS placeholder; use explicit env mappings.
+                    findings.append(f"{location}: envFrom on {workload} has an unverified dynamic source")
+                    continue
+                cm = configmap(ref.get("name"))
+                if cm is None:
+                    findings.append(f"{location}: envFrom on {workload} references an unverified ConfigMap")
+                    continue
+                for key, value in (cm.get("data") or {}).items():
+                    if tls_verification_env(prefix + str(key)) and resolved(value) == "none":
+                        findings.append(f"{location}: envFrom on {workload} resolves {prefix + str(key)}=none")
+                if any(tls_verification_env(prefix + str(key)) for key in (cm.get("binaryData") or {})):
+                    findings.append(f"{location}: envFrom on {workload} imports an unverified binary OIDC TLS setting")
     return count, findings
 
 
 def evaluate(root: pathlib.Path):
     subjects = 0
     findings: list[str] = []
-    for p in sorted(root.glob("openbank-*/src/main/resources/application*.yaml")):
+    for p in sorted(set(root.glob("openbank-*/src/main/resources/application*.yaml")) |
+                    set(root.glob("openbank-*/src/main/resources/application*.yml"))):
         subjects += 1
         findings += yaml_findings(p, str(p.relative_to(root)))
     for p in sorted(root.glob("openbank-*/src/main/resources/**/*.properties")):
@@ -152,8 +216,10 @@ def self_test() -> int:
         "dev": ('"%dev":\n  quarkus:\n    oidc:\n      tls:\n        verification: none\n', False),
         "test": ('"%test":\n  quarkus:\n    oidc-client:\n      tls:\n        verification: none\n', False),
         "devtest": ('"%dev,test":\n  quarkus:\n    oidc:\n      tls:\n        verification: none\n', False),
+        "dev-flat-profile": ('"%dev.quarkus.oidc.tls.verification": none\n', False),
         "required": ("quarkus:\n  oidc:\n    tls:\n      verification: ${OIDC_TLS_VERIFICATION:required}\n", False),
         "unrelated": ("quarkus:\n  hibernate-orm:\n    verification: none\n", False),
+        "http-tls": ("quarkus:\n  http:\n    tls:\n      verification: none\n", False),
     }
     with tempfile.TemporaryDirectory() as td:
         root = pathlib.Path(td)
@@ -168,12 +234,57 @@ def self_test() -> int:
         badprops = root / "openbank-badprops/src/main/resources"
         badprops.mkdir(parents=True)
         (badprops / "application.properties").write_text("quarkus.oidc-client.tls.verification = none\n")
+        (badprops / "application-dev.yaml").write_text("quarkus.oidc.tls.verification: none\n")
+        (badprops / "application-test.yaml").write_text("quarkus.oidc.tls.verification: none\n")
         gitops = root / "openbank-infra/gitops/components"
         gitops.mkdir(parents=True)
         wl = ("kind: {kind}\nmetadata:\n  name: {n}\nspec:\n  template:\n    spec:\n      containers:\n"
               "        - name: app\n          env:\n            - name: {e}\n              value: {v}\n")
         (gitops / "bad.yaml").write_text(wl.format(kind="Rollout", n="bad-svc", e="OIDC_TLS_VERIFICATION", v="none"))
         (gitops / "good.yaml").write_text(wl.format(kind="Deployment", n="good-svc", e="OIDC_TLS_VERIFICATION", v="required"))
+        (gitops / "source.yaml").write_text(
+            "kind: ConfigMap\nmetadata:\n  name: tls-settings\n  namespace: test\n"
+            "data:\n  OIDC_TLS_VERIFICATION: none\n  SAFE_SETTING: required\n")
+        (gitops / "dynamic.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: dynamic-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n"
+            "            - name: OIDC_TLS_VERIFICATION\n              valueFrom:\n"
+            "                configMapKeyRef:\n                  name: tls-settings\n"
+            "                  key: OIDC_TLS_VERIFICATION\n")
+        (gitops / "envfrom.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: envfrom-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n"
+            "          envFrom:\n            - configMapRef:\n                name: tls-settings\n")
+        (gitops / "unknown.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: unknown-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n"
+            "          envFrom:\n            - secretRef:\n                name: external-settings\n")
+        (gitops / "safe-source.yaml").write_text(
+            "kind: ConfigMap\nmetadata:\n  name: safe-tls-settings\n  namespace: test\n"
+            "data:\n  OIDC_TLS_VERIFICATION: required\n")
+        (gitops / "safe-dynamic.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: safe-dynamic-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n"
+            "            - name: OIDC_TLS_VERIFICATION\n              valueFrom:\n"
+            "                configMapKeyRef:\n                  name: safe-tls-settings\n"
+            "                  key: OIDC_TLS_VERIFICATION\n"
+            "          envFrom:\n            - configMapRef:\n                name: safe-tls-settings\n")
+        (gitops / "secret-dynamic.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: secret-dynamic-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n"
+            "            - name: OIDC_TLS_VERIFICATION\n              valueFrom:\n"
+            "                secretKeyRef:\n                  name: external-settings\n                  key: tls\n")
+        (gitops / "generic-source.yaml").write_text(
+            "kind: ConfigMap\nmetadata:\n  name: generic-settings\n  namespace: test\n"
+            "data:\n  TLS_VERIFICATION: none\n")
+        (gitops / "generic-envfrom.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: generic-envfrom-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n"
+            "          envFrom:\n            - configMapRef:\n                name: generic-settings\n")
+        (gitops / "generic-direct.yaml").write_text(
+            "kind: Deployment\nmetadata:\n  name: generic-direct-svc\n  namespace: test\n"
+            "spec:\n  template:\n    spec:\n      containers:\n        - name: app\n          env:\n"
+            "            - name: TLS_VERIFICATION\n              value: none\n")
 
         subjects, findings = evaluate(root)
         text = "\n".join(findings)
@@ -189,7 +300,15 @@ def self_test() -> int:
             fails.append("a gitops env TLS_VERIFICATION=none must be flagged")
         if "good-svc" in text:
             fails.append("a gitops env TLS_VERIFICATION=required must not be flagged")
-        want = len(cases) + 2 + 2
+        for name in ("dynamic-svc", "envfrom-svc", "unknown-svc", "secret-dynamic-svc",
+                     "generic-envfrom-svc", "generic-direct-svc"):
+            if name not in text:
+                fails.append(f"{name}: dynamic OIDC TLS source must not pass unseen")
+        if "safe-dynamic-svc" in text:
+            fails.append("an in-repo ConfigMap with required OIDC TLS verification must pass")
+        if "application-dev.yaml" in text or "application-test.yaml" in text:
+            fails.append("profile-specific application files must not be flagged")
+        want = len(cases) + 4 + 12
         if subjects != want:
             fails.append(f"subject count {subjects}, expected {want}")
 
@@ -198,7 +317,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print(f"self-test ok: oidc-tls-verification-profile is falsifiable ({len(cases) + 4} cases)")
+    print(f"self-test ok: oidc-tls-verification-profile is falsifiable ({len(cases) + 12} cases)")
     return 0
 
 
