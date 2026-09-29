@@ -59,6 +59,12 @@ interface SnapshotRepository {
     /** The [limit] most recently recorded runs, newest first. */
     suspend fun listRecent(limit: Int): List<SnapshotRunSummary>
 
+    /**
+     * The latest-recorded TIED_OUT run of each as-of date in [from]..[to] (inclusive), oldest date
+     * first: one run per day, so a re-run of a day supersedes the earlier one.
+     */
+    suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary>
+
     suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
 
     suspend fun findById(id: UUID): SnapshotRun?

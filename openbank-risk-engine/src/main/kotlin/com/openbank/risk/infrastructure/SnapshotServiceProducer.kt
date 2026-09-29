@@ -11,6 +11,7 @@ import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
+import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
@@ -26,12 +27,14 @@ import com.openbank.risk.application.usecase.IrrbbService
 import com.openbank.risk.application.usecase.LimitService
 import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
+import com.openbank.risk.application.usecase.MinReservesPeriodService
 import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.PostShockFloor
 import com.openbank.risk.domain.irrbb.ShockSizes
+import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Provenance
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
@@ -73,6 +76,7 @@ class SnapshotServiceProducer {
         treasury: TreasuryDealBook,
         repository: SnapshotRepository,
         clock: Clock,
+        modelVersions: ModelVersions,
         @ConfigProperty(name = "openbank.risk.lending.enabled", defaultValue = "true") lendingEnabled: Boolean,
         // ADR-0315 D6: the bank's money-market deals from treasury's events. Off keeps the
         // treasury principal accounts GL-level, as before deals were modelled.
@@ -84,7 +88,44 @@ class SnapshotServiceProducer {
         Provenance.parse(provenance),
         lending.takeIf { lendingEnabled },
         treasury.takeIf { treasuryEnabled },
+        modelVersions,
     )
+
+    /**
+     * The versions every new snapshot run records in its manifest (ADR-0314 D2): the parameter
+     * sets the analytic reads apply, the IRRBB shock fingerprint, the behavioural model and the
+     * engine build. Built from the SAME config the analytic producers read, so the manifest cannot
+     * name a set the reads do not use.
+     */
+    @Produces
+    @ApplicationScoped
+    fun modelVersions(
+        capital: CapitalConfig,
+        liquidity: LiquidityConfig,
+        reserves: MinReservesConfig,
+        @ConfigProperty(name = "quarkus.application.version") engineVersion: String,
+        @ConfigProperty(name = "openbank.risk.irrbb.shock-sizes") shockSizes: Optional<String>,
+        @ConfigProperty(name = "openbank.risk.irrbb.shock-source") shockSource: Optional<String>,
+        @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor") floor: Optional<String>,
+    ): ModelVersions {
+        val capitalSet = capital.toParameters()
+        val liquiditySet = liquidity.toParameters()
+        val irrbb = irrbbParameters(shockSizes, shockSource, floor, Optional.empty())
+        val model = BehaviouralModel.NMD_PHASE0
+        return ModelVersions(
+            engineVersion = engineVersion,
+            capitalSetId = capitalSet.id,
+            capitalSetVersion = capitalSet.version,
+            liquiditySetId = liquiditySet.id,
+            liquiditySetVersion = liquiditySet.version,
+            irrbbShockSetVersion = ModelVersions.irrbbFingerprint(irrbb),
+            irrbbShockSource = irrbb.shockSource,
+            minReservesSetId = reserves.parameterSetId(),
+            minReservesSetVersion = reserves.parameterSetVersion(),
+            behaviouralModelId = model.id,
+            behaviouralModelVersion = model.version,
+        )
+    }
 
     @Produces
     @ApplicationScoped
@@ -120,12 +161,7 @@ class SnapshotServiceProducer {
         snapshots,
         curveSets,
         BehaviouralModel.NMD_PHASE0,
-        IrrbbParameters(
-            shockSizes = parseShockSizes(shockSizes.orElse("")),
-            shockSource = shockSource.orElse("not configured"),
-            floor = floor.map { PostShockFloor.parse(it) }.orElse(null),
-            floorSource = floorSource.orElse(NO_FLOOR),
-        ),
+        irrbbParameters(shockSizes, shockSource, floor, floorSource),
     )
 
     /**
@@ -196,10 +232,20 @@ class SnapshotServiceProducer {
     fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
         MinReservesService(snapshots, config.toParameters())
 
-    /** Same reason as [validateLiquidityParameters]: a bad rate must fail the deploy, not a request. */
+    /** Maintenance-period averaging (ADR-0315 D8) under `openbank.risk.min-reserves.maintenance-calendar`. */
+    @Produces
+    @ApplicationScoped
+    fun minReservesPeriodUseCase(
+        snapshots: SnapshotUseCase,
+        config: MinReservesConfig,
+        clock: Clock,
+    ): MinReservesPeriodUseCase = MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock)
+
+    /** Same reason as [validateLiquidityParameters]: a bad rate or calendar must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateMinReservesParameters(@Observes event: StartupEvent, config: MinReservesConfig) {
         config.toParameters()
+        config.toCalendar()
     }
 
     /**
@@ -225,6 +271,18 @@ class SnapshotServiceProducer {
     }
 
     companion object {
+        fun irrbbParameters(
+            shockSizes: Optional<String>,
+            shockSource: Optional<String>,
+            floor: Optional<String>,
+            floorSource: Optional<String>,
+        ): IrrbbParameters = IrrbbParameters(
+            shockSizes = parseShockSizes(shockSizes.orElse("")),
+            shockSource = shockSource.orElse("not configured"),
+            floor = floor.map { PostShockFloor.parse(it) }.orElse(null),
+            floorSource = floorSource.orElse(NO_FLOOR),
+        )
+
         const val NO_FLOOR =
             "No post-shock floor configured. BCBS d368 Annex 2 leaves floors to national supervisors " +
                 "(not above zero); set openbank.risk.irrbb.post-shock-floor from the applicable text."

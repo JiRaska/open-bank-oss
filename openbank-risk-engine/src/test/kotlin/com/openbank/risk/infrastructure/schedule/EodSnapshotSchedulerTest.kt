@@ -54,6 +54,9 @@ class EodSnapshotSchedulerTest {
 
         override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = emptyList()
 
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+            error("unused")
+
         override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
             calls++
             lastAsOf = asOf

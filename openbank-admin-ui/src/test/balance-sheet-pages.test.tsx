@@ -570,7 +570,9 @@ describe('ČNB minimum reserve requirement', () => {
     router = () => json(MIN_RESERVES())
     await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
     await screen.findByTestId('total-holdings')
-    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')).toBe(true)
+    expect(calls[0].url).toBe('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')
+    // every other call is the maintenance-period read, through the same BFF path
+    expect(calls.slice(1).every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/min-reserves/periods'))).toBe(true)
     expect(screen.getByTestId('total-holdings').textContent).toMatch(/2[\s ,.]?500/)
     expect(screen.getByTestId('requirement').textContent).toMatch(/2[\s ,.]?000/)
     expect(screen.getByTestId('surplus').textContent).toMatch(/500/)
@@ -621,6 +623,64 @@ describe('ČNB minimum reserve requirement', () => {
     expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
     expect(screen.getByRole('alert').textContent).toContain('1000')
     expect(screen.getByText(/Excluded balances|Vyloučené zůstatky/)).toBeTruthy()
+  })
+
+  const PERIOD_ID = '2026-09'
+  const CALENDAR = {
+    calendarId: 'cnb-pmr-maintenance-calendar', calendarVersion: '1', calendarStatus: 'sample-unverified',
+    calendarSource: 'SAMPLE / UNVERIFIED', notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'],
+    periods: [{ id: PERIOD_ID, start: '2026-09-01', end: '2026-09-30', baseReferenceDate: '2026-08-31' }],
+  }
+  const PERIOD = (over: Record<string, unknown> = {}) => ({
+    calendarId: CALENDAR.calendarId, calendarVersion: '1', calendarStatus: 'sample-unverified', calendarSource: 'SAMPLE / UNVERIFIED',
+    period: CALENDAR.periods[0], evaluationDate: '2026-09-30', parameterSetId: 'cnb-pmr', parameterSetVersion: '2', holdingCurrency: 'CZK',
+    baseRunId: 'run-base', requirement: 2000, requirementNotStated: null,
+    daysInPeriod: 30, daysElapsed: 3, daysRemaining: 27, daysWithData: 3, coverage: 1, missingDays: [],
+    days: [{ date: '2026-09-01', runId: 'r1', holdings: 1900 }, { date: '2026-09-02', runId: 'r2', holdings: 2000 }, { date: '2026-09-03', runId: 'r3', holdings: 2100 }],
+    averageHoldings: 2000, averageNotStated: null, remainingRequiredAverage: 2000, dailyHoldingProposal: 2000,
+    proposal: [{ date: '2026-09-04', amount: 2000 }], proposalNotStated: null, requirementMet: null,
+    notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'], ...over,
+  })
+  const periodRouter = (period: unknown, calendar: unknown = CALENDAR) => (url: string) => {
+    if (url.includes(`/min-reserves/periods/${PERIOD_ID}`)) return json(period)
+    if (url.includes('/min-reserves/periods')) return json(calendar)
+    return json(MIN_RESERVES())
+  }
+
+  it('shows the maintenance period of the run date: sample badge, requirement, average, coverage and proposal', async () => {
+    router = periodRouter(PERIOD())
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-proposal')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/min-reserves/periods?asOf=2026-09-30')).toBe(true)
+    expect(calls.some(c => c.url === `/api/svc/risk-engine/api/v1/risk/min-reserves/periods/${PERIOD_ID}?asOf=2026-09-30`)).toBe(true)
+    expect(screen.getByText(/Sample, unverified calendar|Vzorový, neověřený kalendář/)).toBeTruthy()
+    expect(screen.getByTestId('period-requirement').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-average').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-coverage').textContent).toMatch(/3 \/ 3/)
+    expect(document.querySelectorAll('tr[data-period-day="true"]').length).toBe(3)
+  })
+
+  it('a not-stated average and proposal show their reasons, never a zero figure', async () => {
+    router = periodRouter(PERIOD({
+      averageHoldings: null, averageNotStated: 'No ledger GL account is mapped as the bank current account at the ČNB',
+      remainingRequiredAverage: null, dailyHoldingProposal: null, proposal: null, proposalNotStated: 'holdings not stated',
+      days: [{ date: '2026-09-01', runId: 'r1', holdings: null }], daysWithData: 1, coverage: 0.3333, missingDays: ['2026-09-02', '2026-09-03'],
+    }))
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-average-not-stated')
+    expect(screen.getByTestId('period-average-not-stated').textContent).toContain('current account at the ČNB')
+    expect(screen.getByTestId('period-proposal-not-stated').textContent).toContain('holdings not stated')
+    expect(screen.queryByTestId('period-average')).toBeNull()
+    expect(screen.queryByTestId('period-proposal')).toBeNull()
+    expect(screen.getByTestId('period-missing-days').textContent).toContain('2026-09-02')
+    expect(screen.getByTestId('maintenance-period').textContent).not.toMatch(/\b0[.,]00\b/)
+  })
+
+  it('a run date outside the calendar says so instead of showing period figures', async () => {
+    router = periodRouter(PERIOD(), { ...CALENDAR, periods: [] })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-none')
+    expect(calls.some(c => c.url.includes(`/min-reserves/periods/${PERIOD_ID}`))).toBe(false)
   })
 
   it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
