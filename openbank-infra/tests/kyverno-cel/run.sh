@@ -17,6 +17,10 @@ run() {
 # apiCall urlPath (query string -> empty GVR in the fake client), with or without
 # values. Its v1 verdicts are therefore pinned in V1_ROLLOUT below and were measured
 # against the live Enforce policy with `kubectl create --dry-run=server` (PR body).
+# deny-nginx-snippet-annotations.yaml is NOT in the v1 run either: it was deleted when
+# its CEL port went to Enforce (#11437). Its v1 verdicts are pinned in V1_NGINX below,
+# measured with this harness (Kyverno CLI v1.19.1, v1 file as on main) on 2026-09-29,
+# immediately before the deletion.
 # The CLI silently loads NO policy from dr-runner-rbac.yaml (a ClusterPolicy mixed
 # with RBAC docs yields "pass: 0, fail: 0"), so the ClusterPolicy is extracted first.
 DR="$T/tmp-dr-sa-pin.v1.yaml"
@@ -25,7 +29,7 @@ OUT="$T/tmp-mutated"
 trap 'rm -rf "$ROOT/$DR" "$ROOT/$MP" "$ROOT/$OUT"' EXIT
 python3 -c "import sys,yaml; print(yaml.safe_dump_all([d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get('kind')=='ClusterPolicy']))" \
   "$ROOT/gitops/components/platform/dr-runner-rbac.yaml" >"$ROOT/$DR"
-V1=$(run "$K/deny-nginx-snippet-annotations.yaml" "$K/tool-ingress-gate-policy.yaml" "$DR" \
+V1=$(run "$K/tool-ingress-gate-policy.yaml" "$DR" \
   -f "$T/values.yaml")
 CEL=$(run "$K/cel-validating-policies.yaml" -f "$T/values.yaml" \
   --context-file "$T/context.yaml" --crd-paths "$T/rollout-crd-stub.yaml")
@@ -50,6 +54,16 @@ V1_ROLLOUT = {  # measured live, see the comment in the shell part
     ('block-deployment-if-rollout-exists', 'Deployment', 'ledger', 'redis'): 'pass',
 }
 v1.update(V1_ROLLOUT)
+V1_NGINX = {  # measured 2026-09-29 by this harness before the v1 file was deleted (#11437)
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'clean'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'empty-snippet'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'snippet'): 'fail',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'tool-ungated-elsewhere'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-declared'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-gated'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-ungated'): 'pass',
+}
+v1.update(V1_NGINX)
 EXPECTED = {'block-deployment-if-rollout-exists', 'deny-nginx-snippet-annotations',
             'require-gated-or-declared-tool-ingress', 'openbank-dr-sa-pin'}
 for name, t in (('v1', v1), ('cel', cel)):
