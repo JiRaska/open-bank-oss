@@ -490,6 +490,26 @@ gates:
       # 8 self-test cases, both directions, including prose-in-a-comment near-misses.
       python3 .github/scripts/check-untrusted-pg-extension.py --enforce
 
+  - id: eso-crd-api-version
+    name: "an external-secrets.io v1beta1/v1alpha1 manifest cannot coexist with an ESO chart >= 0.17.0"
+    group: gitops
+    budget_seconds: 10
+    mode: enforced
+    min_subjects: 100   # ~215 external-secrets.io-group manifests on origin/main today; floors at roughly half
+    rationale: "ESO 0.17 stops serving external-secrets.io/v1beta1 (and the already-deprecated v1alpha1) CRD storage — a manifest still on either group/version fails to sync the moment the chart Application in openbank-infra/gitops/apps/external-secrets.yaml crosses that line, and the failing files are not the ones the bump PR touched, so nothing in that diff hints at the cause. Refs #11126."
+    review_after: "2027-03-27"
+    selftest: python3 .github/scripts/check-eso-crd-api-version.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-eso-crd-api-version.py"]
+    run: |
+      # Falsified both ways (7 self-test cases) plus a run against the real tree: with the chart
+      # pin simulated at 0.17.0 and a synthetic v1beta1 ExternalSecret dropped into gitops, this
+      # exits 1; on origin/main today (chart 0.16.2, all 215 external-secrets.io manifests already
+      # on v1 after #11128) it exits 0. Below 0.17.0 the gate is a deliberate no-op — it exists to
+      # keep the chart bump and the apiVersion migration in the same PR, not to force a migration
+      # nobody has decided on yet.
+      python3 .github/scripts/check-eso-crd-api-version.py --enforce
+
   - id: litellm-config-revision
     name: "a litellm-config change bumps the pod-roll annotation (an unrolled pod keeps its old model list)"
     group: gitops
@@ -1217,6 +1237,36 @@ gates:
       # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
       python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
+  # ADR-0325 (incident 2026-09-28): a fleet-wide CNPG minor bump restarted every primary IN
+  # PLACE -- no Cluster set primaryUpdateMethod, and CNPG's default is `restart` -- while a
+  # drifted node wedged 22 EBS volumes. card-issuance-db, money-path, was `instances: 1`
+  # although ADR-0159 says two: ADR-0159 listed the money-path services of its day, and seven
+  # of the eight added since shipped single-instance with nothing to notice. So the money-path
+  # cluster set here is DERIVED (service image -> workload -> `<cluster>-rw.<ns>.svc`), and a
+  # money-path service that resolves to nothing is itself a finding.
+  - id: cnpg-update-resilience
+    name: "CNPG clusters update by switchover; money-path clusters are HA (ADR-0325, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      A Cluster without `primaryUpdateMethod: switchover` restarts its primary in place on
+      every image or config update, and a money-path cluster with one instance, or two on the
+      same node, has no failover target when that node wedges. Both were live on 2026-09-28.
+    review_after: "2027-03-31"
+    verified: >-
+      2026-09-28 -- run against origin/main before the fix: FAIL with 96 findings, 68 clusters
+      without switchover and 7 single-instance money-path clusters (card-issuance-db among
+      them), 25 money-path clusters derived for 25 money-path services. Self-test falsifies a
+      single-instance money-path cluster, a restart-method cluster, missing anti-affinity, a
+      disabled PDB and a money-path service whose workload vanished, against a compliant control.
+    min_subjects: 50   # 68 CNPG Clusters declared in gitops today (2026-09-28)
+    selftest_inputs: [".github/scripts/check-cnpg-update-resilience.py"]
+    selftest: python3 .github/scripts/check-cnpg-update-resilience.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-cnpg-update-resilience.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its
@@ -1282,6 +1332,21 @@ gates:
       # their subject — the file's own "remove an entry the moment the service is built" line
       # had no enforcement behind it.
       .github/scripts/check-fleet-attestations.sh --check-placeholders
+
+  - id: no-handrolled-cosign
+    name: "workflows sign through the shared cosign library (issue #9805, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # local YAML inventory completes under one second; initial CI margin
+    # 81 workflows measured 2026-09-13; half, so the estate can shrink without a false red.
+    min_subjects: 40
+    rationale: "A workflow that signs and attests by hand emits whatever predicates its author knew about, so a new admission policy silently outruns it. That is how runner-image.yml shipped an SBOM with no SLSA provenance and deadlocked every ARC runner pool twice in two months (#9805, #887/#8847) — with the rule already written in root CLAUDE.md the whole time."
+    review_after: "2027-03-13"
+    selftest_inputs: [".github/scripts/check-no-handrolled-cosign.py"]
+    selftest: python3 .github/scripts/check-no-handrolled-cosign.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-no-handrolled-cosign.py
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
@@ -1352,6 +1417,7 @@ gates:
     run: |
       python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
       python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
+      python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND
@@ -2337,7 +2403,7 @@ gates:
       bash .github/scripts/spot-kill-retry.sh --self-test
 
   - id: ci-reconcile-selector-selftest
-    name: "CI reconciler selects only recent retry and flake candidates (issue #9645, enforced)"
+    name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
     group: registry
     mode: enforced
     selftest_exempt: >-
@@ -2346,7 +2412,7 @@ gates:
     budget_seconds: 10
     rationale: "The scheduled reconciler replaces a per-completion listener; a broad or duplicate candidate set would recreate the API and runner amplification it removes."
     review_after: "2027-03-11"
-    min_subjects: 3
+    min_subjects: 16
     run: |
       python3 .github/scripts/select-ci-reconcile-candidates.py --self-test
 
@@ -2903,6 +2969,97 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
+  # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
+  # baselined in the script; a new site OR a stale (now lower) baseline is a finding.
+  # ADVISORY first, per the ADR; enforced once the money-path baseline is empty.
+  - id: money-rounding-inline-ratchet
+    name: "inline RoundingMode/setScale in money-path services ratchet (ADR-0318, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      Money-path services round with both HALF_UP and HALF_EVEN inline, so one amount can round
+      differently depending on which service touched it. ADR-0318 moves the rule into a named
+      RoundingPolicy registry; this ratchet keeps new inline sites from appearing meanwhile.
+    review_after: "2027-03-26"
+    verified: "2026-09-26 — advisory per ADR-0318 until the money-path baseline is empty; self-test flags a new site, a stale baseline and an unknown service, and an injected unknown baseline entry made the real run exit 1"
+    budget_seconds: 30
+    min_subjects: 12   # 25 money-path services measured 2026-09-26; half
+    selftest: python3 .github/scripts/check-money-rounding-inline.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
+    run: |
+      python3 .github/scripts/check-money-rounding-inline.py --root .
+  # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
+  # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
+  # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
+  # HttpClient.newBuilder()/newHttpClient() in a service's src/main fails; the 29 sites measured on
+  # 2026-09-26 are baselined per file (count, so a second site in a baselined file still fails),
+  # and a healed entry is reported stale. Advisory per ADR-0320 until P1 has a migrated consumer.
+  - id: raw-http-client-ratchet
+    name: "raw java.net.http.HttpClient construction in services does not grow (ADR-0320 P1, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 29 raw sites in 29 service files; advisory until SafeHttpClient has one migrated consumer (ADR-0320)"
+    budget_seconds: 20   # 0.4s locally; generous for a slower runner
+    rationale: "Every raw HttpClient is an outbound path with no SSRF allowlist or resolved-address check; this forbids new ones while the existing 29 migrate to SafeHttpClient."
+    review_after: "2027-03-31"
+    min_subjects: 1000   # 2319 service src/main files scanned 2026-09-26; findings may reach zero
+    selftest: python3 .github/scripts/check-raw-http-client.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-raw-http-client.py", ".github/scripts/raw-http-client-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-raw-http-client.py --root .
+
+  # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
+  # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
+  # guards never runs — fail-closed (every call the filter should have let through is instead
+  # rejected downstream), not a bypass, which is why nothing 5xx's and nothing alerts.
+  # `openbank-psd2-service`'s EidasMtlsFilter, QsealSignatureFilter and BespokeDeprecationFilter
+  # all shipped this way; a mock-based unit test cannot see it because the mock supplies the
+  # exact slash-less string the code expects. Ratchet, not a flat fail: the 3 files measured
+  # 2026-09-26 are baselined per file (count, so a second slash-less site in a baselined file
+  # still fails), and a healed entry is reported stale. #11008 (open) fixes all three; this gate
+  # is what stops a fourth from shipping the same way in the meantime. Advisory until #11008
+  # merges and the fleet has run clean against the tightened check for a full cycle.
+  - id: jaxrs-path-prefix-leading-slash
+    name: "JAX-RS path-prefix literal missing its leading slash (#10997, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 3 files / 6 sites, all in openbank-psd2-service, all covered by open PR #11008"
+    budget_seconds: 15   # ~1.2s locally; generous for a slower runner
+    rationale: "A slash-less UriInfo.path prefix check never matches under RESTEasy Reactive, so the gate it guards silently never runs; this stops a new occurrence while #11008 fixes the 3 known ones."
+    review_after: "2026-12-31"
+    min_subjects: 1000   # 2521 service src/main .kt files scanned 2026-09-26
+    selftest: python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-jaxrs-path-prefix-leading-slash.py", ".github/scripts/jaxrs-path-prefix-leading-slash-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-jaxrs-path-prefix-leading-slash.py --root .
+
+  # ADR-0321 D2: every SmallRye/MicroProfile Fault Tolerance annotation
+  # (@Timeout/@Retry/@CircuitBreaker/@Bulkhead) on a service src/main declaration must carry
+  # `@ResilienceProfile` (openbank-libs-runtime, com.openbank.libs.resilience) naming one of the
+  # four ADR-0321 profiles, or CUSTOM with a non-blank reason. Ratchet, baselined per file (a
+  # count, so a second undeclared site in an already-baselined file still fails); the 146 sites
+  # measured on 2026-09-26 (one adopted this PR, delegation-service's
+  # ResilientPartyEligibilityClient) are grandfathered, and a healed entry is reported stale.
+  # Advisory per the ADR's own "Neutral" consequence — no fleet sweep in this PR.
+  - id: resilience-profile
+    name: "inter-service FT annotation declares its ADR-0321 resilience profile (advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 146 undeclared sites across 89 files after adopting the read profile in delegation-service; advisory until the fleet sweep (ADR-0321)"
+    budget_seconds: 20   # ~0.5s locally; generous for a slower runner
+    rationale: "A reviewer cannot tell whether a given @Timeout/@Retry/@CircuitBreaker is deliberate without a named profile; this forbids new undeclared sites while the existing 146 migrate."
+    review_after: "2027-03-31"
+    min_subjects: 1000   # 2319 service src/main .kt files scanned 2026-09-26; findings may reach zero
+    selftest: python3 .github/scripts/check-resilience-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-resilience-profile.py", ".github/scripts/resilience-profile-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-resilience-profile.py --root .
+
   # The body-entity arm of the same null-safety class (#7867): Jackson null-checks a data
   # class's constructor parameters but NOT the ELEMENTS of a collection, so a request DTO's
   # `List<X>` accepts `[null]` and NPEs at the first dereference — 500 where a 400 belongs.
@@ -3079,6 +3236,26 @@ gates:
       python3 .github/scripts/check-domain-purity.py --self-test
     run: |
       python3 .github/scripts/check-domain-purity.py .
+
+  # ADR-0317: bounded-context packages leave openbank-libs-domain for openbank-libs-<context>
+  # so a business change rebuilds its 1-11 declarers, not all 57 core consumers. Three things
+  # silently undo that — a moved package reappearing in core, core depending on a context
+  # module, a libs module missing from LIBS_MODULES (#2983) — and this reports each. ADVISORY
+  # through phases 1-3, enforced in phase 4 (rules.yaml: architecture.libs_core_purity).
+  - id: libs-core-purity
+    name: "libs-core-purity — business packages stay out of libs-domain (ADR-0317, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Business packages drifting back into openbank-libs-domain, or a libs module missing from LIBS_MODULES, silently restores the 57-module rebuild fan-out ADR-0317 removes (or the #2983 no-rebuild defect)."
+    review_after: "2027-03-31"
+    verified: "2026-09-26 — advisory until ADR-0317 phases 2-3 move the remaining packages; 0 findings on the phase-1 tree, sabotage of each rule (a/b/c) goes red under --enforce"
+    budget_seconds: 10
+    min_subjects: 50   # 109 measured 2026-09-26 (libs-domain sources + 2 build files + libs modules)
+    selftest_inputs: [".github/scripts/check-libs-core-purity.py"]
+    selftest: python3 .github/scripts/check-libs-core-purity.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-libs-core-purity.py
 
   # openbank-libs published three annotations — @Idempotent, @Audited, @MaskSensitive —
   # that were plain RUNTIME markers: no @InterceptorBinding, no interceptor, zero usages.
@@ -3310,15 +3487,23 @@ gates:
   # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
   # released), same contract as check-pact-provider-replay.py above.
   - id: release-evidence-coverage
-    name: "released package resolves to a component that reaches released.tsv (issue #7597, enforced)"
+    name: "released packages have identities and complete evidence bundles (issue #7597, enforced)"
     group: supplychain
     mode: enforced
-    rationale: "A released package with no component key never enters released.tsv, so its release produces no SBOM, no provenance attestation and no VEX document — silently, since the release itself still succeeds. This gate makes that gap a finding instead of an absence nothing else can see."
+    rationale: "Unmapped released packages and tags with missing SBOM/provenance/VEX/signature assets must be explicit failures rather than silent gaps."
     review_after: "2027-08-31"
     min_subjects: 60
-    selftest_inputs: [".github/scripts/check-release-evidence-coverage.py"]
+    selftest_inputs:
+      - ".github/scripts/check-release-evidence-coverage.py"
+      - ".github/scripts/test-release-evidence-upload.py"
+      - ".github/scripts/verify-release-evidence-manifest.py"
+      - ".github/scripts/test-verify-release-evidence-manifest.py"
+      - ".github/workflows/release-please.yml"
+      - ".github/workflows/verify-release-evidence.yml"
     selftest: |
       python3 .github/scripts/check-release-evidence-coverage.py --self-test
+      python3 .github/scripts/test-release-evidence-upload.py
+      python3 .github/scripts/test-verify-release-evidence-manifest.py
     run: |
       python3 .github/scripts/check-release-evidence-coverage.py --enforce
 
@@ -4297,13 +4482,17 @@ gates:
   # '## Security checklist' section with every box ticked — deleting the section is a
   # finding, same as leaving it blank, or the fix would be "delete the question".
   # The boxes' truthfulness is the reviewer's; the control here is the pause itself.
+  # Items the DIFF decides (suppressions added, dependency manifests changed, and — when every
+  # money-path file is test/docs and no auth/crypto/PII/cardholder path changed — the judgement
+  # items) are answered by the gate with evidence in the step summary; only the rest need a tick.
+  # Anything unclassified (src/main, config, migrations, unknown paths) stays human: fail closed.
   - id: security-checklist-money-path
     name: "money-path PR must tick the Security checklist (ADR-0279 #26, enforced)"
     group: security
     mode: enforced
     when: pull_request
     needs_base: required
-    budget_seconds: 5   # one git diff + a regex over the PR body
+    budget_seconds: 20   # money-path only: bounded live GitHub read plus local diff
     rationale: "The security checklist is the fleet's per-PR control and unticked boxes were free; on money-path code the six lines written for exactly that case must be answered, not carried."
     review_after: "2027-03-04"
     selftest: python3 .github/scripts/check-security-checklist.py --self-test
@@ -4314,10 +4503,27 @@ gates:
       # Editing the body to add the checklist (the documented remediation) only reached this
       # gate after an otherwise-pointless empty commit pushed to re-emit the event (measured
       # 2026-09-06 on #8934: body edited 11:45Z, run at 11:46Z still read the old body).
-      # The live body is the truth the gate means to check; the frozen one is the fallback
-      # when the API is unreachable. One contents-read API call per shard run.
-      LIVE_BODY="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq .body 2>/dev/null || true)"
-      python3 .github/scripts/check-security-checklist.py --body "${LIVE_BODY:-${PR_BODY}}" --base "${PR_DIFF_BASE}" --enforce
+      # Read the live body only after the checker proves this PR touches a money path.
+      # The event body remains the fallback when the API is unavailable.
+      python3 .github/scripts/check-security-checklist.py --live-body --body "${PR_BODY}" --base "${PR_DIFF_BASE}" --enforce
+
+  # #11301: the checklist gate answers the auth/PII/cardholder boxes from the reviewed
+  # `rules.yaml: security_sensitive_paths` declaration. A declaration nobody checks drifts
+  # narrower than the code; this keeps a floor under it — a crypto/JWT/TLS import, the shared
+  # four-eyes library, or a PII-/card-named field or column outside its category's globs fails.
+  - id: security-sensitive-paths-coverage
+    name: "security_sensitive_paths covers every strong sensitive-code signal (#11301, enforced)"
+    group: security
+    mode: enforced
+    budget_seconds: 20   # one pass over the declared services' src/main
+    min_subjects: 16     # declared services at introduction; a shrink below this is the declaration eroding
+    rationale: "Auto-answering checklist items from a path declaration is only as honest as the declaration; a file that imports javax.crypto or carries a PAN field but sits outside its service's globs would let a sensitive change auto-pass."
+    review_after: "2027-03-28"
+    selftest: python3 .github/scripts/check-security-checklist.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-security-checklist.py", "openbank-libs/governance/rules.yaml"]
+    run: |
+      python3 .github/scripts/check-security-checklist.py --coverage
 
   # #8757: the gate above requires the template's Security checklist, and CLAUDE.md mandates
   # `gh pr create --body-file`, which never applies the template — so the section is absent by
@@ -4428,6 +4634,34 @@ gates:
     selftest_inputs: [".github/scripts/check-no-service-principal-type.sh"]
     run: |
       bash .github/scripts/check-no-service-principal-type.sh .
+
+  # No unconditional allow-all PDP under any service's src/main (rules.yaml: authz_policy).
+  # AllowAllPolicyDecisionPoint used to live in openbank-libs-domain/src/main — a class that
+  # unconditionally allows every @Authorize-decorated call, reachable from every production
+  # service's classpath, distinguishable from the real OpaSidecarPolicyDecisionPoint only by
+  # which bean a service's own AuthzProducer happened to @Produces. It has moved to
+  # openbank-libs-testing (test scope, pulled in only via testImplementation), and this gate
+  # keeps it — or anything shaped like it — from coming back. Flags a function under src/main
+  # that resolves to `AuthzDecision(allow = true, ...)` with no branching keyword anywhere in
+  # its body, i.e. a decision that can never be anything but allow. Deliberately does not flag
+  # DenyAllPolicyDecisionPoint (unconditional allow = false), which is a genuine production
+  # kill-switch (rules.yaml: authz_policy), nor a conditional PDP that merely contains the
+  # string on one branch. openbank-libs-testing's own src/main is excluded by module name: it
+  # is a test-fixture library every consumer pulls in via testImplementation, never from a
+  # service's own src/main, so a class there never reaches a production classpath. ENFORCED.
+  - id: no-allow-all-pdp-in-main
+    name: "no unconditional allow-all PDP under src/main (enforced)"
+    group: security
+    mode: enforced
+    rationale: "AllowAllPolicyDecisionPoint used to live in openbank-libs-domain/src/main, reachable from every production service's classpath and distinguishable from the real OPA-backed PDP only by which bean a service's AuthzProducer happened to @Produces; it has moved to openbank-libs-testing (test scope only), and this gate keeps the shape from coming back."
+    review_after: "2027-03-26"
+    min_subjects: 1000   # 2543 *.kt files under src/main scanned at introduction 2026-09-26; well under half
+    budget_seconds: 30   # measured ~8s at introduction 2026-09-26; generous headroom for fleet growth
+    selftest: python3 .github/scripts/check-no-allow-all-pdp-in-main.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-no-allow-all-pdp-in-main.py"]
+    run: |
+      python3 .github/scripts/check-no-allow-all-pdp-in-main.py .
 
   # psd2's ANONYMOUS OPA grant rests on upstream eIDAS mTLS authentication
   # (issue #2169, rules.yaml: authz_policy). psd2_rest_ext.rego grants
@@ -4582,6 +4816,22 @@ gates:
     selftest_inputs: [".github/scripts/check-oidc-client-configured.py"]
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
+  # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
+  # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  - id: oidc-tls-verification-profile-scoped
+    name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
+    group: security
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A top-level `tls.verification: none` silently switches off certificate validation in production the moment any environment moves the Keycloak leg to https; it spreads by copying a template application.yaml, so only a gate stops the next service reintroducing it."
+    review_after: "2027-03-25"
+    min_subjects: 400   # 884 files today (application yaml/properties + gitops manifests, 2026-09-25)
+    selftest: python3 .github/scripts/check-oidc-tls-verification-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-tls-verification-profile.py"]
+    run: |
+      python3 .github/scripts/check-oidc-tls-verification-profile.py
   - id: pr-build-cloud-credentials
     name: "reusable PR build lane carries no cloud credentials (enforced)"
     group: security
@@ -4596,7 +4846,7 @@ gates:
   # Keycloak realm templates must be IMPORTABLE (issue #3246). The three existing realm checks
   # all compare NAME SETS — @RolesAllowed vs template, template vs live, template vs the import
   # artifact — and every one of them is perfectly happy with a document Keycloak refuses to
-  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml runs), the
+  # parse. Measured against quay.io/keycloak/keycloak:26.6.3 (the tag keycloak.yaml ran then), the
   # customers template had FOUR independent import-blocking defects and could never have
   # rebuilt its realm: five `"comment"` keys (Jackson fails the whole import on an unrecognized
   # field), a 490-char client description over the 255 column cap, a 37-char authenticator in a
@@ -4620,6 +4870,22 @@ gates:
     selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Importability alone does not reject an operator client with a password grant,
+  # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
+  - id: ops-cli-client-contract
+    name: "Operator CLI client stays loopback-only and PKCE-gated (issue #10905)"
+    group: security
+    mode: enforced
+    rationale: "Realm import accepts insecure grants and redirects; this gate rejects an operator CLI client that weakens loopback, PKCE, token or scope restrictions."
+    review_after: "2027-03-29"
+    budget_seconds: 5
+    min_subjects: 1  # exactly one named operator client must be present
+    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py"]
+    selftest: python3 openbank-infra/e2e/ops_cli_client.test.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/e2e/ops_cli_client.test.py
 
   # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
   # follow-up). The four checks above — this one included until now — all glob only
@@ -4663,19 +4929,19 @@ gates:
       # ARTIFACT with the consumer's own parser, which is the only layer that can see it.
       python3 .github/scripts/check-opa-bundle-parses.py --root .
   - id: opa-bundle-apply-size
-    name: OPA bundle must be installable (client-side apply annotation ceiling)
+    name: GitOps ConfigMaps must be installable (client-side apply annotation ceiling)
     group: gitops
     mode: enforced
     selftest: python3 .github/scripts/check-opa-bundle-apply-size.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-opa-bundle-apply-size.py"]
     run: |
-      # A bundle over ~256 KB cannot be installed by client-side apply: the whole
+      # A ConfigMap over ~256 KB cannot be installed by client-side apply: the whole
       # object goes into last-applied-configuration and the API server rejects it
       # with "metadata.annotations: Too long". Argo then retries forever while the
-      # cluster keeps serving the PREVIOUS policy, and the Application reads as
-      # OutOfSync/Progressing rather than failed. Five services, four money-path,
-      # were drifted this way before the check existed.
+      # cluster keeps serving the PREVIOUS object. Policy bundles caused five
+      # drifted services; a binary Keycloak theme later hit the same ceiling
+      # because this gate scanned only OPA filenames and ignored binaryData.
       python3 .github/scripts/check-opa-bundle-apply-size.py
   - id: configproperty-kotlin-defaults
     name: "@ConfigProperty constructor params must not carry a Kotlin default"
@@ -5505,9 +5771,33 @@ gates:
     selftest_inputs:
       - ".github/scripts/check-workflow-supply-chain.py"
       - ".github/scripts/test-workflow-supply-chain.py"
+      - ".github/scripts/infracost-scope.py"
+      - ".github/scripts/test-infracost-scope.py"
       - ".github/scripts/agent-admission.py"
       - ".github/scripts/test-agent-admission.py"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
+      python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
+
+  # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
+  # (OpenBao Transit adapter; test-only AES-GCM adapter in libs-testing). A service's src/main that uses
+  # JCA/BouncyCastle/Tink key handling, X-Vault-Token or a Transit path is a second copy of
+  # key handling the libs port exists to replace. Today's eight files are
+  # baselined (shrink-only); a NEW file and a STALE baseline entry each exit 1. ADVISORY per
+  # ADR-0320 until card-issuance, the first consumer, has migrated — then enforced.
+  - id: field-crypto-in-libs
+    name: "service-local field crypto / Transit calls go through libs FieldProtector (ADR-0320 P3, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "Per-service Cipher/Transit code duplicates key handling, AAD binding and fail-closed error handling that ADR-0320 P3 centralises in libs; a ratchet stops new copies while card-issuance migrates."
+    review_after: "2027-03-26"
+    verified: "2026-09-27 — ran check-field-crypto-in-libs.py on the branch: 2857 subjects, 8 service files with local field crypto, all 8 baselined, exit 0; advisory until card-issuance (ADR-0262) migrates to FieldProtector"
+    budget_seconds: 10
+    min_subjects: 1000   # 2857 service src/main .kt/.java/.sql files scanned 2026-09-27
+    selftest: python3 .github/scripts/check-field-crypto-in-libs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
+    run: |
+      python3 .github/scripts/check-field-crypto-in-libs.py --root .

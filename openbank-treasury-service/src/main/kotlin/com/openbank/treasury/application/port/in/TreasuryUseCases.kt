@@ -4,11 +4,17 @@
 
 package com.openbank.treasury.application.port.`in`
 
+import com.openbank.libs.domain.money.RoundingPolicy
+import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
+import com.openbank.treasury.domain.model.NostroReconciliation
+import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -21,20 +27,45 @@ data class DraftDealCommand(
     val principal: BigDecimal,
     val rate: BigDecimal,
     val tradeDate: LocalDate?,
-    val valueDate: LocalDate,
+    /** Required, except for FX_SPOT where it defaults to T+2 business days after the trade date. */
+    val valueDate: LocalDate?,
     val maturityDate: LocalDate?,
     val rationale: String?,
+    /** FX_SPOT only: the bank's side on the foreign [currency]. */
+    val fxSide: FxSide? = null,
 )
 
 data class DealView(val deal: Deal, val journals: List<LedgerJournalRef>)
 
+/**
+ * Per counterparty/currency limit line, doubling as the treasury limit-utilisation view (#10896).
+ * [exposure] MUST be computed the exact same way the booking-time [com.openbank.treasury.domain.model.LimitCheck]
+ * is — both ultimately read [DealRepository.exposure], which itself derives its state/product
+ * filter from [com.openbank.treasury.domain.model.Deal.LIMIT_CONSUMING_STATES] — so this view and
+ * the check that actually blocks booking cannot silently disagree.
+ */
 data class CounterpartyExposure(
     val counterparty: Counterparty,
     val currency: String,
     val limit: BigDecimal,
     val exposure: BigDecimal,
+    /** Deals PENDING_APPROVAL right now whose senior limit override is still in force (ADR-0315 D4). */
+    val activeOverrides: Int = 0,
 ) {
     val headroom: BigDecimal get() = limit - exposure
+    val breached: Boolean get() = exposure > limit
+
+    /** 0 when the limit itself is zero (nothing to utilise), never a divide-by-zero. */
+    val utilisationPercent: BigDecimal
+        get() = if (limit.signum() == 0) {
+            BigDecimal.ZERO
+        } else {
+            RoundingPolicy.RATIO_PERCENT.divide(exposure.multiply(HUNDRED), limit)
+        }
+
+    private companion object {
+        val HUNDRED: BigDecimal = BigDecimal(100)
+    }
 }
 
 /** Daily position per currency (outstanding principal of SETTLED deals as of a date). */
@@ -49,6 +80,9 @@ data class CurrencyPosition(
 
 data class SimulatedMarketRun(val moved: Int, val failures: List<Throwable>)
 
+/** One daily-accrual pass (ADR-0315 D5): journals posted and per-deal failures, none swallowed. */
+data class AccrualRun(val journals: Int, val failures: List<Throwable>)
+
 @Suppress("TooManyFunctions")
 interface TreasuryDealUseCase {
     /**
@@ -59,6 +93,9 @@ interface TreasuryDealUseCase {
     suspend fun draft(command: DraftDealCommand, actor: Actor, key: String? = null): Deal
     suspend fun submit(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun approve(dealId: UUID, actor: Actor, key: String? = null): Deal
+
+    /** ADR-0315 D4: a senior approver records an override of a limit breach, with a reason. */
+    suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String? = null): Deal
     suspend fun cancel(dealId: UUID, actor: Actor, key: String? = null): Deal
     suspend fun settle(dealId: UUID, actor: Actor, key: String? = null): Deal
@@ -71,4 +108,24 @@ interface TreasuryDealUseCase {
 
     /** One pass of the simulated market (ADR-0315 D9): settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun
+
+    /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
+    suspend fun accrueInterest(asOf: LocalDate): AccrualRun
+}
+
+interface NostroReconciliationUseCase {
+    /**
+     * Store a parsed correspondent statement for a CONFIGURED nostro account. A replay of
+     * [idempotencyKey] with the same bytes returns the original; with different bytes it is a
+     * conflict. The same (IBAN, statement id) under a new key is a conflict too.
+     */
+    suspend fun upload(
+        statement: NostroStatement,
+        sha256: String,
+        idempotencyKey: String,
+        actor: Actor,
+    ): StoredStatement
+
+    /** Compare the statement with the ledger's nostro GL for the statement date. Posts nothing. */
+    suspend fun reconcile(statementId: UUID): NostroReconciliation
 }

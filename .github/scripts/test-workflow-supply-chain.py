@@ -16,6 +16,14 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_personal_model_credential_is_rejected_in_every_workflow(self):
+        for name in ('agent-review.yml', 'other.yml'):
+            doc = {'jobs': {'test': {'steps': [{
+                'run': 'echo ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
+            }]}}}
+            self.assertIn('personal model subscription credential is forbidden in workflows',
+                          guard.findings(name, doc))
+
     def test_tags_fail_for_steps_and_reusable_jobs(self):
         for job in ({'uses': 'owner/action@v1'}, {'steps': [{'uses': 'actions/checkout@v4'}]}):
             self.assertTrue(guard.findings('example.yml', {'jobs': {'test': job}}))
@@ -96,12 +104,26 @@ class SupplyChainTest(unittest.TestCase):
     def test_services_ci_dispatch_and_fail_closed_contract(self):
         original = yaml.safe_load((guard.ROOT / '.github/workflows/services-ci.yml').read_text())
         self.assertFalse(guard.findings('services-ci.yml', original))
-        for mutation in ('missing-plan-output', 'unbounded-verifier', 'detector-failure-passes'):
+        for mutation in ('missing-plan-output', 'missing-matrix-output', 'unsharded-verifier',
+                         'fail-fast-verifier', 'wrong-shard-target', 'unbounded-verifier',
+                         'detector-failure-passes', 'missing-shard-verdict-passes'):
             doc = copy.deepcopy(original)
             if mutation == 'missing-plan-output':
                 doc['jobs']['changes']['outputs'].pop('verification-modules')
+            elif mutation == 'missing-matrix-output':
+                doc['jobs']['changes']['outputs'].pop('verification-modules-json')
+            elif mutation == 'unsharded-verifier':
+                doc['jobs']['verification-metadata']['strategy']['matrix']['module'] = '[]'
+            elif mutation == 'fail-fast-verifier':
+                doc['jobs']['verification-metadata']['strategy']['fail-fast'] = True
+            elif mutation == 'wrong-shard-target':
+                doc['jobs']['verification-metadata']['steps'][-1]['run'] = 'echo skipped'
             elif mutation == 'unbounded-verifier':
                 doc['jobs']['verification-metadata']['if'] = 'always()'
+            elif mutation == 'missing-shard-verdict-passes':
+                doc['jobs']['all-green']['steps'][0]['run'] = (
+                    'if [ "${{ needs.changes.result }}" != "success" ]; then '
+                    'echo "scope is unknown"; exit 1; fi')
             else:
                 doc['jobs']['all-green']['steps'][0]['run'] = 'echo green'
             with self.subTest(mutation=mutation):

@@ -73,10 +73,12 @@ TLS. Domain layer (`SanctionsEntry`, `SanctionsList` models) has zero framework 
 | T3 | `sanctions_entries` rows | **Tampering** — direct DB mutation bypassing the import pipeline | App-only write path via `SanctionsEntryRepository.upsertAll`/`deactivateByListType`; reactive Panache; forward-only Flyway | DB-admin insider — infra scope |
 | R1 | Import outcome | **Repudiation** — dispute over which source URL and entry count backed a screening decision at a given time | `sanctions_lists.last_updated_at`/`last_entry_count` updated on every successful refresh (manual and scheduled); `SanctionsImportService` logs source URL + entry count per run | Not yet a signed/immutable audit record (ADR-0029 evidence bundle) — *planned*, same gap as fraud-service R1 |
 | I1 | Match results | **Information disclosure** — sanctions/PEP match reasons could leak screening logic or PII beyond what the caller needs | Match responses are same-list domain data already public on the source feed (sanctioned entity names); endpoint role-gated, no customer-facing exposure | Low — screening data is inherently about named public entities |
-| D1 | Scheduled refresh | **DoS (self-inflicted)** — a slow or hung upstream feed (e.g. a stalled multi-hundred-MB CSV stream) blocks the refresh loop or exhausts memory | Streaming parsers (SAX for OFAC XML, `BufferedReader` line-by-line for OpenSanctions CSV) — **O(1) peak memory per entry**, never buffers the full body; `IMPORT_BATCH_SIZE = 500` batched upserts; per-list `try/catch` in `scheduledRefresh()` — one hung/failing list logs a warning and does not block the others; `HttpClient` has a 30s connect timeout and 300s request timeout | No circuit breaker/backoff on a persistently-failing host yet — a feed that fails every tick retries every tick until its cron slot passes; acceptable given the 60s poll is cheap (cron-gated, not per-list every tick) |
+| D1 | Scheduled refresh | **DoS** — a slow source or large feed exhausts time or resources | CSV records are processed in batches of 500; XML imports retain parsed entries and reconciliation retains source IDs. Publisher pages are bounded independently of feed size. Per-list exception handling isolates failed attempts. | A hung stream can still delay the sequential refresh loop; connection/request timeouts do not establish an independent streaming-body deadline. Importer memory and PostgreSQL temporary storage require capacity planning. |
 | D2 | Scheduled refresh | **DoS** — the fix in this PR made the scheduled path call the real importer for the first time; a bug here could make every due list re-import on every 60s tick instead of once per cron slot | `isDueForScheduledRefresh()` compares `lastUpdatedAt` against the current minute — a list is only due once per matching cron slot; covered by unit tests (`SanctionsListServiceTest`) | Verify in a live sandbox before relying on it — no integration/Testcontainers run against a real external network signal was possible in this sandboxed session (see PR notes) |
 | E1 | Roles | **Elevation** — a viewer/service role obtains operator-only mutation (registry update, manual refresh) | Distinct `@RolesAllowed` tiers per endpoint; `listAll`/`getById` allow `ROLE_SERVICE` (read-only, for KYC/payment callers), `update`/`refresh`/`refreshAll` require `ROLE_OPERATOR`/`ROLE_ADMIN` | OPA enforce still advisory fleet-wide — *open*, same as fraud-service E1 |
 | S2 | OIDC client secret | **Spoofing (shared-credential blast radius)** — reuses the shared `openbank-services` Keycloak confidential client, same pattern as the rest of the fleet | Secret Vault-projected; confidential client; role-gated endpoints | Shared-credential blast radius accepted for sandbox only; dedicated per-service Vault path is prod hardening — *open* |
+| T4 | Committed list changes | **Silent loss** — entry batches commit but the process fails before publishing their changes | V15 appends journal evidence in the same PostgreSQL transaction as each entry mutation, including old-version writers during rollout. The publisher locks an exact selection and writes outbox rows plus journal deletion in one repeatable-read Panache transaction. Failure rolls back the publication; the scheduled loop retries retained evidence outside the feed cron too. | Broker delivery remains at-least-once; consumers must deduplicate ce-id. The KYC re-screen consumer is a separate integration; an outbox row does not prove a completed re-screen. |
+| T5 | Withheld list changes | **DoS / missed re-screening** — a bulk source reformat or unaddressable identifier causes excessive or incomplete targeted work | Actual population and changed targets are summarized in SQL before paging. A share above the configured threshold, missing source ID, or oversized ID withholds targeted events and retains the journal. A distinct count-only signal is deduplicated across identical retries. Normal events contain at most 64 bounded identifiers; transaction-local SQL tables and flush/clear between pages bound publisher heap. | Retained evidence and SQL temporary storage grow with pending changes. Operator handling and KYC re-screening remain separate integrations; the count event alone is not an operational resolution. A legitimate bulk update can require deliberate intervention. |
 
 ## 4. Key invariants (must never regress)
 
@@ -159,6 +161,34 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
 
 ## 7. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-13** — Add durable list-change publication (ADR-0256 D1). Flyway V15 installs an
+  append-only journal trigger; publication atomically transfers an exact committed selection to
+  the existing outbox. When an invalid source identity is repaired or its entry is removed,
+  publication marks only its unpublishable historical rows as resolved while retaining them for
+  audit. A repair records the target list/key across lists; a removal records its reason. Resolution
+  shares the outbox transaction: a failed write restores the rows for retry. It is not evidence that a
+  downstream re-screen completed. Retry survives failed imports and process interruption.
+  Equivalent alias/program/nationality ordering does not trigger a new change; malformed legacy
+  text remains repairable. SQL working sets and bounded pages prevent fleet-sized journals from
+  becoming fleet-sized JVM allocations. Change messages are additive chunks on the existing
+  topic; withheld messages retain evidence and do not claim a downstream re-screen completed.
+  Migration rollback requires stopping publication and preserving pending journal evidence before
+  dropping the trigger/tables. Existing outbox rows remain dispatchable. The KYC consumer and
+  operator resolution workflow are separate delivery requirements.
+
 - **2026-07-07** — Verified the sanctions/PEP feed registry (`sanctions_lists`, Flyway V3/V7/V8) was
   already populated with real, live source URLs (OFAC Treasury `sdn.xml`; EU/UN/HM Treasury via
   OpenSanctions `targets.simple.csv` bulk exports) — an earlier audit's claim that screening ran
@@ -230,3 +260,30 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   deactivateMissing runs only after a fully-consumed stream, so a mid-stream failure keeps the
   previously stored entries (#1432). No endpoint, authz or DB schema change; rollback = revert
   the commit or set `SANCTIONS_EU_SOURCE=opensanctions`.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

@@ -96,3 +96,12 @@ allowed_reasons contains "service-kyb-party-m2m" if {
 		"party.mandate.grant",
 	}
 }
+
+# #10486 batch 8: delegation-service's PartyMandateRestClient / PartyAuthorityRestClient read a grantor's mandates and acting-for relations to decide whether a delegation may be granted. It used to reach these reads on the shared
+# service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
+# (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
+allowed_reasons contains "service-delegation-mandate-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-delegation"
+	input.action in {"party.mandate.read"}
+}

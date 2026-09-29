@@ -61,8 +61,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OUTBOUND M2M. `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
   # Every REST client here (sca, pid, party, account, card-issuance) targets an @RolesAllowed endpoint,
@@ -193,6 +191,8 @@ mp:
         json: false
         format: "%d{HH:mm:ss} %-5p [%c{2.}] %s%e%n"
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%prod":
@@ -237,6 +237,11 @@ mp:
     enforce: "false"
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   delegation:
     idempotency-ttl-seconds: 86400
     # New domestic reservations fail closed until the downstream binding consumer is deployed.

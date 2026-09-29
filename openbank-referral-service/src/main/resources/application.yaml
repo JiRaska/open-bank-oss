@@ -30,8 +30,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   swagger-ui:
     always-include: true
     path: /api/docs
@@ -113,3 +111,9 @@ mp:
         # No broker in tests: the ADR-0310 consumer is driven through InMemoryConnector.
         account-created-in:
           connector: smallrye-in-memory
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none

@@ -44,8 +44,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound service-to-service token (ADR-0104 D3 / Bug #3): the rest-clients (sanctions, aml,
   # fraud, clearing-simulator) mint an openbank-services M2M token via this oidc-client. Without
   # it the default client is "not initialized" → no Authorization header → downstream 401 (the
@@ -175,6 +173,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%test":
   quarkus:
@@ -193,6 +193,11 @@ mp:
       worker:
         enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   bank:
     bic: ${OPENBANK_BIC:OPBKCZ22}
     bank-code: ${OPENBANK_BANK_CODE:2000}

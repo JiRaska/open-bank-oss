@@ -5,6 +5,9 @@
 package com.openbank.treasury.domain.model
 
 import java.math.BigDecimal
+import java.math.RoundingMode
+import java.time.LocalDate
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 enum class Side { DEBIT, CREDIT }
@@ -12,6 +15,9 @@ enum class Side { DEBIT, CREDIT }
 /** The ledger events that move value. `BOOKED` posts nothing (no off-balance commitment in the MVP). */
 enum class PostingEvent(val key: String) {
     SETTLED("settled"),
+
+    /** One calendar day of interest recognised on an accrual basis (ADR-0315 D5); keyed per day. */
+    ACCRUED("accrued"),
     MATURED("matured"),
     REVERSED("reversed"),
 }
@@ -20,10 +26,16 @@ data class PostingLine(val glCode: String, val side: Side, val amount: BigDecima
 
 /**
  * A balanced journal for one deal event. [idempotencyKey] is `treasury:<dealId>:<event>` (ADR-0315
- * D5): a retried post returns the ledger's original entry and never double-posts.
+ * D5), or `treasury:<dealId>:accrued:<date>` for a daily accrual ([suffix] = the ISO date): a retried
+ * post returns the ledger's original entry and never double-posts.
  */
-data class JournalSpec(val dealId: UUID, val event: PostingEvent, val lines: List<PostingLine>) {
-    val idempotencyKey: String get() = "treasury:$dealId:${event.key}"
+data class JournalSpec(
+    val dealId: UUID,
+    val event: PostingEvent,
+    val lines: List<PostingLine>,
+    val suffix: String? = null,
+) {
+    val idempotencyKey: String get() = "treasury:$dealId:${event.key}" + (suffix?.let { ":$it" } ?: "")
 
     init {
         require(lines.size >= 2) { "a journal needs at least two lines" }
@@ -46,12 +58,14 @@ data class JournalSpec(val dealId: UUID, val event: PostingEvent, val lines: Lis
  * | Deposit facility at ČNB          | 1510 | —    | ASSET     |
  * | Accrued interest receivable (MM) | 1520 | 1521 | ASSET     |
  * | MM borrowings from banks         | 2300 | 2301 | LIABILITY |
+ * | Borrowings from ČNB (lombard)    | 2320 | —    | LIABILITY |  (ledger V30)
  * | Accrued interest payable (MM)    | 2310 | 2311 | LIABILITY |
  * | MM interest income               | 4200 | 4201 | INCOME    |
  * | MM interest expense              | 5200 | 5201 | EXPENSE   |
+ * | FX position (ledger V5)          | 1990 | 1991 | ASSET     |
  *
- * The accrued-interest accounts are seeded for the daily-accrual follow-up; the MVP recognises
- * interest in one amount at maturity and does not post to them.
+ * Interest is recognised daily into the accrued-interest accounts (ADR-0315 D5); maturity then
+ * clears them rather than booking the whole interest to income in one amount.
  */
 object TreasuryChart {
     private val byCurrency: Map<String, Map<String, String>> = mapOf(
@@ -60,8 +74,12 @@ object TreasuryChart {
             "placement" to "1500",
             "cnb" to "1510",
             "borrowing" to "2300",
+            "cnb-borrowing" to "2320",
             "income" to "4200",
             "expense" to "5200",
+            "accrued-receivable" to "1520",
+            "accrued-payable" to "2310",
+            "fx-position" to "1990",
         ),
         Deal.EUR to mapOf(
             "nostro" to "1002",
@@ -69,6 +87,9 @@ object TreasuryChart {
             "borrowing" to "2301",
             "income" to "4201",
             "expense" to "5201",
+            "accrued-receivable" to "1521",
+            "accrued-payable" to "2311",
+            "fx-position" to "1991",
         ),
     )
 
@@ -78,22 +99,37 @@ object TreasuryChart {
     /** Fixed ids seeded by the ledger migration: `a0000000-0000-0000-0000-00000000<code>`. */
     fun glAccountId(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
 
+    /** The nostro GL of every currency — the only accounts a correspondent statement may reconcile. */
+    val nostroCodes: Set<String> get() = byCurrency.values.mapNotNull { it["nostro"] }.toSet()
+
     /** Every code the treasury posts to — the ledger migration must seed each one. */
     val postedCodes: Set<String> get() = byCurrency.values.flatMap { it.values }.toSet()
 }
 
 /**
- * The posting table (ADR-0315 D5). Pure: a deal and an event in, a balanced journal out.
+ * The posting table (ADR-0315 D5). Pure: a deal and an event in, a balanced journal out. I is the
+ * deal's interest, A the part of it already accrued (Σ of the daily ACCRUED journals).
  *
- * | product              | SETTLED                        | MATURED                                   |
- * |----------------------|--------------------------------|-------------------------------------------|
- * | MM_PLACEMENT         | Dr placement / Cr nostro  (P)  | Dr nostro (P+I) / Cr placement (P) / Cr income (I) |
- * | CNB_DEPOSIT_FACILITY | Dr ČNB 1510 / Cr nostro   (P)  | Dr nostro (P+I) / Cr 1510 (P) / Cr income (I)       |
- * | MM_BORROWING         | Dr nostro / Cr borrowing  (P)  | Dr borrowing (P) / Dr expense (I) / Cr nostro (P+I) |
+ * | product              | SETTLED                       | ACCRUED (per day, amount d)         | MATURED                                                        |
+ * |----------------------|-------------------------------|-------------------------------------|----------------------------------------------------------------|
+ * | MM_PLACEMENT         | Dr placement / Cr nostro (P)  | Dr accrued receivable / Cr income   | Dr nostro (P+I) / Cr placement (P) / Cr accrued (A) / Cr income (I−A) |
+ * | CNB_DEPOSIT_FACILITY | Dr ČNB 1510 / Cr nostro (P)   | Dr accrued receivable / Cr income   | Dr nostro (P+I) / Cr 1510 (P) / Cr accrued (A) / Cr income (I−A)      |
+ * | MM_BORROWING         | Dr nostro / Cr borrowing (P)  | Dr expense / Cr accrued payable     | Dr borrowing (P) / Dr accrued (A) / Dr expense (I−A) / Cr nostro (P+I) |
+ * | CNB_LOMBARD          | Dr nostro / Cr ČNB 2320 (P)   | Dr expense / Cr accrued payable     | Dr 2320 (P) / Dr accrued (A) / Dr expense (I−A) / Cr nostro (P+I)      |
  *
- * REVERSED (from SETTLED) is the settlement journal with every side flipped, posted as a new
- * offsetting journal under its own key; from BOOKED nothing had posted, so nothing is reversed.
- * A zero-interest deal (rate 0) posts no interest line.
+ * The daily amount is `cumulative(d) − cumulative(d−1)` with `cumulative(n) = I · n / days`, rounded
+ * as I itself is, so the dailies sum to exactly I over the life of the deal and a maturity after a
+ * complete accrual run books nothing to income (A = I). REVERSED (from SETTLED) is the settlement
+ * journal with every side flipped, plus the accrued A unwound out of income or expense, posted as
+ * one new offsetting journal under its own key; from BOOKED nothing had posted. A zero amount
+ * posts no line.
+ *
+ * FX_SPOT (F = foreign amount, C = its CZK leg) SETTLED, routed through the ledger's per-currency
+ * FX position accounts (V5, credited when the bank acquires a currency) so each currency balances:
+ * - BUY:  Dr nostro(F) / Cr FX position(F) (F); Dr FX position CZK / Cr nostro CZK (C)
+ * - SELL: the same four lines with every side flipped.
+ * It never accrues or matures; its reversal is the flipped settlement. Revaluation of the open
+ * position is the ledger's daily FX revaluation, not the treasury's.
  */
 object PostingRules {
 
@@ -110,20 +146,67 @@ object PostingRules {
                 PostingLine(TreasuryChart.code(ccy, "cnb"), Side.DEBIT, p, ccy),
                 PostingLine(nostro, Side.CREDIT, p, ccy),
             )
-            ProductType.MM_BORROWING -> listOf(
+            ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOf(
                 PostingLine(nostro, Side.DEBIT, p, ccy),
-                PostingLine(TreasuryChart.code(ccy, "borrowing"), Side.CREDIT, p, ccy),
+                PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
             )
+            ProductType.FX_SPOT -> fxSpotSettlement(deal)
         }
         return JournalSpec(deal.id, PostingEvent.SETTLED, lines)
     }
 
-    fun maturity(deal: Deal): JournalSpec {
+    private fun fxSpotSettlement(deal: Deal): List<PostingLine> {
+        val fx = checkNotNull(deal.fx) { "FX_SPOT deal ${deal.id} without FX terms" }
+        val ccy = deal.currency
+        val czk = Deal.CZK
+        val buy = listOf(
+            PostingLine(TreasuryChart.code(ccy, "nostro"), Side.DEBIT, deal.principal, ccy),
+            PostingLine(TreasuryChart.code(ccy, "fx-position"), Side.CREDIT, deal.principal, ccy),
+            PostingLine(TreasuryChart.code(czk, "fx-position"), Side.DEBIT, fx.counterAmount, czk),
+            PostingLine(TreasuryChart.code(czk, "nostro"), Side.CREDIT, fx.counterAmount, czk),
+        )
+        return if (fx.side == FxSide.BUY) buy else buy.map { it.copy(side = it.side.flipped()) }
+    }
+
+    private fun Side.flipped() = if (this == Side.DEBIT) Side.CREDIT else Side.DEBIT
+
+    /** Interest accrued from the value date up to and including [date], capped at maturity. */
+    fun accruedThrough(deal: Deal, date: LocalDate): BigDecimal {
+        val total = deal.days
+        if (total <= 0L) return BigDecimal.ZERO
+        val elapsed = ChronoUnit.DAYS.between(deal.valueDate, date).coerceIn(0L, total)
+        return deal.interest.multiply(BigDecimal.valueOf(elapsed))
+            .divide(BigDecimal.valueOf(total), MONEY_SCALE, RoundingMode.HALF_UP)
+    }
+
+    /** The journal accruing [date]'s interest, or null when that day adds nothing. */
+    fun accrual(deal: Deal, date: LocalDate): JournalSpec? {
+        if (deal.product == ProductType.FX_SPOT) return null
+        val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
+        if (amount.signum() <= 0) return null
+        val ccy = deal.currency
+        val lines = if (deal.product.isAsset) {
+            listOf(
+                PostingLine(TreasuryChart.code(ccy, "accrued-receivable"), Side.DEBIT, amount, ccy),
+                PostingLine(TreasuryChart.code(ccy, "income"), Side.CREDIT, amount, ccy),
+            )
+        } else {
+            listOf(
+                PostingLine(TreasuryChart.code(ccy, "expense"), Side.DEBIT, amount, ccy),
+                PostingLine(TreasuryChart.code(ccy, "accrued-payable"), Side.CREDIT, amount, ccy),
+            )
+        }
+        return JournalSpec(deal.id, PostingEvent.ACCRUED, lines, suffix = date.toString())
+    }
+
+    fun maturity(deal: Deal, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec {
+        require(deal.product != ProductType.FX_SPOT) { "an FX spot deal has no maturity journal" }
         val p = deal.principal
         val i = deal.interest
+        require(accrued.signum() >= 0 && accrued <= i) { "accrued $accrued outside 0..$i for ${deal.id}" }
+        val rest = i - accrued
         val ccy = deal.currency
         val nostro = TreasuryChart.code(ccy, "nostro")
-        val hasInterest = i.signum() > 0
         val lines = when (deal.product) {
             ProductType.MM_PLACEMENT, ProductType.CNB_DEPOSIT_FACILITY -> {
                 val asset = TreasuryChart.code(
@@ -139,24 +222,46 @@ object PostingRules {
                 listOfNotNull(
                     PostingLine(nostro, Side.DEBIT, p + i, ccy),
                     PostingLine(asset, Side.CREDIT, p, ccy),
-                    if (hasInterest) PostingLine(TreasuryChart.code(ccy, "income"), Side.CREDIT, i, ccy) else null,
+                    line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
+                    line(TreasuryChart.code(ccy, "income"), Side.CREDIT, rest, ccy),
                 )
             }
-            ProductType.MM_BORROWING -> listOfNotNull(
-                PostingLine(TreasuryChart.code(ccy, "borrowing"), Side.DEBIT, p, ccy),
-                if (hasInterest) PostingLine(TreasuryChart.code(ccy, "expense"), Side.DEBIT, i, ccy) else null,
+            ProductType.FX_SPOT -> error("unreachable: FX spot has no maturity")
+            ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
+                PostingLine(liabilityCode(deal), Side.DEBIT, p, ccy),
+                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
+                line(TreasuryChart.code(ccy, "expense"), Side.DEBIT, rest, ccy),
                 PostingLine(nostro, Side.CREDIT, p + i, ccy),
             )
         }
         return JournalSpec(deal.id, PostingEvent.MATURED, lines)
     }
 
-    /** The offsetting journal for a SETTLED deal's reversal; null when nothing had posted. */
-    fun reversal(deal: Deal, stateBeforeReversal: DealState): JournalSpec? {
+    /** The offsetting journal for a SETTLED deal's reversal, unwinding [accrued]; null when nothing had posted. */
+    fun reversal(deal: Deal, stateBeforeReversal: DealState, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec? {
         if (stateBeforeReversal != DealState.SETTLED) return null
-        val flipped = settlement(deal).lines.map {
-            it.copy(side = if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT)
+        val flipped = settlement(deal).lines.map { it.copy(side = it.side.flipped()) }
+        val ccy = deal.currency
+        val unwind = if (deal.product.isAsset) {
+            listOfNotNull(
+                line(TreasuryChart.code(ccy, "income"), Side.DEBIT, accrued, ccy),
+                line(TreasuryChart.code(ccy, "accrued-receivable"), Side.CREDIT, accrued, ccy),
+            )
+        } else {
+            listOfNotNull(
+                line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
+                line(TreasuryChart.code(ccy, "expense"), Side.CREDIT, accrued, ccy),
+            )
         }
-        return JournalSpec(deal.id, PostingEvent.REVERSED, flipped)
+        return JournalSpec(deal.id, PostingEvent.REVERSED, flipped + unwind)
     }
+
+    /** The principal's liability account: interbank borrowings, or the ČNB lombard account. */
+    private fun liabilityCode(deal: Deal): String =
+        TreasuryChart.code(deal.currency, if (deal.product == ProductType.CNB_LOMBARD) "cnb-borrowing" else "borrowing")
+
+    private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): PostingLine? =
+        if (amount.signum() > 0) PostingLine(code, side, amount, ccy) else null
+
+    private const val MONEY_SCALE = 2
 }

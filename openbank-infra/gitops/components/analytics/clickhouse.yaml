@@ -57,7 +57,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clickhouse
-          image: docker.io/clickhouse/clickhouse-server:24.8-alpine
+          image: docker.io/clickhouse/clickhouse-server:26.8-alpine
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

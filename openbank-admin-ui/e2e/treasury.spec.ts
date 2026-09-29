@@ -30,6 +30,9 @@ test('approver sees the blotter with the synthetic counterparty label and no new
   await expect(main.getByText('dana.dealer')).toBeVisible({ timeout: 20_000 })
   await expect(main.getByText(/Simulovaná protistrana|Synthetic counterparty/)).toBeVisible()
   await expect(main.getByRole('link', { name: /Nový obchod|New deal/ })).toHaveCount(0)
+  await expect(main.getByRole('heading', { name: /Nejdřív obchod|First the deal/ })).toBeVisible()
+  await expect(main.getByRole('link', { name: /Ke schválení|Approval inbox/ })).toBeVisible()
+  await expect(main.getByLabel(/Přehled treasury|Treasury overview/).getByText('1', { exact: true })).toBeVisible()
 })
 
 test('approval inbox offers approve on a pending deal', async ({ page }) => {

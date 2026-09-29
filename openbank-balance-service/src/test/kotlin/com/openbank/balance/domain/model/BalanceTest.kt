@@ -165,6 +165,11 @@ class BalanceTest {
     }
 
     @Test
+    fun `isOverdrawn returns false for a zero balance`() {
+        assertFalse(balance(booked = "0.00").isOverdrawn())
+    }
+
+    @Test
     fun `available booked reserved return their respective fields`() {
         val b = balance(booked = "200.00", available = "150.00").copy(reservedAmount = BigDecimal("50.00"))
         assertEquals(0, b.booked().compareTo(BigDecimal("200.00")))

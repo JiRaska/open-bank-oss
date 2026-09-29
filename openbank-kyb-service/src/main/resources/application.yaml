@@ -52,8 +52,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # OUTBOUND M2M for the party-service client (POST /parties, POST /parties/{id}/mandates are
   # @RolesAllowed). `quarkus.oidc` above validates bearers this service RECEIVES; it mints nothing.
@@ -255,6 +253,8 @@ authz:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
     oidc-client:
       enabled: false

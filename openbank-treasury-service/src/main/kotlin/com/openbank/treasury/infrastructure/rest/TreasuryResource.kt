@@ -10,6 +10,8 @@ import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -41,7 +43,7 @@ import java.util.UUID
 @Path("/api/v1/treasury")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
-@RolesAllowed(Roles.ADMIN, DEALER, APPROVER)
+@RolesAllowed(Roles.ADMIN, DEALER, APPROVER, SENIOR_APPROVER)
 @Suppress("TooManyFunctions")
 class TreasuryResource {
 
@@ -75,17 +77,34 @@ class TreasuryResource {
     @Operation(summary = "Draft a deal (DRAFT); nothing posts")
     @Authorize(action = "treasury.deal.draft")
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
+        val product = requireNotNull(request.product) { "product is required" }
+        val fx = if (product == ProductType.FX_SPOT) {
+            FxTerms.fromCurrencies(
+                requireNotNull(request.buyCurrency) { "buyCurrency is required for FX_SPOT" },
+                requireNotNull(request.sellCurrency) { "sellCurrency is required for FX_SPOT" },
+            ).also { (foreign, _) ->
+                require(request.currency == null || request.currency == foreign) {
+                    "currency, when given for FX_SPOT, is the foreign currency $foreign"
+                }
+            }
+        } else {
+            require(request.buyCurrency == null && request.sellCurrency == null) {
+                "buyCurrency/sellCurrency apply to FX_SPOT only"
+            }
+            null
+        }
         val deal = deals.draft(
             DraftDealCommand(
-                product = requireNotNull(request.product) { "product is required" },
+                product = product,
                 counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
-                currency = requireNotNull(request.currency) { "currency is required" },
+                currency = fx?.first ?: requireNotNull(request.currency) { "currency is required" },
                 principal = requireNotNull(request.principal) { "principal is required" },
                 rate = requireNotNull(request.rate) { "rate is required" },
                 tradeDate = request.tradeDate,
-                valueDate = requireNotNull(request.valueDate) { "valueDate is required" },
+                valueDate = request.valueDate,
                 maturityDate = request.maturityDate,
                 rationale = request.rationale,
+                fxSide = fx?.second,
             ),
             actor(),
             requireKey(key),
@@ -125,6 +144,22 @@ class TreasuryResource {
     @Authorize(action = "treasury.deal.approve", resource = "#id")
     suspend fun approve(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         DealResponse.from(deals.approve(id, actor(), requireKey(key)))
+
+    @POST
+    @Path("/deals/{id}/override-limit")
+    @RolesAllowed(SENIOR_APPROVER)
+    @Operation(
+        summary = "Senior override of a counterparty-limit breach, with a reason (ADR-0315 D4). " +
+            "The deal must be PENDING_APPROVAL and breached; booking still needs a different approver.",
+    )
+    @Authorize(action = "treasury.deal.override-limit", resource = "#id")
+    suspend fun overrideLimit(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ReasonRequest,
+    ): DealResponse = DealResponse.from(
+        deals.overrideLimit(id, requireNotNull(request.reason) { "reason is required" }, actor(), requireKey(key)),
+    )
 
     @POST
     @Path("/deals/{id}/reject")
@@ -174,6 +209,19 @@ class TreasuryResource {
     @Authorize(action = "treasury.counterparty.read")
     suspend fun counterparties(): List<CounterpartyResponse> = deals.counterparties().map(CounterpartyResponse::from)
 
+    /**
+     * Read-only limit-utilisation view (ADR-0315 D4, #10896): reuses [TreasuryDealUseCase.counterparties]
+     * (and, underneath it, the same repository exposure query the booking-time limit check calls) so
+     * this can never disagree with what actually blocks booking. Same read action/roles as the other
+     * treasury GETs — no new rego rule needed.
+     */
+    @GET
+    @Path("/limits/utilisation")
+    @Operation(summary = "Per-counterparty limit utilisation: limit, utilised, available, % and active overrides")
+    @Authorize(action = "treasury.counterparty.read")
+    suspend fun limitsUtilisation(): LimitUtilisationResponse =
+        LimitUtilisationResponse(deals.counterparties().map(LimitUtilisationEntryResponse::from))
+
     @GET
     @Path("/positions")
     @Operation(summary = "Daily position per currency: placed, borrowed, at ČNB, net")
@@ -188,3 +236,6 @@ class TreasuryResource {
 const val DEALER = "ROLE_TREASURY_DEALER"
 const val IDEMPOTENCY_KEY = "Idempotency-Key"
 const val APPROVER = "ROLE_TREASURY_APPROVER"
+
+/** ADR-0315 D4: overrides a counterparty-limit breach. Never the same person who books the deal. */
+const val SENIOR_APPROVER = "ROLE_TREASURY_SENIOR_APPROVER"

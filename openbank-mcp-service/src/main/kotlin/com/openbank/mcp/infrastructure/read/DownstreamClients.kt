@@ -81,7 +81,10 @@ interface TransactionServiceClient {
 
 @RegisterRestClient(configKey = "statement-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-mcp` (ROLE_API only).
+// statement-service grants it nothing: no charter holds query.statement.readonly, so get_statement is
+// refused by the MCP gate before this client is reached (McpMachineGrantCharterAlignmentTest).
+@OidcClientFilter("m2m")
 @Path("/api/v1/statements")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
