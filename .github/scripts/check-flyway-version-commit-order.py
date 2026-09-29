@@ -328,8 +328,10 @@ def find_violations(
                         f"renumber it to the next free version instead. If it has ALREADY "
                         f"reached main, renumbering is blocked by check-db-migration.py's "
                         f"db-migration-gate (renaming an already-committed migration is treated "
-                        f"as editing it) — set QUARKUS_FLYWAY_OUT_OF_ORDER=true in that "
-                        f"service's gitops Deployment env instead (see "
+                        f"as editing it). Check flyway_schema_history in every deployed "
+                        f"environment before choosing a recovery plan. If independently "
+                        f"reviewed and safe for those histories, use a scoped "
+                        f"QUARKUS_FLYWAY_OUT_OF_ORDER setting (see "
                         f"components/campaign/campaign-service.yaml for the pattern), then add "
                         f"an entry to this script's KNOWN_VIOLATIONS.",
                     )
