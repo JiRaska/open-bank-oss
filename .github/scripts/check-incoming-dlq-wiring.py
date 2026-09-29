@@ -49,7 +49,10 @@ from __future__ import annotations
 
 import re
 import sys
+from functools import lru_cache
 from pathlib import Path
+
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import gatelib  # noqa: E402
@@ -68,12 +71,6 @@ KNOWN_UNWIRED = {
     # source, so local dev and tests get the same wiring as the pod. The gate reads both sources
     # and sees all three.
     ("openbank-tax-reporting-service", "withholding-remitted-in"): "no KafkaUser in gitops — a Write ACL cannot be granted, so a DLQ would wedge on the send (#5745)",
-    # ADR-0310 D3. The channel names its DLQ (nested form) and the KafkaTopic CR exists; only the
-    # Write ACL is missing, because loyalty-service has no KafkaUser and no gitops workload at all
-    # (#8793) — nothing syncs components/loyalty, so a KafkaUser written there would green this gate
-    # while applying nothing. The consumer cannot wedge because it is not deployed. This entry goes
-    # stale (and fails the gate) the moment the loyalty KafkaUser grants that Write.
-    ("openbank-loyalty-service", "referral-qualified-in"): "no KafkaUser in gitops — loyalty-service has no workload yet (#8793); the Write ACL on openbank.dlq.loyalty.referral-qualified-in lands with its KafkaUser",
     # The channels that had a DLQ BEFORE #5745, on SmallRye's implicit `dead-letter-topic-<channel>`
     # name. Naming one explicitly is a RENAME of a live topic: it strands whatever is already parked
     # in the old one and moves what the AccountPartyEventDeadLettered alert must read. That is an
@@ -156,7 +153,7 @@ def props(body: list[str]) -> dict[str, str]:
 
 
 def gitops_text() -> str:
-    return "\n".join(p.read_text(encoding="utf-8", errors="replace") for p in GITOPS.rglob("*.yaml"))
+    return "\n---\n".join(p.read_text(encoding="utf-8", errors="replace") for p in GITOPS.rglob("*.yaml"))
 
 
 def overrides(root: Path) -> dict[tuple[str, str], dict[str, str]]:
@@ -202,6 +199,29 @@ def kafka_topic_cr(gitops: str, topic: str) -> bool:
         ):
             return True
     return False
+
+
+@lru_cache(maxsize=4)
+def kafka_user_write_topics(gitops: str) -> frozenset[str]:
+    """Read Write grants from KafkaUser ACL entries once per manifest corpus."""
+    topics: set[str] = set()
+    for text in re.split(r"(?m)^---\s*$", gitops):
+        if not re.search(r"(?m)^kind:\s*KafkaUser\s*$", text):
+            continue
+        doc = yaml.safe_load(text)
+        if not isinstance(doc, dict) or doc.get("kind") != "KafkaUser":
+            continue
+        acls = doc.get("spec", {}).get("authorization", {}).get("acls", [])
+        for acl in acls:
+            resource = acl.get("resource", {})
+            if resource.get("type") == "topic" and "Write" in acl.get("operations", []):
+                topics.add(resource["name"])
+    return frozenset(topics)
+
+
+def kafka_user_write_acl(gitops: str, topic: str) -> bool:
+    """Require the topic and Write operation in the same KafkaUser ACL entry."""
+    return topic in kafka_user_write_topics(gitops)
 
 
 def findings(root: Path) -> tuple[list[str], int]:
@@ -250,7 +270,7 @@ def findings(root: Path) -> tuple[list[str], int]:
                     if not kafka_topic_cr(gitops, topic):
                         chan.append(f"{svc} :: {ch}: no KafkaTopic CR for {topic} — this cluster does not "
                                     f"auto-create topics, so the DLQ send fails and the consumer wedges")
-                    if not re.search(r"name:\s*%s\b[\s\S]{0,200}?operations:\s*\[[^\]]*Write" % re.escape(topic), gitops):
+                    if not kafka_user_write_acl(gitops, topic):
                         chan.append(f"{svc} :: {ch}: no KafkaUser Write ACL on {topic} — the DLQ send is denied "
                                     f"and the consumer wedges on the failure it was meant to park")
 
@@ -282,8 +302,8 @@ SELF_TEST = [
 
 def self_test() -> int:
     failed = 0
-    for name, yaml, expect in SELF_TEST:
-        chans = channels(yaml)
+    for name, config_text, expect in SELF_TEST:
+        chans = channels(config_text)
         got = 0
         for _channel, p in chans:
             if p.get("failure-strategy") != "dead-letter-queue" or not p.get("dead-letter-queue.topic"):
@@ -322,6 +342,22 @@ def self_test() -> int:
         ("a real KafkaTopic document is found", with_cr, True),
     ):
         got = kafka_topic_cr(corpus, "openbank.dlq.x.y-in")
+        if got is not expect:
+            print(f"SELF-TEST FAIL: {name} (expected {expect}, got {got})")
+            failed += 1
+        else:
+            print(f"self-test ok: {name}")
+
+    neighboring_acl = acl_only.replace("operations: [Write, Describe]", "operations: [Read, Describe]") + (
+        "      - resource:\n          type: topic\n          name: openbank.events.other\n"
+        "        operations: [Write, Describe]\n"
+    )
+    for name, corpus, expect in (
+        ("a neighboring Write ACL does not grant this topic", neighboring_acl, False),
+        ("the same ACL grants Write on this topic", acl_only, True),
+        ("a KafkaTopic is not a Write ACL", with_cr.replace("operations: [Write, Describe]", "operations: [Read]"), False),
+    ):
+        got = kafka_user_write_acl(corpus, "openbank.dlq.x.y-in")
         if got is not expect:
             print(f"SELF-TEST FAIL: {name} (expected {expect}, got {got})")
             failed += 1
