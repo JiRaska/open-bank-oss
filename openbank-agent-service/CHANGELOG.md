@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.2...agent-service-v1.27.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** verify unified approval inbox identity and audit context ([#11400](https://github.com/JiRaska/open-bank-oss/issues/11400)) ([a12d9be](https://github.com/JiRaska/open-bank-oss/commit/a12d9be97efa1af05460899e39d5c3baa0b965b0))
+
 ## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.1...agent-service-v1.26.2) (2026-09-23)
 
 
