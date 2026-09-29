@@ -1,7 +1,7 @@
 # customer-edge upstream OIDC client secret from OpenBao →
 # customer-edge-upstream-oidc Secret (key client-secret), from the
 # openbank/customer-edge-upstream KV path.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: customer-edge-upstream-oidc

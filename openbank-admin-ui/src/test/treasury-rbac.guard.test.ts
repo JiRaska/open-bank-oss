@@ -15,6 +15,7 @@ const root = resolve(__dirname, '..')
 const read = (p: string) => readFileSync(resolve(root, p), 'utf8')
 const sidebar = read('components/layout/Sidebar.tsx')
 const resource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/TreasuryResource.kt')
+const nostroResource = read('../../openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/rest/NostroResource.kt')
 
 const PAGES: [string, string, Permission][] = [
   ['app/treasury/deals/page.tsx', '/treasury/deals', 'treasury:view'],
@@ -22,7 +23,9 @@ const PAGES: [string, string, Permission][] = [
   ['app/treasury/deals/new/page.tsx', '/treasury/deals/new', 'treasury:deal:create'],
   ['app/treasury/approvals/page.tsx', '/treasury/approvals', 'treasury:deal:approve'],
   ['app/treasury/counterparties/page.tsx', '/treasury/counterparties', 'treasury:view'],
+  ['app/treasury/limits/page.tsx', '/treasury/limits', 'treasury:view'],
   ['app/treasury/positions/page.tsx', '/treasury/positions', 'treasury:view'],
+  ['app/treasury/nostro/page.tsx', '/treasury/nostro', 'treasury:nostro:read'],
 ]
 
 const OUTSIDE_THE_DESK = [
@@ -46,6 +49,13 @@ function resolveRoles(args: string): string[] {
 function methodRoles(path: string, verb: 'GET' | 'POST'): string[] | null {
   const re = new RegExp(`@${verb}\\s*\\n\\s*@Path\\("${path.replace(/[{}]/g, m => `\\${m}`)}"\\)\\s*\\n\\s*@RolesAllowed\\(([^)]*)\\)`)
   const m = resource.match(re)
+  return m ? resolveRoles(m[1]) : null
+}
+
+/** Same as [methodRoles], for NostroResource — GET has no method-level override (class-level only). */
+function nostroMethodRoles(path: string, verb: 'GET' | 'POST'): string[] | null {
+  const re = new RegExp(`@${verb}\\s*\\n\\s*@Path\\("${path.replace(/[{}]/g, m => `\\${m}`)}"\\)[\\s\\S]{0,200}?@RolesAllowed\\(([^)]*)\\)`)
+  const m = nostroResource.match(re)
   return m ? resolveRoles(m[1]) : null
 }
 
@@ -110,5 +120,26 @@ describe('treasury — UI grants never exceed the service', () => {
   it('cancel admits both desk roles, as the service does', () => {
     expect(methodRoles('/deals/{id}/cancel', 'POST')).toEqual([ROLES.TREASURY_APPROVER, ROLES.TREASURY_DEALER].sort())
     expect(granted('treasury:deal:cancel')).toEqual([ROLES.TREASURY_APPROVER, ROLES.TREASURY_DEALER].sort())
+  })
+})
+
+describe('nostro reconciliation (#10896) — UI grants never exceed NostroResource', () => {
+  it('reads: the UI set is exactly NostroResource\'s class-level @RolesAllowed', () => {
+    const cls = nostroResource.match(/@RolesAllowed\(([^)]*)\)\s*\n(?:@Suppress[^\n]*\n)?class NostroResource/)
+    expect(cls, 'class-level @RolesAllowed not found').toBeTruthy()
+    expect(granted('treasury:nostro:read')).toEqual(resolveRoles(cls![1]))
+    expect(nostroMethodRoles('/statements/{id}/reconciliation', 'GET')).toBeNull()
+  })
+
+  it('upload: method-level APPROVER only — ADMIN sits in the class grant but not this method\'s', () => {
+    expect(nostroMethodRoles('/statements', 'POST')).toEqual([ROLES.TREASURY_APPROVER])
+    expect(granted('treasury:nostro:upload')).toEqual([ROLES.TREASURY_APPROVER])
+  })
+
+  it('is denied to every staff role outside the treasury desk', () => {
+    for (const role of OUTSIDE_THE_DESK) {
+      expect(hasPermission([role], 'treasury:nostro:read'), role).toBe(false)
+      expect(hasPermission([role], 'treasury:nostro:upload'), role).toBe(false)
+    }
   })
 })

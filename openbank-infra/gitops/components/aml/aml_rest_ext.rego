@@ -86,3 +86,12 @@ allowed_reasons contains "service-aml-case-create-m2m" if {
 	}
 	input.action == "amlCase.create"
 }
+
+# #10486 batch 8: agent-service's aml_list_cases / aml_get_case tools (AmlServiceClient, query.compliance.readonly, held by the compliance-officer charter only; the agent gate refuses every other agent before the call). It used to reach these reads on the shared
+# service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
+# (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
+allowed_reasons contains "service-agent-aml-case-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-agent"
+	input.action in {"amlCase.list", "amlCase.read"}
+}

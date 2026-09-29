@@ -6,15 +6,12 @@ package com.openbank.productcatalog.infrastructure.rest
 
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.domain.identifiers.Ids
-import com.openbank.productcatalog.application.CatalogConflictException
 import com.openbank.productcatalog.application.CatalogForbiddenException
-import com.openbank.productcatalog.application.CatalogNotFoundException
 import com.openbank.productcatalog.application.CatalogPreconditionFailedException
 import com.openbank.productcatalog.application.CatalogPreconditionRequiredException
 import com.openbank.productcatalog.application.CatalogValidationException
 import com.openbank.productcatalog.application.DuplicateProductCodeException
 import com.openbank.productcatalog.application.ProductNotFoundException
-import com.openbank.productcatalog.application.ProductUpdateConflictException
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.ExceptionMapper
 import jakarta.ws.rs.ext.Provider
@@ -29,13 +26,9 @@ class DuplicateProductCodeExceptionMapper : ExceptionMapper<DuplicateProductCode
             .build()
 }
 
-@Provider
-class ProductUpdateConflictExceptionMapper : ExceptionMapper<ProductUpdateConflictException> {
-    override fun toResponse(exception: ProductUpdateConflictException): Response = conflict(
-        code = "CONCURRENT_MODIFICATION",
-        message = exception.message ?: "Product was modified concurrently",
-    )
-}
+// ProductUpdateConflictException: mapped by libs-runtime's ResourceConflictExceptionMapper since
+// #10911 phase 2 (the exception now extends the libs-domain base) -- see
+// ProductCatalogExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 /** Preserve the established v1 `{error}` body used by bank clients and its Pact. */
 @Provider
@@ -45,14 +38,8 @@ class ProductNotFoundExceptionMapper : ExceptionMapper<ProductNotFoundException>
         .build()
 }
 
-@Provider
-class CatalogNotFoundExceptionMapper : ExceptionMapper<CatalogNotFoundException> {
-    override fun toResponse(exception: CatalogNotFoundException): Response = apiError(
-        status = Response.Status.NOT_FOUND.statusCode,
-        code = "CATALOG_NOT_FOUND",
-        message = exception.message ?: "Catalog resource not found",
-    )
-}
+// CatalogNotFoundException: mapped by libs-runtime's ResourceNotFoundExceptionMapper since #10911
+// phase 2 -- see ProductCatalogExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 @Provider
 class CatalogValidationExceptionMapper : ExceptionMapper<CatalogValidationException> {
@@ -85,14 +72,8 @@ class CatalogPreconditionFailedExceptionMapper : ExceptionMapper<CatalogPrecondi
     )
 }
 
-@Provider
-class CatalogConflictExceptionMapper : ExceptionMapper<CatalogConflictException> {
-    override fun toResponse(exception: CatalogConflictException): Response = apiError(
-        status = Response.Status.CONFLICT.statusCode,
-        code = "CATALOG_CONFLICT",
-        message = exception.message ?: "Catalog state conflicts with the requested operation",
-    )
-}
+// CatalogConflictException: mapped by libs-runtime's ResourceConflictExceptionMapper since #10911
+// phase 2 -- see ProductCatalogExceptionMapperEquivalenceTest for the byte-for-byte proof.
 
 @Provider
 class CatalogForbiddenExceptionMapper : ExceptionMapper<CatalogForbiddenException> {
@@ -102,18 +83,6 @@ class CatalogForbiddenExceptionMapper : ExceptionMapper<CatalogForbiddenExceptio
         message = exception.message ?: "A different operator must approve this change",
     )
 }
-
-private fun conflict(code: String, message: String): Response = Response.status(Response.Status.CONFLICT)
-    .entity(
-        ApiError(
-            traceId = (MDC.get("correlationId") as? String) ?: Ids.randomId().toString(),
-            status = Response.Status.CONFLICT.statusCode,
-            code = code,
-            message = message,
-            timestamp = Instant.now(),
-        ),
-    )
-    .build()
 
 private fun apiError(status: Int, code: String, message: String): Response = Response.status(status)
     .entity(

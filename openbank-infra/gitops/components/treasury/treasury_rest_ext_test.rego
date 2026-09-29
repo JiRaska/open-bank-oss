@@ -26,7 +26,7 @@ shared_sa := {
 
 agent := {"type": "AI_AGENT", "id": "agent:treasury-drafter", "roles": ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"]}
 
-reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read"}
+reads := {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
 
 dealer_writes := {"treasury.deal.draft", "treasury.deal.submit"}
 
@@ -130,4 +130,16 @@ test_machines_and_agents_may_not_override if {
 	not allowed(sa, "treasury.deal.override-limit")
 	ag := object.union(agent, {"roles": ["ROLE_TREASURY_SENIOR_APPROVER"]})
 	not allowed(ag, "treasury.deal.override-limit")
+}
+
+# --- nostro reconciliation (#10896) ---
+
+test_approver_may_upload_nostro_statement if {
+	allowed(approver, "treasury.nostro.upload")
+}
+
+test_nobody_else_may_upload_nostro_statement if {
+	every p in [dealer, senior, nobody, shared_sa, agent] {
+		not allowed(p, "treasury.nostro.upload")
+	}
 }

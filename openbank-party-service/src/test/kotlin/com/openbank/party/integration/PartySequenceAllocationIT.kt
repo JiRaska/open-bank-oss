@@ -4,8 +4,9 @@
 
 package com.openbank.party.integration
 
-import com.openbank.party.it.PostgresRedpandaTestResource
+import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -42,7 +43,10 @@ import javax.sql.DataSource
  * insert reached the table with an id drawn from the sequence Hibernate asks for.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
+)
 class PartySequenceAllocationIT {
 
     @Inject

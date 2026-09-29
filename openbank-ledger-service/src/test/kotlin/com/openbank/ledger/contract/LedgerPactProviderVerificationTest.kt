@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.ledger.domain.model.GlAccountType
 import com.openbank.ledger.domain.model.PeriodTrialBalance
@@ -58,6 +59,13 @@ import javax.sql.DataSource
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-ledger-service")
 @PactFolder("../pacts")
+// Excludes the negative-auth state: a class-level @TestSecurity authenticates every request it
+// makes, which would turn the "no valid M2M identity" 401 interactions into 200s. Verified instead
+// by LedgerNegativeAuthPactVerificationTest, which carries no @TestSecurity at all (same split as
+// TransactionPactFolderProviderVerificationTest / TransactionNegativeAuthPactVerificationTest).
+// pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match
+// Java regex), so the negative lookahead holds.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class LedgerPactProviderVerificationTest {
 
@@ -166,9 +174,78 @@ class LedgerPactProviderVerificationTest {
         // transaction-service postJournal contract replays against real, enabled, leaf GL accounts.
     }
 
+    /**
+     * treasury-service's nostro-reconciliation reads (ADR-0315 D5, #10896): a balanced two-line
+     * journal on [STATEMENT_DATE], Dr 1500 (MM placement, CZK) / Cr 1001 (CZK nostro, the fixed id
+     * V29__treasury_money_market_accounts.sql seeds) — the same shape treasury's own SETTLED
+     * posting for an MM_PLACEMENT deal produces (`Postings.kt`). Inserted directly against
+     * `journal_entries`/`journal_lines` (V1's schema: `side` is a single 'D'/'C' char, the table is
+     * partitioned by `entry_date`), the same direct-JDBC seeding
+     * [stateWithFrozenMonthlyTrialBalance] above already uses for this Testcontainer DB — a
+     * `LedgerUseCase.postJournal` call needs a Vert.x context this bare `@BeforeEach`/`@State`
+     * thread does not carry (`CLAUDE.md`'s reactive-repo-off-thread note).
+     */
+    @State("ledger has a nostro journal line on 1001 for the statement date")
+    fun stateWithNostroJournalLine() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """insert into journal_entries (id, transaction_id, entry_date, value_date, description, status, created_by)
+                   values (?, ?, ?, ?, 'MM placement settlement', 'POSTED', ?)
+                   on conflict (id, entry_date) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, JOURNAL_ID)
+                statement.setObject(2, TRANSACTION_ID)
+                statement.setObject(3, java.sql.Date.valueOf(STATEMENT_DATE))
+                statement.setObject(4, java.sql.Date.valueOf(STATEMENT_DATE))
+                statement.setObject(5, SYSTEM_ACTOR_ID)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                """insert into journal_lines (id, journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence)
+                   values (?, ?, ?, ?, ?, 'CZK', ?, 'CZK', ?)
+                   on conflict (id) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, NOSTRO_LINE_ID)
+                statement.setObject(2, JOURNAL_ID)
+                statement.setObject(3, NOSTRO_GL_ID)
+                statement.setString(4, "C")
+                statement.setBigDecimal(5, STATEMENT_AMOUNT)
+                statement.setBigDecimal(6, STATEMENT_AMOUNT)
+                statement.setInt(7, 1)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                """insert into journal_lines (id, journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence)
+                   values (?, ?, ?, ?, ?, 'CZK', ?, 'CZK', ?)
+                   on conflict (id) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, PLACEMENT_LINE_ID)
+                statement.setObject(2, JOURNAL_ID)
+                statement.setObject(3, PLACEMENT_GL_ID)
+                statement.setString(4, "D")
+                statement.setBigDecimal(5, STATEMENT_AMOUNT)
+                statement.setBigDecimal(6, STATEMENT_AMOUNT)
+                statement.setInt(7, 2)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     private companion object {
         const val PERIOD_ID = "00000000-0000-0000-0000-000000009601"
         const val ASSET_ID = "00000000-0000-0000-0000-000000009602"
         const val LIABILITY_ID = "00000000-0000-0000-0000-000000009603"
+
+        const val STATEMENT_DATE = "2026-03-15"
+        val STATEMENT_AMOUNT: BigDecimal = BigDecimal("250000.00")
+        val JOURNAL_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010896")
+        val TRANSACTION_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010897")
+        val NOSTRO_LINE_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010898")
+        val PLACEMENT_LINE_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010899")
+
+        // TreasuryChart.glAccountId("1001") / ("1500") — seeded by V29.
+        val NOSTRO_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000001001")
+        val PLACEMENT_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000001500")
+        val SYSTEM_ACTOR_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000cc")
     }
 }

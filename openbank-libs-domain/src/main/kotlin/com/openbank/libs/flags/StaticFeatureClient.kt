@@ -9,8 +9,10 @@ package com.openbank.libs.flags
  * [EvaluationReason.DEFAULT]. This is the **safe fallback bean**: wire it as the
  * `@Default` `FeatureClient` so a service that has not (yet) deployed a flagd
  * sidecar still runs — every gate simply takes its default branch. Mirrors
- * `AllowAllPolicyDecisionPoint`'s role as the no-sidecar stand-in, but here the
- * neutral outcome is "behave as if the feature were absent", not "allow".
+ * `com.openbank.libs.testing.authz.AllowAllPolicyDecisionPoint`'s role as the
+ * no-sidecar stand-in (that class lives in `openbank-libs-testing`, not here
+ * — see the `PolicyDecisionPoint` kdoc), but here the neutral outcome is
+ * "behave as if the feature were absent", not "allow".
  */
 class DefaultsFeatureClient : FeatureClient {
     override fun boolean(flag: String, default: Boolean, ctx: EvalContext) =

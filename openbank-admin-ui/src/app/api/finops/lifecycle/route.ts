@@ -129,7 +129,7 @@ export async function GET() {
       name: 'Apache Kafka', kind: 'messaging',
       version: process.env.KAFKA_VERSION ?? '4.2.0',
       tier: 'rolling',
-      managedBy: 'Strimzi 1.0.0 (in-cluster operator)',
+      managedBy: 'Strimzi 1.2.0 (in-cluster operator)',
       standardEnd: null,
       daysRemaining: null,
     },

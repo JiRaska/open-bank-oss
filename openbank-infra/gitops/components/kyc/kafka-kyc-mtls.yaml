@@ -66,7 +66,7 @@ spec:
 # `dataFrom.extract` copies every key verbatim, preserving the binary PKCS#12
 # payload byte-for-byte. deletionPolicy: Retain so a transient store/RBAC blip
 # never deletes a live keystore out from under a running pod.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -89,7 +89,7 @@ spec:
 # ── ExternalSecret: cluster CA truststore ───────────────────────────────────
 # Shared cluster-CA truststore projected into `kyc` — identical pattern to
 # every other namespace (payments, clearing, etc.).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

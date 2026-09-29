@@ -134,30 +134,39 @@ jobs:
   # ── Infracost cost delta ───────────────────────────────────────────────────
   # Posts a PR comment with the AWS cost delta introduced by this change.
   # Runs without AWS credentials — Infracost parses HCL and fetches pricing
-  # from its own cloud API (free tier). INFRACOST_API_KEY must be set as a
-  # GitHub Actions secret (Settings → Secrets → Actions). Without the key the
-  # job soft-fails (continue-on-error) and blocks nothing.
+  # from its own cloud API (free tier). A PR changing only this workflow needs
+  # no pricing call; a cost-bearing PR still reports missing pricing credentials.
   infracost:
     name: infracost cost delta
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     timeout-minutes: 10
-    continue-on-error: true   # non-blocking until INFRACOST_API_KEY is set
+    continue-on-error: true   # advisory check; a failed estimate remains visible
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Detect cost-bearing changes
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: python3 .github/scripts/infracost-scope.py substrate
+
       - name: Checkout base branch (for baseline)
+        if: steps.scope.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.event.pull_request.base.ref }}
           path: infracost-base
 
       - name: Setup Infracost
+        if: steps.scope.outputs.run == 'true'
         uses: infracost/actions/setup@fb736a8f219195d6efdca58682069b16fe1bc280 # v4.2.0
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
       - name: Generate baseline cost estimate
+        if: steps.scope.outputs.run == 'true'
         run: |
           infracost breakdown \
             --path infracost-base/${{ env.ENV_DIR }} \
@@ -165,6 +174,7 @@ jobs:
             --out-file /tmp/infracost-base.json
 
       - name: Generate cost delta
+        if: steps.scope.outputs.run == 'true'
         run: |
           infracost diff \
             --path ${{ env.ENV_DIR }} \
@@ -173,6 +183,7 @@ jobs:
             --out-file /tmp/infracost-diff.json
 
       - name: Post PR comment
+        if: steps.scope.outputs.run == 'true'
         run: |
           infracost comment github \
             --path /tmp/infracost-diff.json \

@@ -40,7 +40,7 @@ class CapitalParametersTest {
     @Test
     fun `the parameter set is identified, versioned and scoped to BCBS d424`() {
         assertThat(p.id).isEqualTo("bcbs-d424-sa")
-        assertThat(p.version).isEqualTo("1")
+        assertThat(p.version).isEqualTo("2")
         assertThat(p.source).contains("d424").contains("EU CRR Part Three Title II Chapter 2 not applied")
         assertThat(CapitalFactor.entries.filter { it.kind == FactorKind.RISK_WEIGHT }.map { it.citation })
             .allMatch { it.startsWith("BCBS d424 ¶") }
@@ -102,7 +102,7 @@ class CapitalParametersTest {
             },
         ).describedAs("nothing is known to be ¶96 cash")
             .isEmpty()
-        assertThat(c.glAccounts).doesNotContainKeys("1000", "1400", "1100", "1110", "1990")
+        assertThat(c.glAccounts).describedAs("1000 is not known to be ¶96 cash").doesNotContainKey("1000")
         assertThat(c.glAccountTypes).doesNotContainKey("ASSET")
     }
 

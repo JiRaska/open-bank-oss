@@ -7,6 +7,7 @@ package com.openbank.risk.application.usecase
 import com.openbank.risk.application.port.`in`.CapitalAnalysis
 import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.domain.capital.CapitalParameters
 import com.openbank.risk.domain.capital.CreditRiskCapital
 import java.util.UUID
@@ -14,14 +15,23 @@ import java.util.UUID
 /**
  * Pillar 1 credit-risk capital of a TIED_OUT run, derived on request and never stored (ADR-0313
  * phase 2, ADR-0314 D6). Same gate as every other read: 404 unknown, 409 UNTIED.
+ *
+ * The CZK total reads its rates through [ReportingFixings], the same lookup the liquidity view uses.
  */
-class CapitalService(private val snapshots: SnapshotUseCase, private val parameters: CapitalParameters) :
-    CapitalUseCase {
+class CapitalService(
+    private val snapshots: SnapshotUseCase,
+    private val parameters: CapitalParameters,
+    fixings: FxFixingRepository,
+) : CapitalUseCase {
+
+    private val reportingFixings = ReportingFixings(fixings)
 
     override suspend fun analyse(runId: UUID): CapitalAnalysis {
         val positions = snapshots.getPositions(runId) // 404 / 409 (UNTIED) before anything else
         val instruments = snapshots.getInstruments(runId)
         val run = snapshots.getRun(runId)
-        return CapitalAnalysis(run, parameters, CreditRiskCapital.compute(positions, instruments, parameters))
+        val rates = reportingFixings.inEffect(positions.map { it.currency }, run.asOf)
+        val result = CreditRiskCapital.compute(positions, instruments, parameters, rates, run.asOf)
+        return CapitalAnalysis(run, parameters, result)
     }
 }

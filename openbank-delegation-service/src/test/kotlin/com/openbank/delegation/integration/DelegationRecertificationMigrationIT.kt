@@ -31,7 +31,7 @@ class DelegationRecertificationMigrationIT {
         scripts.filterNot { it in recertification || version(it) > lastRecertification }
             .forEach { Files.copy(it, migrations.resolve(it.fileName)) }
 
-        PostgreSQLContainer("postgres:16-alpine").withUsername("openbank").use { postgres ->
+        PostgreSQLContainer("postgres:18.6-alpine").withUsername("openbank").use { postgres ->
             postgres.start()
             val flyway = Flyway.configure()
                 .dataSource(postgres.jdbcUrl, postgres.username, postgres.password)

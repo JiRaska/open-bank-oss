@@ -94,7 +94,7 @@ def entries_in(doc, rel: str) -> list[tuple[str, str]]:
     return out
 
 
-def classify(found, baseline: dict[str, str] | None = None):
+def classify(found, baseline: dict[str, str] | None = None, dedicated: set[str] | None = None):
     """-> (violations, stale baseline entries, count of conforming entries).
 
     `baseline` is a PARAMETER and not a read of the module global, so the self-test can supply a
@@ -107,8 +107,16 @@ def classify(found, baseline: dict[str, str] | None = None):
     baseline = BASELINE if baseline is None else baseline
     violations, conforming = [], 0
     still_violating: set[str] = set()
+    dedicated = dedicated or set()
     for rel, key in found:
         if key == SHARED_KEY:
+            conforming += 1
+            continue
+        # A component whose workload authenticates as its OWN Keycloak client (OIDC_CLIENT_ID set
+        # to something other than the shared `openbank-services`) has its own secret VALUE, so
+        # its own KV key is correct and the shared one would break authentication. Derived from
+        # the manifests, never listed: pricing (JiRaska/openbank-pricing#1) is today's only case.
+        if rel.split("/", 1)[0] in dedicated:
             conforming += 1
             continue
         if baseline.get(rel) == key:
@@ -131,8 +139,27 @@ def classify(found, baseline: dict[str, str] | None = None):
     return violations, stale, conforming
 
 
+SHARED_CLIENT = "openbank-services"
+
+
+def dedicated_clients_in(doc) -> set[str]:
+    """Literal OIDC_CLIENT_ID values a workload sets that are NOT the shared client."""
+    out: set[str] = set()
+    if not isinstance(doc, dict) or doc.get("kind") not in ("Deployment", "StatefulSet", "Rollout"):
+        return out
+    spec = (((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
+    for c in (spec.get("containers") or []) + (spec.get("initContainers") or []):
+        for e in (c or {}).get("env") or []:
+            v = (e or {}).get("value")
+            if (e or {}).get("name") == "OIDC_CLIENT_ID" and isinstance(v, str) and v and v != SHARED_CLIENT \
+                    and not v.startswith("${"):
+                out.add(v)
+    return out
+
+
 def audit() -> tuple[list[str], list[str], int, int]:
     found: list[tuple[str, str]] = []
+    dedicated: set[str] = set()
     scanned = 0
     for path in gatelib.rglob(COMPONENTS, "*.yaml"):
         scanned += 1
@@ -144,7 +171,9 @@ def audit() -> tuple[list[str], list[str], int, int]:
             continue
         for doc in docs:
             found += entries_in(doc, rel)
-    violations, stale, conforming = classify(found)
+            if dedicated_clients_in(doc):
+                dedicated.add(rel.split("/", 1)[0])
+    violations, stale, conforming = classify(found, dedicated=dedicated)
     return violations, stale, conforming, scanned
 
 
@@ -202,6 +231,31 @@ def self_test() -> int:
                                                             "spec": {}}, 0),
         ("a null document does not crash the walk", None, 0),
     ]
+    # DEDICATED CLIENT. A component whose workload declares its own OIDC_CLIENT_ID may read its
+    # own key; the exemption is by component, so a neighbour without one is still flagged.
+    dcases = [
+        ("a dedicated-client component may read its own key",
+         [("pricing/secrets.yaml", "pricing-service")], {"pricing"}, 0),
+        ("the exemption does not leak to another component",
+         [("delegation/oidc-externalsecret.yaml", "delegation-service")], {"pricing"}, 1),
+    ]
+    for name, found, ded, want in dcases:
+        v, _, _ = classify(found, {}, dedicated=ded)
+        ok = len(v) == want
+        failed += not ok
+        print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {want}v, got {len(v)}v)")
+    wl = lambda cid: {"kind": "Deployment", "spec": {"template": {"spec": {"containers": [
+        {"name": "a", "env": [{"name": "OIDC_CLIENT_ID", "value": cid}]}]}}}}
+    for name, doc, want in [
+        ("a dedicated OIDC_CLIENT_ID is detected", wl("openbank-pricing-service"), 1),
+        ("the shared client is not a dedicated one", wl(SHARED_CLIENT), 0),
+        ("an env-expression default is not a literal client", wl("${X:openbank-foo}"), 0),
+    ]:
+        got = len(dedicated_clients_in(doc))
+        ok = got == want
+        failed += not ok
+        print(f"  {'PASS' if ok else 'FAIL'}  {name} (expected {want}, got {got})")
+
     for name, doc, want in parse_cases:
         got = len(entries_in(doc, "z/es.yaml"))
         ok = got == want

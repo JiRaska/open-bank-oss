@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.3...billing-service-v0.13.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.13.3](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.2...billing-service-v0.13.3) (2026-09-26)
 
 

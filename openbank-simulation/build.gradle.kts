@@ -44,6 +44,7 @@ dependencies {
     // semantics track production (Money arithmetic + scale rules, the saga transition
     // engine). openbank-libs exposes kotlin-stdlib/coroutines/jackson transitively (api).
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-lending"))
     implementation(project(":openbank-libs-runtime"))
 
     // The harness drives the REAL ledger domain aggregate (JournalEntry.validateBalance /

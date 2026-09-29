@@ -44,7 +44,10 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.account.Iban
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.observability.DomainMetrics
 import io.vertx.pgclient.PgException
 import jakarta.enterprise.context.ApplicationScoped
@@ -79,7 +82,7 @@ class AccountService(
         // Idempotent replay (#465): a repeated key returns the original account and never opens
         // a second one. The Redis record in the REST layer is only a response cache — this DB
         // check (and the transactional key insert in saveNewAccount) is the source of truth.
-        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return it }
+        accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
 
         // ADR-0032 §C: Sanctions gate — fails closed.
         // HIT: confirmed match — hard block.
@@ -163,11 +166,16 @@ class AccountService(
         // the same contract as the sequential replay above: return the winner's account,
         // publish no second event, count no second metric.
         val saved = try {
-            accountRepository.saveNewAccount(account, primaryPocketFor(account), command.idempotencyKey)
+            accountRepository.saveNewAccount(
+                account,
+                primaryPocketFor(account),
+                command.idempotencyKey,
+                command.requestHash,
+            )
         } catch (e: PersistenceException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
         } catch (e: PgException) {
-            return recoverConcurrentReplay(e, command.idempotencyKey)
+            return replayOrRefuse(recoverConcurrentReplay(e, command.idempotencyKey), command)
         }
 
         // Operational money lives in the balance-service (N3 / ADR-0024). Balance init is
@@ -515,6 +523,19 @@ class AccountService(
     )
 
     /**
+     * #10916: the durable half of the Idempotency-Key check. The Redis record expires (or is
+     * evicted) while the account_idempotency row does not, so a key reused for a DIFFERENT
+     * opening must be refused here too rather than answered with the first account. A key stored
+     * without a fingerprint (legacy row, or a caller with none) keeps the plain replay.
+     */
+    private suspend fun replayOrRefuse(existing: Account, command: OpenAccountCommand): Account {
+        val requestHash = command.requestHash ?: return existing
+        val stored = accountRepository.findIdempotencyRequestHash(command.idempotencyKey)
+        if (stored != null && stored != requestHash) throw IdempotencyKeyReusedException()
+        return existing
+    }
+
+    /**
      * The loser of a concurrent duplicate-open race: both contenders passed the replay check
      * before either committed, and this transaction died on the account_idempotency primary
      * key. Recover by returning the winner's account. Anything that is not the idempotency-key
@@ -569,15 +590,24 @@ class AccountService(
     }
 }
 
-class AccountNotFoundException(message: String) : RuntimeException(message)
+// #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
+// ResourceNotFoundExceptionMapper handles the 404, keeping the domain-specific "ACCOUNT_NOT_FOUND"
+// code the deleted local AccountNotFoundExceptionMapper used — byte-for-byte identical status,
+// code and message. See AccountExceptionMapperEquivalenceTest.
+class AccountNotFoundException(message: String) : ResourceNotFoundException(message, code = "ACCOUNT_NOT_FOUND")
 
 /**
  * A lifecycle update raced a concurrent modification of the same account (#465): the caller's
  * domain object was read at a version the row no longer has. Dedicated type (not
  * IllegalStateException — that has two competing mappers, libs 422 vs service, picked
  * non-deterministically per request; see issue #526) mapped to 409.
+ *
+ * #10911/#11059 phase 3: extends the libs-domain base, keeping the domain-specific
+ * "CONCURRENT_MODIFICATION" code the deleted local AccountUpdateConflictExceptionMapper used —
+ * byte-for-byte identical status, code and message. See AccountExceptionMapperEquivalenceTest.
  */
-class AccountUpdateConflictException(message: String, cause: Throwable? = null) : RuntimeException(message, cause)
+class AccountUpdateConflictException(message: String, cause: Throwable? = null) :
+    ResourceConflictException(message, code = "CONCURRENT_MODIFICATION", cause = cause)
 
 /**
  * Closing an account with money still in any of its currency pockets would strand that money —
