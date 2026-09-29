@@ -13,11 +13,12 @@ info:
   #        available, utilisation %, breached flag and active senior-override count.
   # 1.7.0: additive — nostro reconciliation (#10896): POST /nostro/statements (camt.053 upload,
   #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
-  # 1.8.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
-  #        built from, required with `rationale` when an agent drafts (ADR-0315 D10).
-  # 1.10.0: version bump only — 1.8.0/1.9.0 are claimed by other open PRs against this spec
-  #        (#11048, #11041 at 1.8.0; #11113 at 1.9.0); this PR takes the next free slot above
-  #        live main (1.7.0) and every open PR's claimed version.
+  # 1.8.0: additive — FX_SPOT deal terms, settlement and response fields (#10896).
+  #        Invalid rates and rounded-to-zero counter amounts return 400.
+  # 1.10.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
+  #        built from, required with `rationale` when an agent drafts (ADR-0315 D10). 1.9.0 is
+  #        claimed by the still-open #11113 against this same spec, so this PR takes the next free
+  #        slot above both live main (1.8.0) and that open claim.
   version: 1.10.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
@@ -48,6 +49,15 @@ info:
     and ACT/360 interest as a money-market borrowing; like any borrowing it consumes no limit.
     Settlement credits the ledger's "Borrowings from CNB" liability (2320). The collateral pledge
     that backs a lombard loan is NOT modelled.
+
+    **FX spot** (`FX_SPOT`): the bank buys or sells a foreign currency against CZK. Name the legs
+    with `buyCurrency`/`sellCurrency` (one must be CZK); `principal` is the FOREIGN amount and
+    `rate` the dealer's rate in CZK per unit. `valueDate` defaults to T+2 business days (weekends
+    skipped) and may not be later. Same four-eyes lifecycle; the limit check runs against the
+    counterparty's CZK limit on the CZK equivalent, consumed until settlement. Settlement posts
+    both legs through the ledger's FX position accounts; an FX spot never accrues or matures
+    (`mature` is 409). The rate may be checked against fx-service's mid within a configured
+    tolerance — a deviation FLAGS the deal (`fx.rateFlag`), it never blocks it.
 
     **Ledger postings** go through ledger-service's journal API only, keyed
     `treasury:<dealId>:<event>` and balanced per currency: settlement, maturity (principal plus
@@ -447,15 +457,15 @@ components:
   schemas:
     ProductType:
       type: string
-      # x-extensible-enum, not enum (1.5.0, #10896): products GROW as ADR-0315 D2 lands them
-      # (CNB_LOMBARD now). A client must tolerate an unknown product; a closed set would make every
+      # x-extensible-enum, not enum (1.8.0, #10896): products GROW as ADR-0315 D2 lands them
+      # (CNB_LOMBARD and FX_SPOT now). A client must tolerate an unknown product; a closed set would make every
       # new product a URL-major break. The same idiom as risk-engine's Position.kind.
-      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DraftProductType:
       # What a client may SEND: closed, so the server's validation is what the document says. A new
       # product widens it (additive for a request). Responses use the open ProductType above.
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DealState:
       type: string
       enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
@@ -470,15 +480,32 @@ components:
           type: [string, 'null']
     DraftDealRequest:
       type: object
-      required: [product, counterpartyId, currency, principal, rate, valueDate]
+      required: [product, counterpartyId, principal, rate]
       properties:
         product: { $ref: '#/components/schemas/DraftProductType' }
         counterpartyId: { type: string, examples: [SIMBK-A] }
-        currency: { type: string, enum: [CZK, EUR] }
-        principal: { type: number, exclusiveMinimum: 0 }
-        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360. Must be > 0 for CNB_LOMBARD.' }
+        currency:
+          type: string
+          enum: [CZK, EUR]
+          description: Required for money-market deals. For FX_SPOT optional; if given, the foreign currency.
+        principal: { type: number, exclusiveMinimum: 0, description: 'For FX_SPOT the foreign-currency amount' }
+        rate:
+          type: number
+          minimum: 0
+          description: 'Annual percentage, ACT/360 (must be > 0 for CNB_LOMBARD); for FX_SPOT the deal rate in CZK per 1 unit of the foreign currency'
         tradeDate: { type: string, format: date, description: Defaults to today }
-        valueDate: { type: string, format: date }
+        valueDate:
+          type: string
+          format: date
+          description: Required for money-market deals. For FX_SPOT defaults to T+2 business days, and may not be later.
+        buyCurrency:
+          type: string
+          enum: [CZK, EUR]
+          description: FX_SPOT only (required there) — the currency the bank buys.
+        sellCurrency:
+          type: string
+          enum: [CZK, EUR]
+          description: FX_SPOT only (required there) — the currency the bank sells.
         maturityDate:
           type: string
           format: date
@@ -532,6 +559,18 @@ components:
         at: { type: string, format: date-time }
         coversExposureUpTo: { type: number }
         limitAtOverride: { type: number }
+    FxTerms:
+      type: object
+      description: FX_SPOT only (#10896) — both legs from the bank's side, and the rate check.
+      properties:
+        side: { type: string, enum: [BUY, SELL], description: The bank's side on the foreign currency }
+        buyCurrency: { type: string }
+        buyAmount: { type: number }
+        sellCurrency: { type: string }
+        sellAmount: { type: number }
+        dealRate: { type: number, description: CZK per 1 unit of the foreign currency }
+        midRate: { type: [number, 'null'], description: fx-service mid at drafting, when the check ran }
+        rateFlag: { type: [string, 'null'], description: Why the rate was flagged; null when not flagged }
     Deal:
       type: object
       properties:
@@ -563,6 +602,10 @@ components:
         limitOverride:
           oneOf:
             - $ref: '#/components/schemas/LimitOverride'
+            - type: 'null'
+        fx:
+          oneOf:
+            - $ref: '#/components/schemas/FxTerms'
             - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }

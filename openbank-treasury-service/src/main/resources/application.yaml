@@ -147,6 +147,13 @@ openbank:
       # Hourly and idempotent per day, so a missed pass is caught up by the next one.
       enabled: ${OPENBANK_TREASURY_ACCRUAL_ENABLED:true}
       interval: 1h
+    fx-spot:
+      rate-check:
+        # #10896: flag (never block) an FX spot deal whose dealer-entered rate deviates from
+        # fx-service's mid by more than tolerance-percent. OFF: treasury has no fx-service client
+        # yet, and switched on without one it flags every FX deal "mid unavailable".
+        enabled: false
+        tolerance-percent: 2.0
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

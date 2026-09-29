@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
@@ -38,6 +39,10 @@ data class DraftDealRequest(
      * `rationale`) when the caller is an agent; optional for a human dealer.
      */
     val inputs: JsonNode? = null,
+    /** FX_SPOT only: the currency the bank buys; exactly one of buy/sell is CZK. */
+    val buyCurrency: String? = null,
+    /** FX_SPOT only: the currency the bank sells. */
+    val sellCurrency: String? = null,
 )
 
 data class ReasonRequest(val reason: String? = null)
@@ -105,6 +110,8 @@ data class DealResponse(
     val limitCheck: LimitCheckResponse?,
     /** A senior approver's recorded override of a limit breach (ADR-0315 D4); null when none. */
     val limitOverride: LimitOverrideResponse?,
+    /** FX_SPOT only (#10896); null for money-market deals. */
+    val fx: FxTermsResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
     val history: List<TransitionResponse>,
@@ -135,6 +142,7 @@ data class DealResponse(
             limitOverride = d.limitOverride?.let {
                 LimitOverrideResponse(it.by.id, it.reason, it.at, it.coversExposureUpTo, it.limitAtOverride)
             },
+            fx = FxTermsResponse.from(d),
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {
@@ -142,6 +150,35 @@ data class DealResponse(
             },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
         )
+    }
+}
+
+/** Both legs of an FX spot, named from the bank's side, plus the rate check (#10896). */
+data class FxTermsResponse(
+    val side: FxSide,
+    val buyCurrency: String,
+    val buyAmount: BigDecimal,
+    val sellCurrency: String,
+    val sellAmount: BigDecimal,
+    val dealRate: BigDecimal,
+    val midRate: BigDecimal?,
+    val rateFlag: String?,
+) {
+    companion object {
+        fun from(d: Deal): FxTermsResponse? {
+            val fx = d.fx ?: return null
+            val buy = fx.side == FxSide.BUY
+            return FxTermsResponse(
+                side = fx.side,
+                buyCurrency = if (buy) d.currency else Deal.CZK,
+                buyAmount = if (buy) d.principal else fx.counterAmount,
+                sellCurrency = if (buy) Deal.CZK else d.currency,
+                sellAmount = if (buy) fx.counterAmount else d.principal,
+                dealRate = d.rate,
+                midRate = fx.midRate,
+                rateFlag = fx.rateFlag,
+            )
+        }
     }
 }
 

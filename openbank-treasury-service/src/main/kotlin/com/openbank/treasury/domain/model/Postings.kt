@@ -62,6 +62,7 @@ data class JournalSpec(
  * | Accrued interest payable (MM)    | 2310 | 2311 | LIABILITY |
  * | MM interest income               | 4200 | 4201 | INCOME    |
  * | MM interest expense              | 5200 | 5201 | EXPENSE   |
+ * | FX position (ledger V5)          | 1990 | 1991 | ASSET     |
  *
  * Interest is recognised daily into the accrued-interest accounts (ADR-0315 D5); maturity then
  * clears them rather than booking the whole interest to income in one amount.
@@ -78,6 +79,7 @@ object TreasuryChart {
             "expense" to "5200",
             "accrued-receivable" to "1520",
             "accrued-payable" to "2310",
+            "fx-position" to "1990",
         ),
         Deal.EUR to mapOf(
             "nostro" to "1002",
@@ -87,6 +89,7 @@ object TreasuryChart {
             "expense" to "5201",
             "accrued-receivable" to "1521",
             "accrued-payable" to "2311",
+            "fx-position" to "1991",
         ),
     )
 
@@ -120,6 +123,13 @@ object TreasuryChart {
  * journal with every side flipped, plus the accrued A unwound out of income or expense, posted as
  * one new offsetting journal under its own key; from BOOKED nothing had posted. A zero amount
  * posts no line.
+ *
+ * FX_SPOT (F = foreign amount, C = its CZK leg) SETTLED, routed through the ledger's per-currency
+ * FX position accounts (V5, credited when the bank acquires a currency) so each currency balances:
+ * - BUY:  Dr nostro(F) / Cr FX position(F) (F); Dr FX position CZK / Cr nostro CZK (C)
+ * - SELL: the same four lines with every side flipped.
+ * It never accrues or matures; its reversal is the flipped settlement. Revaluation of the open
+ * position is the ledger's daily FX revaluation, not the treasury's.
  */
 object PostingRules {
 
@@ -140,9 +150,25 @@ object PostingRules {
                 PostingLine(nostro, Side.DEBIT, p, ccy),
                 PostingLine(liabilityCode(deal), Side.CREDIT, p, ccy),
             )
+            ProductType.FX_SPOT -> fxSpotSettlement(deal)
         }
         return JournalSpec(deal.id, PostingEvent.SETTLED, lines)
     }
+
+    private fun fxSpotSettlement(deal: Deal): List<PostingLine> {
+        val fx = checkNotNull(deal.fx) { "FX_SPOT deal ${deal.id} without FX terms" }
+        val ccy = deal.currency
+        val czk = Deal.CZK
+        val buy = listOf(
+            PostingLine(TreasuryChart.code(ccy, "nostro"), Side.DEBIT, deal.principal, ccy),
+            PostingLine(TreasuryChart.code(ccy, "fx-position"), Side.CREDIT, deal.principal, ccy),
+            PostingLine(TreasuryChart.code(czk, "fx-position"), Side.DEBIT, fx.counterAmount, czk),
+            PostingLine(TreasuryChart.code(czk, "nostro"), Side.CREDIT, fx.counterAmount, czk),
+        )
+        return if (fx.side == FxSide.BUY) buy else buy.map { it.copy(side = it.side.flipped()) }
+    }
+
+    private fun Side.flipped() = if (this == Side.DEBIT) Side.CREDIT else Side.DEBIT
 
     /** Interest accrued from the value date up to and including [date], capped at maturity. */
     fun accruedThrough(deal: Deal, date: LocalDate): BigDecimal {
@@ -155,6 +181,7 @@ object PostingRules {
 
     /** The journal accruing [date]'s interest, or null when that day adds nothing. */
     fun accrual(deal: Deal, date: LocalDate): JournalSpec? {
+        if (deal.product == ProductType.FX_SPOT) return null
         val amount = accruedThrough(deal, date) - accruedThrough(deal, date.minusDays(1))
         if (amount.signum() <= 0) return null
         val ccy = deal.currency
@@ -173,6 +200,7 @@ object PostingRules {
     }
 
     fun maturity(deal: Deal, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec {
+        require(deal.product != ProductType.FX_SPOT) { "an FX spot deal has no maturity journal" }
         val p = deal.principal
         val i = deal.interest
         require(accrued.signum() >= 0 && accrued <= i) { "accrued $accrued outside 0..$i for ${deal.id}" }
@@ -198,6 +226,7 @@ object PostingRules {
                     line(TreasuryChart.code(ccy, "income"), Side.CREDIT, rest, ccy),
                 )
             }
+            ProductType.FX_SPOT -> error("unreachable: FX spot has no maturity")
             ProductType.MM_BORROWING, ProductType.CNB_LOMBARD -> listOfNotNull(
                 PostingLine(liabilityCode(deal), Side.DEBIT, p, ccy),
                 line(TreasuryChart.code(ccy, "accrued-payable"), Side.DEBIT, accrued, ccy),
@@ -211,9 +240,7 @@ object PostingRules {
     /** The offsetting journal for a SETTLED deal's reversal, unwinding [accrued]; null when nothing had posted. */
     fun reversal(deal: Deal, stateBeforeReversal: DealState, accrued: BigDecimal = BigDecimal.ZERO): JournalSpec? {
         if (stateBeforeReversal != DealState.SETTLED) return null
-        val flipped = settlement(deal).lines.map {
-            it.copy(side = if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT)
-        }
+        val flipped = settlement(deal).lines.map { it.copy(side = it.side.flipped()) }
         val ccy = deal.currency
         val unwind = if (deal.product.isAsset) {
             listOfNotNull(

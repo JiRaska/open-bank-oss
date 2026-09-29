@@ -10,6 +10,8 @@ import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -78,21 +80,38 @@ class TreasuryResource {
     )
     @Authorize(action = "treasury.deal.draft")
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
+        val product = requireNotNull(request.product) { "product is required" }
+        val fx = if (product == ProductType.FX_SPOT) {
+            FxTerms.fromCurrencies(
+                requireNotNull(request.buyCurrency) { "buyCurrency is required for FX_SPOT" },
+                requireNotNull(request.sellCurrency) { "sellCurrency is required for FX_SPOT" },
+            ).also { (foreign, _) ->
+                require(request.currency == null || request.currency == foreign) {
+                    "currency, when given for FX_SPOT, is the foreign currency $foreign"
+                }
+            }
+        } else {
+            require(request.buyCurrency == null && request.sellCurrency == null) {
+                "buyCurrency/sellCurrency apply to FX_SPOT only"
+            }
+            null
+        }
         val deal = deals.draft(
             DraftDealCommand(
-                product = requireNotNull(request.product) { "product is required" },
+                product = product,
                 counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
-                currency = requireNotNull(request.currency) { "currency is required" },
+                currency = fx?.first ?: requireNotNull(request.currency) { "currency is required" },
                 principal = requireNotNull(request.principal) { "principal is required" },
                 rate = requireNotNull(request.rate) { "rate is required" },
                 tradeDate = request.tradeDate,
-                valueDate = requireNotNull(request.valueDate) { "valueDate is required" },
+                valueDate = request.valueDate,
                 maturityDate = request.maturityDate,
                 rationale = request.rationale,
                 inputs = request.inputs?.let { node ->
                     require(node.isObject) { "inputs must be a JSON object" }
                     node.toString()
                 },
+                fxSide = fx?.second,
             ),
             actor(),
             requireKey(key),
