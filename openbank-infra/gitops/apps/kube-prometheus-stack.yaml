@@ -138,6 +138,19 @@ spec:
                     - severity = "critical"
                   receiver: 'goalert'   # ADR-0088 §D1: page on-call via GoAlert — escalation,
                   # ack and dedup — which fans out to ntfy. In-perimeter paging.
+                  # ONE ALERT PER NOTIFICATION GROUP (#11136). GoAlert's Alertmanager
+                  # integration dedups on the SUMMARY: CommonAnnotations.summary, else
+                  # "alertname <instance>,<instance>,...". Under the inherited
+                  # ['alertname','service'] grouping that string followed group membership,
+                  # so each membership change opened a NEW GoAlert alert and the final
+                  # `resolved` carried yet another summary and closed nothing. The orphans
+                  # (send_resolved was never the problem) piled up to GoAlert's
+                  # unacked_alerts_per_service limit of 200, after which it answered EVERY
+                  # page with HTTP 400 and Alertmanager, treating 4xx as unrecoverable,
+                  # dropped it. '...' makes the summary the alert's own, so the resolve
+                  # matches it. Enforced by check-critical-alert-egress.py, together with
+                  # "no $value in a critical summary" (the same drift, over time).
+                  group_by: ['...']
                 - matchers:
                     - severity = "warning"
                   receiver: 'slack-alerts'   # ADR-0077 Phase 4: non-paging visibility.
