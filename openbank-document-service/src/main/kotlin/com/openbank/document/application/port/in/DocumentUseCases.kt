@@ -107,6 +107,25 @@ interface DocumentQueryUseCase {
     suspend fun findByIdempotencyKey(key: String): Document?
 }
 
+data class ExportExternalDisclosureCommand(
+    val documentId: UUID,
+    val disclosureId: UUID,
+    val recipientLabel: String,
+    val issuedAt: Instant,
+)
+
+data class SealedExternalDisclosure(
+    val documentId: UUID,
+    val disclosureId: UUID,
+    val contentType: String,
+    val bytes: ByteArray,
+)
+
+/** Internal-only export: never returns the original storage object. */
+interface ExternalDisclosureExportUseCase {
+    suspend fun export(command: ExportExternalDisclosureCommand): SealedExternalDisclosure
+}
+
 /** Opens signing ceremonies and records signer decisions. */
 interface SignatureCeremonyUseCase {
     suspend fun openCeremony(cmd: OpenCeremonyCommand): SignatureCeremony

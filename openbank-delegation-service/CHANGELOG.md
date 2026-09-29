@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.1...delegation-service-v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **delegation:** add OTP-gated external disclosure boundary ([#9237](https://github.com/JiRaska/open-bank-oss/issues/9237)) ([b6288a2](https://github.com/JiRaska/open-bank-oss/commit/b6288a2985121121ba5739682db74118f9ba884a))
+
 ## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.0...delegation-service-v0.20.1) (2026-09-29)
 
 
