@@ -68,7 +68,7 @@
   right: -12px;
   bottom: 0;
   width: 260px;
-  height: 176px;
+  height: 174px;
   overflow: hidden;
   border-radius: 48% 0 0 0;
   background: #06152f;
@@ -103,7 +103,7 @@
   right: -8px;
   bottom: 0;
   width: 160px;
-  height: 126px;
+  height: 124px;
 }
 
 @media (max-width: 720px) {
