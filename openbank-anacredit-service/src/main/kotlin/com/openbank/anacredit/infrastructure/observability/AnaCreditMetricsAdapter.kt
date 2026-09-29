@@ -6,6 +6,7 @@ package com.openbank.anacredit.infrastructure.observability
 import com.openbank.anacredit.application.port.out.AnaCreditMetricsPort
 import com.openbank.anacredit.application.port.out.LoanStageEventOutcome
 import com.openbank.anacredit.domain.model.InstrumentType
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.MeterRegistry
@@ -61,8 +62,7 @@ class AnaCreditMetricsAdapter(private val registry: MeterRegistry?) : AnaCreditM
         registry?.let { r ->
             Timer.builder("openbank.anacredit.return.build.duration")
                 .tag("service", SERVICE)
-                .publishPercentiles(P50, P95, P99)
-                .publishPercentileHistogram()
+                .standardPercentiles()
                 .description("Time to render one AnaCredit credit-dataset return")
                 .register(r)
                 .record(duration)
@@ -90,17 +90,11 @@ class AnaCreditMetricsAdapter(private val registry: MeterRegistry?) : AnaCreditM
     private fun summary(registry: MeterRegistry, name: String, description: String): DistributionSummary =
         DistributionSummary.builder(name)
             .tag("service", SERVICE)
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description(description)
             .register(registry)
 
     companion object {
         private const val SERVICE = "anacredit"
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }

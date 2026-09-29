@@ -13,6 +13,7 @@ import com.openbank.referral.domain.InviteStatus
 import com.openbank.referral.domain.LedgerOutcome
 import com.openbank.referral.domain.ProgramStatus
 import com.openbank.referral.domain.ReferralConflictException
+import com.openbank.referral.domain.ReferralConflictReason
 import com.openbank.referral.domain.ReferralEvent
 import com.openbank.referral.domain.ReferralInvite
 import com.openbank.referral.domain.ReferralNotFoundException
@@ -20,6 +21,8 @@ import com.openbank.referral.domain.ReferralProgram
 import com.openbank.referral.domain.ReferralPublishOutcome
 import com.openbank.referral.domain.ReferralReward
 import com.openbank.referral.domain.ReferralValidationException
+import com.openbank.referral.domain.ReferrerInviteView
+import com.openbank.referral.domain.ReferrerRewardView
 import com.openbank.referral.domain.RewardStatus
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
@@ -55,6 +58,38 @@ class ReferralService(
 
     suspend fun publishedProgram(id: UUID): ReferralProgram? =
         programs.find(id)?.takeIf { it.status == ProgramStatus.PUBLISHED }
+
+    /**
+     * The invites [referrerPartyId] issued, newest first, as the referrer may see them: no referee
+     * identity, no token. An ISSUED invite past its window reads as EXPIRED — nothing rewrites the
+     * stored row on expiry, so without this the referrer would be told an invite is still open.
+     */
+    suspend fun listInvitesForReferrer(referrerPartyId: UUID): List<ReferrerInviteView> {
+        val own = invites.listByReferrer(referrerPartyId)
+        if (own.isEmpty()) return emptyList()
+        val ids = own.map { it.id }
+        val latestReward = rewards.listByInviteIds(ids)
+            .groupBy { it.inviteId }
+            .mapValues { (_, list) -> list.maxBy { it.createdAt } }
+        val issuedAt = audit.issuedAt(ids)
+        val now = Instant.now(clock)
+        return own.map { invite ->
+            val expired = invite.status == InviteStatus.ISSUED && !invite.expiresAt.isAfter(now)
+            ReferrerInviteView(
+                id = invite.id,
+                status = if (expired) InviteStatus.EXPIRED else invite.status,
+                createdAt = issuedAt[invite.id],
+                expiresAt = invite.expiresAt,
+                attributedAt = invite.attributedAt,
+                reward = latestReward[invite.id]?.let {
+                    ReferrerRewardView(it.status, it.amount, it.currency, it.requestedAt, it.rewardedAt)
+                },
+            )
+        }.sortedWith(
+            compareByDescending<ReferrerInviteView, Instant?>(nullsFirst()) { it.createdAt }
+                .thenByDescending { it.expiresAt },
+        )
+    }
 
     suspend fun createProgram(
         name: String,
@@ -115,12 +150,18 @@ class ReferralService(
     ): ReferralInvite {
         validate(idempotencyKey.isNotBlank(), "Idempotency-Key is required")
         if (invites.findByIdempotencyKey(idempotencyKey) != null) {
-            throw ReferralConflictException("Idempotency-Key has already been used")
+            throw ReferralConflictException(
+                "Idempotency-Key has already been used",
+                ReferralConflictReason.IDEMPOTENCY_KEY_REUSED,
+            )
         }
         val program = programs.find(programId) ?: throw ReferralNotFoundException("program $programId not found")
         val now = Instant.now(clock)
         if (program.status != ProgramStatus.PUBLISHED || !program.attributionWindowEndsAt.isAfter(now)) {
-            throw ReferralConflictException("program is not published or has expired")
+            throw ReferralConflictException(
+                "program is not published or has expired",
+                ReferralConflictReason.PROGRAM_UNAVAILABLE,
+            )
         }
         val token = randomToken()
         val invite = ReferralInvite(
@@ -152,13 +193,19 @@ class ReferralService(
         validate(idempotencyKey.isNotBlank(), "Idempotency-Key is required")
         val invite = invites.findByToken(hash(token)) ?: throw ReferralNotFoundException("invite not found")
         val now = Instant.now(clock)
-        if (!invite.expiresAt.isAfter(now)) throw ReferralConflictException("invite has expired")
-        if (invite.referrerPartyId == refereePartyId) throw ReferralConflictException("self-referral is not allowed")
+        if (!invite.expiresAt.isAfter(now)) {
+            throw ReferralConflictException("invite has expired", ReferralConflictReason.EXPIRED)
+        }
+        if (invite.referrerPartyId == refereePartyId) {
+            throw ReferralConflictException("self-referral is not allowed", ReferralConflictReason.SELF)
+        }
         if (invite.status == InviteStatus.ATTRIBUTED) {
             if (invite.refereePartyId == refereePartyId) return invite
-            throw ReferralConflictException("invite is already attributed")
+            throw ReferralConflictException("invite is already attributed", ReferralConflictReason.ALREADY_ATTRIBUTED)
         }
-        if (invite.status != InviteStatus.ISSUED) throw ReferralConflictException("invite is not attributable")
+        if (invite.status != InviteStatus.ISSUED) {
+            throw ReferralConflictException("invite is not attributable", ReferralConflictReason.NOT_ATTRIBUTABLE)
+        }
         val attributed = invites.attribute(invite.id, refereePartyId, now)
         audit.append("INVITE_ATTRIBUTED", attributed.id, actor, "referee=$refereePartyId", now)
         return attributed

@@ -13,11 +13,8 @@ class WithholdingTaxPolicyTest {
 
     private val asOf = LocalDate.of(2026, 5, 30)
 
-    private fun compute(
-        gross: String,
-        currency: String = "CZK",
-        profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT
-    ) = WithholdingTaxPolicy.compute(BigDecimal(gross), currency, profile, asOf)
+    private fun compute(gross: String, currency: String = "CZK", profile: TaxProfile = TaxProfile.FAIL_SAFE_DEFAULT) =
+        WithholdingTaxPolicy.compute(BigDecimal(gross), currency, profile, asOf)
 
     @Test
     fun `resident individual is withheld at 15 percent`() {
@@ -54,7 +51,7 @@ class WithholdingTaxPolicyTest {
     fun `non-resident with no treaty defaults to 15 percent`() {
         val result = compute(
             "1000",
-            profile = TaxProfile(TaxpayerType.INDIVIDUAL, TaxResidency.NON_RESIDENT)
+            profile = TaxProfile(TaxpayerType.INDIVIDUAL, TaxResidency.NON_RESIDENT),
         )
 
         assertThat(result.rate).isEqualByComparingTo("0.15")
@@ -69,8 +66,8 @@ class WithholdingTaxPolicyTest {
             profile = TaxProfile(
                 TaxpayerType.INDIVIDUAL,
                 TaxResidency.NON_RESIDENT,
-                nonCooperatingState = true
-            )
+                nonCooperatingState = true,
+            ),
         )
 
         assertThat(result.rate).isEqualByComparingTo("0.35")
@@ -86,8 +83,8 @@ class WithholdingTaxPolicyTest {
                 TaxpayerType.INDIVIDUAL,
                 TaxResidency.NON_RESIDENT,
                 treatyRate = BigDecimal("0.10"),
-                nonCooperatingState = true
-            )
+                nonCooperatingState = true,
+            ),
         )
 
         assertThat(result.rate).isEqualByComparingTo("0.10")
@@ -98,7 +95,7 @@ class WithholdingTaxPolicyTest {
     fun `legal entity is not withheld and is credited gross`() {
         val result = compute(
             "1000",
-            profile = TaxProfile(TaxpayerType.LEGAL_ENTITY, TaxResidency.RESIDENT)
+            profile = TaxProfile(TaxpayerType.LEGAL_ENTITY, TaxResidency.RESIDENT),
         )
 
         assertThat(result.treatment).isEqualTo(WithholdingTreatment.NOT_WITHHELD)
@@ -114,8 +111,8 @@ class WithholdingTaxPolicyTest {
             profile = TaxProfile(
                 TaxpayerType.INDIVIDUAL,
                 TaxResidency.RESIDENT,
-                exemptCode = "TREATY_ART11_ZERO"
-            )
+                exemptCode = "TREATY_ART11_ZERO",
+            ),
         )
 
         assertThat(result.treatment).isEqualTo(WithholdingTreatment.EXEMPT)
@@ -129,7 +126,7 @@ class WithholdingTaxPolicyTest {
         // A resident individual WITH an exempt code must not be withheld.
         val result = compute(
             "1000",
-            profile = TaxProfile.FAIL_SAFE_DEFAULT.copy(exemptCode = "STATUTORY_X")
+            profile = TaxProfile.FAIL_SAFE_DEFAULT.copy(exemptCode = "STATUTORY_X"),
         )
 
         assertThat(result.treatment).isEqualTo(WithholdingTreatment.EXEMPT)

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: transaction-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "eb626d0eaabbb0d2"
+    openbank.tech/policy-checksum: "234d43fb41536d13"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -685,6 +685,118 @@ data:
     		"transaction.search",
     		"transaction.read",
     	}
+    }
+
+    # #10486 batch 1 — per-service machine identities. Each caller below now mints its bearer from
+    # its OWN Keycloak client (named oidc-client `m2m`), whose service account holds realm role
+    # ROLE_API only. The matrix grants ROLE_API nothing, and operator-transaction-write above needs
+    # ROLE_OPERATOR/ROLE_ADMIN, so the rule for a principal is its WHOLE grant here: the narrowest
+    # action that caller's live code path actually invokes, and nothing else.
+    # TransactionResource.initiateTransaction admits ROLE_API at the RBAC layer for these callers
+    # (RBAC runs before OPA); every OTHER ROLE_API holder reaches OPA and is denied unless its own
+    # identity rule fires (transaction_rest_ext_test.rego: test_other_role_api_sa_may_not_create).
+    #   account-service        TransactionServiceRestClient.initiate      welcome-bonus credit
+    #   sdd-service            TransactionServiceClient.initiateTransaction SDD collection settlement
+    #   standing-order-service TransactionServiceClient.initiate          DOMESTIC/INTERNAL execution
+    #   lending-service        TransactionServiceRestClient.initiate      borrower credit / debit
+    #   sepa-payment           TransactionServiceClient.initiateTransaction SCT settlement leg
+    #   sepa-payment           TransactionServiceClient.reverseTransaction  R-transaction return
+    allowed_reasons contains "service-account-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-account"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sdd-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sdd"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-standing-order-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-standing-order"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-lending-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-lending"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sepa-payment-transaction-write" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sepa-payment"
+    	input.action in {"transaction.create", "transaction.reverse"}
+    }
+
+    # #10486 batch 2 — four more callers of initiateTransaction, same shape as batch 1 above: each
+    # principal carries ROLE_API only and its rule is its WHOLE grant here, transaction.create.
+    #   domestic-payment (SettlementAdapter, named OidcClient `m2m`)       domestic settlement booking
+    #   sepa-instant     (TransactionServiceClient, named oidc-client `m2m`) SCT Inst settlement booking
+    #   swift-service    (TransactionServiceClient, named oidc-client `m2m`) MT103 settlement booking
+    #   interest-service (TransactionServiceClient, named oidc-client `ledger`) withholding-tax remittance
+    allowed_reasons contains "service-domestic-payment-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-domestic-payment"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-sepa-instant-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-sepa-instant"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-swift-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-swift"
+    	input.action == "transaction.create"
+    }
+
+    allowed_reasons contains "service-interest-transaction-create" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-interest"
+    	input.action == "transaction.create"
+    }
+
+    # #10486 batch 5 — per-service machine identities for the transaction READS that used to ride the
+    # shared openbank-services principal's ROLE_OPERATOR (base operator-read-any). TransactionResource's
+    # RBAC already admits ROLE_API on list/search/read, so OPA is the only thing between these reads and
+    # every other ROLE_API service account: each rule is its principal's whole read grant.
+    #   party-service TransactionServiceRestClient GET /transactions?accountId= (GDPR Art. 15) transaction.list
+    allowed_reasons contains "service-party-transaction-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-party"
+    	input.action == "transaction.list"
+    }
+
+    # #10486 batch 7 — three more read identities, same shape as the party rule above.
+    #   statement-service TransactionRestClient.search GET /transactions/search (booked entries, ADR-0035) transaction.search
+    #   agent-service     TransactionServiceClient      GET /transactions, /transactions/{id}              transaction.list, transaction.read
+    #   mcp-service       TransactionServiceClient      GET /transactions?accountId=                       transaction.list
+    # agent-service and mcp-service are AI-agent runtimes. Their machine identity reaches only what an
+    # agents.yaml charter can already call: agent-service's list_transactions/get_transaction tools map
+    # to query.ledger.readonly (compliance-officer, ui-assistant), mcp-service's list_transactions to
+    # query.transaction.readonly (mcp-anonymous). The charter gate refuses every other agent before the
+    # REST call is made; this rule is the upstream's half of the same boundary.
+    allowed_reasons contains "service-statement-transaction-search" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-statement"
+    	input.action == "transaction.search"
+    }
+
+    allowed_reasons contains "service-agent-transaction-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-agent"
+    	input.action in {"transaction.list", "transaction.read"}
+    }
+
+    allowed_reasons contains "service-mcp-transaction-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-mcp"
+    	input.action == "transaction.list"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1370,6 +1482,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1806,6 +1928,23 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

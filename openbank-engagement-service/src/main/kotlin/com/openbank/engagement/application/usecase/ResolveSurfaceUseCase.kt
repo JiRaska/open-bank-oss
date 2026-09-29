@@ -8,6 +8,7 @@ import com.openbank.engagement.application.port.out.AdverseStateRepository
 import com.openbank.engagement.application.port.out.CampaignBannerPlacementRepository
 import com.openbank.engagement.application.port.out.EngagementEventRepository
 import com.openbank.engagement.domain.model.DismissalRule
+import com.openbank.engagement.domain.model.EligibilityRule
 import com.openbank.engagement.domain.model.EligibilitySnapshot
 import com.openbank.engagement.domain.model.SurfaceContent
 import com.openbank.engagement.domain.model.SurfaceResolver
@@ -79,6 +80,9 @@ class ResolveSurfaceUseCase(
             adverseState = adverseState.activeStates(partyId),
             asOf = Instant.now(),
         )
+        if (!EligibilityRule.isEligibleForPromotionalTargeting(eligibility)) {
+            return Result.Rendered(emptyList())
+        }
         val catalogue = SurfaceResolver.resolve(slot, eligibility)
         val campaignBanner = banners.latestForPartyAndSlot(partyId, slot)
         // Each slot intentionally has one current campaign placement, with no opaque score or

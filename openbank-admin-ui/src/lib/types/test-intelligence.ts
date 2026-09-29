@@ -218,6 +218,12 @@ export interface SyntheticJourneyEvidence {
       observedAt: string | null
       detail: string
       run?: TestRunProvenance
+      /**
+       * Present only when the run was asked to prove a specific deployed build (#7451). `matched`
+       * is derived from the SHAs by both collectors, never taken from the browser script's claim.
+       * Its absence means ordinary CI/browser evidence, not a failed attestation.
+       */
+      buildAttestation?: { requestedSha: string; observedSha: string | null; matched: boolean }
     }>
   }
   live?: {

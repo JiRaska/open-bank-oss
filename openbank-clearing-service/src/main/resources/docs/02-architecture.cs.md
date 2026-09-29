@@ -113,7 +113,7 @@ sequenceDiagram
 
 **Resilience:** `publishWithResilience` je obalen `@Bulkhead(1)`, `@CircuitBreaker(threshold 10, ratio 0.5, delay 5s)`, `@Retry(2, delay 200, jitter 100)`, `@Timeout(3000)`. Scheduler polyká výjimky, aby nikdy nespadl; selhané řádky se označí FAILED pro retry. Životní cyklus outbox statusu: `PENDING → SENT | FAILED`.
 
-> **Pozn. (aktuální stav):** `ClearingEventPublisherImpl.publishBatchSettled` a `publishItemCleared` NEJSOU stuby — každý zapisuje outbox řádek přes `Panache.withTransaction { outboxRepo.persistInTransaction(...) }` (řádky 41 a 85). Produkční cesta je transakční outbox vyprazdňovaný `ClearingOutboxDispatcher` do `clearing-events-out`. `publishBatchSettled` už navíc není na cestě settle vůbec — `settleWithEvent` zapisuje outbox řádek uvnitř transakce dávky — a `publishItemCleared` nemá produkčního volajícího, takže jeho vlastní transakce je latentní past, ne živá vada.
+> **Pozn. (aktuální stav):** `ClearingEventPublisherImpl.publishBatchSettled` a `publishItemCleared` jsou kompatibilní vstupní body, které každý otevírají vlastní transakci. Produkční cesta settlementu nevolá ani jednu metodu: `settleWithEvents` sestaví zprávu dávky, příkaz net settlementu a acknowledgement pro každou položku a všechny outbox řádky zapíše ve stejné transakci jako změny dávky a položek. `ClearingOutboxDispatcher` je následně odešle do `clearing-events-out`.
 
 ## Komponenty z `openbank-libs`
 

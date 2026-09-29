@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.1...copilot-service-v0.17.2) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.0...copilot-service-v0.17.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **consent:** add an mTLS listener and point lending + copilot at it ([#10400](https://github.com/JiRaska/open-bank-oss/issues/10400)) ([4de039d](https://github.com/JiRaska/open-bank-oss/commit/4de039d0fdb285b79df402ec3e68aa71b5524112))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.16.0...copilot-service-v0.17.0) (2026-09-13)
+
+
+### Features
+
+* **copilot:** ADR-0285 D5 published-style client (infra only, not wired) ([#9729](https://github.com/JiRaska/open-bank-oss/issues/9729)) ([cbdee07](https://github.com/JiRaska/open-bank-oss/commit/cbdee0763a5b6c355bba94b97bcb583fbfdf1b63))
+
+
+### Bug Fixes
+
+* **copilot:** publish the two ActionKind values the spec omits ([#9827](https://github.com/JiRaska/open-bank-oss/issues/9827)) ([37ab7cb](https://github.com/JiRaska/open-bank-oss/commit/37ab7cbc010f9421dcbdf9f8c2836a1aafebc871)), closes [#5962](https://github.com/JiRaska/open-bank-oss/issues/5962)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.15.0...copilot-service-v0.16.0) (2026-08-27)
 
 

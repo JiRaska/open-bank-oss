@@ -26,10 +26,10 @@ import java.time.format.DateTimeFormatter
  * `Instant.now()`/`LocalDate.now()` directly), a config-driven interval and batch size, and
  * `concurrentExecution = SKIP` so overlapping runs never race.
  *
- * Each tick re-buckets every ACTIVE loan's IFRS 9 stage/ECL for the **current calendar month**
- * (`yyyy-MM`, derived from the injected clock — never wall-clock time) and posts only the delta versus
- * the loan's previous period. A loan already provisioned for the current period is a no-op re-read
- * (idempotent), so running this more than once within the same month is safe.
+ * Each tick re-buckets every ACTIVE loan's IFRS 9 stage/ECL for the **current reporting date**
+ * (`yyyy-MM-dd`, derived from the injected clock — never wall-clock time) and posts only the delta versus
+ * the loan's previous period. A loan already provisioned for the current date is a no-op re-read
+ * (idempotent), so running this more than once for the same date is safe.
  *
  * PD/LGD are the conservative placeholders from `ConservativeRiskParameterSource` until a real
  * risk-parameter adapter is bound (ADR-0028 D4) — the ECL this loop posts is **not** production-grade
@@ -44,7 +44,7 @@ class ProvisioningCycleScheduler(
     private val domainMetrics: DomainMetrics,
 ) {
     private val log = Logger.getLogger(ProvisioningCycleScheduler::class.java)
-    private val periodFormat = DateTimeFormatter.ofPattern("yyyy-MM")
+    private val periodFormat = DateTimeFormatter.ISO_LOCAL_DATE
 
     // Nullable, not `lateinit`: the gauge is a diagnostic, and a money-path job must never fail
     // because its observability wiring was not initialised. `lateinit` turns a missed StartupEvent
@@ -53,7 +53,7 @@ class ProvisioningCycleScheduler(
 
     // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run.
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
-        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(APPROX_MONTHLY_HOURS))
+        liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofHours(DAILY_HOURS))
     }
 
     @Scheduled(
@@ -67,27 +67,11 @@ class ProvisioningCycleScheduler(
         cycle.runProvisioningCycle(period, asOf, batchSize)
             .invoke { outcome ->
                 log.infof(
-                    "IFRS 9 provisioning cycle %s: %d loans assessed, %d provisioning journals posted",
+                    "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
                     outcome.period,
                     outcome.loansAssessed,
-                    outcome.journalsPosted,
+                    outcome.journalsQueued,
                 )
-                // The batch scan (LoanRepository.findActive) has no continuation cursor: if the active
-                // book is exactly at (or over) the batch size, this tick may have silently left loans
-                // unprovisioned for the period. Flag it — the next tick's idempotency check means a
-                // truncated tail self-heals eventually, but an operator should know it's happening.
-                if (outcome.loansAssessed >= batchSize) {
-                    log.warnf(
-                        "IFRS 9 provisioning cycle %s assessed %d loans, at or above the batch size " +
-                            "(%d) — the active loan book may exceed one pass and some loans could be " +
-                            "left unprovisioned for this period until a later tick catches up",
-                        outcome.period,
-                        outcome.loansAssessed,
-                        batchSize,
-                    )
-                }
-                // ADR-0160 mechanism 3: record after the success path — a truncated pass that logs a
-                // warning is still a successful run of the control; never record in the failure path.
                 liveness?.recordSuccess()
             }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }
@@ -99,6 +83,6 @@ class ProvisioningCycleScheduler(
         const val WORKFLOW_NAME = "lending-provisioning-cycle"
 
         /** Approximate monthly interval (720 h) matching `lending.provisioning.cycle.every` default. */
-        const val APPROX_MONTHLY_HOURS = 720L
+        const val DAILY_HOURS = 24L
     }
 }

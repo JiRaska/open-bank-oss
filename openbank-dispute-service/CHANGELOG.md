@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.3...dispute-service-v0.11.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.2...dispute-service-v0.10.3) (2026-09-13)
+
+
+### Bug Fixes
+
+* **dispute:** a withdrawal's outcome must be JSON null, not the string "null" ([#9595](https://github.com/JiRaska/open-bank-oss/issues/9595)) ([3d10285](https://github.com/JiRaska/open-bank-oss/commit/3d10285d4512af2e6effc1f753c725d358b2ebf7)), closes [#8745](https://github.com/JiRaska/open-bank-oss/issues/8745)
+* **dispute:** guard dispute_outbox created_at plausibility at INSERT ([#9305](https://github.com/JiRaska/open-bank-oss/issues/9305)) ([46ce72e](https://github.com/JiRaska/open-bank-oss/commit/46ce72efa255a3c322d9a9ef3bb5dc6918efdb66))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.10.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.10.1...dispute-service-v0.10.2) (2026-09-08)
 
 

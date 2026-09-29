@@ -43,6 +43,12 @@ spec:
   # allows. Async replication (no minSyncReplicas) keeps the write path independent
   # of standby health; synchronous is deferred to a production decision (ADR-0159).
   instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   affinity:
     enablePodAntiAffinity: true
     topologyKey: kubernetes.io/hostname
@@ -54,7 +60,7 @@ spec:
       labelSelector:
         matchLabels:
           cnpg.io/cluster: billing-db
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 2Gi
@@ -90,6 +96,10 @@ metadata:
   name: billing-db-daily
   namespace: billing
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 11 3 * * *"
   backupOwnerReference: self
   cluster:

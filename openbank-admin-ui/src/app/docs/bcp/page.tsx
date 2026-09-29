@@ -429,12 +429,16 @@ export default function BcpPage() {
             return (
               <div key={tier.id} className="card" style={{ padding: 0, overflow: 'hidden', borderLeft: `4px solid ${tier.color}` }}>
                 {/* Tier header */}
-                <div
+                <button
+                  type="button"
+                  aria-expanded={expanded}
+                  aria-controls={`bcp-tier-${tier.id}`}
                   onClick={() => toggleTier(tier.id)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: '12px',
                     padding: '14px 18px', cursor: 'pointer',
                     background: expanded ? 'var(--surface-2)' : 'transparent',
+                    border: 0, width: '100%', textAlign: 'left', color: 'inherit', font: 'inherit',
                   }}
                 >
                   {/* Tier number */}
@@ -486,11 +490,11 @@ export default function BcpPage() {
                   </div>
 
                   {expanded ? <ChevronDown size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} /> : <ChevronRight size={16} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />}
-                </div>
+                </button>
 
                 {/* Services list */}
                 {expanded && (
-                  <div style={{ borderTop: '1px solid var(--border)', padding: '12px 18px' }}>
+                  <div id={`bcp-tier-${tier.id}`} style={{ borderTop: '1px solid var(--border)', padding: '12px 18px' }}>
                     {/* Startup sequence note */}
                     {idx > 0 && (
                       <div style={{ fontSize: '11px', color: 'var(--text-primary)', marginBottom: '10px', padding: '6px 10px', background: 'var(--surface-3)', borderRadius: '6px' }}>

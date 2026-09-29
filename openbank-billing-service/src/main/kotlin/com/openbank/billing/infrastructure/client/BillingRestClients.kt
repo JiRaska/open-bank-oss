@@ -6,6 +6,7 @@ package com.openbank.billing.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.openbank.libs.web.SyntheticTaintClientFilter
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.Consumes
@@ -84,7 +85,9 @@ interface ProductCatalogRestClient {
 /** Account read — carries account PII, so the call propagates an OIDC service token. */
 @RegisterRestClient(configKey = "account-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 5: account reads (account.list, account.read) are minted by the NAMED oidc-client
+// `m2m` - Keycloak client `openbank-billing` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

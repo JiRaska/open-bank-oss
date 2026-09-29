@@ -1,8 +1,27 @@
 openapi: 3.0.3
 info:
   title: OpenBank Referral Service
-  version: 1.1.0
+  # 1.1.0 -> 1.3.0: additive — GET /api/v1/referrals/parties/{partyId}/invites (the referrer's
+  # own invites) and a machine-readable `reason` on attribution conflicts. NOT 1.2.0: open PR
+  # #7192 claims it against this file; a skipped number is harmless, a collided one is not.
+  version: 1.3.0
 paths:
+  /api/v1/referrals/parties/{partyId}/invites:
+    get:
+      summary: The invites a referrer issued, newest first
+      description: >-
+        Referrer-side projection. Never carries the referee's party id or name, the invite token or
+        its hash, or the idempotency key. An ISSUED invite whose expiresAt has passed is reported as
+        EXPIRED. createdAt comes from the invite's INVITE_ISSUED audit record and is null if absent.
+      parameters: [{name: partyId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        "200":
+          description: Invites (empty when the party issued none)
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/ReferrerInvite'}
   /api/v1/referrals/programs:
     get:
       summary: List published immutable referral program versions
@@ -38,12 +57,26 @@ paths:
     post:
       summary: Issue an opaque invite token
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
-      responses: {"201": {description: Issued}}
+      responses:
+        "201": {description: Issued}
+        "404": {description: Unknown program}
+        "409":
+          description: Program not open (PROGRAM_UNAVAILABLE) or key already used (IDEMPOTENCY_KEY_REUSED)
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
   /api/v1/referrals/invites/{token}/attribute:
     post:
       summary: Attribute an invite, rejecting self and replay
       parameters: [{name: token, in: path, required: true, schema: {type: string}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
-      responses: {"200": {description: Attributed}, "409": {description: Conflict}}
+      responses:
+        "200": {description: Attributed (also a replay by the same referee)}
+        "404": {description: Unknown token}
+        "409":
+          description: Conflict; `reason` says which
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralConflict'}
   /api/v1/referrals/invites/{token}/qualify:
     post:
       summary: Qualify one event and request a fixed reward
@@ -51,6 +84,39 @@ paths:
       responses: {"202": {description: Reward requested}}
 components:
   schemas:
+    ReferralConflict:
+      type: object
+      required: [error]
+      properties:
+        error: {type: string}
+        reason:
+          type: string
+          enum: [EXPIRED, SELF, ALREADY_ATTRIBUTED, NOT_ATTRIBUTABLE, IDEMPOTENCY_KEY_REUSED, PROGRAM_UNAVAILABLE]
+          description: >-
+            Present on attribution and invite-issue conflicts; absent on conflicts not yet
+            classified. IDEMPOTENCY_KEY_REUSED is not a replay — the token is stored only as a
+            hash and cannot be returned twice.
+    ReferrerInvite:
+      type: object
+      required: [id, status, expiresAt]
+      properties:
+        id: {type: string, format: uuid}
+        status: {type: string, enum: [ISSUED, ATTRIBUTED, EXPIRED, REJECTED]}
+        createdAt: {type: string, format: date-time, nullable: true}
+        expiresAt: {type: string, format: date-time}
+        attributedAt: {type: string, format: date-time, nullable: true}
+        reward:
+          nullable: true
+          allOf: [{$ref: '#/components/schemas/ReferrerReward'}]
+    ReferrerReward:
+      type: object
+      required: [status, amount, currency]
+      properties:
+        status: {type: string, enum: [QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVERSED]}
+        amount: {type: string, description: Decimal string, e.g. "500.0000"}
+        currency: {type: string, minLength: 3, maxLength: 3}
+        requestedAt: {type: string, format: date-time, nullable: true}
+        rewardedAt: {type: string, format: date-time, nullable: true}
     ReferralProgram:
       type: object
       required: [id, name, version, rewardAmount, currency, qualifyingEvent, attributionWindowEndsAt, status, maker, createdAt]

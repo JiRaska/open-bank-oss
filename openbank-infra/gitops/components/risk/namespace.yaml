@@ -1,0 +1,12 @@
+# Risk domain (ADR-0037: domain = namespace). App plane. Holds risk-engine plus its single-owner
+# CNPG Postgres. risk-engine is the read-only balance-sheet risk engine (ADR-0313, ADR-0314). Not
+# money-path: it reads the ledger and never writes it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: risk
+  labels:
+    openbank.io/plane: app
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

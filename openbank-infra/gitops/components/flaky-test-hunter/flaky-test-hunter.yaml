@@ -37,7 +37,7 @@ spec:
         - name: flaky-test-hunter
           # Pending first CI build (ADR-0168 initial PR) — build-push-service.sh publishes the
           # real sandbox-<sha> tag on merge; ArgoCD will not sync a healthy pod until then.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-062c26af
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-flaky-test-hunter:sandbox-bcb1b695
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -88,6 +88,10 @@ spec:
               value: http://litellm.ai-platform.svc:4000
             - name: TEMPORAL_NAMESPACE
               value: openbank-flakytest
+            - name: QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://tempo.observability.svc:4317"
+            - name: OTEL_TRACES_SAMPLER_ARG
+              value: "0.1"
           resources:
             requests:
               cpu: 100m

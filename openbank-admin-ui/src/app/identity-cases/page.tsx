@@ -10,7 +10,8 @@ import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { LoadingState, PageHeader } from '@/components/ui'
+import { LoadingState, PageHeader, StatusBadge } from '@/components/ui'
+import { TONE_TEXT_CLASS, type Tone } from '@/components/ui/tone'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { Fingerprint, RefreshCw, ShieldAlert, Users, Check, Search } from 'lucide-react'
 
@@ -47,15 +48,15 @@ interface VerificationCase {
 
 // ── Display helpers ─────────────────────────────────────────────────────────────
 
-const TRIGGER_COLOR: Record<Trigger, string> = {
-  RN_COLLISION: '#dc2626',
-  NAMESAKE_CANDIDATE: '#d97706',
-  PROBABILISTIC_CANDIDATE: '#7c3aed',
+const TRIGGER_TONE: Record<Trigger, Tone> = {
+  RN_COLLISION: 'danger',
+  NAMESAKE_CANDIDATE: 'warning',
+  PROBABILISTIC_CANDIDATE: 'accent',
 }
-const VERDICT_COLOR: Record<Verdict, string> = {
-  LINK_TO_EXISTING: '#16a34a',
-  DISTINCT_NEW: '#2563eb',
-  REJECT: '#dc2626',
+const VERDICT_TONE: Record<Verdict, Tone> = {
+  LINK_TO_EXISTING: 'success',
+  DISTINCT_NEW: 'info',
+  REJECT: 'danger',
 }
 
 function shortId(id: string): string {
@@ -179,7 +180,7 @@ function DecisionForm({
           }}
         >
           {t('První hlas:', 'First vote:')} <strong>{c.firstApprover}</strong> →{' '}
-          <span style={{ color: VERDICT_COLOR[c.firstVerdict ?? 'DISTINCT_NEW'], fontWeight: 600 }}>
+          <span className={TONE_TEXT_CLASS[VERDICT_TONE[c.firstVerdict ?? 'DISTINCT_NEW']]} style={{ fontWeight: 600 }}>
             {c.firstVerdict}
           </span>
           {'. '}
@@ -304,7 +305,7 @@ function IdentityDecisionReviewDialog({ c, intent, verdict, linkPartyId, notes, 
       <dl style={{ margin: '14px 0 0', padding: 12, borderRadius: 9, border: '1px solid var(--border)', background: 'var(--surface-2)', display: 'grid', gap: 8, fontSize: 12.5 }}>
         <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Žadatel', 'Applicant')}</dt><dd style={{ margin: '2px 0 0', fontWeight: 650 }}>{c.applicant.givenName} {c.applicant.familyName} · {c.applicant.birthdate}</dd></div>
         <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Případ a spouštěč', 'Case and trigger')}</dt><dd className="mono" style={{ margin: '2px 0 0', wordBreak: 'break-all' }}>{c.id} · {c.trigger}</dd></div>
-        {!isReopen && <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Verdikt', 'Verdict')}</dt><dd style={{ margin: '2px 0 0', fontWeight: 700, color: VERDICT_COLOR[verdict] }}>{verdict}{verdict === 'LINK_TO_EXISTING' ? ` → ${linkPartyId}` : ''}</dd></div>}
+        {!isReopen && <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Verdikt', 'Verdict')}</dt><dd className={TONE_TEXT_CLASS[VERDICT_TONE[verdict]]} style={{ margin: '2px 0 0', fontWeight: 700 }}>{verdict}{verdict === 'LINK_TO_EXISTING' ? ` → ${linkPartyId}` : ''}</dd></div>}
         {!isReopen && <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('Poznámka', 'Notes')}</dt><dd style={{ margin: '2px 0 0' }}>{notes || t('bez poznámky', 'no notes')}</dd></div>}
         {c.firstApprover && <div><dt style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>{t('První hlas', 'First vote')}</dt><dd style={{ margin: '2px 0 0' }}>{c.firstApprover} → <strong>{c.firstVerdict}</strong>{c.firstLinkPartyId ? ` → ${c.firstLinkPartyId}` : ''}{c.firstNotes ? ` · ${c.firstNotes}` : ''}</dd></div>}
       </dl>
@@ -469,26 +470,12 @@ export default function IdentityCasesPage() {
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '2px 8px',
-                        borderRadius: '20px',
-                        background: `${TRIGGER_COLOR[c.trigger]}15`,
-                        color: TRIGGER_COLOR[c.trigger],
-                        border: `1px solid ${TRIGGER_COLOR[c.trigger]}30`,
-                      }}
-                    >
-                      {triggerLabel(c.trigger)}
-                    </span>
+                    <StatusBadge status={c.trigger} tone={TRIGGER_TONE[c.trigger]} label={triggerLabel(c.trigger)} />
                     <span className="mono" style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                       {t('případ', 'case')} {shortId(c.id)}
                     </span>
                     {c.status === 'AWAITING_SECOND_APPROVAL' && (
-                      <span style={{ fontSize: '11px', fontWeight: 600, color: '#d97706' }}>
-                        {t('čeká na 2. schválení', 'awaiting 2nd approval')}
-                      </span>
+                      <StatusBadge status={c.status} tone="warning" label={t('čeká na 2. schválení', 'awaiting 2nd approval')} />
                     )}
                   </div>
                   <div style={{ fontSize: '15px', fontWeight: 700, color: 'var(--text-primary)' }}>

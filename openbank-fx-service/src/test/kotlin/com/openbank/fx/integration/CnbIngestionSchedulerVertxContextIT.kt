@@ -12,6 +12,7 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
@@ -19,11 +20,13 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import org.assertj.core.api.Assertions.assertThat
+import org.hibernate.reactive.mutiny.Mutiny
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.util.UUID
 
 /**
  * Regression coverage for #2187 (the fleet sweep of #2148) — the daily ČNB fixing ingestion had
@@ -82,6 +85,9 @@ class CnbIngestionSchedulerVertxContextIT {
     @Inject
     lateinit var rates: FxRateRepository
 
+    @Inject
+    lateinit var sf: Mutiny.SessionFactory
+
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
@@ -112,6 +118,22 @@ class CnbIngestionSchedulerVertxContextIT {
         // A mid rate carries no bank spread (ADR-0046), so bid == ask == the published rate.
         assertThat(ingested!!.bidRate).isEqualByComparingTo(BigDecimal(RATE))
         assertThat(ingested.askRate).isEqualByComparingTo(BigDecimal(RATE))
+
+        // ADR-0314 D5: the same transaction wrote exactly one fx.fixing.published.v1 outbox row for
+        // this fixing, and it names the rate row that now exists. A mocked repository cannot show
+        // this; only the real write path can.
+        val payloads = onEventLoop {
+            sf.withSession { s ->
+                s.createNativeQuery<String>(
+                    "select payload from fx_outbox where event_type = 'fx.fixing.published.v1' and aggregate_id = :a",
+                    String::class.java,
+                ).setParameter("a", FIXING_AGGREGATE_ID).resultList
+            }.awaitSuspending()
+        }
+        // Filtered by the rate id: another IT sharing this database may ingest the same day.
+        val mine = payloads.filter { it.contains(ingested.id.toString()) }
+        assertThat(mine).hasSize(1)
+        assertThat(mine.single()).contains("\"fixingDate\":\"2026-05-30\"")
     }
 
     private companion object {
@@ -126,6 +148,8 @@ class CnbIngestionSchedulerVertxContextIT {
         val VALID_FROM: Instant = LocalDate.of(2026, 5, 30)
             .atStartOfDay(ZoneId.of("Europe/Prague"))
             .toInstant()
+
+        val FIXING_AGGREGATE_ID: UUID = UUID.nameUUIDFromBytes("CNB:2026-05-30".toByteArray())
 
         /** Generous vs the 2 s cron so a slow CI runner cannot flake the wait. */
         const val BUDGET_NANOS = 60_000_000_000L

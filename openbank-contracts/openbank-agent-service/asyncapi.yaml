@@ -21,14 +21,18 @@
 asyncapi: 3.0.0
 
 info:
-  title: OpenBank Agent Service — audit events
-  version: 1.0.0
+  title: OpenBank Agent Service — audit and kill-switch events
+  version: 1.1.0
   description: |
     Durable AI-provenance handoff (ADR-0031 D5): every `AuditEvent` agent-service would
     otherwise only log is enqueued to a local Postgres outbox (`agent_audit_outbox`,
     `V4__agent_audit_outbox.sql`) inside the same transaction as the audited operation, then
     drained by a `@Scheduled` dispatcher into Kafka — so an audit call returns only after the
     source database has acknowledged the row, and a Kafka outage delays but never drops it.
+
+    Kill-switch events (ADR-0244 D7) are emitted directly from `KillSwitchService` to Kafka
+    after the runtime halt is persisted and audited; `openbank-case-coordinator-agent` consumes
+    them to cancel active incident-response workflows.
   license:
     name: Apache-2.0
     url: https://www.apache.org/licenses/LICENSE-2.0
@@ -62,6 +66,23 @@ channels:
       agent-audit-event:
         $ref: '#/components/messages/agent-audit-event'
 
+  agentKillSwitchEvents:
+    address: agent-kill-switch-events-in
+    title: Agent-service kill-switch commands
+    description: |
+      Topic name from `AGENT_KILL_SWITCH_TOPIC:agent-kill-switch-events-in` in
+      `openbank-agent-service/src/main/resources/application.yaml`. Produced when an operator
+      sets or clears a runtime kill-switch scope via `KillSwitchService`; consumed by
+      openbank-case-coordinator-agent's `AgentKillSwitchEventConsumer`, which cancels relevant
+      Temporal case workflows.
+
+      **Partitioning key: `aggregateId`** (`KafkaKillSwitchEventPublisher` sends
+      `Record.of(event.aggregateId, payload)`). Events for the same scope are ordered per
+      partition; cross-scope ordering is not guaranteed.
+    messages:
+      agent-kill-switch-event:
+        $ref: '#/components/messages/agent-kill-switch-event'
+
 operations:
   publishAgentAuditEvent:
     action: send
@@ -79,6 +100,20 @@ operations:
     messages:
       - $ref: '#/channels/agentAuditEvents/messages/agent-audit-event'
 
+  publishAgentKillSwitchEvent:
+    action: send
+    channel:
+      $ref: '#/channels/agentKillSwitchEvents'
+    summary: Emit a kill-switch set/cleared event after persistence and audit.
+    description: |
+      `KillSwitchService.halt()` and `KillSwitchService.resume()` persist the runtime
+      state change via `KillSwitchRepository`, audit it, and then emit this event.
+      `KafkaKillSwitchEventPublisher` serialises the `KillSwitchEvent` DTO as JSON and sends
+      `Record.of(aggregateId, payload)`. Publication is best-effort after the local mutation;
+      consumers must tolerate duplicate/redelivered events by keying on `eventId`.
+    messages:
+      - $ref: '#/channels/agentKillSwitchEvents/messages/agent-kill-switch-event'
+
 components:
   messages:
     agent-audit-event:
@@ -87,6 +122,13 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AgentAuditEventPayload'
+
+    agent-kill-switch-event:
+      name: agent-kill-switch-event
+      title: Agent-service kill-switch command event
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/AgentKillSwitchEventPayload'
   schemas:
     AgentAuditEventPayload:
       type: object
@@ -160,3 +202,42 @@ components:
           type: string
           enum: [SUCCESS, FAILURE, DENIED]
           description: "`AuditEvent.result.name` — outcome of the audited operation."
+
+    AgentKillSwitchEventPayload:
+      type: object
+      description: |
+        `KillSwitchEvent` (`openbank-agent-service/.../application/port/out/KillSwitchEventPublisher.kt`),
+        serialised via `ObjectMapper.writeValueAsString` in `KafkaKillSwitchEventPublisher.publish`.
+      required: [eventId, eventType, aggregateId, reason, actorId, occurredAt]
+      properties:
+        eventId:
+          type: string
+          description: |
+            `KillSwitchEvent.eventId` (a UUID, minted via `Ids.newId()` at the call site) — also
+            the Kafka record key for idempotency on redelivery.
+        eventType:
+          type: string
+          enum: [agent.killswitch.set, agent.killswitch.cleared]
+          description: |
+            `KillSwitchEvent.eventType` — `agent.killswitch.set` when a scope is halted,
+            `agent.killswitch.cleared` when it is resumed.
+        aggregateId:
+          type: string
+          description: |
+            `KillSwitchEvent.aggregateId` — the scope being controlled. `*` means every agent;
+            otherwise an agent id matching a charter in `agents.yaml`.
+        reason:
+          type: string
+          description: |
+            `KillSwitchEvent.reason` — operator-supplied rationale on `.set`; the literal string
+            `resumed` on `.cleared`.
+        actorId:
+          type: string
+          description: |
+            `KillSwitchEvent.actorId` — the operator/system identity that flipped the switch.
+        occurredAt:
+          type: string
+          format: date-time
+          description: |
+            `KillSwitchEvent.occurredAt` — business time of the state change (taken from the
+            injected `Clock`), not dispatch time.

@@ -109,7 +109,7 @@ export function AgentDock() {
         style={{
           position: 'fixed', bottom: 24, right: 24, zIndex: 1000,
           width: 52, height: 52, borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: 'var(--accent)', color: '#fff',
+          background: 'var(--accent-strong)', color: '#fff',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           boxShadow: '0 6px 20px rgba(0,0,0,0.18)',
         }}
@@ -227,7 +227,7 @@ export function AgentDock() {
               disabled={busy || !input.trim()}
               style={{
                 width: 38, borderRadius: 8, border: 'none', cursor: busy ? 'default' : 'pointer',
-                background: 'var(--accent)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+                background: 'var(--accent-strong)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
                 opacity: busy || !input.trim() ? 0.5 : 1,
               }}
             >

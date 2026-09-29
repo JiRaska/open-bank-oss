@@ -10,6 +10,7 @@ import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -43,7 +44,9 @@ class SettlementAdapter(
     @RestClient private val client: TransactionServiceClient,
     // Lazy Instance: absent when oidc-client is disabled under %test so a direct injection
     // would fail Arc validation for every @QuarkusTest. Resolved on demand in prod only.
-    private val oidcClient: Instance<OidcClient>,
+    // #10486: domestic-payment's OWN Keycloak client `openbank-domestic-payment` (ROLE_API only),
+    // never the shared default client. transaction-service's OPA grants it transaction.create only.
+    @NamedOidcClient("m2m") private val oidcClient: Instance<OidcClient>,
     private val accountLookup: AccountLookupPort,
     private val clock: Clock,
 ) : SettlementPort {

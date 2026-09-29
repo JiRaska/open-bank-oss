@@ -1,5 +1,48 @@
 # Changelog
 
+## [0.21.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.3...domestic-payment-v0.21.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.21.3](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.2...domestic-payment-v0.21.3) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.1...domestic-payment-v0.21.2) (2026-09-22)
+
+
+### Security
+
+* **transaction:** own M2M identities for batch-2 money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 2) ([#10525](https://github.com/JiRaska/open-bank-oss/issues/10525)) ([c5a7270](https://github.com/JiRaska/open-bank-oss/commit/c5a7270804c6a0104b50a4d204671a84c08e8444))
+
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.0...domestic-payment-v0.21.1) (2026-09-20)
+
+
+### Bug Fixes
+
+* **document:** give document-service an mTLS listener and point its three blocked callers at it ([#10393](https://github.com/JiRaska/open-bank-oss/issues/10393)) ([1d55397](https://github.com/JiRaska/open-bank-oss/commit/1d5539709602123a122c1b5d4b1181ffeabe9218)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.1...domestic-payment-v0.21.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.20.0...domestic-payment-v0.20.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **domestic-payment:** guard domestic_payment_outbox created_at plausibility at INSERT ([#9293](https://github.com/JiRaska/open-bank-oss/issues/9293)) ([f8d3145](https://github.com/JiRaska/open-bank-oss/commit/f8d31451a567b73ef183fb4a4bcbe8bdcd98efe5))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.19.1...domestic-payment-v0.20.0) (2026-09-08)
 
 

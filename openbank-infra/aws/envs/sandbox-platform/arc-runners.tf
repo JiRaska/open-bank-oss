@@ -1059,7 +1059,8 @@ resource "aws_iam_role_policy" "arc_build_ecr_pullthrough" {
 
 # Cosign image signing (ADR-0029/0030 supply-chain). The auto-deploy build job signs
 # every pushed image with the AWS KMS key alias/openbank-cosign-signing (cosign v2,
-# tag-based) so kyverno's verify-openbank-image-signatures Enforce policy admits the
+# tag-based) so kyverno's verify-openbank-image-sbom-attestation Enforce policy (which
+# verifies the image signature as well as the SBOM attestation) admits the
 # Deployment. Without this grant the build runner pushes UNSIGNED images and every
 # deploy is blocked ("no signatures found"). Scoped to the single cosign key.
 data "aws_iam_policy_document" "arc_build_cosign" {

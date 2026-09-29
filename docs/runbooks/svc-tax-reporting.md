@@ -43,7 +43,7 @@ triaging an incident that starts on `tax-reporting`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: not declared in a matching workload · Liveness: not declared in a matching workload
 - Metrics: scraped by the fleet PodMonitor (namespace `tax-reporting`); dashboards in Grafana.
 - Logs: `kubectl logs -n tax-reporting deploy/tax-reporting-service -f`, or Loki
   `{namespace="tax-reporting"}`.

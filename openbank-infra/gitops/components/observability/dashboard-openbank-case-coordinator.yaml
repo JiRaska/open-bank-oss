@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dashboard-openbank-case-coordinator
+  namespace: observability
+  labels:
+    grafana_dashboard: "1"
+data:
+  openbank-case-coordinator.json: |
+    {
+      "id": null,
+      "uid": "openbank-casecoordinator",
+      "title": "OpenBank — Case Coordinator",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "30s",
+      "time": { "from": "now-1h", "to": "now" },
+      "timepicker": {},
+      "templating": {
+        "list": [
+          {
+            "name": "datasource",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "label": "Datasource",
+            "hide": 0,
+            "refresh": 1,
+            "options": [],
+            "current": {}
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Kill Switch Active",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 0, "w": 8, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "bool",
+              "min": 0,
+              "max": 1,
+              "custom": { "lineWidth": 2, "fillOpacity": 30 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "openbank_casecoordinator_kill_switch_active",
+              "legendFormat": "{{scope}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 2,
+          "title": "Active Cases by Class and Status",
+          "type": "timeseries",
+          "gridPos": { "x": 8, "y": 0, "w": 16, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "cases",
+              "custom": { "lineWidth": 1, "fillOpacity": 20 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "openbank_casecoordinator_active_cases",
+              "legendFormat": "{{caseClass}} / {{status}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "Kill Switch Events",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 6, "w": 12, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "events",
+              "custom": { "lineWidth": 1, "fillOpacity": 20 }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "sum"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "sum by (scope, eventType) (rate(openbank_casecoordinator_kill_switch_events_total[5m]))",
+              "legendFormat": "{{scope}} / {{eventType}}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "id": 4,
+          "title": "Halt Latency (pilot SLO)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 6, "w": 12, "h": 6 },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "custom": { "lineWidth": 1, "fillOpacity": 10 },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "red", "value": 240 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "max"] },
+            "tooltip": { "mode": "multi" }
+          },
+          "targets": [
+            {
+              "expr": "histogram_quantile(0.99, sum by (le, caseClass, deliveryMode) (rate(openbank_casecoordinator_halt_latency_seconds_bucket[5m])))",
+              "legendFormat": "p99 {{caseClass}} / {{deliveryMode}}",
+              "refId": "A"
+            }
+          ]
+        }
+      ]
+    }

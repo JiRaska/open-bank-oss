@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.10.0...onboarding-service-v0.10.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **onboarding:** recognised event with unparseable status dead-letters, never silently dropped ([#9424](https://github.com/JiRaska/open-bank-oss/issues/9424)) ([4cf0f9d](https://github.com/JiRaska/open-bank-oss/commit/4cf0f9de8e7095c3fed7869b9b7ac778cfb7e997)), closes [#9038](https://github.com/JiRaska/open-bank-oss/issues/9038)
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/onboarding-service-v0.9.0...onboarding-service-v0.10.0) (2026-09-08)
 
 

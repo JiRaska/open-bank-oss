@@ -286,9 +286,11 @@ class AuthorizeInterceptor {
                 query.principal.id,
                 decision.reason ?: "unspecified",
             )
+            m2mDecisionLine(annotation.action, query.principal.id, "deny", decision.reason)?.let(log::info)
             throw ForbiddenException(decision.reason ?: "policy denied")
         }
         record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
+        m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)
         requireFourEyes(annotation, query, decision)
     }
 
@@ -531,6 +533,30 @@ private fun resolveResourceField(target: Any, fieldName: String, log: Logger): A
         ex.message,
     )
     null
+}
+
+/** Keycloak's service-account username convention: `service-account-<clientId>`. */
+internal const val SERVICE_ACCOUNT_PREFIX = "service-account-"
+
+/**
+ * #10486: the INFO line that proves, per request, WHICH machine identity an enforced decision was
+ * about. The migration off the shared `openbank-services` client moves money-path writes to
+ * per-service principals, and "the post now arrives as service-account-openbank-lending" was
+ * otherwise observable only as a `reason` tag on a counter — never as a line an owner can grep
+ * for one request after a deploy.
+ *
+ * Deliberately narrow, so it can sit at INFO on every money-path call:
+ * - **machine principals only** (`service-account-*`); a human or AI-agent principal returns
+ *   `null`, so no end-user subject id reaches the log (those stay at DEBUG above);
+ * - **no resource**: a resource id is often an account or party UUID, which is exactly what this
+ *   line must not carry; action + principal + reason is enough to attribute the call;
+ * - never a token or claim — the principal id is the Keycloak client's service-account NAME,
+ *   which is public in the realm template.
+ */
+internal fun m2mDecisionLine(action: String, principalId: String, outcome: String, reason: String?): String? {
+    if (!principalId.startsWith(SERVICE_ACCOUNT_PREFIX)) return null
+    return "authz m2m decision: outcome=$outcome action=$action principal=$principalId " +
+        "reason=${reason ?: "unspecified"}"
 }
 
 /*

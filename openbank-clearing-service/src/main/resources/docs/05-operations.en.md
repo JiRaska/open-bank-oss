@@ -44,7 +44,8 @@ The **management interface** is enabled (`quarkus.management.enabled: true`) on 
 | `openbank.clearing.batch-size` | `1000` | max items pulled per cycle |
 | `openbank.clearing.netting-enabled` | `true` | net settlement |
 | `openbank.clearing.settlement-cycle-hours` | `4` | cycle cadence (config; scheduling TBD) |
-| `openbank.outbox.poll-interval` / `initial-delay` | `5s` / `5s` | outbox dispatcher cadence |
+| `openbank.outbox.batch-size` | `250` | bounded rows atomically claimed per dispatcher tick |
+| `openbank.outbox.poll-interval` / `initial-delay` | `2s` / `5s` | outbox dispatcher cadence |
 | `openbank.rate-limit.max-concurrent-requests` | `500` | concurrency guard |
 
 The `CHANGE_ME_LOCAL_DEV_ONLY` placeholders must be replaced by Vault-injected secrets in production (ADR-0017).
@@ -74,7 +75,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 | Availability | 99.9% | Prometheus `up{service="openbank-clearing-service"}` |
 | Latency p95 GET | < 100 ms | `http_server_requests_seconds` |
 | Latency p95 submit | < 300 ms | DB write |
-| Outbox lag | < 10 s (poll 5 s) | pending-age on `clearing_outbox` |
+| Outbox lag | < 10 s under the healthy-broker design load | pending-age on `clearing_outbox` |
 | Error rate | < 0.1% 5xx | `http_server_requests_seconds_count{status=~"5.."}` |
 
 ## Runbooks
@@ -83,7 +84,10 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 1. `SELECT count(*) FROM clearing_outbox WHERE status='PENDING';`
 2. Check Kafka reachability for topic `openbank.clearing.batch.event`.
 3. Inspect dispatcher logs: `kubectl logs -l app=openbank-clearing-service | grep ClearingOutboxDispatcher`.
-4. The dispatcher batch size is 25 with circuit-breaker/bulkhead; persistent FAILED rows carry `last_error`.
+4. The dispatcher atomically claims at most 250 rows per tick with circuit-breaker/bulkhead;
+   persistent FAILED rows carry `last_error`. A maximum 1,000-item settlement therefore requires
+   four bounded claims. If broker publish latency makes those claims approach the 30 s dispatcher
+   timeout, reduce `openbank.outbox.batch-size`; no event or database migration rollback is needed.
 
 ### Settle/trigger returns 500
 Body is `{ "error": "<message>" }`. Common cause: `settleBatch` with an unknown id → `IllegalArgumentException("Batch not found")`. Verify the batch id; reads via `GET /batches/{id}`.

@@ -1,0 +1,25 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA client certificate for clearing-service's mTLS write to ledger-service (8443, client
+# auth REQUIRED) — the ADR-0281 net-settlement journal posting. Same shape as aml-internal-tls and
+# notification-internal-tls: tls.crt/tls.key identify clearing-service, ca.crt trusts ledger-service.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: clearing-internal-tls
+  namespace: payments
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: clearing-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: clearing-service.payments.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

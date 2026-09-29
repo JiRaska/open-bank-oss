@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.2...fraud-service-v0.15.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.1...fraud-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **fraud:** guard fraud_outbox created_at plausibility at INSERT ([#9309](https://github.com/JiRaska/open-bank-oss/issues/9309)) ([1bd2acd](https://github.com/JiRaska/open-bank-oss/commit/1bd2acd04c8154ff1f8678017f17f255ced69c5c))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.0...fraud-service-v0.15.1) (2026-09-03)
 
 

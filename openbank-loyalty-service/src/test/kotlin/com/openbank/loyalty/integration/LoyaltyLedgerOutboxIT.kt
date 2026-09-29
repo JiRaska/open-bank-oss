@@ -15,6 +15,7 @@ import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.notNullValue
 import org.junit.jupiter.api.Test
 import java.util.UUID
 import javax.sql.DataSource
@@ -134,6 +135,43 @@ class LoyaltyLedgerOutboxIT {
 
         assertThat(before - after).isEqualTo(FEE_WAIVER_PRICE)
         assertThat(countRows("SELECT count(*) FROM benefit_grant WHERE party_id = ?", party)).isEqualTo(1)
+    }
+
+    /**
+     * The grants list reads back over the real `benefit_grant` columns, is scoped to the path party,
+     * and never echoes the idempotency key.
+     */
+    @Test
+    fun `a party's grants list back with their stored status and no idempotency key`() {
+        val party = UUID.randomUUID()
+        repeat(2) {
+            Given {
+                contentType("application/json")
+                body("""{"earnSourceId":"EMERGENCY_BUFFER_REACHED","correlationEventId":"${UUID.randomUUID()}"}""")
+            }.When { post("/api/v1/loyalty/parties/$party/earn") }.Then { statusCode(201) }
+        }
+        val grantId = Given {
+            contentType("application/json")
+            header("Idempotency-Key", "it-list-key")
+            body("""{"benefitId":"MONTHLY_MAINTENANCE_FEE_WAIVER"}""")
+        }.When { post("/api/v1/loyalty/parties/$party/redeem") }
+            .Then { statusCode(201) } Extract { path<String>("grantId") }
+
+        val body = When { get("/api/v1/loyalty/parties/$party/grants") } Then {
+            statusCode(200)
+            body("size()", equalTo(1))
+            body("[0].grantId", equalTo(grantId))
+            body("[0].benefitId", equalTo("MONTHLY_MAINTENANCE_FEE_WAIVER"))
+            body("[0].grantStatus", equalTo("GRANTED"))
+            body("[0].grantedAt", notNullValue())
+            body("[0].expiresAt", notNullValue())
+        } Extract { asString() }
+        assertThat(body).doesNotContain("idempotencyKey").doesNotContain("it-list-key")
+
+        When { get("/api/v1/loyalty/parties/${UUID.randomUUID()}/grants") } Then {
+            statusCode(200)
+            body("size()", equalTo(0))
+        }
     }
 
     /** An unaffordable redemption is a 409 that burns nothing and grants nothing. */

@@ -70,6 +70,7 @@ class RestGrantorAuthorityClient @Inject constructor(@RestClient private val cli
         GrantorAuthority(
             verdict = if (authorized) GrantorAuthorityVerdict.AUTHORIZED else GrantorAuthorityVerdict.DENIED,
             displayName = principal.legalName?.trim()?.takeIf { it.isNotEmpty() },
+            partyType = principal.partyType,
         )
     } catch (e: NotFoundException) {
         GrantorAuthority(GrantorAuthorityVerdict.DENIED)

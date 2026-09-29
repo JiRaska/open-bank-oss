@@ -141,8 +141,7 @@ export default function LedgerPage() {
         <ContextualInsights dashboardUid="openbank-ledger-int" panels={LEDGER_INSIGHTS}
           titleCs="Integrita účetního toku" titleEn="Ledger flow integrity"
           descriptionCs="Čekající předání, chybovost a rychlost zaúčtování bez zavádějících účetních závěrů."
-          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions."
-          from={fromDate} to={toDate} />
+          descriptionEn="Pending delivery, failures and posting speed without misleading accounting conclusions." />
       </Can>
 
       <div className="card">
@@ -209,7 +208,7 @@ export default function LedgerPage() {
         </p>}
 
         {(!unavailable || result) && (
-        <div style={{ overflowX: 'auto' }}>
+        <div className="table-scroll-region" role="region" tabIndex={0} aria-label={t('Posuvná tabulka hlavní knihy', 'Scrollable general ledger table')}>
           <table className="data-table">
             <thead>
               <tr>

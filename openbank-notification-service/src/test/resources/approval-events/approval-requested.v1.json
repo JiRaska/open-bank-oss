@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "eventId": "0199a1b2-0000-7000-8000-00000000e001",
+  "type": "APPROVAL_REQUESTED",
+  "occurredAt": "2026-09-19T08:15:00Z",
+  "approvalId": "0199a1b2-0000-7000-8000-0000000a0001",
+  "entityPartyId": "0199a1b2-0000-7000-8000-0000000e0001",
+  "entityName": "Example Bakery s.r.o.",
+  "kind": "PAYMENT",
+  "amount": "125000.50",
+  "currency": "CZK",
+  "payeeName": "Example Mill a.s.",
+  "initiatorPartyId": "0199a1b2-0000-7000-8000-0000000b0001",
+  "initiatorName": "Initiator Example",
+  "recipientPartyIds": [
+    "0199a1b2-0000-7000-8000-0000000b0001",
+    "0199a1b2-0000-7000-8000-0000000b0002",
+    "0199a1b2-0000-7000-8000-0000000b0003"
+  ],
+  "expiresAt": "2026-09-21T08:15:00Z",
+  "reason": null,
+  "locale": "cs",
+  "producerFieldAddedLater": { "ignored": true }
+}

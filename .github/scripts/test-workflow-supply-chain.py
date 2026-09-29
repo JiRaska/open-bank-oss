@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 import copy
+import json
+import subprocess
 import importlib.util
 import unittest
 from pathlib import Path
@@ -14,6 +16,14 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_personal_model_credential_is_rejected_in_every_workflow(self):
+        for name in ('agent-review.yml', 'other.yml'):
+            doc = {'jobs': {'test': {'steps': [{
+                'run': 'echo ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}',
+            }]}}}
+            self.assertIn('personal model subscription credential is forbidden in workflows',
+                          guard.findings(name, doc))
+
     def test_tags_fail_for_steps_and_reusable_jobs(self):
         for job in ({'uses': 'owner/action@v1'}, {'steps': [{'uses': 'actions/checkout@v4'}]}):
             self.assertTrue(guard.findings('example.yml', {'jobs': {'test': job}}))
@@ -104,6 +114,66 @@ class SupplyChainTest(unittest.TestCase):
                 doc['jobs']['all-green']['steps'][0]['run'] = 'echo green'
             with self.subTest(mutation=mutation):
                 self.assertTrue(guard.findings('services-ci.yml', doc))
+
+
+    def test_security_regression_partial_graphql_errors_fail_closed(self):
+        workflow = yaml.safe_load(
+            (guard.ROOT / '.github/workflows/security-regression-test.yml').read_text())
+        script = workflow['jobs']['security-regression-test']['steps'][0]['with']['script']
+        runner = r"""
+const {script} = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+const run = new (Object.getPrototypeOf(async function() {}).constructor)(
+  'github', 'context', 'core', script);
+const clone = x => JSON.parse(JSON.stringify(x));
+const connection = {nodes: [{path: 'src/main/Fix.kt'}],
+  pageInfo: {hasNextPage: false, endCursor: null}};
+const data = {repository: {issue0: null,
+  issue1: {labels: {nodes: [{name: 'security'}]}},
+  pullRequest: {files: connection}}};
+const missing = {type: 'NOT_FOUND', path: ['repository', 'issue0']};
+const fixtures = [];
+function add(name, errors, mutate, expected) {
+  const response = clone(data);
+  mutate(response.repository);
+  fixtures.push({name, errors, response, expected});
+}
+add('missing reference does not hide real security issue', [missing], () => {}, 'failed');
+add('missing reference plus regression test', [missing], r => {
+  r.pullRequest.files.nodes.push({path: 'src/test/FixTest.kt'});
+}, 'passed');
+for (const type of ['FORBIDDEN', 'RATE_LIMITED', 'INTERNAL', undefined]) {
+  add(`partial ${type}`, [{...missing, type}], r => {r.issue1.labels.nodes = [];}, 'threw');
+}
+for (const path of [undefined, ['repository', 'issue9'],
+  ['repository', 'issue0', 'labels'], ['repository', 'pullRequest', 'files']]) {
+  add(`invalid error path ${path}`, [{type: 'NOT_FOUND', path}], () => {}, 'threw');
+}
+add('mixed errors', [missing, {...missing, type: 'FORBIDDEN'}], () => {}, 'threw');
+add('empty errors', [], () => {}, 'threw');
+add('non-null failed alias', [missing], r => {r.issue0 = r.issue1;}, 'threw');
+add('missing labels', [missing], r => {r.issue1 = {};}, 'threw');
+add('missing requested alias', [missing], r => {delete r.issue1;}, 'threw');
+add('null alias without error', null, () => {}, 'threw');
+add('ordinary security response', null, r => {r.issue0 = r.issue1;}, 'failed');
+(async () => {
+  for (const fixture of fixtures) {
+    let result = 'passed';
+    try {
+      await run({graphql: async () => {
+        if (fixture.errors !== null) throw {errors: fixture.errors, data: fixture.response};
+        return fixture.response;
+      }}, {repo: {owner: 'example', repo: 'example'},
+        payload: {pull_request: {number: 3, body: 'Closes #1, fixes #2'}}},
+      {info() {}, setFailed() { result = 'failed'; }});
+    } catch { result = 'threw'; }
+    require('node:assert/strict').equal(result, fixture.expected, fixture.name);
+  }
+  console.log(`${fixtures.length} real workflow GraphQL cases passed`);
+})().catch(error => {console.error(error); process.exitCode = 1;});
+"""
+        result = subprocess.run(['node', '-e', runner], input=json.dumps({'script': script}),
+                                text=True, capture_output=True, timeout=20)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':

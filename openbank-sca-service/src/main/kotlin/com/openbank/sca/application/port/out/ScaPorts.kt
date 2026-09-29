@@ -101,3 +101,17 @@ interface DeviceAssertionVerifier {
         signatureB64: String,
     ): Boolean
 }
+
+/**
+ * The register's answer to "is this party a natural person?" (#10281 item 1). A device key is a
+ * PERSON's credential: enrolling one to a company let whoever held that key approve any challenge
+ * raised for the company, with nothing attributing the approval to a human.
+ */
+interface PartyTypeLookup {
+
+    /**
+     * The party's register type (`INDIVIDUAL`, `SOLE_TRADER`, `COMPANY`, `TRUST`), or null when the
+     * register has no such party. Throws when the register cannot be asked — callers fail closed.
+     */
+    suspend fun partyType(partyId: UUID): String?
+}

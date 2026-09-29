@@ -43,6 +43,17 @@ afterEach(() => {
 })
 
 describe('Customer 360 isolation (ADR-0210 D2)', () => {
+  it.each(['ROLE_VIEWER', 'ROLE_OPERATOR', 'ROLE_PAYMENTS', 'ROLE_DEMO'])('denies %s before reading graph evidence', async role => {
+    vi.mocked(auth).mockResolvedValue({ user: { roles: [role] } } as never)
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    const { GET } = await import('@/app/api/customer-360/[partyId]/route')
+    const res = await GET({} as never, { params: Promise.resolve({ partyId: PARTY }) })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ available: false, accountIds: [], consents: [], domains: [] })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it('rejects an unauthenticated direct BFF call before querying ClickHouse', async () => {
     vi.mocked(auth).mockResolvedValue(null as never)
     const fetchMock = vi.fn()

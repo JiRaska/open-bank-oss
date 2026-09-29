@@ -77,6 +77,9 @@ spec:
               kubernetes.io/metadata.name: consent
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: context
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: control-liveness-sentinel
         - namespaceSelector:
             matchLabels:
@@ -137,6 +140,9 @@ spec:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: loyalty
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: notifications
         - namespaceSelector:
             matchLabels:
@@ -164,6 +170,9 @@ spec:
               kubernetes.io/metadata.name: release-steward
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: risk
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: sanctions
         - namespaceSelector:
             matchLabels:
@@ -180,6 +189,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: wealth

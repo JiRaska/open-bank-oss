@@ -64,6 +64,17 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
+    # #10486 batch 3: the entity-party create + mandate grant (party.create, party.mandate.grant)
+    # no longer rides the shared openbank-services principal. The rest-client selects this NAMED client (@OidcClientFilter("m2m")), so its token's principal is
+    # service-account-openbank-kyb (ROLE_API only), granted by identity upstream. Every other
+    # rest-client stays on the default (shared) client above until its own edge is migrated.
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-kyb
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   smallrye-reactive-messaging:
     kafka:
@@ -94,6 +105,12 @@ quarkus:
       url: ${PARTY_SERVICE_URL:http://localhost:8111}
       connect-timeout: 2000
       read-timeout: 5000
+    # Business framework agreement + its SCA signature ceremony (business-contract spec, W1).
+    # Rendering a PDF with its annexes is slower than a party lookup, hence the longer read timeout.
+    document-service:
+      url: ${DOCUMENT_SERVICE_URL:http://localhost:8143}
+      connect-timeout: 2000
+      read-timeout: 10000
     # Public registers (ADR-0284 D1). Free, no key. Egress from the pod goes through the NAT
     # gateway; the NetworkPolicy generator sees these as external edges.
     ares:
@@ -167,6 +184,36 @@ openbank:
     # Temporal timers-worker switch (rules.yaml: temporal_worker_switch_naming).
     worker:
       enabled: ${KYB_WORKER_ENABLED:true}
+    # Sandbox-only fictitious company — IČO 00000001, "OpenBank Demo s.r.o." — so business onboarding can
+    # be demonstrated end to end. OFF by default and it must stay so: a register that answers for a
+    # company that does not exist is an onboarding bypass anywhere but a sandbox. Only the sandbox
+    # deployment turns it on (gitops/components/kyb/kyb-service.yaml).
+    demo-entity:
+      enabled: ${OPENBANK_KYB_DEMO_ENTITY_ENABLED:false}
+      representative-name: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE:Oldřich Vaněk}
+      # A second fictitious jednatel makes the register read "dva jednatelé společně" (JOINT, 2
+      # signatures), so business multi-signature can be demonstrated. Remove the key to get the
+      # single-jednatel SOLE shape back.
+      second-representative-name: ${OPENBANK_KYB_DEMO_ENTITY_SECOND_REPRESENTATIVE:Jana Testová}
+      representative-address:
+        street: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_STREET:Ukázková 1}
+        city: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_CITY:Praha}
+        postal-code: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_POSTAL_CODE:11000}
+        country: ${OPENBANK_KYB_DEMO_ENTITY_REPRESENTATIVE_COUNTRY:CZ}
+    risk:
+      # Countries in the questionnaire that route a signed case to MANUAL_REVIEW. Reference copy of
+      # the EU high-risk third-country list (Delegated Reg. (EU) 2016/1675 as amended); a deployment
+      # must keep it in step with the Official Journal.
+      high-risk-countries: ${OPENBANK_KYB_HIGH_RISK_COUNTRIES:AF,AO,BF,BO,CD,CI,CM,DZ,HT,IR,KE,KP,LA,LB,MC,ML,MM,MZ,NA,NG,NP,SS,SY,TT,TZ,VE,VG,VN,VU,YE,ZA}
+    # The product the business framework agreement opens.
+    business-product:
+      code: ${OPENBANK_KYB_BUSINESS_PRODUCT_CODE:prod-004}
+      name: ${OPENBANK_KYB_BUSINESS_PRODUCT_NAME:Business Current Account}
+      currency: ${OPENBANK_KYB_BUSINESS_PRODUCT_CURRENCY:EUR}
+    representation:
+      # A single statutory member with a SOLE rule is confirmed without an operator (no second
+      # signatory can exist). Kill switch: false sends every rule to human confirmation.
+      auto-confirm-single-member: ${OPENBANK_KYB_REPRESENTATION_AUTO_CONFIRM_SINGLE_MEMBER:true}
   temporal:
     # ⚠ BUILD-TIME PROPERTY (lending #6085): TemporalBusinessOnboardingWorkflowAdapter is selected
     # with @IfBuildProperty, resolved during augmentation and frozen into the image — a container

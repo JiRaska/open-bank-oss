@@ -40,7 +40,13 @@ spec:
   # and the idle replacements Karpenter had already provisioned. The replica is
   # also the switchover target a single-instance cluster never had.
   instances: 2
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 2Gi
@@ -80,6 +86,10 @@ metadata:
   name: campaign-db-daily
   namespace: campaign
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 20 4 * * *"
   backupOwnerReference: self
   cluster:

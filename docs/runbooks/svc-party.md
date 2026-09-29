@@ -30,7 +30,7 @@ triaging an incident that starts on `party`.
 
 ## Health & probes
 
-- Readiness: `GET :8085/q/health/ready` · Liveness: `GET :8085/q/health/live`
+- Readiness: `TCP :8111` · Liveness: `GET :8085/q/health/live`
 - Metrics: scraped by the fleet PodMonitor (namespace `party`); dashboards in Grafana.
 - Logs: `kubectl logs -n party -l app.kubernetes.io/name=party-service -f`, or Loki
   `{namespace="party"}`.

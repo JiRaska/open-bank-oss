@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.5...standing-order-service-v0.17.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.16.5](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.4...standing-order-service-v0.16.5) (2026-09-21)
+
+
+### Security
+
+* **transaction:** own M2M identities for six money-path writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 1) ([#10513](https://github.com/JiRaska/open-bank-oss/issues/10513)) ([5d5a109](https://github.com/JiRaska/open-bank-oss/commit/5d5a109bdcd8e4d2b9dc73ff161dd6638ff5aaa5))
+
+## [0.16.4](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.3...standing-order-service-v0.16.4) (2026-09-13)
+
+
+### Bug Fixes
+
+* **standing-order:** guard standing_order_outbox created_at plausibility at INSERT ([#9321](https://github.com/JiRaska/open-bank-oss/issues/9321)) ([5d5473a](https://github.com/JiRaska/open-bank-oss/commit/5d5473a3fc26c9699414aa477c4893e50a1b5511))
+
 ## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.16.2...standing-order-service-v0.16.3) (2026-09-08)
 
 

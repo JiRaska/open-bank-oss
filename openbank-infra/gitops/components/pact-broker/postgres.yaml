@@ -36,7 +36,13 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
   # ECR pull-through instead of ghcr.io — the ADR-0092 pilot for #1290. CNPG instance
   # pods are (correctly) excluded from the Kyverno ecr-pull-through-rewrite policy: the
   # operator reconciles the running pod's image against spec.imageName, so a mutating
@@ -47,7 +53,7 @@ spec:
   # Tag stays 16.14 = what this cluster actually runs. The 18.1 that was declared here
   # never applied (see the storage note below) and adopting it would be a Postgres MAJOR
   # upgrade — a separate, deliberate decision, not a side effect of changing a registry.
-  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:16.14
+  imageName: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:16.15
   storage:
     storageClass: gp3
     # 5Gi = the live PVC. It was declared 1Gi in 343aef3f8 while the volume was already
@@ -93,6 +99,10 @@ metadata:
   name: pact-broker-db-daily
   namespace: pact-broker
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 19 2 * * *"
   backupOwnerReference: self
   cluster:

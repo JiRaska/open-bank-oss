@@ -80,11 +80,13 @@ class LendingEclCalibrationScenarioTest {
 
     @Test
     fun `stage 3 exposures use the lifetime PD the parameter set supplies, mirroring production`() {
-        // Ifrs9.assess does NOT force PD = 1 for defaulted exposures — the risk-parameter source
-        // owns that convention, and today's flat source supplies the same pdLifetime for every
-        // stage (a documented first-pass limitation, see 07-risk-model-calibration). The replay
-        // must mirror production, not the ideal: current 0.20·0.45·10000 = 900, candidate
-        // 0.24·0.40·10000 = 960.
+        // Ifrs9.ecl now forces PD = 1 for STAGE_3: a defaulted exposure has already defaulted, so
+        // its probability of default is 1 by definition and the parameter set's pdLifetime does
+        // not apply. That closed the first-pass limitation this test used to pin (it asserted
+        // current 0.20·0.45·10000 = 900 and candidate 0.24·0.40·10000 = 960, i.e. the flat
+        // source's PD leaking into a defaulted exposure). The replay still mirrors production,
+        // and what moves the stage-3 number is now the LGD alone: current 1·0.45·10000 = 4500,
+        // candidate 1·0.40·10000 = 4000 — so the candidate RELEASES 500 rather than adding 60.
         val defaulted = LendingEclCalibrationScenario.SyntheticExposure(
             id = "sim-loan-defaulted",
             daysPastDue = 120,
@@ -93,9 +95,9 @@ class LendingEclCalibrationScenarioTest {
         val report = LendingEclCalibrationScenario.replay(listOf(defaulted), current, candidate)
         val delta = report.perExposure.single()
         assertThat(delta.stage).isEqualTo(Ifrs9Stage.STAGE_3)
-        assertThat(delta.currentEcl).isEqualTo(Money.of("900.00", "CZK"))
-        assertThat(delta.candidateEcl).isEqualTo(Money.of("960.00", "CZK"))
-        assertThat(delta.delta).isEqualTo(Money.of("60.00", "CZK"))
+        assertThat(delta.currentEcl).isEqualTo(Money.of("4500.00", "CZK"))
+        assertThat(delta.candidateEcl).isEqualTo(Money.of("4000.00", "CZK"))
+        assertThat(delta.delta).isEqualTo(Money.of("-500.00", "CZK"))
     }
 
     @Test

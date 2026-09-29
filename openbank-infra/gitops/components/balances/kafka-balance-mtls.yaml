@@ -71,7 +71,7 @@ spec:
         host: "*"
 ---
 # Project balance-service keystore from `messaging` into `balances` namespace.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -92,7 +92,7 @@ spec:
         key: balance-service
 ---
 # Shared cluster-CA truststore for all Kafka clients in `balances`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

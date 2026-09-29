@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.8.0...security-scanner-v0.9.0) (2026-09-14)
+
+
+### Features
+
+* **context:** deliver controlled P0/P1 banking context investigations ([#9959](https://github.com/JiRaska/open-bank-oss/issues/9959)) ([9f9a84e](https://github.com/JiRaska/open-bank-oss/commit/9f9a84ee09e3570b08d22e3eaabc8a2179ea45e4))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/security-scanner-v0.7.5...security-scanner-v0.8.0) (2026-08-20)
 
 

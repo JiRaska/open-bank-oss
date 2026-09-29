@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import json
 import pathlib
+import contextlib
+import io
 import sys
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -57,18 +59,44 @@ def reading_is_empty(have_version: set[str], in_config: set[str], in_manifest: s
     return not have_version or not in_config or not in_manifest
 
 
-def violations_for(have_version: set[str], in_config: set[str], in_manifest: set[str]) -> list[str]:
-    """The comparison, separated from the I/O so a self-test can drive it directly."""
+def violations_for(
+    have_version: set[str],
+    in_config: set[str],
+    in_manifest: set[str],
+    pending: set[str] | None = None,
+) -> list[str]:
+    """The comparison, separated from the I/O so a self-test can drive it directly.
+
+    `pending` names modules whose `version.txt` is ADDED BY THIS PR and which are therefore
+    allowed to be unregistered *yet*: the registry is derived from the version.txt set
+    (`gen-release-registry.py`) and written on main by `derived-artefact-autoheal`, so a feature
+    branch no longer has to edit the two shared JSON maps — which is what made five sibling PRs
+    conflict on them and what silently dropped a registered component from two branches.
+
+    The deferral is deliberately narrow, and only the FIRST two rules below honour it:
+
+      * an orphan (registered with no version.txt) still fails, pending or not;
+      * a HALF registration still fails — config and manifest must move together, so a pending
+        module that appears in one of them is a broken write, not a deferral;
+      * a module that already exists on the base and is unregistered still fails, which is the
+        drift this gate was built for (customer-edge and security-scanner sat that way for weeks).
+
+    What it costs, stated rather than glossed: between the merge and the autoheal PR landing, a new
+    service is on main unregistered, so a release-please run in that window does not cut its first
+    release. That is a one-cycle DELAY under a gate that still runs on main and is watched by
+    `main-red-watch` — not the original defect, which was *silently never*.
+    """
+    pending = pending or set()
     violations: list[str] = []
 
     # A component with version.txt must be registered in both files.
-    for missing in sorted(have_version - in_config):
+    for missing in sorted(have_version - in_config - pending):
         violations.append(
             f"{missing} has version.txt but is NOT in release-please-config.json `packages` "
             f"— it will never get a Release PR/changelog/tag. Add: "
             f'"{missing}": {{ "component": "{missing.removeprefix("openbank-")}" }}'
         )
-    for missing in sorted(have_version - in_manifest):
+    for missing in sorted(have_version - in_manifest - pending):
         violations.append(
             f"{missing} has version.txt but is NOT in .release-please-manifest.json "
             f"— add it with its current version.txt value as the baseline."
@@ -107,8 +135,9 @@ def self_test() -> int:
     """
     fails: list[str] = []
 
-    def case(label: str, have: set, cfg: set, man: set, want_any: bool, want_sub: str = "") -> None:
-        v = violations_for(have, cfg, man)
+    def case(label: str, have: set, cfg: set, man: set, want_any: bool, want_sub: str = "",
+             pending: set | None = None) -> None:
+        v = violations_for(have, cfg, man, pending)
         if bool(v) != want_any:
             fails.append(f"{label}: expected violations={want_any}, got {len(v)}")
         elif want_sub and not any(want_sub in x for x in v):
@@ -144,6 +173,50 @@ def self_test() -> int:
     # so the COMPARISON is right to report clean — and that is exactly the reading a broken
     # glob produces. The emptiness is therefore its own verdict, asserted here directly.
     case("three empty sets are internally consistent", set(), set(), set(), False)
+
+    # ── the `pending` deferral, held in BOTH directions ────────────────────────────────────────
+    #
+    # A branch adding a service no longer edits the two shared JSON maps; the registry is derived
+    # from the version.txt set and written on main. The deferral must be exactly that wide and no
+    # wider, so every case below except the first is a MUST-FAIL.
+    case("a module whose version.txt this PR ADDS may be unregistered yet",
+         three, {"openbank-a", "openbank-b"}, {"openbank-a", "openbank-b"}, False,
+         pending={"openbank-c"})
+    case("a module unregistered on the BASE still fails — the drift this gate exists for",
+         three, {"openbank-a", "openbank-b"}, {"openbank-a", "openbank-b"}, True,
+         "NOT in release-please-config.json", pending={"openbank-zzz"})
+    case("a HALF-registered pending module still fails: config and manifest move together",
+         three, three, {"openbank-a", "openbank-b"}, True, "lockstep", pending={"openbank-c"})
+    case("a phantom entry is never deferred, pending or not",
+         {"openbank-a"}, {"openbank-a", "openbank-ghost"}, {"openbank-a"}, True,
+         "has no version.txt", pending={"openbank-ghost"})
+    case("an empty pending set leaves the gate exactly as strict as before",
+         three, {"openbank-a", "openbank-b"}, {"openbank-a", "openbank-b"}, True,
+         "NOT in release-please-config.json", pending=set())
+    # The argv parsing is its own failure surface: an empty base must read as "no base", not as
+    # a ref named "" that git then fails to resolve. Each of these must be strict (no pending).
+    for label, argv, want_base in (
+        ("no --pr-base at all", ["prog"], ""),
+        ("--pr-base with an empty value", ["prog", "--pr-base", ""], ""),
+        ("--pr-base as the last argument, no value", ["prog", "--pr-base"], ""),
+        ("--pr-base with a real value", ["prog", "--pr-base", "abc123"], "abc123"),
+    ):
+        got = base_from_argv(argv)
+        if got != want_base:
+            fails.append(f"{label}: base_from_argv should be {want_base!r}, got {got!r}")
+        if not want_base:
+            # Must be strict AND must not have asked git about a ref named "": the empty-base
+            # fallback in newly_added_modules() would make the wrong answer look identical, so
+            # the discriminator is that nothing is probed at all (no warning is emitted).
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                got_pending = pending_from_argv(argv)
+            if got_pending:
+                fails.append(f"{label}: must leave the pending set empty (strict)")
+            if "did not resolve" in buf.getvalue():
+                fails.append(f"{label}: resolved an empty base as a git ref instead of "
+                             f"skipping the lookup")
+
     for label, have, cfg, man, want in (
         ("no version.txt found at all", set(), three, three, True),
         ("config read as empty", three, set(), three, True),
@@ -169,18 +242,66 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: release-registration is falsifiable (7 comparison + 4 empty-read cases + a live read)")
+    print("self-test ok: release-registration is falsifiable "
+          "(12 comparison + 4 argv + 4 empty-read cases + a live read)")
     return 0
+
+
+def newly_added_modules(base: str) -> set[str]:
+    """Modules whose `version.txt` does not exist on `base` — i.e. this PR introduces them.
+
+    Read from git rather than from the filesystem: "new" is a statement about the BASE, and the
+    working tree cannot answer it. A base that does not resolve returns the empty set, so the gate
+    falls back to its strict behaviour — an unreadable base must never widen a control.
+    """
+    import subprocess
+
+    res = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", base],
+        capture_output=True, text=True, cwd=REPO,
+    )
+    if res.returncode != 0:
+        print(f"::warning::release-registration: base ref {base!r} did not resolve — "
+              f"treating every module as pre-existing (strict).")
+        return set()
+    on_base = {
+        line.split("/", 1)[0]
+        for line in res.stdout.splitlines()
+        if line.endswith("/version.txt") and line.startswith("openbank-")
+    }
+    return modules_with_version_txt() - on_base
+
+
+def base_from_argv(argv: list[str]) -> str:
+    """The `--pr-base` value, or "" when it is absent or empty.
+
+    `--pr-base ""` is the same statement as no `--pr-base` at all: there is no PR base, so every
+    module is pre-existing and the gate is strict. The empty form exists because run-gates.py
+    derives a gate's `needs_base` from the COMMAND TEXT — a bare `$PR_DIFF_BASE` is classified
+    `required` and then refuses to run without one, which this gate must not be: it also runs on
+    a push to main, where no base exists.
+    """
+    if "--pr-base" not in argv:
+        return ""
+    i = argv.index("--pr-base") + 1
+    return argv[i] if i < len(argv) else ""
+
+
+def pending_from_argv(argv: list[str]) -> set[str]:
+    base = base_from_argv(argv)
+    return newly_added_modules(base) if base else set()
 
 
 def main() -> int:
     if "--self-test" in sys.argv:
         return self_test()
 
+    pending = pending_from_argv(sys.argv)
+
     have_version = modules_with_version_txt()
     in_config = registered_packages()
     in_manifest = manifest_keys()
-    violations = violations_for(have_version, in_config, in_manifest)
+    violations = violations_for(have_version, in_config, in_manifest, pending)
 
     # Never report a pass about an empty reading. Three empty sets are internally consistent,
     # so a broken glob or a wrong CWD would print "OK" — the shape where a gate over a list
@@ -200,6 +321,9 @@ def main() -> int:
         for v in violations:
             print(f"    - {v}")
         return 1
+    if pending:
+        print(f"  DEFERRED (version.txt added by this PR, registry is written on main by "
+              f"derived-artefact-autoheal): {sorted(pending)}")
     print("  OK: every released component is registered in config + manifest, and vice versa.")
     return 0
 

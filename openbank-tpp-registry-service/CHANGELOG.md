@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.2...tpp-registry-service-v0.10.0) (2026-09-28)
+
+
+### Features
+
+* **tpp-registry:** bind Idempotency-Key to a request fingerprint ([#10956](https://github.com/JiRaska/open-bank-oss/issues/10956)) ([b4eb25e](https://github.com/JiRaska/open-bank-oss/commit/b4eb25ef112b1c01491e7c91e7f7ac7689debe6b))
+
+## [0.9.2](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.1...tpp-registry-service-v0.9.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **tpp-registry:** guard tpp_outbox created_at plausibility at INSERT ([#9323](https://github.com/JiRaska/open-bank-oss/issues/9323)) ([516c3e6](https://github.com/JiRaska/open-bank-oss/commit/516c3e60dedec7fe4e1af45e4cbe8667c7d4fc99))
+
 ## [0.9.1](https://github.com/JiRaska/open-bank-oss/compare/tpp-registry-service-v0.9.0...tpp-registry-service-v0.9.1) (2026-09-01)
 
 

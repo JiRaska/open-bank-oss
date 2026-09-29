@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.2...kyc-service-v0.16.0) (2026-09-17)
+
+
+### Features
+
+* **kyc:** route a risky AML self-declaration to enhanced due diligence ([#10208](https://github.com/JiRaska/open-bank-oss/issues/10208)) ([aa7ccde](https://github.com/JiRaska/open-bank-oss/commit/aa7ccde76a41ccbd53037ede7f1f845249c9fa4d)), closes [#10200](https://github.com/JiRaska/open-bank-oss/issues/10200)
+
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.1...kyc-service-v0.15.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **kyc:** exclude parties that predate the auto-open consumer from the orphan gauge ([#9853](https://github.com/JiRaska/open-bank-oss/issues/9853)) ([e587fdb](https://github.com/JiRaska/open-bank-oss/commit/e587fdb6cda554712a90137b43145aa5df5b95dc)), closes [#9726](https://github.com/JiRaska/open-bank-oss/issues/9726)
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.15.0...kyc-service-v0.15.1) (2026-09-13)
+
+
+### Bug Fixes
+
+* **kyc:** guard kyc_outbox created_at plausibility at INSERT ([#9312](https://github.com/JiRaska/open-bank-oss/issues/9312)) ([280dae2](https://github.com/JiRaska/open-bank-oss/commit/280dae2b4fdead9a8d6e74437c299f03a52b1a66))
+* **kyc:** unparseable status filter is a 400, never the unfiltered list ([#9411](https://github.com/JiRaska/open-bank-oss/issues/9411)) ([a78d9c4](https://github.com/JiRaska/open-bank-oss/commit/a78d9c42dd9ad1dd27c8e24c7b9ad6b0ad4f8b2d))
+* **pid:** publish the request schemas the resources actually parse (14 services, 100 findings → 0) ([#8838](https://github.com/JiRaska/open-bank-oss/issues/8838)) ([9720f8f](https://github.com/JiRaska/open-bank-oss/commit/9720f8fb1763ce9706a0a72b1968e70d0ed9d00c))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.14.1...kyc-service-v0.15.0) (2026-09-08)
 
 

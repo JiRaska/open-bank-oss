@@ -52,6 +52,21 @@ class DomesticPaymentDelegationContractTest {
     }
 
     @Test
+    fun `payment contracts expose the additive durable aggregate revision`() {
+        val createdMessage = asyncApi.substringAfter("    DOMESTIC_PAYMENT_CREATED:\n      name:")
+            .substringBefore("    DOMESTIC_PAYMENT_STATUS_CHANGED:")
+        val statusMessage = asyncApi.substringAfter("    DOMESTIC_PAYMENT_STATUS_CHANGED:\n      name:")
+
+        assertThat(createdMessage).contains("aggregateRevision:", "minimum: 1")
+        assertThat(statusMessage).contains("aggregateRevision:", "minimum: 1")
+        assertThat(openApi.substringAfter("    DomesticPaymentResponse:")).contains(
+            "aggregateRevision:",
+            "readOnly: true",
+            "minimum: 1",
+        )
+    }
+
+    @Test
     fun `reservation consumer contract matches producer and retains only a domain-separated hash`() {
         // Window ends at the NEXT 4-space-indented schema key, not at the messages section:
         // #8334 inserted the spendReserved/spendSettled audit schemas between
