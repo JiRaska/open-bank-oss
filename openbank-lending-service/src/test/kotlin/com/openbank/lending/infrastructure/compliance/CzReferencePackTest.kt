@@ -5,7 +5,6 @@
 package com.openbank.lending.infrastructure.compliance
 
 import com.openbank.libs.lending.compliance.CompliancePackCompiler
-import com.openbank.libs.lending.compliance.CompliancePackJson
 import com.openbank.libs.lending.compliance.PackProductType
 import com.openbank.libs.lending.origination.OriginationState
 import org.assertj.core.api.Assertions.assertThat

@@ -4,9 +4,9 @@
 
 Dedicated PostgreSQL schema `openbank_security` in the `openbank` database (shared cluster, schema-per-service isolation).
 
-**The service persists one table: `ict_incidents`.** After `V5` the schema holds
-`flyway_schema_history` and `ict_incidents`. There is no entity, repository or JPA mapping for
-anything else in the service — scan results are still in-memory only.
+**The service persists `ict_incidents` and `ict_incident_outbox`.** `V6` adds a monotonic
+`aggregate_revision` and the transactional hand-off table; `V7` preserves synthetic-test origin
+on that hand-off. Scan results remain in-memory only.
 
 Consequently:
 
@@ -40,11 +40,12 @@ ict_incidents
 ├── regulatory_report_id    TEXT
 ├── assigned_to             TEXT
 ├── created_at              TIMESTAMPTZ NOT NULL
-└── updated_at              TIMESTAMPTZ NOT NULL
+├── updated_at              TIMESTAMPTZ NOT NULL
+└── aggregate_revision      BIGINT NOT NULL
 ```
 
-No other table references it and it references nothing else — a single-node diagram, not worth
-drawing as a graph.
+`ict_incident_outbox` stores one event per `(aggregate_id, aggregate_revision)` with the shared
+outbox status, attempt, claim, error and timestamp fields.
 
 > Until #4709 this page described a `security_outbox` table and an `ict_incidents` table, and
 > claimed both were fictional. The outbox existed but was never written to (0 rows ever, and 0
@@ -59,7 +60,9 @@ drawing as a graph.
 | `V2__create_security_outbox.sql` | Created `security_outbox` with indexes on `(status, created_at)` and `aggregate_id` | Applied on the live database; superseded by V4 |
 | `V3__hibernate_sequences.sql` | Created the Hibernate/Panache sequence used for the outbox surrogate key | Applied; the sequence is dropped by V4 |
 | `V4__drop_security_outbox.sql` | `DROP TABLE security_outbox` + `DROP SEQUENCE security_outbox_seq` — the outbox had no producer (#4709) | Applied out of order (#5628) |
-| `V5__create_ict_incidents.sql` | Created `ict_incidents` (columns above) + indexes on `created_at`, `status`, `severity` — moves the DORA ICT incident register out of the in-memory map (#4728) | The current head |
+| `V5__create_ict_incidents.sql` | Created `ict_incidents` (columns above) + indexes on `created_at`, `status`, `severity` — moves the DORA ICT incident register out of the in-memory map (#4728) | Applied predecessor to V6 |
+| `V6__ict_incident_transactional_outbox.sql` | Adds strict incident revisions and the dedicated claim-safe transactional outbox | Applied predecessor to V7; production relay activation is staged separately |
+| `V7__synthetic_outbox_taint.sql` | Adds a non-null synthetic-origin marker with a safe false backfill | Current head; preserves ADR-0252 test provenance across relay |
 
 > V1 is absent — the scanner was stateless in its first iteration and V2 is the first migration that
 > landed. V2 and V3 are deliberately kept as files rather than deleted: both are recorded as applied
@@ -69,7 +72,7 @@ drawing as a graph.
 > `ict_incidents` has no Hibernate sequence: its id is application-assigned (`UUID.randomUUID()` in
 > `IctIncidentService.reportIncident`), not `@GeneratedValue`, so the entity is
 > `PanacheEntityBase` with an explicit `@Id` rather than `PanacheEntity`. Updates go through
-> `Panache.getSession().flatMap { it.merge(entity) }` — `persist()` on an assigned id would schedule
+> a locked managed-entity update — `persist()` on an assigned id would schedule
 > an INSERT for every save and fail every status transition after the first with a duplicate-key
 > error (see `IctIncidentEntity`, `IctIncidentRepositoryImpl.save`).
 

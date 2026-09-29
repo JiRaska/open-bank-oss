@@ -7,6 +7,7 @@ package com.openbank.delegation.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.delegation.application.port.`in`.CheckDelegationCommand
 import com.openbank.delegation.application.port.`in`.CheckDelegationUseCase
+import com.openbank.delegation.application.port.`in`.DelegationRecertificationUseCase
 import com.openbank.delegation.application.port.`in`.GetDelegationUseCase
 import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.OfferDelegationUseCase
@@ -19,13 +20,18 @@ import com.openbank.delegation.application.port.`in`.SuspendDelegationCommand
 import com.openbank.delegation.infrastructure.rest.dto.CheckDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.DelegationCheckResponse
 import com.openbank.delegation.infrastructure.rest.dto.DelegationPreviewResponse
+import com.openbank.delegation.infrastructure.rest.dto.DelegationRecertificationResponse
 import com.openbank.delegation.infrastructure.rest.dto.DelegationResponse
 import com.openbank.delegation.infrastructure.rest.dto.OfferDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.PreviewDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.RevokeDelegationRequest
 import com.openbank.delegation.infrastructure.rest.dto.SuspendDelegationRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -43,9 +49,61 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.util.UUID
+
+private val log: Logger = Logger.getLogger("com.openbank.delegation.infrastructure.rest.IdempotencyReservation")
+
+/**
+ * `reserve` -> Reserved: run [block], then the fingerprinted `save`; any failure from [block]
+ * releases the reservation and rethrows so a retry with the same body can succeed. Replay: the
+ * stored response is returned verbatim. Mismatch/InFlight: throw the matching exception so
+ * libs-runtime's mappers answer 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS.
+ * Side effects never run before `reserve` returns [ReserveResult.Reserved]. Kept top-level (not a
+ * class member) so it does not count against any resource class's detekt TooManyFunctions, and
+ * `internal` because it is implementation plumbing shared by this module's REST classes, not
+ * public API.
+ */
+internal suspend fun IdempotencyStore.withReservation(
+    key: String,
+    requestHash: String,
+    ttlSeconds: Long = 86400,
+    block: suspend () -> Triple<Int, String, java.net.URI?>,
+): Response = when (val reservation = reserve(key, requestHash)) {
+    is ReserveResult.Replay -> replayResponse(reservation.record.statusCode, reservation.record.responseBody)
+    ReserveResult.Reserved -> {
+        val (statusCode, body, location) = runCatching { block() }
+            .onFailure {
+                // Shielded from cancellation and never rethrows: a release failure must not mask
+                // the ORIGINAL exception from block() (rethrown by getOrThrow() below), and a
+                // cancelled caller must not abandon the release mid-flight and leave the key stuck
+                // IN_PROGRESS for its full TTL.
+                withContext(NonCancellable) {
+                    runCatching { release(key, requestHash) }
+                        .onFailure { releaseFailure ->
+                            log.warn("Failed to release idempotency key after failure", releaseFailure)
+                        }
+                }
+            }
+            .getOrThrow()
+        save(key, requestHash, statusCode, body, ttlSeconds)
+        val builder = Response.status(statusCode).entity(body).type(MediaType.APPLICATION_JSON)
+        location?.let { builder.location(it) }
+        builder.build()
+    }
+    ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+    ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+}
+
+private fun replayResponse(statusCode: Int, body: String): Response = Response.status(statusCode)
+    .entity(body)
+    .type(MediaType.APPLICATION_JSON)
+    .header("X-Idempotency-Replayed", "true")
+    .build()
 
 @Tag(name = "Delegations", description = "Customer-to-party delegated access lifecycle (ADR-0232)")
 @Path("/api/v1/delegations")
@@ -63,6 +121,9 @@ class DelegationResource(
     private val objectMapper: ObjectMapper,
 ) {
 
+    @Inject
+    lateinit var recertification: DelegationRecertificationUseCase
+
     @Operation(summary = "Validate a delegation draft without consuming SCA or creating a grant")
     @POST
     @Path("/preview")
@@ -70,11 +131,13 @@ class DelegationResource(
     suspend fun preview(
         request: PreviewDelegationRequest?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationPreviewResponse {
         requireNotNull(request) { "request body is required" }
         previewDelegation.preview(
             PreviewDelegationCommand(
                 callerPartyId = customerPartyId,
+                actorPartyId = customerActorPartyId,
                 grantorPartyId = request.grantorPartyId,
                 granteePartyId = request.granteePartyId,
                 resourceType = request.resourceType,
@@ -86,6 +149,7 @@ class DelegationResource(
                 dailyLimit = request.dailyLimit?.toDomain(),
                 monthlyLimit = request.monthlyLimit?.toDomain(),
                 exposure = request.exposure?.toDomain(),
+                recertificationAudience = request.recertificationAudience,
                 validTo = request.validTo,
             ),
         )
@@ -115,51 +179,49 @@ class DelegationResource(
         request: OfferDelegationRequest?,
         @HeaderParam("X-Request-ID") xRequestId: String?,
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+        @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
         @Context uriInfo: UriInfo,
     ): Response {
         requireNotNull(request) { "request body is required" }
         val idempotencyKey = xRequestId?.takeIf { it.isNotBlank() }
 
-        idempotencyKey?.let { key ->
-            idempotencyStore.get(offerKey(request.grantorPartyId, key))?.let { cached ->
-                return Response.status(cached.statusCode)
-                    .entity(cached.responseBody)
-                    .type(MediaType.APPLICATION_JSON)
-                    .header("X-Idempotency-Replayed", "true")
-                    .build()
-            }
-        }
-
-        val grant = offerDelegation.offer(
-            OfferDelegationCommand(
-                callerPartyId = customerPartyId,
-                grantorPartyId = request.grantorPartyId,
-                granteePartyId = request.granteePartyId,
-                resourceType = request.resourceType,
-                resourceId = request.resourceId,
-                capabilities = request.capabilities,
-                approvalPolicy = request.approvalPolicy,
-                requiredApprovals = request.requiredApprovals,
-                perTransactionLimit = request.perTransactionLimit?.toDomain(),
-                dailyLimit = request.dailyLimit?.toDomain(),
-                monthlyLimit = request.monthlyLimit?.toDomain(),
-                exposure = request.exposure?.toDomain(),
-                validTo = request.validTo,
-                grantScaSessionId = request.grantScaSessionId,
-                note = request.note,
-            ),
-        )
-        val responseBody = DelegationResponse.from(grant)
-        idempotencyKey?.let { key ->
-            idempotencyStore.save(
-                offerKey(request.grantorPartyId, key),
-                201,
-                objectMapper.writeValueAsString(responseBody),
+        suspend fun runOffer(): DelegationResponse {
+            val grant = offerDelegation.offer(
+                OfferDelegationCommand(
+                    callerPartyId = customerPartyId,
+                    actorPartyId = customerActorPartyId,
+                    grantorPartyId = request.grantorPartyId,
+                    granteePartyId = request.granteePartyId,
+                    resourceType = request.resourceType,
+                    resourceId = request.resourceId,
+                    capabilities = request.capabilities,
+                    approvalPolicy = request.approvalPolicy,
+                    requiredApprovals = request.requiredApprovals,
+                    perTransactionLimit = request.perTransactionLimit?.toDomain(),
+                    dailyLimit = request.dailyLimit?.toDomain(),
+                    monthlyLimit = request.monthlyLimit?.toDomain(),
+                    exposure = request.exposure?.toDomain(),
+                    recertificationAudience = request.recertificationAudience,
+                    validTo = request.validTo,
+                    grantScaSessionId = request.grantScaSessionId,
+                    note = request.note,
+                ),
             )
+            return DelegationResponse.from(grant)
         }
 
-        return Response.created(uriInfo.absolutePathBuilder.path(grant.id.toString()).build())
-            .entity(responseBody).build()
+        if (idempotencyKey == null) {
+            val responseBody = runOffer()
+            return Response.created(uriInfo.absolutePathBuilder.path(responseBody.id.toString()).build())
+                .entity(responseBody).build()
+        }
+
+        val hash = RequestFingerprints.of(objectMapper, "POST", "/api/v1/delegations", request)
+        return idempotencyStore.withReservation(offerKey(request.grantorPartyId, idempotencyKey), hash) {
+            val responseBody = runOffer()
+            val location = uriInfo.absolutePathBuilder.path(responseBody.id.toString()).build()
+            Triple(201, objectMapper.writeValueAsString(responseBody), location)
+        }
     }
 
     @Operation(summary = "Get delegation grant by ID")
@@ -190,6 +252,55 @@ class DelegationResource(
         @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
     ): List<DelegationResponse> =
         getDelegation.listByGrantee(partyId, customerPartyId).map { DelegationResponse.from(it) }
+
+    @Operation(summary = "List pending customer recertification tasks for grants issued by a party")
+    @GET
+    @Path("/recertifications/grantor/{partyId}")
+    @Authorize(action = "delegation.recertification.read", resource = "#partyId")
+    suspend fun pendingRecertifications(
+        @PathParam("partyId") partyId: UUID,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): List<DelegationRecertificationResponse> =
+        recertification.listPending(partyId, customerPartyId).map { DelegationRecertificationResponse.from(it) }
+
+    @Operation(summary = "Confirm that the grantor reviewed a pending delegation recertification task")
+    @POST
+    @Path("/recertifications/{id}/confirm")
+    @Authorize(action = "delegation.recertification.confirm", resource = "#id")
+    suspend fun confirmRecertification(
+        @PathParam("id") id: UUID,
+        @QueryParam("grantorPartyId") grantorPartyId: UUID?,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam(CUSTOMER_PARTY_HEADER) customerPartyId: UUID?,
+    ): DelegationRecertificationResponse {
+        requireNotNull(grantorPartyId) { "query parameter 'grantorPartyId' is required" }
+        require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
+        // Authenticate the customer scope before returning even an already recorded confirmation.
+        if (identity.principal.name != "service-account-openbank-edge" || customerPartyId != grantorPartyId) {
+            throw ForbiddenException("recertification confirmation requires the grantor's customer session")
+        }
+        val cacheKey = recertificationConfirmKey(id, grantorPartyId, idempotencyKey)
+        // The fingerprint covers only the ids already present in the cache key (method + path +
+        // grantorPartyId query param, no body) — there is no further request-specific content to
+        // bind to, so IDEMPOTENCY_KEY_REUSED is never documented for this operation in
+        // openapi.yaml (only IDEMPOTENCY_REQUEST_IN_PROGRESS is reachable/claimed).
+        val hash = RequestFingerprints.of(
+            objectMapper,
+            "POST",
+            "/api/v1/delegations/recertifications/$id/confirm?grantorPartyId=$grantorPartyId",
+            null,
+        )
+        val httpResponse = idempotencyStore.withReservation(cacheKey, hash) {
+            val response = DelegationRecertificationResponse.from(
+                recertification.confirm(id, grantorPartyId, customerPartyId),
+            )
+            Triple(Response.Status.OK.statusCode, objectMapper.writeValueAsString(response), null)
+        }
+        return objectMapper.readValue(
+            httpResponse.entity as String,
+            DelegationRecertificationResponse::class.java,
+        )
+    }
 
     @Operation(summary = "Accept an OFFERED grant after the grantee's SCA challenge completes")
     @POST
@@ -328,6 +439,9 @@ class DelegationResource(
 
     private fun offerKey(grantorPartyId: UUID, requestId: String) = "delegation:offer:$grantorPartyId:$requestId"
 
+    private fun recertificationConfirmKey(id: UUID, grantorPartyId: UUID, key: String) =
+        "delegation:recertification-confirm:$id:$grantorPartyId:$key"
+
     companion object {
         /**
          * Contract: matches customer-edge UpstreamClient.PARTY_HEADER and
@@ -335,5 +449,6 @@ class DelegationResource(
          * call with the caller's validated party id under this header.
          */
         const val CUSTOMER_PARTY_HEADER = "X-Customer-Party-Id"
+        const val CUSTOMER_ACTOR_PARTY_HEADER = "X-Customer-Actor-Party-Id"
     }
 }

@@ -85,6 +85,38 @@ class CloseOrchestratorTest {
         assertThat(result.pocketsFailed).isEqualTo(0)
     }
 
+    /**
+     * The SECOND read. `closePocketMonth` calls `accountInfo.pocketAccount` again, once per pocket,
+     * so a debris account can surface as NOT_VIABLE on the per-pocket path even after the
+     * account-level read succeeded. The rule must be the same on both: skipped, never failed
+     * (#862) — otherwise the same account is counted differently depending on which read saw the
+     * debris, and a CloseFailure row is written carrying a `reason` the published CloseFailure
+     * schema has no value for.
+     */
+    @Test
+    fun `debris surfacing on the per-pocket read is skipped, not recorded as a failure`() {
+        val accountId = UUID.randomUUID()
+        every { accountRegistry.allAccountIds() } returns Uni.createFrom().item(listOf(accountId))
+        // The account-level read SUCCEEDS — this is the case the outer guard does not cover.
+        every { accountInfo.pocketAccount(accountId) } returns
+            Uni.createFrom().item(PocketAccountInfo(accountId, "CZ6500000000000000000001", "Holder", listOf("CZK")))
+        every { periods.latestClosedPeriodTo(accountId, "CZK") } returns Uni.createFrom().nullItem()
+        every { closePocket.closePocketMonth(accountId, "CZK", any(), any()) } returns
+            Uni.createFrom().failure(NotViableAccountException(accountId, "no active pockets — debris account (#862)"))
+
+        val result = orchestrator.runClose(CloseTrigger.SCHEDULED).subscribe().withSubscriber(
+            io.smallrye.mutiny.helpers.test.UniAssertSubscriber.create(),
+        ).awaitItem().item
+
+        assertThat(result.pocketsSkipped).isEqualTo(1)
+        assertThat(result.pocketsFailed).isEqualTo(0)
+        // COMPLETED, not COMPLETED_WITH_FAILURES: data noise must not colour the run's verdict.
+        assertThat(result.status).isEqualTo(CloseRunStatus.COMPLETED)
+        // And nothing is persisted or published — the two observable side effects of "failed".
+        verify(exactly = 0) { runs.recordFailure(any()) }
+        verify(exactly = 0) { outbox.append(any()) }
+    }
+
     @Test
     fun `transient upstream failure is counted as failed not skipped`() {
         val accountId = UUID.randomUUID()

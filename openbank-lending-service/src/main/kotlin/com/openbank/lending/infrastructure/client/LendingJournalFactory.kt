@@ -57,7 +57,7 @@ object LendingJournalFactory {
         idempotencyKey = posting.reference,
         transactionId = UUID.nameUUIDFromBytes(posting.reference.toByteArray(Charsets.UTF_8)),
         entryDate = date.toString(),
-        valueDate = date.toString(),
+        valueDate = (posting.valueDate ?: date).toString(),
         description = "Lending ${posting.kind.name.lowercase().replace('_', ' ')}: ${posting.reference}",
         lines = buildLines(posting, accounts),
         createdBy = systemActorId,

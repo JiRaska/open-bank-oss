@@ -34,6 +34,7 @@ dependencies {
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     implementation(libs.quarkus.scheduler)
     testImplementation(libs.quarkus.junit5)
@@ -48,6 +49,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.pact.consumer)
     testImplementation(libs.pact.provider)
 }

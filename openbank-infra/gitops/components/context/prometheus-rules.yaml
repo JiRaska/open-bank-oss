@@ -1,0 +1,49 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: context-service
+  namespace: context
+  labels: { app.kubernetes.io/part-of: context }
+spec:
+  groups:
+    - name: context-service.slo
+      rules:
+        - alert: ContextProjectionFailing
+          expr: sum(rate(openbank_context_projection_events_total{outcome="failed"}[5m])) > 0
+          for: 5m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Context graph projection is rejecting source events
+            description: Inspect the context-service consumer and its dedicated DLQ before replaying records.
+        - alert: ContextProjectionStale
+          expr: max(openbank_context_projection_lag_seconds) > 60
+          for: 15m
+          labels: { severity: warning, service: context-service }
+          annotations:
+            summary: Context graph projection is more than 60 seconds behind event time
+            description: Check consumer-group lag, database saturation and source clock skew.
+        - alert: ContextAuthorizationUnavailable
+          expr: sum(rate(openbank_context_access_decisions_total{decision="unavailable"}[5m])) > 0
+          for: 2m
+          labels: { severity: critical, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Context reads are failing closed because authorization is unavailable
+            description: Restore the OPA sidecar or its policy bundle; do not bypass the decision point.
+        - alert: ContextProjectionLatencyBudgetExceeded
+          expr: histogram_quantile(0.95, sum by (le) (rate(openbank_context_projection_duration_seconds_bucket[10m]))) > 0.5
+          for: 15m
+          labels: { severity: warning, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Context projection p95 exceeds the 500 ms transaction budget
+            description: Inspect PostgreSQL query plans and consumer concurrency before increasing the deadline.
+        - alert: ContextReadLatencySloExceeded
+          expr: histogram_quantile(0.95, sum by (le) (rate(openbank_context_read_duration_seconds_bucket[10m]))) > 0.3
+          for: 15m
+          labels: { severity: warning, service: context-service }
+          annotations:
+            subject_period: continuous
+            summary: Authorized context read p95 exceeds 300 ms
+            description: Keep the graph bounds fixed and inspect OPA, audit and adjacency-query latency.

@@ -100,6 +100,9 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
             case.signers.mapNotNull { it.invitationToken }.takeIf { it.isNotEmpty() }?.joinToString("|", "|", "|")
         signerPartyIds = case.signers.mapNotNull { it.partyId }.takeIf { it.isNotEmpty() }?.joinToString("|", "|", "|")
         reviewReason = case.reviewReason
+        questionnaireJson = case.questionnaire?.let { KybJson.write(it) }
+        declarationsJson = case.declarations?.let { KybJson.write(it) }
+        agreementJson = case.agreement?.let { KybJson.write(it) }
         updatedAt = case.updatedAt
     }
 
@@ -115,6 +118,9 @@ class BusinessOnboardingCaseRepositoryImpl(private val outbox: KybOutboxReposito
         signers = KybJson.readSigners(signersJson),
         reviewReason = reviewReason,
         entityPartyActive = entityPartyActive,
+        questionnaire = questionnaireJson?.let { KybJson.readQuestionnaire(it) },
+        declarations = declarationsJson?.let { KybJson.readDeclarations(it) },
+        agreement = agreementJson?.let { KybJson.readAgreement(it) },
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

@@ -9,6 +9,7 @@ import com.openbank.loyalty.application.port.out.LeafLedgerRepository
 import com.openbank.loyalty.application.port.out.LoyaltyMetricsPort
 import com.openbank.loyalty.application.usecase.EarnLeavesUseCase
 import com.openbank.loyalty.application.usecase.ExpireLeavesUseCase
+import com.openbank.loyalty.application.usecase.ListBenefitGrantsUseCase
 import com.openbank.loyalty.application.usecase.RedeemBenefitUseCase
 import com.openbank.loyalty.domain.AnnualCap
 import com.openbank.loyalty.domain.BenefitCatalog
@@ -92,6 +93,37 @@ private class FakeLedger : LeafLedgerRepository {
 private class FakeGrants(private val ledger: FakeLedger) : BenefitGrantRepository {
     override suspend fun findByIdempotencyKey(partyId: UUID, key: String) =
         ledger.grants.firstOrNull { it.partyId == partyId && it.idempotencyKey == key }
+
+    override suspend fun listFor(partyId: UUID) = ledger.grants.filter { it.partyId == partyId }
+}
+
+class ListBenefitGrantsUseCaseTest {
+    private val party = UUID.randomUUID()
+
+    @Test
+    fun `lists only the party's own grants, newest first, with the stored status`(): Unit = runBlocking {
+        val ledger = FakeLedger()
+        val t0 = Instant.parse("2026-06-01T10:00:00Z")
+        fun grant(owner: UUID, at: Instant, key: String) = BenefitGrant(
+            id = UUID.randomUUID(),
+            partyId = owner,
+            benefitId = "MONTHLY_MAINTENANCE_FEE_WAIVER",
+            price = Leaves.of(300),
+            status = com.openbank.loyalty.domain.BenefitGrantStatus.GRANTED,
+            idempotencyKey = key,
+            reservedAt = at,
+            grantedAt = at,
+            expiresAt = at.plus(Duration.ofDays(90)),
+        )
+        val older = grant(party, t0, "k1")
+        val newer = grant(party, t0.plusSeconds(60), "k2")
+        ledger.grants += listOf(older, grant(UUID.randomUUID(), t0.plusSeconds(120), "k3"), newer)
+
+        val listed = ListBenefitGrantsUseCase(FakeGrants(ledger)).list(party)
+
+        assertThat(listed.map { it.id }).containsExactly(newer.id, older.id)
+        assertThat(listed.map { it.status.name }).containsOnly("GRANTED")
+    }
 }
 
 private class RecordingMetrics : LoyaltyMetricsPort {

@@ -26,12 +26,13 @@ import { FlowParticle } from '@/components/topology/FlowParticle'
 import { NodeShadow } from '@/components/topology/TopologyDefs'
 import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { ORIGINATION_GRAPH, STATE_LABELS, happyPath, exitStates } from './OriginationFlow'
+import type { WireMoney } from '@/lib/lending/money'
 
 export type PipelineItem = {
   id: string
   status: string
   createdAt?: string
-  requestedAmount?: { amount: number; currency: string }
+  requestedAmount?: WireMoney
 }
 
 type Props = {

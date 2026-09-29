@@ -22,10 +22,11 @@ import com.openbank.account.domain.model.Account
 import com.openbank.account.domain.model.AccountStatus
 import com.openbank.account.domain.model.AccountType
 import com.openbank.account.domain.model.DelegatedAccessGrant
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.account.Iban
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
@@ -87,7 +88,10 @@ import java.util.concurrent.TimeUnit
  * `@IgnoreNoPactsToVerify(ignoreIoErrors)` makes a missing/unreadable pact a skip, not a failure.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_VIEWER", "ROLE_OPERATOR"])
 @Provider("openbank-account-service")
 @PactBroker(enablePendingPacts = "true")
@@ -281,5 +285,18 @@ class AccountEventPactProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /**
+     * The negative state: deliberately seeds NOTHING.
+     *
+     * The vop pact asks for an IBAN this provider does not know, and the point of that interaction
+     * is that the route answers 404 rather than a 200 carrying nulls — a distinction VoP's caller
+     * cannot make afterwards, because "we hold no name for this IBAN" is itself a valid answer. A
+     * handler that seeded anything would destroy the case it exists to pin.
+     */
+    @State("no account exists for the unknown IBAN")
+    fun noAccountForUnknownIban() {
+        // Intentionally empty.
     }
 }

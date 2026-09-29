@@ -6,142 +6,113 @@
 package com.openbank.agent.infrastructure.rest
 
 import com.openbank.agent.application.port.`in`.DecideProposalUseCase
-import com.openbank.agent.application.port.`in`.ProposalQueries
 import com.openbank.agent.domain.proposal.AgentProposal
 import com.openbank.agent.domain.proposal.ProposalState
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import io.quarkus.security.identity.SecurityIdentity
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.security.Principal
 import java.time.Instant
 import java.util.UUID
 
-/**
- * The HITL approval-queue API's own logic: which query the `state` parameter selects, how a
- * blank agent filter is normalised, and the status code each lifecycle failure maps to. The
- * segregation-of-duties rules themselves live in ProposalService — here the contract is that a
- * rejected decision surfaces as 409, never as a 500.
- */
 class ProposalResourceTest {
 
-    private val queries = mockk<ProposalQueries>()
-    private val decisions = mockk<DecideProposalUseCase>()
-    private val resource = ProposalResource().also {
-        it.queries = queries
-        it.decisions = decisions
-    }
+    private val proposalId = UUID.fromString("70d90e7f-f0aa-4c27-b812-6429159f5425")
 
-    private val id = UUID.randomUUID()
-    private val row = AgentProposal(
-        id = id,
-        title = "raise the cap",
-        rationale = "r",
-        suggestedAction = "a",
-        proposedBy = "ui-assistant",
-        proposedAt = Instant.parse("2026-01-02T03:04:05Z"),
-        state = ProposalState.PROPOSED,
-        decidedBy = null,
-        decidedAt = null,
-        decisionReason = null,
-        modelId = "llama-3.3",
-        correlationId = "corr",
-        metadata = mapOf("context_hash" to "abc"),
-    )
-
-    @Test
-    fun `the default state lists only pending proposals`() {
-        every { queries.listPending(null) } returns listOf(row)
-
-        val dtos = resource.list("pending", null)
-
-        assertThat(dtos).singleElement().satisfies({
-            assertThat(it.id).isEqualTo(id.toString())
-            assertThat(it.state).isEqualTo("PROPOSED")
-            assertThat(it.proposedAt).isEqualTo(row.proposedAt)
-            assertThat(it.modelId).isEqualTo("llama-3.3")
-            assertThat(it.metadata).containsEntry("context_hash", "abc")
-        })
-        verify(exactly = 0) { queries.listAll(any(), any()) }
+    private fun resource(principal: String?): Pair<ProposalResource, DecideProposalUseCase> {
+        val decisions = mockk<DecideProposalUseCase>()
+        val identity = mockk<SecurityIdentity>()
+        every { identity.principal } returns principal?.let { Principal { it } }
+        return ProposalResource().also {
+            it.decisions = decisions
+            it.identity = identity
+        } to decisions
     }
 
     @Test
-    fun `state=all switches to the capped full listing, case-insensitively`() {
-        every { queries.listAll(100, null) } returns emptyList()
-
-        assertThat(resource.list("ALL", null)).isEmpty()
-
-        verify { queries.listAll(100, null) }
-    }
-
-    @Test
-    fun `an unrecognised state falls back to pending rather than listing everything`() {
-        every { queries.listPending(null) } returns emptyList()
-
-        resource.list("archived", null)
-
-        verify { queries.listPending(null) }
-        verify(exactly = 0) { queries.listAll(any(), any()) }
-    }
-
-    @Test
-    fun `a blank agent filter is normalised to no filter, a real one is trimmed`() {
-        every { queries.listPending(null) } returns emptyList()
-        every { queries.listPending("ui-assistant") } returns emptyList()
-
-        resource.list("pending", "   ")
-        resource.list("pending", "  ui-assistant ")
-
-        verify { queries.listPending(null) }
-        verify { queries.listPending("ui-assistant") }
-    }
-
-    @Test
-    fun `a non-UUID id is a 400 and never reaches the use case`() {
-        val response = resource.decide("not-a-uuid", ProposalResource.DecisionRequest(true, "bob"))
+    fun `invalid id is rejected before attempting a decision`() {
+        val (resource, decisions) = resource("reviewer")
+        val response = resource.decide("not-a-uuid", ProposalResource.DecisionRequest(true, "forged"))
 
         assertThat(response.status).isEqualTo(400)
-        assertThat(response.entity).isEqualTo(mapOf("error" to "invalid id"))
         verify(exactly = 0) { decisions.decide(any(), any(), any(), any()) }
     }
 
     @Test
-    fun `an unknown proposal is a 404`() {
-        every { decisions.decide(id, true, "bob", null) } returns null
+    fun `missing or blank principal cannot be replaced by request actor`() {
+        for (principal in listOf<String?>(null, " ")) {
+            val (resource, decisions) = resource(principal)
+            val response = resource.decide(
+                proposalId.toString(),
+                ProposalResource.DecisionRequest(true, "forged"),
+            )
 
-        val response = resource.decide(id.toString(), ProposalResource.DecisionRequest(true, "bob"))
+            assertThat(response.status).isEqualTo(403)
+            verify(exactly = 0) { decisions.decide(any(), any(), any(), any()) }
+        }
+    }
+
+    @Test
+    fun `not found decision uses authenticated actor and preserves reason`() {
+        val (resource, decisions) = resource("reviewer")
+        every { decisions.decide(proposalId, false, "reviewer", "insufficient evidence") } returns null
+
+        val response = resource.decide(
+            proposalId.toString(),
+            ProposalResource.DecisionRequest(false, "forged", "insufficient evidence"),
+        )
 
         assertThat(response.status).isEqualTo(404)
-        assertThat(response.entity).isEqualTo(mapOf("error" to "proposal not found"))
+        verify(exactly = 1) { decisions.decide(proposalId, false, "reviewer", "insufficient evidence") }
     }
 
     @Test
-    fun `a rejected decision - self-approval or double decision - is a 409 carrying the reason`() {
-        every { decisions.decide(id, true, "ui-assistant", null) } throws
-            IllegalArgumentException("Segregation of duties: the approver must differ from the author")
-
-        val response = resource.decide(id.toString(), ProposalResource.DecisionRequest(true, "ui-assistant"))
-
-        assertThat(response.status).isEqualTo(409)
-        assertThat(response.entity.toString()).contains("Segregation of duties")
-    }
-
-    @Test
-    fun `a successful decision returns 200 with the decided DTO`() {
-        val decided = row.copy(
-            state = ProposalState.REJECTED,
-            decidedBy = "bob",
-            decidedAt = Instant.parse("2026-01-03T00:00:00Z"),
-            decisionReason = "no",
+    fun `successful decision returns the persisted audit identity`() {
+        val (resource, decisions) = resource("reviewer")
+        val decidedAt = Instant.parse("2026-09-28T12:00:00Z")
+        val updated = AgentProposal(
+            id = proposalId,
+            title = "proposal",
+            rationale = "rationale",
+            suggestedAction = "action",
+            proposedBy = "maker-agent",
+            proposedAt = decidedAt.minusSeconds(60),
+            state = ProposalState.APPROVED,
+            decidedBy = "reviewer",
+            decidedAt = decidedAt,
+            decisionReason = "verified",
+            modelId = null,
+            correlationId = null,
         )
-        every { decisions.decide(id, false, "bob", "no") } returns decided
+        every { decisions.decide(proposalId, true, "reviewer", "verified") } returns updated
 
-        val response = resource.decide(id.toString(), ProposalResource.DecisionRequest(false, "bob", "no"))
+        val response = resource.decide(
+            proposalId.toString(),
+            ProposalResource.DecisionRequest(true, "forged", "verified"),
+        )
 
         assertThat(response.status).isEqualTo(200)
+        assertThat(response.entity).isInstanceOf(ProposalResource.ProposalDto::class.java)
         val dto = response.entity as ProposalResource.ProposalDto
-        assertThat(dto.state).isEqualTo("REJECTED")
-        assertThat(dto.decidedBy).isEqualTo("bob")
-        assertThat(dto.decisionReason).isEqualTo("no")
+        assertThat(dto.proposedBy).isEqualTo("maker-agent")
+        assertThat(dto.decidedBy).isEqualTo("reviewer")
+        assertThat(dto.decidedAt).isEqualTo(decidedAt)
+    }
+
+    @Test
+    fun `separation of duties rejection remains a conflict`() {
+        val (resource, decisions) = resource("maker")
+        every { decisions.decide(proposalId, true, "maker", null) } throws IllegalArgumentException("self approval")
+
+        val response = resource.decide(
+            proposalId.toString(),
+            ProposalResource.DecisionRequest(true, "someone-else"),
+        )
+
+        assertThat(response.status).isEqualTo(409)
+        verify(exactly = 1) { decisions.decide(proposalId, true, "maker", null) }
     }
 }

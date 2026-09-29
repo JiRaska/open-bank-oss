@@ -72,7 +72,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Dostupnost | 99,5% (nižší než money-path — není zákaznická) | `up{service="security-scanner"}` |
 | Dokončení naplánovaného skenu | < 90 s pro 27 služeb | `security_scan_duration_seconds` |
 | Latence p95 GET /report | < 50 ms | in-memory cache |
-| ICT incident API p95 | < 200 ms | in-memory zápis + přímý Kafka emit |
+| ICT incident API p95 | < 200 ms | atomický zápis incidentu + outboxu |
 
 ## Runbooky
 
@@ -102,13 +102,13 @@ Pravděpodobně problém s network policy nebo DNS.
 
 ### Event ICT incidentu chybí downstream
 
-Incidenty se vysílají přímo do Kafky bez outboxu, takže selhané publikování nezanechá žádný lokální
-záznam, ze kterého by šlo opakovat (#4709).
+Přechody incidentu zůstávají v `ict_incident_outbox`, dokud je relay neoznačí jako odeslané.
+Produkční dispatch zůstává během migrační zkoušky vypnutý a zapne se až po ověření schématu a ACL.
 
-1. Zkontroluj chyby emitteru: `kubectl logs -l app=security-scanner | grep ict-incident-events-out`
+1. Zkontroluj chyby relaye a `openbank_outbox_backlog{service="security-scanner"}`.
 2. Zkontroluj broker: `kcat -L -b kafka:9092`
 3. Ověř, že topic event přijal: přečti konec `openbank.security.ict.incident`.
-4. Pokud se publikování ztratilo, nahlas incident znovu přes `POST /api/v1/ict-incidents`.
+4. Ověř stav v `ict_incident_outbox` a zopakuj relay; nevytvářej duplicitní incident.
 
 ### Výsledky skenů jsou po restartu prázdné
 

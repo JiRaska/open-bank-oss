@@ -43,3 +43,25 @@ KafkaUser, so an event and the state change that produced it commit together.
 **Out of scope, deliberately.** This service requests nothing monetary and cannot post to the
 ledger. If an incentive ever becomes a monetary credit rather than an eligibility decision, that is
 a money-path change and needs its own ADR and a revision of this document before it ships.
+
+## STRIDE
+
+Named explicitly because two gates hold this directory to different bars and only one of them was
+ever run against this file. `check-threat-model-claims.py` verifies that every mitigation NAMES a
+mechanism that exists in code — this document passed that from the day it was written.
+`check-threat-models.py` additionally requires STRIDE framing, and did not see this file at all
+while its population was money-path services only (#9167). Prose that satisfies one gate and not
+the other is the failure this section closes.
+
+| category | the concrete exposure here | what answers it |
+|---|---|---|
+| **Spoofing** | a caller claiming to be campaign-service or the operator console | Keycloak OIDC at the edge; `ROLE_OPERATOR` for the lifecycle API, `ROLE_API` for the machine reservation path — separate roles, so a customer-facing token cannot reach offer creation |
+| **Tampering** | altering a published offer's ceilings, or the promo-code set | publication is four-eyes in the aggregate (`IncentiveOffer.publish` rejects `checker == maker`); codes are stored only as `SHA-256(pepper : code)`, so a database write cannot mint a usable code without the pepper |
+| **Repudiation** | "I did not publish that offer" | maker and checker are both persisted, and every transition writes an evidence row |
+| **Information disclosure** | promo codes leaking from the database or a backup | the raw code exists only in the import request; a dump yields digests that cannot be reversed without the Vault-held pepper, and the service refuses to start without one |
+| **Denial of service** | exhausting an offer by reserving and walking away | reservations expire on `PROMO_RESERVATION_TTL` (15 min default) with an explicit release, against `totalLimit`/`perPartyLimit` |
+| **Elevation of privilege** | a machine caller reaching operator-only operations | the two APIs are distinct paths with distinct roles; NetworkPolicy admits application traffic from `campaign`, `admin-ui` and same-namespace only |
+
+The residual risk this document does **not** cover is the pepper's own lifecycle: rotating it
+invalidates every stored digest, and no rotation procedure exists yet. That is a real gap, stated
+here rather than omitted.

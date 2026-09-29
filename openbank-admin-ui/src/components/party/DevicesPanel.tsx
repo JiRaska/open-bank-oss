@@ -8,7 +8,9 @@ import { useEffect, useState } from 'react'
 import { Smartphone, HelpCircle } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { StatusBadge } from '@/components/ui'
-import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
+import type { BffFailure } from '@/lib/services/bff'
+import { loadCustomerGraphFacts } from '@/lib/context/customerGraphClient'
+import type { DeviceFact } from '@/lib/context/customerGraph'
 
 // Reads notification-service's `GET /api/v1/devices?partyId=` (DeviceResource, ROLE_VIEWER-readable)
 // through the ADR-0056 BFF proxy — same operator-token relay + backend RBAC as AdverseStatePanel, no
@@ -20,26 +22,9 @@ import { svcUrl, classifyBffFailure, type BffFailure } from '@/lib/services/bff'
 // foreground token refresh (ADR-0135 §2), so it reads as "last time the app was open", not a login event.
 // The panel says so rather than labelling it "last login".
 
-interface DeviceView {
-  id: string
-  platform: string
-  appInstance: string
-  appVersion: string | null
-  osVersion: string | null
-  status: string
-  registeredAt: string
-  refreshedAt: string | null
-  lastUsedAt: string | null
-}
-
-interface DevicesResponse {
-  items: DeviceView[]
-  total: number
-}
-
 type State =
   | { kind: 'loading' }
-  | { kind: 'ok'; devices: DeviceView[] }
+  | { kind: 'ok'; devices: DeviceFact[] }
   | { kind: 'unknown'; why: BffFailure }
 
 export function DevicesPanel({ partyId }: { partyId: string }) {
@@ -52,16 +37,10 @@ export function DevicesPanel({ partyId }: { partyId: string }) {
     let live = true
     ;(async () => {
       try {
-        const res = await fetch(svcUrl('notification-service', '/api/v1/devices', { partyId }), {
-          cache: 'no-store',
-        })
-        if (!res.ok) {
-          const why = await classifyBffFailure(res)
-          if (live) setState({ kind: 'unknown', why })
-          return
-        }
-        const body = (await res.json()) as DevicesResponse
-        if (live) setState({ kind: 'ok', devices: body.items ?? [] })
+        const facts = await loadCustomerGraphFacts(partyId)
+        if (live) setState(facts.unavailable.includes('devices')
+          ? { kind: 'unknown', why: 'unreachable' }
+          : { kind: 'ok', devices: facts.devices })
       } catch {
         if (live) setState({ kind: 'unknown', why: 'unreachable' })
       }

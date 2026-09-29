@@ -40,6 +40,7 @@ import java.util.Optional
  * analyst has to see it, so it is carried separately from the (then empty) owner list.
  */
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Each PSC field and page-completeness rule stays explicit at the source boundary.
 class CompaniesHousePscAdapter : UboAdapter {
 
     @Inject @RestClient
@@ -72,10 +73,9 @@ class CompaniesHousePscAdapter : UboAdapter {
         val body = try {
             companiesHouse.personsWithSignificantControl(identifier.value, auth, PSC_PAGE)
         } catch (e: jakarta.ws.rs.WebApplicationException) {
-            // 404 here means the COMPANY has no PSC resource, which for a live company is itself a
-            // finding: the register answered, and it holds nothing. It is not an outage, and it is
-            // not "we did not look" — both of which would send an analyst chasing the wrong thing.
-            if (e.response?.status == NOT_FOUND) return empty(identifier, pack)
+            // This endpoint lists PSCs, not the separately published PSC statements. A 404 does
+            // not prove the company has no owners or has filed a "no PSC" statement. Keep the
+            // finding unknown until both register resources can be reconciled.
             log.warnf("Companies House PSC answered %s", e.response?.status)
             throw RegistryUnavailableException(SOURCE, e)
         } catch (e: RegistryUnavailableException) {
@@ -85,20 +85,43 @@ class CompaniesHousePscAdapter : UboAdapter {
         ) {
             throw RegistryUnavailableException(SOURCE, e)
         }
-        return map(identifier, body, pack)
+        val statementBody = try {
+            companiesHouse.personsWithSignificantControlStatements(identifier.value, auth, PSC_PAGE)
+        } catch (e: jakarta.ws.rs.WebApplicationException) {
+            if (e.response?.status == NOT_FOUND) null else throw RegistryUnavailableException(SOURCE, e)
+        } catch (e: RegistryUnavailableException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            throw RegistryUnavailableException(SOURCE, e)
+        }
+        val finding = map(identifier, body, pack, statementBody)
+        // Without an active controller or a filed statement, the register has not supplied
+        // evidence for a complete ownership finding, even if both list requests answered 200.
+        if (finding.owners.isEmpty() && finding.registerStatements.isEmpty()) {
+            throw RegistryUnavailableException(SOURCE)
+        }
+        return finding
     }
 
-    internal fun map(identifier: LegalEntityIdentifier, body: JsonNode, pack: CountryPack): UboFinding {
-        val items = body.path("items").toList()
+    internal fun map(
+        identifier: LegalEntityIdentifier,
+        body: JsonNode,
+        pack: CountryPack,
+        statementBody: JsonNode? = null,
+    ): UboFinding {
+        val items = completePageItems(body)
         val owners = items
             .filter { it.text("ceased_on") == null && it.text("kind")?.contains("statement") != true }
-            .mapNotNull { toOwner(it) }
-        // A statement item ("no individual or entity with significant control identified") is an
-        // answer the company filed under s.790 — carried as text so the analyst reads the register's
-        // own words rather than our summary of them.
-        val statements = items.mapNotNull { item ->
-            item.text("statement") ?: item.text("kind")?.takeIf { it.contains("statement") }
-        }
+            .map { toOwner(it, identifier.value) ?: throw RegistryUnavailableException(SOURCE) }
+        // Companies House publishes statements at a separate endpoint. Never assume an empty PSC
+        // list means the company filed "no PSC" or silently omit a statement from the evidence.
+        val statements = statementBody?.let(::completePageItems).orEmpty()
+            .filter { it.text("ceased_on") == null }
+            .map { item ->
+                item.text("statement") ?: throw RegistryUnavailableException(SOURCE)
+            }
         return UboFinding(
             identifier = identifier,
             source = UboSource.REGISTER,
@@ -111,22 +134,33 @@ class CompaniesHousePscAdapter : UboAdapter {
         )
     }
 
-    private fun empty(identifier: LegalEntityIdentifier, pack: CountryPack) = UboFinding(
-        identifier = identifier,
-        source = UboSource.REGISTER,
-        owners = emptyList(),
-        registerStatements = emptyList(),
-        threshold = pack.uboRegister.threshold,
-        registerName = pack.uboRegister.name,
-        sourceRef = identifier.value,
-        fetchedAt = Instant.now(clock),
-    )
+    private fun completePageItems(body: JsonNode): List<JsonNode> {
+        val page = body.path("items")
+        if (!page.isArray) throw RegistryUnavailableException(SOURCE)
+        val items = page.toList()
+        val total = body.path("total_results")
+        // This adapter requests only the first page. Never call a partial list the full UBO
+        // finding: omitted owners would silently satisfy the review's evidence requirement.
+        if (!total.isIntegralNumber || !total.canConvertToInt() || total.asInt() != items.size) {
+            throw RegistryUnavailableException(SOURCE)
+        }
+        return items
+    }
 
-    private fun toOwner(item: JsonNode): BeneficialOwner? {
+    private fun toOwner(item: JsonNode, companyNumber: String): BeneficialOwner? {
         val name = item.text("name") ?: return null
         val natures = item.path("natures_of_control").mapNotNull { it.takeIf { n -> n.isTextual }?.asText() }
+        val corporate = item.text("kind")?.let { it.startsWith("corporate") || it.startsWith("legal-person") } == true
+        val identification = item.path("identification")
         return BeneficialOwner(
             fullName = name,
+            sourceRecordRef = item.path("links").text("self")?.takeIf { ref ->
+                // A PSC path identifies one register record for this company, not a person across companies.
+                // Never surface an arbitrary URL or a reference to a different company as evidence.
+                ref.length <= MAX_RECORD_REF_LENGTH &&
+                    ref.startsWith("/company/$companyNumber/persons-with-significant-control/") &&
+                    RECORD_REF_PATTERN.matches(ref)
+            },
             // The PSC register publishes month and year only. A reconstructed day would be a fact
             // nobody filed, so the field stays null and identity matching uses the other columns.
             dateOfBirth = null,
@@ -135,7 +169,15 @@ class CompaniesHousePscAdapter : UboAdapter {
             band = bandOf(natures),
             natureOfControl = natures,
             notifiedOn = item.date("notified_on"),
-            corporate = item.text("kind")?.let { it.startsWith("corporate") || it.startsWith("legal-person") } == true,
+            corporate = corporate,
+            registrationNumber = identification.text("registration_number")?.takeIf { number ->
+                corporate &&
+                    number.length <= MAX_REGISTRATION_NUMBER_LENGTH &&
+                    REGISTRATION_NUMBER_PATTERN.matches(number)
+            },
+            countryRegistered = identification.text("country_registered")?.takeIf { country ->
+                corporate && country.length <= MAX_COUNTRY_LENGTH
+            },
         )
     }
 
@@ -173,6 +215,11 @@ class CompaniesHousePscAdapter : UboAdapter {
         private const val PSC_TIMEOUT_MS = 4000L
         private const val DATE_LENGTH = 10
         private const val PSC_PAGE = 100
+        private const val MAX_RECORD_REF_LENGTH = 256
+        private const val MAX_REGISTRATION_NUMBER_LENGTH = 64
+        private const val MAX_COUNTRY_LENGTH = 80
+        private val RECORD_REF_PATTERN = Regex("(/[A-Za-z0-9-]+)+")
+        private val REGISTRATION_NUMBER_PATTERN = Regex("[A-Za-z0-9-]+")
 
         /**
          * Ordering for "the strongest control this person holds". A person can hold shares in one

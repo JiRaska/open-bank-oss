@@ -131,6 +131,10 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
     }.awaitSuspending().let { p }
     override suspend fun find(id: UUID) =
         Panache.withSession { find("id", id).firstResult<ReferralProgramEntity>() }.awaitSuspending()?.toDomain()
+    override suspend fun listPublished() = Panache.withSession {
+        find("status = ?1 order by publishedAt desc, name, version desc", ProgramStatus.PUBLISHED.name)
+            .list<ReferralProgramEntity>()
+    }.awaitSuspending().map { it.toDomain() }
     override suspend fun publish(id: UUID, maker: String, checker: String, at: Instant) = Panache.withTransaction {
         find("id", id).firstResult<ReferralProgramEntity>().map { e ->
             requireNotNull(e)
@@ -182,6 +186,12 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             e.toDomain(e.tokenHash)
         }
     }.awaitSuspending()
+
+    // The `token` field carries the stored HASH here, as findByToken does; the referrer view
+    // built from this never exposes it.
+    override suspend fun listByReferrer(referrerPartyId: UUID) = Panache.withSession {
+        find("referrerPartyId", referrerPartyId).list<ReferralInviteEntity>()
+    }.awaitSuspending().map { it.toDomain(it.tokenHash) }
 }
 
 @ApplicationScoped class PanacheReferralRewardRepository :
@@ -226,6 +236,13 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
             e.toDomain()
         }
     }.awaitSuspending()
+
+    override suspend fun listByInviteIds(inviteIds: List<UUID>): List<ReferralReward> {
+        if (inviteIds.isEmpty()) return emptyList()
+        return Panache.withSession {
+            find("inviteId in ?1", inviteIds).list<ReferralRewardEntity>()
+        }.awaitSuspending().map { it.toDomain() }
+    }
 }
 
 @ApplicationScoped class PanacheReferralAuditRepository :
@@ -245,5 +262,14 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                 },
             )
         }.awaitSuspending()
+    }
+
+    override suspend fun issuedAt(inviteIds: List<UUID>): Map<UUID, Instant> {
+        if (inviteIds.isEmpty()) return emptyMap()
+        return Panache.withSession {
+            find("type = ?1 and aggregateId in ?2", "INVITE_ISSUED", inviteIds).list<ReferralAuditEntity>()
+        }.awaitSuspending()
+            .groupBy { it.aggregateId }
+            .mapValues { (_, rows) -> rows.minOf { it.occurredAt } }
     }
 }

@@ -23,7 +23,7 @@ This service implements several DORA obligations directly:
 | Art. 10 | Detection of anomalies | Scheduled 30-min scans detect regressions; CRITICAL findings trigger alerts |
 | Art. 11 | Response & recovery | `IctIncident` lifecycle (OPEN→RESOLVED), RTO/RPO tracking |
 | Art. 17 | ICT incident reporting | Full incident reporting workflow: `POST /ict-incidents` → `PATCH /status` → `POST /regulatory-report` |
-| Art. 23 | Supervisory reporting | `regulatoryReportId` links to CNB submission; the record is in-memory only (see limitations below) |
+| Art. 23 | Supervisory reporting | `regulatoryReportId` links to CNB submission; the incident and event hand-off are persisted atomically |
 | Art. 24 | ICT risk testing | OWASP Top 10 automated test suite as the digital operational resilience test |
 | Art. 28 | Third-party risk | Scanner probes include third-party-integrated services (Keycloak, Kafka health) |
 

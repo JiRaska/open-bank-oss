@@ -33,5 +33,7 @@ data class IctIncident(
     val regulatoryReportId: String?,
     val assignedTo: String?,
     val createdAt: Instant,
-    val updatedAt: Instant
+    val updatedAt: Instant,
+    /** Strict per-aggregate ordering token persisted with every state transition. */
+    val aggregateRevision: Long = 0,
 )

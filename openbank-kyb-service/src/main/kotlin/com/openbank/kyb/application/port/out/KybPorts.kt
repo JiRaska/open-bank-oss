@@ -9,6 +9,7 @@ import com.openbank.kyb.domain.model.BusinessOnboardingCase
 import com.openbank.kyb.domain.model.CaseStatus
 import com.openbank.kyb.domain.model.CountryPack
 import com.openbank.kyb.domain.model.IdentifierScheme
+import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.KybEvent
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
 import com.openbank.kyb.domain.model.RegistryExtract
@@ -125,7 +126,19 @@ data class MandateRequest(
 interface PartyGateway {
     suspend fun createEntityParty(request: EntityPartyRequest): UUID
     suspend fun grantMandate(request: MandateRequest)
+
+    /** Who [partyId] verifiably is; null when party-service has no such party. Throws when it cannot be asked. */
+    suspend fun initiatorIdentity(partyId: UUID): InitiatorIdentity?
+
+    /**
+     * The PEP facts party-service holds about a person, so the customer is never asked again for
+     * what the bank already knows. [PepProfile.pep] null means "not on file" — the person must then
+     * declare. Null overall when party-service has no such party.
+     */
+    suspend fun pepProfile(partyId: UUID): PepProfile?
 }
+
+data class PepProfile(val pep: Boolean?, val category: String?)
 
 /** Opaque, unguessable invitation tokens. A port so tests can make them deterministic. */
 interface InvitationTokens {

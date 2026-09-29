@@ -11,14 +11,11 @@
 // fail, and the KYC-method split.
 
 import { useState, useEffect, useCallback, useRef } from 'react'
+import dynamic from 'next/dynamic'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { TrendingUp, RefreshCw, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
-import {
-  ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Cell, LabelList,
-  LineChart, Line, PieChart, Pie, Legend,
-} from 'recharts'
 import { parseFunnelAnalytics, type FunnelAnalytics } from '@/lib/onboarding/funnelAnalyticsContract'
 import { PageHeader } from '@/components/ui/PageHeader'
 
@@ -38,17 +35,16 @@ const STEP_LABEL_EN: Record<string, string> = {
 const C_VIEWED = '#6366f1'
 const C_DONE = '#22c55e'
 const C_FAIL = '#ef4444'
-const C_RATE = '#22c55e'
-const PIE_COLORS = ['#6366f1', '#22c55e', '#f59e0b', '#a855f7', '#06b6d4', '#ef4444', '#94a3b8']
+
+// Valid analytics arrive only after the ClickHouse request and contract validation. Keep the chart
+// engine out of loading, denial and recovery paths; reserve the panel footprint while it loads.
+const OnboardingAnalyticsCharts = dynamic(
+  () => import('@/components/onboarding/OnboardingAnalyticsCharts')
+    .then(module => module.OnboardingAnalyticsCharts),
+  { ssr: false, loading: () => <div style={{ minHeight: 600 }} aria-hidden="true" /> },
+)
 
 function isoDay(d: Date) { return d.toISOString().slice(0, 10) }
-function fmtSeconds(s: number | null): string {
-  if (s == null) return '—'
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  const rem = s % 60
-  return rem ? `${m}m ${rem}s` : `${m}m`
-}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -144,15 +140,6 @@ export default function OnboardingAnalyticsPage() {
   }))
   const kycChart = (visibleData?.kycMethods ?? []).map(k => ({ name: k.method, value: k.sessions }))
   const maxReasonFailures = Math.max(1, ...(visibleData?.failReasons ?? []).map(r => r.failures))
-
-  const tooltipStyle = {
-    background: 'var(--surface)',
-    border: '1px solid var(--border)',
-    borderRadius: '8px',
-    fontSize: '12px',
-    color: 'var(--text-secondary)',
-  }
-  const axisTick = { fill: 'var(--text-muted)', fontSize: 11 }
 
   return (
     <div>
@@ -271,98 +258,7 @@ export default function OnboardingAnalyticsPage() {
               hint={t('Úspěchy / pokusy', 'successes / attempts')} color={signRate >= 80 ? C_DONE : C_FAIL} />
           </div>
 
-          {/* Funnel: viewed vs completed per step */}
-          <div className="card" style={{ padding: '16px 20px', marginBottom: '20px' }}>
-            <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 600 }}>
-              {t('Funnel konverze — krok po kroku', 'Conversion funnel — step by step')}
-            </h3>
-            <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              {t('Zobrazeno vs. dokončeno; % je odchod na daném kroku',
-                 'Viewed vs. completed; % is drop-off at that step')}
-            </p>
-            <div style={{ width: '100%', height: 300 }}>
-              <ResponsiveContainer>
-                <BarChart data={funnelChart} margin={{ top: 20, right: 16, left: 0, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                  <XAxis dataKey="label" tick={axisTick} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
-                  <YAxis tick={axisTick} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'var(--border)', opacity: 0.3 }} />
-                  <Bar dataKey="viewed" name={t('Zobrazeno', 'Viewed')} fill={C_VIEWED} radius={[3, 3, 0, 0]} />
-                  <Bar dataKey="completed" name={t('Dokončeno', 'Completed')} fill={C_DONE} radius={[3, 3, 0, 0]}>
-                    <LabelList dataKey="dropOffPct" position="top"
-                      formatter={(v) => (Number(v) > 0 ? `−${Number(v).toFixed(0)}%` : '')}
-                      style={{ fill: 'var(--text-muted)', fontSize: 10 }} />
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Median dwell per step */}
-            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${funnelChart.length}, 1fr)`, gap: '8px', marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-              {funnelChart.map(s => (
-                <div key={s.step} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {t('Medián času', 'Median time')}
-                  </div>
-                  <div style={{ fontSize: '15px', fontWeight: 600, marginTop: '2px' }}>{fmtSeconds(s.medianSeconds)}</div>
-                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '1px' }}>{s.label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '1.4fr 1fr', gap: '20px', marginBottom: '20px' }}>
-            {/* Daily signature conversion rate */}
-            <div className="card" style={{ padding: '16px 20px' }}>
-              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 600 }}>
-                {t('Podpis smlouvy — denní úspěšnost', 'Signature — daily success rate')}
-              </h3>
-              <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                {t('Úspěchy / pokusy v %', 'Successes / attempts, %')}
-              </p>
-              <div style={{ width: '100%', height: 240 }}>
-                {rateChart.length === 0 ? (
-                  <DataUnavailable kind="no_data" feature={t('Podpis smlouvy', 'Signature')} lang={language} dense />
-                ) : (
-                  <ResponsiveContainer>
-                    <LineChart data={rateChart} margin={{ top: 8, right: 16, left: 0, bottom: 4 }}>
-                      <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" vertical={false} />
-                      <XAxis dataKey="day" tick={axisTick} axisLine={{ stroke: 'var(--border)' }} tickLine={false} />
-                      <YAxis domain={[0, 100]} unit="%" tick={axisTick} axisLine={false} tickLine={false} />
-                      <Tooltip contentStyle={tooltipStyle} formatter={(v) => [`${v} %`, t('Úspěšnost', 'Success rate')]} />
-                      <Line type="monotone" dataKey="rate" stroke={C_RATE} strokeWidth={2} dot={{ r: 2 }} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-
-            {/* KYC method split */}
-            <div className="card" style={{ padding: '16px 20px' }}>
-              <h3 style={{ margin: '0 0 4px', fontSize: '14px', fontWeight: 600 }}>
-                {t('Metoda ověření', 'Verification method')}
-              </h3>
-              <p style={{ margin: '0 0 12px', fontSize: '12px', color: 'var(--text-muted)' }}>
-                {t('Rozdělení podle zvolené KYC metody', 'Split by chosen KYC method')}
-              </p>
-              <div style={{ width: '100%', height: 240 }}>
-                {kycChart.length === 0 ? (
-                  <DataUnavailable kind="no_data" feature={t('Metoda ověření', 'Verification method')} lang={language} dense />
-                ) : (
-                  <ResponsiveContainer>
-                    <PieChart>
-                      <Pie data={kycChart} dataKey="value" nameKey="name" cx="50%" cy="50%"
-                        innerRadius={45} outerRadius={80} paddingAngle={2}>
-                        {kycChart.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                      </Pie>
-                      <Tooltip contentStyle={tooltipStyle} />
-                      <Legend wrapperStyle={{ fontSize: 11, color: 'var(--text-muted)' }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                )}
-              </div>
-            </div>
-          </div>
+          <OnboardingAnalyticsCharts funnel={funnelChart} rate={rateChart} kyc={kycChart} />
 
           {/* Sign-fail reasons, ranked */}
           <div className="card" style={{ padding: '16px 20px' }}>

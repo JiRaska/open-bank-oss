@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA server certificate for the authority read path. The existing HTTP listener remains
+# during the east-west TLS migration; new consumers use the parallel 8443 listener.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: party-service-internal-tls
+  namespace: party
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: party-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - party-service.party.svc
+    - party-service.party.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

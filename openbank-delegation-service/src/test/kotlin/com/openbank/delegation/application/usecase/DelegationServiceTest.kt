@@ -9,6 +9,9 @@ import com.openbank.delegation.application.port.`in`.OfferDelegationCommand
 import com.openbank.delegation.application.port.`in`.PreviewDelegationCommand
 import com.openbank.delegation.application.port.`in`.RevokeDelegationCommand
 import com.openbank.delegation.application.port.out.DelegationRepository
+import com.openbank.delegation.application.port.out.GrantorAuthority
+import com.openbank.delegation.application.port.out.GrantorAuthorityClient
+import com.openbank.delegation.application.port.out.GrantorAuthorityVerdict
 import com.openbank.delegation.application.port.out.OwnershipVerdict
 import com.openbank.delegation.application.port.out.PartyEligibility
 import com.openbank.delegation.application.port.out.PartyEligibilityClient
@@ -48,6 +51,7 @@ class DelegationServiceTest {
     private val repository: DelegationRepository = mockk()
     private val scaClient: ScaChallengeClient = mockk()
     private val eligibilityClient: PartyEligibilityClient = mockk()
+    private val authorityClient: GrantorAuthorityClient = mockk()
     private val ownershipClient: ResourceOwnershipClient = mockk()
     private val clock: Clock = Clock.fixed(Instant.parse("2026-07-31T12:00:00Z"), ZoneOffset.UTC)
 
@@ -60,7 +64,9 @@ class DelegationServiceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, ownershipClient, clock)
+        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
         coEvery { scaClient.consumeChallenge(any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
@@ -89,14 +95,9 @@ class DelegationServiceTest {
         )
     }
 
-    private fun eligibilityOk(
-        grantorKyc: String = "FULL",
-        granteeKyc: String = "FULL",
-        grantorName: String? = null,
-        granteeName: String? = null,
-    ) {
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns
-            PartyEligibility(grantor, true, grantorKyc, grantorName)
+    private fun eligibilityOk(granteeKyc: String = "FULL", grantorName: String? = null, granteeName: String? = null) {
+        coEvery { authorityClient.authorityFor(grantor, grantor) } returns
+            GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED, grantorName)
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns
             PartyEligibility(grantee, true, granteeKyc, granteeName)
     }
@@ -146,6 +147,7 @@ class DelegationServiceTest {
         capabilities: Set<DelegationCapability> = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
     ) = OfferDelegationCommand(
         callerPartyId = grantor,
+        actorPartyId = grantor,
         grantorPartyId = grantor,
         granteePartyId = grantee,
         resourceType = DelegationResourceType.ACCOUNT,
@@ -157,6 +159,7 @@ class DelegationServiceTest {
 
     private fun previewCommand() = PreviewDelegationCommand(
         callerPartyId = grantor,
+        actorPartyId = grantor,
         grantorPartyId = grantor,
         granteePartyId = grantee,
         resourceType = DelegationResourceType.ACCOUNT,
@@ -172,7 +175,7 @@ class DelegationServiceTest {
         service.preview(previewCommand())
 
         coVerify(exactly = 1) { ownershipClient.verifyOwnership(grantor, DelegationResourceType.ACCOUNT, accountId) }
-        coVerify(exactly = 1) { eligibilityClient.eligibilityOf(grantor) }
+        coVerify(exactly = 1) { authorityClient.authorityFor(grantor, grantor) }
         coVerify(exactly = 1) { eligibilityClient.eligibilityOf(grantee) }
         coVerify(exactly = 0) { scaClient.getChallenge(any()) }
         coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
@@ -599,7 +602,6 @@ class DelegationServiceTest {
     @Test
     fun `offer rejects inactive grantee party`(): Unit = runBlocking {
         scaOk(grantor, "DELEGATION_GRANT")
-        coEvery { eligibilityClient.eligibilityOf(grantor) } returns PartyEligibility(grantor, true, "FULL")
         coEvery { eligibilityClient.eligibilityOf(grantee) } returns PartyEligibility(grantee, false, "FULL")
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationEligibilityException::class.java)

@@ -8,6 +8,7 @@ const target = process.env.ADMIN_UI_SYNTHETIC_URL ?? 'https://admin.open-bank.te
 const report = process.env.PLAYWRIGHT_JUNIT_OUTPUT_FILE ?? 'build/test-results/e2e/admin-login-synthetic.xml'
 const vitalsReport = process.env.OPENBANK_BROWSER_VITALS_OUTPUT ?? 'build/test-intelligence/browser-vitals.json'
 const engine = process.env.OPENBANK_BROWSER ?? 'chromium'
+const journey = process.env.OPENBANK_SYNTHETIC_JOURNEY ?? 'admin-ui-sso-boundary'
 const expectedBuildSha = process.env.ADMIN_UI_EXPECTED_BUILD_SHA?.trim().toLowerCase() || null
 // When set, the journey asserts the AUTH GATE itself: an unauthenticated hit on a protected
 // page must land on /auth/login (never a 200 — that would be an auth-bypass regression, which
@@ -15,6 +16,7 @@ const expectedBuildSha = process.env.ADMIN_UI_EXPECTED_BUILD_SHA?.trim().toLower
 const expectAuthGate = process.env.ADMIN_UI_SYNTHETIC_EXPECT_AUTH_GATE === '1'
 const launchers = { chromium, firefox }
 if (!Object.hasOwn(launchers, engine)) throw new Error(`Unsupported browser engine: ${engine}`)
+if (!/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(journey)) throw new Error(`Invalid synthetic journey: ${journey}`)
 // Deliberately forgiving public-edge budgets. These are synthetic availability guards, not an
 // authenticated operator-flow SLO or a substitute for RUM. Together they prevent a page that
 // eventually renders after a multi-second upstream or client-side stall from reading as healthy.
@@ -32,6 +34,7 @@ let measuredVitals = null
 let attestationFailure = null
 let buildAttestation = null
 let gateFailure = null
+let approvalsGateFailure = null
 let browser
 try {
   browser = await launchers[engine].launch({ headless: true })
@@ -100,6 +103,21 @@ try {
   if (!vitals.clsAvailable || !Number.isFinite(vitals.cls) || vitals.cls > CLS_BUDGET) {
     clsFailure = `SSO boundary CLS ${Number.isFinite(vitals.cls) ? vitals.cls.toFixed(3) : 'unavailable'} exceeds ${CLS_BUDGET} budget`
   }
+  // The approval inbox is a human-only workspace. Verify its deployed unauthenticated
+  // boundary in the same browser run; this does not claim an authenticated operator journey.
+  try {
+    const approvalsUrl = new URL('/approvals', target)
+    const approvalsResponse = await page.goto(approvalsUrl.toString(), { waitUntil: 'domcontentloaded', timeout: 20_000 })
+    const approvalsLanding = new URL(page.url())
+    if (!approvalsResponse || approvalsResponse.status() >= 400 ||
+        approvalsLanding.origin !== approvalsUrl.origin ||
+        approvalsLanding.pathname !== '/auth/login' ||
+        approvalsLanding.searchParams.get('callbackUrl') !== '/approvals') {
+      approvalsGateFailure = `approval inbox auth gate failed: HTTP ${approvalsResponse?.status() ?? 'no response'}, landed on ${approvalsLanding.pathname}`
+    }
+  } catch (error) {
+    approvalsGateFailure = error instanceof Error ? error.message : 'unknown approval inbox auth gate failure'
+  }
 } catch (error) {
   boundaryFailure ??= error instanceof Error ? error.message : 'unknown browser synthetic failure'
   latencyFailure ??= boundaryFailure
@@ -108,6 +126,7 @@ try {
   clsFailure ??= boundaryFailure
   attestationFailure ??= boundaryFailure
   gateFailure ??= boundaryFailure
+  approvalsGateFailure ??= boundaryFailure
 } finally {
   await browser?.close()
 }
@@ -122,10 +141,11 @@ const fcp = fcpFailure && `<failure message="${escape(fcpFailure)}"/>`
 const cls = clsFailure && `<failure message="${escape(clsFailure)}"/>`
 const attestation = attestationFailure && `<failure message="${escape(attestationFailure)}"/>`
 const gate = gateFailure && `<failure message="${escape(gateFailure)}"/>`
-const checks = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure, ...(expectedBuildSha ? [attestationFailure] : []), ...(expectAuthGate ? [gateFailure] : [])]
+const approvalsGate = approvalsGateFailure && `<failure message="${escape(approvalsGateFailure)}"/>`
+const checks = [boundaryFailure, latencyFailure, renderFailure, fcpFailure, clsFailure, approvalsGateFailure, ...(expectedBuildSha ? [attestationFailure] : []), ...(expectAuthGate ? [gateFailure] : [])]
 const failureCount = checks.filter(Boolean).length
-await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="${checks.length}" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase>${expectedBuildSha ? `<testcase classname="admin-login-synthetic" name="deployed build matches requested source" time="${seconds}">${attestation ?? ''}</testcase>` : ''}${expectAuthGate ? `<testcase classname="admin-login-synthetic" name="auth gate redirects unauthenticated to SSO" time="${seconds}">${gate ?? ''}</testcase>` : ''}</testsuite></testsuites>\n`)
+await writeFile(report, `<testsuites><testsuite name="admin-login-synthetic" tests="${checks.length}" failures="${failureCount}" errors="0" skipped="0" time="${seconds}"><testcase classname="admin-login-synthetic" name="renders SSO boundary" time="${seconds}">${boundary ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary responds within public latency budget" time="${seconds}">${latency ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary DOMContentLoaded within public render budget" time="${seconds}">${render ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary FCP is within public Web Vitals budget" time="${seconds}">${fcp ?? ''}</testcase><testcase classname="admin-login-synthetic" name="SSO boundary CLS is within public Web Vitals budget" time="${seconds}">${cls ?? ''}</testcase><testcase classname="admin-login-synthetic" name="approval inbox redirects unauthenticated visitors to SSO" time="${seconds}">${approvalsGate ?? ''}</testcase>${expectedBuildSha ? `<testcase classname="admin-login-synthetic" name="deployed build matches requested source" time="${seconds}">${attestation ?? ''}</testcase>` : ''}${expectAuthGate ? `<testcase classname="admin-login-synthetic" name="auth gate redirects unauthenticated to SSO" time="${seconds}">${gate ?? ''}</testcase>` : ''}</testsuite></testsuites>\n`)
 // Preserve the engine identity even when the browser-native metrics are unavailable. The collector
 // then reports `not-run`, never a made-up zero or a passing Web Vitals result.
-await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey: 'admin-ui-sso-boundary', browser: engine, ...(measuredVitals ? { metrics: measuredVitals } : {}), ...(buildAttestation ? { buildAttestation } : {}) })}\n`)
+await writeFile(vitalsReport, `${JSON.stringify({ schemaVersion: 1, journey, browser: engine, ...(measuredVitals ? { metrics: measuredVitals } : {}), ...(buildAttestation ? { buildAttestation } : {}) })}\n`)
 if (failureCount) throw new Error(checks.filter(Boolean).join('; '))

@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.17.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.2...balance-service-v1.17.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [1.17.2](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.1...balance-service-v1.17.2) (2026-09-13)
+
+
+### Bug Fixes
+
+* **balance:** guard balance_outbox created_at plausibility at INSERT ([#9290](https://github.com/JiRaska/open-bank-oss/issues/9290)) ([3948ad9](https://github.com/JiRaska/open-bank-oss/commit/3948ad9d8a82df48a4aad48f03670bf202da5f9a))
+* **sepa-payment:** publish the request schemas the resources actually parse (also domestic-payment, balance) ([#8833](https://github.com/JiRaska/open-bank-oss/issues/8833)) ([ce1373f](https://github.com/JiRaska/open-bank-oss/commit/ce1373fcc8348ee9697ce848b2aaacef8d27cd36))
+
 ## [1.17.1](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.0...balance-service-v1.17.1) (2026-09-08)
 
 

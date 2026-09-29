@@ -79,6 +79,7 @@ class PartyEventConsumer {
 
         when (eventType) {
             "PARTY_CREATED" -> handleCreated(partyId, node, payload)
+            "PARTY_UPDATED" -> handleAmlProfileDeclared(partyId, node)
             "PARTY_ERASED" -> handleErased(partyId, payload)
         }
     }
@@ -111,6 +112,34 @@ class PartyEventConsumer {
             if (!case.status.isTerminal && !legalName.isNullOrBlank()) {
                 pepScreeningService.screenCase(case.id, legalName)
                 log.infof("[party-events-in] PEP-screened KYC case %s for party %s", case.id, partyId)
+            }
+        }
+    }
+
+    /**
+     * The customer declared a personal AML profile carrying risk factors (party-service adds
+     * `changeKind`, `eddRequired` and `amlRiskFactors` to `PARTY_UPDATED`). Every other
+     * `PARTY_UPDATED` — contact edits, projections — is not a KYC concern here and is acked.
+     */
+    private suspend fun handleAmlProfileDeclared(partyId: UUID?, node: JsonNode) {
+        if (node.path("changeKind").asText() != "AML_PROFILE_DECLARED" || !node.path("eddRequired").asBoolean(false)) {
+            return
+        }
+        if (partyId == null) {
+            log.warnf("[party-events-in] AML_PROFILE_DECLARED without a valid partyId, skipping")
+            return
+        }
+        val factors = node.path("amlRiskFactors").map { it.asText() }.filter { it.isNotBlank() }
+        EventRetry.withRetry(log, "AML profile EDD routing", partyId) {
+            val escalated = kycService.escalateForDeclaredAmlRisk(partyId, factors)
+            if (escalated != null) {
+                log.infof(
+                    "[party-events-in] KYC case %s for party %s routed to EDD (risk %s, factors %s)",
+                    escalated.id,
+                    partyId,
+                    escalated.riskLevel,
+                    factors,
+                )
             }
         }
     }

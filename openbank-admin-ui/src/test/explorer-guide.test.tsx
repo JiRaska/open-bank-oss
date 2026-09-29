@@ -13,6 +13,6 @@ describe('ExplorerGuide', () => {
     )
 
     expect(container.querySelector('aside')).toHaveAttribute('aria-label', 'Start with a person')
-    expect(container.querySelector('img')).toHaveAttribute('src', expect.stringContaining('explorer-prague-lioness.webp'))
+    expect(container.querySelector('img')).toHaveAttribute('src', '/brand/explorer-prague-lioness.webp')
   })
 })

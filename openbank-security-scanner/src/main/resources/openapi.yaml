@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Security Scanner Service API
-  version: 1.1.0
+  version: 1.2.0
   description: Internal security vulnerability scanner — trigger scans, retrieve reports per service.
   license:
     name: Apache-2.0
@@ -15,6 +15,100 @@ tags:
   - name: Security Scanner
 
 paths:
+  /api/v1/ict-incidents:
+    post:
+      tags: [ICT Incidents]
+      summary: Report an ICT incident
+      operationId: reportIctIncident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportIncidentRequest'
+      responses:
+        '201':
+          description: Incident reported with a durable lifecycle revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IctIncident'
+    get:
+      tags: [ICT Incidents]
+      summary: List ICT incidents
+      operationId: listIctIncidents
+      parameters:
+        - {name: status, in: query, schema: {type: string}}
+        - {name: severity, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, default: 50, maximum: 200}}
+        - {name: offset, in: query, schema: {type: integer, default: 0, minimum: 0}}
+      responses:
+        '200':
+          description: Incident page
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/IctIncident'
+
+  /api/v1/ict-incidents/{id}:
+    get:
+      tags: [ICT Incidents]
+      summary: Get an ICT incident
+      operationId: getIctIncident
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      responses:
+        '200':
+          description: Incident detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IctIncident'
+
+  /api/v1/ict-incidents/{id}/status:
+    patch:
+      tags: [ICT Incidents]
+      summary: Update ICT incident status
+      operationId: updateIctIncidentStatus
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateIncidentStatusRequest'
+      responses:
+        '200':
+          description: Updated incident
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IctIncident'
+
+  /api/v1/ict-incidents/{id}/regulatory-report:
+    post:
+      tags: [ICT Incidents]
+      summary: Record regulatory reporting
+      operationId: reportIctIncidentToRegulator
+      parameters:
+        - $ref: '#/components/parameters/IncidentId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegulatoryReportRequest'
+      responses:
+        '200':
+          description: Updated incident
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IctIncident'
+
   /api/v1/security/scan:
     post:
       tags: [Security Scanner]
@@ -69,6 +163,15 @@ paths:
           description: Info
 
 components:
+  parameters:
+    IncidentId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
   responses:
     NotFound:
       description: Not found
@@ -78,6 +181,105 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    ReportIncidentRequest:
+      type: object
+      required: [title, description, category, severity, affectedServices]
+      properties:
+        title: {type: string}
+        description: {type: string}
+        category:
+          type: string
+          enum:
+            - AVAILABILITY
+            - INTEGRITY
+            - CONFIDENTIALITY
+            - AUTHENTICITY
+            - UNAUTHORIZED_ACCESS
+            - DATA_BREACH
+            - RANSOMWARE
+            - DDOS
+            - INSIDER_THREAT
+            - SUPPLY_CHAIN
+            - OTHER
+        severity: {type: string, enum: [P1_CRITICAL, P2_HIGH, P3_MEDIUM, P4_LOW]}
+        affectedServices:
+          type: array
+          items: {type: string}
+        detectedAt: {type: string, format: date-time, nullable: true}
+        assignedTo: {type: string, nullable: true}
+
+    UpdateIncidentStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [OPEN, INVESTIGATING, CONTAINED, RESOLVED, CLOSED]}
+        containedAt: {type: string, format: date-time, nullable: true}
+        resolvedAt: {type: string, format: date-time, nullable: true}
+        rtoMinutes: {type: integer, nullable: true}
+        rpoMinutes: {type: integer, nullable: true}
+
+    RegulatoryReportRequest:
+      type: object
+      required: [regulatoryReportId]
+      properties:
+        regulatoryReportId: {type: string}
+
+    IctIncident:
+      type: object
+      required:
+        - id
+        - title
+        - description
+        - category
+        - severity
+        - status
+        - affectedServices
+        - detectedAt
+        - reportedAt
+        - reportedToRegulator
+        - createdAt
+        - updatedAt
+        - aggregateRevision
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        description: {type: string}
+        category:
+          type: string
+          enum:
+            - AVAILABILITY
+            - INTEGRITY
+            - CONFIDENTIALITY
+            - AUTHENTICITY
+            - UNAUTHORIZED_ACCESS
+            - DATA_BREACH
+            - RANSOMWARE
+            - DDOS
+            - INSIDER_THREAT
+            - SUPPLY_CHAIN
+            - OTHER
+        severity: {type: string, enum: [P1_CRITICAL, P2_HIGH, P3_MEDIUM, P4_LOW]}
+        status: {type: string, enum: [OPEN, INVESTIGATING, CONTAINED, RESOLVED, CLOSED]}
+        affectedServices:
+          type: array
+          items: {type: string}
+        detectedAt: {type: string, format: date-time}
+        reportedAt: {type: string, format: date-time}
+        containedAt: {type: string, format: date-time, nullable: true}
+        resolvedAt: {type: string, format: date-time, nullable: true}
+        rtoMinutes: {type: integer, nullable: true}
+        rpoMinutes: {type: integer, nullable: true}
+        reportedToRegulator: {type: boolean}
+        regulatoryReportId: {type: string, nullable: true}
+        assignedTo: {type: string, nullable: true}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+        aggregateRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          readOnly: true
+
     ApiError:
       type: object
       properties:

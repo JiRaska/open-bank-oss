@@ -6,6 +6,7 @@ package com.openbank.delegation.infrastructure.messaging
 import com.fasterxml.jackson.core.JsonProcessingException
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.ObjectNode
+import com.openbank.delegation.domain.event.APPROVAL_EVENT_TYPES
 import com.openbank.delegation.domain.event.DelegationSpendReservationStateChanged
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
@@ -25,6 +26,7 @@ class KafkaDelegationOutboxEventPublisher(
     @Channel("delegation-events-out") private val delegationEventsEmitter: MutinyEmitter<String>,
     @Channel("spend-reservation-state-out") private val spendReservationStateEmitter: MutinyEmitter<String>,
     private val objectMapper: ObjectMapper,
+    @Channel("approval-events-out") private val approvalEventsEmitter: MutinyEmitter<String>,
 ) : OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
@@ -37,12 +39,12 @@ class KafkaDelegationOutboxEventPublisher(
         emitterFor(entry).sendMessage(Message.of(withSourceService(entry.payload)).addMetadata(meta)).awaitSuspending()
     }
 
-    private fun emitterFor(entry: OutboxEntry): MutinyEmitter<String> =
-        if (entry.eventType == DelegationSpendReservationStateChanged.EVENT_TYPE) {
-            spendReservationStateEmitter
-        } else {
-            delegationEventsEmitter
-        }
+    private fun emitterFor(entry: OutboxEntry): MutinyEmitter<String> = when (entry.eventType) {
+        DelegationSpendReservationStateChanged.EVENT_TYPE -> spendReservationStateEmitter
+        // ADR-0312 business-signing lifecycle: its own topic, consumed by notification-service.
+        in APPROVAL_EVENT_TYPES -> approvalEventsEmitter
+        else -> delegationEventsEmitter
+    }
 
     private fun partitionKey(entry: OutboxEntry): String {
         if (entry.eventType != DelegationSpendReservationStateChanged.EVENT_TYPE) {

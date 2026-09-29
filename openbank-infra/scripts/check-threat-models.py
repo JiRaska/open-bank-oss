@@ -60,6 +60,108 @@ def money_path_services(rules: pathlib.Path = None) -> list[str]:
     return out
 
 
+GITOPS = REPO / "openbank-infra" / "gitops" / "components"
+IMAGE_REF = re.compile(r"image:[^\n]*?(openbank-[a-z0-9-]+)")
+
+# Deployed workloads that carry NO threat model today (#9167). SHRINK-ONLY: a new deployed
+# workload without one FAILS, and an entry here that stops being a gap fails too, so the list
+# cannot rot into permanence the way a hand-kept scope list does.
+#
+# Why this population and not "every service": the question #9167 asks is whether a service that
+# owns a secret or a NetworkPolicy should need a model, and a workload under gitops/components is
+# exactly one that does — it has an image, a namespace and a policy. Money-path services are a
+# SEPARATE, harder rule above: they have no baseline and never will.
+#
+# The entries are not all the same kind of debt, and the reason says which. A third-party image
+# has a different answer from a bounded context nobody has modelled yet, and flattening the two
+# would make this list read as 23 identical omissions.
+DEPLOYED_BASELINE: dict[str, str] = {
+    "openbank-admin-ui":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-aml-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-analytics-sink":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-ap2-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-audit-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-authz-policy-auditor":
+        "#9167 — agent, not yet modelled",
+    "openbank-campaign-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-case-coordinator-agent":
+        "#9167 — agent, not yet modelled",
+    "openbank-clearing-simulator":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-communication-service":
+        "#9167 — a model exists but carries no STRIDE framing — prose that satisfies the claims gate and not this one",
+    "openbank-control-liveness-sentinel":
+        "#9167 — agent, not yet modelled",
+    "openbank-developer-portal":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-devops-agent":
+        "#9167 — agent, not yet modelled",
+    "openbank-docs-truth-agent":
+        "#9167 — agent, not yet modelled",
+    "openbank-document-renderer":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-document-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-engagement-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-finops-agent":
+        "#9167 — agent, not yet modelled",
+    "openbank-finrep-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-flaky-test-hunter":
+        "#9167 — agent, not yet modelled",
+    "openbank-governance-auditor":
+        "#9167 — agent, not yet modelled",
+    "openbank-keycloak":
+        "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",
+    "openbank-kyb-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-kyc-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-onboarding-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-party-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-pid-service":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-product-catalog":
+        "#9167 — bounded context, not yet modelled",
+    "openbank-pyroscope-agent":
+        "#9167 — third-party image; a model here is about its CONFIGURATION, not code this repo ships",
+    "openbank-referral-service":
+        "#9167 — a model exists but carries no STRIDE framing — prose that satisfies the claims gate and not this one",
+    "openbank-release-steward":
+        "#9167 — agent, not yet modelled",
+    "openbank-statement-service":
+        "#9167 — bounded context, not yet modelled",
+}
+
+
+def deployed_workloads(gitops: pathlib.Path = None) -> list[str]:
+    """Every `openbank-*` image referenced by a manifest under gitops/components.
+
+    Derived, never listed: a hand-kept population is the shape that reads as full coverage while
+    silently shrinking, which is the defect this whole file exists to avoid.
+    """
+    root = gitops or GITOPS
+    if not root.exists():
+        return []
+    found: set[str] = set()
+    for path in sorted(root.rglob("*.yaml")):
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found.update(IMAGE_REF.findall(text))
+    return sorted(found)
+
+
 def evaluate(service: str, tm_dir: pathlib.Path = None) -> tuple[str, str]:
     """Return (status, detail) where status in {ok, missing, stub}."""
     path = (tm_dir or TM_DIR) / f"{service}.md"
@@ -180,6 +282,19 @@ def main() -> int:
     results = [(s, *evaluate(s)) for s in services]
     bad = [(s, st, d) for (s, st, d) in results if st != "ok"]
 
+    # The SECOND population (#9167): every deployed workload, ratcheted. Money-path above is a hard
+    # requirement with no baseline; this one carries today's debt so a NEW deployed workload cannot
+    # join without a model. The ratchet is two-way — a baseline entry that stops being a gap fails
+    # too, so the list cannot outlive its subject the way a hand-kept scope list does.
+    deployed = deployed_workloads()
+    if not deployed:
+        print("::error::check-threat-models: parsed ZERO deployed workloads from gitops/components "
+              "— refusing to report coverage about nobody.")
+        return 1
+    deployed_gaps = {s: st for s in deployed for st, _ in [evaluate(s)] if st != "ok"}
+    new_gaps = sorted(set(deployed_gaps) - set(DEPLOYED_BASELINE))
+    stale = sorted(set(DEPLOYED_BASELINE) - set(deployed_gaps))
+
     if args.report:
         print(f"THREATMODEL_FINDING={1 if bad else 0}")
         print("\n## Threat-model coverage — money-path (ADR-0030 D2)\n")
@@ -195,6 +310,18 @@ def main() -> int:
             print("All money-path services carry a structured threat model. ✅")
         return 0
 
+    for s_ in new_gaps:
+        print(f"::error::{s_}: deployed under gitops/components with no structured threat model "
+              f"(#9167). Write docs/threat-models/{s_}.md, or add it to DEPLOYED_BASELINE with a "
+              f"reason if that is genuinely the right answer for this workload.")
+    for s_ in stale:
+        print(f"::error::DEPLOYED_BASELINE entry `{s_}` is no longer a gap — drop it from "
+              f"check-threat-models.py so the baseline cannot outlive its subject.")
+
+    print(f"SUBJECTS={len(services) + len(deployed)}  # money-path + deployed workloads examined")
+    print(f"deployed-workload coverage (#9167): {len(deployed)} workloads, "
+          f"{len(deployed_gaps)} without a model, {len(DEPLOYED_BASELINE)} baselined, "
+          f"{len(new_gaps)} new, {len(stale)} stale")
     print(f"Threat-model gate (ADR-0030 D2): {len(services)} money-path services")
     for s, st, d in results:
         mark = "OK " if st == "ok" else "!! "
@@ -206,7 +333,15 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    print(f"\nOK: all {len(services)} money-path services have a structured threat model.")
+    if new_gaps or stale:
+        print(
+            f"\nFAIL: {len(new_gaps)} deployed workload(s) with no threat model and not baselined, "
+            f"{len(stale)} stale baseline entr(ies) — #9167.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"\nOK: all {len(services)} money-path services have a structured threat model, "
+          f"and every deployed workload without one is baselined against #9167.")
     return 0
 
 

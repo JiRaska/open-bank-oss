@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.0...audit-service-v0.21.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.20.0...audit-service-v0.21.0) (2026-09-25)
+
+
+### Features
+
+* **treasury:** money-market deal service MVP — four-eyes booking, ledger posting, ČNB facility as HQLA (ADR-0315) ([#10872](https://github.com/JiRaska/open-bank-oss/issues/10872)) ([dad4c4b](https://github.com/JiRaska/open-bank-oss/commit/dad4c4b2801b03ca58cf3d50153310e0066d7ad0))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.19.0...audit-service-v0.20.0) (2026-09-24)
+
+
+### Features
+
+* **fx:** publish fx.fixing.published on ČNB fixing ingest (ADR-0314 D5) ([#10686](https://github.com/JiRaska/open-bank-oss/issues/10686)) ([161bed0](https://github.com/JiRaska/open-bank-oss/commit/161bed0b8c2e1ab97e97aec6f8ceae09c1ae626e))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.5...audit-service-v0.19.0) (2026-09-19)
+
+
+### Features
+
+* **delegation:** business payment signing - N-of-M approvals, trusted payees, single-use release ([#10315](https://github.com/JiRaska/open-bank-oss/issues/10315)) ([94da2b7](https://github.com/JiRaska/open-bank-oss/commit/94da2b7a8c62f9da48db60ac6477063b0af40b5b))
+
 ## [0.18.5](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.18.4...audit-service-v0.18.5) (2026-09-08)
 
 

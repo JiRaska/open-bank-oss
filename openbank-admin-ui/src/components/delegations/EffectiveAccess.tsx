@@ -191,7 +191,7 @@ export function EffectiveAccess({ data }: { data: EffectiveAccessPayload }) {
       {t('Výsledek je částečný. Nedostupné nebo nepovolené zdroje:', 'The result is partial. Unavailable or forbidden sources:')} {' '}
       {partial.map(([source, state]) => `${source} (${state})`).join(', ')}
     </div>}
-    {data.resourceDetailsTruncated && <div role="status" style={{ marginTop: 12, fontSize: 12, color: 'var(--warning)' }}>{t('Zobrazen je detail prvních 50 delegovaných zdrojů.', 'Showing details for the first 50 delegated resources.')}</div>}
+    {data.resourceDetailsTruncated && <div role="status" style={{ marginTop: 12, fontSize: 12, color: 'var(--warning-text)' }}>{t('Zobrazen je detail prvních 50 delegovaných zdrojů.', 'Showing details for the first 50 delegated resources.')}</div>}
 
     {attention.length > 0 && <aside aria-labelledby="delegation-attention-title" style={{ marginTop: 14, padding: 12, borderRadius: 10, border: '1px solid var(--warning-border)', background: 'var(--warning-bg)' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
@@ -248,7 +248,7 @@ function AccessCard({ icon, authority, role, resource, meta, href, capabilities,
     ? capabilities
     : authority === 'card-holder' ? [] : capabilities.filter(isAssignablePresetCapability)
   const hasLegacyEvidence = authority === 'delegated' && effectiveCapabilities.length !== capabilities.length
-  const content = <><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', color: 'var(--accent)' }}>{icon}<strong style={{ color: 'var(--text-primary)' }}>{role}</strong><span style={{ borderRadius: 999, padding: '3px 7px', fontSize: 9.5, fontWeight: 700, color: 'var(--text-secondary)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{authorityLabel}</span></div>
+  const content = <><div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', color: 'var(--accent)' }}>{icon}<strong style={{ color: 'var(--text-primary)' }}>{role}</strong><span style={{ borderRadius: 999, padding: '3px 7px', fontSize: 10, fontWeight: 700, color: 'var(--text-secondary)', background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{authorityLabel}</span></div>
     <div style={{ fontSize: 13, fontWeight: 650, marginTop: 9 }}>{resource}</div><div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 3 }}>{meta}</div>
     {effectiveCapabilities.length > 0 && <div aria-label={t('Účinná práva', 'Effective rights')} style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginTop: 12 }}>{effectiveCapabilities.map(capability => <span key={capability} title={capability} style={{ borderRadius: 999, padding: '4px 8px', fontSize: 10, background: 'var(--surface-3)', border: '1px solid var(--border)' }}>{capabilityLabel(capability, language)}</span>)}</div>}
     {evidence}

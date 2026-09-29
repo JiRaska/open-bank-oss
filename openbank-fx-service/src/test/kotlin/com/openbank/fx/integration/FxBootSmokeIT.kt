@@ -34,7 +34,8 @@ import org.junit.jupiter.api.Test
 class FxBootSmokeIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("fx-events-out", "fx-fixing-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

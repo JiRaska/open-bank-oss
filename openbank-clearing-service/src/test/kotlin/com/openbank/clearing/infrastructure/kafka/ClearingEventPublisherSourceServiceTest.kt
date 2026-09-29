@@ -66,6 +66,7 @@ class ClearingEventPublisherSourceServiceTest {
         creditorIban = "GB29NWBK60161331926819",
         amount = BigDecimal("10.00"),
         status = ClearingStatus.SETTLED,
+        revision = 2,
         createdAt = updatedAt,
         updatedAt = updatedAt,
     )
@@ -84,5 +85,6 @@ class ClearingEventPublisherSourceServiceTest {
 
         assertThat(node.get("eventType").asText()).isEqualTo("openbank.clearing.item.cleared")
         assertThat(node.get("sourceService").asText()).isEqualTo("clearing-service")
+        assertThat(node.get("version").asLong()).isEqualTo(2)
     }
 }

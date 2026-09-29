@@ -6,7 +6,7 @@
 
 import { useEffect, useRef } from 'react'
 import DOMPurify from 'dompurify'
-import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
+import { getMermaid } from '@/lib/docs/mermaidClient'
 
 // Tiny client-side enhancer. Wraps server-rendered markdown content and,
 // after mount, scans for the `<pre data-mermaid>` placeholders the
@@ -16,21 +16,6 @@ import { MERMAID_CONFIG } from '@/lib/docs/mermaidConfig'
 // browser (it manipulates DOM/SVG). Keeping it isolated here means a bug
 // in mermaid loading can never crash the page — at worst the diagram
 // source stays visible.
-type MermaidApi = {
-  initialize: (cfg: object) => void
-  render: (id: string, src: string) => Promise<{ svg: string }>
-}
-
-let mermaidInstance: MermaidApi | null = null
-async function getMermaid(): Promise<MermaidApi> {
-  if (mermaidInstance) return mermaidInstance
-  const mod = await import('mermaid')
-  const m = (mod.default ?? mod) as unknown as MermaidApi
-  m.initialize(MERMAID_CONFIG)
-  mermaidInstance = m
-  return m
-}
-
 function escapeHtml(s: string): string {
   return s.replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c] ?? c))
 }

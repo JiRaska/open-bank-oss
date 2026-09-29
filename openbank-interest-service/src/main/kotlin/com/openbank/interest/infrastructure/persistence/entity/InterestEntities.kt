@@ -4,7 +4,10 @@
 
 package com.openbank.interest.infrastructure.persistence.entity
 
-import com.openbank.interest.domain.model.*
+import com.openbank.interest.domain.model.AccrualStatus
+import com.openbank.interest.domain.model.DayCount
+import com.openbank.interest.domain.model.InterestRateType
+import com.openbank.interest.domain.model.RateIndex
 import com.openbank.interest.domain.tax.TaxResidency
 import com.openbank.interest.domain.tax.TaxpayerType
 import com.openbank.interest.domain.tax.WithholdingRemittanceStatus
@@ -132,6 +135,13 @@ class InterestRateConfigEntity : PanacheEntityBase() {
     // precision through the reference-data boundary; binary/scale truncation changes money.
     @Column(name = "annual_rate", precision = 20, scale = 18)
     var annualRate: BigDecimal = BigDecimal.ZERO
+
+    @Column(name = "rate_index", length = 16)
+    @Enumerated(EnumType.STRING)
+    var rateIndex: RateIndex? = null
+
+    @Column(name = "spread", precision = 20, scale = 18)
+    var spread: BigDecimal? = null
 
     @Column(name = "min_balance", precision = 20, scale = 4)
     var minBalance: BigDecimal = BigDecimal.ZERO

@@ -33,26 +33,35 @@ RULESET_NAME="main-protection"
 # stands in for the whole per-service matrix (see services-ci.yml), so we do
 # not have to enumerate all 29 services here.
 #
+# CI GATE MIGRATION — PHASE 1 OF 2:
+# `Validate manifests` used to be the required context for the three gate
+# shards. That adds one serial hosted-runner allocation after all substantive
+# work is complete; in #9986 the no-op aggregator waited almost seven minutes
+# and then ran for seconds. Require those shards directly while retaining the
+# aggregator during the transition. `Admin UI` remains a separate follow-up:
+# this script cannot itself prove its PR-only skipped-build path. A later change
+# may add it after reviewing that evidence. Another follow-up may remove
+# `Validate manifests` from both this list and ci.yml after the new contexts
+# are observed live; the overlap intentionally preserves shard coverage.
+#
 # NOTE on matrix checks: a job with a matrix produces one check PER cell named
 # "Job (cell)" — e.g. CodeQL becomes "CodeQL (java-kotlin)" and
 # "CodeQL (javascript-typescript)". Add those explicit names if you want CodeQL
 # to gate merges; the bare "CodeQL" context will never match.
 REQUIRED_CHECKS=(
-  "all-green"            # Services CI — aggregates the per-service build matrix
-  "Validate manifests"   # CI — yamllint + shellcheck
-  "Gitleaks"             # Secret scan
-  "issue-hygiene"        # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
+  "all-green"                                # Services CI — aggregates the per-service build matrix
+  "Validate manifests"                       # CI — transitional aggregator; remove only in phase 2
+  "gates (gitops-api)"                       # CI — direct governance shard
+  "gates (lint-supplychain-security)"        # CI — direct governance shard
+  "gates (registry-kotlin-data)"             # CI — direct governance shard
+  "Gitleaks"                                 # Secret scan
+  "issue-hygiene"                            # CI — link-in-PR lint (ADR-0052; rules.yaml: issues = block)
 )
-# NOTE: "Admin UI" (CI) is deliberately NOT gated yet. The committed
-# openbank-admin-ui currently fails type-check (real WIP TypeScript errors +
-# missing committed eslint config), so requiring it would deadlock every merge.
-# Re-add it here once the admin-ui build is green:
-#   "Admin UI"           # CI — Next.js lint + type-check + build
 
-# Solo-maintainer pragmatism: GitHub forbids approving your own PR, so requiring
-# >=1 approval would deadlock a single-maintainer repo. Set to 1+ once there is
-# a second maintainer.
-REQUIRED_APPROVALS=0
+# Fresh-bootstrap default only. Existing rulesets preserve their complete live
+# pull_request rule during this context-only migration. GitHub forbids approving
+# your own PR, so a new single-maintainer ruleset starts at zero approvals.
+BOOTSTRAP_APPROVALS=0
 
 DRY_RUN=0
 REPO=""
@@ -69,43 +78,78 @@ if [ -z "$REPO" ]; then
 fi
 echo "Target repository: $REPO"
 
-# Look up an existing ruleset of this name UP FRONT — we need its id both for the
-# idempotent upsert below AND to carry over its bypass_actors.
-existing_id=$(gh api "repos/$REPO/rulesets" --jq \
-  ".[] | select(.name == \"$RULESET_NAME\") | .id" 2>/dev/null || true)
+# A failed list read is not evidence that the ruleset is absent. Resolve one
+# unambiguous resource or abort before constructing any write.
+rulesets=$(gh api "repos/$REPO/rulesets" --paginate --slurp)
+existing_id=$(echo "$rulesets" | jq -er --arg name "$RULESET_NAME" '
+  if type != "array" or any(.[]; type != "array") then error("invalid ruleset listing")
+  else [ .[][] | select(.name == $name) | .id ] as $ids
+    | if ($ids | length) > 1 then error("ambiguous ruleset name")
+      elif ($ids | length) == 1 then $ids[0] | tostring else "" end
+  end')
 
-# PRESERVE bypass_actors. A ruleset PUT replaces the WHOLE resource, so a
-# hardcoded `bypass_actors: []` would silently WIPE any configured bypass (e.g.
-# the admin/automation RepositoryRole that lets the second instance admin-merge).
-# Read whatever is live and carry it over verbatim; only fall back to empty when
-# there is no existing ruleset (first-time create). The list endpoint omits
-# bypass_actors, so fetch the individual ruleset.
-bypass_json='[]'
+live_json=''
+live_checks_json='[]'
 if [ -n "$existing_id" ]; then
-  # If the ruleset exists we MUST read its bypass actors successfully. A failed
-  # fetch must ABORT, never fall back to empty — coercing a transient API error
-  # to `[]` would silently strip the actors, reintroducing the very bug this
-  # guards against. A legitimately empty list serialises as "[]" (valid JSON),
-  # which is distinct from the empty string produced on gh/jq failure.
-  bypass_json=$(gh api "repos/$REPO/rulesets/$existing_id" \
-    --jq '[.bypass_actors[] | {actor_id, actor_type, bypass_mode}]' 2>/dev/null || true)
-  if ! echo "$bypass_json" | jq -e 'type == "array"' >/dev/null 2>&1; then
-    echo "ERROR: ruleset #$existing_id exists but its bypass_actors could not be read." >&2
-    echo "       Refusing to proceed: a PUT now would WIPE existing bypass actors." >&2
+  live_json=$(gh api "repos/$REPO/rulesets/$existing_id")
+  echo "$live_json" | jq -e --arg name "$RULESET_NAME" '
+    .name == $name and .target == "branch" and .enforcement == "active" and
+    (.rules | type == "array") and (.conditions | type == "object") and
+    (.bypass_actors | type == "array") and
+    ([.rules[] | select(.type == "required_status_checks")] | length == 1) and
+    all(.rules[] | select(.type == "required_status_checks");
+      (.parameters.required_status_checks | type == "array") and
+      all(.parameters.required_status_checks[]; (.context | type == "string")))
+  ' >/dev/null || {
+    echo "ERROR: incomplete or ambiguous live ruleset; refusing update." >&2
     exit 1
-  fi
-  echo "Preserving $(echo "$bypass_json" | jq 'length') bypass actor(s) from ruleset #$existing_id."
+  }
+  live_checks_json=$(echo "$live_json" | jq '
+    .rules[] | select(.type == "required_status_checks")
+    | .parameters.required_status_checks')
 fi
 
 # Build the required_status_checks array as JSON from REQUIRED_CHECKS.
 checks_json=$(printf '%s\n' "${REQUIRED_CHECKS[@]}" \
   | jq -R '{context: .}' | jq -cs .)
 
+# Derive the preflight set instead of maintaining a second context list. Every
+# desired context absent from the live ruleset must already report SUCCESS on
+# one immutable default-branch SHA before it can become required. On a fresh
+# bootstrap this checks the complete desired set. A future REQUIRED_CHECKS edit
+# therefore cannot bypass this guard by forgetting to update another array.
+preflight_checks=$(jq -n \
+  --argjson desired "$checks_json" \
+  --argjson live "$live_checks_json" '
+  [$desired[] | select(.context as $context |
+    all($live[]; .context != $context)) | .context]')
+
+default_branch=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name')
+default_sha=$(gh api "repos/$REPO/commits/$default_branch" --jq '.sha')
+check_runs=$(gh api "repos/$REPO/commits/$default_sha/check-runs?per_page=100" \
+  --paginate --slurp | jq '[.[].check_runs[]]')
+
+while IFS= read -r context; do
+  conclusion=$(echo "$check_runs" | jq -r --arg context "$context" '
+    map(select(.name == $context)) | sort_by(.id) | last | .conclusion // "missing"')
+  case "$conclusion" in
+    success)
+      echo "Preflight: $context = $conclusion on $default_sha"
+      ;;
+    *)
+      echo "ERROR: refusing to require '$context': latest result on default-branch" >&2
+      echo "       commit $default_sha is '$conclusion'." >&2
+      echo "       It may be absent, still running, skipped or failed; wait for SUCCESS" >&2
+      echo "       on that exact commit, or fix its workflow first." >&2
+      exit 1
+      ;;
+  esac
+done < <(echo "$preflight_checks" | jq -r '.[]')
+
 payload=$(jq -n \
   --arg name "$RULESET_NAME" \
-  --argjson approvals "$REQUIRED_APPROVALS" \
+  --argjson approvals "$BOOTSTRAP_APPROVALS" \
   --argjson checks "$checks_json" \
-  --argjson bypass "$bypass_json" \
   '{
     name: $name,
     target: "branch",
@@ -126,12 +170,29 @@ payload=$(jq -n \
         } },
       { type: "required_status_checks",
         parameters: {
+          # Conservative default for a brand-new ruleset. Existing rulesets do
+          # not use this value: their complete live rule is preserved below.
           strict_required_status_checks_policy: true,
           required_status_checks: $checks
         } }
     ],
-    bypass_actors: $bypass
+    bypass_actors: []
   }')
+
+# Phase 1 is additive only. An existing ruleset has already been validated as
+# active above; preserve every live field (including approvals, conditions and
+# bypass actors) and integration binding, changing solely the required-check
+# array by appending missing contexts. Bootstrap defaults never overwrite it.
+if [ -n "$existing_id" ]; then
+  payload=$(echo "$live_json" | jq --argjson checks "$checks_json" '
+    {name, target, enforcement, conditions, rules, bypass_actors}
+    | .rules |= map(if .type == "required_status_checks" then
+        .parameters.required_status_checks as $existing
+        | .parameters.required_status_checks += [
+            $checks[] | select(.context as $context |
+              all($existing[]; .context != $context))]
+      else . end)')
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "--- dry-run: ruleset payload ---"
@@ -139,9 +200,16 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# Idempotent upsert: $existing_id was resolved up front (see bypass preservation).
+# Apply the prepared additive update, or create the bootstrap resource when the
+# unambiguous listing above proved that no matching ruleset exists.
 if [ -n "$existing_id" ]; then
-  echo "Updating existing ruleset #$existing_id ..."
+  # Refuse an observed concurrent edit instead of overwriting another operator.
+  latest_json=$(gh api "repos/$REPO/rulesets/$existing_id")
+  if [ "$(echo "$latest_json" | jq -cS .)" != "$(echo "$live_json" | jq -cS .)" ]; then
+    echo "ERROR: ruleset changed during preparation; read and review it again." >&2
+    exit 1
+  fi
+  echo "Adding missing checks to existing ruleset #$existing_id ..."
   echo "$payload" | gh api -X PUT "repos/$REPO/rulesets/$existing_id" \
     --input - >/dev/null
   echo "Ruleset #$existing_id updated."

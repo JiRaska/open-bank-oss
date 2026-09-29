@@ -44,7 +44,8 @@ Coverage floor: Kover LINE bound `minValue = 40` (vyjímá třídy anotované `@
 | `openbank.clearing.batch-size` | `1000` | max položek načtených na cyklus |
 | `openbank.clearing.netting-enabled` | `true` | net settlement |
 | `openbank.clearing.settlement-cycle-hours` | `4` | kadence cyklu (konfig; rozvrhování TBD) |
-| `openbank.outbox.poll-interval` / `initial-delay` | `5s` / `5s` | kadence outbox dispatcheru |
+| `openbank.outbox.batch-size` | `250` | omezený počet řádků atomicky claimnutých za tick dispatcheru |
+| `openbank.outbox.poll-interval` / `initial-delay` | `2s` / `5s` | kadence outbox dispatcheru |
 | `openbank.rate-limit.max-concurrent-requests` | `500` | guard souběžnosti |
 
 Placeholdery `CHANGE_ME_LOCAL_DEV_ONLY` musí být v produkci nahrazeny tajemstvími vstříknutými z Vaultu (ADR-0017).
@@ -74,7 +75,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 | Dostupnost | 99.9 % | Prometheus `up{service="openbank-clearing-service"}` |
 | Latence p95 GET | < 100 ms | `http_server_requests_seconds` |
 | Latence p95 submit | < 300 ms | zápis do DB |
-| Outbox lag | < 10 s (poll 5 s) | stáří pending na `clearing_outbox` |
+| Outbox lag | < 10 s při návrhové zátěži a zdravém brokeru | stáří pending na `clearing_outbox` |
 | Chybovost | < 0.1 % 5xx | `http_server_requests_seconds_count{status=~"5.."}` |
 
 ## Runbooky
@@ -83,7 +84,10 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 1. `SELECT count(*) FROM clearing_outbox WHERE status='PENDING';`
 2. Zkontroluj dosažitelnost Kafky pro topic `openbank.clearing.batch.event`.
 3. Prohlédni logy dispatcheru: `kubectl logs -l app=openbank-clearing-service | grep ClearingOutboxDispatcher`.
-4. Batch size dispatcheru je 25 s circuit-breakerem/bulkheadem; trvale FAILED řádky nesou `last_error`.
+4. Dispatcher atomicky claimuje nejvýše 250 řádků za tick s circuit-breakerem/bulkheadem; trvale
+   FAILED řádky nesou `last_error`. Maximální settlement s 1 000 položkami proto potřebuje čtyři
+   omezené claimy. Pokud se kvůli latenci brokeru blíží 30s timeoutu dispatcheru, sniž
+   `openbank.outbox.batch-size`; není potřeba vracet event ani databázovou migraci.
 
 ### Settle/trigger vrací 500
 Tělo je `{ "error": "<zpráva>" }`. Častá příčina: `settleBatch` s neznámým id → `IllegalArgumentException("Batch not found")`. Ověř id dávky; čtení přes `GET /batches/{id}`.

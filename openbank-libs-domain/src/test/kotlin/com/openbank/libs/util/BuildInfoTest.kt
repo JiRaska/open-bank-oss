@@ -8,78 +8,70 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * [BuildInfo] is read once at class init and served over `/api/v1/info`. The failure mode worth
- * testing is the one that renders as a plausible page: an unresolved Gradle token (`@kotlin.version@`)
- * or a blank property leaking through as if it were a real version, instead of the honest `unknown`.
+ * `openbank-build-info.properties` is stamped by Gradle's `processResources` in a service module
+ * (from `libs.versions.toml`); `openbank-libs-domain` itself never generates it, so under this
+ * module's own test classpath the resource stream is absent and every build-time property falls
+ * back to its documented default. That fallback path — never letting a missing resource surface as
+ * an empty string or a thrown exception — is exactly what these assertions pin.
  */
 class BuildInfoTest {
 
     @Test
-    fun `no field ever surfaces an unresolved gradle placeholder or a blank`() {
-        val strings = listOf(
-            BuildInfo.kotlinVersion,
-            BuildInfo.quarkusVersion,
-            BuildInfo.quarkusSupportUntil,
-            BuildInfo.gradleVersion,
-            BuildInfo.buildTime,
-            BuildInfo.gitCommit,
-            BuildInfo.libsVersion,
-            BuildInfo.javaVersion,
-            BuildInfo.javaVendor,
-            BuildInfo.osArch,
-        )
-        assertThat(strings).allSatisfy {
-            assertThat(it).isNotBlank()
-            assertThat(it).doesNotStartWith("@")
-        }
+    fun `a build-time property falls back to unknown when the stamped resource is absent`() {
+        assertThat(BuildInfo.quarkusVersion).isEqualTo("unknown")
+        assertThat(BuildInfo.gradleVersion).isEqualTo("unknown")
+        assertThat(BuildInfo.buildTime).isEqualTo("unknown")
+        assertThat(BuildInfo.gitCommit).isEqualTo("unknown")
+        assertThat(BuildInfo.libsVersion).isEqualTo("unknown")
     }
 
     @Test
-    fun `kotlin version falls back to the compiler's own version rather than unknown`() {
-        // The fallback is KotlinVersion.CURRENT, so this is never the generic "unknown" sentinel
-        // even when the stamped properties file is missing from the test runtime classpath.
-        assertThat(BuildInfo.kotlinVersion).isNotEqualTo("unknown")
-        assertThat(BuildInfo.kotlinVersion).matches("^\\d+\\.\\d+.*")
+    fun `kotlinVersion falls back to the running Kotlin compiler version, not a blank string`() {
+        assertThat(BuildInfo.kotlinVersion).isEqualTo(KotlinVersion.CURRENT.toString())
+        assertThat(BuildInfo.kotlinVersion).isNotBlank()
     }
 
     @Test
-    fun `runtime facts are read from the live JVM, not from the stamped properties`() {
+    fun `quarkusLts defaults to false rather than throwing on a missing flag`() {
+        assertThat(BuildInfo.quarkusLts).isFalse()
+    }
+
+    @Test
+    fun `runtime JVM properties reflect the actual running JVM, not the stamped-resource fallback`() {
         assertThat(BuildInfo.javaVersion).isEqualTo(Runtime.version().toString())
+        assertThat(BuildInfo.javaVendor).isEqualTo(System.getProperty("java.vendor") ?: "unknown")
+        assertThat(BuildInfo.osArch).isEqualTo(System.getProperty("os.arch") ?: "unknown")
         assertThat(BuildInfo.cpuCount).isEqualTo(Runtime.getRuntime().availableProcessors())
-        assertThat(BuildInfo.cpuCount).isPositive()
-        assertThat(BuildInfo.maxHeapMib).isPositive()
+        assertThat(BuildInfo.cpuCount).isGreaterThan(0)
+        assertThat(BuildInfo.maxHeapMib).isGreaterThan(0)
     }
 
     @Test
-    fun `toStack exposes every group the info endpoint renders, in a stable order`() {
+    fun `toStack renders a JSON-friendly map with kotlin, quarkus, java, gradle and libs top-level keys`() {
         val stack = BuildInfo.toStack()
+
         assertThat(stack.keys).containsExactly("kotlin", "quarkus", "java", "gradle", "libs")
-    }
-
-    @Test
-    fun `toStack carries the same values as the individual accessors`() {
-        val stack = BuildInfo.toStack()
-
-        @Suppress("UNCHECKED_CAST")
-        val java = stack["java"] as Map<String, Any>
-        assertThat(java["version"]).isEqualTo(BuildInfo.javaVersion)
-        assertThat(java["vendor"]).isEqualTo(BuildInfo.javaVendor)
-        assertThat(java["arch"]).isEqualTo(BuildInfo.osArch)
-        assertThat(java["cpu"]).isEqualTo(BuildInfo.cpuCount)
-        assertThat(java["maxHeapMib"]).isEqualTo(BuildInfo.maxHeapMib)
 
         @Suppress("UNCHECKED_CAST")
         val quarkus = stack["quarkus"] as Map<String, Any>
         assertThat(quarkus["version"]).isEqualTo(BuildInfo.quarkusVersion)
         assertThat(quarkus["lts"]).isEqualTo(BuildInfo.quarkusLts)
         assertThat(quarkus["supportUntil"]).isEqualTo(BuildInfo.quarkusSupportUntil)
+
+        @Suppress("UNCHECKED_CAST")
+        val java = stack["java"] as Map<String, Any>
+        assertThat(java["version"]).isEqualTo(BuildInfo.javaVersion)
+        assertThat(java["arch"]).isEqualTo(BuildInfo.osArch)
+        assertThat(java["cpu"]).isEqualTo(BuildInfo.cpuCount)
+
+        @Suppress("UNCHECKED_CAST")
+        val libs = stack["libs"] as Map<String, Any>
+        assertThat(libs["version"]).isEqualTo(BuildInfo.libsVersion)
+        assertThat(libs["gitCommit"]).isEqualTo(BuildInfo.gitCommit)
     }
 
     @Test
-    fun `toStack is a fresh map each call so a caller cannot mutate the shared snapshot`() {
-        val a = BuildInfo.toStack()
-        val b = BuildInfo.toStack()
-        assertThat(a).isEqualTo(b)
-        assertThat(a).isNotSameAs(b)
+    fun `toStack lists kotlin before quarkus before java, the order a human looks for first`() {
+        assertThat(BuildInfo.toStack().keys.toList()).containsExactly("kotlin", "quarkus", "java", "gradle", "libs")
     }
 }

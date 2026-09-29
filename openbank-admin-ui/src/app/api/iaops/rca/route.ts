@@ -25,6 +25,13 @@ function holmesBase(): string {
   return process.env.HOLMES_URL ?? 'http://localhost:18080'
 }
 
+function caseCoordinatorBase(): string {
+  if (process.env.SERVICES_HOST === 'container') {
+    return 'http://case-coordinator-agent.platform.svc:8146'
+  }
+  return (process.env.CASE_COORDINATOR_URL ?? 'http://localhost:8146').replace(/\/$/, '')
+}
+
 function extractRca(body: unknown): string {
   if (typeof body === 'string') return body.slice(0, 8000)
   if (body && typeof body === 'object') {
@@ -35,6 +42,105 @@ function extractRca(body: unknown): string {
     return JSON.stringify(body).slice(0, 8000)
   }
   return String(body).slice(0, 8000)
+}
+
+type ShadowCaseResult =
+  | { recorded: true; caseId: string }
+  | { recorded: false; reason: 'not_authorized' | 'quota_exhausted' | 'case_closed' | 'unavailable' }
+
+async function alertFingerprint(ask: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(ask.trim()))
+  return Array.from(new Uint8Array(digest))
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('')
+    .slice(0, 16)
+}
+
+async function recordShadowCase(
+  ask: string,
+  rca: string,
+  accessToken: string,
+): Promise<ShadowCaseResult> {
+  const fingerprint = await alertFingerprint(ask)
+  const subjectRef = `rca-${fingerprint}`
+  const deterministicCaseId = `case-incident-response-${subjectRef}`
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+  }
+  try {
+    const opened = await fetch(`${caseCoordinatorBase()}/api/v1/case-coordinator/cases`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        caseClass: 'incident-response',
+        subjectRef,
+        openedBy: 'case-coordinator',
+        dispositionTarget: `alert:${fingerprint}`,
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (opened.status === 403) return { recorded: false, reason: 'not_authorized' }
+    if (opened.status === 429) return { recorded: false, reason: 'quota_exhausted' }
+    if (opened.status !== 201 && opened.status !== 409) {
+      console.error('Shadow case open failed', { status: opened.status })
+      return { recorded: false, reason: 'unavailable' }
+    }
+    const newlyOpened = opened.status === 201
+    const caseId = newlyOpened
+      ? ((await opened.json().catch(() => null)) as { caseId?: string } | null)?.caseId
+      : deterministicCaseId
+    if (!caseId) return { recorded: false, reason: 'unavailable' }
+
+    const signalUrl = `${caseCoordinatorBase()}/api/v1/case-coordinator/cases/${encodeURIComponent(caseId)}/signals`
+    if (!newlyOpened) {
+      const existing = await fetch(`${caseCoordinatorBase()}/api/v1/case-coordinator/cases/${encodeURIComponent(caseId)}`, {
+        headers,
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (existing.status === 404) return { recorded: false, reason: 'case_closed' }
+      if (!existing.ok) return { recorded: false, reason: 'unavailable' }
+      const body = await existing.json().catch(() => null) as { status?: string } | null
+      if (!body || body.status === 'CLOSED') return { recorded: false, reason: 'case_closed' }
+    } else {
+      const joined = await fetch(signalUrl, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ type: 'join', agentId: 'rca-investigator', role: 'incident-investigator' }),
+        cache: 'no-store',
+        signal: AbortSignal.timeout(10_000),
+      })
+      if (joined.status === 403) return { recorded: false, reason: 'not_authorized' }
+      if (!joined.ok) {
+        console.error('Shadow case join failed', { status: joined.status })
+        return { recorded: false, reason: 'unavailable' }
+      }
+    }
+    const contributed = await fetch(signalUrl, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        type: 'contribute',
+        agentId: 'rca-investigator',
+        summary: rca,
+        evidenceRefs: [`holmes-rca:${fingerprint}`],
+        contested: false,
+      }),
+      cache: 'no-store',
+      signal: AbortSignal.timeout(10_000),
+    })
+    if (contributed.status === 403) return { recorded: false, reason: 'not_authorized' }
+    if (!contributed.ok) {
+      console.error('Shadow case contribution failed', { status: contributed.status })
+      return { recorded: false, reason: 'unavailable' }
+    }
+    return { recorded: true, caseId }
+  } catch {
+    console.error('Shadow case recording failed')
+    return { recorded: false, reason: 'unavailable' }
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -65,7 +171,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'upstream_error' }, { status: 502 })
     }
     const raw = await upstream.json().catch(() => null)
-    return NextResponse.json({ rca: extractRca(raw) })
+    const rca = extractRca(raw)
+    const mayRecordCase = (session.user.roles ?? []).some(role => role === 'ROLE_ADMIN' || role === 'ROLE_OPERATOR')
+    const shadowCase: ShadowCaseResult = mayRecordCase && session.user.accessToken
+      ? await recordShadowCase(ask, rca, session.user.accessToken)
+      : { recorded: false, reason: 'not_authorized' }
+    return NextResponse.json({ rca, shadowCase })
   } catch {
     console.error('HolmesGPT RCA request failed')
     return NextResponse.json({ error: 'upstream_error' }, { status: 502 })

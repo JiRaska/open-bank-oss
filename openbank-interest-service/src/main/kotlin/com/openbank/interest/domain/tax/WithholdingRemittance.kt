@@ -20,7 +20,7 @@ enum class WithholdingRemittanceStatus {
     PENDING,
 
     /** The downstream payment/filing consumer confirmed the odvod. */
-    SETTLED
+    SETTLED,
 }
 
 /**

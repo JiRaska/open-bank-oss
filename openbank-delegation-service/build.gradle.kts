@@ -63,6 +63,9 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Standalone Flyway upgrade tests run outside Quarkus bootstrap, which installs this plugin.
+    // Keep its version aligned through the existing Quarkus BOM.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     // Secret-free Testcontainers lifecycle evidence for the immutable Test Intelligence envelope.
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)

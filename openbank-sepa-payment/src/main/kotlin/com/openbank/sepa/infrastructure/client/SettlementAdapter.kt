@@ -8,6 +8,7 @@ import com.openbank.sepa.application.port.out.SettlementOutcome
 import com.openbank.sepa.application.port.out.SettlementPort
 import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
+import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -26,7 +27,9 @@ import java.util.UUID
 @ApplicationScoped
 class SettlementAdapter(
     @RestClient private val client: TransactionServiceClient,
-    private val oidcClient: Instance<OidcClient>,
+    // #10486: sepa-payment's OWN Keycloak client `openbank-sepa-payment` (ROLE_API only), never the
+    // shared default client. transaction-service's OPA grants it transaction.create/.reverse only.
+    @NamedOidcClient("m2m") private val oidcClient: Instance<OidcClient>,
     private val clock: Clock,
 ) : SettlementPort {
 

@@ -6,6 +6,9 @@ package com.openbank.notification.infrastructure.rest
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.approval.SelfApprovalNotAllowedException
+import com.openbank.libs.approval.web.ApprovalResponse
+import com.openbank.libs.approval.web.DecideApprovalRequest
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -111,5 +114,19 @@ class ApprovalResourceTest {
         val response = resource.decide("approval-1", DecideApprovalRequest(approve = true))
 
         assertThat(response.status).isEqualTo(200)
+    }
+
+    @Test
+    fun `the maker cannot approve their own request through this endpoint`() {
+        // The guard itself is proven against a real store in libs-runtime's
+        // ApprovalEndpointSupportTest; this pins that the resource passes the AUTHENTICATED
+        // maker as checker and lets the refusal propagate rather than swallowing it into a 200.
+        val maker = "operator-1"
+        val guarding = mockk<ApprovalStore> {
+            coEvery { decide("approval-1", maker, any()) } throws SelfApprovalNotAllowedException(maker)
+        }
+        assertThatThrownBy {
+            runBlocking { resourceWith(guarding, maker).decide("approval-1", DecideApprovalRequest(approve = true)) }
+        }.isInstanceOf(SelfApprovalNotAllowedException::class.java)
     }
 }

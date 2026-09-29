@@ -45,7 +45,8 @@ dependencies {
     implementation(libs.aws.sdk.s3)
     // ADR-0162 D2: logic-less Handlebars templating behind TemplateRenderPort.
     implementation(libs.handlebars)
-    // ADR-0162 D4 phase 1: PAdES-B sealing behind SignatureSealPort.
+    // ADR-0162 D4 phase 1: PAdES-B sealing behind SignatureSealPort. BouncyCastle version is the
+    // catalog `bouncycastle` ref, force-pinned fleet-wide in openbank.dependency-vulnerability-pins.
     implementation(libs.pdfbox)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)
@@ -75,6 +76,14 @@ dependencies {
 // (ADR-0063). pactbroker.* / pact.provider.* props are injected by CI with -D; on a pull request
 // none of them are set, and DocumentPactProviderVerificationTest is @PactFolder-sourced, so it
 // runs regardless — that is the point (issue #2338).
+// Test heap: the default fork heap was enough while fewer @TestProfile classes each forced their
+// own Quarkus boot. The business-agreement ITs add two more boots (one with remote stubs, one with
+// a denying PDP), and a local full-suite run died with `OutOfMemoryError: Java heap space` inside
+// the test executor. Same shape and same per-module remedy as account-service.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 // Pact rootDir + Pact Broker property forwarding centralised into
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the

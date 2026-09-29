@@ -22,7 +22,7 @@ This documentation is published directly by the service at the management endpoi
 - **Auth:** OIDC disabled (internal platform service, no external exposure)
 - **Scheduler:** probes all 27 fleet services every 30 minutes (`@Scheduled(every = "30m")`)
 - **Scan checks:** OWASP Top 10 2021, security headers, CORS, unauthenticated actuators, OpenAPI exposure
-- **State:** none persisted — scan results and ICT incidents live in in-memory maps and are lost on pod restart
-- **Events:** one topic, `openbank.security.ict.incident`, emitted directly to Kafka (no outbox; the unused one was removed in #4709)
+- **State:** scan results remain in memory; ICT incidents and their lifecycle revision are persisted in Postgres
+- **Events:** `openbank.security.ict.incident` is written atomically to the ICT incident outbox and relayed when dispatch is enabled
 - **ICT incidents:** DORA Art. 17 lifecycle (OPEN → INVESTIGATING → CONTAINED → RESOLVED → CLOSED)
 - **Scoring:** 0–100 per service, letter grade A+ / A / B / C / D / F

@@ -45,6 +45,9 @@ class SignatureCeremonyEntity {
     // Never Instant.EPOCH (#3882): a defaulted EPOCH survives every isNotNull() check and
     // reads as 1970 in audit/sort paths. Entities are populated via `.also {}` right after
     // construction, so now() is only the never-silent pre-population value.
+    @field:Column(name = "parallel_signing")
+    var parallelSigning: Boolean = false
+
     @field:Column(name = "created_at")
     var createdAt: Instant = Instant.now()
 }

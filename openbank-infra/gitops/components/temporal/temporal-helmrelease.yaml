@@ -137,7 +137,7 @@ spec:
       - ServerSideApply=true
 ---
 # CNPG PostgreSQL cluster for Temporal.
-# Single instance (sandbox) — scale to 2+ for production.
+# Primary + hot standby (ADR-0159/ADR-0325) — Temporal backs the payment sagas.
 # S3 backups via EKS Pod Identity (no secret needed).
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -164,8 +164,33 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # HA (ADR-0159, ADR-0325): a platform database money-path services depend on
+  # (rules.yaml: money_path_platform_databases). Temporal persists every payment saga's workflow state here; with it down no
+  # saga can start, advance or compensate, so it gets
+  # the money-path shape: primary + hot standby on DIFFERENT nodes (required
+  # hostname anti-affinity, applied in a staged ADR-0325 wave), soft AZ spread, and
+  # switchover-first updates.
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  # ADR-0325 wave: required anti-affinity + zone spread. This changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: temporal-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 10Gi
@@ -200,6 +225,10 @@ metadata:
   name: temporal-db-daily
   namespace: temporal
 spec:
+  # CNPG reads this only at creation: without it the cluster has no recovery
+  # point until the first scheduled run, while Ready and ContinuousArchiving
+  # both read True. Adding it to a cluster that already exists is inert.
+  immediate: true
   schedule: "0 30 3 * * *"
   backupOwnerReference: self
   cluster:
@@ -208,7 +237,7 @@ spec:
 # ExternalSecret pulls DB credentials from OpenBao KV.
 # Path: secret/data/temporal/db
 # Keys expected: DB_HOST, DB_USER, DB_PASSWORD
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: temporal-db-credentials

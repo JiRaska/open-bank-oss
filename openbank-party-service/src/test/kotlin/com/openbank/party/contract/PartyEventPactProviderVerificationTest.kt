@@ -15,6 +15,9 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
+import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.PartyUseCase
 import com.openbank.party.application.port.out.PartyRepository
 import com.openbank.party.domain.model.AmlStatus
 import com.openbank.party.domain.model.KycStatus
@@ -29,6 +32,7 @@ import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
@@ -83,7 +87,10 @@ import java.util.concurrent.TimeUnit
  * of continuing to rerun a stale run object.
  */
 @QuarkusTest
-@QuarkusTestResource(com.openbank.party.it.PostgresRedpandaTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
+)
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_KYC"])
 @Provider("openbank-party-service")
 @PactBroker(enablePendingPacts = "true")
@@ -96,6 +103,9 @@ class PartyEventPactProviderVerificationTest {
 
     @Inject
     lateinit var partyRepository: PartyRepository
+
+    @Inject
+    lateinit var partyUseCase: PartyUseCase
 
     @Inject
     lateinit var vertx: Vertx
@@ -353,6 +363,11 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    @State("no party exists for the id")
+    fun noPartyExistsForId() {
+        // The pact uses an id no positive provider state seeds; the endpoint must preserve 404.
+    }
+
     /**
      * State for vop-service's `PartyNameLookupPactConsumerTest` (issue #2255): hop 2 of the ADR-0171
      * §4 VoP name resolution reads `legalName`/`tradingName` off `GET /api/v1/parties/{id}`, and the
@@ -389,12 +404,63 @@ class PartyEventPactProviderVerificationTest {
         )
     }
 
+    @State("an active human mandate exists for an active company")
+    fun activeHumanMandateExistsForActiveCompany() {
+        partyExistsWithLegalAndTradingName()
+        runOnVertxContext {
+            if (partyRepository.findById(DELEGATION_ACTOR_ID) == null) {
+                partyRepository.save(
+                    Party(
+                        id = DELEGATION_ACTOR_ID,
+                        partyType = PartyType.INDIVIDUAL,
+                        status = PartyStatus.ACTIVE,
+                        legalName = "Pact Delegation Actor",
+                        tradingName = null,
+                        dateOfBirth = null,
+                        nationality = null,
+                        taxId = null,
+                        registrationNumber = null,
+                        email = "pact-delegation-actor@example.com",
+                        phone = null,
+                        address = null,
+                        kycStatus = KycStatus.APPROVED,
+                        createdAt = Instant.now(),
+                        updatedAt = Instant.now(),
+                        amlStatus = AmlStatus.NOT_SCREENED,
+                    ),
+                )
+            }
+            partyUseCase.grantMandate(
+                GrantMandateCommand(
+                    principalPartyId = VOP_NAME_PARTY_ID,
+                    agentPartyId = DELEGATION_ACTOR_ID,
+                    role = MandateRole.LEGAL_REPRESENTATIVE,
+                    authority = MandateAuthority.SOLE,
+                    requiredSignatures = 1,
+                    source = MandateSource.REGISTRY,
+                    evidenceRef = "synthetic-pact-fixture",
+                ),
+            )
+        }
+    }
+
     companion object {
         private val FIXED_PARTY_ID = UUID.fromString("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
 
         /** Must equal `PartyNameLookupPactConsumerTest.PACT_PARTY_ID` (openbank-vop-service). */
         private val VOP_NAME_PARTY_ID = UUID.fromString("b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9")
+        private val DELEGATION_ACTOR_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b3b3b3b3b3b3")
         private val KYB_MANDATE_PRINCIPAL_ID = UUID.fromString("c1c1c1c1-d2d2-4e4e-8f8f-a1a1a1a1a1a1")
         private val KYB_MANDATE_AGENT_ID = UUID.fromString("d1d1d1d1-e2e2-4f4f-8a8a-b1b1b1b1b1b1")
+    }
+
+    /**
+     * The negative state: deliberately seeds NOTHING — see the account-service twin. An unknown
+     * party id must answer 404, not a 200 with empty names, which VoP would read as a real "no
+     * name held" for the payee.
+     */
+    @State("no party exists with the unknown id")
+    fun noPartyWithUnknownId() {
+        // Intentionally empty.
     }
 }

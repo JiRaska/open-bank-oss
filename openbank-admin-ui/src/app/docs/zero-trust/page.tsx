@@ -299,10 +299,15 @@ export default async function ZeroTrustPage() {
                 </span>
               </div>
               <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: '10px' }}>
-                {t(
-                  `${sc.engine} ověřuje Cosign podpisy obrazů (${sc.policy}). Dnes v režimu Audit — nepodepsané obrazy se reportují, nic neblokuje. Roadmapa: podepisovat v CI → přepnout na Enforce.`,
-                  `${sc.engine} verifies Cosign image signatures (${sc.policy}). In Audit mode today — unsigned images are reported, nothing is blocked. Roadmap: sign in CI → flip to Enforce.`,
-                )}
+                {sc.enforced
+                  ? t(
+                      `${sc.engine} při admission ověřuje Cosign podpis obrazu i podepsanou CycloneDX SBOM attestaci (${sc.policy}). Režim Enforce — obraz bez nich je odmítnut.`,
+                      `${sc.engine} verifies the Cosign image signature and the signed CycloneDX SBOM attestation at admission (${sc.policy}). Enforce mode — an image lacking either is rejected.`,
+                    )
+                  : t(
+                      `${sc.engine} ověřuje Cosign podpis obrazu i SBOM attestaci (${sc.policy}). Režim Audit — chybějící se reportuje, nic neblokuje.`,
+                      `${sc.engine} verifies the Cosign image signature and SBOM attestation (${sc.policy}). Audit mode — gaps are reported, nothing is blocked.`,
+                    )}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 {sc.rekor && (

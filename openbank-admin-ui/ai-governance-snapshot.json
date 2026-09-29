@@ -3,7 +3,7 @@
   "adrStatus": "Accepted",
   "phase": 2,
   "totalPhases": 5,
-  "phaseLabel": "Read-only oversight active — HITL proposal queue live; HolmesGPT + copilot deployed (proposal-only, no autonomous state-changing action)",
+  "phaseLabel": "Governed oversight active — HITL queue live; HolmesGPT shadow evidence + copilot deployed (no autonomous business action)",
   "agentsActing": 0,
   "phaseRoadmap": [
     {
@@ -102,7 +102,7 @@
       "id": "D9",
       "title": "Phasing (blast radius grows with controls)",
       "status": "partial",
-      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. The first read-only oversight agent — HolmesGPT (rca-investigator, ADR-0088), which investigates alerts and proposes a root cause without acting — is now deployed, and the customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes state-changing action yet. Phases 3–5 (dev agent → money-path → tamper-evidence) follow."
+      "detail": "Phase 1 controls live and ENFORCING (deny-by-default + block); the phase-2 HITL proposal queue is shipped. HolmesGPT (rca-investigator, ADR-0091) investigates only on operator request; an authorized operator may persist its finding into an ADR-0271 SHADOW case, but it never remediates or changes banking state. The customer-facing copilot (ADR-0089) runs in its own SCA-gated regime (proposes; the bank disposes). No agent takes autonomous business action. Phases 3–5 (dev agent → money-path → tamper-evidence) follow."
     }
   ],
   "decisionSummary": {
@@ -186,8 +186,8 @@
   "facts": {
     "agentCharters": {
       "source": "openbank-libs/governance/agents.yaml",
-      "sha256": "96b996a517fb3ea2",
-      "count": 19,
+      "sha256": "d22737eabb08d8a8",
+      "count": 20,
       "ids": [
         "compliance-officer",
         "ledger-domain-engineer",
@@ -197,6 +197,7 @@
         "mcp-anonymous",
         "ap2-anonymous",
         "card-scheme-bulletin-agent",
+        "card-dispute-evidence-agent",
         "finops-agent",
         "devops-agent",
         "control-liveness-sentinel",
@@ -210,7 +211,7 @@
         "business-copilot"
       ],
       "byPlane": {
-        "control": 12,
+        "control": 13,
         "development": 2,
         "customer": 3,
         "business": 2
@@ -222,11 +223,11 @@
     },
     "promptRegistryCoverage": {
       "source": "openbank-libs/governance/prompts/registry.yaml",
-      "sha256": "3933380548aa6da8",
+      "sha256": "a3e89e8ca8fb050f",
       "counts": {
         "external": 2,
         "not-applicable": 2,
-        "pending": 3,
+        "pending": 4,
         "registered": 12
       },
       "idsByStatus": {
@@ -240,6 +241,7 @@
         ],
         "pending": [
           "card-scheme-bulletin-agent",
+          "card-dispute-evidence-agent",
           "kyb-analyst",
           "business-copilot"
         ],
@@ -285,6 +287,7 @@
         "rca-investigator": [],
         "ledger-domain-engineer": [],
         "card-scheme-bulletin-agent": [],
+        "card-dispute-evidence-agent": [],
         "mcp-anonymous": [],
         "ap2-anonymous": [],
         "finops-agent": [
@@ -450,7 +453,7 @@
     "provenance": {
       "curated": {
         "source": "openbank-libs/governance/ai-rollout.yaml",
-        "sha256": "2bd1d114462d2c5f"
+        "sha256": "b4ddd769c30c0212"
       },
       "generatedBy": ".github/scripts/gen-ai-governance-snapshot.py"
     }

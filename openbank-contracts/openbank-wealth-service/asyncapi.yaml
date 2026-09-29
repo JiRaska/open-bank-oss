@@ -1,0 +1,180 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# Everything below is DERIVED from the code that runs — the payload classes in
+# `WealthEventPayloads.kt` and `KafkaWealthOutboxEventPublisher`, which emits them verbatim.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Wealth Service — events
+  version: 1.0.0
+  description: |
+    Lifecycle of a customer-declared off-platform holding (ADR-0301): something the customer says
+    they own and the bank does not hold.
+
+    **Transactional outbox.** Events are written to `wealth_outbox` in the same transaction as the
+    holding row and dispatched afterwards (`WealthOutboxDispatcher`,
+    `KafkaWealthOutboxEventPublisher`), so a published event always corresponds to a committed
+    change.
+
+    **Every amount here is an assertion, not a bank figure.** `valuationSource` says whose
+    assertion: `CUSTOMER_DECLARED` is what the customer typed and is never verified. No consumer
+    may treat any amount on this topic as a position, a balance, or an input to pricing or credit.
+
+    **No itemised description of what a customer owns reaches this topic.** The holding's label,
+    its external reference and its evidence document ids stay inside the service. ADR-0301 D7
+    limits every downstream use to counts and totals, so a segment rule learns the type and the
+    amount and nothing about the object itself.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`wealth-service`)."
+
+channels:
+  wealthEvents:
+    address: openbank.wealth.events
+    title: Declared holding lifecycle
+    description: |
+      One partition, one replica, `cleanup.policy: delete`, `retention.ms: 604800000` (7 days) —
+      `openbank-infra/gitops/components/wealth/kafka-topic.yaml`. A change feed, not a source of
+      truth: a consumer rebuilding a projection seeds from `GET /api/v1/holdings` and follows the
+      topic.
+
+      **Partitioning key: `aggregateId`** = the holding id (`OutboxKafkaHeaders.partitionKey`), so
+      every event about one holding stays ordered.
+    messages:
+      HoldingDeclared:
+        $ref: '#/components/messages/HoldingDeclared'
+      HoldingRevalued:
+        $ref: '#/components/messages/HoldingRevalued'
+      HoldingWithdrawn:
+        $ref: '#/components/messages/HoldingWithdrawn'
+
+operations:
+  publishWealthEvents:
+    action: send
+    channel:
+      $ref: '#/channels/wealthEvents'
+    summary: wealth-service publishes declared-holding lifecycle events.
+
+components:
+  messages:
+    HoldingDeclared:
+      name: wealth.holding.declared.v1
+      summary: "A customer declared a holding the bank does not hold."
+      payload:
+        $ref: '#/components/schemas/HoldingDeclared'
+    HoldingRevalued:
+      name: wealth.holding.revalued.v1
+      summary: "The value was restated. This does NOT move any loan's ECL (ADR-0301 D3)."
+      payload:
+        $ref: '#/components/schemas/HoldingRevalued'
+    HoldingWithdrawn:
+      name: wealth.holding.withdrawn.v1
+      summary: "The customer removed the holding. Refused while pledged as lending collateral."
+      payload:
+        $ref: '#/components/schemas/HoldingWithdrawn'
+
+  schemas:
+    HoldingType:
+      type: string
+      enum:
+        - REAL_ESTATE
+        - COLLECTIBLE
+        - EXTERNAL_SECURITIES
+        - EXTERNAL_COMPANY_STAKE
+        - VEHICLE
+        - EXTERNAL_DEPOSIT
+        - PRIVATE_CLAIM
+        - MORTGAGE
+        - CONSUMER_CREDIT
+        - PRIVATE_DEBT
+        - OTHER_LIABILITY
+
+    ValuationSource:
+      type: string
+      enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]
+
+    HoldingDeclared:
+      type: object
+      description: "Constructor properties of `HoldingDeclared` in `WealthEventPayloads.kt`."
+      required:
+        - holdingId
+        - ownerPartyId
+        - holdingType
+        - amount
+        - currency
+        - valuedAt
+        - valuationSource
+        - ownershipShare
+        - occurredAt
+        - sourceService
+      properties:
+        holdingId: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        holdingType: { $ref: '#/components/schemas/HoldingType' }
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        valuedAt:
+          type: string
+          format: date
+          description: When the value was ESTABLISHED, not when the row was written.
+        valuationSource: { $ref: '#/components/schemas/ValuationSource' }
+        ownershipShare: { type: number }
+        occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.
+
+    HoldingRevalued:
+      type: object
+      description: "Constructor properties of `HoldingRevalued` in `WealthEventPayloads.kt`."
+      required:
+        - holdingId
+        - ownerPartyId
+        - holdingType
+        - amount
+        - currency
+        - valuedAt
+        - valuationSource
+        - ownershipShare
+        - occurredAt
+        - sourceService
+      properties:
+        holdingId: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        holdingType: { $ref: '#/components/schemas/HoldingType' }
+        amount: { type: number }
+        currency: { type: string, minLength: 3, maxLength: 3 }
+        valuedAt: { type: string, format: date }
+        valuationSource: { $ref: '#/components/schemas/ValuationSource' }
+        ownershipShare: { type: number }
+        occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.
+
+    HoldingWithdrawn:
+      type: object
+      description: "Constructor properties of `HoldingWithdrawn` in `WealthEventPayloads.kt`."
+      required: [holdingId, ownerPartyId, holdingType, occurredAt, sourceService]
+      properties:
+        holdingId: { type: string, format: uuid }
+        ownerPartyId: { type: string, format: uuid }
+        holdingType: { $ref: '#/components/schemas/HoldingType' }
+        occurredAt: { type: string, format: date-time }
+        sourceService:
+          type: string
+          const: wealth-service
+          description: The producer's own attribution claim; audit-service would otherwise derive one.

@@ -28,129 +28,277 @@ tests:
     input_series:
       - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
         values: "1600000000+0x40"
@@ -173,6 +321,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -212,6 +362,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -230,11 +382,15 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -249,6 +405,10 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 30m
@@ -288,131 +448,281 @@ tests:
     input_series:
       - series: 'up{container="postgres",namespace="accounts",pod="accounts-db-1",job="accounts-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="accounts-db-2",job="accounts-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
         values: "1600000000+0x40"
@@ -435,6 +745,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -474,6 +786,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -492,11 +806,15 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -512,12 +830,426 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
+        values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 30m
         alertname: PostgresClusterUnscraped
         exp_alerts: []
       - eval_time: 40m
         alertname: PostgresClusterDeclaredNotDeployed
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: PostgresClusterDegraded
+        exp_alerts: []
+
+  # 2b. NEGATIVE CASE (ADR-0325): accounts/accounts-db declares 2 instances and its
+  #     last one never becomes a target (volume cannot attach). Must page DEGRADED;
+  #     case 2 above, with every instance answering, is its control.
+  - interval: 1m
+    name: "an HA cluster missing an instance is degraded, not healthy"
+    input_series:
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="accounts-db-1",job="accounts-db"}'
+        values: "1+0x40"
+      - series: 'kube_namespace_created{namespace="accounts"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ai-platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="aml"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="anacredit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="audit"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="authz-policy-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="balances"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="billing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="campaign"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="communication"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="delegation"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="devops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="dispute"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="docs-truth-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="documents"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="engagement"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="finops-agent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="flaky-test-hunter"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fraud"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="fx"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="governance-auditor"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="iam"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="incentive"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="interest"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyb"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="kyc"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="ledger"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="lending"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="messaging"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="notifications"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="observability"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="onboarding"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pact-broker"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="party"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="payments"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pid"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="platform"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="psd2"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="referral"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sanctions"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sca"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="sdd"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="security-scanner"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="statements"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="temporal"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
+        values: "1600000000+0x40"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PostgresClusterDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: accounts
+              cluster: accounts-db
+            exp_annotations:
+              summary: "CNPG cluster accounts/accounts-db has fewer instances serving than it declares"
+              description: "For 15 minutes fewer Postgres instances have answered a scrape than the Cluster declares. An HA cluster in this state has no failover target; a single-instance one is down. Check `kubectl get cluster,pods -n <namespace>` for a Pending or ContainerCreating instance, then the pod events for a volume that cannot attach (FailedAttachVolume / VolumeInUse) -- that is a node that has not released its EBS volume, see NodeClaimAwaitingVolumeDetachment (ADR-0325)."
+      - eval_time: 30m
+        alertname: PostgresClusterUnscraped
         exp_alerts: []
 
   # 3. CONTROL: DOWN is not UNSCRAPED. `up == 0` means the target EXISTS and the
@@ -528,129 +1260,277 @@ tests:
     input_series:
       - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="accounts"}'
         values: "1600000000+0x40"
@@ -673,6 +1553,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -712,6 +1594,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -730,11 +1614,15 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -749,6 +1637,10 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
       - series: 'up{container="postgres",namespace="accounts",pod="accounts-db-1",job="accounts-db"}'
         values: "0+0x40"
@@ -778,129 +1670,277 @@ tests:
     input_series:
       - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-1",job="langfuse-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="langfuse-db-2",job="langfuse-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="ai-platform"}'
         values: "1600000000+0x40"
@@ -921,6 +1961,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -960,6 +2002,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -978,11 +2022,15 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -997,6 +2045,10 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 40m
@@ -1023,127 +2075,273 @@ tests:
     input_series:
       - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-1",job="product-catalog-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="accounts",pod="product-catalog-db-2",job="product-catalog-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-1",job="litellm-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ai-platform",pod="litellm-db-2",job="litellm-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="aml",pod="aml-db-1",job="aml-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="aml",pod="aml-db-2",job="aml-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-1",job="anacredit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="anacredit",pod="anacredit-db-2",job="anacredit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="audit",pod="audit-db-1",job="audit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="audit",pod="audit-db-2",job="audit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-1",job="authzaudit-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="authz-policy-auditor",pod="authzaudit-db-2",job="authzaudit-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="balances",pod="balances-db-1",job="balances-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="balances",pod="balances-db-2",job="balances-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="billing",pod="billing-db-1",job="billing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="billing",pod="billing-db-2",job="billing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-1",job="campaign-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="campaign",pod="campaign-db-2",job="campaign-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="communication",pod="communication-db-1",job="communication-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="communication",pod="communication-db-2",job="communication-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="consent",pod="consent-db-1",job="consent-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="consent",pod="consent-db-2",job="consent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-1",job="context-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="context",pod="context-db-2",job="context-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-1",job="liveness-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="control-liveness-sentinel",pod="liveness-db-2",job="liveness-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-1",job="delegation-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="delegation",pod="delegation-db-2",job="delegation-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-1",job="devops-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="devops-agent",pod="devops-db-2",job="devops-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-1",job="dispute-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="dispute",pod="dispute-db-2",job="dispute-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-1",job="docstruth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="docs-truth-agent",pod="docstruth-db-2",job="docstruth-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="documents",pod="document-service-db-1",job="document-service-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="documents",pod="document-service-db-2",job="document-service-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-1",job="engagement-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="engagement",pod="engagement-db-2",job="engagement-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-1",job="finops-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="finops-agent",pod="finops-db-2",job="finops-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-1",job="flakytest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="flaky-test-hunter",pod="flakytest-db-2",job="flakytest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-1",job="fraud-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fraud",pod="fraud-db-2",job="fraud-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="fx",pod="fx-db-1",job="fx-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="fx",pod="fx-db-2",job="fx-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-1",job="govaudit-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="governance-auditor",pod="govaudit-db-2",job="govaudit-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-1",job="keycloak-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="iam",pod="keycloak-db-2",job="keycloak-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-1",job="incentive-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="incentive",pod="incentive-db-2",job="incentive-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="interest",pod="interest-db-1",job="interest-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="interest",pod="interest-db-2",job="interest-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-1",job="kyb-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyb",pod="kyb-db-2",job="kyb-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-1",job="kyc-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="kyc",pod="kyc-db-2",job="kyc-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-1",job="ledger-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="ledger",pod="ledger-db-2",job="ledger-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="lending",pod="lending-db-1",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="lending",pod="lending-db-2",job="lending-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-1",job="loyalty-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="loyalty",pod="loyalty-db-2",job="loyalty-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-1",job="apicurio-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="messaging",pod="apicurio-db-2",job="apicurio-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-1",job="notifications-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-1",job="onboarding-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="onboarding",pod="onboarding-db-2",job="onboarding-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-1",job="pact-broker-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pact-broker",pod="pact-broker-db-2",job="pact-broker-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="party",pod="party-db-1",job="party-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="party",pod="party-db-2",job="party-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-1",job="card-issuance-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="card-issuance-db-2",job="card-issuance-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="clearing-db-1",job="clearing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="clearing-db-2",job="clearing-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-1",job="domestic-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="domestic-payment-db-2",job="domestic-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-1",job="sepa-instant-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-instant-db-2",job="sepa-instant-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-1",job="sepa-payment-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="sepa-payment-db-2",job="sepa-payment-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-1",job="settlement-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="settlement-service-db-2",job="settlement-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-1",job="standing-order-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="standing-order-db-2",job="standing-order-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-1",job="swift-service-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="swift-service-db-2",job="swift-service-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="transaction-db-1",job="transaction-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="transaction-db-2",job="transaction-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="payments",pod="vop-db-1",job="vop-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="payments",pod="vop-db-2",job="vop-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="pid",pod="pid-db-1",job="pid-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pid",pod="pid-db-2",job="pid-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="agent-db-1",job="agent-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="agent-db-2",job="agent-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-1",job="case-coordinator-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="case-coordinator-db-2",job="case-coordinator-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="copilot-db-1",job="copilot-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="copilot-db-2",job="copilot-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="platform",pod="mcp-db-1",job="mcp-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="platform",pod="mcp-db-2",job="mcp-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-1",job="pricing-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="pricing",pod="pricing-db-2",job="pricing-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-1",job="psd2-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="psd2",pod="psd2-db-2",job="psd2-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="referral",pod="referral-db-1",job="referral-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="referral",pod="referral-db-2",job="referral-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-1",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="release-steward",pod="releasesteward-db-2",job="releasesteward-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-1",job="risk-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="risk",pod="risk-db-2",job="risk-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-1",job="sanctions-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sanctions",pod="sanctions-db-2",job="sanctions-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="sca",pod="sca-db-1",job="sca-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sca",pod="sca-db-2",job="sca-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-1",job="sdd-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="sdd",pod="sdd-db-2",job="sdd-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-1",job="security-scanner-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="security-scanner",pod="security-scanner-db-2",job="security-scanner-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="statements",pod="statements-db-1",job="statements-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="statements",pod="statements-db-2",job="statements-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-1",job="temporal-db"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="temporal",pod="temporal-db-2",job="temporal-db"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-1",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="tpp-registry",pod="tpp-registry-db-2",job="tpp-registry-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-1",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="treasury",pod="treasury-db-2",job="treasury-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-1",job="wealth-db"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="wealth",pod="wealth-db-2",job="wealth-db"}'
         values: "1+0x40"
       - series: 'kube_namespace_created{namespace="ai-platform"}'
         values: "1600000000+0x40"
@@ -1164,6 +2362,8 @@ tests:
       - series: 'kube_namespace_created{namespace="communication"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="consent"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="context"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="control-liveness-sentinel"}'
         values: "1600000000+0x40"
@@ -1203,6 +2403,8 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="lending"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="loyalty"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="messaging"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="notifications"}'
@@ -1221,11 +2423,15 @@ tests:
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="platform"}'
         values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="pricing"}'
+        values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="psd2"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="referral"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="release-steward"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="risk"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="sanctions"}'
         values: "1600000000+0x40"
@@ -1240,6 +2446,10 @@ tests:
       - series: 'kube_namespace_created{namespace="temporal"}'
         values: "1600000000+0x40"
       - series: 'kube_namespace_created{namespace="tpp-registry"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="treasury"}'
+        values: "1600000000+0x40"
+      - series: 'kube_namespace_created{namespace="wealth"}'
         values: "1600000000+0x40"
     alert_rule_test:
       - eval_time: 40m

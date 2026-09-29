@@ -8,6 +8,7 @@ package com.openbank.agent.infrastructure.client
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import com.openbank.libs.web.SyntheticTaintExternalBoundary
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
@@ -51,7 +52,9 @@ interface AccountServiceClient {
 
 @RegisterRestClient(configKey = "transaction-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). transaction-service grants it transaction.list/read (query.ledger.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -172,7 +175,9 @@ interface LedgerServiceClient {
 
 @RegisterRestClient(configKey = "aml-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). aml-service grants it amlCase.list/read (query.compliance.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/aml")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -194,7 +199,9 @@ interface AmlServiceClient {
 
 @RegisterRestClient(configKey = "sanctions-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). sanctions-service grants it sanctions.list/read (query.compliance.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/sanctions")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -260,7 +267,10 @@ interface ClearingServiceClient {
 
 @RegisterRestClient(configKey = "interest-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). interest-service grants it NOTHING: no charter holds query.interest.readonly, so the agent
+// gate already refuses these tools and the upstream now agrees.
+@OidcClientFilter("m2m")
 @Path("/api/v1/interest")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -289,7 +299,9 @@ interface InterestServiceClient {
 
 @RegisterRestClient(configKey = "dispute-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 8: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). dispute-service grants it dispute.list/read (query.disputes.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/disputes")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
@@ -313,7 +325,9 @@ interface DisputeServiceClient {
 
 @RegisterRestClient(configKey = "sepa-instant-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
+// #10486 batch 7: minted by the NAMED oidc-client `m2m` - Keycloak client `openbank-agent` (ROLE_API
+// only). sepa-instant grants it sctInstPayment.list/read (query.payments.readonly charters).
+@OidcClientFilter("m2m")
 @Path("/api/v1/sepa-instant")
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)

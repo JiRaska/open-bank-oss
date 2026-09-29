@@ -1,0 +1,24 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Materialises a namespace-local copy of the platform CA chain. delegation-service mounts only
+# ca.crt; the generated private key is never mounted into the workload.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: delegation-internal-tls
+  namespace: delegation
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: delegation-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  commonName: delegation-service.delegation.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

@@ -5,12 +5,17 @@
 
 package com.openbank.agent.application
 
+import com.openbank.agent.application.port.out.KillSwitchEvent
+import com.openbank.agent.application.port.out.KillSwitchEventPublisher
 import com.openbank.agent.application.port.out.KillSwitchRepository
 import com.openbank.agent.domain.control.HaltStatus
 import com.openbank.libs.audit.AuditEventPublisher
+import io.mockk.Runs
 import io.mockk.coEvery
 import io.mockk.every
+import io.mockk.just
 import io.mockk.mockk
+import io.mockk.slot
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Clock
@@ -19,6 +24,7 @@ import java.time.Instant
 class KillSwitchServiceTest {
 
     private val audit = mockk<AuditEventPublisher>().also { coEvery { it.publish(any()) } returns Unit }
+    private val eventPublisher = mockk<KillSwitchEventPublisher>().also { every { it.publish(any()) } just Runs }
 
     /**
      * A [KillSwitchRepository] that reports a halt only for the scopes in [haltedScopes].
@@ -34,6 +40,8 @@ class KillSwitchServiceTest {
                 null
             }
         }
+        every { upsertHalt(any(), any(), any(), any()) } just Runs
+        every { deleteHalt(any()) } just Runs
     }
 
     private fun service(
@@ -42,7 +50,7 @@ class KillSwitchServiceTest {
         agentEnabled: Boolean = true,
     ): KillSwitchService {
         val charters = mockk<CharterRegistry> { every { isEnabled(any()) } returns agentEnabled }
-        return KillSwitchService(repository, audit, Clock.systemUTC()).also {
+        return KillSwitchService(repository, audit, eventPublisher, Clock.systemUTC()).also {
             it.charters = charters
             it.globalEnabled = globalEnabled
         }
@@ -77,5 +85,26 @@ class KillSwitchServiceTest {
         val svc = service(repository("compliance-officer"))
         assertThat(svc.haltReason("compliance-officer")).contains("is halted")
         assertThat(svc.haltReason("ui-assistant")).isNull()
+    }
+
+    @Test
+    fun `halt publishes agent killswitch set event`() {
+        val event = slot<KillSwitchEvent>()
+        every { eventPublisher.publish(capture(event)) } just Runs
+        service(repository()).halt("rca-investigator", "tier-3 review", "case-coordinator")
+        assertThat(event.captured.eventType).isEqualTo(KillSwitchEvent.SET)
+        assertThat(event.captured.aggregateId).isEqualTo("rca-investigator")
+        assertThat(event.captured.reason).isEqualTo("tier-3 review")
+        assertThat(event.captured.actorId).isEqualTo("case-coordinator")
+    }
+
+    @Test
+    fun `resume publishes agent killswitch cleared event`() {
+        val event = slot<KillSwitchEvent>()
+        every { eventPublisher.publish(capture(event)) } just Runs
+        service(repository()).resume("rca-investigator", "case-coordinator")
+        assertThat(event.captured.eventType).isEqualTo(KillSwitchEvent.CLEARED)
+        assertThat(event.captured.aggregateId).isEqualTo("rca-investigator")
+        assertThat(event.captured.actorId).isEqualTo("case-coordinator")
     }
 }

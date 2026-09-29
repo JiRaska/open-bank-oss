@@ -99,6 +99,24 @@ classify_failure() {
   printf 'UNKNOWN\n'
 }
 
+# Echo the stderr a verdict was classified FROM. Only UNKNOWN used to do this, and that is the one
+# class nobody has to diagnose — it already says "no verdict about this image". The two classes that
+# accuse something (ABSENT, UNATTESTED) discarded their evidence, so a wrong accusation could not be
+# told apart from a right one after the fact.
+#
+# Measured 2026-09-12 (issue #9860): run 34721055657 reported
+# `UNATTESTED openbank-security-scanner:sandbox-062c26af`, and a hand
+# `cosign verify-attestation --key <same> --type cyclonedx <same digest>` verified cleanly 25 minutes
+# later, with `.att` and `.sig` both present in ECR and the tag unmoved on main. cosign must
+# therefore have emitted one of the phrases `classify_failure` treats as positive-UNATTESTED, and
+# which one is the whole question — it was not retained anywhere. Note the retry loop cannot help
+# here by design: it breaks on any verdict that is not UNKNOWN, so a transient whose wording lands in
+# the UNATTESTED set is accepted on the first attempt.
+print_classified_stderr() {
+  [ -n "$1" ] || return 0
+  printf '%s\n' "$1" | sed 's/^/                  | /' | tail -5
+}
+
 selftest() {
   # `cases` is the SUBJECT COUNT this gate reports (gates.yaml min_subjects). A checker whose
   # corpus is its own fixtures examines nothing the day someone deletes them, and the floor is
@@ -162,6 +180,10 @@ case "$img" in
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
   *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
   *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
+  # The ARC runner repository, keyed by digest: one attested, one carrying a predicate the
+  # policies require and it does not — the September shape.
+  *ci-runner@sha256:0000*) echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *ci-runner@sha256:1111*) echo "Error: no matching attestations:" >&2; exit 1 ;;
 esac
 echo "Error: stub reached with an unexpected image: $img" >&2; exit 1
 STUB
@@ -179,6 +201,7 @@ STUB
     # the function, not on the grandchild process, so an inherited value would silently be the
     # default and the systemic case would prove nothing.
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
+           ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
            SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
@@ -222,23 +245,95 @@ STUB
     printf '  ok: %s (exit %s)\n' "$name" "$code"
   }
 
+  # ---------------------------------------------------------------------------------------
+  # THE ARC RUNNER IMAGE — in scope since #9805, and falsifiable here rather than only in a job
+  # that needs ECR credentials. The image whose denial deadlocks every runner pool had no gitops
+  # workload, so a gitops-scoped enumerator could not see it at all; these three cases pin that
+  # it is now read, and that a broken, ambiguous or absent pin fails CLOSED.
+  printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+    "0000000000000000000000000000000000000000000000000000000000000000" > "$tmp/arc-ok.tf"
+  printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+    "1111111111111111111111111111111111111111111111111111111111111111" > "$tmp/arc-bad.tf"
+  printf 'runner_image = "not-a-pinned-digest"\n' > "$tmp/arc-nopin.tf"
+  printf 'runner_image = "%s/openbank-ci-runner@sha256:%s" /* active pin */\n' "$reg" \
+    "0000000000000000000000000000000000000000000000000000000000000000" > "$tmp/arc-inline.tf"
+  {
+    printf '# runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    printf '/* runner_image = "%s/openbank-ci-runner@sha256:%s" */\n' "$reg" \
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    printf 'runner_image = "%s/openbank-ci-runner@sha256:%s"\n' "$reg" \
+      "1111111111111111111111111111111111111111111111111111111111111111"
+  } > "$tmp/arc-commented.tf"
+  cat "$tmp/arc-ok.tf" "$tmp/arc-bad.tf" > "$tmp/arc-duplicate.tf"
+
+  fixture_arc_tf="$tmp/arc-ok.tf" \
+  run_fixture "the ARC runner pin is verified alongside gitops -> 2 subjects" 0 \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-bad.tf" \
+  run_fixture "an UNATTESTED runner image is a finding, not an invisible one -> exit 1" 1 \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-nopin.tf" \
+  run_fixture "a terraform file with no digest pin fails CLOSED, never silently out of scope" 1 \
+    "declares no openbank-ci-runner@sha256: pin" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-commented.tf" \
+  run_fixture "a commented old digest cannot mask an unattested active runner" 1 \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-inline.tf" \
+  run_fixture "an inline HCL block comment does not hide the active pin" 0 \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/arc-duplicate.tf" \
+  run_fixture "ambiguous active runner assignments fail closed" 1 \
+    "exactly one active runner_image assignment" \
+    "openbank-fixture-ok:t"
+  fixture_arc_tf="$tmp/no-such-arc.tf" \
+  run_fixture "a missing runner Terraform file fails closed" 1 \
+    "ARC runner Terraform file is missing" \
+    "openbank-fixture-ok:t"
+
   # Every declared image attested -> 0.
   run_fixture "all attested -> exit 0" 0 \
-    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
   # A real gap -> 1. Both fatal classes, so the summary carries each count.
   run_fixture "unattested + absent -> exit 1" 1 \
-    "1 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
+    "2 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-bare:t" "openbank-fixture-gone:t"
+  # The accusing verdicts must carry the stderr they were classified FROM (#9860). Asserted on the
+  # fixture above rather than as its own run: LAST_OUT holds that run's output, and the point is that
+  # the evidence sits next to the accusation in the log a reader actually opens. Without the echo in
+  # the UNATTESTED branch this assertion fails, which is the only reason to trust the echo is there.
+  cases=$((cases + 1))
+  if ! grep -qF '| Error: no matching attestations:' <<< "$LAST_OUT"; then
+    printf '  FAIL: an UNATTESTED verdict does not print the cosign stderr it was classified from\n'
+    printf '        (a wrong accusation would then be indistinguishable from a right one, #9860)\n'
+    printf '%s\n' "$LAST_OUT" | grep -A3 'UNATTESTED' | sed 's/^/          | /'
+    failures=$((failures + 1))
+  else
+    printf '  ok: an UNATTESTED verdict prints the stderr it was classified from\n'
+  fi
+  cases=$((cases + 1))
+  if ! grep -qF '| Error: MANIFEST_UNKNOWN: manifest unknown' <<< "$LAST_OUT"; then
+    printf '  FAIL: an ABSENT verdict does not print the cosign stderr it was classified from\n'
+    failures=$((failures + 1))
+  else
+    printf '  ok: an ABSENT verdict prints the stderr it was classified from\n'
+  fi
+
   # ONLY a probe failure -> 2, and crucially NOT 1: this is the case that used to be
   # published as a fleet gap, and the exit code is the only thing the caller reads.
   run_fixture "probe failure only -> exit 2 (not 1)" 2 \
-    "1 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-ok:t" "openbank-fixture-flaky:t"
   # A REAL gap alongside a probe failure must still be 1 — "could not run" never masks a
   # verdict that was reached, or an unlucky throttle would downgrade a live outage.
   run_fixture "gap + probe failure -> exit 1 (gap wins)" 1 \
-    "0 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
+    "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 1 unknown" \
     "openbank-fixture-bare:t" "openbank-fixture-flaky:t"
   # A TOTAL outage must short-circuit the retries rather than multiply them past the job
   # timeout — a killed job reports no exit code at all, and the caller then cannot tell a gap
@@ -278,6 +373,7 @@ STUB
     printf '# fixture allowlist\n' > "$tmp/placeholders.txt"
     for img in $allow; do printf '%s/%s\n' "$reg" "$img" >> "$tmp/placeholders.txt"; done
     out="$(GITOPS_DIR="$tmp/gitops" PLACEHOLDER_FILE="$tmp/placeholders.txt" \
+           ARC_RUNNERS_TF="$tmp/arc-ok.tf" \
            bash "$SELF" --check-placeholders 2>&1)"
     code=$?
     if [ "$code" != "$expected_exit" ]; then
@@ -432,6 +528,37 @@ echo
 # ephemeralContainers, and any Helm/kustomize value that names a full openbank-* ref.
 IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
 
+# ---------------------------------------------------------------------------------------
+# WHICH PREDICATES — derived from the POLICIES, never written here as a literal.
+#
+# This gate verified `--type cyclonedx` and nothing else. From the moment #8847 made SLSA
+# provenance an admission input, a check named "verify every declared openbank-* image is
+# attested" was reporting ATTESTED about images the cluster would refuse to admit — it
+# measured the predicate that was present rather than the one that was missing, which is how
+# the September ARC deadlock reached production unseen (#9805).
+#
+# A second literal would fix today and rot the same way tomorrow. The policies are the
+# authority on what admission requires, so the list is read out of them: every
+# `attestations[].predicateType` in `verify-*.yaml`. Adding a policy widens this gate on the
+# same commit, with nothing to remember.
+#
+# cosign's `--type` accepts a predicate URI verbatim (measured against a live attested image:
+# both `https://cyclonedx.org/bom` and `https://slsa.dev/provenance/v0.2` verify exactly as
+# their short aliases do), so no alias table stands between the policy and the probe — one
+# more thing that cannot drift.
+KYVERNO_DIR="${KYVERNO_DIR:-openbank-infra/gitops/components/kyverno}"
+PREDICATE_TYPES=()
+while IFS= read -r _pt; do
+  [ -n "$_pt" ] && PREDICATE_TYPES+=("$_pt")
+done < <(grep -rhoE 'predicateType:[[:space:]]*[^[:space:]]+' "$KYVERNO_DIR"/verify-*.yaml 2>/dev/null \
+           | awk '{print $2}' | sort -u)
+
+if [ "${#PREDICATE_TYPES[@]}" -eq 0 ]; then
+  echo "ERROR: no predicateType found under ${KYVERNO_DIR} — the derivation is broken." >&2
+  echo "       (Failing closed: verifying nothing would otherwise 'pass' vacuously.)" >&2
+  exit 1
+fi
+
 # Read into an array without `mapfile` — this script must also run on macOS's bash 3.2
 # (an operator verifying the gate by hand before authorizing a graduation).
 IMAGES=()
@@ -439,12 +566,52 @@ while IFS= read -r _img; do
   [ -n "$_img" ] && IMAGES+=("$_img")
 done < <(grep -rhoE "$IMAGE_RE" "$GITOPS_DIR" 2>/dev/null | sort -u)
 
+# ---------------------------------------------------------------------------------------
+# THE ONE IMAGE WHOSE FAILURE STOPS EVERYTHING, and which this gate could not see.
+#
+# `openbank-ci-runner` has no gitops workload: ARC pulls it from the Helm values in
+# arc-runners.tf, and ecr-service-repositories.tf splits `local.ci_runner_repository` out of
+# that same string "so the two can never disagree". A gitops-scoped enumerator therefore
+# cannot reach it — so the image whose denial deadlocks every runner pool, twice in two
+# months, was structurally outside the check that exists to catch exactly this (#9805).
+#
+# Read by digest from the terraform pin, which is what ARC actually admits. Absence of the
+# pin is a broken enumerator, not a pass: the file is in this repository and a rename that
+# silently drops the runner from scope is the failure being fixed.
+ARC_RUNNERS_TF="${ARC_RUNNERS_TF:-openbank-infra/aws/envs/sandbox-platform/arc-runners.tf}"
+if [ ! -f "$ARC_RUNNERS_TF" ]; then
+  echo "ERROR: ARC runner Terraform file is missing: ${ARC_RUNNERS_TF}" >&2
+  echo "       A missing inventory source cannot silently remove the runner from attestation scope." >&2
+  exit 1
+fi
+# Drop HCL comments before examining assignments. An old pin in a comment must never be
+# chosen instead of the active runner_image value. Ambiguity also fails closed.
+_runner_line="$(sed -E 's@/\*.*\*/@@g; /^[[:space:]]*#/d; /^[[:space:]]*\/\//d; /\/\*/,/\*\//d' "$ARC_RUNNERS_TF" \
+  | grep -E '^[[:space:]]*runner_image[[:space:]]*=' || true)"
+if [ -z "$_runner_line" ] || [[ "$_runner_line" == *$'\n'* ]]; then
+  echo "ERROR: ${ARC_RUNNERS_TF} must declare exactly one active runner_image assignment." >&2
+  exit 1
+fi
+_runner_ref="$(printf '%s\n' "$_runner_line" | sed -nE \
+  's/^[[:space:]]*runner_image[[:space:]]*=[[:space:]]*"[^"]*\/(openbank-ci-runner@sha256:[a-f0-9]{64})"[[:space:]]*(#.*|\/\/.*)?$/\1/p')"
+if [ -z "$_runner_ref" ]; then
+  echo "ERROR: ${ARC_RUNNERS_TF} declares no openbank-ci-runner@sha256: pin." >&2
+  echo "       The runner image is in scope for this gate; an invalid pin means the" >&2
+  echo "       enumerator is broken, not that the runner is attested." >&2
+  exit 1
+fi
+IMAGES+=("${ECR_REGISTRY}/${_runner_ref}")
+echo "    plus the ARC runner image pinned in $(basename "$ARC_RUNNERS_TF") (no gitops workload)"
+
 if [ "${#IMAGES[@]}" -eq 0 ]; then
   echo "ERROR: no openbank-* images found under ${GITOPS_DIR} — the enumerator is broken." >&2
   echo "       (Failing closed: an empty fleet would otherwise 'pass' vacuously.)" >&2
   exit 1
 fi
 
+echo "==> ${#PREDICATE_TYPES[@]} predicate type(s) required by the Kyverno policies:"
+for _pt in "${PREDICATE_TYPES[@]}"; do echo "      $_pt"; done
+echo
 echo "==> ${#IMAGES[@]} distinct openbank-* image(s) declared"
 echo
 
@@ -561,12 +728,23 @@ for image in "${IMAGES[@]}"; do
   verdict=""
   attempt=1
   while :; do
-    if err="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
-                --key "$COSIGN_KEY" --type cyclonedx "$image" 2>&1)"; then
-      verdict=OK
+    # Every predicate the policies require, not the first one that happens to pass. An image
+    # carrying a CycloneDX SBOM and no SLSA provenance is exactly the September shape, and it
+    # must read UNATTESTED here rather than OK.
+    verdict=OK
+    err=""
+    missing_type=""
+    for _pt in "${PREDICATE_TYPES[@]}"; do
+      if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+                 --key "$COSIGN_KEY" --type "$_pt" "$image" 2>&1)"; then
+        continue
+      fi
+      err="$_e"
+      verdict="$(classify_failure "$err")"
+      missing_type="$_pt"
       break
-    fi
-    verdict="$(classify_failure "$err")"
+    done
+    [ "$verdict" = OK ] && break
     [ "$verdict" != "UNKNOWN" ] && break
     [ "$RETRIES_DISABLED" -eq 1 ] && break
     [ "$attempt" -ge "$VERIFY_ATTEMPTS" ] && break
@@ -587,12 +765,14 @@ for image in "${IMAGES[@]}"; do
         ALLOWED=$((ALLOWED + 1))
       else
         printf '  ABSENT      %s  <-- declared in gitops but NOT in the registry\n' "$short"
+        print_classified_stderr "$err"
         ABSENT=$((ABSENT + 1))
         ABSENT_IMAGES+=("$image")
       fi
       ;;
     UNATTESTED)
-      printf '  UNATTESTED  %s  <-- no valid CycloneDX SBOM attestation\n' "$short"
+      printf '  UNATTESTED  %s  <-- no valid attestation for %s\n' "$short" "${missing_type:-?}"
+      print_classified_stderr "$err"
       UNATTESTED=$((UNATTESTED + 1))
       UNATTESTED_IMAGES+=("$image")
       ;;
@@ -654,7 +834,7 @@ fi
 
 if [ "$UNATTESTED" -gt 0 ]; then
   echo
-  echo "UNATTESTED (${UNATTESTED}) — pushed, signed, but NO SBOM attestation:"
+  echo "UNATTESTED (${UNATTESTED}) — pushed and signed, but missing a predicate the policies require:"
   for image in "${UNATTESTED_IMAGES[@]}"; do
     echo "  - ${image}"
   done
@@ -704,8 +884,8 @@ if [ "$FAIL" -gt 0 ]; then
   echo
   echo "FLEET ATTESTATION GATE: FAIL — ${FAIL} of ${#IMAGES[@]} declared image(s) not deployable."
   echo
-  echo "Both image-provenance policies are already Enforce in-cluster"
-  echo "(verify-openbank-image-signatures; verify-openbank-image-sbom-attestation, graduated"
+  echo "Image-provenance admission is already Enforce in-cluster"
+  echo "(verify-openbank-image-sbom-attestation: signature + SBOM, graduated"
   echo "2026-07-12), so this is a LATENT OUTAGE, not a graduation blocker: the affected pods"
   echo "keep running until something reschedules them, and are then denied admission and can"
   echo "never restart. Fix before a reschedule, not after"

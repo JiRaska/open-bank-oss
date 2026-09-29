@@ -168,18 +168,29 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
     override suspend fun update(payment: DomesticPayment, outboxMessage: OutboxMessage): DomesticPayment =
         Panache.withTransaction {
-            find("paymentId", payment.id).firstResult()
-                .invoke { entity ->
-                    if (entity != null) {
+            Panache.getSession().flatMap { session ->
+                session.createQuery(
+                    "FROM DomesticPaymentEntity WHERE paymentId = :paymentId",
+                    DomesticPaymentEntity::class.java,
+                ).setParameter("paymentId", payment.id)
+                    .setLockMode(LockModeType.PESSIMISTIC_WRITE)
+                    .singleResultOrNull
+                    .invoke { entity ->
+                        requireNotNull(entity) { "Domestic payment ${payment.id} disappeared during update" }
+                        check(payment.aggregateRevision == entity.aggregateRevision + 1) {
+                            "Stale domestic payment revision ${payment.aggregateRevision}; " +
+                                "current revision is ${entity.aggregateRevision}"
+                        }
                         entity.status = payment.status.name
                         entity.rejectReason = payment.rejectReason?.name
                         entity.rejectDetail = payment.rejectDetail
                         entity.submittedAt = payment.submittedAt
                         entity.settledAt = payment.settledAt
                         entity.updatedAt = payment.updatedAt
+                        entity.aggregateRevision = payment.aggregateRevision
                     }
-                }
-                .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+                    .flatMap { outboxRepository.persistWithinCurrentTransaction(outboxMessage).replaceWith(payment) }
+            }
         }.awaitSuspending()
 
     // #4218. Its own transaction, deliberately: the point of the marker is to survive a failure of
