@@ -23,7 +23,7 @@ import java.util.UUID
 
 /**
  * ADR-0315 D2 over real HTTP and a real Postgres: `POST /deals/{id}/confirm` is a registered route,
- * the CONFIRMED row passes the V12 state constraint, the confirmed event commits in the same
+ * the CONFIRMED row passes the V13 state constraint, the confirmed event commits in the same
  * transaction as the state change, and every principal that must not confirm is refused — the
  * deal's own dealer (even holding the approver role), an AI agent (even holding it), and a dealer
  * without it. `openbank.treasury.confirmation.required` is its default (true) here.

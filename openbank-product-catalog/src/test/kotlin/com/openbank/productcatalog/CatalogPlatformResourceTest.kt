@@ -204,7 +204,6 @@ class CatalogPlatformResourceTest {
         val specificationId = createSpecification("INS_TERM_LIFE_SCHEMA_ADVANCE", schemaVersion = 1)
         val offeringId = createOffering(specificationId, "INS_TERM_LIFE_SCHEMA_ADVANCE_CZ")
         val first = createRevision(offeringId, "Schema version one", schemaVersion = 1)
-        val second = createRevision(offeringId, "Schema version two", schemaVersion = 2)
 
         val mismatchedUpdate = mapper.readTree(revisionPayload("Wrong in-place schema", schemaVersion = 2))
         given().contentType("application/json").header("If-Match", "\"0\"")
@@ -212,12 +211,38 @@ class CatalogPlatformResourceTest {
             .put("/api/v2/offerings/$offeringId/revisions/$first").then()
             .statusCode(400)
 
+        setMaker(first, "independent-maker")
+        publish(offeringId, first)
+        val second = createRevision(offeringId, "Schema version two", schemaVersion = 2)
+
         given().get("/api/v2/offerings/$offeringId/revisions/$first").then()
             .statusCode(200)
             .body("schemaRef.version", equalTo(1))
         given().get("/api/v2/offerings/$offeringId/revisions/$second").then()
             .statusCode(200)
             .body("schemaRef.version", equalTo(2))
+    }
+
+    @Test
+    fun refusesASecondOpenDraftForOneOffering() {
+        val specificationId = createSpecification("INS_TERM_LIFE_SINGLE_DRAFT")
+        val offeringId = createOffering(specificationId, "INS_TERM_LIFE_SINGLE_DRAFT_CZ")
+        val first = createRevision(offeringId, "Only open draft")
+
+        Given {
+            contentType("application/json")
+            body(revisionPayload("Double-submitted draft"))
+        } When {
+            post("/api/v2/offerings/$offeringId/revisions")
+        } Then {
+            statusCode(409)
+            body("code", equalTo("CATALOG_CONFLICT"))
+        }
+        assertThat(aggregateCount("catalog_revisions", "offering_id", offeringId)).isEqualTo(1)
+
+        setMaker(first, "independent-maker")
+        publish(offeringId, first)
+        createRevision(offeringId, "Next draft after publication")
     }
 
     @Test
