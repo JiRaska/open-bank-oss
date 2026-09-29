@@ -15,8 +15,8 @@
 #   failurePolicy: Ignore        a webhook error on the shadow cannot block admission
 # Both are deliberate deviations from the v1 originals (Enforce / default Fail) and
 # are restored in stage 2, which flips each to [Deny] + Fail and deletes the v1
-# policy in the same PR (except openbank-dr-sa-pin, whose v1 lives in another Argo
-# app; see its document). Names carry a -cel suffix so kyverno_policy_results_total
+# policy in the same PR (except openbank-dr-sa-pin, whose v1 lived in another Argo
+# app and was removed in a follow-up PR; see its document). Names carry a -cel suffix so kyverno_policy_results_total
 # and PolicyReports keep the two engines apart while both run: a shadow failing a
 # resource its v1 original admits fires KyvernoAuditPolicyFailingBeforeEnforce,
 # which is the parity signal stage 2 must see silent first.
@@ -176,12 +176,12 @@ spec:
 ---
 # STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the
 # arc-runners namespace. [Deny] + Fail restore v1's Enforce / default failurePolicy.
-# Unlike the other stage-2 policies, the v1 original lives in a DIFFERENT Argo app
-# (`platform`, components/platform/dr-runner-rbac.yaml), so the two cannot be swapped
-# in one sync: PruneLast only orders a prune within one app. The flip therefore
-# lands first and runs NEXT TO the still-enforcing v1 (both deny the same resources,
-# parity harness); the v1 document is removed by a follow-up PR once this one has
-# synced. The v1 exclude of namespace arc-runners is a NotIn namespaceSelector.
+# Unlike the other stage-2 policies, the v1 original lived in a DIFFERENT Argo app
+# (`platform`, components/platform/dr-runner-rbac.yaml), so the two could not be
+# swapped in one sync: PruneLast only orders a prune within one app. The flip landed
+# first and ran next to the still-enforcing v1; the v1 ClusterPolicy was then
+# removed by a follow-up PR, so this is now the only policy pinning the SA, and
+# the compensating control for the openbank-dr ClusterRole. The v1 exclude of namespace arc-runners is a NotIn namespaceSelector.
 # Pod-controller autogen stays at the default, as the v1 policy's autogen rules did.
 # The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
 # The precondition lives in the cluster, not in git; re-check it before touching

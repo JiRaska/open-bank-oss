@@ -200,10 +200,11 @@ with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ev
 `require-gated-or-declared-tool-ingress` — enforcing as `require-gated-or-declared-tool-ingress-cel`
 (`[Deny]`, `failurePolicy: Fail`), v1 file `tool-ingress-gate-policy.yaml` deleted. The v1 verdicts
 of both are pinned in the parity harness. `openbank-dr-sa-pin` — enforcing as `openbank-dr-sa-pin-cel`
-(`[Deny]`, `failurePolicy: Fail`) NEXT TO its still-enforcing v1 original; the v1 ClusterPolicy lives
-in `components/platform/dr-runner-rbac.yaml` (Argo app `platform`, not `kyverno-policies`), so it is
-removed by a separate follow-up PR after this flip has synced — two apps sync independently and
-`PruneLast` cannot order across them. While both enforce, a rollback must relax BOTH documents. For those policies the rollback targets the `-cel`
+(`[Deny]`, `failurePolicy: Fail`); its v1 ClusterPolicy lived in `components/platform/dr-runner-rbac.yaml`
+(Argo app `platform`, not `kyverno-policies`), so it was removed by a separate follow-up PR after the
+flip had synced — two apps sync independently and `PruneLast` cannot order across them. The RBAC
+documents in that file stay; the ClusterPolicy document is gone. Its v1 verdicts are pinned in the harness too (reverting the
+removal PR re-creates it). For those policies the rollback targets the `-cel`
 document, and reverting the stage-2 PR re-creates the v1 original. All other policies are still at
 stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
