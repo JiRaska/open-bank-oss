@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.2](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.6.1...docs-truth-agent-v0.6.2) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
 ## [0.6.1](https://github.com/JiRaska/open-bank-oss/compare/docs-truth-agent-v0.6.0...docs-truth-agent-v0.6.1) (2026-09-08)
 
 

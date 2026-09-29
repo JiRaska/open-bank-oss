@@ -3,16 +3,20 @@ info:
   title: Referral lifecycle events
   version: 1.0.0
   description: |
-    CONTRACT ONLY — no producer is wired in this build. The referral service hands every event to
-    UnwiredReferralEventPublisher, which DROPS it and counts it as
-    openbank_referral_events_dropped_total{reason="transport_not_wired"}. Do not build a consumer
-    against these channels expecting traffic until the event-schema slice wires an outbox producer.
+    Producer wired since #7190: qualification writes both Qualified and RewardRequested to
+    `referral_outbox` in the same transaction as the reward row, and ReferralOutboxDispatcher
+    relays them at-least-once to the topics below (each channel is its own Kafka topic —
+    openbank.referral.qualified.v1, openbank.referral.reward-requested.v1,
+    openbank.referral.reward-outcome.v1). A consumer can now build against these channels.
 channels:
   referral.qualified.v1:
+    address: openbank.referral.qualified.v1
     publish: {operationId: referralQualified, message: {$ref: '#/components/messages/Qualified'}}
   referral.reward.requested.v1:
+    address: openbank.referral.reward-requested.v1
     publish: {operationId: referralRewardRequested, message: {$ref: '#/components/messages/RewardRequested'}}
   referral.reward.outcome.v1:
+    address: openbank.referral.reward-outcome.v1
     publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
 components:
   messages:

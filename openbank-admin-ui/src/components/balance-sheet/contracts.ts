@@ -15,6 +15,9 @@ const timestamp = z.string().min(1)
 export const snapshotSummarySchema = z.object({
   id: z.string(), asOf: z.iso.date(), recordedAt: timestamp, provenance, status: tieOutStatus,
   positionCount: z.number().int(), mismatchCount: z.number().int(),
+  // Added in risk-engine openapi 1.14.0 (#11016); optional+nullable so an older backend that omits
+  // the field entirely, or a historic run recorded before it existed, both parse. Never guessed.
+  requestedBy: z.string().nullable().optional(),
 })
 export const snapshotListSchema = z.object({ runs: z.array(snapshotSummarySchema) })
 
@@ -91,6 +94,23 @@ export const backfillExecutionSchema = z.object({
   execution: z.looseObject({
     requestId: z.string(), executed: z.boolean(), complete: z.boolean(),
     loans: z.array(z.looseObject({ loanId: z.string(), status: z.string(), legsPosted: z.number().int(), legsTotal: z.number().int() })),
+  }),
+})
+// Void of back-posted loans (#10969, console #11487): GET/POST /api/v1/lending/ledger-backfill/voids.
+// The dry-run answers the backfill plan shape; a void names the EXECUTED backfill it offsets.
+export const voidRequestSchema = z.object({
+  id: z.string(), sourceRequestId: z.string(), state: backfillStateSchema, voidDate: z.string(),
+  planHash: z.string(), loanCount: z.number().int(), legCount: z.number().int(), proposedBy: z.string(),
+  decidedBy: z.string().nullable(), decisionReason: z.string().nullable(), executedBy: z.string().nullable(),
+  lastResult: z.string().nullable().optional(),
+  proposedAt: z.string().nullable().optional(), decidedAt: z.string().nullable().optional(),
+  executedAt: z.string().nullable().optional(),
+})
+export const voidRequestListSchema = z.object({ requests: z.array(voidRequestSchema) })
+export const voidExecutionSchema = z.object({
+  execution: z.looseObject({
+    requestId: z.string(), executed: z.boolean(), complete: z.boolean(),
+    loans: z.array(z.looseObject({ loanId: z.string(), status: z.string() })),
   }),
 })
 
@@ -180,6 +200,30 @@ export const liquiditySchema = z.object({
   }),
 })
 
+// Liquidity survival forecast (risk-engine GET /snapshots/{id}/liquidity-forecast, ADR-0313
+// forecasting). A null survival day means no breach within the horizon — never "day 0".
+export const forecastRowSchema = z.object({
+  fromDay: z.number().int(), toDay: z.number().int(), from: z.string(), to: z.string(),
+  contractualInflows: money, contractualOutflows: money, behaviouralInflows: money, behaviouralOutflows: money,
+  inflows: money, outflows: money, net: money, cumulative: money,
+  // Lowest end-of-day cumulative inside the row: a weekly row's `cumulative` is end-of-week only.
+  minCumulative: money,
+})
+export const currencyForecastSchema = z.object({
+  currency: z.string(), hqla: hqlaSchema.nullable().optional(), openingLiquidity: money,
+  survivalHorizonDays: z.number().int().nullable().optional(), survivalDate: z.string().nullable().optional(),
+  minimumCumulative: money, flowsBeyondHorizon: z.number().int(), ladder: z.array(forecastRowSchema),
+})
+export const liquidityForecastSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance,
+  model: z.object({ id: z.string(), version: z.string() }).passthrough(),
+  parameterSetId: z.string(), parameterSetVersion: z.string(),
+  horizonDays: z.number().int(), dailyDays: z.number().int(),
+  currencies: z.array(currencyForecastSchema),
+  assumptions: z.array(z.object({ key: z.string(), statement: z.string() })),
+})
+export type LiquidityForecast = z.infer<typeof liquidityForecastSchema>
+
 // Pillar 1 credit-risk capital, standardised approach (risk-engine GET /snapshots/{id}/capital,
 // ADR-0313 phase 2).
 export const exposureLineSchema = z.object({
@@ -226,6 +270,47 @@ export const capitalSchema = z.object({
 export type Capital = z.infer<typeof capitalSchema>
 export type CurrencyCapital = z.infer<typeof currencyCapitalSchema>
 
+// ČNB minimum reserve requirement (risk-engine GET /snapshots/{id}/min-reserves, ADR-0313/ADR-0315).
+export const reserveLineSchema = z.object({
+  label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money, reserveClass: z.string(),
+})
+export const reserveBaseSchema = z.object({
+  currency: z.string(), lines: z.array(reserveLineSchema), rate: money,
+  /** Null (with requirementNotStated) while a LIABILITY in this currency is unclassified: never a partial sum. */
+  base: money.nullable(), requirement: money.nullable(),
+  requirementNotStated: z.string().nullable().optional(),
+})
+const reserveMappingSchema = z.object({ key: z.string(), reserveClass: z.string(), description: z.string() })
+export const minReservesSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance, parameterSetId: z.string(), parameterSetVersion: z.string(),
+  currencies: z.array(reserveBaseSchema),
+  holdingCurrency: z.string(),
+  /** Null when no GL account is mapped as the ČNB current account (see holdingsNotStated). Never a stand-in zero. */
+  holdings: z.array(reserveLineSchema).nullable(),
+  totalHoldings: money.nullable(),
+  holdingsNotStated: z.string().nullable(),
+  /** Requirement on the holding-currency book; null when that book has an unclassified liability. */
+  requirement: money.nullable(),
+  /** Holdings minus requirement; negative is a shortfall. Only for a single-currency book; null when requirement or holdings is. */
+  surplus: money.nullable(),
+  remunerationRate: money, remuneration: money,
+  excluded: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), amount: money, reserveClass: z.string(),
+  })),
+  unclassified: z.array(z.object({
+    glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
+    currency: z.string(), amount: money, reason: z.string(),
+  })),
+  notes: z.array(z.string()),
+  assumptions: z.object({
+    parameterSetId: z.string(), parameterSetVersion: z.string(), source: z.string(), rate: money, remunerationRate: money,
+    holdingCurrency: z.string(), glAccounts: z.array(reserveMappingSchema), glAccountTypes: z.array(reserveMappingSchema),
+  }),
+})
+export type MinReserves = z.infer<typeof minReservesSchema>
+export type ReserveBase = z.infer<typeof reserveBaseSchema>
+export type ReserveLine = z.infer<typeof reserveLineSchema>
+
 export type Liquidity = z.infer<typeof liquiditySchema>
 export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>
 export type LiquidityLine = z.infer<typeof liquidityLineSchema>
@@ -241,4 +326,6 @@ export type CurveSet = z.infer<typeof curveSetSchema>
 export type BackfillPlan = z.infer<typeof backfillPlanSchema>
 export type BackfillRequest = z.infer<typeof backfillRequestSchema>
 export type BackfillExecution = z.infer<typeof backfillExecutionSchema>
+export type VoidRequest = z.infer<typeof voidRequestSchema>
+export type VoidExecution = z.infer<typeof voidExecutionSchema>
 export type Provenance = z.infer<typeof provenance>

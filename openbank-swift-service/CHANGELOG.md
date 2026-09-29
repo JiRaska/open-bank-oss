@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.5...swift-service-v0.11.6) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.4...swift-service-v0.11.5) (2026-09-26)
 
 

@@ -68,6 +68,13 @@ interface DealRepository {
     /** Outstanding placed principal with [counterpartyId] in [currency], excluding [excludeDealId]. */
     suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?): BigDecimal
 
+    /**
+     * Every PENDING_APPROVAL deal carrying a senior limit override, across all counterparties and
+     * currencies. Deliberately NOT grouped by currency here: which limit line an override sits on
+     * is [Deal.limitCurrency], a domain rule the caller applies via [Deal.holdsActiveLimitOverride].
+     */
+    suspend fun pendingLimitOverrides(): List<Deal>
+
     suspend fun journals(dealId: UUID): List<LedgerJournalRef>
 
     /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
@@ -87,6 +94,30 @@ interface CounterpartyRepository {
 interface LedgerPostingPort {
     /** Returns the ledger's journal id — the original one on an idempotent replay. */
     suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
+}
+
+/**
+ * fx-service's mid rate for `currency`/CZK on [asOf] (#10896), used only to FLAG an FX spot deal
+ * rate outside tolerance. Null = no mid available. treasury has no fx-service client yet, so the
+ * wired implementation is [NONE] and the check is off by default ([FxRateTolerance]).
+ */
+fun interface FxMidRatePort {
+    suspend fun mid(currency: String, asOf: LocalDate): BigDecimal?
+
+    companion object {
+        val NONE = FxMidRatePort { _, _ -> null }
+    }
+}
+
+/** Versioned config `openbank.treasury.fx-spot.rate-check.*`: off unless a mid source is wired. */
+data class FxRateTolerance(val enabled: Boolean, val tolerancePercent: BigDecimal) {
+    init {
+        require(tolerancePercent.signum() >= 0) { "tolerance must not be negative" }
+    }
+
+    companion object {
+        val DISABLED = FxRateTolerance(false, BigDecimal("2.0"))
+    }
 }
 
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */

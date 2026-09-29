@@ -324,3 +324,8 @@ V9.1 openbank-infra/gitops/components/finops-agent/finops-agent.yaml:98: plainte
 V9.1 openbank-infra/gitops/components/flaky-test-hunter/flaky-test-hunter.yaml:92: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/governance-auditor/governance-auditor.yaml:83: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/release-steward/release-steward.yaml:81: plaintext http:// env value http://tempo.observability.svc:4317
+# JiRaska/openbank-pricing#1: pricing adopted under GitOps 2026-09-28; these edges already ran live
+# (hand-applied, never scanned). Not new debt, newly VISIBLE debt; TLS for them is a follow-up.
+V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:67: plaintext http:// env value http://tempo.observability.svc:4317
+V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:285: plaintext http:// env value http://pricing-service.pricing.svc:8150
+V9.1 openbank-infra/gitops/components/pricing/workloads.yaml:287: plaintext http:// env value http://product-catalog.accounts.svc:8104

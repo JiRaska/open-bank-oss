@@ -1,0 +1,230 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CEL (policies.kyverno.io/v1) SHADOWS of the four kyverno.io/v1 validate
+# ClusterPolicies — Kyverno 1.19 deprecates kyverno.io/v1 ClusterPolicy and plans
+# its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
+#
+# STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
+# (today: block-deployment-if-rollout-exists-cel, deny-nginx-snippet-annotations-cel,
+# require-gated-or-declared-tool-ingress-cel and openbank-dr-sa-pin-cel, #11437).
+# Each other ValidatingPolicy
+# below runs NEXT TO its v1 original, which stays in Enforce and remains the only
+# thing that can deny:
+#   validationActions: [Audit]   reports, never denies
+#   failurePolicy: Ignore        a webhook error on the shadow cannot block admission
+# Both are deliberate deviations from the v1 originals (Enforce / default Fail) and
+# are restored in stage 2, which flips each to [Deny] + Fail and deletes the v1
+# policy in the same PR (except openbank-dr-sa-pin, whose v1 lived in another Argo
+# app and was removed in a follow-up PR; see its document). Names carry a -cel suffix so kyverno_policy_results_total
+# and PolicyReports keep the two engines apart while both run: a shadow failing a
+# resource its v1 original admits fires KyvernoAuditPolicyFailingBeforeEnforce,
+# which is the parity signal stage 2 must see silent first.
+#
+# Semantics preserved from v1: match kinds/namespaces/operations, the v1 exclude
+# (as a namespaceSelector), background: false, and each message verbatim.
+# Parity is tested with the Kyverno 1.19.1 CLI against the same positive/negative
+# resources as the v1 originals: openbank-infra/tests/kyverno-cel/.
+---
+# STAGE 2 (#11437): enforcing. The v1 original rollout-bypass-prevention.yaml was
+# deleted in the same PR, so this is the only policy stopping a plain Deployment
+# from shadowing a money-path Rollout of the same name (ADR-0098): such a
+# Deployment would take traffic without the canary steps and analysis gates.
+# The v1 apiCall LIST + fieldSelector becomes resource.List over the namespace's
+# Rollouts; LIST, as before, so a missing Rollout is an empty list, not an error.
+# DELETE stays out of scope so the Deployment->Rollout migration (Argo creates the
+# Rollout before pruning the Deployment) and cleanup keep working.
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Fail means that if
+# resource.List itself errors (Rollout CRD absent, RBAC revoked), every Deployment
+# CREATE/UPDATE in the 13 namespaces below is denied until it is fixed; v1 carried
+# exactly this exposure for the same call. Blast radius is those namespaces only,
+# never cluster-wide. Preconditions live in the cluster; re-check before touching:
+#   kubectl get crd rollouts.argoproj.io
+#   kubectl auth can-i list rollouts.argoproj.io -A \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   # yes
+# Break-glass for a List outage: runbook 0011 §4a (set failurePolicy: Ignore here).
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: block-deployment-if-rollout-exists-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL
+    policies.kyverno.io/category: Progressive Delivery
+    policies.kyverno.io/severity: high
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [apps]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [deployments]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values:
+            - accounts
+            - balances
+            - ledger
+            - payments
+            - fraud
+            - fx
+            - sca
+            - consent
+            - customer-edge
+            - onboarding
+            - kyc
+            - party
+            - sanctions
+  variables:
+    - name: rolloutExists
+      expression: >-
+        dyn(resource.List('argoproj.io/v1alpha1', 'rollouts', object.metadata.namespace).items)
+        .exists(r, r.metadata.name == object.metadata.name)
+  validations:
+    - expression: "!variables.rolloutExists"
+      messageExpression: >-
+        "Deployment '" + object.metadata.name + "' is blocked: an Argo Rollout with the
+        same name exists in namespace '" + object.metadata.namespace + "'. This service
+        uses progressive delivery (ADR-0098) — use kind:Rollout to ensure canary
+        analysis gates run before traffic reaches 100 %."
+---
+# STAGE 2 (#11437): enforcing. The v1 original deny-nginx-snippet-annotations.yaml was
+# deleted in the same PR, so this is the only policy denying snippet annotations.
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. No exclusions, as in v1.
+# The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: deny-nginx-snippet-annotations-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: No ingress-nginx snippet annotations (ADR-0324) — CEL
+    policies.kyverno.io/category: Security
+    policies.kyverno.io/severity: high
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [networking.k8s.io]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [ingresses]
+  validations:
+    - expression: >-
+        !['configuration', 'server', 'auth', 'stream', 'modsecurity'].exists(k,
+          object.metadata.?annotations[?('nginx.ingress.kubernetes.io/' + k + '-snippet')].orValue('') != '')
+      messageExpression: >-
+        "Ingress '" + object.metadata.namespace + "/" + object.metadata.name + "'
+        carries an ingress-nginx snippet annotation. Snippets are disabled on this
+        cluster (ADR-0324): use `custom-headers` for response headers,
+        `denylist-source-range` to block paths, and the controller's
+        modsecurity.conf for WAF policy."
+---
+# STAGE 2 (#11437): enforcing. The v1 original tool-ingress-gate-policy.yaml was
+# deleted in the same PR, so this is the only policy requiring an observability
+# Ingress to be gated (auth-url, ADR-0234) or declared (ungated-machine-callers).
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Scope as in v1:
+# observability only, CREATE/UPDATE only. The -cel suffix is kept so metrics and
+# PolicyReports stay continuous with stage 1. The precondition lives in the cluster,
+# not in git; re-check it before touching this document:
+#   kubectl -n observability get ingress -o custom-columns=\
+#   'NAME:.metadata.name,GATE:.metadata.annotations.nginx\.ingress\.kubernetes\.io/auth-url,\
+#   DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
+# Every row must have a non-empty GATE or DECLARED.
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: require-gated-or-declared-tool-ingress-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Tool Ingress must be gated or declared (ADR-0234) — CEL
+    policies.kyverno.io/category: Access Control
+    policies.kyverno.io/severity: high
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [networking.k8s.io]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [ingresses]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: In
+          values: [observability]
+  validations:
+    - expression: >-
+        object.metadata.?annotations[?'nginx.ingress.kubernetes.io/auth-url'].orValue('') != '' ||
+        object.metadata.?annotations[?'openbank.io/ungated-machine-callers'].orValue('') != ''
+      messageExpression: >-
+        "Ingress '" + object.metadata.name + "' in namespace 'observability' is neither
+        gated nor declared. An internal tool UI must be served behind the identity-aware
+        edge gate — as a sub-path of admin.open-bank.tech carrying
+        'nginx.ingress.kubernetes.io/auth-url' (ADR-0234). If this Ingress exists for
+        machine callers that cannot follow a login redirect (SDK ingest by DSN,
+        sentry-cli by org token), annotate it
+        'openbank.io/ungated-machine-callers: \"<why, and which paths>\"' and keep its
+        path list narrowed to those endpoints."
+---
+# STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the
+# arc-runners namespace. [Deny] + Fail restore v1's Enforce / default failurePolicy.
+# Unlike the other stage-2 policies, the v1 original lived in a DIFFERENT Argo app
+# (`platform`, components/platform/dr-runner-rbac.yaml), so the two could not be
+# swapped in one sync: PruneLast only orders a prune within one app. The flip landed
+# first and ran next to the still-enforcing v1; the v1 ClusterPolicy was then
+# removed by a follow-up PR, so this is now the only policy pinning the SA, and
+# the compensating control for the openbank-dr ClusterRole. The v1 exclude of namespace arc-runners is a NotIn namespaceSelector.
+# Pod-controller autogen stays at the default, as the v1 policy's autogen rules did.
+# The -cel suffix is kept so metrics and PolicyReports stay continuous with stage 1.
+# The precondition lives in the cluster, not in git; re-check it before touching
+# this document (must print nothing):
+#   kubectl get pods -A -o jsonpath='{range .items[?(@.spec.serviceAccountName=="openbank-dr")]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' | grep -v '^arc-runners/'
+apiVersion: policies.kyverno.io/v1
+kind: ValidatingPolicy
+metadata:
+  name: openbank-dr-sa-pin-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+spec:
+  validationActions: [Deny]
+  failurePolicy: Fail
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+    namespaceSelector:
+      matchExpressions:
+        - key: kubernetes.io/metadata.name
+          operator: NotIn
+          values: [arc-runners]
+  validations:
+    - expression: "object.spec.?serviceAccountName.orValue('') != 'openbank-dr'"
+      message: "openbank-dr SA must not be used outside the arc-runners namespace (ADR-0277)."

@@ -20,7 +20,7 @@ import java.math.BigDecimal
  */
 class CreditRiskCapitalTest {
 
-    private val shipped = CapitalTestParameters.shipped()
+    private val shipped = CapitalTestParameters.bcbs()
     private val asOf = Fixtures.AS_OF
 
     private fun gl(code: String, type: String, amount: String, ccy: String = "CZK") =
@@ -100,6 +100,41 @@ class CreditRiskCapitalTest {
     }
 
     @Test
+    fun `POLICY CHOICE clearing, allowance and FX position accounts land in their shipped class`() {
+        val c = shipped.classification.glAccounts
+        assertThat((1100..1113).map { c[it.toString()] }).containsOnly(CapitalGlClass.OTHER_ASSET)
+        assertThat((1400..1403).map { c[it.toString()] }).containsOnly(CapitalGlClass.NOT_AN_EXPOSURE)
+        assertThat((1990..1997).map { c[it.toString()] }).containsOnly(CapitalGlClass.NOT_AN_EXPOSURE)
+    }
+
+    @Test
+    fun `clearing account 1100 is weighted 100 percent as an other asset`() {
+        val line = run(listOf(gl("1100", "ASSET", "16122197"))).total!!.lines.single()
+        assertThat(line.exposureClass).isEqualTo(ExposureClass.OTHER_ASSET)
+        assertThat(line.factorKey).isEqualTo("rw-other-asset")
+        assertThat(line.rwa).isEqualByComparingTo("16122197")
+    }
+
+    @Test
+    fun `the loan loss allowance 1400 does not reduce RWA and is not listed as unclassified`() {
+        val base = run(book, bookInstruments).total!!
+        val r = run(book + gl("1400", "ASSET", "-82264"), bookInstruments)
+        assertThat(r.total!!.totalRwa).describedAs("RWA gross of the allowance").isEqualByComparingTo(base.totalRwa)
+        assertThat(r.total!!.totalEad).isEqualByComparingTo(base.totalEad)
+        assertThat(r.unclassified).isEmpty()
+    }
+
+    @Test
+    fun `FX position accounts 1990 to 1997 are not exposures in either sign`() {
+        val base = run(book, bookInstruments).total!!
+        val fx = listOf(gl("1990", "ASSET", "-132"), gl("1995", "ASSET", "-126"), gl("1997", "ASSET", "500"))
+        val r = run(book + fx, bookInstruments)
+        assertThat(r.total!!.totalRwa).isEqualByComparingTo(base.totalRwa)
+        assertThat(r.total!!.lines.map { it.glAccountCode }).doesNotContain("1990", "1995", "1997")
+        assertThat(r.unclassified).isEmpty()
+    }
+
+    @Test
     fun `an unmapped GL balance is listed and counted nowhere`() {
         val base = run(book, bookInstruments).total!!.totalRwa
         val r = run(book + gl("1000", "ASSET", "999"), bookInstruments)
@@ -120,9 +155,9 @@ class CreditRiskCapitalTest {
 
     @Test
     fun `a central-bank claim outside the domestic currency takes the unrated d424 7 weight`() {
-        val r = run(listOf(gl("1510", "ASSET", "100", "EUR")))
-        assertThat(r.total!!.totalRwa).isEqualByComparingTo("100")
-        assertThat(r.total!!.lines.single().factorKey).isEqualTo("rw-sovereign-unrated")
+        val eur = run(listOf(gl("1510", "ASSET", "100", "EUR"))).currencies.single()
+        assertThat(eur.totalRwa).isEqualByComparingTo("100")
+        assertThat(eur.lines.single().factorKey).isEqualTo("rw-sovereign-unrated")
     }
 
     @Test
@@ -169,10 +204,12 @@ class CreditRiskCapitalTest {
     }
 
     @Test
-    fun `a two-currency book has per-currency results, no total and no ratios`() {
+    fun `a two-currency book with no fixing has per-currency results, no total and no ratios`() {
         val r = run(book + gl("1002", "ASSET", "100", "EUR"), bookInstruments)
         assertThat(r.currencies.map { it.currency }).containsExactly("CZK", "EUR")
         assertThat(r.total).isNull()
+        assertThat(r.totalNotStated).contains("EUR")
+        assertThat(r.fxRates).isEmpty()
         assertThat(r.ownFundsRequirement).isNull()
         assertThat(r.ratios).isNull()
         assertThat(r.ratiosNotComputable).contains("multi-currency")

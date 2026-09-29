@@ -28,10 +28,13 @@ vi.mock('recharts', () => {
 })
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
+import LedgerBackfillVoidPage from '@/app/balance-sheet/ledger-backfill/voids/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
 import SnapshotCapitalPage from '@/app/balance-sheet/snapshots/[id]/capital/page'
 import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
 import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/page'
+import SnapshotLiquidityForecastPage from '@/app/balance-sheet/snapshots/[id]/liquidity-forecast/page'
+import SnapshotMinReservesPage from '@/app/balance-sheet/snapshots/[id]/min-reserves/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
 
 const json = (body: unknown, status = 200) =>
@@ -112,6 +115,77 @@ describe('ledger backfill — four-eyes in the console', () => {
   })
 })
 
+describe('ledger backfill void — four-eyes in the console (#10969, #11487)', () => {
+  const SOURCE = { ...REQUEST, id: 'src-1', state: 'EXECUTED', proposedBy: 'petr.finance', executedBy: 'petr.finance', executedAt: '2026-09-26T07:48:34Z' }
+  const VOID = {
+    sourceRequestId: 'src-1', voidDate: '2026-09-30', planHash: 'v', loanCount: 44, legCount: 352,
+    decidedBy: null, decisionReason: null, executedBy: null, lastResult: null, proposedAt: '2026-09-30T08:00:00Z',
+  }
+  const V_OWN = { ...VOID, id: 'v-own', state: 'PROPOSED', proposedBy: 'jana.finance' }
+  const V_OTHER = { ...VOID, id: 'v-other', state: 'PROPOSED', proposedBy: 'petr.finance' }
+  const V_APPROVED = { ...VOID, id: 'v-appr', state: 'APPROVED', proposedBy: 'petr.finance', decidedBy: 'jana.finance' }
+  const PLAN = {
+    plan: { cutoverDate: '2026-09-30', planHash: 'v', tieOut: [], loans: [{ loanId: 'l1', currency: 'CZK', status: 'ACTIVE', unpaidPrincipal: 1, legs: [] }] },
+    executable: true, journalCount: 352, glTotals: [{ code: '1200', currency: 'CZK', debit: 1, credit: 0, net: 1 }],
+  }
+  beforeEach(() => {
+    router = (url, init) => {
+      if (url.includes('/voids/plan')) return json(PLAN)
+      if (url.includes('/voids/v-other/decide')) return json({ error: 'Maker and checker must differ' }, 422)
+      if (url.includes('/voids/v-appr/execute')) {
+        return json({ execution: { requestId: 'v-appr', executed: true, complete: true, loans: [{ loanId: 'l1', status: 'VOIDED', legs: [] }] }, offsetGlTotals: [] })
+      }
+      if (url.endsWith('/ledger-backfill/voids') && init?.method === 'POST') return json({ ...V_OWN }, 201)
+      if (url.includes('/ledger-backfill/voids') && !init?.method) return json({ requests: [V_OWN, V_OTHER, V_APPROVED] })
+      if (url.includes('/ledger-backfill/requests') && !init?.method) return json({ requests: [SOURCE, APPROVED] })
+      return json({}, 404)
+    }
+  })
+
+  it('lists voids through the lending BFF and offers only EXECUTED backfills as sources', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(calls.some(c => c.url === '/api/svc/lending-service/api/v1/lending/ledger-backfill/voids?limit=25')).toBe(true)
+    const options = screen.getAllByRole('option').map(o => (o as HTMLOptionElement).value)
+    expect(options).toEqual(['src-1'])
+  })
+
+  it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Navrhnout storno|Propose void/ }))
+    await screen.findByText(/Void proposal recorded|Návrh storna zaznamenán/)
+    expect(calls.find(c => c.url.includes('/voids/plan'))!.url).toContain('sourceRequestId=src-1')
+    const post = calls.find(c => c.url.endsWith('/ledger-backfill/voids') && c.init?.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ sourceRequestId: 'src-1' })
+    expect((post.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('hides approve from the proposer and shows the backend 422 on a refused decision', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findByText(/You proposed this|Tento návrh je váš/)
+    const approve = screen.getAllByRole('button', { name: /^(Schválit|Approve)$/ })
+    expect(approve).toHaveLength(1)
+    fireEvent.click(approve[0])
+    await screen.findByText(/Maker and checker must differ/)
+    const decide = calls.find(c => c.url.includes('/voids/v-other/decide'))!
+    expect((decide.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('executes only after explicit confirmation, with execute=true', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Provést|Execute/ }))
+    const run = screen.getByRole('button', { name: /^(Stornovat|Void loans)$/ }) as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(calls.some(c => c.url.includes('/execute'))).toBe(false)
+    fireEvent.click(screen.getAllByRole('checkbox')[0])
+    fireEvent.click(run)
+    await screen.findByText(/Void complete|Storno dokončeno/)
+    expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/voids/v-appr/execute?execute=true')
+  })
+})
+
 describe('snapshots', () => {
   it('finance sees the run list but not the create form', async () => {
     router = () => json({ runs: [{ id: 'run-1', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'UNTIED', positionCount: 3, mismatchCount: 1 }] })
@@ -127,6 +201,22 @@ describe('snapshots', () => {
     router = () => json({ runs: [] })
     await renderPage(<SnapshotsPage />)
     expect(await screen.findByRole('button', { name: /Build snapshot|Sestavit snímek/ })).toBeTruthy()
+  })
+
+  it('shows a human requester as-is, a system: one as a scheduled-run badge, and — for a null/missing one', async () => {
+    router = () => json({
+      runs: [
+        { id: 'run-human', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: 'jana.finance' },
+        { id: 'run-system', asOf: '2026-09-29', recordedAt: '2026-09-29T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: 'system:risk-engine-eod-snapshot' },
+        { id: 'run-null', asOf: '2026-09-28', recordedAt: '2026-09-28T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0, requestedBy: null },
+        { id: 'run-missing', asOf: '2026-09-27', recordedAt: '2026-09-27T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 1, mismatchCount: 0 },
+      ],
+    })
+    await renderPage(<SnapshotsPage />)
+    await screen.findByText('jana.finance')
+    expect(screen.getByText(/Scheduled run \(risk-engine-eod-snapshot\)|Plánovaný běh \(risk-engine-eod-snapshot\)/)).toBeTruthy()
+    const dashes = screen.getAllByTitle(/nezaznamenáno|not recorded/)
+    expect(dashes).toHaveLength(2)
   })
 
   it('an UNTIED run shows its mismatches and fetches nothing derived from it', async () => {
@@ -374,5 +464,186 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
     await renderPage(<SnapshotCapitalPage params={Promise.resolve({ id: 'run-5' })} />)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByTestId('total-rwa')).toBeNull()
+  })
+})
+
+const fRow = (fromDay: number, toDay: number, behaviouralOutflows: number, cumulative: number, minCumulative = cumulative) => ({
+  fromDay, toDay, from: '2026-10-01', to: `2026-10-${String(toDay).padStart(2, '0')}`,
+  contractualInflows: 0, contractualOutflows: 0, behaviouralInflows: 0, behaviouralOutflows,
+  inflows: 0, outflows: behaviouralOutflows, net: behaviouralOutflows, cumulative, minCumulative,
+})
+const FORECAST = (survival: number | null, hqla: boolean) => ({
+  runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic',
+  model: { id: 'nmd-linear-core', version: '1.0.0', coreRatio: 0.7, coreRunoffYears: 5, annualDepositRate: 0 },
+  parameterSetId: 'bcbs-d238-d295', parameterSetVersion: '2', horizonDays: 90, dailyDays: 30,
+  currencies: [{
+    currency: 'CZK',
+    hqla: hqla ? { lines: [], level1: 1000, level2a: 0, level2b: 0, adjustmentFor15Cap: 0, adjustmentFor40Cap: 0, level2bCapBinding: false, level2CapBinding: false, stock: 1000 } : null,
+    openingLiquidity: hqla ? 1000 : 0,
+    survivalHorizonDays: survival, survivalDate: survival === null ? null : '2026-10-01',
+    minimumCumulative: survival === null ? 550 : -450, flowsBeyondHorizon: 57,
+    ladder: survival === null ? [fRow(1, 1, -450, 550), fRow(2, 2, 0, 550)] : [fRow(1, 1, -450, -450), fRow(2, 2, 0, -450)],
+  }],
+  assumptions: [
+    { key: 'opening-liquidity', statement: 'Opening liquidity is the HQLA stock as the LCR reports it.' },
+    { key: 'new-business-not-modelled', statement: 'New business is not modelled.' },
+  ],
+})
+
+describe('Liquidity forecast (survival horizon)', () => {
+  const route = (body: unknown, status = 200) => (url: string) => url.includes('/curve-sets')
+    ? json({ curveSets: [{ id: 'cs-1', asOf: '2026-09-30', provenance: 'synthetic', source: 'desk', recordedAt: '2026-09-30T06:00:00Z', indices: ['CZEONIA'] }] })
+    : json(body, status)
+
+  it('shows the ladder, the opening HQLA and a survival horizon that is not breached as such, never as a day', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    const forecastCalls = calls.filter(c => c.url.includes('/liquidity-forecast'))
+    expect(forecastCalls.length).toBeGreaterThan(0)
+    expect(forecastCalls.every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/liquidity-forecast?') && c.url.includes('curveSetId=cs-1') && c.url.includes('horizonDays=90'))).toBe(true)
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/no shortfall within 90 days|bez výpadku do 90 dnů/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(0)
+    expect(screen.getByText(/New business is not modelled/)).toBeTruthy()
+    expect(screen.getByText(/bcbs-d238-d295 v2/)).toBeTruthy()
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+  })
+
+  it('names the breach day, marks negative rows and says when a currency holds no HQLA', async () => {
+    router = route(FORECAST(1, false))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/day 1|1\. den/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(2)
+    expect(screen.getByText(/no HQLA held in this currency|nemá žádná HQLA/)).toBeTruthy()
+  })
+
+  it('marks a weekly row that dips negative mid-week even though it ends positive', async () => {
+    const body = FORECAST(null, true)
+    body.currencies[0].ladder = [fRow(1, 1, -450, 550), fRow(31, 37, 0, 120, -80)]
+    router = route(body)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('min-cumulative-CZK-31').textContent).toMatch(/80/)
+    const negative = document.querySelectorAll('tr[data-negative="true"]')
+    expect(negative.length).toBe(1)
+    expect(negative[0].textContent).toMatch(/31–37/)
+  })
+
+  it('sends the chosen horizon', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    await act(async () => { fireEvent.change(screen.getByLabelText(/^(Forecast horizon|Horizont prognózy)$/), { target: { value: '365' } }) })
+    expect(calls.some(c => c.url.includes('/liquidity-forecast') && c.url.includes('horizonDays=365'))).toBe(true)
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = route({ error: 'UNTIED', runId: 'run-6', mismatches: [] }, 409)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('survival-CZK')).toBeNull()
+  })
+})
+
+const reserveLine = (label: string, amount: number, reserveClass: string, glAccountCode: string | null = '9001') =>
+  ({ label, glAccountCode, amount, reserveClass })
+const MIN_RESERVES = (opts: {
+  holdingsNotStated?: string | null
+  unclassified?: boolean
+  excluded?: boolean
+  totalHoldings?: number | null
+  requirement?: number | null
+  surplus?: number | null
+  requirementNotStated?: string
+} = {}) => ({
+  runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', parameterSetId: 'cnb-min-reserves', parameterSetVersion: '1',
+  currencies: [{
+    currency: 'CZK',
+    lines: [reserveLine('Client deposits (retail)', 100000, 'reserve-base', '2200')],
+    base: opts.requirementNotStated ? null : 100000, rate: 0.02,
+    requirement: opts.requirementNotStated ? null : 2000, requirementNotStated: opts.requirementNotStated ?? null,
+  }],
+  holdingCurrency: 'CZK',
+  holdings: opts.holdingsNotStated ? null : [reserveLine('ČNB current account', opts.totalHoldings ?? 2500, 'cnb-account')],
+  totalHoldings: opts.holdingsNotStated ? null : (opts.totalHoldings ?? 2500),
+  holdingsNotStated: opts.holdingsNotStated ?? null,
+  requirement: opts.holdingsNotStated ? null : (opts.requirement ?? 2000),
+  surplus: opts.holdingsNotStated ? null : (opts.surplus ?? 500),
+  remunerationRate: 0, remuneration: 0,
+  excluded: opts.excluded ? [{ glAccountCode: '2500', amount: 5000, reserveClass: 'liability-to-bank' }] : [],
+  unclassified: opts.unclassified ? [{ glAccountCode: '1000', glAccountType: 'ASSET', currency: 'CZK', amount: 300, reason: 'not mapped' }] : [],
+  notes: [],
+  assumptions: {
+    parameterSetId: 'cnb-min-reserves', parameterSetVersion: '1', source: 'ČNB Opatření o povinných minimálních rezervách',
+    rate: 0.02, remunerationRate: 0, holdingCurrency: 'CZK',
+    glAccounts: [{ key: '2200', reserveClass: 'reserve-base', description: 'Client deposits' }],
+    glAccountTypes: [],
+  },
+})
+
+describe('ČNB minimum reserve requirement', () => {
+  it('renders the base, requirement, holdings and surplus figures with the parameter set', async () => {
+    router = () => json(MIN_RESERVES())
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('total-holdings')
+    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')).toBe(true)
+    expect(screen.getByTestId('total-holdings').textContent).toMatch(/2[\s ,.]?500/)
+    expect(screen.getByTestId('requirement').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('surplus').textContent).toMatch(/500/)
+    expect(screen.getByTestId('requirement-CZK').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByText(/cnb-min-reserves v1/)).toBeTruthy()
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+    expect(screen.queryByTestId('holdings-not-stated')).toBeNull()
+    expect(screen.queryByText(/Unclassified balances|Nezařazené zůstatky/)).toBeNull()
+  })
+
+  it('shows the holdingsNotStated reason prominently and renders no zero when holdings are null', async () => {
+    router = () => json(MIN_RESERVES({ holdingsNotStated: 'No GL account is mapped as the ČNB current account' }))
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('holdings-not-stated')
+    expect(screen.getByTestId('holdings-not-stated').textContent).toContain('No GL account is mapped as the ČNB current account')
+    expect(screen.queryByTestId('total-holdings')).toBeNull()
+    expect(screen.queryByTestId('surplus')).toBeNull()
+    // No stand-in zero anywhere on the page for the not-stated figures.
+    expect(document.body.textContent).not.toMatch(/\b0[.,]00\b.*(?:ČNB|holdings)/)
+  })
+
+  it('does not invent a holdings total when individual holdings are present', async () => {
+    router = () => json({ ...MIN_RESERVES(), totalHoldings: null })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    const heading = await screen.findByRole('heading', { name: /ČNB current-account holdings|Zůstatek na účtu u ČNB/, level: 3 })
+    const totalCell = heading.parentElement?.querySelector('tbody tr:last-child td:last-child')
+    expect(totalCell?.textContent).toMatch(/not stated|neuvedeno/)
+    expect(screen.getByTestId('total-holdings').textContent).toMatch(/not stated|neuvedeno/)
+  })
+
+  it('a currency whose base is not stated shows the reason and no base or requirement figure', async () => {
+    router = () => json({
+      ...MIN_RESERVES({ requirementNotStated: 'A LIABILITY balance in this currency is not classified' }),
+      requirement: null, surplus: null,
+    })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('requirement-not-stated-CZK')
+    expect(screen.getByTestId('requirement-not-stated-CZK').textContent).toContain('is not classified')
+    expect(screen.queryByTestId('requirement-CZK')).toBeNull()
+    expect(screen.getByTestId('requirement').textContent).toMatch(/not stated|neuvedeno/)
+  })
+
+  it('lists excluded and unclassified balances separately, with their amounts and reason', async () => {
+    router = () => json(MIN_RESERVES({ excluded: true, unclassified: true }))
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByText(/Unclassified balances|Nezařazené zůstatky/)
+    expect(document.querySelectorAll('tr[data-excluded="true"]').length).toBe(1)
+    expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
+    expect(screen.getByRole('alert').textContent).toContain('1000')
+    expect(screen.getByText(/Excluded balances|Vyloučené zůstatky/)).toBeTruthy()
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = () => json({ error: 'UNTIED', runId: 'run-6', mismatches: [] }, 409)
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('total-holdings')).toBeNull()
   })
 })

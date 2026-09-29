@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.5.1...vop-service-v0.5.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/vop-service-v0.5.0...vop-service-v0.5.1) (2026-09-26)
 
 

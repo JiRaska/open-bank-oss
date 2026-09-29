@@ -46,10 +46,21 @@ interface AccountRepository {
      * fail atomically instead of opening a second account; the caller recovers the conflict
      * via [findByIdempotencyKey].
      */
-    suspend fun saveNewAccount(account: Account, primaryPocket: CurrencyPocket, idempotencyKey: String): Account
+    suspend fun saveNewAccount(
+        account: Account,
+        primaryPocket: CurrencyPocket,
+        idempotencyKey: String,
+        requestHash: String?,
+    ): Account
 
     /** The account opened under this idempotency key, or null if the key is unused. */
     suspend fun findByIdempotencyKey(idempotencyKey: String): Account?
+
+    /**
+     * Request fingerprint stored with this idempotency key (#10916), or null when the key is
+     * unused or was stored before fingerprints existed (V30) / by a caller without one.
+     */
+    suspend fun findIdempotencyRequestHash(idempotencyKey: String): String?
 
     suspend fun update(account: Account): Account
 

@@ -76,8 +76,12 @@ data class UnclassifiedCapitalBalance(
 
 data class CapitalResult(
     val currencies: List<CurrencyCapital>,
-    /** The single book currency, when there is exactly one; else null and no total is reported. */
-    val totalCurrency: String?,
+    /** The CZK total at the ČNB fixing ([ReportingCurrencyTotal]); null with [totalNotStated] when a rate is missing. */
+    val total: CurrencyCapital?,
+    /** Every rate the total was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateUsed>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     /** Own-funds requirement of the total: [CapitalFactor.MIN_TOTAL_CAPITAL_RATIO] × total RWA. */
     val ownFundsRequirement: BigDecimal?,
     val ratios: CapitalRatios?,
@@ -85,32 +89,43 @@ data class CapitalResult(
     val ratiosNotComputable: String?,
     val unclassified: List<UnclassifiedCapitalBalance>,
     val notes: List<String>,
-) {
-    val total: CurrencyCapital? get() = totalCurrency?.let { c -> currencies.single { it.currency == c } }
-}
+)
 
 private const val RATIO_SCALE = 6
 private const val STAGE_3 = "STAGE_3"
 
 /**
- * Pillar 1 credit-risk RWA under the BCBS d424 standardised approach, and the capital ratios where
- * own funds are in the snapshot (ADR-0313 phase 2). Per currency; a total, a requirement and
- * ratios only for a single-currency book (no reporting-currency conversion yet — the same rule as
- * IRRBB and LCR / NSFR). No credit-risk mitigation (none is in the snapshot) and no off-balance
+ * Pillar 1 credit-risk RWA under the standardised approach of the selected [CapitalParameters]
+ * ([CapitalRegime.EU]: CRR Part Three Title II Chapter 2, the default; [CapitalRegime.BCBS]: d424 Part I),
+ * and the capital ratios where
+ * own funds are in the snapshot (ADR-0313 phase 2). Per currency, plus a CZK total and requirement
+ * at the ČNB fixing ([ReportingCurrencyTotal]); ratios only for a single-currency book, since own
+ * funds are not converted. No credit-risk mitigation (none is in the snapshot) and no off-balance
  * items (none in the snapshot, so no CCF is applied).
  */
 object CreditRiskCapital {
 
     const val AGGREGATION_NOTE =
-        "Computed per currency. A total needs conversion to one reporting currency, which the engine does " +
-            "not do yet, so total RWA, the requirement and the ratios are reported only for a single-currency book."
+        "Computed per currency. The total is in CZK: each other currency's EAD and RWA are converted at the " +
+            "ČNB fixing in effect on the as-of date (the fixing whose validity window contains 00:00 Prague of " +
+            "that day, the same rule as the ledger's FX revaluation; a weekend or holiday takes the prior " +
+            "business day's fixing while it is still valid), listed in fxRates. If any needed fixing is missing " +
+            "no total is stated (never a partial one). Own funds are not converted, so the ratios are reported " +
+            "only for a single-currency book."
 
     const val CREDIT_RISK_ONLY_NOTE =
-        "The ratios divide own funds by CREDIT-RISK RWA only. bcbs189 ¶50 minima apply to total RWA, which also " +
+        "The ratios divide own funds by CREDIT-RISK RWA only. The minima (CRR Art. 92(1); bcbs189 ¶50) apply to " +
+            "the total risk exposure amount, which also " +
             "includes operational and market risk (and CVA); those are not computed here, so these ratios are an " +
             "UPPER BOUND on the real ones."
 
-    fun compute(positions: List<Position>, instruments: List<Instrument>, params: CapitalParameters): CapitalResult {
+    fun compute(
+        positions: List<Position>,
+        instruments: List<Instrument>,
+        params: CapitalParameters,
+        fixings: Map<String, FxRateUsed> = emptyMap(),
+        asOf: java.time.LocalDate? = null,
+    ): CapitalResult {
         val byId = instruments.associateBy { it.id }
         val unclassified = mutableListOf<UnclassifiedCapitalBalance>()
         val currencies = positions.map { it.currency }.distinct().sorted().map { ccy ->
@@ -119,15 +134,19 @@ object CreditRiskCapital {
                 when (p.kind) {
                     PositionKind.SUB_LEDGER -> acc.customerAccount(p)
                     PositionKind.LOAN -> acc.loan(p, p.instrumentId?.let(byId::get)?.ifrs9Stage)
-                    PositionKind.GL_ACCOUNT -> acc.glAccount(p)
+                    // A money-market deal is classified by the principal account it sits on (1510
+                    // central bank, 1500/1501 bank, 2300/2301 a liability), exactly as its GL-level
+                    // balance was before deals were modelled (ADR-0315 D6).
+                    PositionKind.GL_ACCOUNT, PositionKind.TREASURY_DEAL -> acc.glAccount(p)
                 }
             }
             CurrencyCapital(ccy, acc.lines, acc.ownFunds.takeIf { it.isNotEmpty() }?.let(::OwnFunds))
         }
+        val reporting = ReportingCurrencyTotal.of(currencies, fixings, asOf)
+        val requirement = reporting.total?.totalRwa?.multiply(params[CapitalFactor.MIN_TOTAL_CAPITAL_RATIO], BigMath.MC)
         val total = currencies.singleOrNull()
-        val requirement = total?.totalRwa?.multiply(params[CapitalFactor.MIN_TOTAL_CAPITAL_RATIO], BigMath.MC)
         val notComputable = when {
-            currencies.size > 1 -> "multi-currency book: own funds and RWA would need conversion to one currency"
+            currencies.size > 1 -> "multi-currency book: own funds are not converted to one currency"
             total == null -> "the snapshot has no positions"
             total.ownFunds == null ->
                 "no own-funds GL account (openbank.risk.capital.sa.classification own-funds-*) is in the snapshot"
@@ -137,12 +156,22 @@ object CreditRiskCapital {
         val ratios = if (notComputable == null) ratios(total!!, params) else null
         return CapitalResult(
             currencies = currencies,
-            totalCurrency = total?.currency,
+            total = reporting.total,
+            fxRates = reporting.fxRates,
+            totalNotStated = reporting.notStated,
             ownFundsRequirement = requirement,
             ratios = ratios,
             ratiosNotComputable = notComputable,
             unclassified = unclassified,
-            notes = listOfNotNull(AGGREGATION_NOTE.takeIf { currencies.size > 1 }, CREDIT_RISK_ONLY_NOTE),
+            notes = listOfNotNull(
+                AGGREGATION_NOTE.takeIf {
+                    currencies.any {
+                        it.currency !=
+                            ReportingCurrencyTotal.REPORTING_CURRENCY
+                    }
+                },
+                CREDIT_RISK_ONLY_NOTE,
+            ),
         )
     }
 
@@ -173,7 +202,7 @@ object CreditRiskCapital {
         fun r(amount: BigDecimal, min: CapitalFactor) = CapitalRatio(
             amount.divide(t.totalRwa, BigMath.MC).setScale(RATIO_SCALE, RoundingMode.HALF_EVEN),
             p[min],
-            min.citation,
+            p.citation(min),
         )
         return CapitalRatios(
             cet1 = r(of.cet1, CapitalFactor.MIN_CET1_RATIO),
@@ -192,7 +221,8 @@ object CreditRiskCapital {
         private val cls get() = params.classification
 
         private fun line(c: ExposureClass, label: String, p: Position, f: CapitalFactor) {
-            lines += ExposureLine(c, label, p.glAccountCode, p.instrumentId, p.amount, params[f], f.key, f.citation)
+            lines +=
+                ExposureLine(c, label, p.glAccountCode, p.instrumentId, p.amount, params[f], f.key, params.citation(f))
         }
 
         private fun unclassify(p: Position, reason: String) {

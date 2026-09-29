@@ -6,6 +6,7 @@ package com.openbank.risk.infrastructure.rest
 
 import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.application.port.out.SnapshotRunSummary
+import io.quarkus.security.identity.SecurityIdentity
 import java.time.Instant
 import java.util.UUID
 
@@ -19,6 +20,10 @@ internal fun boundedLimit(limit: Int?): Int {
     return value
 }
 
+/** The caller's principal name, or null when none is set (nullable so historic runs stay nullable too). */
+internal fun requestedByActor(identity: SecurityIdentity): String? =
+    identity.principal?.name?.takeIf { it.isNotBlank() }
+
 data class SnapshotRunSummaryDto(
     val id: UUID,
     val asOf: String,
@@ -27,6 +32,7 @@ data class SnapshotRunSummaryDto(
     val status: String,
     val positionCount: Int,
     val mismatchCount: Int,
+    val requestedBy: String?,
 )
 
 data class SnapshotRunListResponse(val runs: List<SnapshotRunSummaryDto>)
@@ -42,7 +48,15 @@ data class CurveSetSummaryDto(
 
 data class CurveSetListResponse(val curveSets: List<CurveSetSummaryDto>)
 
-fun SnapshotRunSummary.toDto() =
-    SnapshotRunSummaryDto(id, asOf.toString(), recordedAt, provenance, status, positionCount, mismatchCount)
+fun SnapshotRunSummary.toDto() = SnapshotRunSummaryDto(
+    id,
+    asOf.toString(),
+    recordedAt,
+    provenance,
+    status,
+    positionCount,
+    mismatchCount,
+    requestedBy,
+)
 
 fun CurveSetSummary.toDto() = CurveSetSummaryDto(id, asOf.toString(), provenance, source, recordedAt, indices)
