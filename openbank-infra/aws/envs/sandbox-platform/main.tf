@@ -60,12 +60,52 @@ resource "helm_release" "cert_manager" {
 # created in the substrate root), so the ServiceAccount needs no IRSA
 # annotation; only the name must match ("karpenter").
 # ---------------------------------------------------------------------------
+# Karpenter CRDs, applied BEFORE the controller. Helm installs a chart's crds/
+# directory on first install only and never upgrades it, so a chart-only bump
+# leaves the cluster on the previous version's CRDs while the new controller
+# expects the new schema (the upgrade guide's standing advice is to manage CRDs
+# separately). These are the files the chart ships (pkg/apis/crds at the pinned
+# tag), vendored per version so the plan shows exactly what changes. Server-side
+# apply with force_conflicts takes field ownership from Helm's original install
+# without deleting the CRD — a CRD delete would cascade to every NodePool,
+# NodeClaim and EC2NodeClass. prevent_destroy guards that same cascade.
+resource "kubectl_manifest" "karpenter_crd" {
+  for_each = fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")
+
+  yaml_body         = file("${path.module}/karpenter-crds/${var.karpenter_version}/${each.value}")
+  server_side_apply = true
+  force_conflicts   = true
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
+# Authenticated pull of the Karpenter chart from ECR Public. Anonymous pulls are rate
+# limited per source IP and shared GitHub-hosted runners hit it: plan and apply both failed
+# with "Error locating chart ... 429: toomanyrequests: Data limit exceeded" on 2026-09-28.
+# The token is minted in us-east-1 only (ECR Public's control plane), whatever region we run.
+data "aws_ecrpublic_authorization_token" "karpenter_chart" {
+  provider = aws.us_east_1
+}
+
 resource "helm_release" "karpenter" {
-  name       = "karpenter"
-  namespace  = "kube-system"
-  repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = var.karpenter_version
+  depends_on = [kubectl_manifest.karpenter_crd]
+
+  lifecycle {
+    precondition {
+      condition     = length(fileset("${path.module}/karpenter-crds/${var.karpenter_version}", "*.yaml")) > 0
+      error_message = "No vendored CRDs in karpenter-crds/${var.karpenter_version}/ — vendor pkg/apis/crds from that Karpenter tag with the version bump."
+    }
+  }
+
+  name                = "karpenter"
+  namespace           = "kube-system"
+  repository          = "oci://public.ecr.aws/karpenter"
+  repository_username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
+  repository_password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
+  chart               = "karpenter"
+  version             = var.karpenter_version
 
   set = [
     # Single replica for sandbox FinOps; prod should run 2 for HA.
@@ -297,6 +337,18 @@ resource "kubectl_manifest" "nodepool_default" {
             name  = "default"
           }
           expireAfter = "720h"
+          # #11304: a DEADLINE on node termination. 2026-09-28 a drifted node's pods
+          # drained but 22 EBS volumes never detached; with no grace period Karpenter's
+          # termination controller waits on VolumesDetached (AwaitingVolumeDetachment)
+          # forever, and ~22 CNPG clusters stayed down until the instance was terminated
+          # by hand. Past this deadline Karpenter stops waiting on PDBs, do-not-disrupt and
+          # volume detachment and terminates the instance -- which is what releases the
+          # volumes. 1h, not less: CNPG instance pods carry a 30-minute
+          # terminationGracePeriodSeconds (stopDelay) and Karpenter deletes pods early
+          # enough to honour it, so a shorter deadline would cut clean Postgres shutdowns.
+          # This field is part of the NodeClaim hash: applying it drifts every node of
+          # this pool ONCE, which the one-node Drifted budget below serialises.
+          terminationGracePeriod = "1h"
         }
       }
       disruption = {
@@ -336,6 +388,11 @@ resource "kubectl_manifest" "nodepool_default" {
           # Standard 5-field cron: no disruption 20:00–07:00 UTC daily
           { schedule = "0 20 * * *", duration = "11h", nodes = "0%" },
           { nodes = "50%" },
+          # #11304: drift (AMI release, kubelet/NodeClass change) replaces ONE node at a
+          # time. Karpenter applies the most restrictive matching budget, so consolidation
+          # keeps its 50% while a fleet-wide drift can no longer take out half the pool at
+          # once -- the 2026-09-28 wedge landed on top of a fleet-wide CNPG bump.
+          { nodes = "1", reasons = ["Drifted"] },
         ]
       }
       # Hard cap against runaway provisioning: without it Karpenter once
@@ -435,6 +492,14 @@ resource "helm_release" "argocd" {
     },
     {
       name  = "notifications.enabled"
+      value = "false"
+    },
+    # Chart 10.0.0 flipped global.networkPolicy.create false -> true, adding
+    # upstream NetworkPolicies to every argocd component. Kept false so the
+    # 3.4 -> 3.5 upgrade changes no traffic path; enabling them is a separate,
+    # testable change (repo-server/redis ingress, webhook and metrics callers).
+    {
+      name  = "global.networkPolicy.create"
       value = "false"
     },
     # Server-Side Diff, cluster-wide. ServerSideApply=true (our default sync
@@ -578,6 +643,22 @@ resource "helm_release" "cnpg" {
   repository       = "https://cloudnative-pg.github.io/charts"
   chart            = "cloudnative-pg"
   version          = var.cnpg_version
+
+  # In-place instance-manager upgrades. By default an operator upgrade rolls
+  # EVERY Postgres pod to inject the new instance manager, and a single-instance
+  # Cluster has no replica to switch over to, so each one restarts (a few
+  # minutes of downtime per DB, all clusters at once). With this set, the
+  # operator swaps the instance-manager binary inside the running pod and the
+  # postmaster keeps running: no restart, no switchover. Trade-off: the pod's
+  # init-container image keeps the old version until the pod is next recreated.
+  # A change to the instance pod TEMPLATE itself still rolls pods regardless.
+  set = [
+    {
+      name  = "config.data.ENABLE_INSTANCE_MANAGER_INPLACE_UPDATES"
+      value = "true"
+      type  = "string"
+    },
+  ]
 }
 
 # ---------------------------------------------------------------------------

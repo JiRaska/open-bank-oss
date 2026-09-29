@@ -13,6 +13,8 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { FilePlus, Landmark, RefreshCw } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import overview from '@/components/brand/DomainOverview.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { getJson, treasuryUrl } from '@/components/treasury/api'
@@ -40,6 +42,7 @@ function DealBlotter() {
   const { data: session } = useSession()
   const roles = useMemo(() => session?.user?.roles ?? [], [session?.user?.roles])
   const canCreate = hasPermission(roles, 'treasury:deal:create')
+  const canApprove = hasPermission(roles, 'treasury:deal:approve')
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -84,6 +87,39 @@ function DealBlotter() {
           </div>
         }
       />
+
+      <ExplorerGuide compact title={t('Nejdřív obchod, potom druhý pár očí', 'First the deal, then a second pair of eyes')}>
+        {t(
+          'Připravte obchod, zkontrolujte protistranu a limit a teprve pak jej předejte ke schválení. Vlastní obchod si neschválíte — účetní zápis vzniká až po nezávislém rozhodnutí.',
+          'Prepare the deal, check the counterparty and limit, then send it for approval. You cannot approve your own deal — booking follows an independent decision.',
+        )}
+      </ExplorerGuide>
+
+      <div className={overview.overview} aria-label={t('Přehled treasury', 'Treasury overview')}>
+        <div className={overview.tile}>
+          <span className={overview.label}>{t('Obchody v aktuálním výběru', 'Deals in current selection')}</span>
+          <span className={overview.value}>{deals === null ? '—' : deals.length.toLocaleString(locale)}</span>
+          <span className={overview.detail}>{t('Počítáno ze zobrazené odpovědi služby.', 'Counted from the displayed service response.')}</span>
+        </div>
+        {canApprove ? (
+          <Link className={overview.tile} href="/treasury/approvals">
+            <span className={overview.label}>{t('Čtyři oči', 'Four eyes')}</span>
+            <span className={overview.value}>{t('Ke schválení →', 'Approval inbox →')}</span>
+            <span className={overview.detail}>{t('Rozhodnutí dělá jiná oprávněná osoba.', 'A different authorised person makes the decision.')}</span>
+          </Link>
+        ) : (
+          <div className={overview.tile}>
+            <span className={overview.label}>{t('Čtyři oči', 'Four eyes')}</span>
+            <span className={overview.value}>{t('Nezávislé schválení', 'Independent approval')}</span>
+            <span className={overview.detail}>{t('Po předložení rozhodne oprávněný schvalovatel.', 'After submission, an authorised approver decides.')}</span>
+          </div>
+        )}
+        <Link className={overview.tile} href="/treasury/limits">
+          <span className={overview.label}>{t('Před obchodem', 'Before booking')}</span>
+          <span className={overview.value}>{t('Čerpání limitů →', 'Limit utilisation →')}</span>
+          <span className={overview.detail}>{t('Podívejte se na dostupnou kapacitu protistran.', 'See available counterparty capacity.')}</span>
+        </Link>
+      </div>
 
       <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>

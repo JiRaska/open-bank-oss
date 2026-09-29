@@ -14,7 +14,15 @@ import java.time.format.DateTimeFormatter
  * Pure projection (ADR-0035 §C): every value comes from the model, nothing is re-derived or
  * re-queried. **Deterministic** (ADR-0035 §F): all timestamps derive from [StatementModel.closedAt],
  * never the wall clock, so re-rendering a closed period is byte-identical. Amounts are serialised at
- * scale 2 with a dot decimal separator per ISO 20022.
+ * the currency's own ISO 4217 minor-unit scale (e.g. 0 for JPY, 2 for EUR/CZK, 3 for KWD/BHD) with a
+ * dot decimal separator per ISO 20022; an unknown code, or one ISO defines without a minor unit
+ * (XAU, XDR), falls back to scale 2 ([CurrencyScale]).
+ *
+ * Determinism caveat: "byte-identical" holds for a fixed renderer version. The switch from a fixed
+ * scale 2 to currency scale changes the re-render of an already-closed period in any currency whose
+ * minor unit is not 2 (JPY `1500.00` becomes `1500`, KWD `1.500` gains its third digit). Nothing
+ * stores or hashes rendered bytes (ADR-0035 stores the record, not the file), so no stored digest is
+ * invalidated; 2-decimal currencies (EUR, CZK, USD) render exactly as before.
  */
 object Camt053Renderer {
 
@@ -57,7 +65,7 @@ object Camt053Renderer {
         for (e in model.entries) {
             sb.append("      <Ntry>\n")
             sb.append("        <Amt Ccy=\"").append(e.currency).append("\">")
-                .append(money(e.amount)).append("</Amt>\n")
+                .append(money(e.amount, e.currency)).append("</Amt>\n")
             sb.append("        <CdtDbtInd>").append(e.creditDebit.name).append("</CdtDbtInd>\n")
             sb.append("        <Sts><Cd>BOOK</Cd></Sts>\n")
             sb.append("        <BookgDt><Dt>").append(DATE.format(e.bookingDate)).append("</Dt></BookgDt>\n")
@@ -81,13 +89,19 @@ object Camt053Renderer {
         val cdi = if (amount.signum() < 0) "DBIT" else "CRDT"
         sb.append("      <Bal>\n")
         sb.append("        <Tp><CdOrPrtry><Cd>").append(code).append("</Cd></CdOrPrtry></Tp>\n")
-        sb.append("        <Amt Ccy=\"").append(ccy).append("\">").append(money(amount.abs())).append("</Amt>\n")
+        sb.append("        <Amt Ccy=\"").append(ccy).append("\">").append(money(amount.abs(), ccy)).append("</Amt>\n")
         sb.append("        <CdtDbtInd>").append(cdi).append("</CdtDbtInd>\n")
         sb.append("        <Dt><Dt>").append(date).append("</Dt></Dt>\n")
         sb.append("      </Bal>\n")
     }
 
-    private fun money(v: BigDecimal): String = v.setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()
+    /**
+     * Renders at the CURRENCY'S OWN ISO 4217 minor-unit scale (JPY 0, EUR/USD/CZK 2, KWD/BHD 3) —
+     * never a fixed scale 2, which silently mis-renders every non-2-decimal currency.
+     */
+    private fun money(v: BigDecimal, currency: String): String =
+        v.setScale(CurrencyScale.of(currency), java.math.RoundingMode.HALF_UP)
+            .toPlainString()
 
     private fun esc(s: String): String = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         .replace("\"", "&quot;").replace("'", "&apos;")

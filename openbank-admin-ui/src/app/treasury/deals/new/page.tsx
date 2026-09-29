@@ -164,8 +164,8 @@ function NewDeal() {
             <input className="input" type="number" min="0" step="0.01" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} aria-label={t('Jistina', 'Principal')} disabled={draft !== null} />
           </label>
           <label style={field}>
-            {lombard ? t('Lombardní sazba ČNB (%)', 'Lombardní sazba ČNB (%)') : t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
-            <input className="input" type="number" min={lombard ? '0.0001' : '0'} step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={lombard ? t('Lombardní sazba ČNB (%)', 'Lombardní sazba ČNB (%)') : t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
+            {lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
+            <input className="input" type="number" min={lombard ? '0.0001' : '0'} step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
           </label>
           <label style={field}>
             {t('Datum valuty', 'Value date')}

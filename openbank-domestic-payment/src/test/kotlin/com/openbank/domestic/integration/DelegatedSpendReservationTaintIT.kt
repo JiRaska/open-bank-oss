@@ -7,12 +7,13 @@ package com.openbank.domestic.integration
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.infrastructure.kafka.DelegatedSpendReservationStateConsumer
 import com.openbank.domestic.infrastructure.persistence.repository.DelegatedSpendBindingRepositoryImpl
-import com.openbank.domestic.it.PostgresRedisTestResource
 import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import com.openbank.libs.synthetic.SyntheticTaint
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -74,7 +75,10 @@ import javax.sql.DataSource
  */
 @QuarkusTest
 @QuarkusTestResource(DelegatedSpendReservationTaintIT.TaintChannelResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_domestic_payment_it")],
+)
 class DelegatedSpendReservationTaintIT {
 
     /**

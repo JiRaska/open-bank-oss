@@ -17,12 +17,13 @@ export const STATE_TONE: Record<DealState, Tone> = {
   MATURED: 'success', CANCELLED: 'neutral', REVERSED: 'danger',
 }
 
-export function productLabel(p: Product, t: T): string {
+export function productLabel(p: string, t: T): string {
   switch (p) {
     case 'MM_PLACEMENT': return t('Umístění na peněžním trhu', 'MM placement')
     case 'MM_BORROWING': return t('Přijetí na peněžním trhu', 'MM borrowing')
     case 'CNB_DEPOSIT_FACILITY': return t('Depozitní facilita ČNB', 'ČNB deposit facility')
     case 'CNB_LOMBARD': return t('ČNB lombardní úvěr', 'ČNB lombard borrowing')
+    default: return p
   }
 }
 

@@ -171,6 +171,12 @@ resource "aws_eks_node_group" "bootstrap" {
   capacity_type   = "ON_DEMAND"
   instance_types  = var.node_instance_types
 
+  # Track the control plane. Without this the node group keeps whatever
+  # version it was created with, so a control-plane bump leaves nodes behind.
+  # Reading it off the cluster (not the variable) orders the node rolling
+  # update after the control-plane upgrade within one apply.
+  version = aws_eks_cluster.this.version
+
   scaling_config {
     desired_size = var.node_desired_size
     min_size     = var.node_min_size
@@ -320,6 +326,22 @@ resource "aws_eks_addon" "ebs_csi" {
   addon_version               = data.aws_eks_addon_version.this["aws-ebs-csi-driver"].version
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
+
+  # Nitro instances share one attachment budget between EBS volumes, ENIs and NVMe
+  # instance store. The driver's heuristic counts the ENIs present when ebs-csi-node
+  # STARTS; VPC CNI attaches more ENIs later as pods land, so CSINode keeps advertising
+  # slots that no longer exist. The scheduler then places a volume pod the node cannot
+  # take and it sits in Init with "ResourceExhausted: Attachment limit exceeded".
+  # Measured 2026-09-28 on m6g.2xlarge: CSINode allocatable 26, EC2 refused at 24; four
+  # single-instance databases lost their primary to it after a spot interruption.
+  # Reserve the fleet's worst case (Graviton xlarge/2xlarge): root (1) + max ENIs (4) +
+  # instance store on *gd variants (1) = 6. Costs a few volume slots per node; buys a
+  # scheduler that never overcommits EBS.
+  configuration_values = jsonencode({
+    node = {
+      reservedVolumeAttachments = 6
+    }
+  })
 
   pod_identity_association {
     role_arn        = aws_iam_role.ebs_csi.arn

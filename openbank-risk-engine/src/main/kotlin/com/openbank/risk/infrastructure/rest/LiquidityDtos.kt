@@ -117,8 +117,12 @@ data class LiquidityResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyLiquidityDto>,
-    /** Present only for a single-currency book. */
+    /** All currencies combined in CZK at the ČNB fixing for asOf; null (with [totalNotStated]) when a fixing is missing. */
     val total: CurrencyLiquidityDto?,
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateDto>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     val unclassified: List<UnclassifiedBalanceDto>,
     val notes: List<String>,
     val assumptions: LiquidityAssumptionsDto,
@@ -180,7 +184,9 @@ fun LiquidityAnalysis.toResponse(): LiquidityResponse {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         currencies = perCurrency,
-        total = result.totalCurrency?.let { t -> perCurrency.single { it.currency == t } },
+        total = result.total?.toDto(),
+        fxRates = result.fxRates.map { FxRateDto(it.currency, it.rate, it.fixingDate.toString(), it.source) },
+        totalNotStated = result.totalNotStated,
         unclassified = result.unclassified.map {
             UnclassifiedBalanceDto(it.glAccountCode, it.glAccountType, it.currency, it.amount.money(), it.reason)
         },
@@ -234,7 +240,10 @@ private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
             "100% (¶43(c)) — a proxy for d295 footnote 19's > 90 days past due, which the data does not carry.",
         notInData =
         "No undrawn committed facilities (d238 ¶131), no term deposits, no issued debt, no derivatives and " +
-            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, not zero-weighted.",
+            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, " +
+            "not zero-weighted. " +
+            "The one secured funding line is the ČNB lombard (GL 2320, 0% outflow / 0% ASF); the collateral " +
+            "pledged for it is not in the snapshot, so HQLA may be overstated while it is outstanding.",
         currencyAggregation = Liquidity.AGGREGATION_NOTE,
     )
 }

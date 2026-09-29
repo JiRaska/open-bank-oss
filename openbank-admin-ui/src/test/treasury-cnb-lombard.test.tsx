@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { eligibleCounterparties, isAssetProduct, nextBusinessDay, productLabel } from '@/components/treasury/model'
+import { dealSchema, productSchema } from '@/components/treasury/contracts'
 
 const session = vi.hoisted(() => ({ roles: ['ROLE_TREASURY_DEALER'] as string[], username: 'dana.dealer' }))
 const jwt = (claims: Record<string, unknown>) => `h.${btoa(JSON.stringify(claims)).replace(/=+$/, '')}.s`
@@ -62,6 +63,12 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 describe('model — CNB_LOMBARD constraints', () => {
+  it('reads a future response product without offering it for draft creation', () => {
+    expect(dealSchema.parse(lombardDeal({ product: 'FUTURE_PRODUCT' })).product).toBe('FUTURE_PRODUCT')
+    expect(productLabel('FUTURE_PRODUCT', (cs) => cs)).toBe('FUTURE_PRODUCT')
+    expect(productSchema.safeParse('FUTURE_PRODUCT').success).toBe(false)
+  })
+
   it('is a liability like MM_BORROWING: consumes no counterparty limit', () => {
     expect(isAssetProduct('CNB_LOMBARD')).toBe(false)
   })
@@ -113,13 +120,13 @@ describe('new deal form — CNB_LOMBARD', () => {
     await renderPage(<NewTreasuryDealPage />)
     await screen.findAllByRole('option', { name: /Sim Bank A/ })
     fireEvent.change(screen.getByLabelText(/^(Produkt|Product)$/), { target: { value: 'CNB_LOMBARD' } })
-    expect(screen.getByText('Lombardní sazba ČNB (%)')).toBeTruthy()
+    expect(screen.getByText(/Lombardní sazba ČNB \(%\)|CNB lombard rate \(%\)/)).toBeTruthy()
 
     fireEvent.change(screen.getByLabelText(/^(Jistina|Principal)$/), { target: { value: '2500000' } })
-    fireEvent.change(screen.getByLabelText('Lombardní sazba ČNB (%)'), { target: { value: '0' } })
+    fireEvent.change(screen.getByLabelText(/Lombardní sazba ČNB \(%\)|CNB lombard rate \(%\)/), { target: { value: '0' } })
     expect(screen.getByRole('button', { name: /Create draft|Vytvořit koncept/ })).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText('Lombardní sazba ČNB (%)'), { target: { value: '5.75' } })
+    fireEvent.change(screen.getByLabelText(/Lombardní sazba ČNB \(%\)|CNB lombard rate \(%\)/), { target: { value: '5.75' } })
     expect(screen.getByRole('button', { name: /Create draft|Vytvořit koncept/ })).toBeEnabled()
   })
 
@@ -134,7 +141,7 @@ describe('new deal form — CNB_LOMBARD', () => {
     await screen.findAllByRole('option', { name: /Sim Bank A/ })
     fireEvent.change(screen.getByLabelText(/^(Produkt|Product)$/), { target: { value: 'CNB_LOMBARD' } })
     fireEvent.change(screen.getByLabelText(/^(Jistina|Principal)$/), { target: { value: '2500000' } })
-    fireEvent.change(screen.getByLabelText('Lombardní sazba ČNB (%)'), { target: { value: '5.75' } })
+    fireEvent.change(screen.getByLabelText(/Lombardní sazba ČNB \(%\)|CNB lombard rate \(%\)/), { target: { value: '5.75' } })
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /Create draft|Vytvořit koncept/ })) })
 
     const post = calls.find(c => c.init?.method === 'POST')!

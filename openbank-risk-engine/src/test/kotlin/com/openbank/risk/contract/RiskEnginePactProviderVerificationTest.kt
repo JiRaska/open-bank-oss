@@ -27,7 +27,7 @@ import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
 
 /**
- * Provider replay of finrep's snapshot-list and capital pact (ADR-0313 D6) — the risk engine's
+ * Provider replay of finrep's snapshot-list, capital and liquidity pact (ADR-0313 D6) — the risk engine's
  * first provider contract. Reads `pacts/` (`@PactFolder`, git-pact, ADR-0063) and replays every
  * interaction whose provider is `openbank-risk-engine` against the running Quarkus test instance
  * and a real Postgres. Always runs on a PR, no broker: this is the half that catches a wrong PATH,
@@ -79,6 +79,10 @@ class RiskEnginePactProviderVerificationTest {
 
     @State(CapitalPactState.NAME)
     fun tiedOutRun(): Map<String, Any> = CapitalPactState.seed(ledger)
+
+    /** C 72.00's liquidity interaction reads the same seeded run (the same book and report date). */
+    @State(CapitalPactState.LIQUIDITY_NAME)
+    fun tiedOutRunWithLiquidity(): Map<String, Any> = CapitalPactState.seed(ledger)
 }
 
 /**
@@ -90,6 +94,9 @@ class RiskEnginePactProviderVerificationTest {
  */
 object CapitalPactState {
     const val NAME = "a TIED_OUT risk snapshot exists at the report date"
+
+    /** C 72.00's state: the same run as [NAME], read through `/liquidity`. */
+    const val LIQUIDITY_NAME = "a TIED_OUT risk snapshot with an LCR result exists at the report date"
 
     /** The negative-auth state: the request carries no identity and must be refused 401. */
     const val NO_IDENTITY = "no valid identity is presented"

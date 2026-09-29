@@ -12,6 +12,10 @@
 # The tag is the upstream Keycloak VERSION (read from the Dockerfile's pinned
 # ARG), so bumping Keycloak is a deliberate change to that ARG + this push.
 #
+# NOT THE NORMAL PATH. .github/workflows/platform-images.yml builds, scans, signs and pushes this
+# image on every merge that touches openbank-infra/docker/keycloak/, and opens the gitops PR that
+# pins the digest. This script is break-glass only (CI unavailable).
+#
 # Usage:
 #   openbank-infra/scripts/build-push-keycloak.sh
 set -euo pipefail

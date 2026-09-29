@@ -70,4 +70,8 @@ class AmlCaseEntity : PanacheEntity() {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    /** #10916: request fingerprint the case was created under; null for rows predating V9. */
+    @Column(name = "request_hash", length = 64)
+    var requestHash: String? = null
 }

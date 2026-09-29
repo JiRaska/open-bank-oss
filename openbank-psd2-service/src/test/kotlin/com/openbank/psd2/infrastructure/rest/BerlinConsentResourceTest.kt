@@ -8,6 +8,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.libs.idempotency.IdempotencyRecord
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.psd2.application.port.`in`.ConsentManagementUseCase
 import com.openbank.psd2.application.port.`in`.CreateConsentCommand
 import com.openbank.psd2.application.port.`in`.DeleteConsentCommand
@@ -86,7 +87,7 @@ class BerlinConsentResourceTest {
     fun `createConsent replays a cached response with the replay header`(): Unit = runBlocking {
         val cacheKey = "psd2:v1:consent:tpp-1:req-1"
         val cached = IdempotencyRecord(cacheKey, 201, """{"consentId":"c-1"}""", OffsetDateTime.now())
-        coEvery { idempotencyStore.get(cacheKey) } returns cached
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Replay(cached)
 
         val response = resource.createConsent(sampleRequest(), "req-1", null, null, ctxWithTpp("tpp-1"))
 
@@ -99,7 +100,7 @@ class BerlinConsentResourceTest {
     @Test
     fun `createConsent delegates, saves idempotency and returns Berlin created body`(): Unit = runBlocking {
         val cacheKey = "psd2:v1:consent:tpp-1:req-2"
-        coEvery { idempotencyStore.get(cacheKey) } returns null
+        coEvery { idempotencyStore.reserve(cacheKey, any(), any()) } returns ReserveResult.Reserved
         coEvery {
             consentMgmt.createConsent(
                 CreateConsentCommand(
@@ -112,7 +113,7 @@ class BerlinConsentResourceTest {
                 ),
             )
         } returns sampleConsentResponse("c-1")
-        coEvery { idempotencyStore.save(cacheKey, 201, any()) } returns Unit
+        coEvery { idempotencyStore.save(cacheKey, any<String>(), 201, any(), any()) } returns Unit
 
         val response = resource.createConsent(
             sampleRequest(),

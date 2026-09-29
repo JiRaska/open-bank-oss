@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# The shared edge (ADR-0324): one GatewayClass, one EnvoyProxy, one Gateway.
+#
+# PHASE 0 — NOTHING IS ROUTED. The Gateway exists so the controller provisions the proxy
+# Deployment and its LoadBalancer Service (the second NLB), and so the data plane can be
+# observed before any host moves. Its listener admits HTTPRoutes only from namespaces
+# carrying `openbank.io/edge-gateway: shared`, and no namespace carries that label yet.
+# A phase that moves a host adds the label to that host's namespace together with its
+# HTTPRoute and HTTPS listener — attachment is opt-in per namespace, never `from: All`.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: envoy
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: edge
+    namespace: envoy-gateway-system
+---
+# The data plane's shape. The Service block mirrors ingress-nginx's controller Service
+# (gitops/apps/ingress-nginx.yaml) field for field, so the second NLB is the same kind of
+# load balancer as the first:
+#   - same in-tree cloud-provider annotations (NLB, internet-facing) — no AWS Load
+#     Balancer Controller, the only AWS coupling stays one Service annotation (ADR-0027);
+#   - externalTrafficPolicy: Cluster, NOT Envoy Gateway's default of Local, so any NLB AZ
+#     IP reaches the single proxy replica via kube-proxy, exactly as today.
+# The source-IP allow-list is not in this repo for either NLB: it lives on the NLB's
+# security group, applied outside GitOps, and must be applied to this NLB the same way
+# before a host is moved to it.
+#
+# FinOps (ADR-0324): this is a SECOND NLB for the length of the migration, about
+# 0.025 USD/h (~$18/month) plus LCUs, on top of the ingress-nginx NLB. Steady state is
+# one NLB again (delta $0) once Phase 5 deletes ingress-nginx; the proxy requests
+# 50m / 64Mi, below the ingress-nginx controller it replaces.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: edge
+  namespace: envoy-gateway-system
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: LoadBalancer
+        externalTrafficPolicy: Cluster
+        annotations:
+          service.beta.kubernetes.io/aws-load-balancer-type: nlb
+          service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      envoyDeployment:
+        # Single replica for sandbox FinOps, as ingress-nginx. Prod raises this and adds
+        # envoyPDB.
+        replicas: 1
+        container:
+          # Envoy Gateway's default proxy request is 100m / 512Mi; an idle sandbox edge
+          # needs a fraction of that. Limits match the ingress-nginx controller's.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+  telemetry:
+    metrics:
+      # Stated explicitly: podmonitors.yaml scrapes this endpoint (:19001
+      # /stats/prometheus) for the edge-5xx signal (#2677).
+      prometheus:
+        disable: false
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: edge
+  namespace: envoy-gateway-system
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              openbank.io/edge-gateway: shared

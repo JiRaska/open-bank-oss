@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.7](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.6...psd2-service-v0.11.7) (2026-09-28)
+
+
+### Security
+
+* **psd2:** bind PIS and consent idempotency keys to a request fingerprint ([#10996](https://github.com/JiRaska/open-bank-oss/issues/10996)) ([9967779](https://github.com/JiRaska/open-bank-oss/commit/996777987be19da4b4380e87f57d81c0af522bbf))
+
+## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.5...psd2-service-v0.11.6) (2026-09-28)
+
+
+### Bug Fixes
+
+* **psd2:** offload eIDAS/QSEAL filter blocking work off the IO thread ([#11346](https://github.com/JiRaska/open-bank-oss/issues/11346)) ([dcbb251](https://github.com/JiRaska/open-bank-oss/commit/dcbb251f96b6007a592f5c1cd3c4fccfef3b12d6))
+
+## [0.11.5](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.4...psd2-service-v0.11.5) (2026-09-28)
+
+
+### Bug Fixes
+
+* **psd2:** normalise the leading slash so the eIDAS, QSEAL and deprecation filters run ([#11008](https://github.com/JiRaska/open-bank-oss/issues/11008)) ([4190c2c](https://github.com/JiRaska/open-bank-oss/commit/4190c2c252f082e316fe62a300709dbb28b8209d))
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.3...psd2-service-v0.11.4) (2026-09-26)
 
 
