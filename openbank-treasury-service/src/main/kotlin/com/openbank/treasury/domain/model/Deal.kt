@@ -13,19 +13,57 @@ import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 /**
- * MVP products (ADR-0315 D2). The ADR lists more; these three are the money-market core.
+ * Products (ADR-0315 D2). The three money-market products are the MVP core; [FX_SPOT] is the
+ * first non-money-market product (#10896).
  *
  * - [MM_PLACEMENT]: the bank LENDS to another bank (an asset, consumes that bank's credit limit).
  * - [MM_BORROWING]: the bank BORROWS from another bank (a liability, consumes no credit limit).
  * - [CNB_DEPOSIT_FACILITY]: overnight deposit at the Czech National Bank (an asset, CZK only).
  * - [CNB_LOMBARD]: overnight borrowing from the ČNB marginal lending (lombard) facility against
  *   eligible collateral (a liability, CZK only, #10896). The collateral pledge is NOT modelled.
+ * - [FX_SPOT]: the bank buys or sells a foreign currency against CZK with a counterparty (see
+ *   [FxTerms]). No interest, no maturity: it is final once SETTLED. It carries settlement risk
+ *   until then, so it consumes the counterparty's CZK limit by its CZK equivalent while
+ *   PENDING_APPROVAL or BOOKED. `isAsset = false`: it opens no placement-like claim.
  */
 enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
     MM_PLACEMENT(isAsset = true),
     MM_BORROWING(isAsset = false),
     CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
     CNB_LOMBARD(isAsset = false, isCnbFacility = true),
+    FX_SPOT(isAsset = false),
+}
+
+/** The bank's side of an FX spot deal, on the FOREIGN currency: BUY = the bank buys it and pays CZK. */
+enum class FxSide { BUY, SELL }
+
+/**
+ * The FX-specific terms of an [ProductType.FX_SPOT] deal. The deal's `currency` is the foreign
+ * currency, `principal` its amount, and `rate` the dealer-entered deal rate in CZK per 1 unit of it.
+ * [counterAmount] is the CZK leg, `principal × rate` half-up to 2 dp.
+ *
+ * [midRate] / [rateFlag] record the tolerance check against fx-service's mid (#10896). A deal
+ * outside tolerance is FLAGGED, never blocked: the four-eyes approver sees the flag and decides.
+ */
+data class FxTerms(
+    val side: FxSide,
+    val counterAmount: BigDecimal,
+    val midRate: BigDecimal? = null,
+    val rateFlag: String? = null,
+) {
+    companion object {
+        /** `buy`/`sell` as a client names them: exactly one must be CZK. Returns (foreign currency, side). */
+        fun fromCurrencies(buyCurrency: String, sellCurrency: String): Pair<String, FxSide> {
+            require(buyCurrency != sellCurrency) { "buyCurrency and sellCurrency must differ" }
+            return when (Deal.CZK) {
+                sellCurrency -> buyCurrency to FxSide.BUY
+                buyCurrency -> sellCurrency to FxSide.SELL
+                else -> throw IllegalArgumentException(
+                    "an FX spot deal is against CZK: one of buyCurrency/sellCurrency must be CZK",
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -46,6 +84,9 @@ data class Actor(val id: String, val type: ActorType) {
     companion object {
         /** The in-process simulated counterparty set (ADR-0315 D9) that settles and matures deals. */
         val SIMULATED_MARKET = Actor("system:simulated-market", ActorType.SYSTEM)
+
+        /** Records an FX spot rate flag on the timeline (#10896). */
+        val FX_RATE_CHECK = Actor("system:fx-rate-check", ActorType.SYSTEM)
 
         /**
          * Same convention as libs' AuthorizeInterceptor: an agent presents a `sub` prefixed
@@ -111,8 +152,16 @@ data class Deal(
     val limitCheck: LimitCheck? = null,
     /** An AI agent's inputs and rationale for a draft it proposed (ADR-0315 D10); null for humans. */
     val rationale: String? = null,
+    /**
+     * The data an AI agent's draft was built from, as a JSON object (ADR-0315 D10) — the quote,
+     * curve point, headroom or position it read — so the human who submits and the approver who
+     * books can check the proposal against what the agent actually saw. Null for a human draft.
+     */
+    val inputs: String? = null,
     /** A senior approver's recorded override of a counterparty-limit breach (ADR-0315 D4). */
     val limitOverride: LimitOverride? = null,
+    /** Present exactly when `product == FX_SPOT`. */
+    val fx: FxTerms? = null,
     val history: List<DealTransition> = emptyList(),
 ) {
     init {
@@ -120,9 +169,12 @@ data class Deal(
         require(principal.signum() > 0) { "principal must be positive" }
         require(principal.scale() <= 2) { "principal has at most 2 decimal places" }
         require(rate.signum() >= 0) { "rate must not be negative" }
-        require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
         require(!valueDate.isBefore(tradeDate)) { "valueDate must not precede tradeDate" }
-        require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
+        if (product == ProductType.FX_SPOT) requireFxSpot() else require(fx == null) { "only FX_SPOT carries FX terms" }
+        if (product != ProductType.FX_SPOT) {
+            require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
+            require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
+        }
         if (product.isCnbFacility) {
             val facility = if (product == ProductType.CNB_LOMBARD) "lombard facility" else "deposit facility"
             require(currency == CZK) { "the ČNB $facility is CZK only" }
@@ -140,14 +192,66 @@ data class Deal(
         }
     }
 
+    private fun requireFxSpot() {
+        val terms = requireNotNull(fx) { "an FX_SPOT deal needs its FX terms" }
+        require(currency != CZK) { "an FX spot deal's currency is the foreign one, bought or sold against CZK" }
+        require(rate.signum() > 0) { "an FX deal rate must be positive" }
+        require(rate.scale() <= FX_RATE_SCALE) { "an FX deal rate has at most $FX_RATE_SCALE decimal places" }
+        require(rate < FX_RATE_LIMIT) {
+            "an FX deal rate must be less than $FX_RATE_LIMIT (deals.rate is NUMERIC(9,6): at most 3 integer digits)"
+        }
+        require(maturityDate == valueDate) { "an FX spot deal has no maturity: maturityDate equals valueDate" }
+        require(!DayCount.isWeekend(valueDate)) { "an FX spot value date must be a business day" }
+        require(!valueDate.isAfter(DayCount.spotDate(tradeDate))) {
+            "an FX spot value date is at most T+2 business days (${DayCount.spotDate(tradeDate)}); later is a forward"
+        }
+        require(terms.counterAmount.compareTo(counterAmountOf(principal, rate)) == 0) {
+            "the CZK counter amount must be principal x rate, half-up to 2 dp"
+        }
+        require(terms.counterAmount.signum() > 0) {
+            "the CZK counter amount must be positive (principal $principal x rate $rate rounds to " +
+                "${terms.counterAmount}, which the store's fx_counter_amount > 0 constraint rejects)"
+        }
+    }
+
+    /** The currency whose counterparty limit this deal consumes: CZK for an FX spot (its CZK equivalent). */
+    val limitCurrency: String get() = if (product == ProductType.FX_SPOT) CZK else currency
+
+    /** What the deal adds to the limit: principal for an asset, the CZK leg for FX spot, else zero. */
+    val limitAmount: BigDecimal
+        get() = when {
+            product == ProductType.FX_SPOT -> checkNotNull(fx).counterAmount
+            product.isAsset -> principal
+            else -> BigDecimal.ZERO
+        }
+
     /**
-     * The currency whose counterparty limit this deal consumes (#10896). Today that is the deal's
-     * own currency for every product; a product that consumes a limit in another currency (FX spot:
-     * its CZK equivalent) overrides it HERE. The booking-time [LimitCheck], the exposure query and
-     * the utilisation view's active-override count all read this one property — never the raw
-     * `currency` — so a new product cannot be counted on one line and checked on another.
+     * Record the tolerance check of the dealer's rate against [mid] (#10896). Flags, never blocks:
+     * a deviation beyond [tolerancePercent] — or no mid to compare with — is written on the deal
+     * and its timeline for the approver. Only FX_SPOT deals are checked.
      */
-    val limitCurrency: String get() = currency
+    fun checkRate(mid: BigDecimal?, tolerancePercent: BigDecimal, at: Instant): Deal {
+        val terms = fx ?: return this
+        val flag = when {
+            mid == null || mid.signum() <= 0 -> "fx-service mid unavailable; deal rate $rate is unvalidated"
+            else -> {
+                val deviation = (rate - mid).abs().multiply(HUNDRED).divide(mid, DEVIATION_SCALE, RoundingMode.HALF_UP)
+                if (deviation > tolerancePercent) {
+                    "deal rate $rate deviates $deviation % from fx-service mid $mid (tolerance $tolerancePercent %)"
+                } else {
+                    null
+                }
+            }
+        }
+        val checked = copy(fx = terms.copy(midRate = mid, rateFlag = flag), updatedAt = at)
+        return if (flag == null) {
+            checked
+        } else {
+            checked.copy(
+                history = history + DealTransition(state, state, Actor.FX_RATE_CHECK, at, "rate flagged: $flag"),
+            )
+        }
+    }
 
     /**
      * True while this deal is PENDING_APPROVAL on [counterpartyId]'s [currency] limit with a senior
@@ -249,6 +353,7 @@ data class Deal(
 
     fun mature(actor: Actor, today: LocalDate, at: Instant): Deal {
         requireHumanOrSystem(actor, "mature")
+        check(product != ProductType.FX_SPOT) { "an FX spot deal has no maturity; it is final once SETTLED" }
         requireState(DealState.SETTLED, "mature")
         check(!maturityDate.isAfter(today)) { "deal cannot mature before its maturity date $maturityDate" }
         return transition(DealState.MATURED, actor, at, null)
@@ -273,7 +378,10 @@ data class Deal(
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = product.isAsset && state in LIMIT_CONSUMING_STATES
+        get() = when (product) {
+            ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
+            else -> product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+        }
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
         state = to,
@@ -324,6 +432,22 @@ data class Deal(
         val SUPPORTED_CURRENCIES = setOf(CZK, EUR)
         const val CNB_COUNTERPARTY_ID = "CNB"
         private val MAX_RATE = BigDecimal("100")
+        private val HUNDRED = BigDecimal("100")
+        private const val FX_RATE_SCALE = 6
+        private val FX_RATE_LIMIT = BigDecimal("1000")
+        private const val DEVIATION_SCALE = 4
+        private const val MONEY_SCALE = 2
+
+        /**
+         * An FX spot consumes its counterparty's CZK limit (settlement risk on its CZK leg) only
+         * while PENDING_APPROVAL or BOOKED: once both legs are exchanged nothing is left at risk.
+         * The repository's `exposure` query reads the same set, never a second literal list.
+         */
+        val FX_LIMIT_CONSUMING_STATES: Set<DealState> = setOf(DealState.PENDING_APPROVAL, DealState.BOOKED)
+
+        /** The CZK leg of an FX spot: foreign amount x deal rate, half-up to 2 dp. */
+        fun counterAmountOf(principal: BigDecimal, rate: BigDecimal): BigDecimal =
+            principal.multiply(rate).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
 
         /**
          * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
@@ -339,7 +463,8 @@ data class Deal(
 
         /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or
-         * the system may not. An agent's draft must carry its rationale (ADR-0315 D10).
+         * the system may not. An agent's draft must carry its rationale and the inputs it used
+         * (ADR-0315 D10); a draft never consumes a limit and only a human can submit it.
          */
         @Suppress("LongParameterList")
         fun draft(
@@ -355,14 +480,23 @@ data class Deal(
             actor: Actor,
             at: Instant,
             rationale: String? = null,
+            inputs: String? = null,
+            fxSide: FxSide? = null,
         ): Deal {
             if (actor.type != ActorType.HUMAN && actor.type != ActorType.AI_AGENT) {
                 throw ActorNotPermittedException("a ${actor.type} principal may not draft a treasury deal")
             }
             if (actor.type == ActorType.AI_AGENT) {
                 require(!rationale.isNullOrBlank()) { "an agent-drafted deal must carry its rationale (ADR-0315 D10)" }
+                require(!inputs.isNullOrBlank()) {
+                    "an agent-drafted deal must carry the inputs it used (ADR-0315 D10)"
+                }
+            }
+            require((product == ProductType.FX_SPOT) == (fxSide != null)) {
+                "an FX side (buy/sell currencies) is given exactly for FX_SPOT"
             }
             val maturity = when {
+                product == ProductType.FX_SPOT -> valueDate
                 product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
                 maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
                 else -> maturityDate
@@ -382,6 +516,8 @@ data class Deal(
                 createdAt = at,
                 updatedAt = at,
                 rationale = rationale,
+                inputs = inputs,
+                fx = fxSide?.let { FxTerms(it, counterAmountOf(principal, rate)) },
                 history = listOf(DealTransition(from = null, to = DealState.DRAFT, actor = actor, at = at)),
             )
         }
@@ -400,11 +536,19 @@ object DayCount {
     private const val MONEY_SCALE = 2
     private const val WORK_SCALE = 12
 
+    private const val SPOT_LAG_BUSINESS_DAYS = 2
+
+    fun isWeekend(date: LocalDate): Boolean = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
+
     fun nextBusinessDay(date: LocalDate): LocalDate {
         var d = date.plusDays(1)
-        while (d.dayOfWeek == DayOfWeek.SATURDAY || d.dayOfWeek == DayOfWeek.SUNDAY) d = d.plusDays(1)
+        while (isWeekend(d)) d = d.plusDays(1)
         return d
     }
+
+    /** FX spot value date: T+2 business days (weekends skipped; no holiday calendar, as above). */
+    fun spotDate(tradeDate: LocalDate): LocalDate =
+        (1..SPOT_LAG_BUSINESS_DAYS).fold(tradeDate) { d, _ -> nextBusinessDay(d) }
 
     /** principal × rate/100 × days/360, half-up to 2 dp. */
     fun act360Interest(principal: BigDecimal, ratePercent: BigDecimal, from: LocalDate, to: LocalDate): BigDecimal {

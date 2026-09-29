@@ -25,16 +25,16 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
 /**
- * The SHIPPED parameter set, read from application.yaml through the same config mapping the
+ * The SHIPPED BCBS d424 parameter set (declared, selectable, no longer the default), read from application.yaml through the same config mapping the
  * service uses, holds the value its citation names. One test per factor family: a changed weight
  * without a changed citation (and a version bump) goes red here.
  */
 class CapitalParametersTest {
 
-    private val p = CapitalTestParameters.shipped()
+    private val p = CapitalTestParameters.bcbs()
 
     private fun assertFactors(vararg expected: Pair<CapitalFactor, String>) = expected.forEach { (f, v) ->
-        assertThat(p[f]).describedAs("${f.key} (${f.citation})").isEqualByComparingTo(v)
+        assertThat(p[f]).describedAs("${f.key} (${p.citation(f)})").isEqualByComparingTo(v)
     }
 
     @Test
@@ -109,13 +109,29 @@ class CapitalParametersTest {
     @Test
     fun `a missing, unknown or out-of-range factor is refused, never defaulted`() {
         val keys = p.factors.mapKeys { it.key.key }
-        assertThatThrownBy { CapitalParameters.fromKeys("x", "1", "s", keys - RW_DEFAULTED.key, p.classification) }
+        assertThatThrownBy {
+            CapitalParameters.fromKeys("x", "1", "s", keys - RW_DEFAULTED.key, p.classification, CapitalRegime.BCBS)
+        }
             .hasMessageContaining("missing factors").hasMessageContaining("rw-defaulted")
         assertThatThrownBy {
-            CapitalParameters.fromKeys("x", "1", "s", keys + ("rw-made-up" to BigDecimal.ONE), p.classification)
+            CapitalParameters.fromKeys(
+                "x",
+                "1",
+                "s",
+                keys + ("rw-made-up" to BigDecimal.ONE),
+                p.classification,
+                CapitalRegime.BCBS,
+            )
         }.hasMessageContaining("unknown capital factor keys")
         assertThatThrownBy {
-            CapitalParameters.fromKeys("x", "1", "s", keys + (RW_OTHER_ASSET.key to BigDecimal("13")), p.classification)
+            CapitalParameters.fromKeys(
+                "x",
+                "1",
+                "s",
+                keys + (RW_OTHER_ASSET.key to BigDecimal("13")),
+                p.classification,
+                CapitalRegime.BCBS,
+            )
         }.hasMessageContaining("[0, 12.5]")
         assertThatThrownBy {
             CapitalParameters.fromKeys(
@@ -124,6 +140,7 @@ class CapitalParametersTest {
                 "s",
                 keys + (MIN_TOTAL_CAPITAL_RATIO.key to BigDecimal("8")),
                 p.classification,
+                CapitalRegime.BCBS,
             )
         }.hasMessageContaining("(0, 1]")
     }

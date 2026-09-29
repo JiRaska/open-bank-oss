@@ -13,23 +13,31 @@ run() {
   docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$@" \
     -r "$T/resources.yaml" --policy-report 2>&1 || true
 }
-# rollout-bypass-prevention.yaml is NOT in the v1 run: the 1.19.1 CLI panics on its
-# apiCall urlPath (query string -> empty GVR in the fake client), with or without
-# values. Its v1 verdicts are therefore pinned in V1_ROLLOUT below and were measured
-# against the live Enforce policy with `kubectl create --dry-run=server` (PR body).
-# The CLI silently loads NO policy from dr-runner-rbac.yaml (a ClusterPolicy mixed
-# with RBAC docs yields "pass: 0, fail: 0"), so the ClusterPolicy is extracted first.
-DR="$T/tmp-dr-sa-pin.v1.yaml"
+# rollout-bypass-prevention.yaml (block-deployment-if-rollout-exists) was never in the
+# v1 run: the 1.19.1 CLI panics on its apiCall urlPath (query string -> empty GVR in
+# the fake client), with or without values. Its v1 verdicts are pinned in V1_ROLLOUT
+# below, measured against the live Enforce policy with `kubectl create
+# --dry-run=server`. The file was deleted when its CEL port went to Enforce (#11437).
+# deny-nginx-snippet-annotations.yaml is NOT in the v1 run either: it was deleted when
+# its CEL port went to Enforce (#11437). Its v1 verdicts are pinned in V1_NGINX below,
+# measured with this harness (Kyverno CLI v1.19.1, v1 file as on main) on 2026-09-29,
+# immediately before the deletion.
+# tool-ingress-gate-policy.yaml (require-gated-or-declared-tool-ingress) went the same
+# way (#11437): deleted when its CEL port went to Enforce. Its v1 verdicts are pinned
+# in V1_TOOL_INGRESS below, measured with this harness (Kyverno CLI v1.19.1, v1 file
+# as on main) on 2026-09-29, immediately before the deletion.
+# openbank-dr-sa-pin (formerly the last document of platform/dr-runner-rbac.yaml)
+# went the same way (#11437), in two PRs because it lived in another Argo app. Its v1
+# verdicts are pinned in V1_DR_SA_PIN below, measured with this harness (Kyverno CLI
+# v1.19.1, ClusterPolicy extracted from the file as on main) on 2026-09-29,
+# immediately before the removal. With it, no v1 validate policy is left to run, so
+# the v1 side of the comparison is made entirely of pinned verdicts.
 MP="$T/tmp-ecr-rewrite-cel-enabled.yaml"
 OUT="$T/tmp-mutated"
-trap 'rm -rf "$ROOT/$DR" "$ROOT/$MP" "$ROOT/$OUT"' EXIT
-python3 -c "import sys,yaml; print(yaml.safe_dump_all([d for d in yaml.safe_load_all(open(sys.argv[1])) if d and d.get('kind')=='ClusterPolicy']))" \
-  "$ROOT/gitops/components/platform/dr-runner-rbac.yaml" >"$ROOT/$DR"
-V1=$(run "$K/deny-nginx-snippet-annotations.yaml" "$K/tool-ingress-gate-policy.yaml" "$DR" \
-  -f "$T/values.yaml")
+trap 'rm -rf "$ROOT/$MP" "$ROOT/$OUT"' EXIT
 CEL=$(run "$K/cel-validating-policies.yaml" -f "$T/values.yaml" \
   --context-file "$T/context.yaml" --crd-paths "$T/rollout-crd-stub.yaml")
-python3 - "$V1" "$CEL" <<'PY'
+python3 - "$CEL" <<'PY'
 import sys, yaml
 
 def table(txt):
@@ -44,12 +52,41 @@ def table(txt):
                 out[(pol, res['kind'], res.get('namespace', ''), res['name'])] = r['result']
     return out
 
-v1, cel = table(sys.argv[1]), table(sys.argv[2])
-V1_ROLLOUT = {  # measured live, see the comment in the shell part
+v1, cel = {}, table(sys.argv[1])
+V1_ROLLOUT = {  # measured live (re-measured 2026-09-29 before the v1 file was deleted, #11437)
     ('block-deployment-if-rollout-exists', 'Deployment', 'ledger', 'ledger-service'): 'fail',
     ('block-deployment-if-rollout-exists', 'Deployment', 'ledger', 'redis'): 'pass',
 }
 v1.update(V1_ROLLOUT)
+V1_NGINX = {  # measured 2026-09-29 by this harness before the v1 file was deleted (#11437)
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'clean'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'empty-snippet'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'snippet'): 'fail',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'default', 'tool-ungated-elsewhere'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-declared'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-gated'): 'pass',
+    ('deny-nginx-snippet-annotations', 'Ingress', 'observability', 'tool-ungated'): 'pass',
+}
+v1.update(V1_NGINX)
+V1_TOOL_INGRESS = {  # measured 2026-09-29 by this harness before the v1 file was deleted (#11437)
+    ('require-gated-or-declared-tool-ingress', 'Ingress', 'observability', 'tool-declared'): 'pass',
+    ('require-gated-or-declared-tool-ingress', 'Ingress', 'observability', 'tool-gated'): 'pass',
+    ('require-gated-or-declared-tool-ingress', 'Ingress', 'observability', 'tool-ungated'): 'fail',
+}
+v1.update(V1_TOOL_INGRESS)
+V1_DR_SA_PIN = {  # measured 2026-09-29 by this harness before the v1 policy was removed (#11437)
+    ('openbank-dr-sa-pin', 'Deployment', 'default', 'dr-deploy'): 'fail',
+    ('openbank-dr-sa-pin', 'Deployment', 'default', 'ledger-service'): 'pass',
+    ('openbank-dr-sa-pin', 'Deployment', 'ledger', 'ledger-service'): 'pass',
+    ('openbank-dr-sa-pin', 'Deployment', 'ledger', 'redis'): 'pass',
+    ('openbank-dr-sa-pin', 'Pod', 'default', 'cnpg-1'): 'pass',
+    ('openbank-dr-sa-pin', 'Pod', 'default', 'dr-in-default'): 'fail',
+    ('openbank-dr-sa-pin', 'Pod', 'default', 'multi-registry'): 'pass',
+    ('openbank-dr-sa-pin', 'Pod', 'default', 'no-sa'): 'pass',
+    ('openbank-dr-sa-pin', 'Pod', 'default', 'plain-sa'): 'pass',
+    ('openbank-dr-sa-pin', 'Pod', 'kube-system', 'eks-addon'): 'pass',
+}
+v1.update(V1_DR_SA_PIN)
 EXPECTED = {'block-deployment-if-rollout-exists', 'deny-nginx-snippet-annotations',
             'require-gated-or-declared-tool-ingress', 'openbank-dr-sa-pin'}
 for name, t in (('v1', v1), ('cel', cel)):

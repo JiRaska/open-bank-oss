@@ -21,8 +21,8 @@ import {
   type Counterparty, type Deal, type Product,
 } from '@/components/treasury/contracts'
 import {
-  distinctCounterparties, eligibleCounterparties, exceedsHeadroom, headroomFor, isAssetProduct,
-  isCnbFacility, nextBusinessDay, productLabel, refusalText, STATE_TONE, stateLabel,
+  distinctCounterparties, eligibleCounterparties, exceedsHeadroom, fxCounterAmount, fxSpotDate,
+  headroomFor, isAssetProduct, isCnbFacility, isValidFxPair, nextBusinessDay, productLabel, refusalText, STATE_TONE, stateLabel,
 } from '@/components/treasury/model'
 import { SyntheticBadge } from '@/components/treasury/SyntheticBadge'
 import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
@@ -48,6 +48,8 @@ function NewDeal() {
   const [product, setProduct] = useState<Product>('MM_PLACEMENT')
   const [counterpartyId, setCounterpartyId] = useState('')
   const [currency, setCurrency] = useState<string>('CZK')
+  const [buyCurrency, setBuyCurrency] = useState<string>('EUR')
+  const [sellCurrency, setSellCurrency] = useState<string>('CZK')
   const [principal, setPrincipal] = useState('')
   const [rate, setRate] = useState('')
   const [valueDate, setValueDate] = useState(bankToday())
@@ -66,35 +68,56 @@ function NewDeal() {
 
   const facility = isCnbFacility(product)
   const lombard = product === 'CNB_LOMBARD'
+  const isFx = product === 'FX_SPOT'
   const options = useMemo(() => (rows ? distinctCounterparties(eligibleCounterparties(rows, product)) : []), [rows, product])
 
-  // Keep the form consistent with the product's rules (Deal.kt): a ČNB facility is CZK against
-  // ČNB, always overnight; interbank products never face the central bank.
+  // ČNB facilities are CZK-only and overnight; FX spot has no separate maturity date.
   useEffect(() => {
     if (facility) { setCurrency('CZK'); setCounterpartyId(CNB_COUNTERPARTY_ID); setMaturityDate('') }
     else setCounterpartyId(prev => (prev === CNB_COUNTERPARTY_ID ? '' : prev))
   }, [facility])
+  useEffect(() => {
+    if (isFx) { setMaturityDate(''); setValueDate('') }
+    else if (valueDate === '') setValueDate(bankToday())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFx])
 
   const principalValue = Number(principal)
   const rateValue = Number(rate)
-  const headroomRow = rows && counterpartyId ? headroomFor(rows, counterpartyId, currency) : null
-  const overHeadroom = exceedsHeadroom(product, principalValue, headroomRow)
+  const fxPairValid = isValidFxPair(buyCurrency, sellCurrency)
+  const previewCounterAmount = isFx ? fxCounterAmount(principalValue, rateValue) : null
+  const spotDate = fxSpotDate(bankToday())
+  // Client-side courtesy mirroring Deal.kt's own check: same/next day allowed, later refused; the
+  // server (DayCount.spotDate) is the actual control.
+  const valueDateOk = !isFx || valueDate === '' || (isIsoDate(valueDate) && valueDate <= spotDate)
+  const headroomCurrency = isFx ? 'CZK' : currency
+  const headroomRow = rows && counterpartyId ? headroomFor(rows, counterpartyId, headroomCurrency) : null
+  const headroomAmount = isFx ? (previewCounterAmount ?? NaN) : principalValue
+  const overHeadroom = exceedsHeadroom(product, headroomAmount, headroomRow)
   const selected = options.find(c => c.counterpartyId === counterpartyId)
   const previewMaturity = facility ? nextBusinessDay(valueDate) : ''
 
   const valid = counterpartyId !== '' && principal !== '' && Number.isFinite(principalValue) && principalValue > 0
-    && rate !== '' && Number.isFinite(rateValue) && (lombard ? rateValue > 0 : rateValue >= 0) && isIsoDate(valueDate)
-    && (facility || maturityDate === '' || (isIsoDate(maturityDate) && maturityDate > valueDate))
+    && rate !== '' && Number.isFinite(rateValue) && (lombard ? rateValue > 0 : rateValue >= 0)
+    && (isFx
+      ? fxPairValid && valueDateOk
+      : isIsoDate(valueDate) && (facility || maturityDate === '' || (isIsoDate(maturityDate) && maturityDate > valueDate)))
 
   const create = async () => {
     if (!valid) return
     setBusy(true)
     setNotice(null)
-    const body = {
-      product, counterpartyId, currency, principal: principalValue, rate: rateValue, valueDate,
-      ...(!facility && maturityDate ? { maturityDate } : {}),
-      ...(rationale.trim() ? { rationale: rationale.trim() } : {}),
-    }
+    const body = isFx
+      ? {
+          product, counterpartyId, buyCurrency, sellCurrency, principal: principalValue, rate: rateValue,
+          ...(valueDate ? { valueDate } : {}),
+          ...(rationale.trim() ? { rationale: rationale.trim() } : {}),
+        }
+      : {
+          product, counterpartyId, currency, principal: principalValue, rate: rateValue, valueDate,
+          ...(!facility && maturityDate ? { maturityDate } : {}),
+          ...(rationale.trim() ? { rationale: rationale.trim() } : {}),
+        }
     const res = await postJson(treasuryUrl('/deals'), body, dealSchema)
     setBusy(false)
     if (res.ok) {
@@ -153,25 +176,48 @@ function NewDeal() {
               ))}
             </select>
           </label>
+          {!isFx && (
+            <label style={field}>
+              {t('Měna', 'Currency')}
+              <select className="input" value={currency} onChange={e => setCurrency(e.target.value)} aria-label={t('Měna', 'Currency')} disabled={draft !== null || facility}>
+                {CURRENCIES.filter(c => !facility || c === 'CZK').map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+          )}
+          {isFx && (
+            <>
+              <label style={field}>
+                {t('Kupovaná měna', 'Buy currency')}
+                <select className="input" value={buyCurrency} onChange={e => setBuyCurrency(e.target.value)} aria-label={t('Kupovaná měna', 'Buy currency')} disabled={draft !== null}>
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+              <label style={field}>
+                {t('Prodávaná měna', 'Sell currency')}
+                <select className="input" value={sellCurrency} onChange={e => setSellCurrency(e.target.value)} aria-label={t('Prodávaná měna', 'Sell currency')} disabled={draft !== null}>
+                  {CURRENCIES.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            </>
+          )}
           <label style={field}>
-            {t('Měna', 'Currency')}
-            <select className="input" value={currency} onChange={e => setCurrency(e.target.value)} aria-label={t('Měna', 'Currency')} disabled={draft !== null || facility}>
-              {CURRENCIES.filter(c => !facility || c === 'CZK').map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
+            {isFx ? t('Cizoměnová částka', 'Foreign amount') : t('Jistina', 'Principal')}
+            <input className="input" type="number" min="0" step="0.01" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} aria-label={isFx ? t('Cizoměnová částka', 'Foreign amount') : t('Jistina', 'Principal')} disabled={draft !== null} />
           </label>
           <label style={field}>
-            {t('Jistina', 'Principal')}
-            <input className="input" type="number" min="0" step="0.01" inputMode="decimal" value={principal} onChange={e => setPrincipal(e.target.value)} aria-label={t('Jistina', 'Principal')} disabled={draft !== null} />
+            {isFx ? t('Kurz (CZK za jednotku)', 'Rate (CZK per unit)') : lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
+            <input className="input" type="number" min={lombard ? '0.0001' : '0'} step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={isFx ? t('Kurz, CZK za jednotku cizí měny', 'Rate, CZK per unit of foreign currency') : lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
           </label>
           <label style={field}>
-            {lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Sazba % p.a. (ACT/360)', 'Rate % p.a. (ACT/360)')}
-            <input className="input" type="number" min={lombard ? '0.0001' : '0'} step="0.0001" inputMode="decimal" value={rate} onChange={e => setRate(e.target.value)} aria-label={lombard ? t('Lombardní sazba ČNB (%)', 'CNB lombard rate (%)') : t('Roční sazba v procentech', 'Annual rate in percent')} disabled={draft !== null} />
+            {isFx ? t('Datum valuty (nepovinné)', 'Value date (optional)') : t('Datum valuty', 'Value date')}
+            <input className="input" type="date" value={valueDate} max={isFx ? spotDate : undefined} onChange={e => setValueDate(e.target.value)} aria-label={t('Datum valuty', 'Value date')} disabled={draft !== null} />
+            {isFx && (
+              <span style={{ color: 'var(--text-tertiary)' }}>
+                {t(`Prázdné = T+2 obchodní dny (${spotDate}). Pozdější datum je forward a je odmítnut.`, `Empty = T+2 business days (${spotDate}). A later date is a forward and is refused.`)}
+              </span>
+            )}
           </label>
-          <label style={field}>
-            {t('Datum valuty', 'Value date')}
-            <input className="input" type="date" value={valueDate} onChange={e => setValueDate(e.target.value)} aria-label={t('Datum valuty', 'Value date')} disabled={draft !== null} />
-          </label>
-          {!facility && (
+          {!facility && !isFx && (
             <label style={field}>
               {t('Datum splatnosti (nepovinné)', 'Maturity date (optional)')}
               <input className="input" type="date" value={maturityDate} min={valueDate} onChange={e => setMaturityDate(e.target.value)} aria-label={t('Datum splatnosti', 'Maturity date')} disabled={draft !== null} />
@@ -189,6 +235,26 @@ function NewDeal() {
             </p>
           )}
         </div>
+        {isFx && (
+          <div style={{ marginTop: 12, fontSize: 13 }} data-testid="fx-preview">
+            {!fxPairValid && (
+              <div role="alert" style={{ color: 'var(--danger-text)' }}>
+                {t('Právě jedna z měn musí být CZK.', 'Exactly one of the two currencies must be CZK.')}
+              </div>
+            )}
+            {fxPairValid && previewCounterAmount !== null && (
+              <p>
+                {t('Náhled protihodnoty v CZK (nezaúčtováno)', 'Preview counter amount in CZK (not booked)')}
+                {`: ${money(previewCounterAmount)} CZK`}
+              </p>
+            )}
+            {!valueDateOk && (
+              <div role="alert" style={{ color: 'var(--danger-text)' }}>
+                {t(`Datum valuty smí být nejpozději ${spotDate} (T+2 obchodní dny); pozdější datum je forward.`, `The value date may be at most ${spotDate} (T+2 business days); a later date is a forward.`)}
+              </div>
+            )}
+          </div>
+        )}
         <label style={{ ...field, marginTop: 12 }}>
           {t('Zdůvodnění (nepovinné)', 'Rationale (optional)')}
           <input className="input" value={rationale} onChange={e => setRationale(e.target.value)} aria-label={t('Zdůvodnění', 'Rationale')} disabled={draft !== null} />
@@ -199,11 +265,11 @@ function NewDeal() {
             {selected && <SyntheticBadge synthetic={selected.synthetic} />}{' '}
             {headroomRow ? (
               <>
-                {t('Volný limit protistrany', 'Counterparty limit headroom')}{`: ${money(headroomRow.headroom)} ${currency}`}
+                {t('Volný limit protistrany', 'Counterparty limit headroom')}{`: ${money(headroomRow.headroom)} ${headroomCurrency}`}
                 <span style={{ color: 'var(--text-tertiary)' }}>{` (${t('limit', 'limit')} ${money(headroomRow.limit)}, ${t('expozice', 'exposure')} ${money(headroomRow.exposure)})`}</span>
               </>
             ) : (
-              t(`Pro měnu ${currency} není limit protistrany k dispozici.`, `No counterparty limit is available in ${currency}.`)
+              t(`Pro měnu ${headroomCurrency} není limit protistrany k dispozici.`, `No counterparty limit is available in ${headroomCurrency}.`)
             )}
             {!isAssetProduct(product) && (
               <div style={{ color: 'var(--text-tertiary)' }}>{t('Přijetí prostředků nečerpá úvěrový limit protistrany.', 'Borrowing does not consume the counterparty credit limit.')}</div>

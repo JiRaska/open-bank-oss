@@ -54,7 +54,7 @@ class LiquidityParametersTest {
     @Test
     fun `the parameter set is identified and versioned`() {
         assertThat(p.id).isEqualTo("bcbs-d238-d295")
-        assertThat(p.version).isEqualTo("3")
+        assertThat(p.version).isEqualTo("4")
         assertThat(p.source).contains("d238").contains("d295").contains("2015/61 deviations not applied")
         assertThat(p.regime).isEqualTo(LiquidityRegime.BCBS)
         assertThat(LiquidityFactor.entries.map { p.citation(it) }).allMatch { it.startsWith("BCBS d2") }
@@ -82,6 +82,7 @@ class LiquidityParametersTest {
     fun `inflow rates and the cap are d238 153, 154, 156 and 144`() = assertFactors(
         LCR_RETAIL_LOAN_INFLOW to "0.50",
         LCR_FI_INFLOW to "1.00",
+        LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D to "1.00",
         LCR_OPERATIONAL_DEPOSIT_INFLOW to "0",
         LCR_INFLOW_CAP to "0.75",
     )
