@@ -466,32 +466,13 @@ class ScaService(
     private fun buildPushMessage(purpose: ScaPurpose, data: DynamicLinkingData?): String = when (purpose) {
         ScaPurpose.PAYMENT_INITIATION ->
             "Potvrďte platbu ${data?.amount} ${data?.currency} pro ${data?.creditorName}"
-        ScaPurpose.CONSENT_GRANT ->
-            "Potvrďte udělení přístupu k vašemu účtu"
-        ScaPurpose.LOGIN ->
-            "Potvrďte přihlášení do OpenBank"
-        ScaPurpose.AGENT_ACTION ->
-            "Potvrďte akci bankovního agenta"
-        ScaPurpose.SENSITIVE_DATA_ACCESS ->
-            "Potvrďte přístup k citlivým údajům"
-        ScaPurpose.DOCUMENT_SIGNING ->
-            "Potvrďte podpis dokumentu"
-        ScaPurpose.CARD_MANAGEMENT ->
-            "Potvrďte operaci s platební kartou"
-        ScaPurpose.DELEGATION_GRANT ->
-            "Potvrďte sdílení přístupu k vašemu produktu"
-        ScaPurpose.DELEGATION_ACCEPT ->
-            "Potvrďte přijetí sdíleného přístupu"
-        ScaPurpose.DELEGATION_APPROVAL_GROUP ->
-            "Potvrďte změnu skupiny schvalovatelů"
-        ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
-            "Potvrďte výběr ze spořicího cíle"
         ScaPurpose.APPROVAL ->
             if (data?.amount != null) {
                 "Podepište platbu ${data.amount} ${data.currency} pro ${data.creditorName ?: data.creditorIban}"
             } else {
                 "Podepište firemní požadavek ke schválení"
             }
+        else -> checkNotNull(STATIC_PUSH_MESSAGES[purpose]) { "no push message for $purpose" }
     }
 
     /**
@@ -592,3 +573,17 @@ private fun Throwable.causedByUniqueViolation(): Boolean {
     }
     return false
 }
+
+/** Purposes whose push text carries no dynamic-linking data. */
+internal val STATIC_PUSH_MESSAGES: Map<ScaPurpose, String> = mapOf(
+    ScaPurpose.CONSENT_GRANT to "Potvrďte udělení přístupu k vašemu účtu",
+    ScaPurpose.LOGIN to "Potvrďte přihlášení do OpenBank",
+    ScaPurpose.AGENT_ACTION to "Potvrďte akci bankovního agenta",
+    ScaPurpose.SENSITIVE_DATA_ACCESS to "Potvrďte přístup k citlivým údajům",
+    ScaPurpose.DOCUMENT_SIGNING to "Potvrďte podpis dokumentu",
+    ScaPurpose.CARD_MANAGEMENT to "Potvrďte operaci s platební kartou",
+    ScaPurpose.DELEGATION_GRANT to "Potvrďte sdílení přístupu k vašemu produktu",
+    ScaPurpose.DELEGATION_ACCEPT to "Potvrďte přijetí sdíleného přístupu",
+    ScaPurpose.DELEGATION_APPROVAL_GROUP to "Potvrďte změnu skupiny schvalovatelů",
+    ScaPurpose.SAVINGS_WITHDRAW_APPROVAL to "Potvrďte výběr ze spořicího cíle",
+)
