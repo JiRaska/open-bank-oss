@@ -59,7 +59,7 @@ class ProposalResource {
     )
 
     // Keep decidedBy for mixed-version clients; it is never an authority for the audit actor.
-    data class DecisionRequest(val approve: Boolean, val decidedBy: String, val reason: String? = null)
+    data class DecisionRequest(val approve: Boolean, val decidedBy: String? = null, val reason: String? = null)
 
     private fun AgentProposal.toDto() = ProposalDto(
         id = id.toString(), title = title, rationale = rationale, suggestedAction = suggestedAction,

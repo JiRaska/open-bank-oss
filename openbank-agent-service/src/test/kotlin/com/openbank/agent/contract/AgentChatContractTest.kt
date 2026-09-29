@@ -40,6 +40,13 @@ class AgentChatContractTest {
     }
 
     @Test
+    fun `proposal decision only requires approve and keeps legacy actor optional`() {
+        val schema = openapi.substringAfter("    DecisionRequest:")
+        assertThat(schema).contains("required: [approve]")
+        assertThat(schema).contains("decidedBy:").contains("deprecated: true")
+    }
+
+    @Test
     fun `the assistant endpoints are documented`() {
         assertThat(openapi)
             .contains("/agent/chat:")

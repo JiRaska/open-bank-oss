@@ -58,7 +58,7 @@ describe('agent proposal identity enrichment', () => {
     expect(body[0].agent).toBeUndefined()
   })
 
-  it('forwards the authenticated operator id rather than a forged browser-supplied reviewer', async () => {
+  it('forwards the bearer without any browser-supplied or mismatched legacy reviewer', async () => {
     vi.mocked(auth).mockResolvedValueOnce({ user: { id: 'operator-subject', accessToken: 'operator-token' } } as never)
     const upstream = vi.fn(async () => new Response(JSON.stringify({ state: 'APPROVED' }), {
       status: 200, headers: { 'content-type': 'application/json' },
@@ -71,11 +71,12 @@ describe('agent proposal identity enrichment', () => {
     }))
 
     expect(response.status).toBe(200)
-    expect(JSON.parse(upstream.mock.calls[0][1].body as string)).toMatchObject({ decidedBy: 'operator-subject' })
+    expect(JSON.parse(upstream.mock.calls[0][1].body as string)).toEqual({ approve: true, reason: 'verified' })
+    expect(upstream.mock.calls[0][1].headers).toMatchObject({ Authorization: 'Bearer operator-token' })
   })
 
-  it('rejects a decision when the session lacks an operator subject', async () => {
-    vi.mocked(auth).mockResolvedValueOnce({ user: { accessToken: 'operator-token' } } as never)
+  it('rejects a decision when the session lacks an access token', async () => {
+    vi.mocked(auth).mockResolvedValueOnce({ user: { id: 'operator-subject' } } as never)
     const upstream = vi.fn()
     vi.stubGlobal('fetch', upstream)
     const { POST } = await import('@/app/api/agent/proposals/route')

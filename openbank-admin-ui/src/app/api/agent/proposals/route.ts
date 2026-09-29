@@ -75,10 +75,7 @@ export async function POST(req: NextRequest) {
   try {
     const session = await auth()
     const accessToken = session?.user?.accessToken
-    // Retain the legacy field for a mixed-version agent-service rollout, but source it
-    // from the authenticated session, never the browser's decidedBy body property.
-    const decidedBy = session?.user?.id?.trim()
-    if (!accessToken || !decidedBy) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
+    if (!accessToken) return NextResponse.json({ error: 'unauthenticated' }, { status: 401 })
     const parsed = decisionSchema.safeParse(await req.json())
     if (!parsed.success) {
       return NextResponse.json({ error: 'valid proposalId (UUID) and approve (bool) are required' }, { status: 400 })
@@ -89,7 +86,9 @@ export async function POST(req: NextRequest) {
     const res = await fetch(`${agentBase()}/api/v1/proposals/${encodeURIComponent(proposalId)}/decision`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
-      body: JSON.stringify({ approve, decidedBy, reason: reason ?? null }),
+      // An old agent-service requiring decidedBy must reject this request rather than
+      // audit the wrong actor during rollout. The upgraded service uses its bearer principal.
+      body: JSON.stringify({ approve, reason: reason ?? null }),
       signal: ctrl.signal,
       cache: 'no-store',
     })

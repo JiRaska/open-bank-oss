@@ -85,7 +85,7 @@ class ProposalApiIT {
 
     @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
-    fun `decision audit actor comes from authenticated principal not request body`() {
+    fun `decision without legacy reviewer audits the authenticated principal`() {
         val proposal = service.create(
             title = "spoofing guard",
             rationale = "r",
@@ -97,7 +97,7 @@ class ProposalApiIT {
 
         given()
             .contentType("application/json")
-            .body(mapOf("approve" to true, "decidedBy" to "forged-reviewer", "reason" to "verified"))
+            .body(mapOf("approve" to true, "reason" to "verified"))
             .`when`().post("/api/v1/proposals/${proposal.id}/decision")
             .then()
             .statusCode(200)
