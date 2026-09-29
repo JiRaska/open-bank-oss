@@ -279,6 +279,12 @@ variable "arc_max_runners" {
   # pull-through cache made that cheap). It is funded several times over by retiring
   # runners-warm in the same PR (~$197/month). Bounded by the runners NodePool cpu limit
   # of 64: 12 build x 4 vCPU = 48, plus 0 warm now, within limit.
+  #
+  # The "bounded by the runners NodePool cpu limit of 64" arithmetic above was wrong
+  # (it counted build only, and assumed 4-vCPU nodes the pool did not enforce): 12
+  # build pods alone reached 64 on 8-vCPU nodes. Since 2026-09-29 that limit is
+  # DERIVED from the sum of every scale set's maxRunners (arc-runners.tf,
+  # local.runners_nodepool_cpu_limit), so changing this value moves the cap with it.
   default = 12
 }
 
