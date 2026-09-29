@@ -77,7 +77,19 @@ private fun requireProposalAccount(proposal: WithdrawalProposal, accountId: UUID
 }
 
 /** What the decision consume restates to sca-service; a null field is one the challenge never carried. */
-internal data class DecisionScaBinding(val amount: String?, val currency: String?, val reference: String?)
+internal data class DecisionScaBinding(val amount: String?, val currency: String?, val reference: String?) {
+    /** Each carried field must equal [expected]; an absent field passes only when not [requireAll]. */
+    fun matches(expected: DecisionScaBinding, requireAll: Boolean): Boolean =
+        fieldMatches(amount, requireAll) { sameAmount(it, expected.amount) } &&
+            fieldMatches(currency, requireAll) { it.equals(expected.currency, ignoreCase = true) } &&
+            fieldMatches(reference, requireAll) { it == expected.reference }
+}
+
+private fun fieldMatches(value: String?, requireAll: Boolean, check: (String) -> Boolean): Boolean =
+    value?.let(check) ?: !requireAll
+
+private fun sameAmount(a: String, b: String?): Boolean =
+    b != null && runCatching { BigDecimal(a).compareTo(BigDecimal(b)) == 0 }.getOrDefault(false)
 
 /**
  * The decision challenge's dynamic linking, or null when it is linked to something else.
@@ -96,26 +108,16 @@ internal fun decisionScaBinding(
     approve: Boolean,
     amount: String,
 ): DecisionScaBinding? {
-    val expectedReference = SavingsWithdrawalScaReference.of(proposal.id, approve)
-    val amountMatches = challenge.amount
-        ?.let { runCatching { BigDecimal(it).compareTo(BigDecimal(amount)) == 0 }.getOrDefault(false) } == true
-    val currencyMatches = challenge.currency?.uppercase() == proposal.currency.uppercase()
-    val referenceMatches = challenge.reference == expectedReference
-    return when {
-        proposal.approvalGroupId != null ->
-            if (referenceMatches && amountMatches && currencyMatches) {
-                DecisionScaBinding(amount, proposal.currency, expectedReference)
-            } else {
-                null
-            }
-        challenge.reference != null && !referenceMatches -> null
-        challenge.amount != null && !amountMatches -> null
-        challenge.currency != null && !currencyMatches -> null
-        else -> DecisionScaBinding(
-            amount = challenge.amount?.let { amount },
-            currency = challenge.currency?.let { proposal.currency },
-            reference = challenge.reference,
-        )
+    val expected = DecisionScaBinding(amount, proposal.currency, SavingsWithdrawalScaReference.of(proposal.id, approve))
+    val carried = DecisionScaBinding(challenge.amount, challenge.currency, challenge.reference)
+    return if (proposal.approvalGroupId != null) {
+        expected.takeIf { carried.matches(it, requireAll = true) }
+    } else {
+        DecisionScaBinding(
+            amount = carried.amount?.let { amount },
+            currency = carried.currency?.let { proposal.currency },
+            reference = carried.reference,
+        ).takeIf { carried.matches(expected, requireAll = false) }
     }
 }
 
