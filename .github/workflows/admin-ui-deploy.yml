@@ -130,12 +130,29 @@ jobs:
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Coalesce evidence completions across successive main SHAs before the
+    # privileged build. Cancellation applies to this cheap source job only;
+    # build-push below must always finish signing an image it has pushed.
+    # Direct source pushes and manual refreshes get unique groups without this delay.
+    concurrency:
+      group: ${{ github.event_name == 'workflow_run' && 'admin-ui-evidence-source' || format('admin-ui-source-{0}', github.run_id) }}
+      cancel-in-progress: ${{ github.event_name == 'workflow_run' }}
     permissions:
       contents: read
       pull-requests: read
     outputs:
       proceed: ${{ steps.source.outputs.proceed }}
     steps:
+      # Evidence-only workflow_run bursts can otherwise start a full API-heavy image
+      # build for every successive main SHA. Restart the wait on each new evidence
+      # completion, then let the existing ancestry
+      # guard reject a source superseded by a later build-relevant commit. Source
+      # pushes and explicit operator refreshes remain immediate. Never cancel an
+      # in-flight build: it must finish signing and attesting the image it pushed.
+      - name: Coalesce evidence-only merge bursts
+        if: github.event_name == 'workflow_run'
+        run: sleep 600
       # Always checkout the event's trusted default-branch revision. In particular, a
       # workflow_run must never feed its payload SHA into checkout: that trigger carries
       # repository secrets and a write-capable downstream job, so coupling it to a payload
@@ -421,30 +438,33 @@ jobs:
             } | sort -u
           )
 
-          latest_main_artifact() {
-            local artifact_name="$1" page artifact
-            # Artifact results are newest-first for this exact name.  Five pages
-            # cap this best-effort collector at 295 read calls for 59 components;
-            # a hit normally arrives on page one.
-            for page in 1 2 3 4 5; do
-              artifact="$(api "https://api.github.com/repos/${REPO}/actions/artifacts?name=${artifact_name}&per_page=100&page=${page}" \
-                | python3 -c "import json,sys; a=[x for x in json.load(sys.stdin).get('artifacts',[]) if not x['expired'] and (x.get('workflow_run') or {}).get('head_branch') == 'main']; print(str(a[0]['id']) if a else '')" \
-                2>/dev/null || true)"
-              if [ -n "${artifact}" ]; then
-                printf '%s\n' "${artifact}"
-                return 0
-              fi
-            done
-            return 1
-          }
+          ARTIFACT_NAMES=()
+          for svc in "${SERVICES[@]}"; do
+            ARTIFACT_NAMES+=("test-intelligence-${svc}")
+          done
+          LOOKUP_RESULT="$(mktemp)"
+          # Resolve the inventory before downloading anything. API and malformed-
+          # JSON failures are not absence: abort rather than baking an incomplete
+          # Test Intelligence snapshot and stop amplifying an exhausted quota.
+          if ! python3 .github/scripts/find-latest-main-artifacts.py \
+            --repo "${REPO}" "${ARTIFACT_NAMES[@]}" > "${LOOKUP_RESULT}"; then
+            echo "::error::Test Intelligence artifact inventory is unavailable; refusing an incomplete deployment snapshot"
+            exit 1
+          fi
+          mapfile -t ARTIFACT_IDS < "${LOOKUP_RESULT}"
+          if [ "${#ARTIFACT_IDS[@]}" -ne "${#SERVICES[@]}" ]; then
+            echo "::error::artifact inventory did not return one verdict per service"
+            exit 1
+          fi
 
           DOWNLOADED=0
-          for svc in "${SERVICES[@]}"; do
+          for index in "${!SERVICES[@]}"; do
+            svc="${SERVICES[$index]}"
             art_name="test-intelligence-${svc}"
             # This image represents deployed main, not the newest PR candidate.
             # Keep branch provenance explicit: an unmerged artifact must never be
             # presented in the sandbox as evidence for the deployed revision.
-            art_id="$(latest_main_artifact "${art_name}" || true)"
+            art_id="${ARTIFACT_IDS[$index]:-}"
             if [ -z "${art_id}" ]; then
               echo "  ${svc}: no artifact (skip)"
               continue

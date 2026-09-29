@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.32.0",
-  "openbank-admin-ui": "0.262.1",
+  "openbank-admin-ui": "0.262.2",
   "openbank-agent-service": "1.26.2",
   "openbank-aml-service": "0.13.0",
   "openbank-anacredit-service": "0.9.4",
@@ -39,7 +39,7 @@
   "openbank-party-service": "0.24.7",
   "openbank-pid-service": "0.10.4",
   "openbank-product-catalog": "0.18.7",
-  "openbank-psd2-service": "0.11.6",
+  "openbank-psd2-service": "0.11.7",
   "openbank-incentive-service": "0.6.3",
   "openbank-referral-service": "0.4.0",
   "openbank-release-steward": "0.6.1",

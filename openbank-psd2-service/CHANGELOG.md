@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.7](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.6...psd2-service-v0.11.7) (2026-09-28)
+
+
+### Security
+
+* **psd2:** bind PIS and consent idempotency keys to a request fingerprint ([#10996](https://github.com/JiRaska/open-bank-oss/issues/10996)) ([9967779](https://github.com/JiRaska/open-bank-oss/commit/996777987be19da4b4380e87f57d81c0af522bbf))
+
 ## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/psd2-service-v0.11.5...psd2-service-v0.11.6) (2026-09-28)
 
 
