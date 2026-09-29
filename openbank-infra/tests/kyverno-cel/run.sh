@@ -115,8 +115,18 @@ PY
 # runs a second time on its own output, which must change nothing: the idempotency the
 # one-sync v1 -> CEL swap relied on, kept as a property of the policy.
 mkdir -p "$ROOT/$OUT"
-mut() { docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null 2>&1 || true; }
-mut "$K/ecr-pull-through-rewrite-cel.yaml" "$T/resources.yaml" "$OUT/cel.yaml"
+rm -f "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" "$ROOT/$OUT/cel-twice.yaml"
+mut() {
+  if [ "${4:-}" = allow_nonzero ]; then
+    # The fixture batch currently exits 1 despite writing complete output; the pinned
+    # 15-image comparison below checks that output rather than trusting this status.
+    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null 2>&1 || true
+  else
+    # A failed second pass proves nothing about idempotency; surface its exit status.
+    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null
+  fi
+}
+mut "$K/ecr-pull-through-rewrite-cel.yaml" "$T/resources.yaml" "$OUT/cel.yaml" allow_nonzero
 python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" <<'PY'
 import sys, yaml
 pods = {}  # the CLI emits one document per mutation; the last one carries them all
@@ -158,7 +168,12 @@ cel = imgs(sys.argv[1])
 if not cel:
     sys.exit("mutation run produced no Pods")
 # A second-pass Pod the CLI skips is not re-emitted; fall back to its first-pass copy.
-twice = {**imgs(sys.argv[3]), **imgs(sys.argv[2])}
+# The CLI must still emit at least one Pod. Otherwise a failed/empty run would become
+# identical to the first pass by construction and falsely prove idempotency.
+second = imgs(sys.argv[2])
+if not second:
+    sys.exit("second mutation run produced no Pods")
+twice = {**imgs(sys.argv[3]), **second}
 rewritten = sum(1 for v in V1_IMAGES.values() if v.startswith('265175468565.dkr.ecr.'))
 bad = 0
 for k in sorted(set(V1_IMAGES) | set(cel)):
