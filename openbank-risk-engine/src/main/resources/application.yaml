@@ -46,8 +46,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # LedgerClient carries OidcClientRequestReactiveFilter, which mints its bearer token from HERE.
   # Without an oidc-client the ledger call leaves unauthenticated and ledger answers 401
@@ -375,7 +373,8 @@ openbank:
     capital:
       sa:
         parameter-set-id: bcbs-d424-sa
-        parameter-set-version: "1"
+        # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES, below.
+        parameter-set-version: "2"
         source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
         factors:
           rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
@@ -412,9 +411,12 @@ openbank:
           domestic-currency: CZK
           # GL code -> class. ONLY accounts named here (or by type below) are classified; any
           # other ASSET balance is listed as not classified, never weighted. Deliberately absent:
-          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash), 1100-1113 clearing
-          # and scheme settlement (counterparty not known), 1400-1403 loan loss allowance (not
-          # allocated to loans, so ¶92 netting cannot use it), 1990-1997 FX position accounts.
+          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash; NOT treated like 1100:
+          # cash may qualify for 0% under ¶96(i), so a 100% default would be a different claim).
+          #
+          # Version "2" (#10896, #11107): the three blocks below were unclassified and gapped every
+          # COREP C 02.00 credit-risk row on the sandbox. Each is a POLICY CHOICE awaiting owner
+          # sign-off; each is chosen so that RWA is never lower than the unknown facts permit.
           gl-accounts:
             "1001": bank                         # nostro
             "1002": bank                         # nostro EUR
@@ -431,6 +433,48 @@ openbank:
             "1301": other-asset
             "1302": other-asset
             "1303": other-asset
+            # POLICY CHOICE (#11107): 1100-1113 customer cash clearing / scheme settlement. The
+            # counterparty and maturity are not recorded, so no counterparty class can be shown:
+            # "other assets" at 100% (BCBS d424 ¶95; CRR Art. 134(1) "other items"), the strictest
+            # standard weight short of a default class. Not ¶97 cash items in collection (20%):
+            # that needs the item to be known as cash in collection. Sandbox-heavy (1100 carried
+            # +16.1m CZK on 2026-09-29); #10969 (synthetic loan void) is expected to shrink it.
+            "1100": other-asset
+            "1101": other-asset
+            "1102": other-asset
+            "1103": other-asset
+            "1104": other-asset
+            "1105": other-asset
+            "1106": other-asset
+            "1107": other-asset
+            "1108": other-asset
+            "1109": other-asset
+            "1110": other-asset
+            "1111": other-asset
+            "1112": other-asset
+            "1113": other-asset
+            # POLICY CHOICE (#11107): 1400-1403 loan loss allowance (contra-asset, credit balance).
+            # Netting a credit-risk adjustment against an exposure value (CRR Art. 111(1); d424 ¶92
+            # for defaulted loans) requires it to be ALLOCATED to that exposure, which the GL does
+            # not record. So it is not an exposure: it neither reduces RWA nor stays unclassified.
+            # Conservative: loans are weighted gross of the allowance.
+            "1400": not-an-exposure
+            "1401": not-an-exposure
+            "1402": not-an-exposure
+            "1403": not-an-exposure
+            # POLICY CHOICE (#11107): 1990-1997 FX position / counter-value accounts of the ledger's
+            # FX revaluation. They are currency positions — foreign-exchange risk, a market-risk
+            # charge (CRR Part Three Title IV Chapter 3, Art. 351 ff.) — not a claim on any
+            # counterparty, so not a credit exposure under d424 Part I. The FX-risk charge on them
+            # is NOT computed here: excluding them from credit RWA does not make them riskless.
+            "1990": not-an-exposure
+            "1991": not-an-exposure
+            "1992": not-an-exposure
+            "1993": not-an-exposure
+            "1994": not-an-exposure
+            "1995": not-an-exposure
+            "1996": not-an-exposure
+            "1997": not-an-exposure
             "6000": own-funds-cet1               # CET1 capital instruments
             "6010": own-funds-cet1               # CET1 share premium
             "6020": own-funds-cet1               # retained earnings
@@ -561,6 +605,8 @@ authz:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
   authz:
     enforce: "false"

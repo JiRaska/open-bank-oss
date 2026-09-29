@@ -9,9 +9,11 @@ import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.domain.liquidity.LiquidityForecast
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -64,6 +66,9 @@ class RiskResource {
 
     @Inject
     lateinit var capital: CapitalUseCase
+
+    @Inject
+    lateinit var liquidityForecast: LiquidityForecastUseCase
 
     // Field-injected (not a constructor parameter) so the request-scoped identity is read per call.
     @Inject
@@ -161,6 +166,31 @@ class RiskResource {
     @Operation(summary = "LCR and NSFR of a TIED_OUT run with components, caps and assumptions; 409 for an UNTIED one")
     @Authorize(action = "risk.snapshot.read", resource = "#id")
     suspend fun liquidity(@PathParam("id") id: UUID): Response = Response.ok(liquidity.analyse(id).toResponse()).build()
+
+    /**
+     * Liquidity survival forecast of a TIED_OUT run (ADR-0313 "forecasting"): a daily-then-weekly
+     * ladder of the SAME flows the cash-flow read projects, cumulated from the LCR's HQLA stock,
+     * and the first day that cumulative position turns negative. `horizonDays` is 1..365, default
+     * 90. Same gates as cash flows: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/liquidity-forecast")
+    @Operation(
+        summary = "Liquidity survival horizon and funding-gap ladder of a TIED_OUT run under a curve set; " +
+            "409 for an UNTIED one",
+    )
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun liquidityForecast(
+        @PathParam("id") id: UUID,
+        @QueryParam("curveSetId") curveSetId: String?,
+        @QueryParam("horizonDays") horizonDays: String?,
+    ): Response {
+        val horizon = horizonDays?.takeIf { it.isNotBlank() }?.let {
+            val parsed = it.trim().toIntOrNull()
+            requireNotNull(parsed) { "query parameter 'horizonDays' must be an integer" }
+        } ?: LiquidityForecast.DEFAULT_HORIZON_DAYS
+        return Response.ok(liquidityForecast.forecast(id, parseCurveSetId(curveSetId), horizon).toResponse()).build()
+    }
 
     /**
      * Pillar 1 credit-risk RWA (BCBS d424 standardised approach), the 8% own-funds requirement and

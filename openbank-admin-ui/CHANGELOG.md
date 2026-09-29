@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.265.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.1...admin-ui-v0.265.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** book ČNB lombard borrowings ([#11120](https://github.com/JiRaska/open-bank-oss/issues/11120)) ([9a43293](https://github.com/JiRaska/open-bank-oss/commit/9a432938bfcf383791eb9a96a5111c63b7577546))
+
+## [0.264.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.0...admin-ui-v0.264.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.264.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.263.0...admin-ui-v0.264.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** show who requested each risk snapshot ([#11054](https://github.com/JiRaska/open-bank-oss/issues/11054)) ([21a6b52](https://github.com/JiRaska/open-bank-oss/commit/21a6b52079368ba5cb60ec590fe7723000961f42))
+* **admin-ui:** verify unified approval inbox identity and audit context ([#11400](https://github.com/JiRaska/open-bank-oss/issues/11400)) ([a12d9be](https://github.com/JiRaska/open-bank-oss/commit/a12d9be97efa1af05460899e39d5c3baa0b965b0))
+
 ## [0.263.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.2...admin-ui-v0.263.0) (2026-09-29)
 
 

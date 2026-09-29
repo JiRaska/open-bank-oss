@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.0...lending-service-v0.39.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.38.0...lending-service-v0.39.0) (2026-09-28)
 
 

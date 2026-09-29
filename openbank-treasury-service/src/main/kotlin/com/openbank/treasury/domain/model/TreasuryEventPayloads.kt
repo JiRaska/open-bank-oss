@@ -33,6 +33,10 @@ data class DealBooked(
     val approvedBy: String,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
+    /** FX_SPOT only (#10896): the bank's side on the foreign `currency`; null for money-market deals. */
+    val fxSide: FxSide? = null,
+    /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
+    val counterAmount: BigDecimal? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"
@@ -50,6 +54,10 @@ data class DealSettled(
     val ledgerJournalId: UUID,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
+    /** FX_SPOT only (#10896): the bank's side on the foreign `currency`; null for money-market deals. */
+    val fxSide: FxSide? = null,
+    /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
+    val counterAmount: BigDecimal? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.settled.v1"
@@ -85,6 +93,10 @@ data class DealReversed(
     val ledgerJournalId: UUID?,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,
+    /** FX_SPOT only (#10896): the bank's side on the foreign `currency`; null for money-market deals. */
+    val fxSide: FxSide? = null,
+    /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
+    val counterAmount: BigDecimal? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.reversed.v1"

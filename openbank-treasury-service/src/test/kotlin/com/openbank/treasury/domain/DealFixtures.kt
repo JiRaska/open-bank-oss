@@ -8,7 +8,9 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
@@ -59,6 +61,29 @@ object DealFixtures {
         actor = by,
         at = NOW,
         rationale = if (by.type == ActorType.AI_AGENT) "test rationale" else null,
+    )
+
+    /** Bank buys (or sells) EUR against CZK, traded Monday; value date defaults to T+2 (Wednesday). */
+    fun fxSpot(
+        eur: String = "10000.00",
+        rate: String = "25.125000",
+        side: FxSide = FxSide.BUY,
+        tradeDate: LocalDate = MONDAY,
+        valueDate: LocalDate = DayCount.spotDate(tradeDate),
+        by: Actor = dealer,
+    ): Deal = Deal.draft(
+        id = UUID.fromString("0191c0de-0000-7000-8000-00000000f0f0"),
+        product = ProductType.FX_SPOT,
+        counterpartyId = "SIMBK-A",
+        currency = "EUR",
+        principal = BigDecimal(eur),
+        rate = BigDecimal(rate),
+        tradeDate = tradeDate,
+        valueDate = valueDate,
+        maturityDate = null,
+        actor = by,
+        at = NOW,
+        fxSide = side,
     )
 
     fun withinLimit(deal: Deal) = LimitCheck.of(bankA, deal, BigDecimal.ZERO)

@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.18.1...risk-engine-v0.19.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** classify clearing, allowance and FX position accounts conservatively ([#11481](https://github.com/JiRaska/open-bank-oss/issues/11481)) ([41cf055](https://github.com/JiRaska/open-bank-oss/commit/41cf05533de16bb565967218c5289378e22f0492))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.18.0...risk-engine-v0.18.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.17.0...risk-engine-v0.18.0) (2026-09-29)
 
 

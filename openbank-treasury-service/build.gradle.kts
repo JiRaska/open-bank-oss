@@ -49,6 +49,8 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract test for the nostro ledger reads (ADR-0315 D5, #10896).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {

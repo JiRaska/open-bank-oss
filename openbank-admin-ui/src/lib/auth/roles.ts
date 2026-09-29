@@ -39,6 +39,8 @@ export const ROLES = {
   // ADR-0315 D4: a senior approver overrides a counterparty-limit breach on a PENDING_APPROVAL
   // deal, with a reason. Never the deal's creator or submitter, and never the same person who
   // later books it (TreasuryResource, four-eyes) — the domain enforces that, not the UI.
+  // #10896: nostro reconciliation. NostroResource's class-level @RolesAllowed (reads) also admits
+  // this role, unlike TreasuryResource's — see the treasury:nostro:read comment below.
   TREASURY_SENIOR_APPROVER: "ROLE_TREASURY_SENIOR_APPROVER",
 } as const
 
@@ -107,6 +109,12 @@ export const PERMISSIONS = {
   "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
   // Senior override of a breached limit (ADR-0315 D4) — a third, narrower write than approve.
   "treasury:deal:override-limit": [ROLES.TREASURY_SENIOR_APPROVER],
+  // #10896: NostroResource's own @RolesAllowed, not TreasuryResource's — its class-level set
+  // additionally admits ROLE_TREASURY_SENIOR_APPROVER, so the read permission does too. Upload
+  // is method-level APPROVER only, exactly like a treasury deal write: ADMIN is deliberately NOT
+  // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
+  "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -345,6 +353,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['treasury:view', ['/treasury']],
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
+  ['treasury:nostro:read', ['/treasury/nostro']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',

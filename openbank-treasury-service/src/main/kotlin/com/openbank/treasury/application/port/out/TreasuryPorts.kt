@@ -96,6 +96,30 @@ interface LedgerPostingPort {
     suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
 }
 
+/**
+ * fx-service's mid rate for `currency`/CZK on [asOf] (#10896), used only to FLAG an FX spot deal
+ * rate outside tolerance. Null = no mid available. treasury has no fx-service client yet, so the
+ * wired implementation is [NONE] and the check is off by default ([FxRateTolerance]).
+ */
+fun interface FxMidRatePort {
+    suspend fun mid(currency: String, asOf: LocalDate): BigDecimal?
+
+    companion object {
+        val NONE = FxMidRatePort { _, _ -> null }
+    }
+}
+
+/** Versioned config `openbank.treasury.fx-spot.rate-check.*`: off unless a mid source is wired. */
+data class FxRateTolerance(val enabled: Boolean, val tolerancePercent: BigDecimal) {
+    init {
+        require(tolerancePercent.signum() >= 0) { "tolerance must not be negative" }
+    }
+
+    companion object {
+        val DISABLED = FxRateTolerance(false, BigDecimal("2.0"))
+    }
+}
+
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */
 interface TreasuryOutboxRepository : OutboxRepository {
     fun persistInTransaction(message: OutboxMessage): Uni<Void>
