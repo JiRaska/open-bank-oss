@@ -3,7 +3,7 @@
 #  changes  -> works out which Gradle modules a push/PR actually touched and emits
 #              a JSON matrix. Shared changes (openbank-libs, version catalog, root
 #              build, the reusable workflow itself) fan out to EVERY module because
-#              everything depends on them. Pushes to main always build everything.
+#              everything depends on them. Main pushes skip inert paths and scope other changes.
 #  build    -> calls the reusable _service-ci.yml once per changed module (matrix),
 #              so each service reports its own green/red status check.
 #
@@ -70,7 +70,9 @@ concurrency:
 jobs:
   changes:
     name: Detect changed services
-    runs-on: ubuntu-latest
+    # Trusted main pushes use the existing build ARC pool; PRs and manual/nightly
+    # dispatches stay hosted. check-ci-runner-pools.py audits this exact expression.
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
       services: ${{ steps.detect.outputs.services }}
@@ -502,7 +504,9 @@ jobs:
     name: all-green
     needs: [changes, build, verification-metadata]
     if: always()
-    runs-on: ubuntu-latest
+    # The lightweight required aggregate otherwise waits for a second hosted slot
+    # after every main push, even when the service matrix is empty.
+    runs-on: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'openbank-build' || 'ubuntu-latest' }}
     timeout-minutes: 2
     steps:
       - name: Verify no service failed
