@@ -30,11 +30,18 @@ data class StatementEntry(
 /**
  * A correspondent's end-of-day statement for one nostro account (camt.053 `Stmt`). Balances are
  * signed from OUR side: positive means the correspondent holds money for us (CRDT balance).
+ *
+ * [openingDate] is the OPBD balance's `Dt` and [statementDate] the CLBD balance's `Dt`: the opening
+ * balance is as at the END of [openingDate], the closing as at the end of [statementDate], so the
+ * movements between them are exactly the entries booked in ([openingDate], [statementDate]] — the
+ * window the ledger is read over. An entry outside it would make the balances and the lines
+ * describe different periods, so the statement is refused (400).
  */
 data class NostroStatement(
     val statementId: String,
     val iban: String,
     val currency: String,
+    val openingDate: LocalDate,
     val statementDate: LocalDate,
     val openingBalance: BigDecimal,
     val closingBalance: BigDecimal,
@@ -46,16 +53,37 @@ data class NostroStatement(
         require(openingBalance.add(movement).compareTo(closingBalance) == 0) {
             "statement $statementId does not foot: opening $openingBalance + entries $movement != closing $closingBalance"
         }
-        require(ChronoUnit.DAYS.between(firstDate, lastDate) < MAX_SPAN_DAYS) {
-            "statement $statementId spans $firstDate..$lastDate, more than $MAX_SPAN_DAYS days"
+        require(!openingDate.isAfter(statementDate)) {
+            "statement $statementId opens on $openingDate, after it closes on $statementDate"
+        }
+        require(ChronoUnit.DAYS.between(openingDate, statementDate) <= MAX_SPAN_DAYS) {
+            "statement $statementId spans $openingDate..$statementDate, more than $MAX_SPAN_DAYS days"
         }
     }
 
-    /** Earliest of the entry booking dates and the statement (closing balance) date. */
-    val firstDate: LocalDate get() = (entries.map { it.bookingDate } + statementDate).min()
+    /**
+     * Entries booked outside ([openingDate], [statementDate]]. Refused at UPLOAD
+     * ([requireWithinPeriod]); a statement stored before that rule still loads, and reconciliation
+     * lists these as unmatched and flagged rather than refusing the whole statement.
+     */
+    val outOfPeriodEntries: List<StatementEntry>
+        get() = entries.filter { it.bookingDate !in firstDate..statementDate }
 
-    /** Latest of the entry booking dates and the statement (closing balance) date. */
-    val lastDate: LocalDate get() = (entries.map { it.bookingDate } + statementDate).max()
+    /** The upload-time rule: every entry inside the period its balances describe, else a 400. */
+    fun requireWithinPeriod(): NostroStatement = apply {
+        outOfPeriodEntries.firstOrNull()?.let {
+            throw IllegalArgumentException(
+                "statement $statementId entry ${it.sequence} is booked on ${it.bookingDate}, outside the " +
+                    "period its balances describe (after $openingDate, up to $statementDate)",
+            )
+        }
+    }
+
+    /** First booking day the statement's movements can fall on: the day after the opening balance. */
+    val firstDate: LocalDate get() = openingDate.plusDays(1)
+
+    /** Last booking day: the closing balance's date. */
+    val lastDate: LocalDate get() = statementDate
 
     companion object {
         /** A multi-day statement is read from the ledger over its whole span; bounded so that read is too. */
@@ -86,10 +114,10 @@ enum class MatchType {
 data class NostroMatch(val entry: StatementEntry, val line: LedgerNostroLine, val type: MatchType)
 
 /**
- * The ledger balances are NULL when the ledger cannot state them in the statement currency — its
- * balance reads aggregate `base_amount` (CZK) only, so a EUR nostro has no comparable figure, and
- * [balanceNotStated] says why. A CZK figure against a EUR statement would be a difference nobody
- * could stand behind (ADR-0097), so none is shown.
+ * Ledger balances are read in the statement currency from native line amounts (#11107), so they
+ * are stated for every nostro, CZK or foreign. They are NULL — with [balanceNotStated] saying why —
+ * only when the ledger cannot state them at all (it does not hold the GL account); a figure in any
+ * other currency would be a difference nobody could stand behind (ADR-0097), so none is shown.
  */
 data class NostroReconciliation(
     val statement: NostroStatement,
@@ -109,6 +137,9 @@ data class NostroReconciliation(
             "a missing ledger balance must carry its reason, and only a missing one"
         }
     }
+
+    /** Unmatched entries booked outside the statement's own period (only on statements stored before that was refused). */
+    val outOfPeriodEntries: List<StatementEntry> get() = statement.outOfPeriodEntries
 
     val openingDifference: BigDecimal? get() = ledgerOpeningBalance?.let { statement.openingBalance.subtract(it) }
     val closingDifference: BigDecimal? get() = ledgerClosingBalance?.let { statement.closingBalance.subtract(it) }
@@ -144,17 +175,19 @@ object NostroMatcher {
         ledgerClosingBalance: BigDecimal?,
         balanceNotStated: String? = null,
     ): NostroReconciliation {
+        // An out-of-period entry is never paired: the lines were read over the period only.
+        val outside = statement.outOfPeriodEntries.toSet()
         val openEntries = statement.entries.toMutableList()
         val openLines = ledgerLines.toMutableList()
         val matches = mutableListOf<NostroMatch>()
 
-        for (entry in statement.entries) {
+        for (entry in statement.entries.filterNot { it in outside }) {
             val line = openLines.firstOrNull { sameMovement(entry, it) && referenceAgrees(entry, it) } ?: continue
             matches += NostroMatch(entry, line, MatchType.EXACT)
             openEntries.remove(entry)
             openLines.remove(line)
         }
-        for (entry in openEntries.toList()) {
+        for (entry in openEntries.filterNot { it in outside }) {
             val candidates = openLines.filter { sameMovement(entry, it) }
             val rivals = openEntries.filter { e -> candidates.any { sameMovement(e, it) } }
             if (candidates.size == 1 && rivals.size == 1) {
