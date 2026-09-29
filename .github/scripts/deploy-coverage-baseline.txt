@@ -41,5 +41,8 @@
 # Quarkus service, so adding them to ALL_SERVICES would send a static site and a Python app through
 # a Gradle build and fail outright. That is real work — a build path, not a one-line list entry —
 # so it is baselined, not silently fixed with the wrong tool.
+#
+# 2026-09-29: document-renderer paid off. auto-deploy builds it from its own multi-stage
+# Dockerfile (SELF_BUILT_SERVICES in auto-deploy.yml) and then signs, CVE-gates, SBOM-attests
+# and gitops-deploys it through the same steps as the rest of the fleet.
 openbank-developer-portal
-openbank-document-renderer

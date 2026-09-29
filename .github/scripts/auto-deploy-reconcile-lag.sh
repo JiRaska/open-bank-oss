@@ -109,7 +109,8 @@ while IFS= read -r pin; do
   # for 9 days after 0.6.0 was cut (#8127). Dockerfile is in for the same reason.
   if [ -n "$(git log --format=%H "${commit}..HEAD" -- \
               "${svc}/src/main" "${svc}/build.gradle.kts" \
-              "${svc}/version.txt" "${svc}/Dockerfile" 2>/dev/null)" ]; then
+              "${svc}/version.txt" "${svc}/Dockerfile" \
+              "${svc}/app.py" "${svc}/requirements.txt" 2>/dev/null)" ]; then
     epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
     lagging+=("${epoch}	$svc")
   fi
