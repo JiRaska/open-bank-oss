@@ -54,6 +54,7 @@
 /openbank-libs/                         @JiRaska
 /openbank-libs-domain/                  @JiRaska
 /openbank-libs-lending/                 @JiRaska
+/openbank-libs-iso20022/                @JiRaska
 /openbank-libs-runtime/                 @JiRaska
 /openbank-client-product-catalog/       @JiRaska
 
