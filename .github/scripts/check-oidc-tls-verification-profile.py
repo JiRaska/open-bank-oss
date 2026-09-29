@@ -142,8 +142,8 @@ def gitops_findings(root: pathlib.Path):
         namespace, workload = meta.get("namespace"), meta.get("name")
         location = str(p.relative_to(root))
 
-        def configmap(name):
-            matches = configmaps.get((namespace, name), [])
+        def configmap(name, workload_namespace=namespace):
+            matches = configmaps.get((workload_namespace, name), [])
             return matches[0] if len(matches) == 1 else None
 
         for c in containers(d.get("spec") or {}):
