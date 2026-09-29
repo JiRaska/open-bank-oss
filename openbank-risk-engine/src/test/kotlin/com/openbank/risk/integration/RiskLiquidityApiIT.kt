@@ -161,6 +161,84 @@ class RiskLiquidityApiIT {
         assertThat(body["notes"].map { it.asText() }).anyMatch { it.contains("lombard") && it.contains("HQLA") }
     }
 
+    @Inject
+    @jakarta.enterprise.inject.Any
+    lateinit var connector: io.smallrye.reactive.messaging.memory.InMemoryConnector
+
+    /** A ČNB fixing through the real consumer: validity Fri 00:00 - Mon 00:00 Prague, as fx-service stamps it. */
+    private fun publishFixing(date: String, currency: String, ratePerUnit: String) {
+        val d = java.time.LocalDate.parse(date)
+        val prague = java.time.ZoneId.of("Europe/Prague")
+        val validFrom = d.atStartOfDay(prague).toInstant()
+        val validTo = d.plusDays(3).atStartOfDay(prague).toInstant()
+        connector.source<String>("fx-fixing-in").send(
+            """
+            {"source":"CNB","fixingDate":"$date","sequence":1,"quoteCurrency":"CZK",
+             "validFrom":"$validFrom","validTo":"$validTo",
+             "rates":[{"rateId":"${java.util.UUID.randomUUID()}","currency":"$currency","ratePerUnit":$ratePerUnit}],
+             "occurredAt":"${date}T12:30:00Z"}
+            """.trimIndent(),
+        )
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (TestDb.count(
+                "SELECT count(*) FROM fx_fixing_rate WHERE fixing_date = DATE '$date' AND currency = '$currency'",
+            ) == 0 &&
+            System.nanoTime() < deadline
+        ) {
+            Thread.sleep(100)
+        }
+    }
+
+    /** CZK: 1500 nostro against 1500 retail deposits. EUR: a 100 nostro against 100 of income. */
+    private fun eurBook() = LedgerInputs(
+        asOf = Fixtures.AS_OF,
+        trialBalance = listOf(
+            tb("1001", "ASSET", "CZK", "1500.00", "0"),
+            tb("2100", "LIABILITY", "CZK", "0", "1500.00"),
+            tb("1002", "ASSET", "EUR", "100.00", "0"),
+            tb("4100", "INCOME", "EUR", "0", "100.00"),
+        ),
+        subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
+    )
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR and CZK book on a Sunday is combined in CZK at the Friday ČNB fixing`() {
+        publishFixing("2026-09-11", "EUR", "24.5")
+        ledger.inputs = eurBook()
+        val body = liquidity(snapshot("2026-09-13", "TIED_OUT"))
+
+        val eur = body["currencies"].single { it["currency"].asText() == "EUR" }
+        assertThat(eur["nsfr"]["totalRsf"].decimalValue()).isEqualByComparingTo("50.00") // still in EUR
+        val total = body["total"]
+        assertThat(total["currency"].asText()).isEqualTo("CZK")
+        val nostro = total["lcr"]["inflows"].single { it["glAccountCode"].asText() == "1002" }
+        assertThat(nostro["amount"].decimalValue()).isEqualByComparingTo("2450.00") // 100 × 24.5
+        assertThat(total["lcr"]["totalOutflows"].decimalValue()).isEqualByComparingTo("150.00")
+        // ASF 1500 × 90% = 1350; RSF 1500 × 50% + 2450 × 50% = 1975; NSFR on the converted sums.
+        assertThat(total["nsfr"]["totalAsf"].decimalValue()).isEqualByComparingTo("1350.00")
+        assertThat(total["nsfr"]["totalRsf"].decimalValue()).isEqualByComparingTo("1975.00")
+        assertThat(total["nsfr"]["ratio"].decimalValue()).isEqualByComparingTo("0.683544")
+        assertThat(body["totalNotStated"].isNull).isTrue()
+        val fx = body["fxRates"].single()
+        assertThat(fx["currency"].asText()).isEqualTo("EUR")
+        assertThat(fx["rate"].decimalValue()).isEqualByComparingTo("24.5")
+        assertThat(fx["fixingDate"].asText()).isEqualTo("2026-09-11")
+        assertThat(fx["source"].asText()).isEqualTo("CNB")
+        assertThat(body["assumptions"]["currencyAggregation"].asText()).contains("ČNB fixing")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR book with no fixing in effect states no combined total and says why`() {
+        ledger.inputs = eurBook()
+        val body = liquidity(snapshot("2026-08-06", "TIED_OUT"))
+        assertThat(body["total"].isNull).isTrue()
+        assertThat(body["totalNotStated"].asText()).contains("EUR").contains("2026-08-06")
+        assertThat(body["fxRates"].isEmpty).isTrue()
+        assertThat(body["currencies"].map { it["currency"].asText() }).containsExactly("CZK", "EUR")
+    }
+
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `an untied run answers 409`() {
