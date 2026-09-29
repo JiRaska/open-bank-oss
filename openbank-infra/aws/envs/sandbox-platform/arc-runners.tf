@@ -1158,7 +1158,8 @@ resource "helm_release" "arc_batch" {
 # here). The pod SA is openbank-dr with NO IRSA/cloud role; its cluster
 # permissions come from a Role+RoleBinding scoped to the restore/verify
 # namespaces, living in gitops (components/platform/dr-runner-rbac.yaml) so
-# RBAC drift is ArgoCD-visible, and pinned by the Kyverno policy beside it.
+# RBAC drift is ArgoCD-visible, and pinned by the Kyverno ValidatingPolicy
+# openbank-dr-sa-pin-cel (components/kyverno/cel-validating-policies.yaml).
 # minRunners=0: this lane exists to run quarterly; idle spend is $0.
 # ---------------------------------------------------------------------------
 resource "kubernetes_service_account" "arc_dr" {

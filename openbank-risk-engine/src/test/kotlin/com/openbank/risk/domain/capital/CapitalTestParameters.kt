@@ -9,24 +9,36 @@ import com.openbank.risk.infrastructure.toParameters
 import io.smallrye.config.SmallRyeConfigBuilder
 import io.smallrye.config.source.yaml.YamlConfigSource
 
-/** The parameter set exactly as application.yaml ships it, loaded through [CapitalConfig]. */
+/** The parameter sets exactly as application.yaml ships them, loaded through [CapitalConfig]. */
 object CapitalTestParameters {
-    fun shipped(): CapitalParameters {
+    const val EU_SET = "eu-crr3-sa"
+    const val BCBS_SET = "bcbs-d424-sa"
+
+    fun config(): CapitalConfig {
         val url = requireNotNull(CapitalTestParameters::class.java.classLoader.getResource("application.yaml"))
-        val config = SmallRyeConfigBuilder()
+        return SmallRyeConfigBuilder()
             .withSources(YamlConfigSource(url))
             .withMapping(CapitalConfig::class.java)
             .build()
-        return config.getConfigMapping(CapitalConfig::class.java).toParameters()
+            .getConfigMapping(CapitalConfig::class.java)
     }
 
-    /** [shipped] with a different classification; the factors are never touched. */
+    /** The set `parameter-set-id` selects: what the service computes with unless reconfigured. */
+    fun shipped(): CapitalParameters = config().toParameters()
+
+    /** The EU CRR set, by id. */
+    fun eu(): CapitalParameters = config().toParameters(EU_SET)
+
+    /** The BCBS d424 set, by id: still declared, and selectable. */
+    fun bcbs(): CapitalParameters = config().toParameters(BCBS_SET)
+
+    /** [bcbs] with a different classification; the factors are never touched. */
     fun withClassification(
         retailTreatment: RetailTreatment? = null,
         bankScraGrade: ScraGrade? = null,
         glAccounts: Map<String, CapitalGlClass>? = null,
     ): CapitalParameters {
-        val base = shipped()
+        val base = bcbs()
         val c = base.classification
         return base.copy(
             classification = c.copy(

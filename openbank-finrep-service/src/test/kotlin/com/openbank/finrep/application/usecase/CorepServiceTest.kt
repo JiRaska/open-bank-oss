@@ -149,7 +149,7 @@ class CorepServiceTest {
             override suspend fun capitalAt(asOf: LocalDate) =
                 com.openbank.finrep.application.port.out.RiskCapitalLookup.found(
                     com.openbank.finrep.application.port.out.RiskCapitalResult(
-                        "run-1", asOf, "bcbs-d424-sa", "1", "CZK",
+                        "run-1", asOf, "eu-crr3-sa", "1", "CZK",
                         listOf(
                             com.openbank.finrep.application.port.out.RiskExposureClass(
                                 "bank",

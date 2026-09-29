@@ -50,7 +50,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-document-service-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "6e2571c8cdf0e877"
+        openbank.tech/policy-checksum: "b572c82bd840a6df"
     spec:
       # ADR-0162 D4 (continued): a dedicated SA (not `default`) is what OpenBao's Kubernetes-auth
       # role `document-service-signing` is bound to — least-privilege, one identity per consumer.
@@ -75,11 +75,10 @@ spec:
               containerPort: 8088
           env:
             # Parallel private-CA TLS listener for new east-west clients (first: the three document
-            # callers of #10383 — domestic-payment, sepa-payment, statement-service — and
-            # delegation-service's sealed external-disclosure export). HTTP/8143 stays for existing
-            # callers until their own reviewed migrations; same shape as party-service's and
-            # account-service's 8443 listeners. ASVS V9.1 forbids a NEW plaintext http:// env, so a
-            # caller can only be pointed here once this listener exists.
+            # callers of #10383 — domestic-payment, sepa-payment, statement-service). HTTP/8143 stays
+            # for existing callers until their own reviewed migrations; same shape as party-service's
+            # and account-service's 8443 listeners. ASVS V9.1 forbids a NEW plaintext http:// env, so
+            # a caller can only be pointed here once this listener exists.
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
               value: /mnt/internal-tls/tls.crt
             - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES

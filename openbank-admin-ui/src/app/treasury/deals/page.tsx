@@ -147,6 +147,7 @@ function DealBlotter() {
                   <th scope="col" style={{ textAlign: 'right' }}>{t('Jistina', 'Principal')}</th>
                   <th scope="col" style={{ textAlign: 'right' }}>{t('Sazba % p.a.', 'Rate % p.a.')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Valuta / splatnost', 'Value / maturity')}</th>
+                  <th scope="col" style={{ textAlign: 'left' }}>{t('FX', 'FX')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'State')}</th>
                   <th scope="col" style={{ textAlign: 'left' }}>{t('Vytvořil', 'Created by')}</th>
                 </tr>
@@ -164,6 +165,14 @@ function DealBlotter() {
                       <td style={{ textAlign: 'right' }}>{money(d.principal)}</td>
                       <td style={{ textAlign: 'right' }}>{d.rate.toLocaleString(locale, { maximumFractionDigits: 4 })}</td>
                       <td>{`${d.valueDate} → ${d.maturityDate}`}</td>
+                      <td>
+                        {d.fx ? (
+                          <>
+                            {`${d.fx.side} ${d.currency}/CZK`}
+                            <span style={{ color: 'var(--text-tertiary)' }}>{` · ${money(d.fx.side === 'BUY' ? d.fx.sellAmount : d.fx.buyAmount)} CZK`}</span>
+                          </>
+                        ) : '—'}
+                      </td>
                       <td><StatusBadge status={d.state} tone={STATE_TONE[d.state]} label={stateLabel(d.state, t)} /></td>
                       <td>{d.createdBy}</td>
                     </tr>
