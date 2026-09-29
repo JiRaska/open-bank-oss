@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.4...sepa-payment-v0.15.0) (2026-09-28)
+
+
+### Features
+
+* **sepa-payment:** bind Idempotency-Key to a request fingerprint ([#10948](https://github.com/JiRaska/open-bank-oss/issues/10948)) ([cefef67](https://github.com/JiRaska/open-bank-oss/commit/cefef673d15dec06c20c13e452e03488836dee8f))
+
 ## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.3...sepa-payment-v0.14.4) (2026-09-26)
 
 

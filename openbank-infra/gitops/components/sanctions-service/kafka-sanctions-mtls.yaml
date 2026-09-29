@@ -41,7 +41,7 @@ spec:
 # Projects the Strimzi-minted per-user keystore (user.p12 + user.password)
 # from `messaging` into `sanctions`. dataFrom.extract copies every key verbatim
 # (binary PKCS#12 byte-for-byte — per-key data mapping risks mangling binaries).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -67,7 +67,7 @@ spec:
 # `messaging` into `sanctions`. Same secret is shared across all namespaces;
 # deletionPolicy: Retain guards against a transient store/RBAC blip deleting
 # a live truststore out from under a running pod.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

@@ -49,7 +49,7 @@ class ClickHouseAnalyticsSinkIT {
         @Container
         @JvmStatic
         private val clickhouse: KGenericContainer =
-            KGenericContainer("clickhouse/clickhouse-server:24.3-alpine")
+            KGenericContainer("clickhouse/clickhouse-server:26.8-alpine")
                 .withEnv("CLICKHOUSE_DB", DB)
                 .withEnv("CLICKHOUSE_USER", USER)
                 .withEnv("CLICKHOUSE_PASSWORD", PASSWORD)

@@ -4,7 +4,7 @@
 #
 # Read from the SHARED KV entry `account-service`, not the `balance-service` entry this used to
 # name — one realm client, one entry (#3485, rules.yaml: oidc_secret_convention).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: balance-service-oidc

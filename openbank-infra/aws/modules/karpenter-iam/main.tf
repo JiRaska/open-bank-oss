@@ -154,6 +154,36 @@ data "aws_iam_policy_document" "controller" {
     resources = ["*"]
   }
 
+  # Three EC2 describe/read actions the upstream v1.13.1 getting-started policy (unchanged in v1.14.1)
+  # (ResourceDiscoveryPolicy's "AllowRegionalReadActions" statement) grants that
+  # ours never has: ec2:DescribeCapacityReservations and ec2:DescribePlacementGroups
+  # were already absent under Karpenter 1.12.1 (noted in #11123); ec2:DescribeInstanceStatus
+  # is the one the 1.13.1 controller now logs on every reconcile:
+  #
+  #   ec2:DescribeInstanceStatus permission is not allowed, update the IAM policy and
+  #   restart the Karpenter deployment to enable instance status health checks
+  #
+  # Kept as its own statement, scoped exactly like upstream (Resource "*" + a
+  # same-region condition), rather than folded into EC2ReadAndProvision above,
+  # which upstream does NOT region-scope this way for its RunInstances/CreateFleet
+  # verbs — adding the condition there would be a scoping change this PR doesn't make.
+  # Source: https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.13.1/website/content/en/docs/getting-started/getting-started-with-karpenter/cloudformation.yaml
+  # (ResourceDiscoveryPolicy, Sid AllowRegionalReadActions), fetched 2026-09-27.
+  statement {
+    sid = "AllowRegionalReadActions"
+    actions = [
+      "ec2:DescribeCapacityReservations",
+      "ec2:DescribeInstanceStatus",
+      "ec2:DescribePlacementGroups",
+    ]
+    resources = ["*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:RequestedRegion"
+      values   = [local.region]
+    }
+  }
+
   statement {
     sid       = "PricingAndSSM"
     actions   = ["pricing:GetProducts", "ssm:GetParameter"]

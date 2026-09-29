@@ -82,7 +82,7 @@ class CampaignPostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     private companion object {
-        const val POSTGRES_IMAGE = "docker.io/library/postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = "docker.io/library/postgres:18.6-alpine"
         const val VALKEY_IMAGE = "docker.io/valkey/valkey:7.2-alpine"
     }
 }

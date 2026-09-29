@@ -10,7 +10,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 const SYSTEM_PREFIX = 'system:'
 
 /**
- * Who asked for this snapshot run (risk-engine openapi 1.9.0, requestedBy on SnapshotRun /
+ * Who asked for this snapshot run (risk-engine openapi 1.14.0, requestedBy on SnapshotRun /
  * SnapshotRunSummary, #11016). Three cases, never guessed:
  *   - a human principal — rendered as-is;
  *   - a `system:<job>` principal (the EOD scheduler, #11010, records

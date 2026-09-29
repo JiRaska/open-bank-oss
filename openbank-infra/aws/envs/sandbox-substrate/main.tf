@@ -80,9 +80,9 @@ module "karpenter_iam" {
 }
 
 # Public DNS (open-bank.tech) + zone-scoped Pod Identity IAM for external-dns
-# and cert-manager DNS-01. DNS-01 (not HTTP-01) is the only ACME path that
-# works here: the edge NLB is IP-locked, so Let's Encrypt can't reach it — but
-# it can read a TXT record. After apply, delegate the domain to the zone's
+# and cert-manager DNS-01. DNS-01 (not HTTP-01) was chosen while the edge NLB
+# was IP-locked, so Let's Encrypt could not reach it; the sandbox edge is public
+# now, and DNS-01 stays because it needs no inbound path at all. After apply, delegate the domain to the zone's
 # name_servers output at the registrar.
 module "dns" {
   source = "../../modules/dns"

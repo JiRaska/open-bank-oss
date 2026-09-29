@@ -40,10 +40,34 @@ class RiskLiquidityApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @Inject
+    lateinit var treasury: com.openbank.risk.application.port.out.TreasuryDealBook
+
+    /** With the treasury read on, 1510 and 2320 are contract-level: each balance needs its deal. */
+    private val cnbDeposit = java.util.UUID.randomUUID()
+    private val cnbLombard = java.util.UUID.randomUUID()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$cnbDeposit', '$cnbLombard')")
+    }
+
+    private fun seedDeal(id: java.util.UUID, product: String, principal: String) = kotlinx.coroutines.runBlocking {
+        treasury.apply(
+            com.openbank.risk.application.port.out.TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = id,
+                product = product,
+                counterpartyId = "CNB",
+                currency = "CZK",
+                principal = java.math.BigDecimal(principal),
+                rate = java.math.BigDecimal("2.50"),
+                valueDate = java.time.LocalDate.parse("2026-09-30"),
+                maturityDate = java.time.LocalDate.parse("2026-10-01"),
+            ),
+        )
     }
 
     private fun snapshot(asOf: String, status: String): String = given().contentType("application/json")
@@ -76,7 +100,7 @@ class RiskLiquidityApiIT {
 
         // EU rules are the default for this bank (#10860): Delegated Regulation (EU) 2015/61 + CRR2.
         assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")
@@ -97,11 +121,13 @@ class RiskLiquidityApiIT {
         // 1000 "Cash and Cash Equivalents" is NOT mapped: listed, never counted.
         assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).containsExactly("1000")
         assertThat(lcr["hqla"]["lines"].isEmpty).isTrue()
+        // No ČNB lombard balance: no pledged-collateral note.
+        assertThat(body["notes"].map { it.asText() }).noneMatch { it.contains("lombard") }
 
         val a = body["assumptions"]
         assertThat(a["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
         assertThat(a["scope"].asText()).contains("2015/61").contains("575/2013")
-        assertThat(a["factors"].size()).isEqualTo(29)
+        assertThat(a["factors"].size()).isEqualTo(31)
         assertThat(
             a["factors"].all {
                 it["citation"].asText().let { c -> c.startsWith("EU 2015/61") || c.startsWith("CRR ") }
@@ -110,6 +136,107 @@ class RiskLiquidityApiIT {
         assertThat(a["factors"].single { it["key"].asText() == "nsfr-rsf-l1-securities" }["value"].decimalValue())
             .isEqualByComparingTo("0")
         assertThat(a["classification"]["retailStableShare"].decimalValue()).isEqualByComparingTo("0")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a CNB lombard balance on 2320 is classified, not unclassified, and flags the unmodelled collateral`() {
+        seedDeal(cnbDeposit, "CNB_DEPOSIT_FACILITY", "2000.00")
+        seedDeal(cnbLombard, "CNB_LOMBARD", "2000.00")
+        val base = Fixtures.tiedOut()
+        ledger.inputs = base.copy(
+            trialBalance = base.trialBalance +
+                tb("1510", "ASSET", "CZK", "2000.00", "0") +
+                tb("2320", "LIABILITY", "CZK", "0", "2000.00"),
+        )
+        val body = liquidity(snapshot("2026-09-30", "TIED_OUT"))
+
+        assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).doesNotContain("2320")
+        val lcr = body["total"]["lcr"]
+        val out = lcr["outflows"].single { it["glAccountCode"].asText() == "2320" }
+        assertThat(out["factorKey"].asText()).isEqualTo("lcr-central-bank-secured-outflow")
+        assertThat(out["weighted"].decimalValue()).isEqualByComparingTo("0")
+        val asf = body["total"]["nsfr"]["asf"].single { it["glAccountCode"].asText() == "2320" }
+        assertThat(asf["factorKey"].asText()).isEqualTo("nsfr-asf-central-bank-under-6m")
+        assertThat(body["notes"].map { it.asText() }).anyMatch { it.contains("lombard") && it.contains("HQLA") }
+    }
+
+    @Inject
+    @jakarta.enterprise.inject.Any
+    lateinit var connector: io.smallrye.reactive.messaging.memory.InMemoryConnector
+
+    /** A ČNB fixing through the real consumer: validity Fri 00:00 - Mon 00:00 Prague, as fx-service stamps it. */
+    private fun publishFixing(date: String, currency: String, ratePerUnit: String) {
+        val d = java.time.LocalDate.parse(date)
+        val prague = java.time.ZoneId.of("Europe/Prague")
+        val validFrom = d.atStartOfDay(prague).toInstant()
+        val validTo = d.plusDays(3).atStartOfDay(prague).toInstant()
+        connector.source<String>("fx-fixing-in").send(
+            """
+            {"source":"CNB","fixingDate":"$date","sequence":1,"quoteCurrency":"CZK",
+             "validFrom":"$validFrom","validTo":"$validTo",
+             "rates":[{"rateId":"${java.util.UUID.randomUUID()}","currency":"$currency","ratePerUnit":$ratePerUnit}],
+             "occurredAt":"${date}T12:30:00Z"}
+            """.trimIndent(),
+        )
+        val deadline = System.nanoTime() + 10_000_000_000L
+        while (TestDb.count(
+                "SELECT count(*) FROM fx_fixing_rate WHERE fixing_date = DATE '$date' AND currency = '$currency'",
+            ) == 0 &&
+            System.nanoTime() < deadline
+        ) {
+            Thread.sleep(100)
+        }
+    }
+
+    /** CZK: 1500 nostro against 1500 retail deposits. EUR: a 100 nostro against 100 of income. */
+    private fun eurBook() = LedgerInputs(
+        asOf = Fixtures.AS_OF,
+        trialBalance = listOf(
+            tb("1001", "ASSET", "CZK", "1500.00", "0"),
+            tb("2100", "LIABILITY", "CZK", "0", "1500.00"),
+            tb("1002", "ASSET", "EUR", "100.00", "0"),
+            tb("4100", "INCOME", "EUR", "0", "100.00"),
+        ),
+        subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
+    )
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR and CZK book on a Sunday is combined in CZK at the Friday ČNB fixing`() {
+        publishFixing("2026-09-11", "EUR", "24.5")
+        ledger.inputs = eurBook()
+        val body = liquidity(snapshot("2026-09-13", "TIED_OUT"))
+
+        val eur = body["currencies"].single { it["currency"].asText() == "EUR" }
+        assertThat(eur["nsfr"]["totalRsf"].decimalValue()).isEqualByComparingTo("50.00") // still in EUR
+        val total = body["total"]
+        assertThat(total["currency"].asText()).isEqualTo("CZK")
+        val nostro = total["lcr"]["inflows"].single { it["glAccountCode"].asText() == "1002" }
+        assertThat(nostro["amount"].decimalValue()).isEqualByComparingTo("2450.00") // 100 × 24.5
+        assertThat(total["lcr"]["totalOutflows"].decimalValue()).isEqualByComparingTo("150.00")
+        // ASF 1500 × 90% = 1350; RSF 1500 × 50% + 2450 × 50% = 1975; NSFR on the converted sums.
+        assertThat(total["nsfr"]["totalAsf"].decimalValue()).isEqualByComparingTo("1350.00")
+        assertThat(total["nsfr"]["totalRsf"].decimalValue()).isEqualByComparingTo("1975.00")
+        assertThat(total["nsfr"]["ratio"].decimalValue()).isEqualByComparingTo("0.683544")
+        assertThat(body["totalNotStated"].isNull).isTrue()
+        val fx = body["fxRates"].single()
+        assertThat(fx["currency"].asText()).isEqualTo("EUR")
+        assertThat(fx["rate"].decimalValue()).isEqualByComparingTo("24.5")
+        assertThat(fx["fixingDate"].asText()).isEqualTo("2026-09-11")
+        assertThat(fx["source"].asText()).isEqualTo("CNB")
+        assertThat(body["assumptions"]["currencyAggregation"].asText()).contains("ČNB fixing")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a EUR book with no fixing in effect states no combined total and says why`() {
+        ledger.inputs = eurBook()
+        val body = liquidity(snapshot("2026-08-06", "TIED_OUT"))
+        assertThat(body["total"].isNull).isTrue()
+        assertThat(body["totalNotStated"].asText()).contains("EUR").contains("2026-08-06")
+        assertThat(body["fxRates"].isEmpty).isTrue()
+        assertThat(body["currencies"].map { it["currency"].asText() }).containsExactly("CZK", "EUR")
     }
 
     @Test

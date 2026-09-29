@@ -4,6 +4,7 @@
 
 package com.openbank.risk.domain.liquidity
 
+import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LoanExtension
@@ -112,14 +113,17 @@ data class UnclassifiedBalance(
 )
 
 data class LiquidityResult(
+    /** Per currency, each in its own currency — unchanged by the reporting-currency view. */
     val currencies: List<CurrencyLiquidity>,
-    /** The single book currency, when there is exactly one; else null and no total is reported. */
-    val totalCurrency: String?,
+    /** All currencies combined in CZK at the ČNB fixing ([LiquidityReportingTotal]); null with [totalNotStated]. */
+    val total: CurrencyLiquidity?,
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateUsed>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     val unclassified: List<UnclassifiedBalance>,
     val notes: List<String>,
-) {
-    val total: CurrencyLiquidity? get() = totalCurrency?.let { c -> currencies.single { it.currency == c } }
-}
+)
 
 private const val RATIO_SCALE = 6
 private const val LCR_HORIZON_DAYS = 30L
@@ -128,23 +132,47 @@ private const val STAGE_3 = "STAGE_3"
 
 /**
  * LCR and NSFR of a tied-out snapshot under the configured parameter set — BCBS d238 / d295, or the
- * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency; a total only for a single-currency
- * book (the engine has no reporting-currency conversion yet — the same rule as IRRBB).
+ * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency, plus all currencies
+ * combined in CZK at the ČNB fixing ([LiquidityReportingTotal], EU 2015/61 Art. 4(5)).
  */
 object Liquidity {
 
     const val AGGREGATION_NOTE =
-        "Computed per currency. A total across currencies needs conversion to one reporting currency, which " +
-            "the engine does not do yet, so the total is reported only for a single-currency book."
+        "Computed per currency, each in its own currency. The total combines all currencies in CZK " +
+            "(EU 2015/61 Art. 4(5)): every amount of each other currency's lines is converted at the ČNB fixing " +
+            "in effect on the as-of date (listed in fxRates), and the HQLA caps, the inflow cap and both ratios " +
+            "are recomputed on the converted lines, never summed or averaged from the per-currency results. " +
+            "If any needed fixing is missing no total is stated (never a partial one)."
+
+    /**
+     * Stable machine-readable prefix for [PLEDGED_COLLATERAL_NOTE], so a downstream consumer (e.g. the
+     * finrep COREP mappers) can detect this note by code instead of matching free text.
+     */
+    const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
+
+    /**
+     * Present only while a central-bank secured funding balance (ČNB lombard, GL 2320) is non-zero.
+     * The lombard is secured on collateral pledged at the ČNB; encumbered assets are not HQLA
+     * (EU 2015/61 Art. 7(2); BCBS d238 ¶31 — paragraph UNVERIFIED) and carry a higher RSF. The snapshot has no collateral
+     * data, so nothing is removed from the stock — this note says so instead of faking the pledge.
+     * Starts with [PLEDGED_COLLATERAL_NOTE_CODE] followed by ": " so it can be matched by code.
+     */
+    const val PLEDGED_COLLATERAL_NOTE =
+        "$PLEDGED_COLLATERAL_NOTE_CODE: " +
+            "A secured central-bank borrowing (ČNB lombard) is outstanding, but the collateral pledged for it is not " +
+            "modelled: pledged assets are encumbered and would not count as HQLA, so the HQLA stock and the LCR " +
+            "may be overstated, and the RSF of the pledged assets understated."
 
     fun compute(
         positions: List<Position>,
         instruments: List<Instrument>,
         asOf: LocalDate,
         params: LiquidityParameters,
+        fixings: Map<String, FxRateUsed> = emptyMap(),
     ): LiquidityResult {
         val byId = instruments.associateBy { it.id }
         val unclassified = mutableListOf<UnclassifiedBalance>()
+        var centralBankSecuredFunding = false
         val currencies = positions.map { it.currency }.distinct().sorted().map { ccy ->
             val acc = Accumulator(params)
             positions.filter { it.currency == ccy }.forEach { p ->
@@ -166,6 +194,9 @@ object Liquidity {
                                 )
                             }
                         } else {
+                            if (cls == GlClass.CENTRAL_BANK_SECURED_FUNDING && p.amount.signum() != 0) {
+                                centralBankSecuredFunding = true
+                            }
                             acc.glAccount(p, cls)
                         }
                     }
@@ -174,11 +205,17 @@ object Liquidity {
             acc.finishDeposits()
             CurrencyLiquidity(ccy, acc.lcr(), NsfrResult(acc.asf, acc.rsf))
         }
+        val reporting = LiquidityReportingTotal.of(currencies, fixings, asOf, params)
         return LiquidityResult(
             currencies = currencies,
-            totalCurrency = currencies.singleOrNull()?.currency,
+            total = reporting.total,
+            fxRates = reporting.fxRates,
+            totalNotStated = reporting.notStated,
             unclassified = unclassified,
-            notes = listOfNotNull(AGGREGATION_NOTE.takeIf { currencies.size > 1 }),
+            notes = listOfNotNull(
+                AGGREGATION_NOTE.takeIf { currencies.size > 1 },
+                PLEDGED_COLLATERAL_NOTE.takeIf { centralBankSecuredFunding },
+            ),
         )
     }
 
@@ -384,6 +421,10 @@ object Liquidity {
                 GlClass.OTHER_LIABILITY -> {
                     outflows += line(label, code, liability, LiquidityFactor.LCR_OTHER_CONTRACTUAL_OUTFLOW)
                     asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
+                }
+                GlClass.CENTRAL_BANK_SECURED_FUNDING -> {
+                    outflows += line(label, code, liability, LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW)
+                    asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }

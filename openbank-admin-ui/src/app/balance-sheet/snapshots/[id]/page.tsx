@@ -149,6 +149,11 @@ function SnapshotDetail({ id }: { id: string }) {
             {t('Kapitál: úvěrové riziko (SA)', 'Capital: credit risk (SA)')}
           </Link>
         )}
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/min-reserves`} className="btn btn-secondary btn-sm">
+            {t('Povinné minimální rezervy', 'Minimum reserve requirement')}
+          </Link>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>

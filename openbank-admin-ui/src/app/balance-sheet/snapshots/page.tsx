@@ -16,6 +16,8 @@ import Link from 'next/link'
 import { useSession } from 'next-auth/react'
 import { RefreshCw, Scale } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
+import { ExplorerGuide } from '@/components/brand/ExplorerGuide'
+import overview from '@/components/brand/DomainOverview.module.css'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
@@ -98,6 +100,31 @@ function Snapshots() {
           </button>
         }
       />
+
+      <ExplorerGuide compact mascot="lioness" title={t('Riziko začíná důvěryhodnými daty', 'Risk starts with trustworthy data')}>
+        {t(
+          'Nejdřív odsouhlaste snímek s hlavní knihou. Dokud nesedí, navazující pozice a výpočty se nezobrazí. Pro scénáře úrokového rizika pak vyberte sadu výnosových křivek.',
+          'First tie the snapshot to the ledger. Until it ties, downstream positions and calculations stay hidden. Then choose a curve set for interest-rate scenarios.',
+        )}
+      </ExplorerGuide>
+
+      <div className={overview.overview} aria-label={t('Přehled rizika', 'Risk overview')}>
+        <div className={overview.tile}>
+          <span className={overview.label}>{t('Odsouhlasené snímky', 'Tied-out snapshots')}</span>
+          <span className={overview.value}>{runs === null ? '—' : runs.filter(run => run.status === 'TIED_OUT').length.toLocaleString(locale)}</span>
+          <span className={overview.detail}>{t('Z posledních načtených běhů, nikoli celá historie.', 'From the latest loaded runs, not the full history.')}</span>
+        </div>
+        <div className={overview.tile}>
+          <span className={overview.label}>{t('Snímky s rozdíly', 'Snapshots with mismatches')}</span>
+          <span className={overview.value}>{runs === null ? '—' : runs.filter(run => run.status === 'UNTIED').length.toLocaleString(locale)}</span>
+          <span className={overview.detail}>{t('Otevřete běh a zkontrolujte konkrétní rozdíly.', 'Open a run to inspect the exact differences.')}</span>
+        </div>
+        <Link className={overview.tile} href="/balance-sheet/curve-sets">
+          <span className={overview.label}>{t('Další krok', 'Next step')}</span>
+          <span className={overview.value}>{t('Výnosové křivky →', 'Curve sets →')}</span>
+          <span className={overview.detail}>{t('Vstupy pro scénáře IRRBB; nejsou náhradou za tie-out.', 'Inputs for IRRBB scenarios; not a substitute for tie-out.')}</span>
+        </Link>
+      </div>
 
       {canCreate && (
         <div className="card" style={{ marginBottom: 16 }}>

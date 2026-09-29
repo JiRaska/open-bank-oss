@@ -8,12 +8,42 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.api.search.SearchRequest
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.identity.BlindIndex
 import com.openbank.libs.identity.RodneCislo
 import com.openbank.libs.observability.DomainMetrics
-import com.openbank.party.application.port.`in`.*
-import com.openbank.party.application.port.out.*
+import com.openbank.party.application.port.`in`.ActingForProfile
+import com.openbank.party.application.port.`in`.AddDocumentCommand
+import com.openbank.party.application.port.`in`.CreatePartyCommand
+import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.MergePartyCommand
+import com.openbank.party.application.port.`in`.PartyMandateRejectedException
+import com.openbank.party.application.port.`in`.PartyUseCase
+import com.openbank.party.application.port.`in`.PayeeLimitExceededException
+import com.openbank.party.application.port.`in`.PhoneDirectoryMatch
+import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
+import com.openbank.party.application.port.`in`.RevokeMandateCommand
+import com.openbank.party.application.port.`in`.SavePayeeCommand
+import com.openbank.party.application.port.`in`.SearchPartiesQuery
+import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
+import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
+import com.openbank.party.application.port.`in`.UpdatePartyCommand
+import com.openbank.party.application.port.`in`.UploadDocumentCommand
+import com.openbank.party.application.port.out.GdprAggregationPort
+import com.openbank.party.application.port.out.MarketingConsentForwardingPort
+import com.openbank.party.application.port.out.MarketingConsentTrackingRepository
+import com.openbank.party.application.port.out.PartyAccountGuardPort
+import com.openbank.party.application.port.out.PartyChangeMetricsPort
+import com.openbank.party.application.port.out.PartyDocumentFileRepository
+import com.openbank.party.application.port.out.PartyDocumentRepository
+import com.openbank.party.application.port.out.PartyMandateRepository
+import com.openbank.party.application.port.out.PartyPayeeRepository
+import com.openbank.party.application.port.out.PartyRepository
+import com.openbank.party.application.port.out.PartyWrite
+import com.openbank.party.application.port.out.PortabilityAggregationPort
 import com.openbank.party.domain.model.*
 import com.openbank.party.domain.model.PartyDocumentFile
 import jakarta.enterprise.context.ApplicationScoped
@@ -28,8 +58,14 @@ private const val RC_KEY_VERSION = 1
 /** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
 private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
 
-class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id")
-class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
+// #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
+// ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
+// mappers' ErrorCode.NOT_FOUND.code / ErrorCode.CONFLICT.code byte for byte (see
+// PartyExceptionMapperEquivalenceTest). Only traceId's source changes (Ids.randomId() -> the
+// correlation MDC), which #10911 phase 1 already established is not part of the wire contract.
+class PartyNotFoundException(id: UUID) : ResourceNotFoundException("Party not found: $id")
+class PartyAlreadyExistsException(email: String) :
+    ResourceConflictException("Party with email already exists: $email")
 class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
 
 /** ADR-0179: a merge precondition failed. Carries an operator-readable reason (mapped to 409). */

@@ -72,7 +72,7 @@ signatures) with a 10-year retention obligation, and orchestrates e-signature �
 ## Change log
 
 - **2026-09-03** — Doc correction, no behavior change: §2 named the billing ingress topic
-  `openbank.billing.billing.event`. No such topic exists — the string occurs nowhere in the
+  `openbank.billing.billing.event`, but no such topic exists — the string occurs nowhere in the
   repository except this document (`git grep -l -F openbank.billing.billing.event` returns only
   this file), so no consumer, producer, contract or `KafkaTopic` CR has ever carried it. **The
   ingress itself is real and correctly wired**: the topic is `openbank.billing.fee.event`, declared
