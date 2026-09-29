@@ -57,7 +57,7 @@ class RiskLiquidityForecastApiIT {
      * Matures on day 15 of the 2028-01-31 run, inside the horizon: its 1000 + interest must NOT be
      * laddered, because the same 1000 is already the opening HQLA stock.
      */
-    private fun seedCnbDeposit() = runBlocking {
+    private fun seedCnbDeposit(): Unit = runBlocking {
         treasury.apply(
             TreasuryDealEvent(
                 state = "SETTLED",
