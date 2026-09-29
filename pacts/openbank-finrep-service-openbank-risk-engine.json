@@ -333,6 +333,8 @@
               "lcr": {
                 "cappedInflows": 50.0,
                 "hqla": {
+                  "adjustmentFor15Cap": 0.0,
+                  "adjustmentFor40Cap": 0.0,
                   "level1": 1000.0,
                   "level2a": 0.0,
                   "level2b": 0.0,
@@ -343,7 +345,8 @@
                       "level": "L1",
                       "marketValue": 1000.0
                     }
-                  ]
+                  ],
+                  "stock": 1000.0
                 },
                 "inflowCap": 150.0,
                 "inflowCapBinding": false,
@@ -355,6 +358,7 @@
                     "weighted": 50.0
                   }
                 ],
+                "netOutflows": 150.0,
                 "outflows": [
                   {
                     "amount": 2000.0,
@@ -363,6 +367,7 @@
                     "weighted": 200.0
                   }
                 ],
+                "ratio": 6.666667,
                 "totalInflows": 50.0,
                 "totalOutflows": 200.0
               }
@@ -379,6 +384,8 @@
             "lcr": {
               "cappedInflows": 50.0,
               "hqla": {
+                "adjustmentFor15Cap": 0.0,
+                "adjustmentFor40Cap": 0.0,
                 "level1": 1000.0,
                 "level2a": 0.0,
                 "level2b": 0.0,
@@ -389,7 +396,8 @@
                     "level": "L1",
                     "marketValue": 1000.0
                   }
-                ]
+                ],
+                "stock": 1000.0
               },
               "inflowCap": 150.0,
               "inflowCapBinding": false,
@@ -401,6 +409,7 @@
                   "weighted": 50.0
                 }
               ],
+              "netOutflows": 150.0,
               "outflows": [
                 {
                   "amount": 2000.0,
@@ -409,6 +418,7 @@
                   "weighted": 200.0
                 }
               ],
+              "ratio": 6.666667,
               "totalInflows": 50.0,
               "totalOutflows": 200.0
             }
@@ -442,6 +452,22 @@
               ]
             },
             "$.currencies[*].lcr.cappedInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.adjustmentFor15Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.hqla.adjustmentFor40Cap": {
               "combine": "AND",
               "matchers": [
                 {
@@ -514,6 +540,14 @@
                 }
               ]
             },
+            "$.currencies[*].lcr.hqla.stock": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.currencies[*].lcr.inflowCap": {
               "combine": "AND",
               "matchers": [
@@ -571,6 +605,14 @@
                 }
               ]
             },
+            "$.currencies[*].lcr.netOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.currencies[*].lcr.outflows": {
               "combine": "AND",
               "matchers": [
@@ -609,6 +651,14 @@
               "matchers": [
                 {
                   "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.ratio": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
                 }
               ]
             },
@@ -671,6 +721,22 @@
               ]
             },
             "$.total.lcr.cappedInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.adjustmentFor15Cap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.hqla.adjustmentFor40Cap": {
               "combine": "AND",
               "matchers": [
                 {
@@ -743,6 +809,14 @@
                 }
               ]
             },
+            "$.total.lcr.hqla.stock": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.total.lcr.inflowCap": {
               "combine": "AND",
               "matchers": [
@@ -800,6 +874,14 @@
                 }
               ]
             },
+            "$.total.lcr.netOutflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.total.lcr.outflows": {
               "combine": "AND",
               "matchers": [
@@ -838,6 +920,14 @@
               "matchers": [
                 {
                   "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.ratio": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
                 }
               ]
             },

@@ -44,7 +44,12 @@ class RiskEngineCapitalAdapterTest {
                         BigDecimal("900"),
                         BigDecimal.ZERO,
                         BigDecimal.ZERO,
+                        adjustmentFor15Cap = BigDecimal.ZERO,
+                        adjustmentFor40Cap = BigDecimal("1"),
+                        stock = BigDecimal("899"),
                     ),
+                    netOutflows = BigDecimal("100"),
+                    ratio = BigDecimal("8.990000"),
                 ),
             )
             return Uni.createFrom().item(
@@ -106,6 +111,12 @@ class RiskEngineCapitalAdapterTest {
         assertThat(risk.capitalCalls).containsExactly("newer")
         assertThat(lookup.result!!.level1).isEqualByComparingTo("900")
         assertThat(lookup.result!!.lines.single().level).isEqualTo("L1")
+        // C 76.00 fields are carried through, not merely parsed.
+        assertThat(lookup.result!!.level2bCapAdjustment).isEqualByComparingTo("0")
+        assertThat(lookup.result!!.level2CapAdjustment).isEqualByComparingTo("1")
+        assertThat(lookup.result!!.hqlaStock).isEqualByComparingTo("899")
+        assertThat(lookup.result!!.netOutflows).isEqualByComparingTo("100")
+        assertThat(lookup.result!!.lcrRatio).isEqualByComparingTo("8.99")
     }
 
     @Test

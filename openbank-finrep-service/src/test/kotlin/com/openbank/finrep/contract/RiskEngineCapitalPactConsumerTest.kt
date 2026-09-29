@@ -28,6 +28,7 @@ import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.mapper.C7200Mapper
 import com.openbank.finrep.domain.mapper.C7300Mapper
 import com.openbank.finrep.domain.mapper.C7400Mapper
+import com.openbank.finrep.domain.mapper.C7600Mapper
 import com.openbank.finrep.infrastructure.client.CapitalResponse
 import com.openbank.finrep.infrastructure.client.LiquidityResponse
 import com.openbank.finrep.infrastructure.client.RiskEngineRestClient
@@ -179,6 +180,10 @@ class RiskEngineCapitalPactConsumerTest {
                 h.decimalType("level1", 1000.00)
                 h.decimalType("level2a", 0.00)
                 h.decimalType("level2b", 0.00)
+                // C 76.00 reads the buffer AFTER the Level 2 caps and the two cap adjustments it ties to.
+                h.decimalType("adjustmentFor15Cap", 0.00)
+                h.decimalType("adjustmentFor40Cap", 0.00)
+                h.decimalType("stock", 1000.00)
             }
             // C 73.00 reads the outflow lines and the engine's own total they must tie to. A tied book
             // may hold no liability with an outflow, so the list may be empty.
@@ -202,6 +207,9 @@ class RiskEngineCapitalPactConsumerTest {
             lcr.decimalType("inflowCap", 150.00)
             lcr.decimalType("cappedInflows", 50.00)
             lcr.booleanType("inflowCapBinding", false)
+            // C 76.00 reads net outflows (outflows − capped inflows) and the ratio (buffer / net outflows).
+            lcr.decimalType("netOutflows", 150.00)
+            lcr.numberType("ratio", 6.666667)
         }
     }
 
@@ -405,6 +413,63 @@ class RiskEngineCapitalPactConsumerTest {
         val totalRow = served.cells.single { it.rowRef == "r0010" && it.colRef == "c0140" }
         assertThat(totalRow.isDataGap).isTrue()
         assertThat(totalRow.gapReason).contains("unclassified in risk-engine snapshot ${l.runId}")
+    }
+
+    @Test
+    @PactTestFor(pactMethod = "liquidityPact")
+    fun `the same liquidity result feeds a C 76_00 render`(mockServer: MockServer) {
+        assertThat(liquidityPath).isEqualTo("$RISK_SNAPSHOTS_PATH/{id}/liquidity")
+        val body = given().baseUri(mockServer.getUrl()).get(liquidityPath.replace("{id}", EXAMPLE_RUN_ID))
+            .then().statusCode(200).extract().asString()
+        val l = json.readValue<LiquidityResponse>(body)
+        val lcr = checkNotNull(l.total).lcr
+        val result = RiskLiquidityResult(
+            runId = l.runId,
+            asOf = LocalDate.parse(l.asOf),
+            parameterSetId = l.parameterSetId,
+            parameterSetVersion = l.parameterSetVersion,
+            currency = checkNotNull(l.total).currency,
+            lines = emptyList(),
+            level1 = lcr.hqla.level1,
+            level2a = lcr.hqla.level2a,
+            level2b = lcr.hqla.level2b,
+            currencyCount = l.currencies.size,
+            unclassifiedBalances = l.unclassified.size,
+            totalOutflows = lcr.totalOutflows,
+            totalInflows = lcr.totalInflows,
+            inflowCap = lcr.inflowCap,
+            cappedInflows = lcr.cappedInflows,
+            inflowCapBinding = lcr.inflowCapBinding,
+            level2bCapAdjustment = lcr.hqla.adjustmentFor15Cap,
+            level2CapAdjustment = lcr.hqla.adjustmentFor40Cap,
+            hqlaStock = lcr.hqla.stock,
+            netOutflows = lcr.netOutflows,
+            lcrRatio = lcr.ratio,
+        )
+        assertThat(lcr.hqla.adjustmentFor15Cap).isEqualByComparingTo("0.00")
+        assertThat(lcr.hqla.adjustmentFor40Cap).isEqualByComparingTo("0.00")
+        assertThat(lcr.hqla.stock).isEqualByComparingTo("1000.00")
+        assertThat(lcr.netOutflows).isEqualByComparingTo("150.00")
+        assertThat(lcr.ratio).isEqualByComparingTo("6.666667")
+        // With the unclassified balance cleared the render ties buffer, net outflows and ratio, proving
+        // every C 76.00 field is read, not merely parsed ...
+        val tied = C7600Mapper.map(
+            RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0)),
+            LocalDate.parse(REPORTING_DATE),
+        )
+        assertThat(tied.cells.single { it.rowRef == "r0010" }.value).isEqualByComparingTo("1000.00")
+        assertThat(tied.cells.single { it.rowRef == "r0020" }.value).isEqualByComparingTo("150.00")
+        assertThat(tied.cells.single { it.rowRef == "r0030" }.value).isEqualByComparingTo("666.67")
+        assertThatThrownBy {
+            C7600Mapper.map(
+                RiskLiquidityLookup.found(result.copy(unclassifiedBalances = 0, lcrRatio = BigDecimal("7"))),
+                LocalDate.parse(REPORTING_DATE),
+            )
+        }.isInstanceOf(IllegalStateException::class.java).hasMessageContaining("LCR is 7")
+        // ... and the example as served (one unclassified balance) must refuse the ratio and say why.
+        val served = C7600Mapper.map(RiskLiquidityLookup.found(result), LocalDate.parse(REPORTING_DATE))
+        assertThat(served.cells.single { it.rowRef == "r0030" }.gapReason)
+            .contains("unclassified in risk-engine snapshot ${l.runId}")
     }
 
     private companion object {
