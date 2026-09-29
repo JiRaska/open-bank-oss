@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.1...agent-service-v1.27.2) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
 ## [1.27.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.0...agent-service-v1.27.1) (2026-09-29)
 
 
