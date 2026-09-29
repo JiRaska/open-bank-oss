@@ -18,7 +18,6 @@ metadata:
   name: langfuse
   namespace: ai-platform
   annotations:
-    openbank.io/edge-exposure: internal
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/custom-headers: ai-platform/langfuse-edge-headers-v1

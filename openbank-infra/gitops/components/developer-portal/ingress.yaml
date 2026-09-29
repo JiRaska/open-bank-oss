@@ -9,7 +9,6 @@ metadata:
   name: developer-portal
   namespace: developer-portal
   annotations:
-    openbank.io/edge-exposure: public
     cert-manager.io/cluster-issuer: letsencrypt-prod
     # Rotate the TLS private key on every renewal — best practice for a public internet surface.
     cert-manager.io/private-key-rotation-policy: "Always"

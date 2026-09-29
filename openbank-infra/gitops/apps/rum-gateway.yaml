@@ -75,8 +75,6 @@ spec:
           ingressClassName: nginx
           annotations:
             cert-manager.io/cluster-issuer: letsencrypt-prod
-            # Public on purpose: browser/mobile RUM telemetry from customers (ADR-0324 mixed edge).
-            openbank.io/edge-exposure: public
             # Mobile TLS pinning (ADR-0066 S3): the app pins rum.open-bank.tech's SPKI
             # hash, so the private key MUST survive renewals. cert-manager >=1.18
             # defaults rotationPolicy to Always; rotating the key needs a coordinated

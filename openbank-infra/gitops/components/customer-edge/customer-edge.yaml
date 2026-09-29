@@ -494,7 +494,6 @@ metadata:
   name: customer-edge
   namespace: customer-edge
   annotations:
-    openbank.io/edge-exposure: public
     cert-manager.io/cluster-issuer: letsencrypt-prod
     # Mobile TLS pinning (ADR-0066 S3): the app pins this host's SPKI hash, so the
     # private key MUST survive certificate renewals. cert-manager >=1.18 defaults

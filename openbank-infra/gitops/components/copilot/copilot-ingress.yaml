@@ -9,7 +9,6 @@ metadata:
   name: copilot
   namespace: platform
   annotations:
-    openbank.io/edge-exposure: public
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Mobile app in foreground does < 5 req/s; a chat turn is one request.
