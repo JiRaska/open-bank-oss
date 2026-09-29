@@ -410,9 +410,14 @@ jobs:
       # failing to apply it, not a broken package. The gate reported UNFALSIFIED rather than
       # passing — its own self-test could not run — which is how a runtime mismatch that
       # reproduces nowhere else got caught at all.
+      # The governance and Mermaid gates share one npm ci on every lint run. Cache npm's
+      # download store across runs; npm ci still verifies package-lock integrity and creates
+      # a fresh node_modules tree under the gate's install lock.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
+          cache: "npm"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
