@@ -331,6 +331,7 @@
             {
               "currency": "CZK",
               "lcr": {
+                "cappedInflows": 50.0,
                 "hqla": {
                   "level1": 1000.0,
                   "level2a": 0.0,
@@ -344,6 +345,16 @@
                     }
                   ]
                 },
+                "inflowCap": 150.0,
+                "inflowCapBinding": false,
+                "inflows": [
+                  {
+                    "amount": 100.0,
+                    "factor": 0.5,
+                    "factorKey": "lcr-retail-loan-inflow",
+                    "weighted": 50.0
+                  }
+                ],
                 "outflows": [
                   {
                     "amount": 2000.0,
@@ -352,6 +363,7 @@
                     "weighted": 200.0
                   }
                 ],
+                "totalInflows": 50.0,
                 "totalOutflows": 200.0
               }
             }
@@ -365,6 +377,7 @@
           "total": {
             "currency": "CZK",
             "lcr": {
+              "cappedInflows": 50.0,
               "hqla": {
                 "level1": 1000.0,
                 "level2a": 0.0,
@@ -378,6 +391,16 @@
                   }
                 ]
               },
+              "inflowCap": 150.0,
+              "inflowCapBinding": false,
+              "inflows": [
+                {
+                  "amount": 100.0,
+                  "factor": 0.5,
+                  "factorKey": "lcr-retail-loan-inflow",
+                  "weighted": 50.0
+                }
+              ],
               "outflows": [
                 {
                   "amount": 2000.0,
@@ -386,9 +409,11 @@
                   "weighted": 200.0
                 }
               ],
+              "totalInflows": 50.0,
               "totalOutflows": 200.0
             }
           },
+          "totalNotStated": null,
           "unclassified": [
             {
               "glAccountCode": "9999"
@@ -413,6 +438,14 @@
               "matchers": [
                 {
                   "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.cappedInflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
                 }
               ]
             },
@@ -481,6 +514,63 @@
                 }
               ]
             },
+            "$.currencies[*].lcr.inflowCap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflowCapBinding": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.inflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.currencies[*].lcr.outflows": {
               "combine": "AND",
               "matchers": [
@@ -515,6 +605,14 @@
               ]
             },
             "$.currencies[*].lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.currencies[*].lcr.totalInflows": {
               "combine": "AND",
               "matchers": [
                 {
@@ -572,11 +670,11 @@
                 }
               ]
             },
-            "$.total.currency": {
+            "$.total.lcr.cappedInflows": {
               "combine": "AND",
               "matchers": [
                 {
-                  "match": "type"
+                  "match": "decimal"
                 }
               ]
             },
@@ -645,6 +743,63 @@
                 }
               ]
             },
+            "$.total.lcr.inflowCap": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.inflowCapBinding": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.inflows": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 0
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].factor": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].factorKey": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.total.lcr.inflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.total.lcr.outflows": {
               "combine": "AND",
               "matchers": [
@@ -679,6 +834,14 @@
               ]
             },
             "$.total.lcr.outflows[*].weighted": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.total.lcr.totalInflows": {
               "combine": "AND",
               "matchers": [
                 {

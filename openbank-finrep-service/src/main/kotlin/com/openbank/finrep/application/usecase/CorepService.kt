@@ -19,6 +19,7 @@ import com.openbank.finrep.domain.mapper.C0100Mapper
 import com.openbank.finrep.domain.mapper.C0200Mapper
 import com.openbank.finrep.domain.mapper.C7200Mapper
 import com.openbank.finrep.domain.mapper.C7300Mapper
+import com.openbank.finrep.domain.mapper.C7400Mapper
 import com.openbank.finrep.domain.model.CorepTemplate
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Duration
@@ -55,6 +56,7 @@ class CorepService(
             C0200Mapper.TEMPLATE_ID -> C0200Mapper.map(capital(query.asOf), query.asOf)
             C7200Mapper.TEMPLATE_ID -> C7200Mapper.map(liquidity(query.asOf), query.asOf)
             C7300Mapper.TEMPLATE_ID -> C7300Mapper.map(liquidity(query.asOf), query.asOf)
+            C7400Mapper.TEMPLATE_ID -> C7400Mapper.map(liquidity(query.asOf), query.asOf)
             else -> {
                 metrics.templateFailed(RegulatoryFramework.COREP, TemplateFailureReason.UNKNOWN_TEMPLATE)
                 throw IllegalArgumentException("Unknown or unimplemented COREP template: ${query.templateId}")
