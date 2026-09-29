@@ -57,12 +57,33 @@ spec:
         #   answers "did this process dead-letter anything", never "are there dead rows in the
         #   table". Measured 2026-08-09: zero series fleet-wide while two services held dead rows.
         #   `OutboxDeadLetterAlertNamingTest` pins the selector below to a real gauge registration.
-        - alert: BillingOutboxDeadLettered
-          expr: openbank_outbox_dead_lettered{service="billing"} > 0
-          for: 15m
+        #
+        # Two rules, split by what a human must do (#9690):
+        #   - NEW dead rows PAGE. The count rose above its own 24h high-water mark, aggregated
+        #     `max by (service)` so a pod restart (a fresh series booting at 0 and refreshing
+        #     back to the same count) never reads as a rise. That is the "something just broke" signal.
+        #   - STANDING dead rows are a TICKET (warning), not a page. The same two historic rows
+        #     paged critically for weeks and re-fired on every fresh pod, which trained everyone to
+        #     ignore the one control that says the GL is short. A row that has already been seen
+        #     needs a disposition (runbook), not an on-call wake-up. Also aggregated, so a
+        #     restart does not reset `for:` and re-announce the same rows.
+        - alert: BillingOutboxDeadLetteredNew
+          expr: max by (service) (openbank_outbox_dead_lettered{service="billing"}) > max by (service) (max_over_time(openbank_outbox_dead_lettered{service="billing"}[1d] offset 30m))
+          for: 5m
           labels:
             severity: critical
             service: billing
           annotations:
-            summary: "billing-service has dead-lettered outbox rows (fee postings that never reached the ledger)"
-            description: "openbank_outbox_dead_lettered{service=\"billing\"} is >0: one or more billing_outbox rows are in terminal DEAD and will never be retried — listProcessable excludes them. Each one is a fee assessed but never posted to the ledger, so the GL is short by exactly those rows. Read last_error on them before requeueing: a transport fast-fail (breaker/bulkhead) no longer consumes the attempt budget after #4163, so a DEAD row now means a real per-row failure. Refs #4701, #4005."
+            summary: "billing-service dead-lettered NEW outbox rows (fee postings that will never reach the ledger)"
+            description: "openbank_outbox_dead_lettered{service=\"billing\"} rose above its 24h high-water mark: new billing_outbox rows went terminal DEAD. A transport fast-fail (breaker/bulkhead) does not consume the attempt budget, so a new DEAD row is a real per-row failure. Read last_error before anything else. Refs #4701, #9690."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-billing.md#dead-lettered-outbox-rows"
+        - alert: BillingOutboxDeadLettered
+          expr: max by (service) (openbank_outbox_dead_lettered{service="billing"}) > 0
+          for: 1h
+          labels:
+            severity: warning
+            service: billing
+          annotations:
+            summary: "billing-service has unresolved dead-lettered outbox rows (fees never posted to the ledger)"
+            description: "{{ $value }} billing_outbox row(s) are in terminal DEAD and will never be retried. Each is a fee assessed but never posted, so the GL is short by exactly those rows. Needs an operator disposition (replay or write-off), not a page. Refs #4701, #4005, #9690."
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-billing.md#dead-lettered-outbox-rows"
