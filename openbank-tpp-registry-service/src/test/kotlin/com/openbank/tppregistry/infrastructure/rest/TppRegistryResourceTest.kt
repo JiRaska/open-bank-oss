@@ -129,7 +129,10 @@ class TppRegistryResourceTest {
         val response = resource.registerTpp(registerCmd(), "key-1")
 
         assertThat(response.status).isEqualTo(201)
-        assertThat(response.entity).isEqualTo(entry())
+        // respond() always carries a pre-serialized JSON string as the entity (it is the same
+        // body withReservation later persists verbatim as the idempotency record) — never the
+        // deserialized object, even on the freshly-executed path.
+        assertThat(response.entity).isEqualTo(mapper.writeValueAsString(entry()))
         coVerify { store.reserve("tpp:register:CZ-CNB-1:key-1", any()) }
         coVerify { store.save("tpp:register:CZ-CNB-1:key-1", any(), 201, any(), any()) }
     }
@@ -268,7 +271,7 @@ class TppRegistryResourceTest {
         val response = resource.triggerEbaSync("key-3")
 
         assertThat(response.status).isEqualTo(200)
-        assertThat(response.entity).isEqualTo(state)
+        assertThat(response.entity).isEqualTo(mapper.writeValueAsString(state))
         coVerify { store.reserve("tpp:sync:key-3", any()) }
         coVerify { store.save("tpp:sync:key-3", any(), 200, any(), 300) }
     }
