@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.1...lending-service-v0.39.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **lending:** debit the borrower's account when a repayment is recorded ([#11505](https://github.com/JiRaska/open-bank-oss/issues/11505)) ([d990f8c](https://github.com/JiRaska/open-bank-oss/commit/d990f8ce37c6d6963b9d33c592c5c42de2656b37))
+
 ## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.0...lending-service-v0.39.1) (2026-09-29)
 
 

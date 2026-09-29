@@ -13,6 +13,7 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
@@ -694,7 +695,7 @@ class LendingService @Inject constructor(
                             )
                         } else {
                             borrowerCredit.credit(
-                                "loan:${saved.id.value}:disbursement-credit",
+                                LoanCashReferences.disbursementCredit(saved.id),
                                 accountId,
                                 saved.principal,
                             )
@@ -765,7 +766,7 @@ class LendingService @Inject constructor(
                     )
                 loan.status in CLOSED_EXPOSURE_STATES ->
                     Uni.createFrom().failure(IllegalStateException("Loan has no recognized exposure"))
-                else -> recordRepaymentAgainst(loanId, installmentId).call { _ ->
+                else -> recordRepaymentAgainst(loan, installmentId).call { _ ->
                     installments.findByLoan(loanId).flatMap { rows ->
                         if (rows.isNotEmpty() && rows.all { it.paid }) {
                             provisioning.releaseAllowance(loan, events, LocalDate.now(clock))
@@ -779,8 +780,9 @@ class LendingService @Inject constructor(
             }
         }
 
-    private fun recordRepaymentAgainst(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
-        installments.findByLoan(loanId).flatMap { schedule ->
+    private fun recordRepaymentAgainst(loan: Loan, installmentId: UUID): Uni<LoanInstallment> {
+        val loanId = loan.id
+        return installments.findByLoan(loanId).flatMap { schedule ->
             val target = schedule.firstOrNull { it.id == installmentId }
             when {
                 target == null ->
@@ -789,7 +791,15 @@ class LendingService @Inject constructor(
                     Uni.createFrom().failure(IllegalStateException("Installment already paid"))
                 else -> {
                     val paidAt = OffsetDateTime.now(clock)
-                    installments.markPaid(installmentId, paidAt)
+                    // #11487: the repayment's customer-facing leg. The ledger journal below books the
+                    // cash as RECEIVED (Dr Funding Clearing), so the borrower's own account must be
+                    // debited for the same installment, or clearing holds cash no customer ever paid.
+                    // It runs FIRST and fails loud: no current account, or a refused debit (e.g.
+                    // insufficient funds), leaves the installment unpaid and nothing posted. The
+                    // reference is per installment, so a retried call replays instead of charging twice,
+                    // and the four-eyes cash reconstruction for historic repayments uses the same key.
+                    debitBorrower(loan, target)
+                        .flatMap { installments.markPaid(installmentId, paidAt) }
                         .flatMap {
                             // Split posting: principal repayment + the interest leg. If the scheduled pass already
                             // accrued this installment's interest income, the cash only *settles* the receivable
@@ -820,6 +830,29 @@ class LendingService @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun debitBorrower(loan: Loan, installment: LoanInstallment): Uni<Unit> {
+        val amount = installment.principal + installment.interest
+        if (amount.amount.signum() == 0) return Uni.createFrom().item(Unit)
+        return borrowerAccounts.findCurrentAccount(loan.partyId, amount.currency.code).flatMap { accountId ->
+            if (accountId == null) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Loan ${loan.id.value}: party ${loan.partyId} has no active CURRENT account in " +
+                            "${amount.currency.code} to debit installment ${installment.number}; repayment not recorded",
+                    ),
+                )
+            } else {
+                borrowerCredit.debit(
+                    LoanCashReferences.repaymentDebit(loan.id, installment.number),
+                    accountId,
+                    amount,
+                    BorrowerCreditPort.REPAYMENT,
+                )
+            }
+        }
+    }
 
     // --- Servicing posting loop: accrual-basis interest recognition ----------------------------------
 

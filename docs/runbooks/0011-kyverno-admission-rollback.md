@@ -189,7 +189,7 @@ Five rules, each of which this gate broke:
 
 Every `kyverno.io/v1` ClusterPolicy in `gitops/components/kyverno/` not yet listed under stage 2 below has a
 `policies.kyverno.io/v1` twin named `<policy>-cel` (`ValidatingPolicy`, `ImageValidatingPolicy`,
-plus an inert `MutatingPolicy`). They are `validationActions: [Audit]` with `failurePolicy: Ignore`,
+). They are `validationActions: [Audit]` with `failurePolicy: Ignore`,
 so **they are never the thing denying a workload** — the rollback above still targets the v1 policy.
 A `-cel` name in `KyvernoAuditPolicyFailingBeforeEnforce` is a parity gap, not an outage: compare
 with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ever does misbehave
@@ -200,12 +200,31 @@ with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ev
 `require-gated-or-declared-tool-ingress` — enforcing as `require-gated-or-declared-tool-ingress-cel`
 (`[Deny]`, `failurePolicy: Fail`), v1 file `tool-ingress-gate-policy.yaml` deleted. The v1 verdicts
 of both are pinned in the parity harness. `openbank-dr-sa-pin` — enforcing as `openbank-dr-sa-pin-cel`
-(`[Deny]`, `failurePolicy: Fail`) NEXT TO its still-enforcing v1 original; the v1 ClusterPolicy lives
-in `components/platform/dr-runner-rbac.yaml` (Argo app `platform`, not `kyverno-policies`), so it is
-removed by a separate follow-up PR after this flip has synced — two apps sync independently and
-`PruneLast` cannot order across them. While both enforce, a rollback must relax BOTH documents. For those policies the rollback targets the `-cel`
-document, and reverting the stage-2 PR re-creates the v1 original. All other policies are still at
-stage 1.
+(`[Deny]`, `failurePolicy: Fail`); its v1 ClusterPolicy lived in `components/platform/dr-runner-rbac.yaml`
+(Argo app `platform`, not `kyverno-policies`), so it was removed by a separate follow-up PR after the
+flip had synced — two apps sync independently and `PruneLast` cannot order across them. The RBAC
+documents in that file stay; the ClusterPolicy document is gone. Its v1 verdicts are pinned in the harness too (reverting the
+removal PR re-creates it). For those policies the rollback targets the `-cel`
+document, and reverting the stage-2 PR re-creates the v1 original.
+`block-deployment-if-rollout-exists` — enforcing as `block-deployment-if-rollout-exists-cel`
+(`[Deny]`, `failurePolicy: Fail`), v1 file `rollout-bypass-prevention.yaml` deleted; its v1 verdicts
+were measured live and are pinned in `V1_ROLLOUT`. It is the one stage-2 policy that calls the API
+server (`resource.List` over `argoproj.io` Rollouts), so under `Fail` a List error — Rollout CRD gone,
+or the `kyverno-admission-controller` SA losing `list rollouts` — denies every Deployment CREATE/UPDATE
+in its 13 money-path namespaces (v1 had the same exposure). Symptom: Deployment applies there fail
+with a Kyverno webhook error naming that policy and a List/forbidden/not-found cause. Fix the CRD or
+RBAC; if that cannot be quick, set that document's `failurePolicy: Ignore` by PR (it then admits on
+error, keeping Deny when the List succeeds).
+`ecr-pull-through-rewrite` (the one mutating policy) — rewriting as the `MutatingPolicy`
+`ecr-pull-through-rewrite-cel` (kill-switch matchCondition removed, `failurePolicy: Ignore`, background
+off, so existing Pods are never touched), v1 file deleted; its v1 output images are pinned in
+`V1_IMAGES`. A mutation has no Audit mode, so the swap relied on idempotency instead: a rewritten ref
+starts with the ECR host, which matches no origin prefix, so either engine on the other's output is a
+no-op (the harness re-runs the CEL policy on its own output and requires zero changes). Symptom if it
+misbehaves: new Pods show an unexpected image, or pulls fail with an ECR `not found` for a
+pull-through path. Because it is `Ignore`, a webhook outage only means images pull from the origin
+registry over NAT; to stop the rewrite, delete the file by PR (Pods then pull from the origin). CNPG
+instance pods are excluded, as before. All other policies are still at stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 
 ## 5. Related

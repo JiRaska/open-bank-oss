@@ -43,6 +43,28 @@ object RiskEngineFigures {
                 "'$EU_LIQUIDITY_PARAMETER_SET', so this 2015/61 value cannot be stated."
         }
 
+    /**
+     * The prefix every EU CRR (post-CRR3) capital parameter set id starts with, e.g. `eu-crr3-sa`
+     * (risk-engine default as of PR #11496; BCBS `bcbs-d424-sa` remains selectable). COREP C 02.00
+     * reports Pillar 1 own funds requirements under EU CRR, so any set whose id does not start with
+     * this prefix — BCBS or a future non-EU set — is a data gap, never presented as an EU CRR figure.
+     * A prefix, not an exact match, because a later EU CRR set version (`eu-crr4-sa`, …) must also be
+     * accepted without a code change here.
+     */
+    const val EU_CRR_CAPITAL_PARAMETER_SET_PREFIX = "eu-crr"
+
+    /** The EU CRR capital parameter set id currently returned by risk-engine (used only in gap text). */
+    private const val EU_CRR_CAPITAL_PARAMETER_SET_EXAMPLE = "eu-crr3-sa"
+
+    /** The gap reason for a COREP capital value when the run used a non-EU-CRR parameter set, else null. */
+    fun capitalParameterSetGap(parameterSetId: String, runId: String): String? =
+        if (parameterSetId.startsWith(EU_CRR_CAPITAL_PARAMETER_SET_PREFIX)) {
+            null
+        } else {
+            "Risk-engine snapshot $runId was computed under parameter set '$parameterSetId', not the EU CRR set " +
+                "'$EU_CRR_CAPITAL_PARAMETER_SET_EXAMPLE'; COREP C 02.00 reports under EU CRR."
+        }
+
     /** The stable machine code the risk engine prefixes the pledged-collateral note with (#11096). */
     private const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
 
