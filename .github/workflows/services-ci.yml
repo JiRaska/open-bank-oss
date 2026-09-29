@@ -85,7 +85,8 @@ jobs:
         with:
           fetch-depth: 0
       # Shared-library src/test changes build their owning module only. Shared
-      # src/main, src/testFixtures and build inputs still fan out to the fleet.
+      # src/main, src/testFixtures and build inputs still fan out to the fleet,
+      # including modules added after this workflow was written.
       # Discover Gradle modules from the tree, as settings.gradle.kts does. A
       # hardcoded list can omit a newly added service from PR and nightly builds
       # while all-green still passes (#1001). Admin UI and infra have no module build file.
@@ -121,7 +122,14 @@ jobs:
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
 
-          SHARED_TEST_RE='^openbank-libs(-domain|-runtime|-testing|-lending|-iso20022)?/src/test/'
+          SHARED_CODE_RE='^openbank-libs(-[a-z0-9-]+)?/'
+          SHARED_TEST_RE='^openbank-libs(-[a-z0-9-]+)?/src/test/'
+          grep -qE "$SHARED_CODE_RE" <<< 'openbank-libs-future/src/main/Example.kt' \
+            || { echo 'selector self-test: future shared code must fan out' >&2; exit 1; }
+          grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-future/src/test/Example.kt' \
+            || { echo 'selector self-test: future shared tests must stay local' >&2; exit 1; }
+          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-future/src/testFixtures/Example.kt' \
+            || { echo 'selector self-test: test fixtures must retain full-fleet scope' >&2; exit 1; }
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
@@ -174,7 +182,7 @@ jobs:
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
               FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+              if grep -qE "${SHARED_CODE_RE}|^(gradle/|settings\\.gradle\\.kts|build\\.gradle\\.kts|gradle\\.properties|build-logic/)" <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -294,7 +302,7 @@ jobs:
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
             FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
+            if grep -qE "${SHARED_CODE_RE}|^(gradle/|settings\\.gradle\\.kts|build\\.gradle\\.kts|gradle\\.properties|build-logic/)" <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
