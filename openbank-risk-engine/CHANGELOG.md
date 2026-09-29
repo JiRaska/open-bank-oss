@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.19.0...risk-engine-v0.20.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** forecast the liquidity survival horizon from a snapshot ([#11040](https://github.com/JiRaska/open-bank-oss/issues/11040)) ([44cbf58](https://github.com/JiRaska/open-bank-oss/commit/44cbf58b03a562ad31fd0ae6e1697a80f8c9b6f1))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.18.1...risk-engine-v0.19.0) (2026-09-29)
 
 
