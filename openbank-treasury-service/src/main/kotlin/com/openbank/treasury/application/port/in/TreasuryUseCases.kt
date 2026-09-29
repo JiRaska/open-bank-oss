@@ -12,9 +12,9 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
-import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.LocalDate

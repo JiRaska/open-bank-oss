@@ -11,11 +11,11 @@
 --   ALTER TABLE deals DROP CONSTRAINT deals_fx_terms, DROP CONSTRAINT deals_fx_side_check;
 --   ALTER TABLE deals DROP COLUMN fx_side, DROP COLUMN fx_counter_amount, DROP COLUMN fx_mid_rate,
 --       DROP COLUMN fx_rate_flag;
---   then restore the V1 forms of deals_product_check and deals_dates_ordered.
+--   then restore the V7 form of deals_product_check and the pre-FX deals_dates_ordered.
 
 ALTER TABLE deals DROP CONSTRAINT IF EXISTS deals_product_check;
 ALTER TABLE deals ADD CONSTRAINT deals_product_check
-    CHECK (product IN ('MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'FX_SPOT'));
+    CHECK (product IN ('MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD', 'FX_SPOT'));
 
 ALTER TABLE deals DROP CONSTRAINT IF EXISTS deals_dates_ordered;
 ALTER TABLE deals ADD CONSTRAINT deals_dates_ordered CHECK (

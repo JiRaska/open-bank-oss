@@ -381,7 +381,7 @@ class TreasuryDealApiIT {
         assertThat(ledger.calls).containsExactly("treasury:$fxId:settled")
         assertThat(outboxTypes(UUID.fromString(fxId)))
             .containsExactly("treasury.deal.booked.v1", "treasury.deal.settled.v1")
-        // Read back from the row: proves V5's columns and the mapping.
+        // Read back from the row: proves V9's columns and the mapping.
         given().`when`().get("/api/v1/treasury/deals/$fxId").then().statusCode(200)
             .body("fx.buyAmount", equalTo(1000.00f))
             .body("maturityDate", equalTo(businessDay.toString()))

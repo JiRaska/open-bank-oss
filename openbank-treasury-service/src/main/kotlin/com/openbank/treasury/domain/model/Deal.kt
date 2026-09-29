@@ -246,6 +246,7 @@ data class Deal(
             )
         }
     }
+
     /**
      * True while this deal is PENDING_APPROVAL on [counterpartyId]'s [currency] limit with a senior
      * override still in force (ADR-0315 D4, #10896). Keyed on [limitCurrency], not `currency`.
