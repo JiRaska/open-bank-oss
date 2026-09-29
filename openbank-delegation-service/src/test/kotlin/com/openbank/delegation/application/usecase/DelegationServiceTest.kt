@@ -189,7 +189,7 @@ class DelegationServiceTest {
         coVerify(exactly = 1) { authorityClient.authorityFor(grantor, grantor) }
         coVerify(exactly = 1) { eligibilityClient.eligibilityOf(grantee) }
         coVerify(exactly = 0) { scaClient.getChallenge(any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -199,7 +199,7 @@ class DelegationServiceTest {
 
         assertThatThrownBy { runBlocking { service.preview(previewCommand()) } }
             .isInstanceOf(DelegationResourceOwnershipException::class.java)
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -220,7 +220,7 @@ class DelegationServiceTest {
             .extracting("code")
             .isEqualTo(DelegationUnsupportedConstraintException.CODE_EXPOSURE_UNSUPPORTED)
 
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -236,7 +236,7 @@ class DelegationServiceTest {
         coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
         coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
         coVerify(exactly = 0) { scaClient.getChallenge(any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -359,7 +359,7 @@ class DelegationServiceTest {
 
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
         // And, like every other content refusal, it does not cost the grantor their ceremony.
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     /**
@@ -417,7 +417,7 @@ class DelegationServiceTest {
         }
             .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
 
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     /**
@@ -467,7 +467,7 @@ class DelegationServiceTest {
         }
             .isInstanceOf(DelegationUnsupportedConstraintException::class.java)
 
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     /**
@@ -745,7 +745,7 @@ class DelegationServiceTest {
 
         assertThatThrownBy { runBlocking { service.offer(offerCommand()) } }
             .isInstanceOf(DelegationResourceOwnershipException::class.java)
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     // --- P0: the caller may only act as the party the edge authenticated -----------------------
