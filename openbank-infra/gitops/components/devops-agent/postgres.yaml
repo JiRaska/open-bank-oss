@@ -6,8 +6,6 @@
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
 metadata:
-  annotations:
-    openbank.io/affinity-rollout-pending: "ADR-0325 fleet wave -- required anti-affinity lands in a staged wave PR, which removes this"
   name: devops-db
   namespace: devops-agent
 spec:
