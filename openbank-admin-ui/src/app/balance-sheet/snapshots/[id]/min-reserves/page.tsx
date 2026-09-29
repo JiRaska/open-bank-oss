@@ -173,7 +173,7 @@ function MinReservesBody({ data, locale }: { data: MinReserves; locale: string }
       {data.currencies.map(c => <ReserveBaseSection key={c.currency} c={c} locale={locale} />)}
 
       {data.holdings && data.holdings.length > 0 && (
-        <ReserveLines title={t('Zůstatek na účtu u ČNB', 'ČNB current-account holdings')} lines={data.holdings} total={data.totalHoldings ?? 0} money={money} />
+        <ReserveLines title={t('Zůstatek na účtu u ČNB', 'ČNB current-account holdings')} lines={data.holdings} total={data.totalHoldings} money={money} />
       )}
 
       <div className="card">

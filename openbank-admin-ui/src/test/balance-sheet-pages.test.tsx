@@ -441,6 +441,15 @@ describe('ČNB minimum reserve requirement', () => {
     expect(document.body.textContent).not.toMatch(/\b0[.,]00\b.*(?:ČNB|holdings)/)
   })
 
+  it('does not invent a holdings total when individual holdings are present', async () => {
+    router = () => json({ ...MIN_RESERVES(), totalHoldings: null })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    const heading = await screen.findByRole('heading', { name: /ČNB current-account holdings|Zůstatek na účtu u ČNB/, level: 3 })
+    const totalCell = heading.parentElement?.querySelector('tbody tr:last-child td:last-child')
+    expect(totalCell?.textContent).toMatch(/not stated|neuvedeno/)
+    expect(screen.getByTestId('total-holdings').textContent).toMatch(/not stated|neuvedeno/)
+  })
+
   it('a currency whose base is not stated shows the reason and no base or requirement figure', async () => {
     router = () => json({
       ...MIN_RESERVES({ requirementNotStated: 'A LIABILITY balance in this currency is not classified' }),
