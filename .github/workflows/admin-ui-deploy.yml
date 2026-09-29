@@ -685,11 +685,11 @@ jobs:
               # prefix (pitest.yml uploads that directory as `path`). Reconstruct that
               # path so the report collectors find it — never `-d .`, which dumps
               # a full report into the repo root and gets it committed (#1104).
-              # The enforced authz lane predates component-normalized artifact names.
-              # Preserve its retained `pitest-authz` contract while staging it under
-              # the internal module that owns the report and required control.
+              # The enforced authz and advisory libs-runtime lanes both publish a
+              # mutations.xml. Keep them separate: extracting both into the same
+              # directory prompts unzip and can silently substitute one verdict.
               case "${art_name}" in
-                pitest-authz) svc="openbank-libs-runtime" ;;
+                pitest-authz) svc="openbank-libs-runtime-authz" ;;
                 *) svc="${art_name#pitest-}" ;;
               esac
               dest="${svc}/build/reports/pitest"

@@ -446,15 +446,18 @@ def mutation_projection_errors(
     for artifact, owner in fixed_lanes:
         if artifact == f"pitest-{owner}":
             continue
+        # The authz package and advisory libs-runtime lane share a Gradle module
+        # but must retain separate verdicts and separate extraction directories.
+        projected_owner = "openbank-libs-runtime-authz" if artifact == "pitest-authz" else owner
         mapping = re.compile(
-            rf"(?m)^\s*{re.escape(artifact)}\)\s+svc=[\"']{re.escape(owner)}[\"']\s*;;\s*$"
+            rf"(?m)^\s*{re.escape(artifact)}\)\s+svc=[\"']{re.escape(projected_owner)}[\"']\s*;;\s*$"
         ).search(pitest_stage)
         case_end = pitest_stage.find("esac", fallback)
         overwritten = case_end >= 0 and re.search(
             r"(?m)^\s*svc=", pitest_stage[case_end + len("esac"):destination]
         )
         if mapping is None or not (mapping.start() < fallback < case_end < destination) or overwritten:
-            errors.append(f"mutation artifact {artifact} is not staged under report owner {owner}")
+            errors.append(f"mutation artifact {artifact} is not staged under report owner {projected_owner}")
 
     mutation_components = collector.partition("function mutationComponents()")[2].partition(
         "function platformCapabilities()"
@@ -467,10 +470,10 @@ def mutation_projection_errors(
         mutation_components,
     )
     fixed_union = fixed_capture and re.search(
-        rf"return\s+new Set\(\[\.\.\.matrixComponents,\s*\.\.\.{re.escape(fixed_capture.group(1))}\]\)",
+        rf"return\s+new Set\(\[\.\.\.matrixComponents,\s*\.\.\.{re.escape(fixed_capture.group(1))},\s*\.\.\.fixedLaneComponents\]\)",
         mutation_components,
     )
-    if not fixed_union:
+    if not fixed_union or '--service\\s+["\'](openbank-[a-z0-9-]+)' not in mutation_components:
         errors.append("admin projection omits fixed Pitest report owners from its required-control denominator")
 
     projection_flow = (
@@ -1195,7 +1198,7 @@ python3 "${SELECTOR}" baseline
 Stage pitest mutation results
 if a['name'].startswith('pitest-') and not a['expired']]
 case "${art_name}" in
-  pitest-authz) svc="openbank-libs-runtime" ;;
+  pitest-authz) svc="openbank-libs-runtime-authz" ;;
   *) svc="${art_name#pitest-}" ;;
 esac
 dest="${svc}/build/reports/pitest"
@@ -1249,7 +1252,9 @@ function mutationComponents() {
   const fixedComponents = [...workflow.matchAll(
     /--mutation-report\s+["']?(openbank-[a-z0-9-]+)\/build\/reports\/pitest\/mutations\.xml["']?/g,
   )].map(match => match[1])
-  return new Set([...matrixComponents, ...fixedComponents])
+  const fixedLaneComponents = [...workflow.matchAll(/--service\s+["'](openbank-[a-z0-9-]+)["']/g)]
+    .map(match => match[1])
+  return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])
 }
 function platformCapabilities() {
 }
@@ -1306,7 +1311,7 @@ function collectContracts() {}
             return 1
         broken_mutation_projections = {
             "fixed mutation artifact loses its report owner": (0, lambda value: value.replace(
-                'pitest-authz) svc="openbank-libs-runtime" ;;\n', "")),
+                'pitest-authz) svc="openbank-libs-runtime-authz" ;;\n', "")),
             "fixed mutation artifact is excluded from staging": (0, lambda value: value.replace(
                 "if a['name'].startswith('pitest-')",
                 "if a['name'] != 'pitest-authz' and a['name'].startswith('pitest-')")),
@@ -1340,7 +1345,8 @@ function collectContracts() {}
             "fixed mutation capture is not projected": (3, lambda value: value.replace(
                 ")].map(match => match[1])", ")]")),
             "fixed mutation lane leaves the denominator": (3, lambda value: value.replace(
-                "return new Set([...matrixComponents, ...fixedComponents])", "return new Set(matrixComponents)")),
+                "return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])",
+                "return new Set(matrixComponents)")),
             "enforced fixed lane disappears": (1, lambda value: value.replace(
                 "--mutation-report", "--ignored-report")),
             "fixed mutation report owner is not collected": (3, lambda value: value.replace(
