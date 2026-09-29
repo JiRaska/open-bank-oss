@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.265.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.1...admin-ui-v0.265.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** book ČNB lombard borrowings ([#11120](https://github.com/JiRaska/open-bank-oss/issues/11120)) ([9a43293](https://github.com/JiRaska/open-bank-oss/commit/9a432938bfcf383791eb9a96a5111c63b7577546))
+
 ## [0.264.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.0...admin-ui-v0.264.1) (2026-09-29)
 
 
