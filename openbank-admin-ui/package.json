@@ -1,6 +1,6 @@
 {
   "name": "openbank-admin-ui",
-  "version": "0.262.2",
+  "version": "0.264.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "pretype-check": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-origination-graph.mjs",
     "generate:catalog-types": "node scripts/generate-product-catalog-v2-types.mjs",
     "type-check": "tsc --noEmit",
-    "pretest": "node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs && node scripts/generate-gate-catalog.mjs",
+    "pretest": "node --test scripts/approval-inbox-evidence.test.mjs && node scripts/generate-product-catalog-v2-types.mjs && node scripts/generate-governance.mjs && node scripts/generate-catalog.mjs && node scripts/generate-origination-graph.mjs && node scripts/generate-events.mjs && node scripts/generate-card-capabilities.mjs && node scripts/generate-gate-catalog.mjs",
     "test": "vitest run",
     "test:contract": "vitest run src/test/*-pact.contract.test.ts",
     "pretest:coverage": "npm run pretest",

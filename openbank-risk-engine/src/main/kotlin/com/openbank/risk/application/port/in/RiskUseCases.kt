@@ -21,6 +21,8 @@ import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
+import com.openbank.risk.domain.reserves.MinReserveParameters
+import com.openbank.risk.domain.reserves.MinReserveResult
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -31,7 +33,8 @@ data class SnapshotOutcome(val run: SnapshotRun, val replayed: Boolean)
 interface SnapshotUseCase {
     suspend fun listRuns(limit: Int): List<SnapshotRunSummary>
 
-    suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome
+    /** [requestedBy] is the caller's principal name; a replay keeps the first run's requester. */
+    suspend fun createSnapshot(asOf: LocalDate, requestedBy: String? = null): SnapshotOutcome
 
     suspend fun getRun(id: UUID): SnapshotRun
 
@@ -96,4 +99,16 @@ data class CapitalAnalysis(val run: SnapshotRun, val parameters: CapitalParamete
 interface CapitalUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
     suspend fun analyse(runId: UUID): CapitalAnalysis
+}
+
+/** ČNB minimum reserve requirement of a run under a versioned parameter set (ADR-0313, ADR-0315). */
+data class MinReservesAnalysis(
+    val run: SnapshotRun,
+    val parameters: MinReserveParameters,
+    val result: MinReserveResult,
+)
+
+interface MinReservesUseCase {
+    /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
+    suspend fun analyse(runId: UUID): MinReservesAnalysis
 }

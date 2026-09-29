@@ -16,6 +16,7 @@ import com.openbank.delegation.domain.model.MandateAuthority
 import com.openbank.delegation.domain.model.RepresentationMandate
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.logging.Log
+import io.quarkus.oidc.client.filter.OidcClientFilter
 import io.quarkus.oidc.client.reactive.filter.OidcClientRequestReactiveFilter
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.GET
@@ -56,8 +57,10 @@ data class SigningActingForResponse(
 )
 
 /** party-service's mandate register (ADR-0284 D3), read live for every signing decision. */
+// #10486 batch 8: party.mandate.read is minted by the NAMED oidc-client `m2m` - Keycloak client
+// `openbank-delegation` (ROLE_API only) - never the shared `openbank-services` one.
+@OidcClientFilter("m2m")
 @Path("/api/v1/parties")
-@RegisterProvider(OidcClientRequestReactiveFilter::class)
 @RegisterRestClient(configKey = "party-service")
 @RegisterProvider(SyntheticTaintClientFilter::class)
 interface PartyMandateRestClient {

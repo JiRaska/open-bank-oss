@@ -46,8 +46,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # LedgerClient carries OidcClientRequestReactiveFilter, which mints its bearer token from HERE.
   # Without an oidc-client the ledger call leaves unauthenticated and ledger answers 401
@@ -370,7 +368,8 @@ openbank:
     capital:
       sa:
         parameter-set-id: bcbs-d424-sa
-        parameter-set-version: "1"
+        # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES, below.
+        parameter-set-version: "2"
         source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
         factors:
           rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
@@ -407,9 +406,12 @@ openbank:
           domestic-currency: CZK
           # GL code -> class. ONLY accounts named here (or by type below) are classified; any
           # other ASSET balance is listed as not classified, never weighted. Deliberately absent:
-          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash), 1100-1113 clearing
-          # and scheme settlement (counterparty not known), 1400-1403 loan loss allowance (not
-          # allocated to loans, so ¶92 netting cannot use it), 1990-1997 FX position accounts.
+          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash; NOT treated like 1100:
+          # cash may qualify for 0% under ¶96(i), so a 100% default would be a different claim).
+          #
+          # Version "2" (#10896, #11107): the three blocks below were unclassified and gapped every
+          # COREP C 02.00 credit-risk row on the sandbox. Each is a POLICY CHOICE awaiting owner
+          # sign-off; each is chosen so that RWA is never lower than the unknown facts permit.
           gl-accounts:
             "1001": bank                         # nostro
             "1002": bank                         # nostro EUR
@@ -426,6 +428,48 @@ openbank:
             "1301": other-asset
             "1302": other-asset
             "1303": other-asset
+            # POLICY CHOICE (#11107): 1100-1113 customer cash clearing / scheme settlement. The
+            # counterparty and maturity are not recorded, so no counterparty class can be shown:
+            # "other assets" at 100% (BCBS d424 ¶95; CRR Art. 134(1) "other items"), the strictest
+            # standard weight short of a default class. Not ¶97 cash items in collection (20%):
+            # that needs the item to be known as cash in collection. Sandbox-heavy (1100 carried
+            # +16.1m CZK on 2026-09-29); #10969 (synthetic loan void) is expected to shrink it.
+            "1100": other-asset
+            "1101": other-asset
+            "1102": other-asset
+            "1103": other-asset
+            "1104": other-asset
+            "1105": other-asset
+            "1106": other-asset
+            "1107": other-asset
+            "1108": other-asset
+            "1109": other-asset
+            "1110": other-asset
+            "1111": other-asset
+            "1112": other-asset
+            "1113": other-asset
+            # POLICY CHOICE (#11107): 1400-1403 loan loss allowance (contra-asset, credit balance).
+            # Netting a credit-risk adjustment against an exposure value (CRR Art. 111(1); d424 ¶92
+            # for defaulted loans) requires it to be ALLOCATED to that exposure, which the GL does
+            # not record. So it is not an exposure: it neither reduces RWA nor stays unclassified.
+            # Conservative: loans are weighted gross of the allowance.
+            "1400": not-an-exposure
+            "1401": not-an-exposure
+            "1402": not-an-exposure
+            "1403": not-an-exposure
+            # POLICY CHOICE (#11107): 1990-1997 FX position / counter-value accounts of the ledger's
+            # FX revaluation. They are currency positions — foreign-exchange risk, a market-risk
+            # charge (CRR Part Three Title IV Chapter 3, Art. 351 ff.) — not a claim on any
+            # counterparty, so not a credit exposure under d424 Part I. The FX-risk charge on them
+            # is NOT computed here: excluding them from credit RWA does not make them riskless.
+            "1990": not-an-exposure
+            "1991": not-an-exposure
+            "1992": not-an-exposure
+            "1993": not-an-exposure
+            "1994": not-an-exposure
+            "1995": not-an-exposure
+            "1996": not-an-exposure
+            "1997": not-an-exposure
             "6000": own-funds-cet1               # CET1 capital instruments
             "6010": own-funds-cet1               # CET1 share premium
             "6020": own-funds-cet1               # retained earnings
@@ -440,6 +484,53 @@ openbank:
             EQUITY: not-an-exposure
             INCOME: not-an-exposure
             EXPENSE: not-an-exposure
+    # ČNB minimum reserve requirement (povinné minimální rezervy, PMR) — ADR-0313 treasury gap,
+    # ADR-0315. Source: Opatření ČNB o povinných minimálních rezervách (Provision of the ČNB on
+    # minimum reserves). Every key is required (MinReservesConfig is a mapping; the domain rejects
+    # a rate outside [0, 1] and an unknown class), so nothing here has a code default. Change a
+    # value -> bump parameter-set-version; every /min-reserves result names id and version.
+    # UNVERIFIED (not checked against the provision's current wording, so no article numbers are
+    # cited): the exact list of base items and exclusions, the maintenance-period calendar, the
+    # rounding of the requirement, and whether foreign-currency liabilities enter the base.
+    min-reserves:
+      parameter-set-id: cnb-pmr
+      parameter-set-version: "2"     # 2: GL 2320 (ČNB lombard borrowing) excluded-bank-or-cnb
+      source: "Opatření ČNB o povinných minimálních rezervách: 2 % of liabilities up to 2 years excl. banks subject to PMR and the ČNB; unremunerated since 2023-10-05"
+      rate: 0.02                     # the PMR ratio, 2 % of the reserve base
+      remuneration-rate: 0           # ČNB has not remunerated minimum reserves since 2023-10-05
+      holding-currency: CZK          # held on the bank's current account at the ČNB
+      classification:
+        # GL code -> class. Customer deposits need no entry: they are sub-ledger positions on
+        # deposit control 2100-2103 and always join the base (liabilities to non-bank clients).
+        #
+        # HOLDINGS: the ledger chart (ledger-service db/migration V1..V29) has NO current account at
+        # the ČNB, so no account is mapped reserve-holding and holdings / surplus are NOT STATED (null,
+        # with holdingsNotStated) until one exists — never a stand-in zero.
+        # 1510 "Deposit Facility at CNB" (V29) is the ČNB overnight DEPOSIT FACILITY, a separate
+        # instrument from the current account on which reserves are held: never a reserve holding.
+        # 1000 / 1001 / 1002 are cash and nostro balances at commercial banks: not the ČNB account.
+        gl-accounts:
+          "1510": not-a-holding
+          # MM borrowings from banks (V29) and their accrued interest: liabilities to banks. Mapped
+          # as EXCLUDED on the assumption that the counterparty is a bank itself subject to PMR —
+          # UNVERIFIED: the ledger does not record the counterparty; a bank NOT subject to ČNB PMR
+          # (e.g. a foreign bank) would put the liability back into the base.
+          "2300": excluded-bank-or-cnb
+          "2301": excluded-bank-or-cnb
+          "2310": excluded-bank-or-cnb
+          "2311": excluded-bank-or-cnb
+          # ČNB lombard borrowing (arriving with the ledger chart change in #11087): a liability to the
+          # ČNB itself, which the provision excludes from the base. Mapped ahead of the account so a
+          # lombard balance is excluded from the first snapshot that carries it, not unclassified.
+          "2320": excluded-bank-or-cnb
+        # Any LIABILITY not named above (e.g. 2200 Withholding Tax Payable) is deliberately NOT
+        # mapped by type: whether it is in the base is a reading of the provision, so it is listed
+        # as unclassified instead of guessed.
+        gl-account-types:
+          ASSET: not-a-holding
+          EQUITY: not-a-liability
+          INCOME: not-a-liability
+          EXPENSE: not-a-liability
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -509,6 +600,8 @@ authz:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
   authz:
     enforce: "false"

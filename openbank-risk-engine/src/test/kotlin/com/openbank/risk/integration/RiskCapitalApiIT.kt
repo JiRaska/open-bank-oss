@@ -101,7 +101,7 @@ class RiskCapitalApiIT {
         val body = capital(snapshot("2026-05-29", "TIED_OUT"))
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("bcbs-d424-sa")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         // nostro 1500 × 150% (SCRA Grade C) + ČNB 4000 × 0% (¶8) + loan × 100% (other retail, ¶57)
@@ -194,6 +194,50 @@ class RiskCapitalApiIT {
         assertThat(fx["source"].asText()).isEqualTo("CNB")
         assertThat(body["currencies"].map { it["currency"].asText() }).containsExactly("CZK", "EUR")
         assertThat(body["assumptions"]["currencyAggregation"].asText()).contains("ČNB fixing")
+    }
+
+    /**
+     * #10896 / #11107: the ASSET account set the sandbox carried on 2026-09-29, where 1100, 1400,
+     * 1990, 1991 and 1995 were unclassified and gapped every COREP C 02.00 credit-risk row. Amounts
+     * are small stand-ins with the sandbox's signs; balanced per currency.
+     */
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `the sandbox asset set is fully classified and totalled in CZK`() {
+        publishFixing("2026-09-04", "EUR", "24.40")
+        val loan = lendingLoan(principal = "12000.00", currency = "CZK", term = 24, paid = 6)
+        val l = loan.outstandingPrincipal
+        ledger.inputs = LedgerInputs(
+            asOf = Fixtures.AS_OF,
+            trialBalance = listOf(
+                tb("1001", "ASSET", "CZK", "1500.00", "0"),
+                tb("1100", "ASSET", "CZK", "16000.00", "0"),
+                tb("1200", "ASSET", "CZK", l.toPlainString(), "0"),
+                tb("1300", "ASSET", "CZK", "50.00", "0"),
+                tb("1400", "ASSET", "CZK", "0", "80.00"),
+                tb("1520", "ASSET", "CZK", "10.00", "0"),
+                tb("1990", "ASSET", "CZK", "0", "132.00"),
+                tb("1995", "ASSET", "CZK", "0", "126.00"),
+                tb("1991", "ASSET", "EUR", "5.19", "0"),
+                tb("4100", "INCOME", "EUR", "0", "5.19"),
+                tb("2100", "LIABILITY", "CZK", "0", "1500.00"),
+                tb("6000", "EQUITY", "CZK", "0", l.add(BigDecimal("15722.00")).toPlainString()),
+            ),
+            subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00"), sl(Fixtures.BOB, "CZK", "0", "500.00")),
+        )
+        lending.loans = listOf(loan)
+        val body = capital(snapshot("2026-09-06", "TIED_OUT"))
+
+        assertThat(body["unclassified"].map { it["glAccountCode"].asText() }).isEmpty()
+        assertThat(body["totalNotStated"].isNull).isTrue()
+        val total = body["total"]
+        assertThat(total["currency"].asText()).isEqualTo("CZK")
+        // nostro 1500 × 150% + 1520 10 × 150% (Grade C) + 1100 16000 × 100% + 1300 50 × 100%
+        // + loan × 100%; 1400 (allowance) and 1990/1991/1995 (FX position) are not exposures.
+        val rwa = BigDecimal("2250.00").add(BigDecimal("15.00")).add(BigDecimal("16050.00")).add(l)
+        assertThat(total["totalRwa"].decimalValue()).isEqualByComparingTo(rwa)
+        assertThat(total["lines"].map { it["glAccountCode"].asText() })
+            .doesNotContain("1400", "1990", "1991", "1995")
     }
 
     @Test

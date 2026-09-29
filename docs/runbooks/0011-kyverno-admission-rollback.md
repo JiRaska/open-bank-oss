@@ -185,6 +185,17 @@ Five rules, each of which this gate broke:
    verdict depends on parsing a third party's prose, keep one live case whose answer you
    already know, or the parser is only ever tested against your own memory of the wording.
 
+## 4a. CEL shadow policies (Kyverno 1.19 migration, stage 1)
+
+Every `kyverno.io/v1` ClusterPolicy in `gitops/components/kyverno/` currently has a
+`policies.kyverno.io/v1` twin named `<policy>-cel` (`ValidatingPolicy`, `ImageValidatingPolicy`,
+plus an inert `MutatingPolicy`). They are `validationActions: [Audit]` with `failurePolicy: Ignore`,
+so **they are never the thing denying a workload** — the rollback above still targets the v1 policy.
+A `-cel` name in `KyvernoAuditPolicyFailingBeforeEnforce` is a parity gap, not an outage: compare
+with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ever does misbehave
+(admission latency, registry load), delete its file by PR; nothing depends on it yet.
+Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
+
 ## 5. Related
 
 - ADR-0030 D4 (supply-chain verification), ADR-0144 (graduation criteria)
