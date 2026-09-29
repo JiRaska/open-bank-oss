@@ -130,7 +130,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "an unreleased sandbox-tagged workload that is built is clean" "$k" 0
   l="$td/sandboxgap"; mkrepo "$l" openbank-a openbank-a openbank-a
   printf '  image: ecr/openbank-sink:sandbox-abc123\n' >> "$l/openbank-infra/gitops/apps.yaml"
-  expect "an unreleased sandbox-tagged workload nobody builds is a violation" "$l" 1 "openbank-sink"
+  expect "an unreleased sandbox-tagged workload nobody builds is a violation" "$l" 1 "deployable workload(s)"
   # ...and its baseline entry is evaluated, so paying the debt trips the ratchet.
   m="$td/sandboxstale"; mkrepo "$m" openbank-a openbank-a,openbank-sink openbank-a "" openbank-sink
   printf '  image: ecr/openbank-sink:sandbox-abc123\n' >> "$m/openbank-infra/gitops/apps.yaml"
@@ -280,7 +280,7 @@ RC=0
 
 if [ "${#NEW_VIOLATIONS[@]}" -gt 0 ]; then
   echo
-  echo "DEPLOY-COVERAGE GATE: FAIL — ${#NEW_VIOLATIONS[@]} released component(s) that ArgoCD deploys are"
+  echo "DEPLOY-COVERAGE GATE: FAIL — ${#NEW_VIOLATIONS[@]} deployable workload(s) that ArgoCD deploys are"
   echo "not in auto-deploy's ALL_SERVICES, so every push would silently deploy nothing for them:"
   echo
   for svc in "${NEW_VIOLATIONS[@]}"; do echo "  - ${svc}"; done
@@ -311,6 +311,6 @@ if [ "$KNOWN" -gt 0 ]; then
   echo "DEPLOY-COVERAGE GATE: PASS — no NEW gaps. ${KNOWN} known gap(s) remain in ${BASELINE}."
 else
   echo
-  echo "DEPLOY-COVERAGE GATE: PASS — every released component ArgoCD deploys is built by auto-deploy."
+  echo "DEPLOY-COVERAGE GATE: PASS — every deployable workload ArgoCD deploys is built by auto-deploy."
 fi
 exit 0
