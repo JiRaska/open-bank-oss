@@ -298,6 +298,7 @@ class DealRepositoryImpl(
         limitExposureBefore = deal.limitCheck?.exposureBefore
         limitDealAmount = deal.limitCheck?.dealAmount
         rationale = deal.rationale
+        draftInputs = deal.inputs
         limitOverrideBy = deal.limitOverride?.by?.id
         limitOverrideReason = deal.limitOverride?.reason
         limitOverrideAt = deal.limitOverride?.at
@@ -358,6 +359,7 @@ class DealRepositoryImpl(
                 null
             },
             rationale = rationale,
+            inputs = draftInputs,
             limitOverride = overrideOrNull(),
             fx = fx,
             history = history,

@@ -106,6 +106,12 @@ enum class LiquidityFactor(val key: String, val citation: String, val euCitation
         "BCBS d238 ¶154 (financial-institution inflows, 100%)",
         "EU 2015/61 Art. 32(2)(a) (monies due from financial customers, 100%)",
     ),
+    LCR_FI_PLACEMENT_INFLOW_30D(
+        "lcr-inflow-fi-placement-30d",
+        "BCBS d238 ¶154 (performing financial-institution inflows due within 30 days, 100%)",
+        "EU 2015/61 Art. 32(2)(a) (non-past-due monies from financial customers within 30 days, 100%; " +
+            "subject to Art. 32(1))",
+    ),
     LCR_OPERATIONAL_DEPOSIT_INFLOW(
         "lcr-operational-deposit-inflow",
         "BCBS d238 ¶156, ¶98 (operational deposits held at other institutions, 0%)",

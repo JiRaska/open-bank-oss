@@ -61,6 +61,7 @@ object DealFixtures {
         actor = by,
         at = NOW,
         rationale = if (by.type == ActorType.AI_AGENT) "test rationale" else null,
+        inputs = if (by.type == ActorType.AI_AGENT) """{"quote":"4.10"}""" else null,
     )
 
     /** Bank buys (or sells) EUR against CZK, traded Monday; value date defaults to T+2 (Wednesday). */

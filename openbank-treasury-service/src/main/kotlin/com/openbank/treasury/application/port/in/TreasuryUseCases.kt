@@ -31,6 +31,8 @@ data class DraftDealCommand(
     val valueDate: LocalDate?,
     val maturityDate: LocalDate?,
     val rationale: String?,
+    /** ADR-0315 D10: the JSON object of data an agent's draft was built from. */
+    val inputs: String? = null,
     /** FX_SPOT only: the bank's side on the foreign [currency]. */
     val fxSide: FxSide? = null,
 )

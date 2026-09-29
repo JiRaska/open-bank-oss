@@ -36,7 +36,9 @@ info:
   #        (ADR-0313 "forecasting"): a daily-then-weekly funding-gap ladder cumulated from the LCR's
   #        HQLA stock, and the first day the cumulative position turns negative. This PR originally
   #        claimed 1.10.0; main has since reached 1.14.0, so this takes the next free number, 1.15.0.
-  version: 1.15.0
+  # 1.15.0 -> 1.15.1: description only — /capital defaults to the EU CRR parameter set
+  #        (eu-crr3-sa); the response shape is unchanged.
+  version: 1.15.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -400,11 +402,13 @@ paths:
       operationId: getSnapshotCapital
       summary: Pillar 1 credit-risk capital (standardised approach) of a TIED_OUT run
       description: |
-        Credit-risk risk-weighted assets under the BCBS d424 standardised approach, per exposure
-        class and per position, with the risk weight, its configuration key and its d424
-        paragraph; the own-funds requirement (8% × RWA, bcbs189 ¶50); and CET1 / Tier 1 / Total
-        capital ratios when own funds are in the snapshot (`ratiosNotComputable` says why not).
-        BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. The ratios use
+        Credit-risk risk-weighted assets under the standardised approach, per exposure class and
+        per position, with the risk weight, its configuration key and the article / paragraph it
+        cites; the own-funds requirement (8% × RWA); and CET1 / Tier 1 / Total capital ratios when
+        own funds are in the snapshot (`ratiosNotComputable` says why not). Weights come from the
+        versioned parameter set `openbank.risk.capital.sa.*`, named on the result. The default set
+        is `eu-crr3-sa` (Regulation (EU) 575/2013 as amended by CRR2 / CRR3, Part Three Title II
+        Chapter 2, minima Art. 92(1)); the BCBS d424 set `bcbs-d424-sa` stays selectable. The ratios use
         CREDIT-RISK RWA only, so they are an upper bound. Per currency, plus a CZK `total` and
         requirement: every other currency's EAD and RWA converted at the ČNB fixing in effect at
         00:00 Prague on asOf (the ledger FX revaluation's rule; a weekend takes the prior business
