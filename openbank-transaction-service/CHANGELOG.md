@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.25.0](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.4...transaction-service-v1.25.0) (2026-09-29)
+
+
+### Features
+
+* **libs:** lift the spend-category vocabulary out of card-issuance ([#9145](https://github.com/JiRaska/open-bank-oss/issues/9145)) ([194c8d6](https://github.com/JiRaska/open-bank-oss/commit/194c8d6596c4c9295bdafa4c741d05164820dd0c))
+
 ## [1.24.4](https://github.com/JiRaska/open-bank-oss/compare/transaction-service-v1.24.3...transaction-service-v1.24.4) (2026-09-26)
 
 

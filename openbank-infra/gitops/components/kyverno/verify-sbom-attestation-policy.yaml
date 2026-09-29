@@ -73,19 +73,19 @@ spec:
           mutateDigest: false
           verifyDigest: false
           required: true
-          # useCache: false — mirrors the same-day fix in verify-images-policy.yaml.
-          # This rule and the signature rule race on the same ECR credential temp file
-          # inside the admission-controller pod; whichever loses the race gets its
-          # transient failure cached as if it were a real verification result, poisoning
-          # every later admission for that tag until the cache entry expires or the pod
-          # restarts. The signature policy got useCache: false today (2026-07-09) for the
-          # admin-ui hit of this bug, but this policy was left on the default (cached) —
-          # confirmed live in-cluster still denying openbank-billing-service:sandbox-16d25569
-          # on repeat ArgoCD retries although `cosign verify`/`verify-attestation` both pass
-          # against the same tag with the same key. Audit mode never blocks the pod either
-          # way, but a poisoned PolicyReport entry defeats the whole point of step 1
-          # (surfacing real violations) and would silently pass step 2's redeploy check.
-          useCache: false
+          # useCache: true (re-enabled 2026-09-29, #11437). The July reason for `false` was a
+          # "poisoned cache": a transient ECR-credential failure pinned as a verdict. That
+          # cannot happen on Kyverno v1.19.1: pkg/engine/internal/imageverifier.go:102-104
+          # writes the cache ONLY when the rule response is Pass, and a Get hit is the only
+          # thing read back, so a failed or errored verification is re-run on every admission.
+          # Key (pkg/image/verification/cache/client.go:91) = policy UID + resourceVersion +
+          # rule + image REFERENCE as written in the Pod, so any edit to this policy resets it.
+          # Each admission replica holds its own in-memory cache (TTL/size set by the chart
+          # flags --imageVerifyCacheTTLDuration / --imageVerifyCacheMaxSize). Residual: a
+          # cached tag reference passes for up to the TTL even if the tag is re-pointed; a
+          # digest reference cannot be. Why it matters: an ARC runner Pod (3x the ~4 MB-SBOM
+          # runner image) took 7-13 s per admission uncached against a 30 s webhook timeout.
+          useCache: true
           # The image SIGNATURE, folded in from verify-openbank-image-signatures (#9805 item 4).
           # It lives in THIS entry on purpose. Kyverno v1.12.5 records one verification status
           # per image, and each verifyImages entry of each policy overwrites it, so two
