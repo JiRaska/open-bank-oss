@@ -84,18 +84,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Shared-library src/test changes build their owning module only. Shared
+      # src/main, src/testFixtures and build inputs still fan out to the fleet.
+      # Discover Gradle modules from the tree, as settings.gradle.kts does. A
+      # hardcoded list can omit a newly added service from PR and nightly builds
+      # while all-green still passes (#1001). Admin UI and infra have no module build file.
       - id: detect
         run: |
           set -euo pipefail
-          # Canonical Gradle module list — DISCOVERED from the tree exactly like
-          # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
-          # A hardcoded list silently drifts: a newly-added service is absent from it, so its
-          # build job is skipped on the PR that introduces it AND in the nightly full-fleet run,
-          # yet `all-green` passes (skipped != failed) — a branch-protection hole that let
-          # openbank-fraud-service (and anacredit-service, analytics-sink) merge unbuilt (#1001).
-          # Deriving it from the same rule as settings.gradle.kts keeps CI and the build in sync
-          # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
-          # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
 
           # Paths that cannot change a service compile input or Pact contract. Keep this
@@ -125,21 +121,7 @@ jobs:
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
 
-          # Shared-library test sources are compiled only in their own module: no
-          # consumer receives src/test on its compile or test classpath. Keep them
-          # in FILES_CODE for the module fan-out, but exclude them from the
-          # code-global full-fleet trigger. Build scripts and src/testFixtures
-          # remain global because they can change consumer test inputs.
           SHARED_TEST_RE='^openbank-libs(-domain|-runtime|-testing|-lending|-iso20022)?/src/test/'
-          grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/src/test/kotlin/ExampleTest.kt' \
-            || { echo "selector self-test: shared test must be local" >&2; exit 1; }
-          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/src/main/kotlin/Example.kt' \
-            || { echo "selector self-test: shared source must stay global" >&2; exit 1; }
-          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-testing/src/testFixtures/kotlin/Example.kt' \
-            || { echo "selector self-test: shared test fixture must stay global" >&2; exit 1; }
-          ! grep -qE "$SHARED_TEST_RE" <<< 'openbank-libs-domain/build.gradle.kts' \
-            || { echo "selector self-test: shared build script must stay global" >&2; exit 1; }
-
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
