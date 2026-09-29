@@ -33,7 +33,21 @@ object Camt053Parser {
 
     /** A malformed number is a `NumberFormatException`, itself an `IllegalArgumentException` (400). */
     fun parse(xml: ByteArray): NostroStatement = try {
-        val doc = builderFactory().newDocumentBuilder().parse(ByteArrayInputStream(xml))
+        // Configure the very factory used for this untrusted upload before constructing the builder.
+        // Keeping these calls beside parse also lets CodeQL verify the DTD guard on this flow.
+        val factory = DocumentBuilderFactory.newInstance()
+        factory.isNamespaceAware = true
+        factory.isXIncludeAware = false
+        factory.isExpandEntityReferences = false
+        factory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
+        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
+        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+        val builder = factory.newDocumentBuilder()
+        builder.setEntityResolver { _, _ -> throw SAXException("external entity resolution is disabled") }
+        val doc = builder.parse(ByteArrayInputStream(xml))
         val stmts = descendants(doc.documentElement, "Stmt")
         require(stmts.size == 1) { "expected exactly one Stmt, found ${stmts.size}" }
         read(stmts.single())
@@ -119,18 +133,6 @@ object Camt053Parser {
     private fun descendants(parent: Element, name: String): List<Element> {
         val nodes = parent.getElementsByTagNameNS("*", name)
         return (0 until nodes.length).map { nodes.item(it) as Element }
-    }
-
-    private fun builderFactory(): DocumentBuilderFactory = DocumentBuilderFactory.newInstance().apply {
-        isNamespaceAware = true
-        isXIncludeAware = false
-        isExpandEntityReferences = false
-        setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true)
-        setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        setFeature("http://xml.org/sax/features/external-general-entities", false)
-        setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-        setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
     }
 }
 
