@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import ApprovalsPage from '@/app/approvals/page'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { parseAgentProposalList, parseApprovalInbox } from '@/lib/approvals/evidence'
+import { auth } from '@/auth'
+
+vi.mock('@/auth', () => ({ auth: vi.fn() }))
 
 vi.mock('next-auth/react', () => ({
   useSession: () => ({ data: { user: { email: 'checker@example.test', roles: ['ROLE_ADMIN'] } }, status: 'authenticated' }),
@@ -48,6 +51,33 @@ afterEach(() => {
 })
 
 describe('approval queue evidence contracts', () => {
+  it('simulates operator session through the real BFF mapper into the rendered billing queue', async () => {
+    vi.mocked(auth).mockResolvedValue({ user: { accessToken: 'mock-operator-token', roles: ['ROLE_ADMIN'] } } as never)
+    const providerCalls: Array<{ url: string; authorization: string | undefined }> = []
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url === '/api/approvals/pending') return (await import('@/app/api/approvals/pending/route')).GET()
+      if (url.startsWith('/api/agent/proposals')) return json([])
+      if (url.startsWith('/api/governance/agent-identities')) return json({ available: true, agents: [] })
+      providerCalls.push({ url, authorization: new Headers(init?.headers).get('authorization') ?? undefined })
+      if (url.includes('/api/v1/fees/approvals')) return json([{
+        id: 'fee-approval-7', action: 'billing.feeWaiver', resourceId: 'fee-7',
+        makerId: 'maker@example.test', createdAt: '2026-09-24T10:00:00Z',
+      }])
+      return json({ error: 'mock provider unavailable' }, 503)
+    }))
+
+    mount()
+
+    const row = await screen.findByTestId('domain-approval-billing:fee-approval-7')
+    expect(row).toHaveTextContent('billing.feeWaiver')
+    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('maker@example.test')
+    expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('fee-7')
+    expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
+    expect(providerCalls.find(call => call.url.includes('/api/v1/fees/approvals'))?.authorization).toBe('Bearer mock-operator-token')
+    expect(screen.queryByText(/No domain approvals pending|Žádná doménová schvalování nečekají/)).not.toBeInTheDocument()
+  })
+
   it('accepts verified empty queues and rejects guessed or duplicate evidence', () => {
     expect(parseAgentProposalList([])).toEqual([])
     expect(parseAgentProposalList({ items: [] })).toBeNull()
