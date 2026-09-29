@@ -56,6 +56,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import io.mockk.verifyOrder
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -668,6 +669,7 @@ class LendingServiceTest {
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(installment))
         every { installments.markPaid(instId, any()) } returns Uni.createFrom().item(1)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerDebitSucceeds()
 
         service.recordRepayment(loanId, instId).await().indefinitely()
 
@@ -692,12 +694,82 @@ class LendingServiceTest {
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(listOf(installment))
         every { installments.markPaid(instId, any()) } returns Uni.createFrom().item(1)
         every { ledger.post(capture(postings)) } returns Uni.createFrom().item(Unit)
+        stubBorrowerDebitSucceeds()
 
         service.recordRepayment(loanId, instId).await().indefinitely()
 
         // Paid before the accrual pass ran: recognize income directly at cash time.
         assertThat(postings.map { it.kind })
             .containsExactly(PostingKind.PRINCIPAL_REPAYMENT, PostingKind.INTEREST)
+    }
+
+    private fun stubBorrowerDebitSucceeds() {
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.debit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+    }
+
+    private fun unpaidInstallment(loanId: LoanId, instId: UUID) = LoanInstallment(
+        id = instId, loanId = loanId, number = 3, dueDate = firstDue,
+        openingBalance = eur("10098.16"), principal = eur("965.21"),
+        interest = eur("100.98"), payment = eur("1066.19"), closingBalance = eur("9132.95"),
+        interestAccrued = true,
+    )
+
+    @Test
+    fun `repayment debits the borrower's current account for principal plus interest before marking it paid`() {
+        val loanId = LoanId.random()
+        val instId = UUID.randomUUID()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
+        every { installments.findByLoan(loanId) } returns
+            Uni.createFrom().item(listOf(unpaidInstallment(loanId, instId)))
+        every { installments.markPaid(instId, any()) } returns Uni.createFrom().item(1)
+        every { ledger.post(any()) } returns Uni.createFrom().item(Unit)
+        stubBorrowerDebitSucceeds()
+
+        service.recordRepayment(loanId, instId).await().indefinitely()
+
+        verifyOrder {
+            borrowerCredit.debit("loan:${loanId.value}:inst:3:repayment-debit", borrowerAccountId, eur("1066.19"))
+            installments.markPaid(instId, any())
+            ledger.post(any())
+        }
+    }
+
+    @Test
+    fun `repayment is not recorded when the borrower has no current account to debit`() {
+        val loanId = LoanId.random()
+        val instId = UUID.randomUUID()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
+        every { installments.findByLoan(loanId) } returns
+            Uni.createFrom().item(listOf(unpaidInstallment(loanId, instId)))
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns Uni.createFrom().nullItem()
+
+        assertThatThrownBy { service.recordRepayment(loanId, instId).await().indefinitely() }
+            .hasMessageContaining("no active CURRENT account")
+
+        verify(exactly = 0) { borrowerCredit.debit(any(), any(), any()) }
+        verify(exactly = 0) { installments.markPaid(any(), any()) }
+        verify(exactly = 0) { ledger.post(any()) }
+    }
+
+    @Test
+    fun `repayment is not recorded when transaction-service refuses the debit`() {
+        val loanId = LoanId.random()
+        val instId = UUID.randomUUID()
+        every { loans.findById(loanId) } returns Uni.createFrom().item(activeLoan(loanId))
+        every { installments.findByLoan(loanId) } returns
+            Uni.createFrom().item(listOf(unpaidInstallment(loanId, instId)))
+        every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
+            Uni.createFrom().item(borrowerAccountId)
+        every { borrowerCredit.debit(any(), any(), any()) } returns
+            Uni.createFrom().failure(IllegalStateException("insufficient funds"))
+
+        assertThatThrownBy { service.recordRepayment(loanId, instId).await().indefinitely() }
+            .hasMessageContaining("insufficient funds")
+
+        verify(exactly = 0) { installments.markPaid(any(), any()) }
+        verify(exactly = 0) { ledger.post(any()) }
     }
 
     private fun activeLoan(loanId: LoanId) = Loan(

@@ -368,6 +368,9 @@ class LendingGlOutcomeTest {
         // the unguarded flow RUNS to completion and the assertions below fail on the real GL damage.
         every { installments.findByLoan(loanId) } returns Uni.createFrom().item(schedule)
         every { installments.markPaid(any(), any()) } returns Uni.createFrom().item(1)
+        // #11487: the repayment now debits the borrower first; stubbed so the unguarded flow still runs.
+        every { borrowerAccounts.findCurrentAccount(any(), any()) } returns Uni.createFrom().item(UUID.randomUUID())
+        every { borrowerCredit.debit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
         val postings = captureLedger()
 
         val failure = runCatching {
