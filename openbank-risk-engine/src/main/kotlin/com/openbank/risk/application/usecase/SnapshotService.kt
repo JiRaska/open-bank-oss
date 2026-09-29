@@ -79,6 +79,9 @@ class SnapshotService(
 
     override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = repository.listRecent(limit)
 
+    override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+        repository.listTiedOutBetween(from, to)
+
     override suspend fun getRun(id: UUID): SnapshotRun = repository.findById(id) ?: throw SnapshotNotFoundException(id)
 
     override suspend fun getPositions(id: UUID): List<Position> {

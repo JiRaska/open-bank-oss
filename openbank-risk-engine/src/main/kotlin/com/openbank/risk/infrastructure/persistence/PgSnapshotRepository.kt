@@ -40,6 +40,8 @@ import java.util.UUID
  * concurrent requests rather than only under a read-then-write.
  */
 @ApplicationScoped
+// One function per SnapshotRepository port method plus its private load helpers.
+@Suppress("TooManyFunctions")
 class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
 
     override suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun? = loadRun(
@@ -49,18 +51,11 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
     )
 
     override suspend fun listRecent(limit: Int): List<SnapshotRunSummary> =
-        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit)).awaitSuspending().map { row ->
-            SnapshotRunSummary(
-                id = row.getUUID("id"),
-                asOf = row.getLocalDate("as_of"),
-                recordedAt = row.getOffsetDateTime("recorded_at").toInstant(),
-                provenance = Provenance.parse(row.getString("provenance")).wire,
-                status = TieOutStatus.valueOf(row.getString("status")).name,
-                positionCount = row.getInteger("position_count"),
-                mismatchCount = row.getInteger("mismatch_count"),
-                requestedBy = row.getString("requested_by"),
-            )
-        }
+        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit)).awaitSuspending().map { it.toSummary() }
+
+    override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+        pool.preparedQuery(SELECT_TIED_OUT_BETWEEN).execute(Tuple.of(from, to)).awaitSuspending()
+            .map { it.toSummary() }
 
     override suspend fun findById(id: UUID): SnapshotRun? =
         loadRun(pool.preparedQuery("$SELECT_RUN WHERE id = $1").execute(Tuple.of(id)).awaitSuspending().firstOrNull())
@@ -258,6 +253,10 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
         const val SELECT_RECENT =
             "SELECT id, as_of, recorded_at, provenance, status, position_count, mismatch_count, requested_by " +
                 "FROM snapshot_run ORDER BY recorded_at DESC, id LIMIT $1"
+        const val SELECT_TIED_OUT_BETWEEN =
+            "SELECT DISTINCT ON (as_of) id, as_of, recorded_at, provenance, status, position_count, " +
+                "mismatch_count, requested_by FROM snapshot_run " +
+                "WHERE status = 'TIED_OUT' AND as_of BETWEEN $1 AND $2 ORDER BY as_of, recorded_at DESC, id"
         const val SELECT_RUN =
             "SELECT id, as_of, recorded_at, input_hash, provenance, status, position_count, requested_by " +
                 "FROM snapshot_run"
@@ -297,3 +296,15 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                 "FROM snapshot_instrument_installment WHERE run_id = $1 ORDER BY instrument_id, installment_number"
     }
 }
+
+/** One `snapshot_run` row as a list summary (shared by the recent and per-period listings). */
+private fun Row.toSummary() = SnapshotRunSummary(
+    id = getUUID("id"),
+    asOf = getLocalDate("as_of"),
+    recordedAt = getOffsetDateTime("recorded_at").toInstant(),
+    provenance = Provenance.parse(getString("provenance")).wire,
+    status = TieOutStatus.valueOf(getString("status")).name,
+    positionCount = getInteger("position_count"),
+    mismatchCount = getInteger("mismatch_count"),
+    requestedBy = getString("requested_by"),
+)

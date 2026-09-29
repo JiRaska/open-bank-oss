@@ -10,6 +10,7 @@ import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
+import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
@@ -24,6 +25,7 @@ import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
 import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
+import com.openbank.risk.application.usecase.MinReservesPeriodService
 import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
@@ -194,10 +196,20 @@ class SnapshotServiceProducer {
     fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
         MinReservesService(snapshots, config.toParameters())
 
-    /** Same reason as [validateLiquidityParameters]: a bad rate must fail the deploy, not a request. */
+    /** Maintenance-period averaging (ADR-0315 D8) under `openbank.risk.min-reserves.maintenance-calendar`. */
+    @Produces
+    @ApplicationScoped
+    fun minReservesPeriodUseCase(
+        snapshots: SnapshotUseCase,
+        config: MinReservesConfig,
+        clock: Clock,
+    ): MinReservesPeriodUseCase = MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock)
+
+    /** Same reason as [validateLiquidityParameters]: a bad rate or calendar must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateMinReservesParameters(@Observes event: StartupEvent, config: MinReservesConfig) {
         config.toParameters()
+        config.toCalendar()
     }
 
     companion object {
