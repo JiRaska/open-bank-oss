@@ -40,6 +40,7 @@ PSD2 service returns 503 rather than fail-open.
 |---|---|---|
 | **S**poofing | Impersonate a revoked or unlicensed TPP | `X-TPP-ID` validated against registry record per request; EBA register sync keeps revocations current; fail-closed on circuit-open |
 | **T**ampering | Alter TPP role (AISP→PISP) in the registry without authorisation | `@RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN)` on write paths; AuditEvent per change; immutable audit trail via outbox |
+| **T**ampering | Reuse of an `Idempotency-Key` across a DIFFERENT request (register/blacklist), which would otherwise replay the first response for a second, unrelated request | `IdempotencyStore.reserve` atomically binds the key to a SHA-256 fingerprint of (method, path, canonicalised body) before the use case runs; a different fingerprint under the same key answers 409 IDEMPOTENCY_KEY_REUSED instead of executing or replaying. `POST /sync/eba` fingerprints method+path only (no request-specific content), so this control there is reserve/in-flight serialisation only — a mismatch can never occur and is not claimed for that endpoint (only 409 IDEMPOTENCY_REQUEST_IN_PROGRESS is possible/documented) |
 | **R**epudiation | Deny authorising a TPP for PISP role | AuditEvent per role grant/revocation with operator identity; change log in the entity |
 | **I**nfo disclosure | Expose list of authorised TPPs to unauthenticated callers | No Ingress resource (internal only); `@RolesAllowed(ROLE_SERVICE, ROLE_OPERATOR, ROLE_ADMIN)` on all endpoints |
 | **D**oS | Flood authorisation lookup to starve PSD2 service | PSD2 service uses circuit breaker (Fault Tolerance, ADR-0035); registry endpoints are read-heavy — no response cache exists today (§5, #4011), so a future one is the natural mitigation; NetworkPolicy restricts callers |
@@ -64,9 +65,16 @@ PSD2 service returns 503 rather than fail-open.
 
 ## 6. Change log
 
-- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient` as the
-  "plain REST client" backing the no-cache claim. That exact symbol has never existed as a Kotlin
-  class/interface in this repository's tracked history of the file — `git grep -n '\bTppRegistryClient\b'`
+- **2026-09-26** — Idempotency-Key binding reworked onto the fleet-wide fingerprinted
+  `reserve`/`save`/`release` API (#10922): `register`, `blacklist` and `sync/eba` now reserve the
+  key atomically before running the use case, so a concurrent duplicate never races the
+  lookup-then-save window. `sync/eba`'s fingerprint has no request-specific content (method+path
+  only) — the §4 Tampering row above states plainly that IDEMPOTENCY_KEY_REUSED cannot occur for
+  it, only IDEMPOTENCY_REQUEST_IN_PROGRESS.
+
+- **2026-09-27** — Doc correction, no behavior change (#11088): §5 cited `TppRegistryClient`, a
+  name that exists in no tracked Kotlin source, as the "plain REST client" backing the no-cache
+  claim. `git grep -n '\bTppRegistryClient\b'`
   outside this document matches only the *filename* `TppRegistryClient.kt` (in
   `openbank-psd2-service/detekt-baseline.xml`, `ktlint-baseline.xml`, and the architecture doc's
   package-tree listing), never a declared symbol. The file has, for its whole recorded history,

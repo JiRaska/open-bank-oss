@@ -9,6 +9,7 @@ import com.openbank.finrep.application.port.out.RiskCapitalPort
 import com.openbank.finrep.application.port.out.RiskCapitalResult
 import com.openbank.finrep.application.port.out.RiskExposureClass
 import com.openbank.finrep.application.port.out.RiskHqlaLine
+import com.openbank.finrep.application.port.out.RiskInflowLine
 import com.openbank.finrep.application.port.out.RiskLiquidityLookup
 import com.openbank.finrep.application.port.out.RiskLiquidityPort
 import com.openbank.finrep.application.port.out.RiskLiquidityResult
@@ -77,8 +78,10 @@ data class CapitalResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyCapitalResponse>,
+    /** The book in CZK at the ČNB fixing (risk-engine API 1.11.0); null with [totalNotStated]. */
     val total: CurrencyCapitalResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
+    val totalNotStated: String? = null,
 )
 
 /** One HQLA line of the risk engine's LCR (only the fields C 72.00 reads). */
@@ -95,6 +98,10 @@ data class HqlaResponse(
     val level1: BigDecimal,
     val level2a: BigDecimal,
     val level2b: BigDecimal,
+    /** C 76.00: the Level 2B (15 %) and Level 2 (40 %) cap adjustments and the capped stock. */
+    val adjustmentFor15Cap: BigDecimal? = null,
+    val adjustmentFor40Cap: BigDecimal? = null,
+    val stock: BigDecimal? = null,
 )
 
 /** One LCR outflow line (only the fields C 73.00 reads); `factorKey` names the run-off rate applied. */
@@ -109,6 +116,14 @@ data class LcrResponse(
     val hqla: HqlaResponse,
     val outflows: List<OutflowLineResponse> = emptyList(),
     val totalOutflows: BigDecimal? = null,
+    val inflows: List<OutflowLineResponse> = emptyList(),
+    val totalInflows: BigDecimal? = null,
+    val inflowCap: BigDecimal? = null,
+    val cappedInflows: BigDecimal? = null,
+    val inflowCapBinding: Boolean? = null,
+    /** C 76.00: net outflows and the ratio (a fraction, null when net outflows are not positive). */
+    val netOutflows: BigDecimal? = null,
+    val ratio: BigDecimal? = null,
 )
 
 data class CurrencyLiquidityResponse(val currency: String, val lcr: LcrResponse)
@@ -119,9 +134,11 @@ data class LiquidityResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyLiquidityResponse>,
+    /** All currencies combined in CZK at the ČNB fixing (risk-engine API 1.13.0); null with [totalNotStated]. */
     val total: CurrencyLiquidityResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
     val notes: List<String> = emptyList(),
+    val totalNotStated: String? = null,
 )
 
 /**
@@ -154,6 +171,7 @@ class RiskEngineCapitalAdapter(
                 totalRwa = c.total?.totalRwa,
                 currencyCount = c.currencies.size,
                 unclassifiedBalances = c.unclassified.size,
+                totalNotStated = c.totalNotStated,
             ),
         )
     }
@@ -183,7 +201,20 @@ class RiskEngineCapitalAdapter(
                     RiskOutflowLine(it.factorKey, it.amount, it.factor, it.weighted)
                 },
                 totalOutflows = lcr?.totalOutflows,
+                inflows = lcr?.inflows.orEmpty().map {
+                    RiskInflowLine(it.factorKey, it.amount, it.factor, it.weighted)
+                },
+                totalInflows = lcr?.totalInflows,
+                inflowCap = lcr?.inflowCap,
+                cappedInflows = lcr?.cappedInflows,
+                inflowCapBinding = lcr?.inflowCapBinding,
                 notes = l.notes,
+                totalNotStated = l.totalNotStated,
+                level2bCapAdjustment = hqla?.adjustmentFor15Cap,
+                level2CapAdjustment = hqla?.adjustmentFor40Cap,
+                hqlaStock = hqla?.stock,
+                netOutflows = lcr?.netOutflows,
+                lcrRatio = lcr?.ratio,
             ),
         )
     }

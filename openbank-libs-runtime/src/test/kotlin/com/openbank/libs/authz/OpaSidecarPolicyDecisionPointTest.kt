@@ -3,9 +3,11 @@
 
 package com.openbank.libs.authz
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
+import io.mockk.spyk
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -66,6 +68,37 @@ class OpaSidecarPolicyDecisionPointTest {
         // Bodyless inspection — confirm the URI path is the ADR-0034 query namespace.
         assertThat(captured.captured.uri().toString()).endsWith("/v1/data/openbank/rest/allow")
         assertThat(captured.captured.method()).isEqualTo("POST")
+    }
+
+    @Test
+    fun `request body carries the complete authorization input`(): Unit = runBlocking {
+        val mapper = spyk(ObjectMapper())
+        val serialized = slot<Any>()
+        every { mapper.writeValueAsString(capture(serialized)) } answers { callOriginal() }
+        stubResponse(200, """{"result":true}""")
+        val subject = OpaSidecarPolicyDecisionPoint(httpClient = httpClient, mapper = mapper)
+
+        subject.allow(sampleQuery)
+
+        val input = (serialized.captured as Map<*, *>)["input"] as Map<*, *>
+        val principal = input["principal"] as Map<*, *>
+        assertThat(principal["id"]).isEqualTo("user-1")
+        assertThat(principal["type"]).isEqualTo("HUMAN")
+        assertThat(principal["roles"]).isEqualTo(listOf("ROLE_OPERATOR"))
+        assertThat(input["action"]).isEqualTo("party.update")
+        assertThat(input["resource"]).isEqualTo(mapOf("type" to "party", "id" to "p-123"))
+        assertThat(input["attributes"]).isEqualTo(emptyMap<String, Any>())
+    }
+
+    @Test
+    fun `HTTP 299 is accepted but 300 is a policy outage`(): Unit = runBlocking {
+        stubResponse(299, """{"result":true}""")
+        assertThat(pdp.allow(sampleQuery).allow).isTrue
+
+        stubResponse(300, "redirect")
+        assertThatThrownBy { runBlocking { pdp.allow(sampleQuery) } }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("HTTP 300")
     }
 
     private fun stubResponse(status: Int, body: String) {

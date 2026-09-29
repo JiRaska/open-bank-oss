@@ -180,3 +180,24 @@ test_extension_does_not_restate_base_reads if {
 	not "dispute-staff-write" in allowed_reasons with input as {"principal": operator, "action": "dispute.read"}
 	not "dispute-staff-write" in allowed_reasons with input as {"principal": operator, "action": "complaint.list"}
 }
+
+# #10486 batch 8
+b8agent_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+
+test_b8agent_own_identity_reads if {
+	every action in {"dispute.list", "dispute.read"} {
+		"service-agent-dispute-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-agent"), "action": action}
+	}
+}
+
+test_b8agent_own_identity_never_writes if {
+	every action in {"dispute.create", "dispute.resolve"} {
+		not "service-agent-dispute-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-agent"), "action": action}
+	}
+}
+
+test_b8agent_other_api_identity_gets_nothing if {
+	every action in {"dispute.list", "dispute.read"} {
+		not "service-agent-dispute-read" in allowed_reasons with input as {"principal": b8agent_sa("service-account-openbank-services"), "action": action}
+	}
+}

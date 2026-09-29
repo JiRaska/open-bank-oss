@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.0...delegation-service-v0.20.1) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.19.0...delegation-service-v0.20.0) (2026-09-28)
+
+
+### Features
+
+* **delegation:** bind Idempotency-Key to a request fingerprint ([#10959](https://github.com/JiRaska/open-bank-oss/issues/10959)) ([c03b46b](https://github.com/JiRaska/open-bank-oss/commit/c03b46ba873025ad360f3bda6a724370cd022223))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.18.0...delegation-service-v0.19.0) (2026-09-27)
+
+
+### Features
+
+* **libs,delegation:** ADR-0321 resilience-profile gate + first adoption ([#11072](https://github.com/JiRaska/open-bank-oss/issues/11072)) ([3f8b9b4](https://github.com/JiRaska/open-bank-oss/commit/3f8b9b488862bf088717dabaa19208958285f968))
+
 ## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.17.1...delegation-service-v0.18.0) (2026-09-26)
 
 

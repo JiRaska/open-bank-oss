@@ -4,12 +4,13 @@
 package com.openbank.account.integration
 
 import com.openbank.account.infrastructure.persistence.repository.AccountOutboxRepositoryImpl
-import com.openbank.account.it.PostgresRedpandaRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -34,7 +35,10 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedpandaRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedpandaRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_accounts_it")],
+)
 @TestProfile(AccountOutboxClaimIT.NoDispatchProfile::class)
 class AccountOutboxClaimIT {
 

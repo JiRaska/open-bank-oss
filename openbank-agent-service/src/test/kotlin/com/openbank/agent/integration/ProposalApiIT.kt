@@ -55,6 +55,16 @@ class ProposalApiIT {
     }
 
     @Test
+    fun `POST decision without an authenticated role is rejected`() {
+        given()
+            .contentType("application/json")
+            .body(mapOf("approve" to true))
+            .`when`().post("/api/v1/proposals/00000000-0000-4000-8000-000000000001/decision")
+            .then()
+            .statusCode(anyOf(equalTo(401), equalTo(403)))
+    }
+
+    @Test
     @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
     fun `GET proposals with agentId only returns that agent's own proposals`() {
         service.create(
@@ -81,5 +91,46 @@ class ProposalApiIT {
             .body("size()", `is`(1))
             .body("[0].proposedBy", `is`("finops-agent-itest"))
             .body("[0].title", `is`("finops proposal"))
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `decision without legacy reviewer audits the authenticated principal`() {
+        val proposal = service.create(
+            title = "spoofing guard",
+            rationale = "r",
+            suggestedAction = "a",
+            proposedBy = "maker-agent-itest",
+            modelId = null,
+            correlationId = null,
+        )
+
+        given()
+            .contentType("application/json")
+            .body(mapOf("approve" to true, "reason" to "verified"))
+            .`when`().post("/api/v1/proposals/${proposal.id}/decision")
+            .then()
+            .statusCode(200)
+            .body("decidedBy", `is`("operator"))
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `forged reviewer cannot bypass separation of duties`() {
+        val proposal = service.create(
+            title = "self approval guard",
+            rationale = "r",
+            suggestedAction = "a",
+            proposedBy = "operator",
+            modelId = null,
+            correlationId = null,
+        )
+
+        given()
+            .contentType("application/json")
+            .body(mapOf("approve" to true, "decidedBy" to "different-reviewer"))
+            .`when`().post("/api/v1/proposals/${proposal.id}/decision")
+            .then()
+            .statusCode(409)
     }
 }

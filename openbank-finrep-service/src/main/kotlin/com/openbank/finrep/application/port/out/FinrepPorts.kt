@@ -74,6 +74,8 @@ data class RiskCapitalResult(
     val totalRwa: BigDecimal?,
     val currencyCount: Int,
     val unclassifiedBalances: Int,
+    /** The engine's own reason when it states no total (a missing ČNB fixing); null when it does. */
+    val totalNotStated: String? = null,
 )
 
 /**
@@ -109,8 +111,9 @@ data class RiskHqlaLine(
 )
 
 /**
- * The liquid-asset side of ONE tied-out risk-engine snapshot's LCR at the report date. [lines] and
- * the level sums (after haircut, before the Level 2 caps) are present only for a single-currency book;
+ * The LCR of ONE tied-out risk-engine snapshot at the report date, read from the engine's combined
+ * view: all currencies in CZK at the ČNB fixing (risk-engine API 1.13.0, EU 2015/61 Art. 4(5)). [currency]
+ * and the figures are null when the engine states no combined view, [totalNotStated] then says why;
  * [unclassifiedBalances] counts balances the engine could not classify, any of which could be HQLA.
  * [notes] are the engine's free-text caveats on the result (e.g. that pledged collateral is not
  * modelled); the mappers read them through [com.openbank.finrep.domain.mapper.RiskEngineFigures].
@@ -129,7 +132,38 @@ data class RiskLiquidityResult(
     val unclassifiedBalances: Int,
     val outflows: List<RiskOutflowLine> = emptyList(),
     val totalOutflows: BigDecimal? = null,
+    val inflows: List<RiskInflowLine> = emptyList(),
+    /** The engine's Σ weighted inflows, BEFORE the 75 % cap (C 74.00). */
+    val totalInflows: BigDecimal? = null,
+    /** The engine's cap amount: its cap factor × [totalOutflows]. */
+    val inflowCap: BigDecimal? = null,
+    /** The engine's inflows AFTER the cap: min([totalInflows], [inflowCap]). */
+    val cappedInflows: BigDecimal? = null,
+    val inflowCapBinding: Boolean? = null,
     val notes: List<String> = emptyList(),
+    /** The engine's own reason when it states no combined total (e.g. a missing ČNB fixing); null when it does. */
+    val totalNotStated: String? = null,
+    /** The engine's Art. 17 adjustment for the 15 % Level 2B cap (Annex I ¶5), null when not reported (C 76.00). */
+    val level2bCapAdjustment: BigDecimal? = null,
+    /** The engine's Art. 17 adjustment for the 40 % Level 2 cap (Annex I ¶5), null when not reported (C 76.00). */
+    val level2CapAdjustment: BigDecimal? = null,
+    /** The engine's liquidity buffer: after haircuts AND after both Level 2 caps (C 76.00). */
+    val hqlaStock: BigDecimal? = null,
+    /** The engine's net liquidity outflows: [totalOutflows] − [cappedInflows] (C 76.00). */
+    val netOutflows: BigDecimal? = null,
+    /** The engine's LCR as a fraction ([hqlaStock] / [netOutflows], 6 dp); null when net outflows ≤ 0. */
+    val lcrRatio: BigDecimal? = null,
+)
+
+/**
+ * One LCR inflow line of a risk-engine result (COREP C 74.00): the inflow factor key the engine applied
+ * (e.g. `lcr-retail-loan-inflow`), the unweighted [amount], the [factor] and the [weighted] inflow.
+ */
+data class RiskInflowLine(
+    val factorKey: String,
+    val amount: BigDecimal,
+    val factor: BigDecimal,
+    val weighted: BigDecimal,
 )
 
 /**
@@ -157,7 +191,8 @@ data class RiskLiquidityLookup(val result: RiskLiquidityResult?, val unavailable
 }
 
 /**
- * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows). The run is selected
+ * Read-only view of the risk engine's LCR result (COREP C 72.00 liquid assets, C 73.00 outflows, C 74.00
+ * inflows, C 76.00 calculation). The run is selected
  * exactly as [RiskCapitalPort] selects it, so C 02.00 and C 72.00 of one date read the same snapshot.
  */
 interface RiskLiquidityPort {

@@ -649,6 +649,11 @@ def check(root: Path) -> list[str]:
         errors.append("service test JVMs do not receive the runtime-evidence directory")
     if "project.delete(testIntelligenceRuntimeDir)" not in convention:
         errors.append("runtime evidence is not reset before each Test task and can mix local reruns")
+    if 'test-intelligence/runtime/$name' not in convention:
+        errors.append("Test tasks must have distinct runtime-evidence directories")
+    collector = text(root / ".github/scripts/collect-test-run-evidence.py")
+    if '.rglob("*.jsonl")' not in collector:
+        errors.append("runtime collector does not read evidence from every Test task directory")
     # Kover's agent otherwise transforms Testcontainers' shaded classes during Quarkus
     # integration tests.  That can leave the advisory report task green but no XML to
     # project, which is indistinguishable from absent coverage in the operator view.
@@ -698,6 +703,7 @@ def check(root: Path) -> list[str]:
         errors.append("fleet has no executed trace-contract evidence pilot")
 
     deploy = text(root / ".github/workflows/admin-ui-deploy.yml")
+    artifact_lookup = text(root / ".github/scripts/find-latest-main-artifacts.py")
     for needle, message in (
         ("build/test-intelligence/run.json", "admin deployment does not stage the versioned run envelope"),
         ("-name 'run.json'", "admin deployment does not accept the root run-envelope artifact layout"),
@@ -708,9 +714,9 @@ def check(root: Path) -> list[str]:
         ("github.event.workflow_run.head_sha", "admin deployment cannot inspect the exact workflow-run source commit"),
         ("authorize-admin-ui-deploy-source.sh", "admin deployment bypasses its source-ancestry guard"),
         ("needs.deploy-source.outputs.proceed == 'true'", "privileged admin image build bypasses the deploy-source guard"),
-        ("latest_main_artifact", "admin deployment cannot select main-only service evidence"),
-        ("per_page=100&page=${page}",
-         "admin deployment can stage a PR artifact as deployed-main evidence"),
+        ("find-latest-main-artifacts.py", "admin deployment cannot select main-only service evidence"),
+        ("if ! python3 .github/scripts/find-latest-main-artifacts.py",
+         "admin deployment ignores an artifact inventory failure"),
         ("schedule:", "admin deployment has no scheduled Test Intelligence snapshot refresh"),
         ("cron: '17 3 * * *'", "admin deployment refresh cadence drifted from the governed daily schedule"),
         ("github.event_name }}\" = \"schedule\"", "scheduled snapshot refresh does not use a unique immutable image tag"),
@@ -729,6 +735,14 @@ def check(root: Path) -> list[str]:
         ('"openbank-infra/gitops/components/observability/cronjob-journey-*.yaml"', "admin deployment does not rebuild the Test Intelligence snapshot when a synthetic runtime manifest changes"),
     ):
         if needle not in deploy:
+            errors.append(message)
+    for needle, message in (
+        ('workflow_run.get("head_branch") == "main"', "artifact lookup accepts non-main evidence"),
+        ("len(artifacts) < PER_PAGE", "artifact lookup blindly scans exhausted result pages"),
+        ("raise ArtifactApiError", "artifact lookup conflates API failure with absence"),
+        ("--self-test", "artifact lookup has no regression harness"),
+    ):
+        if needle not in artifact_lookup:
             errors.append(message)
     deploy_source_guard = text(root / ".github/scripts/authorize-admin-ui-deploy-source.sh")
     for needle, message in (
@@ -756,10 +770,33 @@ def check(root: Path) -> list[str]:
     for needle, message in (
         ("for page in 1 2 3 4 5; do", "immutable run history is not paginated"),
         ("per_page=100&page=${page}", "immutable run history does not request later artifact pages"),
+        ("admin-ui-browser-synthetic.yml/runs?branch=main&status=completed&per_page=1",
+         "immutable run history cannot find browser evidence beyond the repository-wide artifact window"),
+        ("actions/runs/${browser_run_id}/artifacts?per_page=100",
+         "immutable run history does not inspect the latest browser producer's artifacts"),
         ("head -\"${MAX_ENVELOPES}\"", "immutable run history is not bounded before artifact download"),
+        ("extract-test-intelligence-envelope.py --self-test", "immutable run envelope selector is not regression-tested"),
+        ("--prune-cache openbank-admin-ui/test-run-history",
+         "restored immutable run history is not validated before deployment"),
+        ('if [ -f "${cached}" ]; then',
+         "a stale staged artifact ID can suppress repair of a missing cached envelope"),
+        ('"${archive}" "${cached}"',
+         "immutable run history does not accept browser variant envelopes"),
     ):
         if needle not in history_stage:
             errors.append(message)
+    browser_workflow = text(root / ".github/workflows/admin-ui-browser-synthetic.yml")
+    browser_producer = text(root / "openbank-admin-ui/scripts/admin-login-synthetic.mjs")
+    for needle, message in (
+        ("OPENBANK_SYNTHETIC_JOURNEY: admin-ui-sso-boundary", "SSO browser evidence lacks its journey identity"),
+        ("OPENBANK_SYNTHETIC_JOURNEY: admin-ui-security-excellence",
+         "security-excellence browser evidence lacks its journey identity"),
+    ):
+        if needle not in browser_workflow:
+            errors.append(message)
+    if "journey = process.env.OPENBANK_SYNTHETIC_JOURNEY" not in browser_producer or \
+            "schemaVersion: 1, journey, browser: engine" not in browser_producer:
+        errors.append("browser Web Vitals are not attributed to the configured journey")
     # A staged Pact file is not a provider-verification verdict. The deploy collector
     # can query the existing read-only Broker credentials and must receive them only
     # in its build/collection step; without this wiring the UI bakes every Pact as
@@ -812,8 +849,10 @@ def check(root: Path) -> list[str]:
         for needle in required:
             if needle not in workflow:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
-    if "pitest.yml/runs?branch=main&status=completed&per_page=1" not in deploy:
-        errors.append("mutation projection does not select the latest completed attempt regardless of verdict")
+    if "pitest.yml/runs?branch=main&status=completed&per_page=100" not in deploy:
+        errors.append("mutation projection does not inspect completed attempts regardless of verdict")
+    if "r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True)" not in deploy:
+        errors.append("mutation projection does not select the latest completed attempt by start time")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
     pitest_workflow = text(root / ".github/workflows/pitest.yml")

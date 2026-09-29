@@ -246,6 +246,23 @@ class DealTest {
         }
 
         @Test
+        fun `an active override counts on its counterparty's limit-currency line only, until booked`() {
+            val (pending, breach) = breachedPending()
+            val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
+            val cp = overridden.counterpartyId
+            assertThat(pending.holdsActiveLimitOverride(cp, pending.limitCurrency)).isFalse()
+            assertThat(overridden.holdsActiveLimitOverride(cp, overridden.limitCurrency)).isTrue()
+            assertThat(overridden.holdsActiveLimitOverride("SIMBK-OTHER", overridden.limitCurrency)).isFalse()
+            val other = com.openbank.treasury.domain.model.Deal.SUPPORTED_CURRENCIES.first {
+                it !=
+                    overridden.limitCurrency
+            }
+            assertThat(overridden.holdsActiveLimitOverride(cp, other)).isFalse()
+            val booked = overridden.approve(approver, breach, NOW)
+            assertThat(booked.holdsActiveLimitOverride(cp, booked.limitCurrency)).isFalse()
+        }
+
+        @Test
         fun `the senior who overrode cannot also book the deal`() {
             val (pending, breach) = breachedPending()
             val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
@@ -342,6 +359,37 @@ class DealTest {
                 placement(product = ProductType.CNB_DEPOSIT_FACILITY, counterparty = "SIMBK-A")
             }.isInstanceOf(IllegalArgumentException::class.java)
             assertThatThrownBy { placement(counterparty = "CNB") }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+
+        @Test
+        fun `ČNB lombard is overnight, CZK, facing ČNB, with a positive rate, and Friday matures Monday`() {
+            fun lombard(
+                currency: String = "CZK",
+                counterparty: String = "CNB",
+                rate: String = "5.75",
+                valueDate: LocalDate = MONDAY,
+            ) = placement(
+                product = ProductType.CNB_LOMBARD,
+                counterparty = counterparty,
+                currency = currency,
+                rate = rate,
+                maturity = MONDAY.plusDays(30), // ignored: the facility is overnight
+                valueDate = valueDate,
+            )
+            assertThat(lombard().maturityDate).isEqualTo(LocalDate.parse("2026-09-22"))
+            val fri = lombard(valueDate = FRIDAY)
+            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-28"))
+            assertThat(fri.days).isEqualTo(3)
+            // 1 000 000 × 5.75 % × 3 / 360 = 479.1666… -> 479.17
+            assertThat(lombard(valueDate = FRIDAY).copy(principal = BigDecimal("1000000.00")).interest)
+                .isEqualByComparingTo("479.17")
+            assertThat(fri.product.isAsset).describedAs("a borrowing: consumes no limit").isFalse()
+            assertThat(LimitCheck.of(bankA, fri, BigDecimal.ZERO).dealAmount).isEqualByComparingTo("0")
+            assertThatThrownBy { lombard(currency = "EUR") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { lombard(counterparty = "SIMBK-A") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { lombard(rate = "0") }.isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { fri.copy(maturityDate = FRIDAY.plusDays(1)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
         }
 
         @Test

@@ -23,6 +23,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
+import { RequestedByBadge } from '@/components/balance-sheet/RequestedByBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import {
   cashFlowsSchema, curveSetListSchema, instrumentsSchema, snapshotRunSchema,
@@ -148,12 +149,18 @@ function SnapshotDetail({ id }: { id: string }) {
             {t('Kapitál: úvěrové riziko (SA)', 'Capital: credit risk (SA)')}
           </Link>
         )}
+        {tied && (
+          <Link href={`/balance-sheet/snapshots/${encodeURIComponent(run.id)}/min-reserves`} className="btn btn-secondary btn-sm">
+            {t('Povinné minimální rezervy', 'Minimum reserve requirement')}
+          </Link>
+        )}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: 12, marginBottom: 16 }}>
         <StatCard label={t('Pozice', 'Positions')} value={run.positionCount.toLocaleString(locale)} />
         <StatCard label={t('Rozdíly', 'Mismatches')} value={run.mismatchCount.toLocaleString(locale)} tone={run.mismatchCount > 0 ? 'danger' : undefined} />
         <StatCard label={t('Zaznamenáno', 'Recorded')} value={new Date(run.recordedAt).toLocaleString(locale)} />
+        <StatCard label={t('Spustil', 'Requested by')} value={<RequestedByBadge requestedBy={run.requestedBy} />} />
       </div>
 
       {!tied && (

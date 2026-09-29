@@ -650,6 +650,8 @@ class AuthorizeInterceptorTest {
         interceptor.approvalStore = mockk { every { isResolvable } returns false }
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
+        assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "no_approval_store"))
+            .isEqualTo(1.0)
     }
 
     @Test
@@ -665,6 +667,8 @@ class AuthorizeInterceptorTest {
         assertThat(store.created).hasSize(1)
         assertThat(store.created[0].makerId).isEqualTo("user-42")
         assertThat(store.created[0].action).isEqualTo("party.read")
+        assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "pending_approval"))
+            .isEqualTo(1.0)
     }
 
     @Test
@@ -683,6 +687,8 @@ class AuthorizeInterceptorTest {
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
         assertThat(runBlocking { store.find(pending.id) }?.status).isEqualTo(ApprovalStatus.EXECUTED)
+        assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "approval_satisfied"))
+            .isEqualTo(1.0)
     }
 
     @Test

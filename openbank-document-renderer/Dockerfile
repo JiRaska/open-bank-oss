@@ -14,7 +14,7 @@
 # Digest-pinned per Scorecard Pinned-Dependencies (multi-arch manifest-list digest — the
 # platform-specific image is resolved from this at pull time). Refresh alongside a Python
 # patch bump: `crane digest python:3.14-slim` or the registry API.
-FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS builder
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS builder
 
 # Build-time-only packages. libpango/libharfbuzz runtime .so's are also
 # installed here so `pip install` can link/validate against them if a
@@ -39,7 +39,7 @@ ENV PATH="/opt/venv/bin:${PATH}"
 # upgrades pip to a verified version and installs every (transitive) runtime dependency.
 RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 
-FROM python:3.14-slim@sha256:cea0e6040540fb2b965b6e7fb5ffa00871e632eef63719f0ea54bca189ce14a6 AS runtime
+FROM python:3.14-slim@sha256:51dafde81dbdb6ebde285137a295cf18a47ca95234fe388a343719cb97305b3d AS runtime
 
 # Runtime-only shared libraries WeasyPrint needs (text shaping via Pango +
 # HarfBuzz, image decoding via libjpeg/openjp2). This mirrors the official

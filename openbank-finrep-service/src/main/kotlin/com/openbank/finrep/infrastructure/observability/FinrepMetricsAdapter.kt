@@ -8,6 +8,7 @@ import com.openbank.finrep.application.port.out.FinrepMetricsPort
 import com.openbank.finrep.application.port.out.RegulatoryFramework
 import com.openbank.finrep.application.port.out.TemplateFailureReason
 import com.openbank.finrep.application.port.out.TemplateRender
+import com.openbank.libs.observability.standardPercentiles
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.DistributionSummary
 import io.micrometer.core.instrument.MeterRegistry
@@ -81,8 +82,7 @@ class FinrepMetricsAdapter(private val registry: MeterRegistry?) : FinrepMetrics
             .tag("service", SERVICE)
             .tag("framework", framework)
             .tag("template", render.templateId)
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description("Time to render one template, including the ledger trial-balance hop")
             .register(r)
             .record(render.duration)
@@ -115,8 +115,7 @@ class FinrepMetricsAdapter(private val registry: MeterRegistry?) : FinrepMetrics
         .tag("service", SERVICE)
         .tag("framework", framework)
         .tag("template", template)
-        .publishPercentiles(P50, P95, P99)
-        .publishPercentileHistogram()
+        .standardPercentiles()
         .register(registry)
 
     companion object {
@@ -124,10 +123,5 @@ class FinrepMetricsAdapter(private val registry: MeterRegistry?) : FinrepMetrics
 
         /** COREP defines no balance-sheet identity, so `balanced` is neither true nor false there. */
         private const val NOT_APPLICABLE = "not_applicable"
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }

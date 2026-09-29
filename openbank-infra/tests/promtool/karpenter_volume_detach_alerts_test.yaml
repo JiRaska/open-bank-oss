@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NodeClaimAwaitingVolumeDetachment (#11304). Karpenter/operatorpkg emits the series only while
+# the NodeClaim is IN that condition, with the value = seconds in it. Case 1 must fire; cases 2
+# and 3 are the controls that stop it passing vacuously (a short wait, and a different reason).
+rule_files:
+  - prometheus-rules-capacity.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a NodeClaim stuck awaiting volume detachment for >15m pages"
+    input_series:
+      - series: 'operator_nodeclaim_status_condition_current_status_seconds{name="default-abcde",type="VolumesDetached",status="Unknown",reason="AwaitingVolumeDetachment"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NodeClaimAwaitingVolumeDetachment
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              detector: capacity
+              team: platform
+              name: default-abcde
+              type: VolumesDetached
+              status: Unknown
+              reason: AwaitingVolumeDetachment
+            exp_annotations:
+              summary: "NodeClaim default-abcde has waited over 15m for its volumes to detach"
+              description: "Karpenter has drained this node but EBS volumes are still attached to it, so every pod that owns one (CNPG instances first) is Pending/ContainerCreating elsewhere with `VolumeInUse`. List them with `kubectl get volumeattachment` filtered on the node, and check the ebs-csi-controller logs for the detach error. The NodePool's terminationGracePeriod terminates the instance at 1h, which releases the volumes; terminating the EC2 instance sooner does the same. Do not strip VolumeAttachment finalizers while the instance is still running -- the volume is still mounted there."
+
+  - interval: 1m
+    name: "a normal detach of a few minutes stays silent"
+    input_series:
+      - series: 'operator_nodeclaim_status_condition_current_status_seconds{name="default-fghij",type="VolumesDetached",status="Unknown",reason="AwaitingVolumeDetachment"}'
+        values: "0+60x5"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NodeClaimAwaitingVolumeDetachment
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a grace-period-elapsed detach is not an awaiting one"
+    input_series:
+      - series: 'operator_nodeclaim_status_condition_current_status_seconds{name="default-klmno",type="VolumesDetached",status="False",reason="TerminationGracePeriodElapsed"}'
+        values: "0+60x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NodeClaimAwaitingVolumeDetachment
+        exp_alerts: []

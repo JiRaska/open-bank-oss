@@ -136,6 +136,13 @@ BASELINE: dict[str, str] = {
     "openbank-customer-edge:ACTIVE,CLOSED,MERGED,PENDING_KYC,SUSPENDED":
         "#8810 — mis-pairing: a party lifecycle shares ACTIVE/SUSPENDED with libs "
         "NetworkTokenStatus.",
+    # MIS-PAIRING (#11017): lending's credit-risk insight `engineOutcome` is a read-model STRING
+    # (CreditRiskInsightService, with UNEVALUATED meaning "the engine never ran"), not the libs
+    # DecisionOutcome.Credit envelope enum. A DecisionRecord exists only once a decision was made,
+    # so UNEVALUATED can never be one of its outcomes; the two share the three verdict names only.
+    "openbank-lending-service:APPROVE,DECLINE,REFER,UNEVALUATED":
+        "#11017 — mis-pairing: lending insight engineOutcome (incl. UNEVALUATED) vs libs "
+        "DecisionOutcome.Credit, which records only decisions actually made.",
     "openbank-customer-edge:FAILED,MANUAL_REVIEW,PASSED,PENDING":
         "#7984 — mis-pairing: screening verdict shares FAILED/PENDING with libs OutboxStatus.",
     "openbank-customer-edge:APPROVED,EXPIRED,IN_PROGRESS,NOT_STARTED,REJECTED":

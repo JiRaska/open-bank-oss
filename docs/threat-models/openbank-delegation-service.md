@@ -176,6 +176,27 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Change log
 
+- **2026-09-27** — **Party-eligibility client resilience values now sourced from the shared
+  `READ` profile** (ADR-0321, PR #11072). `ResilientPartyEligibilityClient.eligibilityOf` is
+  annotated `@ResilienceProfile(READ)` and its `@Timeout`/`@Retry`/`@CircuitBreaker` arguments
+  are the named constants in `ResilienceProfiles.Read`; the effective values on the wire are
+  unchanged (2000 ms timeout, 2 retries, same breaker thresholds). No new caller, endpoint,
+  credential or network path — the delegation → party-service boundary (trust boundary 7) and
+  its fail-closed eligibility gate (T3) are as before. Rollback: revert.
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-21** — Two releasable approval kinds, `STANDING_ORDER` and `SDD_MANDATE` (#10281,
   ADR-0312 addendum, migration V26). Same boundary and caller as `PAYMENT` (customer-edge's service
   account); the guards are unchanged code paths — distinct signer and initiator-not-cosigner in
@@ -245,3 +266,39 @@ consumes SCA, writes a grant or publishes an event. `offer` repeats every check 
 cannot become authorization. The response contains only `valid: true`: returning counterparty
 attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
 - **2026-09-21** — **Party-eligibility and card-ownership reads move to the service's own machine identity (#10486 batch 6).** `PidServiceRestClient` (`GET /api/v1/parties/{id}`) and `CardIssuanceRestClient` (`GET /api/v1/cards/{id}`) now mint their bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only). pid-service grants it `party.read` by identity; that endpoint gained `@Authorize` in the same change and pid enforces OPA. card-issuance grants `card.read` by identity, plus a Kotlin named-caller check while it runs OPA advisory. **STRIDE-S:** a new credential at Vault KV `keycloak/delegation-service`, projected by `delegation-service-m2m-oidc`, env ref `optional: false`; compromise reaches those two reads only. The account-ownership client stays on the shared client, where its `account.read` is already identity-granted. Rollback: revert the commit.
+
+- **2026-09-29** — **Grantor mandate reads move to the service's own machine identity (#10486 batch 8).** `PartyMandateRestClient` and `PartyAuthorityRestClient` (`GET /api/v1/parties/{id}`, `/{id}/mandates`, `/{id}/acting-for`) now mint their bearer from the existing NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only), instead of the shared `openbank-services` principal, whose `ROLE_OPERATOR` was the only thing granting `party.mandate.read`. party-service grants it `party.mandate.read` by identity (`service-delegation-mandate-read` in `party_rest_ext.rego`); `GET /api/v1/parties/{id}` is RBAC-only and admits `ROLE_API`. **STRIDE-E:** no new credential; the grant is one read verb, never `party.update` or a mandate write (`party_rest_ext_test.rego`). Rollback: revert the commit, and the clients return to the shared principal, which keeps `ROLE_OPERATOR` until the follow-up removes it.
+
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint, reworked onto the final
+  atomic reserve/save/release API (#10959, v2).** `DelegationPortfolioResource.kt` and
+  `DelegationResource.kt` (`offer`, `confirmRecertification`, portfolio `create`) now call
+  `IdempotencyStore.reserve(key, hash)` BEFORE running the use case, closing the lookup-then-save
+  race a plain `lookup`+`save` pair left open (two concurrent first requests could both miss and
+  both execute); on a use-case failure the reservation is `release`d so a retry with the same body
+  can still succeed. The fingerprint is `RequestFingerprints.of(objectMapper, method, path, dto)`
+  (`openbank-libs-runtime`, the ONE canonicaliser — the service-local fingerprint
+  helper is removed). Reusing the same key with a DIFFERENT request now answers **409**
+  IDEMPOTENCY_KEY_REUSED (not 422 as an earlier revision of this entry stated), and a request still
+  in flight under the same key answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+  `confirmRecertification`'s fingerprint covers only the ids already present in its cache key
+  (task id + grantorPartyId) — there is no request body — so a mismatch can only arise from a
+  stale/legacy stored record, never from two live requests with different bodies; `openapi.yaml`
+  therefore documents only IDEMPOTENCY_REQUEST_IN_PROGRESS for that operation, not
+  IDEMPOTENCY_KEY_REUSED, and `DelegationIdempotencyFingerprintIT` simulates the stale-record case
+  directly rather than through two differing live requests. **Body-shape note:** these three
+  endpoints answer with the fleet-wide libs `ApiError` envelope (`traceId/status/code/message`),
+  which is a DIFFERENT JSON shape from the pre-existing, unrelated
+  `SpendReservationIdempotencyConflictExceptionMapper` (`type/title/status/detail/code/error`,
+  `application/problem+json`) that spend-reservation endpoints already used for the same 409
+  IDEMPOTENCY_KEY_REUSED code — both are 409, but a client cannot rely on one body shape across
+  every idempotent endpoint on this service; reconciling the two shapes is out of scope here.
+  Covered by `DelegationIdempotencyFingerprintIT` and the plain-unit `WithReservationTest`.
+  **DB-level dedupe (migration brief step 5) does not apply**: the only
+  `findByIdempotencyKey`-style lookup in this service is `SpendReservationRepositoryImpl`'s
+  pre-existing, independent dedupe for spend reservations, which already compares the full
+  reservation tuple (`sameSpend`) rather than trusting key presence alone — it does not ignore the
+  fingerprint and is unrelated to this Redis-based rework. **Risk class:** integrity of
+  delegation-offer, recertification-confirmation and delegated-portfolio create — strictly tightens
+  the existing idempotency contract (closes a race the previous revision left open), no new
+  principal or data path. Rollback: revert to the non-atomic `lookup`+`save` pair (reopens the
+  lookup-then-save race, does not remove any control).

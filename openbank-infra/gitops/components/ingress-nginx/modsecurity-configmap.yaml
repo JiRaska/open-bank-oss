@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ModSecurity engine configuration for ingress-nginx (ADR-0093 WAF, ADR-0324 interim
+# hardening). Mounted by apps/ingress-nginx.yaml over the controller image's
+# /etc/nginx/modsecurity/modsecurity.conf, which the controller loads for every location
+# whose Ingress sets `enable-modsecurity: "true"` without a `modsecurity-snippet`.
+#
+# WHY HERE AND NOT ON THE INGRESS. This used to be developer-portal's
+# `nginx.ingress.kubernetes.io/modsecurity-snippet` annotation. ingress-nginx classes that
+# annotation Critical risk — it is raw ModSecurity config, so whoever can write an Ingress
+# can switch the WAF to DetectionOnly or add `ctl:ruleEngine=Off`. Serving it from the
+# controller's pod spec moves the policy to the platform app, and lets the controller run
+# with snippet annotations disabled.
+#
+# BEHAVIOUR IS UNCHANGED. The directives below are the snippet's, verbatim and in order.
+# The controller rendered that snippet INSTEAD of modsecurity.conf (template.go,
+# buildModSecurityForLocation), so the image's recommended file was never loaded for
+# developer-portal and is not reproduced here either: no response-body inspection, no
+# JSON/XML body-processor rules, default audit parts. The OWASP CRS file is still added by
+# `enable-owasp-core-rules`, after this one, exactly as before — which is why the
+# paranoia-level SecAction still runs before CRS initialisation.
+#
+# IMMUTABLE AND VERSIONED BY NAME. A subPath mount does not see an in-place edit, and nginx
+# reads the file only on reload, so an editable ConfigMap would be a WAF change that never
+# lands while ArgoCD reports Synced. To change the policy, add `-v2` next to this object,
+# point `controller.extraVolumes` in apps/ingress-nginx.yaml at it (that rolls the
+# controller), and delete `-v1` in a later PR.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ingress-nginx-modsecurity-v1
+  namespace: ingress-nginx
+  labels:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: modsecurity-config
+immutable: true
+data:
+  modsecurity.conf: |
+    SecRuleEngine On
+    SecRequestBodyAccess On
+    SecRequestBodyLimit 1048576
+    SecAuditEngine RelevantOnly
+    SecAuditLog /dev/stdout
+    SecAuditLogFormat JSON
+    # Paranoia level 1 (low false positives for a docs site); raise later if needed.
+    SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1"

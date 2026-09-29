@@ -18,11 +18,14 @@ import java.util.UUID
  * - [MM_PLACEMENT]: the bank LENDS to another bank (an asset, consumes that bank's credit limit).
  * - [MM_BORROWING]: the bank BORROWS from another bank (a liability, consumes no credit limit).
  * - [CNB_DEPOSIT_FACILITY]: overnight deposit at the Czech National Bank (an asset, CZK only).
+ * - [CNB_LOMBARD]: overnight borrowing from the ČNB marginal lending (lombard) facility against
+ *   eligible collateral (a liability, CZK only, #10896). The collateral pledge is NOT modelled.
  */
-enum class ProductType(val isAsset: Boolean) {
+enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
     MM_PLACEMENT(isAsset = true),
     MM_BORROWING(isAsset = false),
-    CNB_DEPOSIT_FACILITY(isAsset = true),
+    CNB_DEPOSIT_FACILITY(isAsset = true, isCnbFacility = true),
+    CNB_LOMBARD(isAsset = false, isCnbFacility = true),
 }
 
 /**
@@ -126,18 +129,42 @@ data class Deal(
         require(rate <= MAX_RATE) { "rate is an annual percentage and must not exceed $MAX_RATE" }
         require(!valueDate.isBefore(tradeDate)) { "valueDate must not precede tradeDate" }
         require(maturityDate.isAfter(valueDate)) { "maturityDate must be after valueDate" }
-        if (product == ProductType.CNB_DEPOSIT_FACILITY) {
-            require(currency == CZK) { "the ČNB deposit facility is CZK only" }
+        if (product.isCnbFacility) {
+            val facility = if (product == ProductType.CNB_LOMBARD) "lombard facility" else "deposit facility"
+            require(currency == CZK) { "the ČNB $facility is CZK only" }
             require(counterpartyId == CNB_COUNTERPARTY_ID) {
-                "the ČNB deposit facility's counterparty is $CNB_COUNTERPARTY_ID"
+                "the ČNB $facility's counterparty is $CNB_COUNTERPARTY_ID"
             }
             require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
-                "the ČNB deposit facility is overnight: maturityDate must be the next business day"
+                "the ČNB $facility is overnight: maturityDate must be the next business day"
+            }
+            if (product == ProductType.CNB_LOMBARD) {
+                require(rate.signum() > 0) { "the ČNB lombard rate must be positive" }
             }
         } else {
             require(counterpartyId != CNB_COUNTERPARTY_ID) { "interbank products cannot face the central bank" }
         }
     }
+
+    /**
+     * The currency whose counterparty limit this deal consumes (#10896). Today that is the deal's
+     * own currency for every product; a product that consumes a limit in another currency (FX spot:
+     * its CZK equivalent) overrides it HERE. The booking-time [LimitCheck], the exposure query and
+     * the utilisation view's active-override count all read this one property — never the raw
+     * `currency` — so a new product cannot be counted on one line and checked on another.
+     */
+    val limitCurrency: String get() = currency
+
+    /**
+     * True while this deal is PENDING_APPROVAL on [counterpartyId]'s [currency] limit with a senior
+     * override still in force (ADR-0315 D4, #10896). Keyed on [limitCurrency], not `currency`.
+     */
+    fun holdsActiveLimitOverride(counterpartyId: String, currency: String): Boolean =
+        state == DealState.PENDING_APPROVAL &&
+            limitOverride != null &&
+            consumesLimit &&
+            this.counterpartyId == counterpartyId &&
+            limitCurrency == currency
 
     /** ACT/360 day count between value and maturity date. */
     val days: Long get() = ChronoUnit.DAYS.between(valueDate, maturityDate)
@@ -252,7 +279,7 @@ data class Deal(
 
     /** True while the deal still consumes its counterparty's credit limit. */
     val consumesLimit: Boolean
-        get() = product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+        get() = product.isAsset && state in LIMIT_CONSUMING_STATES
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
         state = to,
@@ -305,6 +332,18 @@ data class Deal(
         private val MAX_RATE = BigDecimal("100")
 
         /**
+         * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
+         * a deal in one of these states still consumes its counterparty's credit limit. Both the
+         * booking-time [LimitCheck] (via [consumesLimit] / the repository's `exposure` query) and
+         * the read-only limit-utilisation view MUST derive from this one set — duplicating it as a
+         * second literal list anywhere else is exactly the divergence this constant exists to rule
+         * out (a limit-utilisation view unable to disagree with the check that actually blocks
+         * booking is worth nothing if it silently reads a different rule).
+         */
+        val LIMIT_CONSUMING_STATES: Set<DealState> =
+            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+
+        /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or
          * the system may not. An agent's draft must carry its rationale and the inputs it used
          * (ADR-0315 D10); a draft never consumes a limit and only a human can submit it.
@@ -335,7 +374,7 @@ data class Deal(
                 }
             }
             val maturity = when {
-                product == ProductType.CNB_DEPOSIT_FACILITY -> DayCount.nextBusinessDay(valueDate)
+                product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
                 maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
                 else -> maturityDate
             }
