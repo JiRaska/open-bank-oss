@@ -17,6 +17,7 @@ import com.openbank.ledger.domain.model.PeriodType
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -65,6 +66,9 @@ import javax.sql.DataSource
 class LedgerPactBrokerProviderVerificationTest {
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var dataSource: DataSource
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -79,7 +83,17 @@ class LedgerPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interaction expects 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including this one, and would produce a 200.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     @State("ledger has frozen monthly trial balance for the reporting date")
