@@ -8,10 +8,12 @@ info:
   #        Deal.limitOverride: a senior override of a counterparty-limit breach (ADR-0315 D4).
   # 1.5.0: additive — product CNB_LOMBARD (#10896): overnight borrowing from the ČNB marginal
   #        lending (lombard) facility. The RESPONSE ProductType is now x-extensible-enum (the
-  #        product set grows); the request keeps a closed enum (DraftProductType), one value wider (ADR-0315 D2). Queue: #11036 1.2.0, #11041 1.3.0, #11052 1.4.0.
+  #        product set grows); the request keeps a closed enum (DraftProductType), one value wider (ADR-0315 D2).
   # 1.6.0: additive — GET /limits/utilisation (#10896): per-counterparty limit, utilised,
   #        available, utilisation %, breached flag and active senior-override count.
-  version: 1.6.0
+  # 1.7.0: additive — nostro reconciliation (#10896): POST /nostro/statements (camt.053 upload,
+  #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
+  version: 1.7.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
@@ -313,6 +315,80 @@ paths:
               schema:
                 $ref: '#/components/schemas/Positions'
 
+  /api/v1/treasury/nostro/statements:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: uploadNostroStatement
+      summary: Upload a correspondent's camt.053 end-of-day statement for a configured nostro account
+      description: |
+        Exactly one `Stmt`, with OPBD and CLBD balances; only booked (`BOOK`) entries are read and
+        they must foot (opening + entries = closing). The account IBAN must be configured
+        (`openbank.treasury.nostro.accounts`) against a treasury nostro GL in the statement
+        currency. DOCTYPE declarations are refused. Nothing is posted to the ledger.
+        A replay of the Idempotency-Key with the same bytes returns the original statement; the
+        same key with different bytes, or the same (IBAN, statement id) under a new key, is 409.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+          text/xml:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The stored statement (or the original one on an idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroStatement'
+        '400':
+          description: Missing Idempotency-Key, malformed camt.053, a statement that does not foot, or an unconfigured account, an amount beyond 4 decimal places or 15 integer digits, or a statement spanning more than 31 days
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+
+  /api/v1/treasury/nostro/statements/{id}/reconciliation:
+    get:
+      tags: [Nostro reconciliation]
+      operationId: getNostroReconciliation
+      summary: Statement vs the ledger's nostro GL for the statement date
+      description: |
+        Computed on read against ledger-service (real, booked journals only). Pass 1 matches on
+        amount + direction + date + reference (EndToEndId / AcctSvcrRef / remittance equal to the
+        journal's transaction id or contained in its description); pass 2 pairs a remaining item on
+        amount + direction + date only when exactly one candidate exists on each side
+        (`AMOUNT_DATE`). Everything else is listed as unmatched. Nostro is an asset: a statement
+        CRDT is a ledger DEBIT. Differences are statement minus ledger. Nothing is ever posted.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Reconciliation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroReconciliation'
+        '404':
+          description: No such statement
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -523,3 +599,86 @@ components:
               borrowed: { type: number }
               atCnb: { type: number }
               net: { type: number, description: placed + atCnb − borrowed }
+    NostroStatement:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        statementId: {type: string}
+        iban: {type: string}
+        glCode: {type: string}
+        currency: {type: string}
+        statementDate: {type: string, format: date}
+        openingBalance: {type: number, description: Signed from the bank's side; positive = CRDT}
+        closingBalance: {type: number}
+        entryCount: {type: integer}
+        sha256: {type: string, description: SHA-256 of the uploaded bytes}
+        uploadedBy: {type: string}
+        uploadedAt: {type: string, format: date-time}
+    NostroStatementEntry:
+      type: object
+      properties:
+        sequence: {type: integer}
+        amount: {type: number}
+        currency: {type: string}
+        direction: {type: string, enum: [CRDT, DBIT]}
+        bookingDate: {type: string, format: date}
+        reference: {type: [string, 'null']}
+    NostroLedgerLine:
+      type: object
+      properties:
+        journalId: {type: string, format: uuid}
+        lineId: {type: string, format: uuid}
+        transactionId: {type: string, format: uuid}
+        entryDate: {type: string, format: date}
+        side: {type: string, enum: [DEBIT, CREDIT]}
+        amount: {type: number}
+        currency: {type: string}
+        description: {type: [string, 'null']}
+    NostroMatch:
+      type: object
+      properties:
+        matchType: {type: string, enum: [EXACT, AMOUNT_DATE]}
+        entry: {$ref: '#/components/schemas/NostroStatementEntry'}
+        ledgerLine: {$ref: '#/components/schemas/NostroLedgerLine'}
+    NostroReconciliation:
+      type: object
+      properties:
+        statementUuid: {type: string, format: uuid}
+        statementId: {type: string}
+        iban: {type: string}
+        glCode: {type: string}
+        currency: {type: string}
+        statementDate: {type: string, format: date}
+        statementOpeningBalance: {type: number}
+        ledgerOpeningBalance:
+          type: [number, 'null']
+          description: >
+            Ledger GL net as of the day before the statement's earliest date. NULL when the ledger
+            cannot state it in the statement currency (see balanceNotStated).
+        openingDifference: {type: [number, 'null'], description: NULL whenever ledgerOpeningBalance is}
+        statementClosingBalance: {type: number}
+        ledgerClosingBalance:
+          type: [number, 'null']
+          description: Ledger GL net as of the statement's latest date. NULL as ledgerOpeningBalance.
+        closingDifference: {type: [number, 'null'], description: NULL whenever ledgerClosingBalance is}
+        balanceNotStated:
+          type: [string, 'null']
+          description: >
+            Why the ledger balances are NULL — the ledger exposes only base-currency (CZK)
+            balances, so a nostro in any other currency has no comparable figure. NULL when the
+            balances are stated.
+        reconciled:
+          type: [boolean, 'null']
+          description: >
+            true when no item is unmatched on either side and both differences are zero; false on
+            any unmatched item or non-zero difference; NULL when every item matched but the
+            balances could not be compared (balanceNotStated).
+        matches:
+          type: array
+          items: {$ref: '#/components/schemas/NostroMatch'}
+        unmatchedStatementEntries:
+          type: array
+          items: {$ref: '#/components/schemas/NostroStatementEntry'}
+        unmatchedLedgerLines:
+          type: array
+          items: {$ref: '#/components/schemas/NostroLedgerLine'}

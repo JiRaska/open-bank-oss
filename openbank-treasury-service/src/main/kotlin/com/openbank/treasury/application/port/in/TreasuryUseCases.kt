@@ -7,10 +7,13 @@ package com.openbank.treasury.application.port.`in`
 import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.NostroReconciliation
+import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -104,4 +107,21 @@ interface TreasuryDealUseCase {
 
     /** Post every missing daily accrual of every SETTLED deal up to [asOf] (capped at maturity). */
     suspend fun accrueInterest(asOf: LocalDate): AccrualRun
+}
+
+interface NostroReconciliationUseCase {
+    /**
+     * Store a parsed correspondent statement for a CONFIGURED nostro account. A replay of
+     * [idempotencyKey] with the same bytes returns the original; with different bytes it is a
+     * conflict. The same (IBAN, statement id) under a new key is a conflict too.
+     */
+    suspend fun upload(
+        statement: NostroStatement,
+        sha256: String,
+        idempotencyKey: String,
+        actor: Actor,
+    ): StoredStatement
+
+    /** Compare the statement with the ledger's nostro GL for the statement date. Posts nothing. */
+    suspend fun reconcile(statementId: UUID): NostroReconciliation
 }

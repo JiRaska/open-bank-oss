@@ -96,6 +96,9 @@ object TreasuryChart {
     /** Fixed ids seeded by the ledger migration: `a0000000-0000-0000-0000-00000000<code>`. */
     fun glAccountId(code: String): UUID = UUID.fromString("a0000000-0000-0000-0000-00000000$code")
 
+    /** The nostro GL of every currency — the only accounts a correspondent statement may reconcile. */
+    val nostroCodes: Set<String> get() = byCurrency.values.mapNotNull { it["nostro"] }.toSet()
+
     /** Every code the treasury posts to — the ledger migration must seed each one. */
     val postedCodes: Set<String> get() = byCurrency.values.flatMap { it.values }.toSet()
 }
