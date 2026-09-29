@@ -32,7 +32,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     private lateinit var valkey: GenericContainer<*>
 
     override fun start(): Map<String, String> {
-        postgres = PostgreSQLContainer("postgres:18-alpine")
+        postgres = PostgreSQLContainer("postgres:18.6-alpine")
             .withDatabaseName("openbank_vop")
             .withUsername("openbank")
             .withPassword("openbank")

@@ -31,6 +31,16 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    # ADR-0313 D6: finrep's OWN identity for the risk engine (RiskEngineRestClient). Kept apart from
+    # the shared openbank-services client above, which the ledger read keeps using: the risk
+    # engine grants risk.snapshot.read to THIS identity only (risk_rest_ext.rego).
+    m2m:
+      auth-server-url: ${QUARKUS_OIDC_AUTH_SERVER_URL:http://localhost:8080/realms/openbank}
+      client-id: openbank-finrep
+      credentials:
+        secret: ${OIDC_M2M_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+      grant:
+        type: client
 
   rest-client:
     ledger-service:

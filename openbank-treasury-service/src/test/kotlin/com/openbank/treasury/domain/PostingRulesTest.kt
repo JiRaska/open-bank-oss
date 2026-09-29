@@ -118,6 +118,30 @@ class PostingRulesTest {
     }
 
     @Test
+    fun `ČNB lombard settles Dr nostro Cr 2320 and matures Friday to Monday with three days of expense`() {
+        // 10 000 000 × 5.75 % × 3 / 360 = 4 791.666… -> 4 791.67
+        val l = placement(
+            product = ProductType.CNB_LOMBARD,
+            counterparty = "CNB",
+            principal = "10000000.00",
+            rate = "5.75",
+            maturity = null,
+            valueDate = DealFixtures.FRIDAY,
+        )
+        assertThat(PostingRules.settlement(l).render())
+            .containsExactly("D 1001 10000000.00 CZK", "C 2320 10000000.00 CZK")
+        assertThat(PostingRules.maturity(l).render()).containsExactly(
+            "D 2320 10000000.00 CZK",
+            "D 5200 4791.67 CZK",
+            "C 1001 10004791.67 CZK",
+        )
+        val accrued = (1L..l.days).mapNotNull { PostingRules.accrual(l, l.valueDate.plusDays(it)) }
+        assertThat(accrued.first().render().map { it.substring(0, 6) }).containsExactly("D 5200", "C 2310")
+        assertThat(PostingRules.reversal(l, DealState.SETTLED)!!.render())
+            .containsExactly("C 1001 10000000.00 CZK", "D 2320 10000000.00 CZK")
+    }
+
+    @Test
     fun `an unbalanced journal cannot be constructed`() {
         assertThatThrownBy {
             JournalSpec(
@@ -135,7 +159,7 @@ class PostingRulesTest {
     fun `every posted code has a fixed ledger id in the seeded range`() {
         assertThat(TreasuryChart.postedCodes).containsExactlyInAnyOrder(
             "1001", "1002", "1500", "1501", "1510", "2300", "2301", "4200", "4201", "5200", "5201",
-            "1520", "1521", "2310", "2311",
+            "1520", "1521", "2310", "2311", "2320",
         )
         assertThat(TreasuryChart.glAccountId("1510").toString()).isEqualTo("a0000000-0000-0000-0000-000000001510")
     }

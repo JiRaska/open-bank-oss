@@ -83,6 +83,7 @@ const NS_GROUP: Record<string, ServiceGroup> = {
   kyb:                'compliance',  // kyb-service (ADR-0284 legal-entity onboarding)
   communication:      'platform',    // communication-service (ADR-0285 Communication Studio)
   context:            'compliance',  // context-service (ADR-0303 investigation graph)
+  pricing:            'platform',    // pricing-service and pricing-console
 }
 
 export function inCluster(): boolean {

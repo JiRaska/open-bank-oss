@@ -6,9 +6,13 @@ services:
 
   # ─────────────────────────────────────────────
   # PostgreSQL (CloudNativePG emulated locally)
+  # Same major.minor as the gitops CNPG imageName (18.6). The CNPG image
+  # has no docker-entrypoint (no POSTGRES_* / initdb.d), so the official
+  # image is used. It lacks pgvector: only copilot-service needs it, and
+  # copilot is not in this compose file.
   # ─────────────────────────────────────────────
   postgres:
-    image: ${POSTGRES_IMAGE:-postgres:16.3-alpine}
+    image: ${POSTGRES_IMAGE:-postgres:18.6-alpine}
     container_name: openbank-postgres
     restart: unless-stopped
     command: >
@@ -28,7 +32,10 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      # PG 18 images keep PGDATA at /var/lib/postgresql/18/docker, so
+      # the volume mounts the parent. New volume name because a PG16
+      # data dir cannot be opened by 18 (old volume is left untouched).
+      - postgres18_data:/var/lib/postgresql
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U openbank"]
@@ -42,7 +49,7 @@ services:
   # Kafka (KRaft mode — no ZooKeeper)
   # ─────────────────────────────────────────────
   kafka:
-    image: ${KAFKA_IMAGE:-apache/kafka:3.7.0}
+    image: ${KAFKA_IMAGE:-apache/kafka:4.2.0}
     container_name: openbank-kafka
     restart: unless-stopped
     environment:
@@ -102,7 +109,7 @@ services:
   # host publish uses 8129 because 8123 is already taken by sanctions-service.
   # ─────────────────────────────────────────────
   clickhouse:
-    image: clickhouse/clickhouse-server:24.3-alpine
+    image: clickhouse/clickhouse-server:26.8-alpine
     container_name: openbank-clickhouse
     restart: unless-stopped
     environment:
@@ -132,7 +139,7 @@ services:
   # Valkey (Redis-compatible cache)
   # ─────────────────────────────────────────────
   valkey:
-    image: ${VALKEY_IMAGE:-valkey/valkey:7.2-alpine}
+    image: ${VALKEY_IMAGE:-valkey/valkey:8.1.10-alpine}
     container_name: openbank-valkey
     restart: unless-stopped
     command: valkey-server --save 60 1 --loglevel warning --requirepass ${VALKEY_PASSWORD}
@@ -150,10 +157,10 @@ services:
 
   # ─────────────────────────────────────────────
   # OpenBao (dev mode for local) — same LF/MPL-2.0 fork production runs
-  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.5.4).
+  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.5.5).
   # ─────────────────────────────────────────────
   openbao:
-    image: quay.io/openbao/openbao:2.5.4
+    image: quay.io/openbao/openbao:2.5.5
     container_name: openbank-openbao
     restart: unless-stopped
     environment:
@@ -191,7 +198,7 @@ services:
   # Keycloak (IAM)
   # ─────────────────────────────────────────────
   keycloak:
-    image: quay.io/keycloak/keycloak:24.0.5
+    image: quay.io/keycloak/keycloak:26.7.3
     container_name: openbank-keycloak
     restart: unless-stopped
     environment:
@@ -199,13 +206,12 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres:5432/openbank_keycloak
       KC_DB_USERNAME: openbank
       KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
-      KC_HOSTNAME: localhost
-      KC_HOSTNAME_PORT: 8080
+      # Hostname v2 (KC 25+): the v1 KC_HOSTNAME_PORT / KC_HOSTNAME_STRICT_HTTPS options are gone.
+      KC_HOSTNAME: http://localhost:8080
       KC_HOSTNAME_STRICT: "false"
-      KC_HOSTNAME_STRICT_HTTPS: "false"
       KC_HTTP_ENABLED: "true"
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       KC_CACHE: local
       JAVA_OPTS_APPEND: "-Xms256m -Xmx384m"
     command: start-dev --import-realm
@@ -229,7 +235,7 @@ services:
   # Kafka UI (development convenience)
   # ─────────────────────────────────────────────
   kafka-ui:
-    image: provectuslabs/kafka-ui:v0.7.2
+    image: ghcr.io/kafbat/kafka-ui:v1.5.0
     container_name: openbank-kafka-ui
     restart: unless-stopped
     environment:
@@ -250,14 +256,12 @@ services:
   # Prometheus
   # ─────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v3.12.0
     container_name: openbank-prometheus
     restart: unless-stopped
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--web.enable-lifecycle'
       - '--web.enable-remote-write-receiver'
       - '--enable-feature=exemplar-storage'
@@ -277,7 +281,7 @@ services:
   # Grafana
   # ─────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:11.4.0
+    image: grafana/grafana:13.0.2
     container_name: openbank-grafana
     restart: unless-stopped
     environment:
@@ -302,7 +306,7 @@ services:
   # Loki (log aggregation)
   # ─────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.3.2
+    image: grafana/loki:3.6.7
     container_name: openbank-loki
     restart: unless-stopped
     command: -config.file=/etc/loki/local-config.yaml
@@ -317,7 +321,7 @@ services:
   # Tempo (distributed tracing)
   # ─────────────────────────────────────────────
   tempo:
-    image: grafana/tempo:2.6.1
+    image: grafana/tempo:2.10.8
     container_name: openbank-tempo
     restart: unless-stopped
     user: root
@@ -336,7 +340,7 @@ services:
   # Kafka topic initializer (one-shot)
   # ─────────────────────────────────────────────
   kafka-init:
-    image: ${KAFKA_IMAGE:-apache/kafka:3.7.0}
+    image: ${KAFKA_IMAGE:-apache/kafka:4.2.0}
     container_name: openbank-kafka-init
     depends_on:
       kafka:
@@ -2037,7 +2041,7 @@ services:
       start_period: 60s
 
 volumes:
-  postgres_data:
+  postgres18_data:
   kafka_data:
   valkey_data:
   openbao_data:

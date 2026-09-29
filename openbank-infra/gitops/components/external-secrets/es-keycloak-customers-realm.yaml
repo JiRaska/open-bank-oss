@@ -6,7 +6,7 @@
 # Sandbox bootstrap: until Vault has the key, seed it manually:
 #   vault kv put secret/keycloak-customers-realm-import \
 #     openbank-customers-realm.json=@openbank-infra/gitops/components/keycloak/customers-realm-template.json
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: keycloak-customers-realm-import

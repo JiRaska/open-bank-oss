@@ -98,7 +98,8 @@ class RiskSnapshotApiIT {
     @Test
     fun `a replay keeps the original requester, not the replaying caller's`(): Unit = runBlocking {
         ledger.inputs = Fixtures.tiedOut()
-        val asOf = LocalDate.parse("2026-06-30")
+        // Other integration classes share Postgres and create a run for 2026-06-30.
+        val asOf = LocalDate.parse("2026-03-19")
 
         val first = snapshots.createSnapshot(asOf, requestedBy = "alice")
         assertThat(first.replayed).isFalse()

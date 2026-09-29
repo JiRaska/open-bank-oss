@@ -96,7 +96,21 @@ export function buildSentryOptions(runtime: 'browser' | 'server'): BrowserOption
     release: RELEASE,
     enabled: DSN.length > 0,
     tracesSampleRate: 0,
-    sendDefaultPii: false,
+    // Sentry 11 collects these categories by default. Keep the operator console's
+    // restrictive v10 posture before data can reach beforeSend (or span capture).
+    dataCollection: {
+      userInfo: false,
+      cookies: false,
+      httpHeaders: { request: false, response: false },
+      httpBodies: [],
+      urlQueryParams: false,
+      genAI: { inputs: false, outputs: false },
+      databaseQueryData: false,
+      queues: false,
+      graphQL: { document: false, variables: false },
+      stackFrameVariables: false,
+      frameContextLines: 0,
+    },
     // The screenshot/replay integrations would capture a banking screen — never enable.
     attachStacktrace: true,
     initialScope: { tags: { runtime } },

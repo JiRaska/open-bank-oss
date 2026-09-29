@@ -119,6 +119,13 @@ data class TreasuryDealEvent(
 interface FxFixingRepository {
     /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
     suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int
+
+    /**
+     * The [source] fixing of [currency] against [quoteCurrency] in effect at [at]: `validFrom <= at <
+     * validTo`, newest `validFrom` first — fx-service's own `getCnbRate(asOf)` rule, which the
+     * ledger's FX revaluation reads. Null when none is in effect.
+     */
+    suspend fun inEffect(source: String, currency: String, quoteCurrency: String, at: Instant): FxFixingRate?
 }
 
 class SnapshotNotFoundException(id: UUID) : RuntimeException("snapshot run $id not found")
