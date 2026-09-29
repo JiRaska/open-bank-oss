@@ -31,9 +31,10 @@ class C0200MapperTest {
         unclassified: Int = 0,
         currency: String? = "CZK",
         totalNotStated: String? = null,
+        parameterSetId: String = "eu-crr3-sa",
     ) = RiskCapitalLookup.found(
         RiskCapitalResult(
-            "run-1", asOf, "bcbs-d424-sa", "1", currency, classes,
+            "run-1", asOf, parameterSetId, "1", currency, classes,
             total?.let(
                 ::BigDecimal,
             ),
@@ -111,6 +112,30 @@ class C0200MapperTest {
         // 5 classes: tolerance (5 + 1) × 0.005 = 0.03
         assertThat(cells(result(total = "6095896.11")).getValue("r0040").isDataGap).isFalse()
         assertThatThrownBy { cells(result(total = "6095896.12")) }.hasMessageContaining("total RWA")
+    }
+
+    @Test
+    fun `a set starting with eu-crr states the SA figures, a later EU CRR version included`() {
+        val eu3 = cells(result(parameterSetId = "eu-crr3-sa"))
+        assertThat(eu3.getValue("r0040").isDataGap).isFalse()
+        assertThat(eu3.getValue("r0040").value).isEqualByComparingTo("6095896.08")
+        // A future EU CRR set version must be accepted without a code change (prefix match).
+        val eu4 = cells(result(parameterSetId = "eu-crr4-sa"))
+        assertThat(eu4.getValue("r0040").isDataGap).isFalse()
+    }
+
+    @Test
+    fun `a non-EU-CRR parameter set gaps every value cell, naming the set actually used`() {
+        val c = cells(result(parameterSetId = "bcbs-d424-sa"))
+        listOf("r0010", "r0040", "r0050", "r0060", "r0070", "r0120", "r0125", "r0140", "r0211").forEach {
+            assertThat(c.getValue(it).isDataGap).describedAs(it).isTrue()
+            assertThat(c.getValue(it).gapReason).describedAs(it)
+                .contains("bcbs-d424-sa")
+                .contains("eu-crr3-sa")
+                .contains("EU CRR")
+        }
+        // Rows that are already gaps for their own reason (not modelled / not computed) are unaffected.
+        assertThat(c.getValue("r0080").gapReason).contains("does not model this exposure class")
     }
 
     @Test
