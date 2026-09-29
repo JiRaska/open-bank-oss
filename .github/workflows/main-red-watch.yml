@@ -130,14 +130,15 @@ jobs:
 
   watch:
     name: main red watch
-    # Only completions of a PUSH to main are a verdict on main. Without this the
-    # watch fires on every PR run of all eight workflows and opens issues about
-    # branches. `workflow_dispatch` with a run_id enters here too, for
-    # falsification against a known-red and a known-green run.
+    # A rerun of an older main commit is not a verdict on the current main.
+    # For workflow_run, github.sha is the default branch tip when this event fires;
+    # reject stale runs before making API calls or changing the main-red issue.
+    # Manual dispatch still permits historical run inspection without issue mutation.
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push')
+       github.event.workflow_run.event == 'push' &&
+       github.event.workflow_run.head_sha == github.sha)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

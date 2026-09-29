@@ -54,7 +54,9 @@ THE RULES the declaration half enforces
   R4  main-red-watch.yml must query the ATTEMPT-SCOPED jobs endpoint. `/actions/runs/<id>/jobs`
       returns the LATEST attempt, so once anybody hand-re-runs a run the watcher silently
       answers about a different attempt than the event fired for -- reporting green on a red
-      event, with no error. R4 greps for `/attempts/` and rejects a bare `/jobs` fetch.
+      event, with no error. R4 exercises the fetch and rejects a bare `/jobs` request.
+  R5  A completed run may be a rerun of an older main commit. Only the current default-branch
+      head may mutate the main-red issue; historical manual inspection remains available.
 
 WHAT THIS CANNOT DO -- read before treating it as coverage
 ----------------------------------------------------------
@@ -201,7 +203,7 @@ def watched_set(root: Path) -> tuple[set[str], str]:
 
 
 def check_declaration(root: Path, workflows=None, watched=None, raw=None) -> list[str]:
-    """R1-R4. Returns a list of finding strings; empty means clean."""
+    """R1-R5. Returns a list of finding strings; empty means clean."""
     workflows = load_workflows(root) if workflows is None else workflows
     if watched is None or raw is None:
         watched, raw = watched_set(root)
@@ -251,6 +253,7 @@ def check_declaration(root: Path, workflows=None, watched=None, raw=None) -> lis
 
     if raw:
         findings.extend(check_head_branch_filter(raw))
+        findings.extend(check_current_head_filter(raw))
     findings.extend(check_attempt_scoped_fetch())
     return findings
 
@@ -314,6 +317,23 @@ def check_head_branch_filter(raw: str) -> list[str]:
         f"R3 no job in {WATCH_WORKFLOW} filters on `head_branch` in its `if:` -- the watch would "
         f"fire on every PR run of every watched workflow. Job conditions seen: "
         f"{[c for c in conditions if c] or 'none'}."
+    ]
+
+
+def check_current_head_filter(raw: str) -> list[str]:
+    """R5: the watch job must compare the completed run with this event's main tip."""
+    try:
+        doc = yaml.safe_load(raw) or {}
+    except yaml.YAMLError as exc:
+        return [f"R5 {WATCH_WORKFLOW} does not parse: {exc}"]
+    jobs = doc.get("jobs") if isinstance(doc, dict) else None
+    watch = jobs.get("watch") if isinstance(jobs, dict) else None
+    condition = str(watch.get("if", "")) if isinstance(watch, dict) else ""
+    if re.search(r"github\.event\.workflow_run\.head_sha\s*==\s*github\.sha\b", condition):
+        return []
+    return [
+        "R5 watch job does not require workflow_run.head_sha == github.sha; a rerun of an old "
+        "main commit could reopen or close the current main-red issue."
     ]
 
 
@@ -638,7 +658,9 @@ def self_test() -> int:
     # ever prove that a substring was absent from an arbitrary string.
     raw_ok = (
         "on:\n  workflow_run:\n    workflows: [CI]\n"
-        "jobs:\n  watch:\n    if: github.event.workflow_run.head_branch == 'main'\n"
+        "jobs:\n  watch:\n    if: >-\n"
+        "      github.event.workflow_run.head_branch == 'main' &&\n"
+        "      github.event.workflow_run.head_sha == github.sha\n"
         "    runs-on: ubuntu-latest\n"
     )
     check("a fully declared set is clean", check_declaration(REPO, wf_ok, wl, raw_ok) == [])
@@ -682,6 +704,17 @@ def self_test() -> int:
     )
     check("R3: a COMMENT naming head_branch does not satisfy the rule",
           any("R3" in x for x in check_declaration(REPO, wf_ok, wl, _yml_comment_only)))
+    f = check_declaration(REPO, wf_ok, wl, _yml_with_filter)
+    check("R5: branch filter alone cannot admit a stale main rerun",
+          any("R5" in x for x in f))
+    check("R5: current-head equality admits the watch",
+          not any("R5" in x for x in check_declaration(REPO, wf_ok, wl, raw_ok)))
+    _yml_head_comment_only = _yml_with_filter.replace(
+        "jobs:", "# github.event.workflow_run.head_sha == github.sha\njobs:"
+    )
+    check("R5: a COMMENT naming the equality does not satisfy the rule",
+          any("R5" in x for x in check_declaration(REPO, wf_ok, wl,
+                                                    _yml_head_comment_only)))
     # R4 is behavioural now, so falsify it by breaking the FETCH, not by handing it a doctored
     # yml. The old case passed a fake `raw` without `/attempts/` -- which no longer proves
     # anything, because the yml never carried the request in the first place.
@@ -787,7 +820,7 @@ def main() -> int:
         for f in findings:
             print(f"::error::main-red-watch declaration: {f}")
         if findings:
-            print(f"\n{len(findings)} finding(s). See {Path(__file__).name} R1-R4.")
+            print(f"\n{len(findings)} finding(s). See {Path(__file__).name} R1-R5.")
             return 1
         print("main-red-watch: every push-on-main workflow is watched or declared.")
         return 0
