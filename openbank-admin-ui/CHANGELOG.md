@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.267.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.266.0...admin-ui-v0.267.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** book FX spot deals ([#11048](https://github.com/JiRaska/open-bank-oss/issues/11048)) ([9688749](https://github.com/JiRaska/open-bank-oss/commit/9688749512b66697efc82913b021e1ee10b05df8))
+* **treasury:** let an AI assistant draft deals it can never book ([#11121](https://github.com/JiRaska/open-bank-oss/issues/11121)) ([41a371c](https://github.com/JiRaska/open-bank-oss/commit/41a371c0952a0ff7555839041e192680e429dea2))
+
 ## [0.266.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.265.0...admin-ui-v0.266.0) (2026-09-29)
 
 
