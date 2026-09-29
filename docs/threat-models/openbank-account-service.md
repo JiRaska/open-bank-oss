@@ -914,4 +914,10 @@ decision use first; the additive projection table may remain until its consumer 
   deactivated or revised (revision or threshold differs from the grant's pin), a new proposal is
   refused with "approval group changed; the grant must be reissued" — a group edit never silently
   re-scopes an issued grant or an open proposal. Risk class: elevation of privilege / tampering.
+  Decision SCA linking is split by policy. An N_OF_M proposal is STRICT: the decision challenge
+  must carry `SavingsWithdrawalScaReference.of(proposalId, approve)` plus the amount and currency,
+  or an approve could be counted from a challenge the device signed as a reject. A SOLO proposal
+  keeps main's behaviour: a challenge carrying no linking is accepted, and any field it does carry
+  (reference, amount, currency) must match exactly and is restated on consume
+  (`DecisionScaBindingTest`).
   Rollback: disable the delegation flag first; V31/V32 are additive.

@@ -41,9 +41,9 @@ data class ScaChallengeClientResponse(
 /** Mirrors the operation-bound subset of sca-service's ConsumeScaRequest. */
 data class ConsumeScaChallengeRequest(
     val partyId: UUID,
-    val amount: String,
-    val currency: String,
-    val reference: String,
+    val amount: String?,
+    val currency: String?,
+    val reference: String?,
 )
 
 /**
@@ -90,9 +90,9 @@ class ResilientScaChallengeClient @Inject constructor(@RestClient private val cl
     override suspend fun consumeChallenge(
         challengeId: UUID,
         expectedPartyId: UUID,
-        amount: String,
-        currency: String,
-        reference: String,
+        amount: String?,
+        currency: String?,
+        reference: String?,
     ): ScaChallengeSnapshot = client.consumeChallenge(
         challengeId,
         ConsumeScaChallengeRequest(expectedPartyId, amount, currency, reference),

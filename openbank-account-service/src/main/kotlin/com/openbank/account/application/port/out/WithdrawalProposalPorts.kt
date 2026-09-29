@@ -67,8 +67,8 @@ interface ScaChallengeClient {
     suspend fun consumeChallenge(
         challengeId: UUID,
         expectedPartyId: UUID,
-        amount: String,
-        currency: String,
-        reference: String,
+        amount: String?,
+        currency: String?,
+        reference: String?,
     ): ScaChallengeSnapshot
 }

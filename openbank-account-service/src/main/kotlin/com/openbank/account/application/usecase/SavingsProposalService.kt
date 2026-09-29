@@ -76,15 +76,48 @@ private fun requireProposalAccount(proposal: WithdrawalProposal, accountId: UUID
     if (proposal.accountId != accountId) throw ProposalNotFoundException(proposal.id)
 }
 
-private fun isDynamicallyLinked(
+/** What the decision consume restates to sca-service; a null field is one the challenge never carried. */
+internal data class DecisionScaBinding(val amount: String?, val currency: String?, val reference: String?)
+
+/**
+ * The decision challenge's dynamic linking, or null when it is linked to something else.
+ *
+ * N_OF_M (a proposal with an approval-group snapshot, flag-gated): STRICT. The challenge must carry
+ * this proposal's approve-or-reject reference plus its amount and currency, or an approve could be
+ * counted from a challenge the device signed as a reject (or for another proposal).
+ *
+ * SOLO (live on main): every field the challenge DOES carry must match exactly, and a field it does
+ * not carry is legacy and accepted — today's clients create this challenge without a reference, and
+ * requiring one would refuse every existing owner decision.
+ */
+internal fun decisionScaBinding(
     challenge: ScaChallengeSnapshot,
     proposal: WithdrawalProposal,
     approve: Boolean,
     amount: String,
-): Boolean = challenge.reference == SavingsWithdrawalScaReference.of(proposal.id, approve) &&
-    challenge.currency?.uppercase() == proposal.currency.uppercase() &&
-    challenge.amount?.let { runCatching { BigDecimal(it).compareTo(BigDecimal(amount)) == 0 }.getOrDefault(false) } ==
-    true
+): DecisionScaBinding? {
+    val expectedReference = SavingsWithdrawalScaReference.of(proposal.id, approve)
+    val amountMatches = challenge.amount
+        ?.let { runCatching { BigDecimal(it).compareTo(BigDecimal(amount)) == 0 }.getOrDefault(false) } == true
+    val currencyMatches = challenge.currency?.uppercase() == proposal.currency.uppercase()
+    val referenceMatches = challenge.reference == expectedReference
+    return when {
+        proposal.approvalGroupId != null ->
+            if (referenceMatches && amountMatches && currencyMatches) {
+                DecisionScaBinding(amount, proposal.currency, expectedReference)
+            } else {
+                null
+            }
+        challenge.reference != null && !referenceMatches -> null
+        challenge.amount != null && !amountMatches -> null
+        challenge.currency != null && !currencyMatches -> null
+        else -> DecisionScaBinding(
+            amount = challenge.amount?.let { amount },
+            currency = challenge.currency?.let { proposal.currency },
+            reference = challenge.reference,
+        )
+    }
+}
 
 private data class DecisionContext(val ownerPartyId: UUID, val proposal: WithdrawalProposal)
 
@@ -374,23 +407,32 @@ class SavingsProposalService(
         if (challenge.purpose != SCA_PURPOSE) {
             throw ProposalScaException("SCA challenge $scaSessionId does not match the decision purpose")
         }
-        val amount = proposal.amountForSca()
-        val reference = SavingsWithdrawalScaReference.of(proposal.id, approve)
-        if (!isDynamicallyLinked(challenge, proposal, approve, amount)) {
-            throw ProposalScaException("SCA challenge $scaSessionId is not linked to this exact proposal decision")
-        }
+        val binding = decisionScaBinding(challenge, proposal, approve, proposal.amountForSca())
+            ?: throw ProposalScaException("SCA challenge $scaSessionId is not linked to this exact proposal decision")
         val actorPartyId = challenge.partyId
         authorizeDecisionActor(partyMandateRepository, ownerPartyId, proposal, callerPartyId, actorPartyId)
         // A 409 is recoverable only after the signed amount/currency/reference above matched this
         // exact immutable proposal and decision. This closes the cross-service crash window: if
         // consume committed but this service failed before its DB transaction, retry completes
         // the same operation; the decision ledger prevents a second actor vote or second event.
+        // A legacy SOLO challenge carries no reference, so nothing ties an already-spent one to
+        // THIS decision: it is never recoverable and consume's 409 stands (main's behaviour).
+        val recoverable = binding.reference != null
+        if (challenge.consumedAt != null && !recoverable) {
+            throw ProposalScaException("SCA challenge $scaSessionId was already consumed")
+        }
         try {
             if (challenge.consumedAt == null) {
-                scaChallengeClient.consumeChallenge(scaSessionId, actorPartyId, amount, proposal.currency, reference)
+                scaChallengeClient.consumeChallenge(
+                    scaSessionId,
+                    actorPartyId,
+                    binding.amount,
+                    binding.currency,
+                    binding.reference,
+                )
             }
         } catch (e: WebApplicationException) {
-            if (e.response.status != jakarta.ws.rs.core.Response.Status.CONFLICT.statusCode) {
+            if (!recoverable || e.response.status != jakarta.ws.rs.core.Response.Status.CONFLICT.statusCode) {
                 throw ProposalScaException("SCA challenge $scaSessionId could not be consumed", e)
             }
         } catch (e: Exception) {

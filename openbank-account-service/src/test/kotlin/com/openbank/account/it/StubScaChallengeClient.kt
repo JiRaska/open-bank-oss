@@ -47,9 +47,9 @@ class StubScaChallengeClient : ScaChallengeClient {
     override suspend fun consumeChallenge(
         challengeId: UUID,
         expectedPartyId: UUID,
-        amount: String,
-        currency: String,
-        reference: String,
+        amount: String?,
+        currency: String?,
+        reference: String?,
     ): ScaChallengeSnapshot {
         consumeCount.incrementAndGet()
         check(consumed.add(challengeId)) { "SCA challenge $challengeId already consumed" } // sca-service: 409
