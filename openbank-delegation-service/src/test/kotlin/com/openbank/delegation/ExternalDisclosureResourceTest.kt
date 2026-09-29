@@ -31,7 +31,7 @@ class ExternalDisclosureResourceTest {
     @Test
     fun `successful OTP verification returns no content and does not disclose metadata`(): Unit = runBlocking {
         coEvery { idempotency.get(any()) } returns null
-        coEvery { idempotency.save(any(), any(), any(), any()) } returns Unit
+        coEvery { idempotency.save(any<String>(), any<Int>(), any<String>(), any<Long>()) } returns Unit
         coEvery { disclosures.verifyOtp(id, "link-secret", "123456") } returns mockk()
 
         val response = resource.verifyOtp(id, ExternalDisclosureOtpRequest("link-secret", "123456", "request-1"))
@@ -57,7 +57,7 @@ class ExternalDisclosureResourceTest {
     @Test
     fun `content response is the sealed artifact unchanged`(): Unit = runBlocking {
         coEvery { idempotency.get(any()) } returns null
-        coEvery { idempotency.save(any(), any(), any(), any()) } returns Unit
+        coEvery { idempotency.save(any<String>(), any<Int>(), any<String>(), any<Long>()) } returns Unit
         val sealed = byteArrayOf(37, 80, 68, 70)
         coEvery { disclosures.release(id, "link-secret") } returns ExternalDisclosureArtifact("application/pdf", sealed)
 
