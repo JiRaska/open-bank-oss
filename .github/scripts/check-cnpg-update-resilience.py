@@ -27,6 +27,10 @@ WHAT THIS ENFORCES
 2. EVERY money-path cluster has `instances >= 2`, required hostname anti-affinity, and does not
    disable its PodDisruptionBudget. Without a second instance on a second node, neither
    switchover nor failover has a target, and a stuck node is a stuck database.
+3. EVERY cluster runs a standby (rule 4 below) and EVERY cluster with a standby pins it to a
+   different node (required hostname anti-affinity, rule 5). `preferred` is a hint the scheduler
+   drops under pressure -- exactly during the node churn a standby exists for -- so a two-instance
+   cluster whose instances share a node pays for HA and gets none of it.
 
 The money-path cluster set is DERIVED, never listed: for each service in
 `rules.yaml: money_path_services`, find the workload whose container image is that service and
@@ -74,8 +78,8 @@ IMAGE_RX = re.compile(r'"image":\s*"([^"]+)"')
 # instances; applying it in the same sync that raises instances 1 -> 2 rolls the only primary in
 # place before the new standby exists. A cluster whose standby is being added carries this
 # annotation (with a reason) and is excused the affinity checks ONLY -- never instances >= 2 or
-# switchover. It is stale the moment the affinity is present, and meaningless on a cluster that
-# is not money-path; both are findings, so the excuse cannot outlive the wave that removes it.
+# switchover. It is stale the moment the affinity is present, so the excuse cannot outlive the
+# wave that removes it. Valid on any cluster since rule 5 extended the affinity fleet-wide.
 PENDING_ANN = "openbank.io/affinity-rollout-pending"
 
 # Money-path services that genuinely own no database. Reason required; an entry for a service
@@ -207,17 +211,8 @@ def check() -> tuple[list[str], int]:
         mp_clusters[key] = "platform dependency"
 
     # 3. money-path: a second instance, on a second node, with its PDB
-    for key, c in sorted(clusters.items()):
-        if c["pending"] and key not in mp_clusters:
-            findings.append(f"{c['path']}: Cluster {key} carries {PENDING_ANN} but is not a money-path cluster -- stale")
-    for key, svc in sorted(mp_clusters.items()):
-        c = clusters[key]
-        spec = c["spec"]
-        where = f"{c['path']}: money-path Cluster {key} ({svc})"
-        inst = spec.get("instances", 1)
-        if not isinstance(inst, int) or inst < 2:
-            findings.append(f"{where} has instances={inst}; ADR-0159 requires >= 2 (primary + standby)")
-        aff = spec.get("affinity") or {}
+    def affinity(c: dict, where: str) -> None:
+        aff = c["spec"].get("affinity") or {}
         aff_gaps = []
         if aff.get("enablePodAntiAffinity") is not True:
             aff_gaps.append("lacks affinity.enablePodAntiAffinity: true")
@@ -231,7 +226,16 @@ def check() -> tuple[list[str], int]:
             else:
                 print(f"::notice::{where}: affinity deferred to a staged wave ({c['pending']})")
         else:
-            findings += [f"{where} {g}" for g in aff_gaps]
+            findings.extend(f"{where} {g}" for g in aff_gaps)
+
+    for key, svc in sorted(mp_clusters.items()):
+        c = clusters[key]
+        spec = c["spec"]
+        where = f"{c['path']}: money-path Cluster {key} ({svc})"
+        inst = spec.get("instances", 1)
+        if not isinstance(inst, int) or inst < 2:
+            findings.append(f"{where} has instances={inst}; ADR-0159 requires >= 2 (primary + standby)")
+        affinity(c, where)
         if spec.get("enablePDB") is False:
             findings.append(f"{where} disables its PodDisruptionBudget (enablePDB: false)")
 
@@ -263,6 +267,15 @@ def check() -> tuple[list[str], int]:
                 f"{c['path']}: Cluster {key} has instances={inst}; every CNPG cluster needs >= 2 "
                 f"(a standby survives node loss) or a reasoned entry in cnpg_single_instance_exceptions"
             )
+
+    # 5. EVERY cluster with a standby keeps it on another node (required hostname anti-affinity).
+    #    A single-instance exception has nothing to separate, so it is not checked here.
+    for key, c in sorted(clusters.items()):
+        if key in mp_clusters:
+            continue
+        inst = c["spec"].get("instances", 1)
+        if isinstance(inst, int) and inst >= 2:
+            affinity(c, f"{c['path']}: Cluster {key} (instances={inst})")
 
     gatelib.subjects(len(clusters), f"CNPG clusters; {len(mp_clusters)} money-path")
     return findings, len(mp_clusters)
@@ -351,7 +364,7 @@ def self_test() -> int:
 
     good = {
         "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n"),
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra=_HA),
         "deploy.yaml": _DEPLOY,
         "wf.yaml": _WF.format(inst=2, extra=_HA),
     }
@@ -383,9 +396,19 @@ def self_test() -> int:
     }
     deferred = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
         "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n")}
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
+        "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)}
     if run(deferred):
         print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
+    cases["non-money-path HA cluster with only preferred anti-affinity"] = (
+        {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA) + "---\n"
+         + _CLUSTER.format(name="other-db", inst=2, extra=_HA.replace("required", "preferred"))},
+        "st/other-db (instances=2) affinity.podAntiAffinityType must be `required`")
+    cases["pending annotation on a non-money-path cluster that already has the affinity"] = (
+        {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA) + "---\n"
+         + _CLUSTER.format(name="other-db", inst=2, extra=_HA).replace(
+             "  name: other-db\n", "  name: other-db\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+        "st/other-db (instances=2) carries")
     cases["single-instance platform database (the temporal-db shape)"] = (
         {**good, "wf.yaml": _WF.format(inst=1, extra=_HA)}, "wf/wf-db (platform dependency) has instances=1")
     cases["platform entry naming a namespace no money-path workload calls"] = (
