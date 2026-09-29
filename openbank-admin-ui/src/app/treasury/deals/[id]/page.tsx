@@ -148,6 +148,27 @@ function DealDetail({ id }: { id: string }) {
         </table>
       </div>
 
+      {deal.fx && (
+        <div className="card" style={{ marginBottom: 16 }} data-testid="fx-terms">
+          <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Podmínky FX spotu', 'FX spot terms')}</h2>
+          <div style={{ fontSize: 13, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <StatusBadge status={deal.fx.side} tone={deal.fx.side === 'BUY' ? 'info' : 'warning'} label={deal.fx.side} />
+            <span>{`${deal.fx.buyCurrency}/${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kupuje', 'Buys')} ${money(deal.fx.buyAmount)} ${deal.fx.buyCurrency}`}</span>
+            <span>{`${t('Prodává', 'Sells')} ${money(deal.fx.sellAmount)} ${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kurz obchodu', 'Deal rate')} ${deal.fx.dealRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            {deal.fx.midRate !== null && (
+              <span>{`${t('Střední kurz fx-service', 'fx-service mid')} ${deal.fx.midRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            )}
+          </div>
+          {deal.fx.rateFlag && (
+            <div role="alert" style={{ color: 'var(--danger-text)', marginTop: 8 }}>
+              {t(`Kurz označen: ${deal.fx.rateFlag}`, `Rate flagged: ${deal.fx.rateFlag}`)}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Kontrola limitu', 'Limit check')}</h2>
         {deal.limitCheck ? (

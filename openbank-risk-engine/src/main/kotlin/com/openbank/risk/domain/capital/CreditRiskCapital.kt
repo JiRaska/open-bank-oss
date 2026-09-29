@@ -95,7 +95,9 @@ private const val RATIO_SCALE = 6
 private const val STAGE_3 = "STAGE_3"
 
 /**
- * Pillar 1 credit-risk RWA under the BCBS d424 standardised approach, and the capital ratios where
+ * Pillar 1 credit-risk RWA under the standardised approach of the selected [CapitalParameters]
+ * ([CapitalRegime.EU]: CRR Part Three Title II Chapter 2, the default; [CapitalRegime.BCBS]: d424 Part I),
+ * and the capital ratios where
  * own funds are in the snapshot (ADR-0313 phase 2). Per currency, plus a CZK total and requirement
  * at the ČNB fixing ([ReportingCurrencyTotal]); ratios only for a single-currency book, since own
  * funds are not converted. No credit-risk mitigation (none is in the snapshot) and no off-balance
@@ -112,7 +114,8 @@ object CreditRiskCapital {
             "only for a single-currency book."
 
     const val CREDIT_RISK_ONLY_NOTE =
-        "The ratios divide own funds by CREDIT-RISK RWA only. bcbs189 ¶50 minima apply to total RWA, which also " +
+        "The ratios divide own funds by CREDIT-RISK RWA only. The minima (CRR Art. 92(1); bcbs189 ¶50) apply to " +
+            "the total risk exposure amount, which also " +
             "includes operational and market risk (and CVA); those are not computed here, so these ratios are an " +
             "UPPER BOUND on the real ones."
 
@@ -199,7 +202,7 @@ object CreditRiskCapital {
         fun r(amount: BigDecimal, min: CapitalFactor) = CapitalRatio(
             amount.divide(t.totalRwa, BigMath.MC).setScale(RATIO_SCALE, RoundingMode.HALF_EVEN),
             p[min],
-            min.citation,
+            p.citation(min),
         )
         return CapitalRatios(
             cet1 = r(of.cet1, CapitalFactor.MIN_CET1_RATIO),
@@ -218,7 +221,8 @@ object CreditRiskCapital {
         private val cls get() = params.classification
 
         private fun line(c: ExposureClass, label: String, p: Position, f: CapitalFactor) {
-            lines += ExposureLine(c, label, p.glAccountCode, p.instrumentId, p.amount, params[f], f.key, f.citation)
+            lines +=
+                ExposureLine(c, label, p.glAccountCode, p.instrumentId, p.amount, params[f], f.key, params.citation(f))
         }
 
         private fun unclassify(p: Position, reason: String) {

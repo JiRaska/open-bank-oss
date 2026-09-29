@@ -82,6 +82,7 @@ class TreasuryDealService(
             actor = actor,
             at = now,
             rationale = command.rationale,
+            inputs = command.inputs,
             fxSide = command.fxSide,
         )
         // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
