@@ -144,6 +144,8 @@ class TreasuryAccountsPostingIT {
             ),
             422,
         )
+    }
+
     /**
      * #10896: treasury's FX spot settlement is ONE journal in two currencies, routed through the V5
      * FX position accounts (1990 CZK, 1991 EUR) by their fixed ids, balanced within each currency.
