@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: notification-service
     app.kubernetes.io/part-of: notifications
   annotations:
-    openbank.tech/policy-checksum: "7b8979faae15c48a"
+    openbank.tech/policy-checksum: "822bdb9a342a0e8e"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1262,6 +1262,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

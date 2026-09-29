@@ -6,7 +6,7 @@
 # its removal in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
 #
 # STAGE 1 OF 2 — AUDIT ONLY, except where a document says it has reached stage 2
-# (today: deny-nginx-snippet-annotations-cel,
+# (today: block-deployment-if-rollout-exists-cel, deny-nginx-snippet-annotations-cel,
 # require-gated-or-declared-tool-ingress-cel and openbank-dr-sa-pin-cel, #11437).
 # Each other ValidatingPolicy
 # below runs NEXT TO its v1 original, which stays in Enforce and remains the only
@@ -26,9 +26,23 @@
 # Parity is tested with the Kyverno 1.19.1 CLI against the same positive/negative
 # resources as the v1 originals: openbank-infra/tests/kyverno-cel/.
 ---
-# Shadow of block-deployment-if-rollout-exists (rollout-bypass-prevention.yaml).
+# STAGE 2 (#11437): enforcing. The v1 original rollout-bypass-prevention.yaml was
+# deleted in the same PR, so this is the only policy stopping a plain Deployment
+# from shadowing a money-path Rollout of the same name (ADR-0098): such a
+# Deployment would take traffic without the canary steps and analysis gates.
 # The v1 apiCall LIST + fieldSelector becomes resource.List over the namespace's
 # Rollouts; LIST, as before, so a missing Rollout is an empty list, not an error.
+# DELETE stays out of scope so the Deployment->Rollout migration (Argo creates the
+# Rollout before pruning the Deployment) and cleanup keep working.
+# [Deny] + Fail restore v1's Enforce / default failurePolicy. Fail means that if
+# resource.List itself errors (Rollout CRD absent, RBAC revoked), every Deployment
+# CREATE/UPDATE in the 13 namespaces below is denied until it is fixed; v1 carried
+# exactly this exposure for the same call. Blast radius is those namespaces only,
+# never cluster-wide. Preconditions live in the cluster; re-check before touching:
+#   kubectl get crd rollouts.argoproj.io
+#   kubectl auth can-i list rollouts.argoproj.io -A \
+#     --as=system:serviceaccount:kyverno:kyverno-admission-controller   # yes
+# Break-glass for a List outage: runbook 0011 §4a (set failurePolicy: Ignore here).
 apiVersion: policies.kyverno.io/v1
 kind: ValidatingPolicy
 metadata:
@@ -37,12 +51,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL shadow
+    policies.kyverno.io/title: Block Deployment if Rollout exists (ADR-0098) — CEL
     policies.kyverno.io/category: Progressive Delivery
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   evaluation:
     background:
       enabled: false
