@@ -242,8 +242,8 @@ class CardProcessingService(
             log.errorf(
                 "ledger posting FAILED for authorization %s (%s) — the clearing is recorded, the books are not: %s",
                 saved.id,
-                command.idempotencyKey,
-                posting.detail,
+                command.idempotencyKey.forLog(),
+                posting.detail?.forLog(),
             )
         }
         return PresentmentOutcome.Accepted(saved)
@@ -332,3 +332,7 @@ class CardProcessingService(
 }
 
 class CardNotFoundException(val cardId: UUID) : RuntimeException("card $cardId is not known to card-issuance")
+
+// Caller-supplied text (the acquirer's idempotency key, a downstream error detail) must not be able to
+// forge log lines: CR/LF are replaced before it reaches the formatter.
+private fun String.forLog(): String = replace('\r', '_').replace('\n', '_')
