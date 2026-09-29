@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.266.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.265.0...admin-ui-v0.266.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** nostro reconciliation upload and result ([#11077](https://github.com/JiRaska/open-bank-oss/issues/11077)) ([fb76cea](https://github.com/JiRaska/open-bank-oss/commit/fb76cead571b3d592f458592536a9696f68746dc))
+* **risk-engine:** forecast the liquidity survival horizon from a snapshot ([#11040](https://github.com/JiRaska/open-bank-oss/issues/11040)) ([44cbf58](https://github.com/JiRaska/open-bank-oss/commit/44cbf58b03a562ad31fd0ae6e1697a80f8c9b6f1))
+
 ## [0.265.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.1...admin-ui-v0.265.0) (2026-09-29)
 
 
