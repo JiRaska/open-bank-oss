@@ -328,7 +328,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md) | Shared resilience policy profiles for inter-service calls | Proposed | Planned | resilience,libs,testing,compliance | — |
 | [0322](0322-structured-decision-log-envelope-for-automated-decisions.md) | Structured decision-log envelope for automated decisions | Proposed | Planned | audit,ai-agents,authz,compliance | — |
 | [0323](0323-producer-side-hash-linked-audit-envelope-via-outbox.md) | Producer-side hash-linked audit envelope via outbox | Proposed | Partial | audit,libs,compliance,kafka | — |
-| [0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md) | Replace retired ingress-nginx with Gateway API on Envoy Gateway | Proposed | Planned | networking,kubernetes,security,gitops | — |
+| [0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md) | Replace retired ingress-nginx with Gateway API on Envoy Gateway | Proposed | Partial | networking,kubernetes,security,gitops | — |
 
 ## By tag
 

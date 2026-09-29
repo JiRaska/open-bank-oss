@@ -372,7 +372,7 @@ _Also tagged `infrastructure`: 0007 0010 0054 0058 0060 0161 0174 0175_
 
 ## networking
 
-- **[0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md)** · Replace retired ingress-nginx with Gateway API on Envoy Gateway _(proposed)_ · `planned` · ingress-nginx is archived upstream with no further fixes; the edge moves to Gateway API served by Envoy Gateway behind the same single NLB, host by host, and ingress-nginx is removed at the end.
+- **[0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md)** · Replace retired ingress-nginx with Gateway API on Envoy Gateway _(proposed)_ · `partial` · ingress-nginx is archived upstream with no further fixes; the edge moves to Gateway API served by Envoy Gateway behind the same single NLB, host by host, and ingress-nginx is removed at the end.
 
 _Also tagged `networking`: 0051 0058 0081 0093 0234_
 

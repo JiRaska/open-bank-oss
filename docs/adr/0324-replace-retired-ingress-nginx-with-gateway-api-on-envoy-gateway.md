@@ -1,13 +1,14 @@
 ---
 date: 2026-09-28
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [networking, kubernetes, security, gitops]
 summary: "ingress-nginx is archived upstream with no further fixes; the edge moves to Gateway API served by Envoy Gateway behind the same single NLB, host by host, and ingress-nginx is removed at the end."
+followup: "#11258 — migrate the remaining Ingress hosts and remove ingress-nginx after Gateway API parity is proven"
 ---
 
 # ADR-0324 — Replace retired ingress-nginx with Gateway API on Envoy Gateway

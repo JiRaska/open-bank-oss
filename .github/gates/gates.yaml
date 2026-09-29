@@ -474,7 +474,7 @@ gates:
   - id: ingress-edge-exposure
     name: "every gitops Ingress declares openbank.io/edge-exposure public|internal (ADR-0324 mixed edge)"
     group: gitops
-    budget_seconds: 10
+    budget_seconds: 25   # 10.5s observed in four-way hosted CI; allow runner variance without skipping validation
     mode: enforced
     min_subjects: 10   # 17 today: 15 Ingress manifests + 2 chart-rendered (glitchtip, rum-gateway)
     rationale: "The edge NLBs are public; only Ingresses annotated internal get the Kyverno source allow-list. An Ingress with no annotation is silently public, and a hand-written whitelist-source-range would put operator CIDRs into this public repo."
