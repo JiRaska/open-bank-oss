@@ -117,12 +117,29 @@ class PostgresGenericCatalogRepository(
             query.resultList
         }.map { rows -> rows.map { it.toDomain() } }.awaitSuspending()
 
+    /**
+     * An offering has at most one open draft (V11 `uq_catalog_revisions_single_draft`). The check
+     * runs under the offering lock so a double-submitted create answers 409 instead of leaving two
+     * drafts no reader can choose between; the unique index is the backstop for any other writer.
+     */
     override suspend fun createDraft(revision: ProductRevision, actorId: String): ProductRevision =
-        translatePersistenceConflict("revision number already exists") {
+        translatePersistenceConflict("offering ${revision.offeringId} already has an open draft") {
             sessions.withTransaction { session ->
                 session.find(CatalogOfferingEntity::class.java, revision.offeringId, LockMode.PESSIMISTIC_WRITE)
                     .flatMap { offering ->
                         checkNotNull(offering) { "offering ${revision.offeringId} disappeared" }
+                        session.createQuery(
+                            "SELECT id FROM CatalogRevisionEntity WHERE offeringId = :id AND state = 'DRAFT'",
+                            UUID::class.java,
+                        ).setParameter("id", revision.offeringId).setMaxResults(1).resultList
+                    }
+                    .flatMap { openDrafts ->
+                        openDrafts.firstOrNull()?.let { existing ->
+                            throw CatalogConflictException(
+                                "offering ${revision.offeringId} already has open draft $existing; " +
+                                    "update or publish it instead of creating another",
+                            )
+                        }
                         session.createQuery(
                             "SELECT COALESCE(MAX(number), 0) FROM CatalogRevisionEntity WHERE offeringId = :id",
                             Long::class.javaObjectType,
