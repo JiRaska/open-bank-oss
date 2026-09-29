@@ -50,6 +50,10 @@
 #      The capacity does not exist; the gate built to see that gap could no longer see it.
 #      A scale set in KNOWN_UNAPPLIED is therefore subtracted from `provisioned`, so the
 #      other four classes reason about capacity that actually exists.
+#   6. DYNAMIC-RUNNER (fatal). An arbitrary runs-on expression could route a PR to an
+#      unreviewed pool while a text scan reports no self-hosted label. The one accepted
+#      expression selects openbank-build only for a push to refs/heads/main; all other
+#      events select ubuntu-latest. It is modeled as a main-push build-pool use above.
 #
 # EXIT CODES
 #   0 — clean
@@ -69,7 +73,7 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import gatelib  # noqa: E402  (path must be set first)
+import gatelib
 
 # Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
 # Removing an entry requires either provisioning the pool or deleting its declaration.
@@ -109,6 +113,13 @@ KNOWN_UNAPPLIED: dict[str, str] = {
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')
 PR_EVENTS = {"pull_request", "pull_request_target"}
+# An exact, audited exception to the normal rule that a dynamic runs-on cannot be
+# classified. On PR/schedule/manual events this expression selects ubuntu-latest;
+# only a push to refs/heads/main can select the credential-free build ARC pool.
+MAIN_ONLY_BUILD_EXPR = (
+    "${{ github.event_name == 'push' && github.ref == 'refs/heads/main' "
+    "&& 'openbank-build' || 'ubuntu-latest' }}"
+)
 
 
 def load_declared_pools(root: Path) -> tuple[dict[str, str], list[str]]:
@@ -169,7 +180,8 @@ def scan_workflows(root: Path):
             if not isinstance(job, dict):
                 continue
             for label in _labels(job.get("runs-on")):
-                if "${{" in label:  # expression — not statically decidable
+                if label == MAIN_ONLY_BUILD_EXPR:
+                    yield (wf.relative_to(root).as_posix(), job_id, "openbank-build", {"push"})
                     continue
                 yield (wf.relative_to(root).as_posix(), job_id, label, events)
 
@@ -201,6 +213,12 @@ def evaluate(
     n_labels = 0
 
     for wf, job, label, events in scan_workflows(root):
+        if "${{" in label:
+            findings.append(
+                f"DYNAMIC-RUNNER {wf}: job '{job}' has a runs-on expression the pool gate "
+                "cannot classify. Add a falsifiable event-to-pool rule before using it."
+            )
+            continue
         if not label.startswith("openbank-"):
             continue
         n_labels += 1
@@ -304,6 +322,13 @@ def self_test() -> int:
          _rules(), "push", "openbank-buidl", empty, "UNKNOWN-LABEL", empty),
         ("PR-POOL: a pull_request job on the credential-carrying deploy pool",
          _rules(), "pull_request", "openbank-deploy", empty, "PR-POOL", empty),
+        ("main-only ARC expression keeps pull requests on hosted runners",
+         _rules(), "pull_request", MAIN_ONLY_BUILD_EXPR, empty, None, empty),
+        ("DYNAMIC-RUNNER: an unreviewed expression cannot hide a PR deploy route",
+         _rules(), "pull_request", (
+             "${{ github.event_name == 'pull_request' "
+             "&& 'openbank-deploy' || 'ubuntu-latest' }}"
+         ), empty, "DYNAMIC-RUNNER", empty),
         ("DECLARED-UNPROVISIONED: a declared pool no OpenTofu creates",
          _rules({"ghost": "openbank-ghost"}), "push", "openbank-build", empty, "DECLARED-UNPROVISIONED", empty),
         ("STALE-BASELINE (provisioned): a baselined pool that now exists",
@@ -347,6 +372,18 @@ def self_test() -> int:
                     rc = 1
                 else:
                     print(f"self-test case {i} OK — {desc}")
+    with tempfile.TemporaryDirectory() as td:
+        workflow = ("on: [push, pull_request]\n"
+                    f"jobs:\n  a:\n    runs-on: {MAIN_ONLY_BUILD_EXPR}\n"
+                    "    steps: [{run: 'true'}]\n")
+        root = _fixture(Path(td), _rules(), _TF, workflow)
+        routes = list(scan_workflows(root))
+        expected = [(".github/workflows/w.yml", "a", "openbank-build", {"push"})]
+        if routes != expected:
+            print(f"SELF-TEST FAIL main-only expression did not map to push-only ARC: {routes}")
+            rc = 1
+        else:
+            print("self-test OK — main-only expression maps to push-only ARC")
     if rc == 0:
         print("check-ci-runner-pools self-test: every finding class is reachable, control is clean")
     return rc
