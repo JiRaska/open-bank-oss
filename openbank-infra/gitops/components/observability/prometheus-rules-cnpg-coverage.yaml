@@ -666,6 +666,11 @@ spec:
           expr: vector(2)
           labels:
             namespace: payments
+            cluster: card-processing-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: payments
             cluster: clearing-db
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)

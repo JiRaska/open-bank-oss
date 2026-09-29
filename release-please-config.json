@@ -463,6 +463,12 @@
       "exclude-paths": [
         "openbank-treasury-service/src/test"
       ]
+    },
+    "openbank-card-processing-service": {
+      "component": "card-processing-service",
+      "exclude-paths": [
+        "openbank-card-processing-service/src/test"
+      ]
     }
   }
 }

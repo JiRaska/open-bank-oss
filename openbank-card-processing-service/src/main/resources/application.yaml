@@ -50,8 +50,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   # Outbound M2M: card-issuance, transaction-service and fraud-service all authenticate their
   # callers. An unauthenticated call would 401 and be indistinguishable from an outage.
   oidc-client:
@@ -61,8 +59,6 @@ quarkus:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     grant:
       type: client
-    tls:
-      verification: none
   rest-client:
     "card-issuance-api":
       url: ${CARD_ISSUANCE_SERVICE_URL:http://localhost:8118}
@@ -155,12 +151,17 @@ mp:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     log:
       level: DEBUG
       console:
         json: false
     oidc:
       enabled: false
+      tls:
+        verification: none
   openbank:
     card-processing:
       # A developer needs something to present authorisations with; production does not.

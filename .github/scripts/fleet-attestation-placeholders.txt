@@ -34,7 +34,6 @@
 # step prunes every entry that its own tag rewrite leaves undeclared, in the same deploy PR,
 # using the gate's own enumeration. Adding one is still a human decision.
 #
-#
 # 2026-09-05, ADR-0283 phase 1 (#8809). card-processing-service is a brand-new service: its
 # manifest has to pin a tag before any image can exist, and no image can exist until the manifest
 # merges and auto-deploy builds one. The tag names a real commit so the deploy-drift watch can

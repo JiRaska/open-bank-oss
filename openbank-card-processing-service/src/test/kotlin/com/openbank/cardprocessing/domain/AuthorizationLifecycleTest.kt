@@ -88,6 +88,15 @@ class AuthorizationLifecycleTest {
     }
 
     @Test
+    fun `a presentment large enough to overflow the running total is refused, not wrapped negative`() {
+        val partly = authorization(cleared = 8_000, status = AuthorizationStatus.PARTIALLY_CLEARED)
+
+        val outcome = AuthorizationLifecycle.clear(partly, Long.MAX_VALUE, "CZK", clock)
+
+        assertThat(outcome).isEqualTo(PresentmentOutcome.Refused(PresentmentRefusal.EXCEEDS_AUTHORIZED_AMOUNT))
+    }
+
+    @Test
     fun `a presentment in another currency is refused`() {
         assertThat(AuthorizationLifecycle.clear(authorization(), 1_000, "EUR", clock))
             .isEqualTo(PresentmentOutcome.Refused(PresentmentRefusal.CURRENCY_MISMATCH))
