@@ -13,10 +13,11 @@ run() {
   docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$@" \
     -r "$T/resources.yaml" --policy-report 2>&1 || true
 }
-# rollout-bypass-prevention.yaml is NOT in the v1 run: the 1.19.1 CLI panics on its
-# apiCall urlPath (query string -> empty GVR in the fake client), with or without
-# values. Its v1 verdicts are therefore pinned in V1_ROLLOUT below and were measured
-# against the live Enforce policy with `kubectl create --dry-run=server` (PR body).
+# rollout-bypass-prevention.yaml (block-deployment-if-rollout-exists) was never in the
+# v1 run: the 1.19.1 CLI panics on its apiCall urlPath (query string -> empty GVR in
+# the fake client), with or without values. Its v1 verdicts are pinned in V1_ROLLOUT
+# below, measured against the live Enforce policy with `kubectl create
+# --dry-run=server`. The file was deleted when its CEL port went to Enforce (#11437).
 # deny-nginx-snippet-annotations.yaml is NOT in the v1 run either: it was deleted when
 # its CEL port went to Enforce (#11437). Its v1 verdicts are pinned in V1_NGINX below,
 # measured with this harness (Kyverno CLI v1.19.1, v1 file as on main) on 2026-09-29,
@@ -52,7 +53,7 @@ def table(txt):
     return out
 
 v1, cel = {}, table(sys.argv[1])
-V1_ROLLOUT = {  # measured live, see the comment in the shell part
+V1_ROLLOUT = {  # measured live (re-measured 2026-09-29 before the v1 file was deleted, #11437)
     ('block-deployment-if-rollout-exists', 'Deployment', 'ledger', 'ledger-service'): 'fail',
     ('block-deployment-if-rollout-exists', 'Deployment', 'ledger', 'redis'): 'pass',
 }
