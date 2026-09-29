@@ -237,11 +237,12 @@ jobs:
             # would break merge-base once main advances past this PR's base.
             git fetch --no-tags --force origin \
               "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-              >/dev/null 2>&1 || true
+              >/dev/null 2>&1 || { echo "::error::Cannot refresh ${BASE}; build scope is unknown."; exit 1; }
             # Compute the merge-base explicitly rather than leaning on the
             # three-dot shorthand's ref resolution, then diff from it. Equivalent
             # to BASE...HEAD but observable and robust to odd ref state.
-            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null) \
+              || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
