@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.263.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.2...admin-ui-v0.263.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** minimum reserve requirement page ([#11045](https://github.com/JiRaska/open-bank-oss/issues/11045)) ([2eec3bf](https://github.com/JiRaska/open-bank-oss/commit/2eec3bfcb8a9f5078b2b05f294d6fcc75f8c736b))
+
 ## [0.262.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.1...admin-ui-v0.262.2) (2026-09-29)
 
 

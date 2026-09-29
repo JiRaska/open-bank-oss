@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.16.0...risk-engine-v0.17.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** state the liquidity figures in CZK at the ČNB fixing ([#11431](https://github.com/JiRaska/open-bank-oss/issues/11431)) ([4c55abf](https://github.com/JiRaska/open-bank-oss/commit/4c55abf1b048f2f1ff1d4666f2ae9ad0589de04d)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.15.0...risk-engine-v0.16.0) (2026-09-29)
 
 
