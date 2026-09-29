@@ -7,6 +7,8 @@ package com.openbank.productcatalog.infrastructure.persistence
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.productcatalog.application.CatalogConflictException
+import io.micrometer.core.instrument.Gauge
+import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import io.quarkus.vertx.VertxContextSupport
@@ -20,6 +22,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
 import org.jboss.logging.Logger
 import java.time.Duration
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /** Idempotently expands every persisted v1 product into its canonical v2 banking mapping. */
 @ApplicationScoped
@@ -28,11 +32,27 @@ class BankV1CompatibilityBackfill(
     private val mapper: ObjectMapper,
     private val projector: BankV1CompatibilityProjector,
     domainMetrics: DomainMetrics,
+    meterRegistry: MeterRegistry,
     @ConfigProperty(name = "openbank.catalog.bank-v1-compatibility-enabled", defaultValue = "true")
     private val bankCompatibilityEnabled: Boolean,
 ) {
     private val log = Logger.getLogger(BankV1CompatibilityBackfill::class.java)
     private val liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+
+    /**
+     * Conflicts already reported, by legacy product id. A conflict needs an operator and does not
+     * resolve itself, so re-logging it every tick (~120x/hour) only buries it; it is logged once when
+     * it appears or its reason changes, once when it clears, and is always visible as a gauge.
+     */
+    private val openConflicts = ConcurrentHashMap<UUID, String>()
+
+    init {
+        Gauge.builder(CONFLICT_GAUGE) { openConflicts.size }
+            .description("Legacy banking products the v1 compatibility reconciler cannot map")
+            .register(meterRegistry)
+    }
+
+    internal fun hasOpenConflict(productId: UUID): Boolean = openConflicts.containsKey(productId)
 
     @Suppress("UnusedParameter")
     fun onStart(@Observes @Priority(Interceptor.Priority.APPLICATION + STARTUP_PRIORITY_OFFSET) event: StartupEvent) {
@@ -56,7 +76,7 @@ class BankV1CompatibilityBackfill(
         val result = VertxContextSupport.subscribeAndAwait {
             reconcile(failOnConflict = false)
         } ?: ReconciliationResult()
-        logConflicts(result)
+        reportConflicts(result)
         return result.changed
     }
 
@@ -79,12 +99,25 @@ class BankV1CompatibilityBackfill(
         if (result.changed > 0) {
             log.info("Reconciled ${result.changed} banking product(s) after a mixed-version write.")
         }
-        logConflicts(result)
+        reportConflicts(result)
         liveness.recordSuccess()
     }
 
-    private fun logConflicts(result: ReconciliationResult) {
-        result.conflicts.forEach { log.error("Banking compatibility reconciliation conflict: ${it.message}") }
+    /** Every reconcile pass visits every product, so a product absent from [result] has cleared. */
+    private fun reportConflicts(result: ReconciliationResult) {
+        val current = result.conflicts.mapValues { it.value.message.orEmpty() }
+        current.forEach { (productId, reason) ->
+            if (openConflicts.put(productId, reason) != reason) {
+                log.warn(
+                    "Banking compatibility reconciliation conflict (reported once until it changes " +
+                        "or clears; see $CONFLICT_GAUGE) for product $productId: $reason",
+                )
+            }
+        }
+        openConflicts.keys.filterNot(current::containsKey).forEach { productId ->
+            openConflicts.remove(productId)
+            log.info("Banking compatibility reconciliation conflict cleared for product $productId")
+        }
     }
 
     private fun reconcile(failOnConflict: Boolean): Uni<ReconciliationResult> = sessions.withSession { session ->
@@ -112,22 +145,25 @@ class BankV1CompatibilityBackfill(
                 }.map { changed -> result.copy(changed = result.changed + if (changed) 1 else 0) }
                     .onFailure(CatalogConflictException::class.java)
                     .recoverWithItem { conflict ->
-                        result.copy(conflicts = result.conflicts + conflict as CatalogConflictException)
+                        result.copy(
+                            conflicts = result.conflicts + (detached.id to conflict as CatalogConflictException),
+                        )
                     }
             }
         }.map { result ->
-            if (failOnConflict && result.conflicts.isNotEmpty()) throw result.conflicts.first()
+            if (failOnConflict && result.conflicts.isNotEmpty()) throw result.conflicts.values.first()
             result
         }
     }
 
     private data class ReconciliationResult(
         val changed: Int = 0,
-        val conflicts: List<CatalogConflictException> = emptyList(),
+        val conflicts: Map<UUID, CatalogConflictException> = emptyMap(),
     )
 
     private companion object {
         const val STARTUP_PRIORITY_OFFSET = 100
+        const val CONFLICT_GAUGE = "openbank.catalog.bank_v1.reconciliation.conflicts"
         const val WORKFLOW_NAME = "bank-v1-compatibility-reconciliation"
         val EXPECTED_INTERVAL: Duration = Duration.ofSeconds(30)
     }

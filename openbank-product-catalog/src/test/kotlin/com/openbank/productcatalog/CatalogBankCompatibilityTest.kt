@@ -23,7 +23,11 @@ import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.security.Principal
+import java.sql.SQLException
 import java.util.UUID
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
 import javax.sql.DataSource
 
 @QuarkusTest
@@ -91,22 +95,46 @@ class CatalogBankCompatibilityTest {
     }
 
     @Test
-    fun `startup reconciliation keeps unrelated catalog products available on a banking draft conflict`() {
+    fun `database refuses a second open draft for one offering`() {
         val productId = createLegacyDraft("CURRENT_DUPLICATE_DRAFT")
         val offeringId = mappedOffering(productId)
-        val duplicateId = duplicateDraft(latestDraft(offeringId))
 
-        try {
-            assertThatCode { backfill.runLenient() }.doesNotThrowAnyException()
-            given().get("/api/v1/products/$productId").then().statusCode(200)
-        } finally {
-            dataSource.connection.use { connection ->
-                connection.prepareStatement("DELETE FROM catalog_revisions WHERE id = ?").use { statement ->
-                    statement.setObject(1, duplicateId)
-                    assertThat(statement.executeUpdate()).isEqualTo(1)
-                }
+        assertThatThrownBy { duplicateDraft(latestDraft(offeringId)) }
+            .isInstanceOfSatisfying(SQLException::class.java) { assertThat(it.sqlState).isEqualTo("23505") }
+            .hasMessageContaining("uq_catalog_revisions_single_draft")
+    }
+
+    @Test
+    fun `startup reconciliation reports an unresolved conflict once and keeps unrelated products available`() {
+        switchIdentity("reported-once-author")
+        val productId = createLegacyDraft("CURRENT_REPORTED_ONCE")
+        val offeringId = mappedOffering(productId)
+        val revisionId = latestDraft(offeringId)
+        val captured = mutableListOf<String>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                if (record.level == Level.WARNING) captured += record.message
             }
+            override fun flush() = Unit
+            override fun close() = Unit
         }
+        val logger = java.util.logging.Logger.getLogger(BankV1CompatibilityBackfill::class.java.name)
+        logger.addHandler(handler)
+        try {
+            editDraftName(offeringId, revisionId, "Work authored before V6")
+            setWatermarks(productId, -1, -2)
+
+            repeat(3) { assertThatCode { backfill.runLenient() }.doesNotThrowAnyException() }
+            given().get("/api/v1/products/$productId").then().statusCode(200)
+
+            assertThat(backfill.hasOpenConflict(productId)).isTrue()
+            assertThat(captured.filter { it.contains(productId.toString()) }).hasSize(1)
+        } finally {
+            logger.removeHandler(handler)
+            deleteLegacyDraft(productId, offeringId, revisionId)
+        }
+        backfill.runLenient()
+        assertThat(backfill.hasOpenConflict(productId)).isFalse()
     }
 
     @Test
