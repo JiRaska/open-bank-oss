@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.7.0...treasury-service-v0.8.0) (2026-09-29)
+
+
+### Features
+
+* **treasury:** let an AI assistant draft deals it can never book ([#11121](https://github.com/JiRaska/open-bank-oss/issues/11121)) ([41a371c](https://github.com/JiRaska/open-bank-oss/commit/41a371c0952a0ff7555839041e192680e429dea2))
+
 ## [0.7.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.6.0...treasury-service-v0.7.0) (2026-09-29)
 
 
