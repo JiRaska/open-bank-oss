@@ -111,8 +111,9 @@ data class RiskHqlaLine(
 )
 
 /**
- * The liquid-asset side of ONE tied-out risk-engine snapshot's LCR at the report date. [lines] and
- * the level sums (after haircut, before the Level 2 caps) are present only for a single-currency book;
+ * The LCR of ONE tied-out risk-engine snapshot at the report date, read from the engine's combined
+ * view: all currencies in CZK at the ČNB fixing (risk-engine API 1.13.0, EU 2015/61 Art. 4(5)). [currency]
+ * and the figures are null when the engine states no combined view, [totalNotStated] then says why;
  * [unclassifiedBalances] counts balances the engine could not classify, any of which could be HQLA.
  * [notes] are the engine's free-text caveats on the result (e.g. that pledged collateral is not
  * modelled); the mappers read them through [com.openbank.finrep.domain.mapper.RiskEngineFigures].
@@ -140,6 +141,8 @@ data class RiskLiquidityResult(
     val cappedInflows: BigDecimal? = null,
     val inflowCapBinding: Boolean? = null,
     val notes: List<String> = emptyList(),
+    /** The engine's own reason when it states no combined total (e.g. a missing ČNB fixing); null when it does. */
+    val totalNotStated: String? = null,
 )
 
 /**

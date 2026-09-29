@@ -51,6 +51,7 @@
             "currency": "CZK",
             "totalRwa": 0.0
           },
+          "totalNotStated": null,
           "unclassified": [
             {
               "glAccountCode": "9999"
@@ -172,14 +173,6 @@
               "matchers": [
                 {
                   "match": "decimal"
-                }
-              ]
-            },
-            "$.total.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             },
@@ -420,6 +413,7 @@
               "totalOutflows": 200.0
             }
           },
+          "totalNotStated": null,
           "unclassified": [
             {
               "glAccountCode": "9999"
@@ -673,14 +667,6 @@
                 {
                   "match": "regex",
                   "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                }
-              ]
-            },
-            "$.total.currency": {
-              "combine": "AND",
-              "matchers": [
-                {
-                  "match": "type"
                 }
               ]
             },

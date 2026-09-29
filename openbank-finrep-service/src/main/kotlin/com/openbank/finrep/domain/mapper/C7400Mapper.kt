@@ -48,7 +48,8 @@ import java.time.LocalDate
  * the key ([C7300Mapper.unknownComponentReason]); the rows of known components are still stated.
  *
  * Data gaps (ADR-0097 — never a real-looking zero): every row when the read is disabled, no tied
- * snapshot exists, the book is multi-currency or empty, or balances are unclassified (any could be an
+ * snapshot exists, the engine states no combined CZK view (a multi-currency book is read from it, EU
+ * 2015/61 Art. 4(5)) or the book is empty, or balances are unclassified (any could be an
  * asset with an inflow); every c0140 cell when the run's liquidity parameter set is not the EU 2015/61
  * set ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); r0260 / r0200 always (the snapshot carries no reverse repos, secured lending or
  * central-bank claims maturing within 30 days — the CNB overnight deposit is Level 1 HQLA, C 72.00);
@@ -170,16 +171,13 @@ object C7400Mapper {
         return if (unknown.isEmpty()) null else C7300Mapper.unknownComponentReason(unknown, result.runId)
     }
 
-    private fun gapReason(result: RiskLiquidityResult): String? = when {
-        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
-        result.currencyCount > 1 || result.totalInflows == null ->
-            "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
-                "inflow total can be stated (snapshot ${result.runId})."
-        result.unclassifiedBalances > 0 ->
-            "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
-                "any of them could be an asset with an inflow, so the inflow totals could be misstated."
-        else -> null
-    }
+    private fun gapReason(result: RiskLiquidityResult): String? =
+        RiskEngineFigures.combinedViewGap(result, "inflow total", result.totalInflows != null) ?: when {
+            result.unclassifiedBalances > 0 ->
+                "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
+                    "any of them could be an asset with an inflow, so the inflow totals could be misstated."
+            else -> null
+        }
 
     /** The engine's capped inflows must be min(uncapped, cap); C 76.00 will report them, C 74.00 does not. */
     private fun checkCap(result: RiskLiquidityResult) {

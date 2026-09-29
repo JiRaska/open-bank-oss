@@ -127,9 +127,11 @@ data class LiquidityResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyLiquidityResponse>,
+    /** All currencies combined in CZK at the ČNB fixing (risk-engine API 1.13.0); null with [totalNotStated]. */
     val total: CurrencyLiquidityResponse?,
     val unclassified: List<UnclassifiedBalanceResponse>,
     val notes: List<String> = emptyList(),
+    val totalNotStated: String? = null,
 )
 
 /**
@@ -200,6 +202,7 @@ class RiskEngineCapitalAdapter(
                 cappedInflows = lcr?.cappedInflows,
                 inflowCapBinding = lcr?.inflowCapBinding,
                 notes = l.notes,
+                totalNotStated = l.totalNotStated,
             ),
         )
     }

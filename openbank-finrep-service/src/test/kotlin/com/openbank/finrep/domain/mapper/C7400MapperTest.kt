@@ -40,8 +40,10 @@ class C7400MapperTest {
         currencies: Int = 1,
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
+        currency: String? = "CZK",
+        totalNotStated: String? = null,
     ) = RiskLiquidityResult(
-        "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
+        "run-7", asOf, parameterSet, "2", currency, emptyList(),
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, currencies, unclassified,
         totalOutflows = BigDecimal(outflows),
         inflows = lines,
@@ -49,6 +51,7 @@ class C7400MapperTest {
         inflowCap = cap?.let(::BigDecimal),
         cappedInflows = capped?.let(::BigDecimal),
         inflowCapBinding = true,
+        totalNotStated = totalNotStated,
     )
 
     private fun CorepTemplate.at(row: String, col: String) = cells.single { it.rowRef == row && it.colRef == col }
@@ -170,13 +173,32 @@ class C7400MapperTest {
     }
 
     @Test
-    fun `every cell is a gap when the book is multi-currency, unclassified or unavailable`() {
+    fun `a multi-currency book is reported from the engine's combined CZK view`() {
+        val t = C7400Mapper.map(RiskLiquidityLookup.found(result(currencies = 2)), asOf)
+        assertThat(t.at("r0010", "c0140").isDataGap).isFalse()
+        assertThat(t.at("r0010", "c0140").value).isEqualByComparingTo("380")
+    }
+
+    @Test
+    fun `every cell is a gap with no combined view, a non-CZK total, unclassified balances or no read`() {
         listOf(
-            RiskLiquidityLookup.found(result(currencies = 2, total = null)),
-            RiskLiquidityLookup.found(result(unclassified = 3)),
-            RiskLiquidityLookup.unavailable("no snapshot"),
-        ).forEach { lookup ->
+            RiskLiquidityLookup.found(
+                result(
+                    currencies = 2,
+                    total = null,
+                    currency = null,
+                    totalNotStated = "no ČNB fixing in effect on 2026-09-30 for EUR: no partial total",
+                ),
+            ) to "no ČNB fixing in effect on 2026-09-30 for EUR",
+            RiskLiquidityLookup.found(result(currency = "EUR")) to "not the reporting currency CZK",
+            RiskLiquidityLookup.found(result(unclassified = 3)) to "3 balance(s) are unclassified",
+            RiskLiquidityLookup.unavailable("no snapshot") to "no snapshot",
+        ).forEach { (lookup, reason) ->
             val t = C7400Mapper.map(lookup, asOf)
+            assertThat(t.cells.filter { it.rowRef == "r0010" }).allSatisfy {
+                assertThat(it.isDataGap).isTrue()
+                assertThat(it.gapReason).contains(reason)
+            }
             assertThat(t.cells).allSatisfy { assertThat(it.isDataGap).isTrue() }
         }
     }

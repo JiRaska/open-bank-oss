@@ -149,8 +149,10 @@ paths:
         read from the risk engine's LCR result of the same TIED_OUT snapshot; `evidence` does not
         apply to it. Coins and banknotes (r0040) and withdrawable central bank reserves (r0050) are
         always `isDataGap: true` (the engine does not split them), every value row is a gap with its
-        reason when no tied snapshot exists, the read is not enabled, the book is multi-currency or
-        balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
+        reason when no tied snapshot exists, the read is not enabled, the engine states no combined
+        view (every currency in CZK at the ČNB fixing, Delegated Regulation (EU) 2015/61 Art. 4(5) —
+        a multi-currency book is reported from it; the engine's `totalNotStated` reason is carried)
+        or states it in a currency other than CZK, or balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
         `[row code UNVERIFIED]` in their label. `C_73.00` (LCR outflows, Delegated Regulation (EU)
         2015/61; columns c0010 amount and c0060 outflow) is read from the same LCR result; retail
         deposits subject to higher outflows (r0060) and non-operational deposits (r0250) are always

@@ -127,7 +127,11 @@ class RiskEngineCapitalPactConsumerTest {
                 o.stringType("parameterSetId", "eu-2015-61-crr2")
                 o.stringType("parameterSetVersion", "2")
                 o.eachLike("currencies") { c -> currencyLiquidity(c) }
-                o.`object`("total") { t -> currencyLiquidity(t) }
+                // The total is every currency combined in CZK at the ČNB fixing (risk-engine API 1.13.0,
+                // EU 2015/61 Art. 4(5)): C 72.00-76.00 render it only in CZK, so the currency is pinned,
+                // and totalNotStated (why no total is stated) is read into the gap reason.
+                o.`object`("total") { t -> currencyLiquidity(t, pinCzk = true) }
+                o.nullValue("totalNotStated")
                 o.minArrayLike("unclassified", 0, 1) { u -> u.stringType("glAccountCode", "9999") }
                 // Free-text caveats; may be empty. C 72.00 / C 76.00 gap the HQLA cells on the
                 // pledged-collateral note, so the field is read, not merely tolerated.
@@ -161,8 +165,8 @@ class RiskEngineCapitalPactConsumerTest {
         c.decimalType("totalRwa", 0.00)
     }
 
-    private fun currencyLiquidity(c: au.com.dius.pact.consumer.dsl.LambdaDslObject) {
-        c.stringType("currency", "CZK")
+    private fun currencyLiquidity(c: au.com.dius.pact.consumer.dsl.LambdaDslObject, pinCzk: Boolean = false) {
+        if (pinCzk) c.stringValue("currency", "CZK") else c.stringType("currency", "CZK")
         c.`object`("lcr") { lcr ->
             lcr.`object`("hqla") { h ->
                 // A tied book may hold no liquid asset at all, so the list may be empty.
@@ -277,10 +281,13 @@ class RiskEngineCapitalPactConsumerTest {
                     currencyCount = l.currencies.size,
                     unclassifiedBalances = l.unclassified.size,
                     notes = l.notes,
+                    totalNotStated = l.totalNotStated,
                 ),
             ),
             LocalDate.parse(REPORTING_DATE),
         )
+        assertThat(total.currency).isEqualTo("CZK")
+        assertThat(l.totalNotStated).isNull()
         assertThat(l.notes).containsExactly(PLEDGED_NOTE_EXAMPLE)
         assertThat(hqla.lines.single().level).isEqualTo("L1")
         assertThat(hqla.level1).isEqualByComparingTo("1000.00")
