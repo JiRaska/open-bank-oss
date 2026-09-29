@@ -7,16 +7,20 @@ package com.openbank.agent.application
 
 import com.openbank.agent.application.port.`in`.KillSwitchControlUseCase
 import com.openbank.agent.application.port.`in`.KillSwitchQueries
+import com.openbank.agent.application.port.out.KillSwitchEvent
+import com.openbank.agent.application.port.out.KillSwitchEventPublisher
 import com.openbank.agent.application.port.out.KillSwitchRepository
 import com.openbank.agent.domain.control.HaltStatus
 import com.openbank.libs.audit.AuditEvent
 import com.openbank.libs.audit.AuditEventPublisher
 import com.openbank.libs.audit.AuditResult
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
+import java.time.Instant
 
 /**
  * Kill switch (ADR-0031 D7) — stops an agent without a redeploy. Two layers, runtime wins:
@@ -37,6 +41,7 @@ import java.time.Clock
 class KillSwitchService(
     private val repository: KillSwitchRepository,
     private val auditPublisher: AuditEventPublisher,
+    private val eventPublisher: KillSwitchEventPublisher,
     private val clock: Clock,
 ) : KillSwitchQueries,
     KillSwitchControlUseCase {
@@ -63,16 +68,33 @@ class KillSwitchService(
         return null
     }
 
-    /** Suspend a scope (an agent id, or `*` for every agent). Idempotent upsert + audit. */
+    /** Suspend a scope (an agent id, or `*` for every agent). Idempotent upsert + audit + event. */
     override fun halt(scope: String, reason: String, setBy: String) {
-        repository.upsertHalt(scope, reason, setBy, clock.instant())
+        val now = clock.instant()
+        repository.upsertHalt(scope, reason, setBy, now)
+        publish(scope, KillSwitchEvent.SET, reason, setBy, now)
         audit("agent.killswitch.set", scope, setBy, reason)
     }
 
     /** Lift a runtime halt (the config baseline still applies). Audited even if nothing was set. */
     override fun resume(scope: String, setBy: String) {
         repository.deleteHalt(scope)
+        val now = clock.instant()
+        publish(scope, KillSwitchEvent.CLEARED, "resumed", setBy, now)
         audit("agent.killswitch.cleared", scope, setBy, "resumed")
+    }
+
+    private fun publish(scope: String, type: String, reason: String, setBy: String, at: Instant) {
+        eventPublisher.publish(
+            KillSwitchEvent(
+                eventId = Ids.newId(),
+                eventType = type,
+                aggregateId = scope,
+                reason = reason,
+                actorId = setBy,
+                occurredAt = at,
+            ),
+        )
     }
 
     /** Every active runtime halt (for the admin status view). */

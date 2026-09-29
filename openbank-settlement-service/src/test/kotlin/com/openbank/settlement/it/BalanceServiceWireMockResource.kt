@@ -28,8 +28,8 @@ import java.util.UUID
  * three answers that endpoint can give — a journal, no journal, or no answer at all — are the three
  * outcomes the compensation has to tell apart, and only a real HTTP stub can produce all three.
  *
- * Also stubs an OIDC token endpoint, because both REST clients carry
- * `OidcClientRequestReactiveFilter` and would otherwise dial the real realm to mint a bearer token.
+ * Also stubs an OIDC token endpoint, because both REST clients carry an OIDC client filter (the
+ * named `m2m` client since #10486) and would otherwise dial the real realm to mint a bearer token.
  * Same shape as sepa-payment's `DocumentServiceWireMockResource`.
  */
 class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
@@ -57,6 +57,14 @@ class BalanceServiceWireMockResource : QuarkusTestResourceLifecycleManager {
             "quarkus.oidc-client.client-id" to "openbank-services",
             "quarkus.oidc-client.credentials.secret" to "test-secret",
             "quarkus.oidc-client.grant.type" to "client",
+            // #10486 batch 2: both REST clients now mint from the NAMED client `m2m`
+            // (openbank-settlement), so it needs the same stubbed token endpoint.
+            "quarkus.oidc-client.m2m.auth-server-url" to base,
+            "quarkus.oidc-client.m2m.discovery-enabled" to "false",
+            "quarkus.oidc-client.m2m.token-path" to "/token",
+            "quarkus.oidc-client.m2m.client-id" to "openbank-settlement",
+            "quarkus.oidc-client.m2m.credentials.secret" to "test-secret",
+            "quarkus.oidc-client.m2m.grant.type" to "client",
         )
     }
 

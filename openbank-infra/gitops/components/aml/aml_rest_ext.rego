@@ -59,3 +59,30 @@ allowed_reasons contains "operator-aml-case-update-decision" if {
 	role in input.principal.roles
 	input.action == "amlCase.updateDecision"
 }
+
+# amlCase.create (POST /api/v1/aml/cases), #10486 batch 3. Staff open cases from the console.
+allowed_reasons contains "operator-aml-case-create" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
+	role in input.principal.roles
+	input.action == "amlCase.create"
+}
+
+# amlCase.create by the payment/FX services' OWN machine principals (ROLE_API only), which open a
+# case when a screening gate refers a transfer (AmlServiceClient in domestic-payment, sepa-payment,
+# sepa-instant and fx-service). Identity-gated, never a role: ROLE_API is held by every service
+# account. The shared `service-account-openbank-services` is deliberately absent. Keep this set
+# equal to AML_CASE_CREATE_CALLERS in AmlCaseResource.kt (AmlCaseCreateCallerGuardTest pins it):
+# while AUTHZ_ENFORCE=false that Kotlin check is the enforcing half and this rule is the one the
+# enforce flip will rely on.
+allowed_reasons contains "service-aml-case-create-m2m" if {
+	input.principal.type == "HUMAN"
+	input.principal.id in {
+		"service-account-openbank-domestic-payment",
+		"service-account-openbank-sepa-payment",
+		"service-account-openbank-sepa-instant",
+		"service-account-openbank-fx",
+	}
+	input.action == "amlCase.create"
+}

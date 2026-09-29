@@ -45,7 +45,7 @@ class CopilotPostgresTestResource : QuarkusTestResourceLifecycleManager {
 /**
  * Stock postgres plus pgvector, and nothing else — the V3 migration needs the `vector` extension or
  * Flyway aborts and every @QuarkusTest in this module fails with what looks like a Quarkus startup
- * error rather than a missing extension. `postgres:18-alpine` does not carry it. Same major version
+ * error rather than a missing extension. `postgres:18.6-alpine` does not carry it. Same major version
  * as before, so nothing else about these tests changes.
  *
  * DockerImageName.asCompatibleSubstituteFor is required: Testcontainers checks the image name

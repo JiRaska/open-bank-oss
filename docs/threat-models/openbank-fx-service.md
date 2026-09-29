@@ -52,6 +52,20 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-24** — Trust-boundary change (ADR-0314 D5, #10618): a second outbound Kafka topic, `openbank.fx.fixing.published`, carrying each ingested ČNB fixing (`fx.fixing.published.v1`). New channel `fx-fixing-out`, new KafkaTopic, and a Write/Describe ACL on that topic only for the existing `fx-service` KafkaUser; no new inbound surface, caller, endpoint or privilege. The rates and the event commit in ONE transaction (`FxRateRepository.saveAllWithOutbox`), which also changes ingestion from one transaction per currency to one per fixing: a failure now stores none of that day's rates rather than some, and the next scheduled run retries the whole day. **Tampering:** the event is a copy of public statutory rates, not a new source of truth — `fx_rates` stays the record and a consumer that needs certainty re-reads it by `rateId`; the payload carries only ids the same transaction wrote. **Info disclosure:** none beyond the public ČNB list. **Repudiation:** outbox `event_id` + `ce-*` headers as for conversions. **Routing:** both event families share `fx_outbox`; `KafkaFxOutboxEventPublisher` routes by event-type prefix, pinned by a test that asserts the other emitter is untouched. Rollback: revert; the topic may stay, it has no consumer yet.
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or control bypass. The public CNB feed is explicitly a non-banking external boundary and does not receive the marker; a fleet gate requires every new client to choose one of these treatments.
   The accompanying client-source normalization is formatting-only: request payloads, client targets,
   authentication, retry policy, and the propagation decision are unchanged. No additional trust
@@ -165,3 +179,52 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   `FxConversion.rateId` still references the real `fx_rates` row on both paths (FK unchanged), so
   dispute defense via §5 is preserved. Risk class = **repudiation/auditability (reduced)**.
   API contract: additive, `info.version` 1.5.0 → 1.6.0.
+
+- **2026-09-20** — **New inbound edge over a new private-CA mTLS listener** (8443, client auth
+  REQUIRED, TLSv1.3; server cert `fx-service-internal-tls`), the same shape as account-service,
+  ledger-service and transaction-service. HTTP/8119 is unchanged for its existing callers
+  (customer-edge, ledger-service, agent-service), so this is additive, not a migration. The caller
+  on 8443 is transaction-service `FxRateClient` reading
+  `GET /api/v1/fx/rates/{base}/{quote}` (`fx.read`) as the shared
+  `service-account-openbank-services`. Before this, transaction-service's gitops manifest set no
+  `FX_SERVICE_URL`, so it dialled `http://localhost:8119` inside its own pod and every
+  cross-currency rate lookup was a connection refused.
+  **No policy change, and that is measured against the realm that ships.** `fx_rest_ext.rego`'s
+  identity-gated `service-fx-shared-client-m2m` admits `fx.read`/`fx.list` for that account with no
+  role predicate, so it holds even though the deployed realm template grants the account `ROLE_API`
+  only. Evaluating the committed `fx-opa-bundle` ConfigMap with `opa eval`: `ROLE_API` →
+  `allow=true` (`reason: service-fx-shared-client-m2m`), and the must-DENY controls hold —
+  `fx.convert` is denied for that account and for the edge identity, and a principal with no roles
+  is denied `fx.read`. **Risk class:** confidentiality of published FX rates (already readable by
+  three other in-cluster callers over HTTP) to one more authenticated service; read-only, no
+  mutation, no new action, no widened role. Rollback: drop the listener env block and
+  transaction-service's `FX_SERVICE_URL`.
+- **2026-09-21** — **Own machine identity for the AML case open (#10486 batch 3).** `AmlServiceClient` (`POST /api/v1/aml/cases`) now mints its bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-fx` (`ROLE_API` only); aml-service grants it exactly `amlCase.create` (`service-aml-case-create-m2m`, plus a Kotlin named-caller check while aml-service runs OPA advisory). **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/fx-service` (`client_secret`), projected by the `fx-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `amlCase.create`, against the shared secret's operator write set. **Repudiation improves:** a referred case now names fx-service. The sanctions and fraud clients stay on the shared client until their own edges migrate (their calls already pass with `ROLE_API`, measured by `m2m-shared-client-denylist.py`). Rollback: revert the commit.
+- **2026-09-21** — **Published-rate reads admit ROLE_API at the RBAC gate (#10486 batch 4).** `GET /api/v1/fx/rates` and `/rates/{base}/{quote}` add `ROLE_API` to `@RolesAllowed` so ledger, transaction and agent-service keep reading rates once the shared `openbank-services` client loses `ROLE_OPERATOR`. OPA is unchanged and identity-gated (`service-fx-shared-client-m2m`, `service-fx-edge-m2m`; fx enforces), so another service account with `ROLE_API` still gets 403 there. Conversion reads and `fx.convert` do not admit `ROLE_API` (`FxRateMachineReadRbacTest`). **Risk class:** published reference data only; no write, no customer record. Rollback: revert the commit.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

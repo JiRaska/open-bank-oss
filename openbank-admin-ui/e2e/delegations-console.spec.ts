@@ -224,6 +224,8 @@ test('the educational model remains operable at a 320px reflow width', async ({ 
   await expect(page.locator('html')).toHaveCSS('color-scheme', 'dark')
   // Axe must sample the settled token endpoint, not the reduced-motion transition frame.
   await page.waitForTimeout(50)
+  await expect(education.getByText(/Jedna rozhodovací věta|One decision sentence/)).toHaveCSS('color', 'rgb(199, 210, 254)')
+  await expect(education.locator('#delegation-truth-title')).toHaveCSS('color', 'rgb(252, 211, 77)')
   const darkScan = await new AxeBuilder({ page }).include('[aria-labelledby="delegation-education-title"]').analyze()
   expect(darkScan.violations).toEqual([])
   const darkGuideScan = await new AxeBuilder({ page }).include('aside[aria-label="Understand first. Decide second."]').analyze()

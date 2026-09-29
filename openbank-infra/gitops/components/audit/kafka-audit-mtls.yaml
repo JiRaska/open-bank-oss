@@ -128,6 +128,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.fx.fixing.published
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.documents.document.event
           patternType: literal
         operations: [Read, Describe]
@@ -201,6 +207,14 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # ADR-0312: business-signing approvals (who signed which company payment) are money-path
+      # evidence and belong in the tamper-evident trail from the first event.
+      - resource:
+          type: topic
+          name: openbank.delegation.approval-events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       # Issue #6035: four money-path produced topics had no Read grant here, so even after
       # being added to the subscription list they would have been ACL-denied at runtime with
       # no error surfaced anywhere (the #5338 shape) -- the poll fails silently and the audit
@@ -258,6 +272,15 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # components/treasury/kafka-topic.yaml -- ADR-0315 money-market deal lifecycle
+      # (booked/settled/matured/reversed). Money-path: every settled/matured/reversed deal posts
+      # a ledger journal, and the audit trail must see the deal behind it.
+      - resource:
+          type: topic
+          name: openbank.treasury.deal.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service
@@ -292,7 +315,7 @@ spec:
 ---
 # Projects the Strimzi-minted keystore secret (messaging/audit-service) into
 # the audit namespace so the pod volume mount can reference it directly.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -314,7 +337,7 @@ spec:
 ---
 # Projects the cluster CA truststore (messaging/openbank-cluster-cluster-ca-cert)
 # into the audit namespace. Shared pattern with other Tier 2 consumers.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

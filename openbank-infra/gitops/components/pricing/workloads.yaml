@@ -1,0 +1,365 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    kyverno.io/verify-images: '{"265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pricing-service@sha256:456454c9ebe62b4d4e160c336a2a09ac68b19a114f97425b67e6297a3a3dafb7":"pass"}'
+  labels:
+    app.kubernetes.io/name: pricing-service
+    app.kubernetes.io/part-of: pricing
+  name: pricing-service
+  namespace: pricing
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pricing-service
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pricing-service
+        app.kubernetes.io/part-of: pricing
+      annotations:
+        openbank.tech/policy-checksum: "9ce787359b3b5bc3"
+    spec:
+      containers:
+      - env:
+        - name: QUARKUS_PROFILE
+          value: prod
+        - name: PRICING_DATABASE_URL
+          value: jdbc:postgresql://pricing-db-rw.pricing.svc:5432/pricing
+        - name: PRICING_DATABASE_USERNAME
+          valueFrom:
+            secretKeyRef:
+              key: username
+              name: pricing-db-app
+        - name: PRICING_DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              key: password
+              name: pricing-db-app
+        - name: OIDC_AUTH_SERVER_URL
+          value: https://kc.open-bank.tech/realms/openbank
+        - name: OIDC_CLIENT_ID
+          value: openbank-pricing-service
+        - name: OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: OIDC_CLIENT_SECRET
+              name: pricing-service-oidc
+        - name: PRICING_AUTHZ_OPA_BASE_URL
+          value: http://127.0.0.1:8181
+        - name: TEMPORAL_ENABLED
+          value: 'false'
+        - name: TEMPORAL_TLS_ENABLED
+          value: 'true'
+        - name: TEMPORAL_HOST
+          value: disabled.invalid:7233
+        - name: TEMPORAL_NAMESPACE
+          value: openbank-pricing
+        - name: OTEL_EXPORTER_OTLP_ENDPOINT
+          value: http://tempo.observability.svc:4317
+        - name: PRICING_OUTBOX_KAFKA_ENABLED
+          value: 'false'
+        - name: PRICING_OUTBOX_DISPATCH_ENABLED
+          value: 'false'
+        - name: PRICING_OUTBOX_DISPATCH_TENANTS
+          value: none
+        - name: PRICING_OPERATION_RECONCILE_TENANTS
+          value: none
+        - name: PRICING_E2E_DEMO_BUNDLE_ENABLED
+          value: 'true'
+        - name: PRICING_E2E_PRESENTATION_DEMO_ENABLED
+          value: 'true'
+        - name: PRICING_ARES_ENABLED
+          value: 'true'
+        - name: PRICING_VIES_ENABLED
+          value: 'true'
+        image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pricing-service:sandbox-09ed6fc@sha256:456454c9ebe62b4d4e160c336a2a09ac68b19a114f97425b67e6297a3a3dafb7
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /q/health/live
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          successThreshold: 1
+          timeoutSeconds: 1
+        name: pricing-service
+        ports:
+        - containerPort: 8150
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /q/health/ready
+            port: http
+            scheme: HTTP
+          initialDelaySeconds: 15
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: '1'
+            memory: 1Gi
+          requests:
+            cpu: 100m
+            memory: 512Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /tmp
+          name: tmp
+        - mountPath: /bundle
+          name: opa-bundle
+          readOnly: true
+      - args:
+        - run
+        - --server
+        - --addr=0.0.0.0:8181
+        - --log-level=info
+        - --bundle
+        - /bundle
+        image: docker.io/openpolicyagent/opa:1.17.0@sha256:3c6e9e4d433b6e94df424c3385134312a95042aa991cdfc8e01944115675fb9d
+        imagePullPolicy: IfNotPresent
+        name: opa
+        ports:
+        - containerPort: 8181
+          name: opa
+          protocol: TCP
+        readinessProbe:
+          httpGet:
+            path: /health?bundles=true
+            port: 8181
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          failureThreshold: 3
+        resources:
+          limits:
+            cpu: 100m
+            memory: 64Mi
+          requests:
+            cpu: 25m
+            memory: 32Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - name: opa-bundle
+          mountPath: /bundle/rest.rego
+          subPath: rest.rego
+          readOnly: true
+        - name: opa-bundle
+          mountPath: /bundle/pricing_rest_ext.rego
+          subPath: pricing_rest_ext.rego
+          readOnly: true
+        - name: opa-bundle
+          mountPath: /bundle/agents.rego
+          subPath: agents.rego
+          readOnly: true
+        - name: opa-bundle
+          mountPath: /bundle/agents/data.yaml
+          subPath: agents-data.yaml
+          readOnly: true
+        - name: opa-bundle
+          mountPath: /bundle/rules/data.yaml
+          subPath: rules-data.yaml
+          readOnly: true
+        - name: opa-bundle
+          mountPath: /bundle/.manifest
+          subPath: manifest.json
+          readOnly: true
+        - mountPath: /tmp
+          name: opa-tmp
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8181
+          periodSeconds: 15
+          failureThreshold: 3
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        fsGroup: 101
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 100
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - emptyDir: {}
+        name: tmp
+      - emptyDir: {}
+        name: opa-tmp
+      - configMap:
+          defaultMode: 420
+          name: pricing-opa-bundle
+        name: opa-bundle
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app.kubernetes.io/name: pricing-console
+    app.kubernetes.io/part-of: pricing
+  name: pricing-console
+  namespace: pricing
+spec:
+  progressDeadlineSeconds: 600
+  replicas: 1
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pricing-console
+  strategy:
+    rollingUpdate:
+      maxSurge: 25%
+      maxUnavailable: 25%
+    type: RollingUpdate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: pricing-console
+        app.kubernetes.io/part-of: pricing
+    spec:
+      containers:
+      - env:
+        - name: PRICING_CONSOLE_AUTH_MODE
+          value: oidc
+        - name: PRICING_CONSOLE_COOKIE_SECURE
+          value: 'true'
+        - name: PRICING_CONSOLE_PUBLIC_URL
+          value: https://pricing.open-bank.tech
+        - name: PRICING_CONSOLE_OIDC_CLIENT_ID
+          value: openbank-pricing-console
+        - name: PRICING_CONSOLE_OIDC_AUTHORIZATION_URL
+          value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/auth
+        - name: PRICING_CONSOLE_OIDC_TOKEN_URL
+          value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token
+        - name: PRICING_CONSOLE_OIDC_USERINFO_URL
+          value: https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/userinfo
+        - name: PRICING_CONSOLE_SESSION_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: session-secret
+              name: pricing-console-auth
+        - name: PRICING_CONSOLE_OIDC_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              key: oidc-client-secret
+              name: pricing-console-auth
+        - name: PRICING_CONSOLE_ADMIN_SUBJECT
+          valueFrom:
+            secretKeyRef:
+              key: admin-subject
+              name: pricing-console-auth
+        - name: PRICING_CONSOLE_PRESENTATION_DEMO
+          value: 'true'
+        - name: PRICING_CONSOLE_PRICE_BOOK_ID
+          value: DEMO-RELATIONSHIP-BOOK-001
+        - name: PRICING_SERVICE_URL
+          value: http://pricing-service.pricing.svc:8150
+        - name: OPENBANK_PRODUCT_CATALOG_URL
+          value: http://product-catalog.accounts.svc:8104
+        image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-pricing-console:sandbox-09ed6fc@sha256:61ddcff580f0c9c8d06aeb2f81c334284a8fc83ae8726ed92a5297659ef871d0
+        imagePullPolicy: IfNotPresent
+        livenessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 30
+          periodSeconds: 20
+          successThreshold: 1
+          tcpSocket:
+            port: http
+          timeoutSeconds: 1
+        name: pricing-console
+        ports:
+        - containerPort: 3100
+          name: http
+          protocol: TCP
+        readinessProbe:
+          failureThreshold: 3
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          successThreshold: 1
+          tcpSocket:
+            port: http
+          timeoutSeconds: 1
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+      dnsPolicy: ClusterFirst
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext:
+        runAsGroup: 101
+        runAsNonRoot: true
+        runAsUser: 100
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-service
+  namespace: pricing
+spec:
+  ports:
+  - name: http
+    port: 8150
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: pricing-service
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pricing-console
+  namespace: pricing
+spec:
+  ports:
+  - name: http
+    port: 3100
+    protocol: TCP
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: pricing-console
+  type: ClusterIP

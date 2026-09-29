@@ -9,6 +9,7 @@ import com.openbank.kyb.application.usecase.CaseCallerMismatchException
 import com.openbank.kyb.application.usecase.CaseNotFoundException
 import com.openbank.kyb.application.usecase.InvitationNotFoundException
 import com.openbank.kyb.application.usecase.StaleAttestationException
+import com.openbank.kyb.domain.model.AgreementConflictException
 import com.openbank.kyb.domain.model.CaseTransitionException
 import com.openbank.kyb.domain.model.InitiatorIdentityMismatchException
 import jakarta.ws.rs.core.MediaType
@@ -53,6 +54,16 @@ class CaseCallerMismatchMapper : ExceptionMapper<CaseCallerMismatchException> {
 @Provider
 class CaseTransitionMapper : ExceptionMapper<CaseTransitionException> {
     override fun toResponse(e: CaseTransitionException): Response = error(CONFLICT, "INVALID_TRANSITION", e.message)
+}
+
+/**
+ * A business-agreement precondition is not met (annexes not accepted, not this case's ceremony,
+ * the caller has not signed it, …). 409 with the exception's own code, so the app can tell
+ * "accept first" from "that ceremony is not yours".
+ */
+@Provider
+class AgreementConflictMapper : ExceptionMapper<AgreementConflictException> {
+    override fun toResponse(e: AgreementConflictException): Response = error(CONFLICT, e.code, e.message)
 }
 
 /**

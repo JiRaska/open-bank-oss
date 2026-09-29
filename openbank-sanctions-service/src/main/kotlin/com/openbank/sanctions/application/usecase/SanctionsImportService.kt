@@ -40,9 +40,9 @@ import javax.xml.parsers.SAXParserFactory
  * Supported formats:
  *  - OFAC SDN     → sdn.xml (Treasury XML)               — SAX streaming, O(1) memory
  *  - EU_CONSOLIDATED → official EU FSF XML (first-party) by default; OpenSanctions CSV selectable
- *  - PEP_GLOBAL / UN / HM → OpenSanctions targets.simple.csv — BufferedReader streaming, batch upsert
+ *  - PEP_GLOBAL / UN / HM / CNB_DOMESTIC → OpenSanctions targets.simple.csv — BufferedReader streaming,
+ *    batch upsert (CNB_DOMESTIC is the Czech national list kept by MZV, mirrored as cz_national_sanctions)
  *  - FATF         → country-risk, not entity-based — skipped
- *  - CNB          → no machine-readable feed — seeded in Flyway V6
  *
  * Every import attempt returns a [ListImportResult] whose outcome is one of the
  * [ListImportOutcome] values — never an ambiguous count (issue #8362 / the #4348 rule: a
@@ -81,7 +81,9 @@ class SanctionsImportService(
     /**
      * Downloads and imports [listType] from [sourceUrl].
      *
-     * @return the import outcome — [ListImportOutcome.IMPORTED] with the upserted count, or a
+     * @return the import outcome — [ListImportOutcome.IMPORTED] with the number of entries the
+     * feed carried (the list's size, NOT the rows [SanctionsEntryRepository.upsertAll] wrote: an
+     * unchanged row is skipped there, so a quiet day would otherwise report a handful), or a
      * named non-success (see [ListImportResult]); the caller must key its bookkeeping on the
      * outcome, never on "count > 0".
      */
@@ -128,10 +130,13 @@ class SanctionsImportService(
             )
             SanctionsListType.FATF_HIGH_RISK ->
                 ListImportResult.skippedNotEntityBased("FATF is country-risk — no entity feed")
-            SanctionsListType.CNB_DOMESTIC ->
-                ListImportResult.skippedNotEntityBased(
-                    "CNB has no machine-readable feed — entries seeded via migration",
-                )
+            // Czech national sanctions list (MZV, Act No. 1/2023 Coll.; #10757). MZV publishes it as
+            // open data, but under a new dated filename per edition, so there is no stable URL to
+            // poll; the OpenSanctions mirror (cz_national_sanctions) is stable and refreshed daily.
+            // The enum key keeps its historical CNB_ name because it is part of the public API.
+            SanctionsListType.CNB_DOMESTIC -> importedOrEmpty(
+                importOpenSanctionsCsv(sourceUrl, listType, CZ_NATIONAL_PROGRAMS),
+            )
         }
     } catch (ex: Exception) {
         // Deliberately broad: any fetch/parse/store failure means the SAME thing to the
@@ -186,8 +191,13 @@ class SanctionsImportService(
         }
 
         val deactivated = entryRepo.deactivateMissing(SanctionsListType.EU_CONSOLIDATED, seenExternalIds)
-        Log.infof("Imported %d EU FSF entries (%d no longer present, deactivated)", total, deactivated)
-        return total
+        Log.infof(
+            "Imported %d EU FSF entries (%d written, %d no longer present, deactivated)",
+            seenExternalIds.size,
+            total,
+            deactivated,
+        )
+        return seenExternalIds.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -304,8 +314,8 @@ class SanctionsImportService(
         for (chunk in allEntries.chunked(IMPORT_BATCH_SIZE)) {
             total += entryRepo.upsertAll(chunk)
         }
-        Log.infof("Upserted %d OFAC SDN entries", total)
-        total
+        Log.infof("Imported %d OFAC SDN entries (%d written)", allEntries.size, total)
+        allEntries.size
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -327,8 +337,8 @@ class SanctionsImportService(
         val inputStream = withContext(Dispatchers.IO) { httpGetStream(url) }
         val reader = BufferedReader(InputStreamReader(inputStream, Charsets.UTF_8))
 
-        val headerLine = withContext(Dispatchers.IO) { reader.readLine() } ?: return 0
-        val headers = parseCsvLine(headerLine)
+        val headerLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: return 0
+        val headers = OpenSanctionsCsv.parseRecord(headerLine)
 
         // Resolve column indexes from actual header (format-safe)
         val idxId = headers.indexOf("id")
@@ -346,6 +356,7 @@ class SanctionsImportService(
         }
 
         var total = 0
+        var parsed = 0
         val batch = mutableListOf<SanctionsEntry>()
         // Present-set for the end-of-stream reconciliation sweep below — NOT a deactivate-first
         // pass. Deactivating stale entries used to run BEFORE this loop, unconditionally, for
@@ -359,10 +370,10 @@ class SanctionsImportService(
 
         try {
             while (true) {
-                val rawLine = withContext(Dispatchers.IO) { reader.readLine() } ?: break
+                val rawLine = withContext(Dispatchers.IO) { OpenSanctionsCsv.readRecord(reader) } ?: break
                 if (rawLine.isBlank()) continue
 
-                val cols = parseCsvLine(rawLine)
+                val cols = OpenSanctionsCsv.parseRecord(rawLine)
                 val id = col(cols, idxId)
                 val schema = col(cols, idxSchema)
                 val name = col(cols, idxName)
@@ -407,10 +418,12 @@ class SanctionsImportService(
                     programs = programs,
                 )
 
+                parsed++
+
                 if (batch.size >= IMPORT_BATCH_SIZE) {
                     total += entryRepo.upsertAll(batch)
                     batch.clear()
-                    if (total % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries imported so far…", listType, total)
+                    if (parsed % 10_000 == 0) Log.infof("OpenSanctions %s: %d entries parsed so far…", listType, parsed)
                 }
             }
         } finally {
@@ -424,12 +437,13 @@ class SanctionsImportService(
         // existing list is left untouched rather than partially wiped.
         val deactivated = entryRepo.deactivateMissing(listType, seenExternalIds)
         Log.infof(
-            "Imported %d OpenSanctions entries for %s (%d no longer present, deactivated)",
-            total,
+            "Imported %d OpenSanctions entries for %s (%d written, %d no longer present, deactivated)",
+            parsed,
             listType,
+            total,
             deactivated,
         )
-        return total
+        return parsed
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -477,7 +491,46 @@ class SanctionsImportService(
         .trim()
 
     /** RFC 4180-compatible CSV line parser (handles quoted fields with embedded commas/quotes). */
-    private fun parseCsvLine(line: String): List<String> {
+
+    companion object {
+        const val IMPORT_BATCH_SIZE = 500
+
+        /** `openbank.sanctions.eu.source` values: first-party FSF XML (default), the OpenSanctions mirror, or non-production seeds. */
+        const val EU_SOURCE_EU_FSF = "eu-fsf"
+        const val EU_SOURCE_OPENSANCTIONS = "opensanctions"
+        const val EU_SOURCE_SEED = "seed"
+
+        /** The official EU Financial Sanctions Files endpoint (full consolidated list, FSF v1.1). */
+        const val DEFAULT_EU_FSF_URL =
+            "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
+
+        private val EU_PROGRAMS = listOf("EU-SANCTIONS")
+        private val CZ_NATIONAL_PROGRAMS = listOf("CZ-NATIONAL-SANCTIONS")
+    }
+}
+
+/** Minimal RFC 4180 reader for the OpenSanctions `targets.simple.csv` feeds. */
+private object OpenSanctionsCsv {
+    /**
+     * Read one CSV RECORD, which is not the same as one line: a quoted field may contain line
+     * breaks (gb_fcdo_sanctions puts them in its `sanctions` column), and reading such a record
+     * line by line splits it — the fragments become bogus entries and the real one loses every
+     * column after the break. Keeps appending physical lines while a quote is still open; `""`
+     * inside a quoted field adds two quotes, so an odd running count means "still inside quotes".
+     */
+    fun readRecord(reader: BufferedReader): String? {
+        val first = reader.readLine() ?: return null
+        var record = first
+        var quotes = first.count { it == '"' }
+        while (quotes % 2 != 0) {
+            val next = reader.readLine() ?: break
+            record += "\n" + next
+            quotes += next.count { it == '"' }
+        }
+        return record
+    }
+
+    fun parseRecord(line: String): List<String> {
         val result = mutableListOf<String>()
         val current = StringBuilder()
         var inQuote = false
@@ -501,20 +554,5 @@ class SanctionsImportService(
         }
         result += current.toString()
         return result
-    }
-
-    companion object {
-        const val IMPORT_BATCH_SIZE = 500
-
-        /** `openbank.sanctions.eu.source` values: first-party FSF XML (default), the OpenSanctions mirror, or non-production seeds. */
-        const val EU_SOURCE_EU_FSF = "eu-fsf"
-        const val EU_SOURCE_OPENSANCTIONS = "opensanctions"
-        const val EU_SOURCE_SEED = "seed"
-
-        /** The official EU Financial Sanctions Files endpoint (full consolidated list, FSF v1.1). */
-        const val DEFAULT_EU_FSF_URL =
-            "https://webgate.ec.europa.eu/fsd/fsf/public/files/xmlFullSanctionsList_1_1/content?token=dG9rZW4tMjAxNw"
-
-        private val EU_PROGRAMS = listOf("EU-SANCTIONS")
     }
 }

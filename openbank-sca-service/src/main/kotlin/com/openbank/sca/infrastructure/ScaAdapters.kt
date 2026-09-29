@@ -5,6 +5,7 @@
 package com.openbank.sca.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.security.sanitizeForLog
 import com.openbank.sca.application.port.out.NotificationSender
 import com.openbank.sca.application.port.out.OtpGenerator
 import com.openbank.sca.application.port.out.OtpStore
@@ -65,9 +66,7 @@ class LoggingNotificationSender(
 ) : NotificationSender {
     private val log = org.jboss.logging.Logger.getLogger(LoggingNotificationSender::class.java)
 
-    // CodeQL java/log-injection: message is caller-supplied and flows straight into the log
-    // line below. Strip CR/LF so an attacker can't forge additional log lines (CWE-117).
-    private fun String?.sanitizeForLog(): String = (this ?: "-").replace('\n', '_').replace('\r', '_')
+    // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
     // Emit a real PUSH notification request (#4) so the party gets a "payment to approve" alert on
     // their device. SCA_APPROVAL maps to the SECURITY category in notification-service, so it is

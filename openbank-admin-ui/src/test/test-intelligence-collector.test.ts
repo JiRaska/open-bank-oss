@@ -20,6 +20,45 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it('retains both Security Excellence browser variants as a distinct governed journey', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-security-browser-'))
+    dirs.push(repo)
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', `version: 1
+journeys:
+  - id: admin-ui-security-excellence
+    title: Security Excellence auth boundary
+    status: active
+    severity: ticket
+    money_moving: false
+    workflow: .github/workflows/admin-ui-browser-synthetic.yml
+    workflow_name: Admin UI browser synthetic
+    browser_variants: [chromium, firefox]
+    schedule: "13 */2 * * *"
+    falsification: unauthenticated 200 must fail
+`)
+    for (const variant of ['chromium', 'firefox']) {
+      write(repo, `openbank-admin-ui/test-run-history/security-${variant}.json`, JSON.stringify({
+        schemaVersion: 1,
+        run: { id: `security-${variant}`, attempt: 1, commit: '123456789abc', branch: 'main', workflow: 'Admin UI browser synthetic', url: `https://github.com/JiRaska/open-bank-oss/actions/runs/security-${variant}`, observedAt: '2026-09-17T16:26:00Z' },
+        component: 'openbank-admin-ui', suites: [], coverage: null, testInfrastructure: { declared: [], observed: [] },
+        specializedEvidence: [{ kind: 'synthetic', state: 'passed', source: 'journey:admin-ui-security-excellence', variant, detail: 'auth gate and Web Vitals passed' }],
+      }))
+    }
+
+    const out = path.join(repo, 'report.json')
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    const security = report.syntheticJourneys.find(item => item.id === 'admin-ui-security-excellence')
+    expect(security?.ci).toMatchObject({
+      state: 'passed', detail: '2/2 declared browser variants passed.',
+      variants: [
+        expect.objectContaining({ browser: 'chromium', state: 'passed' }),
+        expect.objectContaining({ browser: 'firefox', state: 'passed' }),
+      ],
+    })
+  })
+
   it('drops a build attestation whose matched verdict disagrees with its own SHAs (#7451)', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-attestation-'))
     dirs.push(repo)

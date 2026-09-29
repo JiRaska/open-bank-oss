@@ -20,6 +20,7 @@ import com.openbank.notification.application.port.out.OversightWebhookPublisher
 import com.openbank.notification.application.port.out.PushMessage
 import com.openbank.notification.application.port.out.PushMetricsPort
 import com.openbank.notification.application.port.out.PushSender
+import com.openbank.notification.domain.ApprovalCopy
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.EmailSendOutcome
@@ -31,6 +32,11 @@ import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationStatus
 import com.openbank.notification.domain.model.NotificationTemplate
+import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_COMPLETED
+import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_EXPIRED
+import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_REJECTED
+import com.openbank.notification.domain.model.NotificationTemplate.APPROVAL_REQUIRED
+import com.openbank.notification.domain.model.NotificationTemplate.PAYMENT_RELEASE_FAILED
 import com.openbank.notification.domain.model.PushPlatform
 import com.openbank.notification.domain.model.PushResult
 import com.openbank.notification.domain.model.PushSendOutcome
@@ -336,7 +342,9 @@ class NotificationConsumer @Inject constructor(
         }
 
     private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
-        val (subject, body) = renderTemplate(req.template, req.variables)
+        // #10281: approval templates carry Czech copy and render through ApprovalCopy in the request language.
+        val (subject, body) = ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
+            ?: renderTemplate(req.template, req.variables)
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
             it.partyId = req.partyId
@@ -1062,6 +1070,9 @@ class NotificationConsumer @Inject constructor(
     @Suppress("CyclomaticComplexMethod", "LongMethod")
     private fun renderTemplate(template: NotificationTemplate, vars: Map<String, String>): Pair<String, String> =
         when (template) {
+            // #10281: reached only without a language; dispatchResolved routes these via renderOrNull.
+            APPROVAL_REQUIRED, APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED ->
+                ApprovalCopy.render(template, vars, null)
             NotificationTemplate.ACCOUNT_OPENED ->
                 "Your OpenBank account is ready" to
                     "<h2>Welcome to OpenBank!</h2><p>Your account <b>${vars.v(

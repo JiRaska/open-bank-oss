@@ -8,12 +8,42 @@ import com.openbank.libs.api.pagination.CursorEncoder
 import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.api.search.SearchRequest
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.identity.BlindIndex
 import com.openbank.libs.identity.RodneCislo
 import com.openbank.libs.observability.DomainMetrics
-import com.openbank.party.application.port.`in`.*
-import com.openbank.party.application.port.out.*
+import com.openbank.party.application.port.`in`.ActingForProfile
+import com.openbank.party.application.port.`in`.AddDocumentCommand
+import com.openbank.party.application.port.`in`.CreatePartyCommand
+import com.openbank.party.application.port.`in`.ErasePartyCommand
+import com.openbank.party.application.port.`in`.GrantMandateCommand
+import com.openbank.party.application.port.`in`.MergePartyCommand
+import com.openbank.party.application.port.`in`.PartyMandateRejectedException
+import com.openbank.party.application.port.`in`.PartyUseCase
+import com.openbank.party.application.port.`in`.PayeeLimitExceededException
+import com.openbank.party.application.port.`in`.PhoneDirectoryMatch
+import com.openbank.party.application.port.`in`.ResolvePartyByRcCommand
+import com.openbank.party.application.port.`in`.RevokeMandateCommand
+import com.openbank.party.application.port.`in`.SavePayeeCommand
+import com.openbank.party.application.port.`in`.SearchPartiesQuery
+import com.openbank.party.application.port.`in`.SelfRegisterPartyCommand
+import com.openbank.party.application.port.`in`.UpdateMarketingConsentCommand
+import com.openbank.party.application.port.`in`.UpdatePartyCommand
+import com.openbank.party.application.port.`in`.UploadDocumentCommand
+import com.openbank.party.application.port.out.GdprAggregationPort
+import com.openbank.party.application.port.out.MarketingConsentForwardingPort
+import com.openbank.party.application.port.out.MarketingConsentTrackingRepository
+import com.openbank.party.application.port.out.PartyAccountGuardPort
+import com.openbank.party.application.port.out.PartyChangeMetricsPort
+import com.openbank.party.application.port.out.PartyDocumentFileRepository
+import com.openbank.party.application.port.out.PartyDocumentRepository
+import com.openbank.party.application.port.out.PartyMandateRepository
+import com.openbank.party.application.port.out.PartyPayeeRepository
+import com.openbank.party.application.port.out.PartyRepository
+import com.openbank.party.application.port.out.PartyWrite
+import com.openbank.party.application.port.out.PortabilityAggregationPort
 import com.openbank.party.domain.model.*
 import com.openbank.party.domain.model.PartyDocumentFile
 import jakarta.enterprise.context.ApplicationScoped
@@ -28,8 +58,14 @@ private const val RC_KEY_VERSION = 1
 /** A party in either terminal state is outside the world a mandate describes (ADR-0284 D3). */
 private val MANDATE_INELIGIBLE = setOf(PartyStatus.CLOSED, PartyStatus.MERGED)
 
-class PartyNotFoundException(id: UUID) : RuntimeException("Party not found: $id")
-class PartyAlreadyExistsException(email: String) : RuntimeException("Party with email already exists: $email")
+// #10911 phase 2: extends the libs-domain base so libs-runtime's Resource{NotFound,Conflict}
+// ExceptionMapper handles the response; default codes NOT_FOUND/CONFLICT match the deleted local
+// mappers' ErrorCode.NOT_FOUND.code / ErrorCode.CONFLICT.code byte for byte (see
+// PartyExceptionMapperEquivalenceTest). Only traceId's source changes (Ids.randomId() -> the
+// correlation MDC), which #10911 phase 1 already established is not part of the wire contract.
+class PartyNotFoundException(id: UUID) : ResourceNotFoundException("Party not found: $id")
+class PartyAlreadyExistsException(email: String) :
+    ResourceConflictException("Party with email already exists: $email")
 class PartyKeycloakSubAlreadyBoundException(sub: String) : RuntimeException("Keycloak sub already registered: $sub")
 
 /** ADR-0179: a merge precondition failed. Carries an operator-readable reason (mapped to 409). */
@@ -283,26 +319,24 @@ class PartyService : PartyUseCase {
     }
 
     override suspend fun updateParty(cmd: UpdatePartyCommand): Party {
-        val party = partyRepo.findById(cmd.id) ?: throw PartyNotFoundException(cmd.id)
-        val updated = party.copy(
-            email = cmd.email ?: party.email,
-            phone = cmd.phone ?: party.phone,
-            address = cmd.address ?: party.address,
-            tradingName = cmd.tradingName ?: party.tradingName,
-            legalName = cmd.legalName ?: party.legalName,
-            dateOfBirth = cmd.dateOfBirth ?: party.dateOfBirth,
-            nationality = cmd.nationality ?: party.nationality,
-            updatedAt = Instant.now(clock),
-        )
+        val result = partyRepo.modify(cmd.id) { party ->
+            val updated = party.copy(
+                email = cmd.email ?: party.email,
+                phone = cmd.phone ?: party.phone,
+                address = cmd.address ?: party.address,
+                tradingName = cmd.tradingName ?: party.tradingName,
+                legalName = cmd.legalName ?: party.legalName,
+                dateOfBirth = cmd.dateOfBirth ?: party.dateOfBirth,
+                nationality = cmd.nationality ?: party.nationality,
+                updatedAt = Instant.now(clock),
+            )
+            PartyWrite(updated, PartyEvents.updated(party, updated, Instant.now(clock), PartyActor.system("party-api")))
+        } ?: throw PartyNotFoundException(cmd.id)
         // ADR-0256 D1 / #4458: the publisher declares materiality, computed from this diff. The
         // event is published either way — account-service reconciles on PARTY_UPDATED regardless
         // — but only MATERIAL is a KYC re-screening trigger, and NO_CHANGE is its own outcome.
-        changeMetrics.changeClassified(PartyChange.classify(party, updated).materiality)
-        val saved = partyRepo.update(
-            updated,
-            PartyEvents.updated(party, updated, Instant.now(clock), PartyActor.system("party-api")),
-        )
-        return saved
+        changeMetrics.changeClassified(PartyChange.classify(result.before, result.after).materiality)
+        return result.after
     }
 
     override suspend fun addDocument(cmd: AddDocumentCommand): PartyDocument {
@@ -397,36 +431,42 @@ class PartyService : PartyUseCase {
         )
     }
 
+    // The KYC and AML outcomes arrive on two independent channels and are applied concurrently.
+    // Each derives the two-key status from the OTHER key as currently committed, so both run as
+    // an atomic modify() under a row lock — see PartyRepository.modify for the lost update that
+    // a read-in-one-session, write-in-another shape produced.
     override suspend fun updateKycStatus(partyId: UUID, status: KycStatus): Party {
-        val party = partyRepo.findById(partyId) ?: throw PartyNotFoundException(partyId)
-        val updated = party.copy(
-            kycStatus = status,
-            status = deriveStatus(status, party.amlStatus, party.status),
-            updatedAt = Instant.now(clock),
-        )
-        val saved = partyRepo.update(
-            updated,
-            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("kyc-status-projection")),
-        )
-        countIfVerifyingTransition(party.status, saved)
-        return saved
+        val result = partyRepo.modify(partyId) { party ->
+            val updated = party.copy(
+                kycStatus = status,
+                status = deriveStatus(status, party.amlStatus, party.status),
+                updatedAt = Instant.now(clock),
+            )
+            PartyWrite(
+                updated,
+                PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("kyc-status-projection")),
+            )
+        } ?: throw PartyNotFoundException(partyId)
+        countIfVerifyingTransition(result.before.status, result.after)
+        return result.after
     }
 
     override suspend fun updateAmlStatus(partyId: UUID, amlStatus: AmlStatus): Party {
-        val party = partyRepo.findById(partyId) ?: throw PartyNotFoundException(partyId)
-        val updated = party.copy(
-            amlStatus = amlStatus,
-            status = deriveStatus(party.kycStatus, amlStatus, party.status),
-            updatedAt = Instant.now(clock),
-        )
         // Emits the party's current status (incl. ACTIVE) to downstream consumers
         // (account-service activation, onboarding cockpit) on the party events topic.
-        val saved = partyRepo.update(
-            updated,
-            PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("aml-status-projection")),
-        )
-        countIfVerifyingTransition(party.status, saved)
-        return saved
+        val result = partyRepo.modify(partyId) { party ->
+            val updated = party.copy(
+                amlStatus = amlStatus,
+                status = deriveStatus(party.kycStatus, amlStatus, party.status),
+                updatedAt = Instant.now(clock),
+            )
+            PartyWrite(
+                updated,
+                PartyEvents.kycStatusChanged(updated, Instant.now(clock), PartyActor.system("aml-status-projection")),
+            )
+        } ?: throw PartyNotFoundException(partyId)
+        countIfVerifyingTransition(result.before.status, result.after)
+        return result.after
     }
 
     /**
@@ -516,16 +556,23 @@ class PartyService : PartyUseCase {
             )
         }
 
-        val merged = source.copy(
-            status = PartyStatus.MERGED,
-            mergedIntoPartyId = target.id,
-            updatedAt = Instant.now(clock),
-        )
-        val saved = partyRepo.update(
-            merged,
-            PartyEvents.merged(merged, target.id, Instant.now(clock), PartyActor.system("party-merge")),
-        )
-        return saved
+        // Re-checked on the LOCKED row: the checks above ran on an unlocked read, and a
+        // concurrent merge or erasure of the same source must not be overwritten by this one.
+        val result = partyRepo.modify(source.id) { current ->
+            if (current.status == PartyStatus.MERGED || current.status == PartyStatus.CLOSED) {
+                throw PartyMergeRejectedException("Party ${current.id} changed to ${current.status} during the merge")
+            }
+            val merged = current.copy(
+                status = PartyStatus.MERGED,
+                mergedIntoPartyId = target.id,
+                updatedAt = Instant.now(clock),
+            )
+            PartyWrite(
+                merged,
+                PartyEvents.merged(merged, target.id, Instant.now(clock), PartyActor.system("party-merge")),
+            )
+        } ?: throw PartyNotFoundException(source.id)
+        return result.after
     }
 
     override suspend fun selfRegisterParty(cmd: SelfRegisterPartyCommand): Pair<Party, Boolean> {

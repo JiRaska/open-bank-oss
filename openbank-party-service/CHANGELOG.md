@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.24.7](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.6...party-service-v0.24.7) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** remove duplicate UnauthorizedException mappers; add unused 404/409 bases ([#10923](https://github.com/JiRaska/open-bank-oss/issues/10923)) ([33ff330](https://github.com/JiRaska/open-bank-oss/commit/33ff330630515a4919ca6f15bfc9b8ce3cc6d1f9))
+
+
+### Security
+
+* **libs:** move AllowAllPolicyDecisionPoint out of src/main into libs-testing ([#10936](https://github.com/JiRaska/open-bank-oss/issues/10936)) ([73c9a01](https://github.com/JiRaska/open-bank-oss/commit/73c9a01c89004bb0d7828deb4f30e1d9db20f5c9))
+
+## [0.24.6](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.5...party-service-v0.24.6) (2026-09-23)
+
+
+### Security
+
+* **card-issuance:** named machine callers for the RBAC-only reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 6) ([#10550](https://github.com/JiRaska/open-bank-oss/issues/10550)) ([3b97193](https://github.com/JiRaska/open-bank-oss/commit/3b9719319a1363979555ffb110e1517b14a8ee42))
+
+## [0.24.5](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.4...party-service-v0.24.5) (2026-09-23)
+
+
+### Security
+
+* **account:** own M2M identities for the account and transaction reads ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 5) ([#10549](https://github.com/JiRaska/open-bank-oss/issues/10549)) ([f1fe313](https://github.com/JiRaska/open-bank-oss/commit/f1fe313996eeecb9a83ae2a6405c340dcadeeaaa))
+
+## [0.24.4](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.3...party-service-v0.24.4) (2026-09-23)
+
+
+### Security
+
+* **aml:** own M2M identities for the remaining writers ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 3) ([#10540](https://github.com/JiRaska/open-bank-oss/issues/10540)) ([b6c829a](https://github.com/JiRaska/open-bank-oss/commit/b6c829a5e2ddcc41c62ad4aac9c58d5b481c676f))
+
+## [0.24.3](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.2...party-service-v0.24.3) (2026-09-21)
+
+
+### Bug Fixes
+
+* **infra:** keep the plain-HTTP port on the seven mTLS listeners ([#10505](https://github.com/JiRaska/open-bank-oss/issues/10505)) ([2f0da4f](https://github.com/JiRaska/open-bank-oss/commit/2f0da4f5eab5e886f77605a2cb1b235c115f271c))
+
+## [0.24.2](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.1...party-service-v0.24.2) (2026-09-20)
+
+
+### Security
+
+* **infra:** complete the east-west mTLS wiring — bake client-auth at build time ([#10441](https://github.com/JiRaska/open-bank-oss/issues/10441)) ([7446e9b](https://github.com/JiRaska/open-bank-oss/commit/7446e9bd176e2c41aa18ea835fc6808443e0338a)), closes [#10383](https://github.com/JiRaska/open-bank-oss/issues/10383)
+
+## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.0...party-service-v0.24.1) (2026-09-19)
+
+
+### Bug Fixes
+
+* **party:** make party read-modify-write atomic under a row lock ([#10360](https://github.com/JiRaska/open-bank-oss/issues/10360)) ([14b6ded](https://github.com/JiRaska/open-bank-oss/commit/14b6dede981c83487f23cdac766f638ba6290d13))
+
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.1...party-service-v0.24.0) (2026-09-17)
+
+
+### Features
+
+* **party:** store the customer's personal AML profile ([#10202](https://github.com/JiRaska/open-bank-oss/issues/10202)) ([84d9bfa](https://github.com/JiRaska/open-bank-oss/commit/84d9bfacd550d38053c9c7fa88fd6ecd2f617faa))
+
 ## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.23.0...party-service-v0.23.1) (2026-09-13)
 
 

@@ -11,7 +11,10 @@ info:
   # comment still described a 1.19 -> 1.20 bump it never got to take: main moved to 1.23.0 while
   # it was open, so the reserved number was spent three releases ago. Read off live origin/main,
   # confirmed free with `git log -S 'version: 1.24.0'` on this file (no hits).
-  version: 1.24.0
+  # 1.24.0 -> 1.25.0: additive only — GET/PUT /api/v1/parties/{id}/aml-profile (the personal AML
+  # profile, AML Act §9 + FATCA/CRS self-certification) and the party detail documents the derived
+  # pepFlag/pepCategory/fatcaStatus/crsStatus facts. Read off live origin/main (1.24.0).
+  version: 1.25.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -121,6 +124,10 @@ paths:
       responses:
         '200':
           description: Party detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartyDetail'
         '404':
           $ref: '#/components/responses/NotFound'
     patch:
@@ -379,6 +386,61 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/ActingForProfile'
+  /api/v1/parties/{id}/aml-profile:
+    get:
+      tags: [Parties]
+      summary: The party's current personal AML profile
+      description: >-
+        AML Act 253/2008 §9 customer declaration plus the FATCA/CRS self-certification, current
+        version only (earlier versions are retained server-side for audit). Readers are the customer
+        edge (which takes the party id from the customer's token) and staff.
+      operationId: getAmlProfile
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      responses:
+        '200':
+          description: Current AML profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '404':
+          description: Unknown party, or the person has not declared an AML profile yet
+    put:
+      tags: [Parties]
+      summary: Declare a new version of the personal AML profile
+      description: >-
+        Validates the declaration, stores it as a new version (the version number increments on
+        every declaration and history is kept), derives pepFlag/pepCategory/fatcaStatus/crsStatus
+        onto the party and publishes PARTY_UPDATED carrying the risk factors. Any risk factor
+        routes the party to enhanced due diligence (reviewStatus ENHANCED_DUE_DILIGENCE) — the
+        declaration is still stored, never silently blocked. Writable only by the customer channel
+        (the customer edge's service identity) or a ROLE_API caller; a staff session is refused.
+      operationId: declareAmlProfile
+      parameters:
+        - $ref: '#/components/parameters/partyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AmlProfileRequest'
+      responses:
+        '200':
+          description: The stored version
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AmlProfile'
+        '400':
+          description: The declaration failed validation (missing field, unknown value, rule violated)
+        '403':
+          description: The caller is not the customer channel
+        '404':
+          description: Unknown party
+        '422':
+          description: The party is not a natural person, or is closed or merged
+
   /api/v1/parties/{id}/payees:
     get:
       tags: [Parties]
@@ -758,6 +820,152 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    PartyDetail:
+      type: object
+      description: A party record. Only the AML-derived facts are enumerated here; other fields are unchanged.
+      additionalProperties: true
+      properties:
+        id: { type: string, format: uuid }
+        partyType: { type: string }
+        status: { type: string }
+        legalName: { type: string }
+        kycStatus: { type: string }
+        pepFlag:
+          type: boolean
+          nullable: true
+          description: >-
+            true if the party is flagged PEP (by a declaration or a screening); false ONLY when a
+            personal AML profile was declared and says not PEP; null when unknown (never declared).
+            Never read null as false.
+        pepCategory:
+          type: string
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PepCategory'
+        fatcaStatus:
+          type: string
+          nullable: true
+          description: null until a personal AML profile is declared
+          enum: [US_PERSON, NON_US]
+        crsStatus:
+          type: string
+          nullable: true
+          enum: [REPORTABLE, NON_REPORTABLE]
+
+    PepCategory:
+      type: string
+      enum: [HEAD_OF_STATE_OR_GOV, MINISTER, MP, JUDGE, CENTRAL_BANK, AMBASSADOR, MILITARY,
+             STATE_COMPANY_BOARD, INTL_ORG, PARTY_LEADERSHIP, FAMILY_MEMBER, CLOSE_ASSOCIATE]
+
+    AmlPep:
+      type: object
+      required: [isPep]
+      properties:
+        isPep: { type: boolean }
+        category:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PepCategory'
+          description: Required when isPep is true; must be empty otherwise.
+        detail:
+          type: string
+          nullable: true
+          maxLength: 500
+
+    AmlProfileRequest:
+      type: object
+      required: [purpose, incomeSources, occupation, expectedMonthlyTurnover, cashIntensive, pep,
+                 taxResidencies, usPerson, truthful]
+      properties:
+        purpose:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EVERYDAY_BANKING, SALARY, SAVINGS, INVESTMENTS, BUSINESS_SIDE_INCOME, OTHER]
+        purposeNote: { type: string, nullable: true, maxLength: 500, description: Required when purpose includes OTHER }
+        incomeSources:
+          type: array
+          minItems: 1
+          items:
+            type: string
+            enum: [EMPLOYMENT, SELF_EMPLOYMENT, PENSION, STUDENT_SUPPORT, RENTAL, INVESTMENTS, INHERITANCE_GIFT, OTHER]
+        incomeNote: { type: string, nullable: true, maxLength: 500, description: Required when incomeSources includes OTHER }
+        occupation:
+          type: string
+          enum: [EMPLOYED, SELF_EMPLOYED, STUDENT, RETIRED, UNEMPLOYED, OTHER]
+        occupationNote: { type: string, nullable: true, maxLength: 500, description: Required when occupation is OTHER }
+        expectedMonthlyTurnover:
+          type: string
+          description: CZK band
+          enum: [UP_TO_30K, UP_TO_100K, UP_TO_500K, OVER_500K]
+        cashIntensive: { type: boolean }
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies:
+          type: array
+          minItems: 1
+          description: ISO 3166-1 alpha-2 codes, no repeats. A US residency requires usPerson=true.
+          items:
+            type: string
+            pattern: '^[A-Za-z]{2}$'
+        tin:
+          type: object
+          description: >-
+            Taxpayer identification number per NON-CZ residency (optional), keyed by ISO 3166-1
+            alpha-2 code, e.g. {"SK": "1234567890"}. Keys must be declared taxResidencies and must
+            not include CZ (400 otherwise).
+          additionalProperties:
+            type: string
+            maxLength: 64
+        usPerson: { type: boolean, description: FATCA self-certification }
+        truthful:
+          type: boolean
+          description: Must be true — the customer confirms the declaration is complete and true.
+
+    AmlProfile:
+      type: object
+      required: [partyId, version, declaredAt, purpose, incomeSources, occupation, expectedMonthlyTurnover,
+                 cashIntensive, pep, taxResidencies, tin, usPerson, truthful, riskFactors, eddRequired,
+                 reviewStatus, pepFlag, fatcaStatus, crsStatus]
+      properties:
+        partyId: { type: string, format: uuid }
+        version: { type: integer, minimum: 1, description: Increments on every declaration }
+        declaredAt: { type: string, format: date-time, description: When this version was confirmed }
+        purpose: { type: array, items: { type: string } }
+        purposeNote: { type: string, nullable: true }
+        incomeSources: { type: array, items: { type: string } }
+        incomeNote: { type: string, nullable: true }
+        occupation: { type: string }
+        occupationNote: { type: string, nullable: true }
+        expectedMonthlyTurnover: { type: string }
+        cashIntensive: { type: boolean }
+        pep:
+          $ref: '#/components/schemas/AmlPep'
+        taxResidencies: { type: array, items: { type: string } }
+        tin:
+          type: object
+          additionalProperties: { type: string }
+        usPerson: { type: boolean }
+        truthful: { type: boolean }
+        riskFactors:
+          type: array
+          items:
+            type: string
+            enum: [PEP, US_PERSON, CASH_INTENSIVE, HIGH_RISK_COUNTRY, HIGH_TURNOVER]
+        eddRequired: { type: boolean }
+        reviewStatus:
+          type: string
+          enum: [STANDARD, ENHANCED_DUE_DILIGENCE]
+          description: ENHANCED_DUE_DILIGENCE means the customer is told the account needs a check.
+        pepFlag: { type: boolean }
+        pepCategory:
+          nullable: true
+          allOf:
+            - $ref: '#/components/schemas/PepCategory'
+        fatcaStatus: { type: string, enum: [US_PERSON, NON_US] }
+        crsStatus: { type: string, enum: [REPORTABLE, NON_REPORTABLE] }
+
     ApprovalResponse:
       type: object
       description: >-

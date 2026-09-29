@@ -4,12 +4,15 @@
 
 package com.openbank.fx.application.usecase
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.fx.application.port.`in`.IngestCnbFixingCommand
 import com.openbank.fx.application.port.out.CnbRateProvider
 import com.openbank.fx.application.port.out.FxRateRepository
 import com.openbank.fx.domain.model.FxRate
 import com.openbank.fx.domain.model.RateSource
 import com.openbank.fx.domain.model.RateType
+import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -22,6 +25,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.ZoneOffset
+import java.util.UUID
 
 class CnbRateIngestionServiceTest {
 
@@ -39,8 +43,11 @@ class CnbRateIngestionServiceTest {
 
     private val clock: Clock = Clock.fixed(Instant.parse("2026-05-30T12:00:00Z"), ZoneOffset.UTC)
 
+    private val mapper = ObjectMapper().registerModule(JavaTimeModule())
+        .disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+
     private fun service(repo: FxRateRepository, provider: CnbRateProvider) =
-        CnbRateIngestionService(provider, repo, "EUR,USD,GBP", clock)
+        CnbRateIngestionService(provider, repo, "EUR,USD,GBP", clock, mapper)
 
     @Test
     fun `ingests only configured currencies as CNB CZK rates with bid equal ask equal per-unit`() = runBlocking<Unit> {
@@ -49,7 +56,7 @@ class CnbRateIngestionServiceTest {
         coEvery { provider.fetchFixing(any()) } returns sample
         coEvery { repo.findBySourceAndValidFrom(any(), any(), any(), any()) } returns null
         val saved = mutableListOf<FxRate>()
-        coEvery { repo.save(capture(slot<FxRate>())) } answers { firstArg<FxRate>().also { saved += it } }
+        coEvery { repo.saveAllWithOutbox(any(), any()) } answers { firstArg<List<FxRate>>().also { saved += it } }
 
         val result = service(repo, provider).ingest(IngestCnbFixingCommand(LocalDate.of(2026, 5, 30)))
 
@@ -84,13 +91,67 @@ class CnbRateIngestionServiceTest {
         coEvery { repo.findBySourceAndValidFrom("EUR", "CZK", RateSource.CNB, expectedValidFrom) } returns existing
         coEvery { repo.findBySourceAndValidFrom("USD", "CZK", RateSource.CNB, expectedValidFrom) } returns null
         coEvery { repo.findBySourceAndValidFrom("GBP", "CZK", RateSource.CNB, expectedValidFrom) } returns null
-        coEvery { repo.save(any()) } answers { firstArg() }
+        val batch = slot<List<FxRate>>()
+        coEvery { repo.saveAllWithOutbox(capture(batch), any()) } answers { firstArg() }
 
         val result = service(repo, provider).ingest(IngestCnbFixingCommand(LocalDate.of(2026, 5, 30)))
 
         assertThat(result.ingested).isEqualTo(2)
         assertThat(result.skipped).isEqualTo(1)
-        coVerify(exactly = 0) { repo.save(match { it.baseCurrency == "EUR" }) }
+        assertThat(batch.captured.map { it.baseCurrency }).containsExactlyInAnyOrder("USD", "GBP")
+    }
+
+    // ── ADR-0314 D5: fx.fixing.published.v1 ──────────────────────────────────────────────────
+
+    @Test
+    fun `stored rates and one fixing event are written in a single call`() = runBlocking<Unit> {
+        val repo = mockk<FxRateRepository>()
+        val provider = mockk<CnbRateProvider>()
+        coEvery { provider.fetchFixing(any()) } returns sample
+        coEvery { repo.findBySourceAndValidFrom(any(), any(), any(), any()) } returns null
+        val rates = slot<List<FxRate>>()
+        val message = slot<OutboxMessage>()
+        coEvery { repo.saveAllWithOutbox(capture(rates), capture(message)) } answers { firstArg() }
+
+        service(repo, provider).ingest(IngestCnbFixingCommand(LocalDate.of(2026, 5, 30)))
+
+        // One call is the atomicity: the repository commits the batch and the outbox row together,
+        // so there is no path that stores a rate without announcing it.
+        coVerify(exactly = 1) { repo.saveAllWithOutbox(any(), any()) }
+        coVerify(exactly = 0) { repo.save(any()) }
+        assertThat(message.captured.eventType).isEqualTo("fx.fixing.published.v1")
+        assertThat(message.captured.aggregateId).isEqualTo(UUID.nameUUIDFromBytes("CNB:2026-05-30".toByteArray()))
+
+        val payload = mapper.readTree(message.captured.payload)
+        assertThat(payload["source"].asText()).isEqualTo("CNB")
+        assertThat(payload["fixingDate"].asText()).isEqualTo("2026-05-30")
+        assertThat(payload["sequence"].asInt()).isEqualTo(104)
+        assertThat(payload["quoteCurrency"].asText()).isEqualTo("CZK")
+        assertThat(payload["sourceService"].asText()).isEqualTo("fx-service")
+        // The event names exactly the rows it was committed with — same ids, same rates.
+        val wire = payload["rates"].associate { it["currency"].asText() to it }
+        assertThat(wire.keys).containsExactlyInAnyOrder("EUR", "USD", "GBP")
+        rates.captured.forEach { stored ->
+            assertThat(wire.getValue(stored.baseCurrency)["rateId"].asText()).isEqualTo(stored.id.toString())
+            assertThat(
+                wire.getValue(stored.baseCurrency)["ratePerUnit"].decimalValue(),
+            ).isEqualByComparingTo(stored.bidRate)
+        }
+    }
+
+    @Test
+    fun `a re-run that stores nothing emits nothing`() = runBlocking<Unit> {
+        val repo = mockk<FxRateRepository>()
+        val provider = mockk<CnbRateProvider>()
+        coEvery { provider.fetchFixing(any()) } returns sample
+        coEvery { repo.findBySourceAndValidFrom(any(), any(), any(), any()) } returns cnbRate()
+
+        val result = service(repo, provider).ingest(IngestCnbFixingCommand(LocalDate.of(2026, 5, 30)))
+
+        assertThat(result.ingested).isZero()
+        assertThat(result.skipped).isEqualTo(3)
+        // An empty fixing event would tell the risk engine a fixing exists with no rates in it.
+        coVerify(exactly = 0) { repo.saveAllWithOutbox(any(), any()) }
     }
 
     // ── #3921 step 3: getCnbRate(asOf) resolves the fixing that was in effect on a given day ───

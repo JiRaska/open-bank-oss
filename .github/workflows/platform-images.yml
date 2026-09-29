@@ -1,0 +1,333 @@
+name: Platform images
+
+# Build, scan, sign, attest and push the platform images this repo owns but that are not
+# Quarkus services — today openbank-keycloak (the cluster IdP) and openbank-litellm (the
+# ai-platform LLM gateway) — and open the GitOps PR that pins the new digest.
+#
+# WHY THIS EXISTS. Both images were built only by a human running a script from a laptop
+# (openbank-infra/scripts/build-push-keycloak.sh). That made every Keycloak CVE bump a
+# two-step change with an invisible second step: the Dockerfile moved to 26.6.4 (#11263) and
+# nothing built the image, so keycloak.yaml kept running 26.6.3 with the merged fix unshipped.
+# The Dockerfile is now the only thing a human edits; everything after the merge is here.
+#
+# THE IMAGE LIST IS DECLARED ONCE, in the `plan` job below. For each image: its build
+# context, its ECR repository, and how its tag is derived FROM THE DOCKERFILE (never typed
+# here), so a version bump is a one-line Dockerfile edit and the tag follows.
+#
+# PR runs build only: no AWS credentials, no push. They exist so a broken Dockerfile (a
+# base digest that no longer resolves, an engine-architecture assertion in the litellm build)
+# is red before the merge, not after it.
+#
+# ARCH. linux/arm64 only, built natively on ubuntu-24.04-arm (no QEMU). Every node the
+# cluster schedules on is Graviton; the service images are arm64-only for the same reason,
+# and a multi-arch index would only add an amd64 image nothing can pull.
+#
+# DEPLOY. After a push the `gitops-pr` job rewrites the image reference in whichever
+# openbank-infra/gitops manifest already pins that repository to `<tag>@<digest>` and opens a
+# PR with the GitOps App token (signed commit, required checks run). It deliberately does NOT
+# arm auto-merge, unlike the service deploy PRs: these are the IdP every login depends on and
+# the one pod with 0.0.0.0/0:443 egress (ADR-0175), and a human looks at the rollout.
+# A repository that no manifest pins yet (a brand-new image) is pushed and reported, and the
+# first pin is a reviewed human PR.
+
+on:
+  pull_request:
+    paths:
+      - openbank-infra/docker/keycloak/**
+      - openbank-infra/docker/litellm/**
+      - .github/workflows/platform-images.yml
+  push:
+    branches: [main]
+    paths:
+      - openbank-infra/docker/keycloak/**
+      - openbank-infra/docker/litellm/**
+      - .github/workflows/platform-images.yml
+  workflow_dispatch:
+    inputs:
+      image:
+        description: Which image to rebuild
+        type: choice
+        options: [all, keycloak, litellm]
+        default: all
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-images-${{ github.event_name }}-${{ github.ref }}
+  # A main push must finish: a cancelled run can leave a pushed-but-unattested image.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  AWS_REGION: eu-north-1
+  AWS_DEFAULT_REGION: eu-north-1
+  ECR_REGISTRY: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
+  PLATFORM: linux/arm64
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      any: ${{ steps.plan.outputs.any }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Select images
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_IMAGE: ${{ inputs.image }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          # name | context | ECR repository | ARG holding the upstream version | tag suffix
+          ALL='[
+            {"name":"keycloak","context":"openbank-infra/docker/keycloak","repo":"openbank-keycloak","version_arg":"KEYCLOAK_VERSION","suffix":"-optimized"},
+            {"name":"litellm","context":"openbank-infra/docker/litellm","repo":"openbank-litellm","version_arg":"LITELLM_VERSION","suffix":""}
+          ]'
+          case "$EVENT" in
+            workflow_dispatch)
+              sel="$(jq -c --arg i "$INPUT_IMAGE" '[.[] | select($i == "all" or .name == $i)]' <<<"$ALL")" ;;
+            *)
+              base="${PR_BASE:-$BEFORE}"
+              # A first push / force-push has no usable `before`: rebuild everything.
+              if [ -z "$base" ] || ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+                changed="$(git ls-files)"
+              else
+                changed="$(git diff --name-only "$base" HEAD)"
+              fi
+              if grep -qx '.github/workflows/platform-images.yml' <<<"$changed"; then
+                sel="$ALL"
+              else
+                sel="$(jq -c --arg c "$changed" '[.[] | . as $i | select(($c | split("\n")) | any(startswith($i.context + "/")))]' <<<"$ALL")"
+              fi ;;
+          esac
+          # Derive each tag from its Dockerfile's pinned ARG — the single source of truth.
+          out='[]'
+          for row in $(jq -c '.[]' <<<"$sel"); do
+            ctx="$(jq -r .context <<<"$row")"; arg="$(jq -r .version_arg <<<"$row")"
+            ver="$(grep -m1 -oE "^ARG ${arg}=[A-Za-z0-9._-]+" "${ctx}/Dockerfile" | cut -d= -f2 || true)"
+            [ -n "$ver" ] || { echo "::error::no 'ARG ${arg}=' in ${ctx}/Dockerfile"; exit 1; }
+            out="$(jq -c --argjson r "$row" --arg t "${ver}$(jq -r .suffix <<<"$row")" '. + [$r + {tag: $t}]' <<<"$out")"
+          done
+          echo "matrix=$out" >> "$GITHUB_OUTPUT"
+          echo "any=$(jq 'length > 0' <<<"$out")" >> "$GITHUB_OUTPUT"
+          echo "selected: $out"
+
+  build:
+    name: Build ${{ matrix.image.name }}
+    needs: plan
+    if: needs.plan.outputs.any == 'true'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write  # GitHub OIDC -> the build runner role; used only off pull_request
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    env:
+      IMAGE: ${{ matrix.image.repo }}
+      TAG: ${{ matrix.image.tag }}
+      CONTEXT: ${{ matrix.image.context }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build (no push)
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          docker buildx build --platform "$PLATFORM" --provenance=false \
+            -t "${IMAGE}:${TAG}" --load "$CONTEXT"
+          docker image inspect "${IMAGE}:${TAG}" --format 'built {{.Id}} for {{.Os}}/{{.Architecture}} user={{.Config.User}}'
+
+      - name: Configure AWS credentials (GitHub OIDC)
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
+          aws-region: eu-north-1
+
+      - name: ECR login
+        if: github.event_name != 'pull_request'
+        uses: aws-actions/amazon-ecr-login@03f1aad4c6c7ffd436567f42f9384779290529bd # v2.1.7
+
+      - name: Build + push
+        id: push
+        if: github.event_name != 'pull_request'
+        run: |
+          set -euo pipefail
+          ref="${ECR_REGISTRY}/${IMAGE}:${TAG}"
+          # Runtime backstop for a repository tofu has not created yet (#3423); fails open.
+          bash .github/scripts/ensure-ecr-repository.sh "$IMAGE"
+          docker buildx create --use --name obplatform --driver docker-container >/dev/null 2>&1 \
+            || docker buildx use obplatform
+          docker buildx build --platform "$PLATFORM" --provenance=false \
+            --metadata-file "$RUNNER_TEMP/meta.json" -t "$ref" --push "$CONTEXT"
+          digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/meta.json")"
+          case "$digest" in sha256:*) ;; *) echo "::error::no digest in buildx metadata"; exit 1 ;; esac
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+          echo "ref=${ECR_REGISTRY}/${IMAGE}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Trivy
+        if: github.event_name != 'pull_request'
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          version: v0.72.0
+
+      # Same gate auto-deploy applies to the service images: fixable CRITICAL blocks, HIGH is
+      # reported. A blocked image is pushed but never pinned — the gitops job only sees images
+      # that reach the attestation step, which this failure skips.
+      - name: Trivy image scan (gate fixable CRITICAL, report HIGH)
+        if: github.event_name != 'pull_request'
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+        run: |
+          set -uo pipefail
+          # Per-image, EXPIRING exceptions: <context>/.trivyignore.yaml lists triaged CVEs with a
+          # statement and `expired_at`. Trivy stops honouring an entry the day it expires, so the
+          # gate fails again on its own; an exception cannot quietly outlive its reason. The
+          # report step shows every finding regardless, ignored ones included.
+          ignore=()
+          [ -f "$CONTEXT/.trivyignore.yaml" ] && ignore=(--ignorefile "$CONTEXT/.trivyignore.yaml")
+          trivy image --platform "$PLATFORM" --scanners vuln --severity CRITICAL,HIGH \
+            --ignore-unfixed --format table --exit-code 0 "$REF" || true
+          trivy image --platform "$PLATFORM" --scanners vuln --severity CRITICAL \
+            --ignore-unfixed --quiet --exit-code 1 "${ignore[@]}" "$REF"
+
+      # Sign + CycloneDX SBOM + SLSA provenance, each verified after the fact, by the shared
+      # helper (root CLAUDE.md: never hand-roll trivy + cosign). Kyverno Enforce admits nothing
+      # without all of it.
+      - name: Sign + attest (cosign + KMS, shared lib)
+        if: github.event_name != 'pull_request'
+        timeout-minutes: 15
+        env:
+          REF: ${{ steps.push.outputs.ref }}
+        run: |
+          set -uo pipefail
+          # shellcheck source=openbank-infra/scripts/lib/cosign-attest.sh
+          source openbank-infra/scripts/lib/cosign-attest.sh
+          cosign_sign_and_attest "$REF" "$PLATFORM"
+
+      - name: Record result
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          NAME: ${{ matrix.image.name }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/result"
+          jq -n --arg repo "$IMAGE" --arg tag "$TAG" --arg digest "$DIGEST" \
+            '{repo: $repo, tag: $tag, digest: $digest}' > "$RUNNER_TEMP/result/${NAME}.json"
+          {
+            echo "## ${IMAGE} pushed, signed and attested"
+            echo ""
+            echo "\`${ECR_REGISTRY}/${IMAGE}:${TAG}@${DIGEST}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: github.event_name != 'pull_request'
+        with:
+          name: platform-image-${{ matrix.image.name }}
+          path: ${{ runner.temp }}/result/${{ matrix.image.name }}.json
+          retention-days: 7
+
+  gitops-pr:
+    name: Gitops PR
+    needs: build
+    # always(): one image failing its CVE gate must not stop the other's pin.
+    if: always() && github.event_name != 'pull_request' && needs.build.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pull-requests: write
+    env:
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: platform-image-*
+          path: ${{ runner.temp }}/results
+          merge-multiple: true
+
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: env.GITOPS_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - name: Pin the new digests in gitops manifests
+        id: rewrite
+        run: |
+          set -euo pipefail
+          # Recompute against LIVE main, as auto-deploy does (#3194): the rewrite is
+          # deterministic, and a stale base would open a conflicted PR that never runs CI.
+          git fetch -q origin main && git reset -q --hard origin/main
+          changed=(); summary=()
+          shopt -s nullglob
+          for r in "$RUNNER_TEMP"/results/*.json; do
+            repo="$(jq -r .repo "$r")"; tag="$(jq -r .tag "$r")"; digest="$(jq -r .digest "$r")"
+            host="${ECR_REGISTRY}/${repo}"
+            files="$(grep -rlE "${host//./\\.}[:@]" openbank-infra/gitops || true)"
+            if [ -z "$files" ]; then
+              echo "::notice::${repo}:${tag}@${digest} pushed; no gitops manifest pins ${repo} yet — the first pin is a reviewed human PR."
+              continue
+            fi
+            for f in $files; do
+              before="$(shasum "$f")"
+              sed -E -i "s#${host//./\\.}(:[A-Za-z0-9._-]+)?(@sha256:[0-9a-f]{64})?#${host}:${tag}@${digest}#g" "$f"
+              [ "$before" = "$(shasum "$f")" ] && continue
+              changed+=("$f"); summary+=("${repo} -> ${tag}@${digest}")
+            done
+          done
+          if [ "${#changed[@]}" -eq 0 ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"; echo "nothing to repin"; exit 0
+          fi
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          tick='`'
+          { echo "summary<<EOF"; printf -- "- ${tick}%s${tick}\n" "${summary[@]}"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          git diff --stat
+
+      - name: Open gitops PR
+        id: gitops_pr
+        if: steps.rewrite.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          sign-commits: true
+          add-paths: |
+            openbank-infra/gitops/**
+          base: main
+          branch: chore/platform-images-${{ github.sha }}
+          delete-branch: true
+          commit-message: "chore(gitops): pin platform images built from ${{ github.sha }}"
+          title: "chore(gitops): pin platform images @ ${{ github.sha }}"
+          body: |
+            Automated by `platform-images.yml` for commit ${{ github.sha }}. Each image below was
+            built for linux/arm64, passed the fixable-CRITICAL trivy gate, and is signed with a
+            CycloneDX SBOM and SLSA provenance attestation (verified by `cosign-attest.sh`).
+
+            ${{ steps.rewrite.outputs.summary }}
+
+            **Auto-merge is deliberately NOT armed** — these are the cluster IdP and the LLM
+            egress gateway. Merge after checking the rollout plan; ArgoCD syncs on merge.
+
+            ## Linked issues
+
+            N/A — automated gitops image pin.
+          labels: |
+            chore
+            gitops

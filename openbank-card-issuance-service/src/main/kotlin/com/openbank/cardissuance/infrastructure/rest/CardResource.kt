@@ -15,7 +15,9 @@ import com.openbank.cardissuance.infrastructure.rest.dto.UpdateControlsRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.UpdateLimitsRequest
 import com.openbank.cardissuance.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -40,6 +42,10 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // one REST handler per card operation (issue/lifecycle/limits/controls)
 class CardResource(private val cardUseCase: CardUseCase) {
 
+    // #10486 batch 6: the named-caller check on the two machine-read endpoints below needs the caller.
+    @Inject
+    lateinit var securityIdentity: SecurityIdentity
+
     @POST
     @RolesAllowed("ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "card.create", resource = "")
@@ -59,14 +65,21 @@ class CardResource(private val cardUseCase: CardUseCase) {
     @Operation(summary = "List all cards")
     suspend fun listAll(): Response = Response.ok(cardUseCase.listAll().map { it.toResponse() }).build()
 
+    // #10486 batch 6: ROLE_API admits delegation-service's OWN machine principal (resource-ownership
+    // check) once the shared openbank-services client loses ROLE_OPERATOR. ROLE_API is held by every
+    // service account, so it is narrowed twice: by identity in card_issuance_rest_ext.rego
+    // (`service-delegation-card-read`) and, while card-issuance runs AUTHZ_ENFORCE=false (advisory), by
+    // [requireNamedCardReader] here.
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "card.read", resource = "#id")
     @Operation(summary = "Get card by ID")
-    suspend fun getCard(@PathParam("id") id: UUID): Response =
-        cardUseCase.getCard(id)?.let { Response.ok(it.toResponse()).build() }
+    suspend fun getCard(@PathParam("id") id: UUID): Response {
+        requireNamedCardReader(securityIdentity, CARD_READ_CALLERS)
+        return cardUseCase.getCard(id)?.let { Response.ok(it.toResponse()).build() }
             ?: Response.status(404).entity(mapOf("error" to "Card not found")).build()
+    }
 
     @GET
     @Path("/account/{accountId}")
@@ -76,13 +89,18 @@ class CardResource(private val cardUseCase: CardUseCase) {
     suspend fun listByAccount(@PathParam("accountId") accountId: UUID): Response =
         Response.ok(cardUseCase.listByAccount(accountId).map { it.toResponse() }).build()
 
+    // #10486 batch 6: ROLE_API admits party-service's OWN machine principal (GDPR Art. 15 aggregation),
+    // narrowed by identity in card_issuance_rest_ext.rego (`service-party-card-list`) and, while
+    // card-issuance runs OPA advisory, by [requireNamedCardReader] here.
     @GET
     @Path("/party/{partyId}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "card.list", resource = "#partyId")
     @Operation(summary = "List cards by party")
-    suspend fun listByParty(@PathParam("partyId") partyId: UUID): Response =
-        Response.ok(cardUseCase.listByParty(partyId).map { it.toResponse() }).build()
+    suspend fun listByParty(@PathParam("partyId") partyId: UUID): Response {
+        requireNamedCardReader(securityIdentity, CARD_PARTY_LIST_CALLERS)
+        return Response.ok(cardUseCase.listByParty(partyId).map { it.toResponse() }).build()
+    }
 
     /**
      * A virtual card's synthetic PAN/CVV. `no-store` is mandatory: this body must not sit in a

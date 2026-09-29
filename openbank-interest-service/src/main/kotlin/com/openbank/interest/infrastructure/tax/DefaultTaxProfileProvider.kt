@@ -18,6 +18,5 @@ import java.util.UUID
  */
 @ApplicationScoped
 class DefaultTaxProfileProvider : TaxProfilePort {
-    override fun resolve(accountId: UUID): Uni<TaxProfile> =
-        Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
+    override fun resolve(accountId: UUID): Uni<TaxProfile> = Uni.createFrom().item(TaxProfile.FAIL_SAFE_DEFAULT)
 }

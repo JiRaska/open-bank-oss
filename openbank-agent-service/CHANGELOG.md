@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.26.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.1...agent-service-v1.26.2) (2026-09-23)
+
+
+### Security
+
+* **agent:** own M2M identities for the AI-agent reads and the statement search ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 7) ([#10551](https://github.com/JiRaska/open-bank-oss/issues/10551)) ([5a25631](https://github.com/JiRaska/open-bank-oss/commit/5a25631fffd69f9f5ea653d36b5b5718bb35e951))
+
+## [1.26.1](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.26.0...agent-service-v1.26.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **agent:** emit kill-switch events from agent-service to case-coordinator topic ([#10593](https://github.com/JiRaska/open-bank-oss/issues/10593)) ([45b241e](https://github.com/JiRaska/open-bank-oss/commit/45b241e1ccd0eaf580e0920c87c353753c3149d7))
+
 ## [1.26.0](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.25.1...agent-service-v1.26.0) (2026-09-13)
 
 

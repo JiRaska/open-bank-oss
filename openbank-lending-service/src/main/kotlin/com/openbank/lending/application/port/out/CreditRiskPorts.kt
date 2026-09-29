@@ -26,6 +26,13 @@ data class LedgerPosting(
     val amount: Money,
     val kind: PostingKind,
     val accountingDate: java.time.LocalDate? = null,
+    /**
+     * The business date the event happened on, when it differs from the booking date. Null for every
+     * live posting (booked the day it happens, so value date == entry date). Set only by the ledger
+     * backfill (#10746), which books into the current open accounting day and carries the original
+     * event date here instead of back-dating into closed days.
+     */
+    val valueDate: java.time.LocalDate? = null,
 )
 
 /** Immutable internal command; the outbox retries this exact amount, key and accounting date. */
@@ -93,6 +100,26 @@ enum class PostingKind {
 /** Posts loan cash events to the ledger (via the outbox in the real adapter). */
 interface LedgerPostingPort {
     fun post(posting: LedgerPosting): Uni<Unit>
+
+    /**
+     * [post], also saying whether the ledger booked the journal or only replayed an idempotency key it
+     * had already posted (#10904). An implementation that cannot tell answers [LedgerPostResult.UNCONFIRMED],
+     * never POSTED: a replay reported as a posting is the defect this exists to remove.
+     */
+    fun postReportingReplay(posting: LedgerPosting): Uni<LedgerPostResult> =
+        post(posting).map { LedgerPostResult.UNCONFIRMED }
+}
+
+/** What the ledger did with one posting, from its `Idempotent-Replayed` response header (#10904). */
+enum class LedgerPostResult {
+    /** This call booked the journal. */
+    POSTED,
+
+    /** The reference had already been posted; the ledger booked nothing. */
+    REPLAYED,
+
+    /** Accepted, but the ledger did not say which (no header, e.g. a ledger older than API 1.20.0). */
+    UNCONFIRMED,
 }
 
 /** Creditworthiness signal from an external bureau / scoring source (EBA/GL/2020/06). */

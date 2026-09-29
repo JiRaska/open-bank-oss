@@ -68,6 +68,39 @@ class InterestCapitalizationScheduler(
             .replaceWithVoid()
     }
 
+    /**
+     * Completes stranded claims on a SHORT clock, independently of the monthly capitalization.
+     *
+     * A claim is taken in its own committed transaction and only released by a successful ledger
+     * post plus the local commit; if the post fails, the `(account, product)` pair is frozen until
+     * something completes it. Recovery therefore cannot ride on [runMonthlyCapitalization] — that
+     * fires once a month, so a claim stranded on the 2nd stays stranded for thirty days. In sandbox
+     * it was seven weeks and 124 accruals, visible only as a WARN (#10404).
+     *
+     * Bounded by construction: it touches ONLY sets a previous attempt already claimed, starts no
+     * new capitalization, and replaying one is idempotent by the ledger's `(account, product,
+     * periodTo)` key. A run with nothing outstanding is a single indexed query.
+     *
+     * `suspend`-free by design: this returns the `Uni` for Quarkus to subscribe, the same shape as
+     * the monthly tick above — a plain `@Scheduled` method carries no Vert.x context, so a
+     * `runBlocking` around reactive Panache here would throw `HR000068` and the sweep would silently
+     * never run (CLAUDE.md).
+     */
+    @Scheduled(
+        every = "{openbank.interest.claim-recovery-interval}",
+        identity = "interest-capitalization-claim-recovery",
+        concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
+    )
+    fun recoverStrandedClaims(): Uni<Void> = capitalizeInterestUseCase.recoverOutstandingClaims()
+        .onItem().invoke { count ->
+            if (count > 0) {
+                log.warnf("capitalization claim recovery completed %d stranded claim(s)", count)
+            }
+        }
+        .onFailure().invoke { e -> log.errorf(e, "capitalization claim recovery sweep failed") }
+        .onFailure().recoverWithItem(0)
+        .replaceWithVoid()
+
     private companion object {
         const val APPROX_MONTHLY_HOURS = 720L
         const val WORKFLOW_NAME = "interest-capitalization"

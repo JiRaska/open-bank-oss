@@ -27,11 +27,13 @@ object CaseThreadProjection {
         caseId = row.workflowId,
         caseClass = row.caseClass,
         dispositionTarget = row.dispositionTarget,
-        status = row.status,
+        status = row.apiStatus(),
         openedAtEpochMs = row.openedAtEpochMs,
         deadlineAtEpochMs = row.deadlineAtEpochMs,
         contestedRate = row.contestedRate,
         contributionCount = row.contributionCount,
+        haltedAtEpochMs = row.haltedAtEpochMs,
+        haltReason = row.haltReason,
     )
 
     fun project(
@@ -52,7 +54,7 @@ object CaseThreadProjection {
             caseId = case.workflowId,
             caseClass = case.caseClass,
             dispositionTarget = case.dispositionTarget,
-            status = case.status,
+            status = case.apiStatus(),
             openedAtEpochMs = case.openedAtEpochMs,
             deadlineAtEpochMs = case.deadlineAtEpochMs,
             contestedRate = case.contestedRate,
@@ -66,6 +68,8 @@ object CaseThreadProjection {
             historySource = HISTORY_SOURCE,
             retentionPolicy = RETENTION_POLICY,
             entries = entries,
+            haltedAtEpochMs = case.haltedAtEpochMs,
+            haltReason = case.haltReason,
         )
     }
 
@@ -131,6 +135,7 @@ object CaseThreadProjection {
             "AUTHORIZED", "DENIED" -> ThreadEntryType.POLICY_DECISION
             "INVOKED" -> ThreadEntryType.SIGNAL_INVOKED
             "CONSUMED" -> ThreadEntryType.SIGNAL_CONSUMED
+            "HALTED" -> ThreadEntryType.POLICY_DECISION
             else -> ThreadEntryType.CONTRIBUTION_PERSISTED
         },
         atEpochMs = observedAtEpochMs,
@@ -142,12 +147,14 @@ object CaseThreadProjection {
         runtimeEvidence = RuntimeEvidence(
             evidenceId = policyDecisionId?.takeIf { it.isNotBlank() } ?: "$signalId:$stage",
             source = SIGNAL_EVIDENCE_SOURCE,
-            stage = RuntimeEvidenceStage.valueOf(stage),
+            stage = if (stage == "HALTED") RuntimeEvidenceStage.PERSISTED else RuntimeEvidenceStage.valueOf(stage),
             observedAtEpochMs = observedAtEpochMs,
             correlationId = workflowId,
             detail = "$capability signal $signalId",
         ),
     )
+
+    private fun CaseRow.apiStatus(): String = if (status == "HALTED") "CLOSED" else status
 
     private const val HISTORY_SOURCE = "case-coordinator-postgres-read-model"
     private const val OUTBOX_SOURCE = "case-coordinator-transactional-outbox"

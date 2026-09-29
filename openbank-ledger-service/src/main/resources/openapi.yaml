@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.19.0
+  version: 1.21.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -86,6 +86,14 @@ paths:
               description: URL of the created journal entry (/api/v1/journals/{journalId}).
               schema:
                 type: string
+            Idempotent-Replayed:
+              description: >
+                `true` when `idempotencyKey` had already been posted and this call only replayed it,
+                so nothing new was booked; `false` when this call posted the journal. A replay answers
+                with the same 201 and the same body as the original, so this header is the only way
+                to tell the two apart (#10904).
+              schema:
+                type: boolean
           content:
             application/json:
               schema:
@@ -264,6 +272,60 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+
+  /api/v1/journals/accounts/{code}/balance:
+    get:
+      tags: [Ledger]
+      summary: A GL account's balance in one transaction currency (native amounts)
+      description: >
+        Sums the native `amount` (not the CZK `base_amount`) of booked journal lines on the GL
+        account `code` whose transaction currency is `currency`, with entry date on or before
+        `asOf`. Base-only CZK lines — the FX revaluation's mark-to-ČNB legs (ADR-0046) — never
+        move a foreign-currency balance. `net` is debit − credit. `scope` behaves as on the trial
+        balance (defaults to REAL_ONLY). Used for nostro reconciliation of foreign-currency GLs
+        (#11107).
+      operationId: getAccountCurrencyBalance
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: asOf
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: currency
+          in: query
+          required: true
+          description: ISO 4217 transaction currency, e.g. EUR.
+          schema:
+            type: string
+            pattern: '^[A-Z]{3}$'
+        - name: scope
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [REAL_ONLY, SYNTHETIC_ONLY, ALL]
+            default: REAL_ONLY
+      responses:
+        '200':
+          description: Balance of the account in the requested currency
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AccountCurrencyBalanceResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /api/v1/journals/sub-ledger-balances:
     get:
@@ -1201,6 +1263,28 @@ components:
         net:
           type: number
           description: Customer-owed booked amount (credit − debit; liability is credit-normal).
+
+    AccountCurrencyBalanceResponse:
+      type: object
+      required: [code, currency, asOf, scope, debit, credit, net]
+      properties:
+        code:
+          type: string
+        currency:
+          type: string
+        asOf:
+          type: string
+          format: date
+        scope:
+          type: string
+          enum: [REAL_ONLY, SYNTHETIC_ONLY, ALL]
+        debit:
+          type: number
+        credit:
+          type: number
+        net:
+          type: number
+          description: debit − credit, in `currency`.
 
     SubLedgerBalancesResponse:
       type: object

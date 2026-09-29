@@ -23,7 +23,6 @@ infrastructure/
   adapter/                        AccountHolderNameLookupAdapter, NoSchemeRoutingAdapter
   persistence/                    VopVerificationEntity, VopVerificationRecordAdapter
   authz/AuthzProducer.kt          OPA sidecar PDP
-  ClockProducer.kt                injected Clock (ADR-0100)
 ```
 
 The use case is a **wiring** layer: it routes (domestic vs external), calls the ports, and records the evidence. Every *decision* is in `VopNameMatchPolicy`. That is the same shape as `sepa-instant`'s `ScreeningPolicy` and `sdd-service`'s `CollectionAuthorisationPolicy`.

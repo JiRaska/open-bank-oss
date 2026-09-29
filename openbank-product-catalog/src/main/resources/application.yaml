@@ -148,3 +148,24 @@ openbank:
       require-https-issuer: true
   authz:
     enforce: "false"
+"%prod":
+  quarkus:
+    http:
+      # East-west mTLS: the 8443 listener must VALIDATE the caller's certificate, not merely offer
+      # TLS. `quarkus.http.ssl.client-auth` is a BUILD-TIME property, so the container env
+      # QUARKUS_HTTP_SSL_CLIENT_AUTH could never set it — Quarkus fixes the value into the image at
+      # build time and ignores a differing runtime value, leaving the listener at the default
+      # `none`. It therefore has to live in the file the image is built from.
+      #
+      # Under `%prod` specifically, and NOT at the top level: `quarkus.http.ssl.*` makes Quarkus
+      # treat TLS as intended, and with no certificate configured it then refuses to start
+      # ("Cannot set quarkus.http.insecure-requests without enabling SSL") — which is every dev run
+      # and every @QuarkusTest. `prod` is the active profile during quarkusBuild, so the value is
+      # still baked into the image; `test` and `dev` simply never see it.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port. With client-auth REQUIRED, Quarkus defaults
+      # `insecure-requests` to `disabled` and drops the HTTP listener entirely, so the
+      # readiness probe and every in-cluster plaintext caller get `connection refused`.
+      # mTLS applies to the 8443 listener only. Runtime property; see #10441.
+      insecure-requests: enabled

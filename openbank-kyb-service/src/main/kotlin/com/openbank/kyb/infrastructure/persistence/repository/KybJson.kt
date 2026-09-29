@@ -10,8 +10,11 @@ import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.kotlinModule
 import com.fasterxml.jackson.module.kotlin.readValue
+import com.openbank.kyb.domain.model.AgreementRecord
+import com.openbank.kyb.domain.model.Declarations
 import com.openbank.kyb.domain.model.IdentifierScheme
 import com.openbank.kyb.domain.model.LegalEntityIdentifier
+import com.openbank.kyb.domain.model.Questionnaire
 import com.openbank.kyb.domain.model.RegistryExtract
 import com.openbank.kyb.domain.model.Signer
 import java.time.Instant
@@ -139,4 +142,17 @@ internal object KybJson {
     fun writeSigners(signers: List<Signer>): String = mapper.writeValueAsString(signers)
 
     fun readSigners(json: String): List<Signer> = mapper.readValue(json)
+
+    /**
+     * Questionnaire, declarations and agreement are stored as their domain shape, like the signer
+     * list. Every field added later carries a default, so an older document still reads back;
+     * unknown properties are ignored so a rolled-back release reads a newer one.
+     */
+    fun write(value: Any): String = mapper.writeValueAsString(value)
+
+    fun readQuestionnaire(json: String): Questionnaire = mapper.readValue(json)
+
+    fun readDeclarations(json: String): Declarations = mapper.readValue(json)
+
+    fun readAgreement(json: String): AgreementRecord = mapper.readValue(json)
 }

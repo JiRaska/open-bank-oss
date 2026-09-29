@@ -185,6 +185,24 @@ class SurfaceRestContractIT {
 
     @Test
     @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
+    fun `a fraud hold hides a stored campaign banner and catalogue over HTTP`() {
+        StubConsentCheckPort.granted.set(true)
+        val heldParty = UUID.randomUUID()
+        val clearParty = UUID.randomUUID()
+        insertCampaignBanner(UUID.randomUUID(), heldParty, UUID.randomUUID())
+        insertCampaignBanner(UUID.randomUUID(), clearParty, UUID.randomUUID())
+        insertAdverseState(heldParty, "FRAUD_HOLD")
+
+        assertThat(getBanner(clearParty).getList<Map<String, Any>>("content"))
+            .extracting("id")
+            .containsExactly("CAMPAIGN_HOME_BANNER", "SAVINGS_RATE_BANNER")
+        val heldResponse = getBanner(heldParty)
+        assertThat(heldResponse.getString("state")).isEqualTo("ok")
+        assertThat(heldResponse.getList<Map<String, Any>>("content")).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = TEST_OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `a campaign carousel is attributed only in its assigned app surface`() {
         val party = UUID.randomUUID()
         val interactionRef = UUID.randomUUID()

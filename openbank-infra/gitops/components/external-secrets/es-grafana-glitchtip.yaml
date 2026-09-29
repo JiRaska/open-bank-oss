@@ -6,7 +6,7 @@
 # Runbook (out-of-band, once): mint a GlitchTip org auth token (read scope) and:
 #   vault kv put openbank/glitchtip ... GRAFANA_API_TOKEN="<token>"
 # (merges with the existing SECRET_KEY under the same `glitchtip` KV path).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: grafana-glitchtip

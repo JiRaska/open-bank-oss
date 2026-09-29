@@ -47,6 +47,7 @@ allowed_reasons contains "operator-delegation-write" if {
 	role in input.principal.roles
 	startswith(input.action, "delegation.")
     not startswith(input.action, "delegation.approval.")
+    not startswith(input.action, "delegation.signing.")
     input.action != "delegation.recertification.confirm"
 }
 
@@ -122,4 +123,39 @@ allowed_reasons contains "service-delegation-check" if {
 prohibited if {
     input.action == "delegation.recertification.confirm"
     not input.principal.id == "service-account-openbank-edge"
+}
+
+# ADR-0312 business payment signing. Enumerated, never a prefix, and granted to the customer edge
+# ONLY: the edge authenticates the human signer, and delegation-service additionally binds every
+# signature to that human's own SCA challenge (linked to approvalId + payloadSha256) and re-reads
+# their mandate live. None of these is a staff act — there is no bank-side signing.
+#
+# `claim` (not `release`) names the single-use release claim deliberately: it is the edge taking
+# the already co-signed payment out of the hold, not a second approver's decision — the N-of-M
+# round IS the multi-person control here, enforced in the service, not by the four-eyes verb set.
+allowed_reasons contains "edge-service-business-signing" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-edge"
+	input.action in {
+		"delegation.signing.evaluate",
+		"delegation.signing.policy.read",
+		"delegation.signing.policy.propose",
+		"delegation.signing.payees.read",
+		"delegation.signing.payees.propose",
+		"delegation.signing.approval.create",
+		"delegation.signing.approval.read",
+		"delegation.signing.approval.sign",
+		"delegation.signing.approval.reject",
+		"delegation.signing.approval.claim",
+		"delegation.signing.approval.report",
+		"delegation.signing.pending.read",
+	}
+}
+
+# Base rest.rego's operator-read-any admits the shared backend identity (HUMAN + ROLE_OPERATOR) to
+# any read, and a staff operator would otherwise reach these too. Veto the whole signing family
+# for every principal except the edge: an extra allow reason can never bypass `prohibited`.
+prohibited if {
+	startswith(input.action, "delegation.signing.")
+	input.principal.id != "service-account-openbank-edge"
 }

@@ -117,6 +117,8 @@ data class LoanApplication(
     val partyId: UUID,
     val requestedAmount: Money,
     val nominalAnnualRate: BigDecimal,
+    /** ADR-0314 D5: fixed or floating, and if floating, how. Carried onto the [Loan] at booking. */
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,
@@ -161,6 +163,8 @@ data class Loan(
     val partyId: UUID,
     val principal: Money,
     val nominalAnnualRate: BigDecimal,
+    /** ADR-0314 D5. [nominalAnnualRate] is the rate currently applied; for FLOATING it is index + spread at the last reset. */
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod,
@@ -233,6 +237,7 @@ data class LoanApplicationRequest(
     val partyId: UUID,
     val requestedAmount: Money,
     val nominalAnnualRate: BigDecimal,
+    val rateTerms: LoanRateTerms = LoanRateTerms.FIXED,
     val termPeriods: Int,
     val periodsPerYear: Int = 12,
     val method: AmortizationMethod = AmortizationMethod.ANNUITY,

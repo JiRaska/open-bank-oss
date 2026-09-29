@@ -156,6 +156,16 @@ money_path_services:
                                             # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                             # joins the #3679 cohort.
   - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                            # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                            # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                            # may move, which is money-path for the same reason sca/consent/vop/
+                                            # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                            # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                            # repair money movement; card.create/activate are SCA-bound customer
+                                            # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                            # without the cardholder's SCA today — add a verb here when one ships.
+                                            # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+  - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
 money_path_action_prefixes:
   sepa-payment: [sepaPayment]
@@ -592,6 +602,23 @@ authz:
     ROLE_COMMS_APPROVER:
       grant:
         - commstyle.approval.read
+    # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+    # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+    # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+    # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+    # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+    # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+    # here on purpose: every treasury action, the reads included, is granted in
+    # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+    # treasury depends on this matrix.
+    ROLE_RISK:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
+    ROLE_FINANCE:
+      grant:
+        - risk.snapshot.read
+        - risk.curve-set.read
 
 shared_m2m_write_prohibition:
   # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

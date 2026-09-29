@@ -89,10 +89,11 @@ journeys:
     cronjob: openbank-infra/gitops/components/observability/cronjob-journey-product-catalog-read.yaml
     schedule: "*/10 * * * *"
     runtime_note: >-
-      The in-cluster network edge is live, but this protected endpoint requires a dedicated
-      read-only client-credentials identity. Until the identity owner provisions that separate
-      Vault-backed secret, failed runs mean missing authentication evidence — not a green
-      catalog or network result. Tracked by #7324.
+      The in-cluster network edge is live and the journey now authenticates as the dedicated
+      synthetic client openbank-synthetic-catalog-read (catalog:read scope only, no realm role).
+      Until the identity owner provisions its Vault-backed secret (runbook 0009), the script logs
+      "credential absent" and fails all three checks — missing authentication evidence, not a
+      green catalog or network result. Tracked by #7324.
     falsification: >-
       Scale the product-catalog Deployment to zero, break its database connectivity, or set
       CATALOG_BASE to a route that returns 5xx. The exact mounted k6 program must fail its
@@ -402,3 +403,10 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-treasury-service
+      note: >-
+        ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
+        to the bank's own nostro and placement accounts; until the SYNTHETIC taint reaches the
+        ledger that is a synthetic movement in the balance sheet. The sandbox simulated market
+        (ADR-0315 D9) already drives settle/mature end to end, so the journey, when it lands,
+        should assert the posted journal by its idempotency key, not the HTTP status.

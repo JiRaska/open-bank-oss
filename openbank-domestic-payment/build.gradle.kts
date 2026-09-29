@@ -63,6 +63,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+
+    testImplementation(project(":openbank-libs-testing"))
     // ADR-0063 P2: consumer-driven contract tests (Pact).
     testImplementation(libs.pact.consumer)
     testImplementation(libs.pact.provider)
@@ -95,6 +97,14 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// Forked test JVM heap. The outbox-claim IT's NoDispatchProfile adds one more Quarkus boot to this
+// module, and the default 512m test heap then fails CI with OutOfMemoryError mid-suite (the executor
+// dies, so the report reads as a crash, not a failing test). Same per-module override as
+// account-service; see its comment for why this is not a fleet default.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
 
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
