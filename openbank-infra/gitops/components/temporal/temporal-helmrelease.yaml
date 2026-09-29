@@ -62,46 +62,127 @@ spec:
                     maxConns: 10
                     maxIdleConns: 10
                     maxConnLifetime: "1h"
-
-        frontend:
-          replicaCount: 1
-          resources:
-            requests:
-              cpu: 200m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
-
-        history:
-          replicaCount: 1
-          resources:
-            requests:
-              cpu: 200m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
-
-        matching:
-          replicaCount: 1
-          resources:
-            requests:
-              cpu: 200m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
-
-        worker:
-          replicaCount: 1
-          resources:
-            requests:
-              cpu: 200m
-              memory: 256Mi
-            limits:
-              cpu: "1"
-              memory: 512Mi
+          # Per-role settings live UNDER `server:` -- the chart reads `server.<role>`. Until
+          # 2026-09-29 these blocks sat at the top level of the values, where the chart never
+          # looks: every role ran the `server.resources` default (500m/512Mi), and the
+          # 200m/256Mi written here had never been applied (verified against the live
+          # Deployments). Moving them is what makes the HA settings below take effect at all.
+          #
+          # HA for the request path (ADR-0325 follow-up). temporal-db is already primary +
+          # standby with switchover updates, but with ONE frontend/history/matching pod each,
+          # every roll of one of those pods (node drift, spot reclaim, image bump) leaves the
+          # membership ring with zero hosts for that role. Measured 2026-09-29: the matching
+          # pod replaced at 16:02:21Z produced 533 "Not enough hosts to serve the request" /
+          # "matching client encountered error" lines until its successor joined the ring at
+          # 16:02:37Z; a longer window at 10:45-10:59Z produced 1770. Two replicas on different
+          # nodes (hard hostname spread, soft zone spread), a PDB Karpenter honours when
+          # draining, and surge-first rolls keep one member of every role in the ring.
+          # Ringpop membership and history-shard ownership rebalance on their own;
+          # numHistoryShards (chart default 512) is immutable and unaffected.
+          frontend:
+            replicaCount: 2
+            podDisruptionBudget:
+              maxUnavailable: 1
+            deploymentStrategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxSurge: 1
+                maxUnavailable: 0
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: frontend
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: ScheduleAnyway
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: frontend
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
+          history:
+            replicaCount: 2
+            podDisruptionBudget:
+              maxUnavailable: 1
+            deploymentStrategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxSurge: 1
+                maxUnavailable: 0
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: history
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: ScheduleAnyway
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: history
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 1Gi
+          matching:
+            replicaCount: 2
+            podDisruptionBudget:
+              maxUnavailable: 1
+            deploymentStrategy:
+              type: RollingUpdate
+              rollingUpdate:
+                maxSurge: 1
+                maxUnavailable: 0
+            topologySpreadConstraints:
+              - maxSkew: 1
+                topologyKey: kubernetes.io/hostname
+                whenUnsatisfiable: DoNotSchedule
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: matching
+              - maxSkew: 1
+                topologyKey: topology.kubernetes.io/zone
+                whenUnsatisfiable: ScheduleAnyway
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/instance: temporal
+                    app.kubernetes.io/component: matching
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
+          # The system worker role runs background scanners/archival only -- not on the request
+          # path -- so it stays at one replica.
+          worker:
+            replicaCount: 1
+            resources:
+              requests:
+                cpu: 200m
+                memory: 256Mi
+              limits:
+                cpu: "1"
+                memory: 512Mi
 
         admintools:
           enabled: true
