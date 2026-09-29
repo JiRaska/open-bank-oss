@@ -34,12 +34,7 @@ object ReportingCurrencyTotal {
         val foreign = currencies.filter { it.currency != REPORTING_CURRENCY && it.lines.isNotEmpty() }
         val missing = foreign.map { it.currency }.filterNot(fixings::containsKey)
         if (missing.isNotEmpty()) {
-            return ReportingTotal(
-                null,
-                emptyList(),
-                "no ČNB fixing in effect on ${asOf ?: "the as-of date"} for ${missing.joinToString(", ")}: " +
-                    "the CZK total needs every currency with exposures converted, and a partial total is not stated",
-            )
+            return ReportingTotal(null, emptyList(), missingFixingReason(missing, asOf))
         }
         val lines = currencies.flatMap { c ->
             val fx = fixings[c.currency].takeIf { c.currency != REPORTING_CURRENCY }
@@ -61,4 +56,12 @@ object ReportingCurrencyTotal {
         val used = foreign.map { fixings.getValue(it.currency) }.sortedBy { it.currency }
         return ReportingTotal(CurrencyCapital(REPORTING_CURRENCY, lines, ownFunds), used, null)
     }
+
+    /**
+     * The one wording for "a needed fixing is missing", shared by every reporting-currency view
+     * (capital, liquidity), so a consumer sees the same reason whichever result it reads.
+     */
+    fun missingFixingReason(missing: List<String>, asOf: LocalDate?): String =
+        "no ČNB fixing in effect on ${asOf ?: "the as-of date"} for ${missing.joinToString(", ")}: " +
+            "the CZK total needs every currency with exposures converted, and a partial total is not stated"
 }
