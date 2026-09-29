@@ -2,8 +2,8 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Return success only when a metadata diff adds Maven Central artifacts with verified SHA-256s.
 
-Exit 0 means safe to omit service builds, 1 means ineligible (caller must use its
-ordinary full-fleet fallback), and 2 means the verifier itself could not decide.
+Exit 0 means safe to omit service builds. Exit 1 (ineligible) or 2 (verifier
+error) leaves the caller on its conservative full-fleet path.
 """
 from __future__ import annotations
 
