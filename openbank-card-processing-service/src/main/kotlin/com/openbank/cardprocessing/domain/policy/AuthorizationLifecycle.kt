@@ -45,10 +45,14 @@ object AuthorizationLifecycle {
         if (!currencyCode.equals(authorization.currencyCode, ignoreCase = true)) {
             return PresentmentOutcome.Refused(PresentmentRefusal.CURRENCY_MISMATCH)
         }
-        val cumulative = authorization.clearedAmountMinorUnits + amountMinorUnits
-        if (cumulative > authorization.amountMinorUnits) {
+        // Compared against the remainder, never as `cleared + amount > authorized`: the presentment
+        // amount is acquirer-supplied, and a value near Long.MAX_VALUE wraps that sum negative and
+        // sails past the check. Both operands here are non-negative, so the subtraction cannot.
+        val remaining = authorization.amountMinorUnits - authorization.clearedAmountMinorUnits
+        if (amountMinorUnits > remaining) {
             return PresentmentOutcome.Refused(PresentmentRefusal.EXCEEDS_AUTHORIZED_AMOUNT)
         }
+        val cumulative = authorization.clearedAmountMinorUnits + amountMinorUnits
         val fullyCleared = cumulative == authorization.amountMinorUnits
         return PresentmentOutcome.Accepted(
             authorization.copy(
