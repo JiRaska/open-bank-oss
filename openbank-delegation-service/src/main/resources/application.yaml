@@ -228,13 +228,20 @@ mp:
           pem:
             certs: /mnt/party-tls/ca.crt
         protocols: TLSv1.3
-      # The disclosure exporter presents a private-CA certificate. Keep hostname verification
-      # enabled and trust only the CA projected by GitOps; local/test HTTP fixtures use the
-      # default URL and never exercise this named TLS configuration.
+      # document-service's 8443 listener is private-CA mTLS with client auth REQUIRED. The
+      # delegation-internal-tls certificate (issued by the same openbank-ca ClusterIssuer and
+      # already mounted for party-authority) is the client identity; hostname verification stays
+      # on. Local/test HTTP fixtures use the default URL and never exercise this bucket.
       disclosure:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/party-tls/tls.crt
+              key: /mnt/party-tls/tls.key
         trust-store:
           pem:
-            certs: ${QUARKUS_TLS_DISCLOSURE_TRUST_STORE_PEM_CERTS}
+            certs: /mnt/party-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       party-service:
         tls-configuration-name: party-authority
