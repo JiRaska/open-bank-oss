@@ -13,6 +13,7 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
@@ -843,7 +844,12 @@ class LendingService @Inject constructor(
                     ),
                 )
             } else {
-                borrowerCredit.debit(LoanCashReferences.repaymentDebit(loan.id, installment.number), accountId, amount)
+                borrowerCredit.debit(
+                    LoanCashReferences.repaymentDebit(loan.id, installment.number),
+                    accountId,
+                    amount,
+                    BorrowerCreditPort.REPAYMENT,
+                )
             }
         }
     }

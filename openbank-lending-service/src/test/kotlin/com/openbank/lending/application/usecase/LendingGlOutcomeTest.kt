@@ -370,7 +370,7 @@ class LendingGlOutcomeTest {
         every { installments.markPaid(any(), any()) } returns Uni.createFrom().item(1)
         // #11487: the repayment now debits the borrower first; stubbed so the unguarded flow still runs.
         every { borrowerAccounts.findCurrentAccount(any(), any()) } returns Uni.createFrom().item(UUID.randomUUID())
-        every { borrowerCredit.debit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerCredit.debit(any(), any(), any(), any()) } returns Uni.createFrom().item(Unit)
         val postings = captureLedger()
 
         val failure = runCatching {

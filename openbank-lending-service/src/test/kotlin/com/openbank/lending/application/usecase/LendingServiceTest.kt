@@ -706,7 +706,7 @@ class LendingServiceTest {
     private fun stubBorrowerDebitSucceeds() {
         every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
             Uni.createFrom().item(borrowerAccountId)
-        every { borrowerCredit.debit(any(), any(), any()) } returns Uni.createFrom().item(Unit)
+        every { borrowerCredit.debit(any(), any(), any(), any()) } returns Uni.createFrom().item(Unit)
     }
 
     private fun unpaidInstallment(loanId: LoanId, instId: UUID) = LoanInstallment(
@@ -730,7 +730,12 @@ class LendingServiceTest {
         service.recordRepayment(loanId, instId).await().indefinitely()
 
         verifyOrder {
-            borrowerCredit.debit("loan:${loanId.value}:inst:3:repayment-debit", borrowerAccountId, eur("1066.19"))
+            borrowerCredit.debit(
+                "loan:${loanId.value}:inst:3:repayment-debit",
+                borrowerAccountId,
+                eur("1066.19"),
+                "Loan repayment",
+            )
             installments.markPaid(instId, any())
             ledger.post(any())
         }
@@ -748,7 +753,7 @@ class LendingServiceTest {
         assertThatThrownBy { service.recordRepayment(loanId, instId).await().indefinitely() }
             .hasMessageContaining("no active CURRENT account")
 
-        verify(exactly = 0) { borrowerCredit.debit(any(), any(), any()) }
+        verify(exactly = 0) { borrowerCredit.debit(any(), any(), any(), any()) }
         verify(exactly = 0) { installments.markPaid(any(), any()) }
         verify(exactly = 0) { ledger.post(any()) }
     }
@@ -762,7 +767,7 @@ class LendingServiceTest {
             Uni.createFrom().item(listOf(unpaidInstallment(loanId, instId)))
         every { borrowerAccounts.findCurrentAccount(partyId, "EUR") } returns
             Uni.createFrom().item(borrowerAccountId)
-        every { borrowerCredit.debit(any(), any(), any()) } returns
+        every { borrowerCredit.debit(any(), any(), any(), any()) } returns
             Uni.createFrom().failure(IllegalStateException("insufficient funds"))
 
         assertThatThrownBy { service.recordRepayment(loanId, instId).await().indefinitely() }
