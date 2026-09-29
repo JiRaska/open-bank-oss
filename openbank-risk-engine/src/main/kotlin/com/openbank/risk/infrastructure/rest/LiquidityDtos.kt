@@ -117,8 +117,12 @@ data class LiquidityResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyLiquidityDto>,
-    /** Present only for a single-currency book. */
+    /** All currencies combined in CZK at the ČNB fixing for asOf; null (with [totalNotStated]) when a fixing is missing. */
     val total: CurrencyLiquidityDto?,
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateDto>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     val unclassified: List<UnclassifiedBalanceDto>,
     val notes: List<String>,
     val assumptions: LiquidityAssumptionsDto,
@@ -180,7 +184,9 @@ fun LiquidityAnalysis.toResponse(): LiquidityResponse {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         currencies = perCurrency,
-        total = result.totalCurrency?.let { t -> perCurrency.single { it.currency == t } },
+        total = result.total?.toDto(),
+        fxRates = result.fxRates.map { FxRateDto(it.currency, it.rate, it.fixingDate.toString(), it.source) },
+        totalNotStated = result.totalNotStated,
         unclassified = result.unclassified.map {
             UnclassifiedBalanceDto(it.glAccountCode, it.glAccountType, it.currency, it.amount.money(), it.reason)
         },
