@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# CEL (policies.kyverno.io/v1 MutatingPolicy) port of ecr-pull-through-rewrite.yaml —
+# kyverno.io/v1 ClusterPolicy is deprecated in Kyverno 1.19 and planned for removal
+# in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/). Read that file's header
+# for WHY each registry is rewritten and why CNPG pods are never touched.
+#
+# STAGE 1 OF 2 — SHIPPED INERT (a matchCondition that is always false; see below). A mutation has
+# no Audit mode: enabled, this would rewrite live Pods next to the v1 policy. The two
+# would agree (a rewritten ref starts with the ECR host, so the second engine no-ops),
+# but "agree" is exactly what stage 1 exists to prove, so it is proven with the Kyverno
+# 1.19.1 CLI instead (openbank-infra/tests/kyverno-cel/run.sh) and this object only has to be
+# accepted by the API server. Stage 2 removes the kill switch and deletes the v1
+# ClusterPolicy in the same PR, so exactly one engine mutates at any time.
+#
+# Semantics kept from v1, rule for rule:
+#   quay.io/, registry.k8s.io/, public.ecr.aws/, docker.io/, ghcr.io/ prefixes →
+#   the matching ECR pull-through prefix, containers AND initContainers;
+#   CNPG instance pods (label cnpg.io/cluster) excluded from every rewrite;
+#   kube-system pods labelled eks.amazonaws.com/component=true excluded from the
+#   quay rewrite ONLY (as in v1 — the other four rules never excluded them);
+#   failurePolicy: Ignore, background: false.
+# The five v1 regexes were anchored literal prefixes, so startsWith + substring is an
+# exact equivalent; the v1 strategic-merge-by-name becomes an ApplyConfiguration on
+# the name-keyed container lists.
+apiVersion: policies.kyverno.io/v1
+kind: MutatingPolicy
+metadata:
+  name: ecr-pull-through-rewrite-cel
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: "Rewrite public registry images to ECR pull-through cache — CEL"
+    policies.kyverno.io/category: "FinOps"
+    policies.kyverno.io/severity: "low"
+spec:
+  failurePolicy: Ignore
+  evaluation:
+    background:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE, UPDATE]
+        resources: [pods]
+  variables:
+    - name: ecr
+      expression: "'265175468565.dkr.ecr.eu-north-1.amazonaws.com/'"
+    - name: eksSystemPod
+      expression: >-
+        request.namespace == 'kube-system' &&
+        object.metadata.?labels[?'eks.amazonaws.com/component'].orValue('') == 'true'
+    - name: prefixes
+      # [origin prefix, ECR pull-through prefix]; quay is dropped for EKS system pods.
+      expression: >-
+        [
+          ['quay.io/', 'quay/'],
+          ['registry.k8s.io/', 'k8s/'],
+          ['public.ecr.aws/', 'ecr-public/'],
+          ['docker.io/', 'docker-hub/'],
+          ['ghcr.io/', 'ghcr/']
+        ].filter(p, p[0] != 'quay.io/' || !variables.eksSystemPod)
+    - name: needsRewrite
+      expression: >-
+        (object.spec.containers + object.spec.?initContainers.orValue([])).exists(c,
+          variables.prefixes.exists(p, c.image.startsWith(p[0])))
+  matchConditions:
+    # STAGE-1 KILL SWITCH. Kyverno refuses a MutatingPolicy with admission evaluation
+    # disabled, so this condition is what keeps it inert: it never matches. Stage 2
+    # deletes these three lines and the v1 ClusterPolicy in the same PR.
+    - name: stage-1-disabled-until-v1-removed
+      expression: "false"
+    # CNPG instance pods own their image ref (see the v1 header). A matchCondition,
+    # not an objectSelector: the 1.19.1 CLI ignored an objectSelector here and
+    # rewrote the CNPG fixture, so the exclusion lives where every engine reads it.
+    - name: not-a-cnpg-instance-pod
+      expression: "!('cnpg.io/cluster' in object.metadata.?labels.orValue({}))"
+    - name: has-rewritable-image
+      expression: variables.needsRewrite
+  mutations:
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              containers: object.spec.containers
+                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
+                .map(c, Object.spec.containers{
+                  name: c.name,
+                  image: variables.prefixes
+                    .filter(p, c.image.startsWith(p[0]))
+                    .map(p, variables.ecr + p[1] + c.image.substring(size(p[0])))[0]
+                })
+            }
+          }
+    - patchType: ApplyConfiguration
+      applyConfiguration:
+        expression: >-
+          Object{
+            spec: Object.spec{
+              initContainers: object.spec.?initContainers.orValue([])
+                .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
+                .map(c, Object.spec.initContainers{
+                  name: c.name,
+                  image: variables.prefixes
+                    .filter(p, c.image.startsWith(p[0]))
+                    .map(p, variables.ecr + p[1] + c.image.substring(size(p[0])))[0]
+                })
+            }
+          }

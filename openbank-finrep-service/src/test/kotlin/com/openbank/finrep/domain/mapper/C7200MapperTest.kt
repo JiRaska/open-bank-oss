@@ -41,10 +41,13 @@ class C7200MapperTest {
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
         notes: List<String> = emptyList(),
+        currency: String? = "CZK",
+        totalNotStated: String? = null,
     ) = RiskLiquidityResult(
-        "run-7", asOf, parameterSet, "2", "CZK", lines,
+        "run-7", asOf, parameterSet, "2", currency, lines,
         level1?.let(::BigDecimal), level2a?.let(::BigDecimal), level2b?.let(::BigDecimal), currencies, unclassified,
         notes = notes,
+        totalNotStated = totalNotStated,
     )
 
     private fun CorepTemplate.at(row: String, col: String) = cells.single { it.rowRef == row && it.colRef == col }
@@ -111,13 +114,38 @@ class C7200MapperTest {
     }
 
     @Test
-    fun `a multi-currency book is a gap, never a sum across currencies`() {
+    fun `a multi-currency book is reported from the engine's combined CZK view`() {
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(currencies = 2)), asOf)
+        assertThat(t.at("r0020", "c0010").isDataGap).isFalse()
+        assertThat(t.at("r0020", "c0010").value).isEqualByComparingTo("1250")
+        assertThat(t.at("r0010", "c0040").isDataGap).isFalse()
+        assertThat(t.cells).allMatch { it.currency == "CZK" }
+    }
+
+    @Test
+    fun `no combined view is a gap carrying the engine's reason, never a sum across currencies`() {
         val t = C7200Mapper.map(
-            RiskLiquidityLookup.found(result(level1 = null, level2a = null, level2b = null, currencies = 2)),
+            RiskLiquidityLookup.found(
+                result(
+                    level1 = null,
+                    level2a = null,
+                    level2b = null,
+                    currencies = 2,
+                    currency = null,
+                    totalNotStated = "no ČNB fixing in effect on 2026-09-30 for EUR: no partial total",
+                ),
+            ),
             asOf,
         )
-        assertThat(t.at("r0020", "c0010").gapReason).contains("multi-currency")
         assertThat(t.cells).allMatch { it.isDataGap }
+        assertThat(t.at("r0020", "c0010").gapReason).contains("no combined CZK total", "run-7", "no ČNB fixing", "EUR")
+    }
+
+    @Test
+    fun `a combined total in a currency other than CZK is a gap, never relabelled`() {
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result(currency = "EUR")), asOf)
+        assertThat(t.cells).allMatch { it.isDataGap }
+        assertThat(t.at("r0020", "c0010").gapReason).contains("is in EUR, not the reporting currency CZK")
     }
 
     @Test

@@ -39,6 +39,7 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation(libs.quarkus.junit5)
     // In-process Temporal test server for the sole-orchestrator dispatch/workflow tests (ADR-0120 Phase 6, #1917).
@@ -63,7 +64,6 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
-
     testImplementation(project(":openbank-libs-testing"))
     // ADR-0063 P2: consumer-driven contract tests (Pact).
     testImplementation(libs.pact.consumer)

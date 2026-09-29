@@ -34,6 +34,7 @@ data class SnapshotRunResponse(
     val positionCount: Int,
     val mismatchCount: Int,
     val mismatches: List<MismatchDto>,
+    val requestedBy: String?,
 )
 
 data class PositionDto(
@@ -62,6 +63,7 @@ fun SnapshotRun.toResponse() = SnapshotRunResponse(
     positionCount = positionCount,
     mismatchCount = mismatches.size,
     mismatches = mismatches.map { it.toDto() },
+    requestedBy = requestedBy,
 )
 
 fun Position.toDto() =

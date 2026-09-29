@@ -42,8 +42,9 @@ import java.time.LocalDate
  *
  * Data gaps (ADR-0097 — never a real-looking zero): r0040 / r0050 because the engine's single L1
  * class `hqla-l1-cash-or-reserves` does not distinguish coins and banknotes from central-bank
- * reserves; every value row when the read is disabled, no tied snapshot exists, the book is
- * multi-currency or empty, or the engine left balances unclassified (any of which could be a liquid
+ * reserves; every value row when the read is disabled, no tied snapshot exists, the engine states no
+ * combined CZK view (a multi-currency book is read from it, EU 2015/61 Art. 4(5)) or the book is
+ * empty, or the engine left balances unclassified (any of which could be a liquid
  * asset); every c0040 cell when the run's liquidity parameter set is not the EU 2015/61 set
  * ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); and column c0040 of a level whose applied haircut
  * differs from the Delegated Regulation 2015/61 standard haircut (L1 0 %, L2A 15 %, L2B 25 % RMBS /
@@ -129,16 +130,17 @@ object C7200Mapper {
     private fun pledgedGap(result: RiskLiquidityResult?): String? =
         result?.let { RiskEngineFigures.pledgedCollateralGap(it.notes, it.runId) }
 
-    private fun gapReason(result: RiskLiquidityResult): String? = when {
-        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
-        result.currencyCount > 1 || result.level1 == null || result.level2a == null || result.level2b == null ->
-            "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
-                "total can be stated (snapshot ${result.runId})."
-        result.unclassifiedBalances > 0 ->
-            "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
-                "any of them could be a liquid asset, so the liquid-asset totals could be understated."
-        else -> null
-    }
+    private fun gapReason(result: RiskLiquidityResult): String? = RiskEngineFigures.combinedViewGap(
+        result,
+        "HQLA level totals",
+        result.level1 != null && result.level2a != null && result.level2b != null,
+    )
+        ?: when {
+            result.unclassifiedBalances > 0 ->
+                "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
+                    "any of them could be a liquid asset, so the liquid-asset totals could be understated."
+            else -> null
+        }
 
     /**
      * Per-level market values from the lines and the engine's own after-haircut level totals; the lines

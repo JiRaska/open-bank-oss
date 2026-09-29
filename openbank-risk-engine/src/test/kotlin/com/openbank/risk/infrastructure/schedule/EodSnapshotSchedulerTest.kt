@@ -39,13 +39,15 @@ class EodSnapshotSchedulerTest {
     private class FakeSnapshotUseCase : SnapshotUseCase {
         var nextReplayed: Boolean = false
         var lastAsOf: LocalDate? = null
+        var lastRequestedBy: String? = null
         var calls: Int = 0
 
         override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = emptyList()
 
-        override suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome {
+        override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
             calls++
             lastAsOf = asOf
+            lastRequestedBy = requestedBy
             val run = SnapshotRun(
                 id = UUID.randomUUID(),
                 asOf = asOf,
@@ -95,6 +97,7 @@ class EodSnapshotSchedulerTest {
         runBlocking { s.runOnce() }
 
         assertThat(useCase.calls).isEqualTo(1)
+        assertThat(useCase.lastRequestedBy).isEqualTo("system:risk-engine-eod-snapshot")
         val created = registry.find("openbank.risk.eod_snapshot.runs").tag("outcome", "created").counter()
         val replayed = registry.find("openbank.risk.eod_snapshot.runs").tag("outcome", "replayed").counter()
         assertThat(created!!.count()).isEqualTo(1.0)

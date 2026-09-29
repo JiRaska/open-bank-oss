@@ -101,7 +101,7 @@ IMPORT_LINE = re.compile(rf"^\s*import\s+({_PREFIX_ALT})")
 DOMAIN_MODULE = "openbank-libs-domain"
 # ADR-0317 bounded-context modules split OUT of DOMAIN_MODULE: framework-free by the same rule,
 # so they stay in scope whole — a move must not silently shrink what this gate reads.
-DOMAIN_CONTEXT_MODULES = frozenset({"openbank-libs-lending"})
+DOMAIN_CONTEXT_MODULES = frozenset({"openbank-libs-iso20022", "openbank-libs-lending"})
 # The framework side of the same split; exempt even though its packages say "domain".
 EXEMPT_MODULE = "openbank-libs-runtime"
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.264.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.263.0...admin-ui-v0.264.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** show who requested each risk snapshot ([#11054](https://github.com/JiRaska/open-bank-oss/issues/11054)) ([21a6b52](https://github.com/JiRaska/open-bank-oss/commit/21a6b52079368ba5cb60ec590fe7723000961f42))
+* **admin-ui:** verify unified approval inbox identity and audit context ([#11400](https://github.com/JiRaska/open-bank-oss/issues/11400)) ([a12d9be](https://github.com/JiRaska/open-bank-oss/commit/a12d9be97efa1af05460899e39d5c3baa0b965b0))
+
+## [0.263.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.2...admin-ui-v0.263.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** minimum reserve requirement page ([#11045](https://github.com/JiRaska/open-bank-oss/issues/11045)) ([2eec3bf](https://github.com/JiRaska/open-bank-oss/commit/2eec3bfcb8a9f5078b2b05f294d6fcc75f8c736b))
+
 ## [0.262.2](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.262.1...admin-ui-v0.262.2) (2026-09-29)
 
 

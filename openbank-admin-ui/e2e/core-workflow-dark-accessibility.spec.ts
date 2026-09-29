@@ -10,7 +10,7 @@ const CORE_WORKFLOWS = [
   { route: '/accounts', heading: /Účty zákazníků|Customer Accounts/ },
   { route: '/payments', heading: /Platby|Payments/ },
   { route: '/parties', heading: /Subjekty|Parties/ },
-  { route: '/approvals', heading: /Fronta schvalování \(AI agent\)|Approval queue \(AI agent\)/ },
+  { route: '/approvals', heading: /Fronta schvalování|Approval inbox/ },
   { route: '/audit', heading: /Auditní log|Audit Log/ },
   { route: '/consents', heading: /Souhlasy|Consents/ },
   { route: '/kyc', heading: /KYC Případy|KYC Cases/ },

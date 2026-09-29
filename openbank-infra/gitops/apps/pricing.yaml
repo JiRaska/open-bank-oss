@@ -6,7 +6,7 @@
 # the running Deployments, Services, Ingress, ExternalSecrets, NetworkPolicies and the
 # CNPG Cluster keep their identity, so pricing-db is taken over, not recreated.
 # Application code and images stay in JiRaska/openbank-pricing; only the deployment
-# lives here, where the CNPG, NetworkPolicy and edge-exposure gates cover it.
+# lives here, where the CNPG and NetworkPolicy gates cover it.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

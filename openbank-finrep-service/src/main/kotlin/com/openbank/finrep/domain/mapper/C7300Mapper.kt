@@ -51,7 +51,8 @@ import java.time.LocalDate
  * naming the key ([unknownComponentReason]); the rows of known components are still stated.
  *
  * Data gaps (ADR-0097 — never a real-looking zero): every row when the read is disabled, no tied
- * snapshot exists, the book is multi-currency or empty, or balances are unclassified (any of which
+ * snapshot exists, the engine states no combined CZK view (a multi-currency book is read from it, EU
+ * 2015/61 Art. 4(5)) or the book is empty, or balances are unclassified (any of which
  * could be an outflow); every c0060 cell when the run's liquidity parameter set is not the EU 2015/61
  * set ([RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET]); r0060 / r0250 always, because the engine treats every customer deposit as retail (the
  * snapshot carries no party type) and applies no higher-outflow category or wholesale run-off; and
@@ -152,16 +153,13 @@ object C7300Mapper {
         return if (unknown.isEmpty()) null else unknownComponentReason(unknown, result.runId)
     }
 
-    private fun gapReason(result: RiskLiquidityResult): String? = when {
-        result.currencyCount == 0 -> RiskEngineFigures.emptyBookReason(result.runId)
-        result.currencyCount > 1 || result.totalOutflows == null ->
-            "The risk engine's book is multi-currency and it does not convert to one reporting currency, so no " +
-                "outflow total can be stated (snapshot ${result.runId})."
-        result.unclassifiedBalances > 0 ->
-            "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
-                "any of them could be a liability with an outflow, so the outflow totals could be understated."
-        else -> null
-    }
+    private fun gapReason(result: RiskLiquidityResult): String? =
+        RiskEngineFigures.combinedViewGap(result, "outflow total", result.totalOutflows != null) ?: when {
+            result.unclassifiedBalances > 0 ->
+                "${result.unclassifiedBalances} balance(s) are unclassified in risk-engine snapshot ${result.runId}; " +
+                    "any of them could be a liability with an outflow, so the outflow totals could be understated."
+            else -> null
+        }
 
     /**
      * Per-component sums from the lines of the components this mapper knows. Every line — known or

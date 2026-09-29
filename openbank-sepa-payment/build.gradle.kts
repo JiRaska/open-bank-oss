@@ -39,6 +39,7 @@ dependencies {
     implementation(project(":openbank-libs-temporal"))
     implementation("io.temporal:temporal-sdk:1.25.1")
     implementation(project(":openbank-libs-domain"))
+    implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
     testImplementation("io.temporal:temporal-testing:1.25.1")
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
@@ -51,6 +52,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(project(":openbank-libs-testing"))
     // ADR-0104 D3 cross-service IT: stub the clearing simulator over real HTTP so the scheme
     // gateway adapter's REST-client / XML / oidc-client wiring is exercised, not mocked.
     testImplementation(libs.wiremock.standalone)

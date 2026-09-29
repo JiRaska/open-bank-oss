@@ -47,6 +47,7 @@ service or a cross-service call:
 
 import glob
 import os
+import pathlib
 import re
 import sys
 import tempfile
@@ -163,7 +164,9 @@ def load_docs():
 def write_policies(out: str, policies: list[dict], *, dump=yaml.dump) -> None:
     """Publish a complete policy file without exposing a truncated intermediate state."""
     out_dir = os.path.dirname(out)
-    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".network-policies-", suffix=".yaml")
+    # Same filesystem for atomic replace, but outside manifest readers' *.yaml globs.
+    # A parallel CNPG gate once globbed this file just before replace removed it.
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".network-policies-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(HEADER)
@@ -272,15 +275,18 @@ def self_test() -> int:
         with open(out, "w", encoding="utf-8") as fh:
             fh.write(old)
         observed = []
+        observed_manifests = []
 
         def observe_dump(policy, stream, **kwargs):
             with open(out, encoding="utf-8") as fh:
                 observed.append(fh.read())
+            observed_manifests.append(sorted(str(p) for p in pathlib.Path(temp_dir).rglob("*.yaml")))
             return yaml.dump(policy, stream, **kwargs)
 
         write_policies(out, [{"kind": "NetworkPolicy", "metadata": {"name": "new"}}],
                        dump=observe_dump)
         case("readers see the complete old policy during render", observed, [old])
+        case("parallel manifest readers never see the staging file", observed_manifests, [[out]])
         with open(out, encoding="utf-8") as fh:
             published = fh.read()
         case("the complete new policy is published", "name: new" in published, True)
@@ -291,7 +297,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction and atomic policy publication (16 cases)")
+    print("self-test ok: dependency extraction and atomic policy publication (17 cases)")
     return 0
 
 def main():
