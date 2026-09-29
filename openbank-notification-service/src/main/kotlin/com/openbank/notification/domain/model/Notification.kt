@@ -109,7 +109,8 @@ enum class NotificationTemplate(val variables: Set<String>) {
     // ([NotificationLanguage]) by ApprovalCopy. The push TITLE never carries a variable (it is the
     // lock-screen-visible part, ADR-0135 §3); amount, payee and entity live only in the inbox body,
     // which the app fetches on tap through the authenticated, party-scoped endpoint.
-    // `kind` is a closed producer vocabulary (PAYMENT, POLICY_CHANGE, PAYEE_ADD, PAYEE_REMOVE);
+    // `kind` is a closed producer vocabulary (PAYMENT, POLICY_CHANGE, PAYEE_ADD, PAYEE_REMOVE,
+    // STANDING_ORDER, SDD_MANDATE);
     // an unknown kind renders as a generic "request", never verbatim.
 
     /** A co-signer must sign or reject a pending request (APPROVAL_REQUESTED). SECURITY: never muted. */

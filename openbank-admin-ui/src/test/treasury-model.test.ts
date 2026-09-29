@@ -5,7 +5,8 @@
 import { describe, expect, it } from 'vitest'
 import { dealSchema, counterpartyListSchema, type Counterparty } from '@/components/treasury/contracts'
 import {
-  dealActions, eligibleCounterparties, exceedsHeadroom, headroomFor, refusalText, utilisation,
+  dealActions, eligibleCounterparties, exceedsHeadroom, fxCounterAmount, fxForeignCurrency,
+  fxSpotDate, headroomFor, isValidFxPair, productLabel, refusalText, utilisation,
 } from '@/components/treasury/model'
 
 const t = (_cs: string, en: string) => en
@@ -73,5 +74,52 @@ describe('contracts and refusals', () => {
     expect(fe).toContain('same person')
     expect(fe).not.toMatch(/422/)
     expect(refusalText({ ok: false, status: 422, kind: 'refused', code: 'LIMIT_BREACHED', message: null }, 'Approve', t)).toContain('limit breached')
+  })
+
+  it('does not reject an unknown future product (ProductType is x-extensible, #10896)', () => {
+    const base = {
+      dealId: 'x', product: 'FX_FORWARD', counterpartyId: 'SIM-A', currency: 'EUR', principal: 1000, rate: 25,
+      dayCount: 'ACT/360', days: 1, interest: 0, tradeDate: '2026-09-25', valueDate: '2026-09-29', maturityDate: '2026-09-29',
+      state: 'DRAFT', createdBy: 'dana', createdByType: 'HUMAN', submittedBy: null, approvedBy: null, rationale: null,
+      limitCheck: null, createdAt: '2026-09-25T08:00:00Z', updatedAt: '2026-09-25T08:00:00Z', history: [], journals: [],
+    }
+    const parsed = dealSchema.safeParse(base)
+    expect(parsed.success).toBe(true)
+    if (parsed.success) {
+      expect(parsed.data.product).toBe('FX_FORWARD')
+      expect(parsed.data.fx).toBeNull()
+      // Rendering falls back to the raw string instead of throwing or rendering blank.
+      expect(productLabel(parsed.data.product, t)).toBe('FX_FORWARD')
+    }
+  })
+})
+
+describe('FX spot helpers (#10896)', () => {
+  it('rejects a pair where both or neither leg is CZK', () => {
+    expect(isValidFxPair('EUR', 'CZK')).toBe(true)
+    expect(isValidFxPair('CZK', 'EUR')).toBe(true)
+    expect(isValidFxPair('CZK', 'CZK')).toBe(false)
+    expect(isValidFxPair('EUR', 'EUR')).toBe(false)
+  })
+
+  it('derives the foreign currency from a valid pair, and null from an invalid one', () => {
+    expect(fxForeignCurrency('EUR', 'CZK')).toBe('EUR')
+    expect(fxForeignCurrency('CZK', 'EUR')).toBe('EUR')
+    expect(fxForeignCurrency('CZK', 'CZK')).toBeNull()
+  })
+
+  it('computes the CZK counter amount half-up to 2 dp, mirroring Deal.counterAmountOf', () => {
+    expect(fxCounterAmount(1000, 25.105)).toBeCloseTo(25105, 5)
+    expect(fxCounterAmount(1000, 25.005)).toBeCloseTo(25005, 5) // half-up, not banker's rounding
+    expect(fxCounterAmount(Number.NaN, 25)).toBeNull()
+  })
+
+  it('computes T+2 business days, skipping weekends (mirrors DayCount.spotDate)', () => {
+    // Wed 2026-09-23 -> Fri 2026-09-25 (no weekend in between)
+    expect(fxSpotDate('2026-09-23')).toBe('2026-09-25')
+    // Thu 2026-09-24 -> Mon 2026-09-28 (Sat/Sun skipped)
+    expect(fxSpotDate('2026-09-24')).toBe('2026-09-28')
+    // Fri 2026-09-25 -> Tue 2026-09-29
+    expect(fxSpotDate('2026-09-25')).toBe('2026-09-29')
   })
 })

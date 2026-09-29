@@ -755,6 +755,23 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-referral-service :: channel `account-created-in` (ADR-0310 D1). Named in
+# openbank-referral-service/src/main/resources/application.yaml (nested form); Write granted in
+# components/referral/kafka-referral-service-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.referral.account-created-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-notification-service :: channel `approval-events-in` (#10281, multi-signature approval
 # notifications). New channel, so nothing is parked anywhere to strand. Named explicitly in
 # openbank-notification-service/src/main/resources/application.yaml (nested form, issue #686);
@@ -780,6 +797,23 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.risk-engine.fx-fixing-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-risk-engine :: channel `treasury-deal-in` (ADR-0315 D6). New channel, so nothing is
+# parked anywhere to strand. Named explicitly in openbank-risk-engine/src/main/resources/application.yaml
+# (nested form, issue #686); Write granted in components/risk/kafka-risk-engine-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.risk-engine.treasury-deal-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

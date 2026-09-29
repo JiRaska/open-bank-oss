@@ -182,7 +182,7 @@ spec:
             # reviewable and unit-tested, and the CI wiring check asserts this container still
             # calls it rather than a second copy that can drift.
             - name: capture-and-compare
-              image: docker.io/alpine/k8s:1.34.1
+              image: docker.io/alpine/k8s:1.34.12
               command: ["/bin/sh", "-ec"]
               securityContext:
                 allowPrivilegeEscalation: false
@@ -226,7 +226,7 @@ spec:
             # Phase 2 — publish the report, THEN fail. Order is load-bearing: the alert must fire
             # with the detail already readable, not with a promise of it.
             - name: publish
-              image: docker.io/alpine/k8s:1.34.1
+              image: docker.io/alpine/k8s:1.34.12
               command: ["/bin/sh", "-ec"]
               securityContext:
                 allowPrivilegeEscalation: false

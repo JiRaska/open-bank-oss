@@ -128,6 +128,24 @@ def derive_excluded_actions(rego: str) -> dict:
     return out
 
 
+def matrix_allows_excludes_sa(rego: str) -> bool:
+    """True when the `matrix-allows` rule itself carries the service-account exclusion (#3765).
+
+    Then the matrix grants no machine anything and cannot defeat any rule's exclusion, so no
+    grant is a violation and every declaration is stale. The rule must be found: a rename that
+    hides it is an error, never a silent 'not excluded'.
+    """
+    for m in RULE_HEAD.finditer(rego):
+        if m.group(1) != "matrix-allows":
+            continue
+        body = rego[m.end():]
+        end = body.find("\n}")
+        body = body[:end] if end != -1 else body
+        return any(EXCLUSION.match(ln.strip()) for ln in body.splitlines())
+    raise SystemExit("::error::no `matrix-allows` rule found in rest.rego — cannot tell whether "
+                     "the matrix reaches machines. Fix the pattern, never pass blind.")
+
+
 def matrix_reach(matrix: dict) -> dict:
     """{action: [roles]} — direct grants plus the ONE inherits hop matrix_grants honours."""
     direct: dict = {}
@@ -152,6 +170,9 @@ def analyse(rego: str, rules: dict) -> tuple:
         if isinstance(d, dict) and d.get("action")
     }
     violations, baselined = {}, {}
+    if "allowed_reasons contains \"matrix-allows\"" in rego and matrix_allows_excludes_sa(rego):
+        # #3765: the matrix reaches no service account, so it defeats no exclusion.
+        return violations, baselined, sorted(declared), excluded
     for action, rule_names in sorted(excluded.items()):
         roles = reach.get(action)
         if not roles:
@@ -176,7 +197,8 @@ def report(violations: dict, baselined: dict, stale: list, excluded: dict) -> No
     for action in stale:
         print(
             f"::error title=Stale declaration::`{action}` is declared in "
-            f"matrix_sa_excluded_action_grants but the matrix no longer grants it. Remove the "
+            f"matrix_sa_excluded_action_grants but the matrix no longer reaches a service account "
+            f"with it (the grant is gone, or matrix-allows now excludes service accounts). Remove the "
             f"declaration — a register that outlives what it describes stops being reviewable."
         )
     for action, (roles, _) in baselined.items():
@@ -272,6 +294,20 @@ def self_test() -> int:
         "matrix_sa_excluded_action_grants": {"declared": [{"action": "commstyle.publish"}]},
     })
     check("a stale declaration was not flagged", s == ["commstyle.publish"])
+
+    # 8. #3765: with matrix-allows itself excluding service accounts, a grant on an SA-excluded
+    #    action is NOT a violation (nothing machine-held reaches it), and declarations go stale
+    matrix_ex = ('\nallowed_reasons contains "matrix-allows" if {\n\tinput.principal.type == "HUMAN"\n'
+                 '\tnot startswith(input.principal.id, "service-account-")\n\tmatrix_grants(a, r)\n}\n')
+    v, b, s, _ = analyse(REGO_CLEAN + matrix_ex, rules_bad)
+    check(f"an excluded matrix still reported a violation ({v=})", not v and not b and not s)
+    v, b, s, _ = analyse(REGO_CLEAN + matrix_ex, rules_declared)
+    check(f"a declaration under an excluded matrix was not stale ({s=})", s == ["commstyle.publish"])
+    # 9. ...and WITHOUT the exclusion in matrix-allows the violation is back (another rule's
+    #    exclusion is not credited to the matrix)
+    matrix_open = matrix_ex.replace('\tnot startswith(input.principal.id, "service-account-")\n', "")
+    v, _, _, _ = analyse(REGO_CLEAN + matrix_open, rules_bad)
+    check("an open matrix hid the violation", "commstyle.publish" in v)
 
     print("check-matrix-excluded-actions --self-test: " + ("PASS" if ok else "FAIL"))
     return 0 if ok else 1

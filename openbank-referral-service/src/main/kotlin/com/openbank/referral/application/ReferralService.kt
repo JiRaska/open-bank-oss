@@ -230,6 +230,23 @@ class ReferralService(
         if (invite.status != InviteStatus.ATTRIBUTED || invite.refereePartyId == null) {
             throw ReferralConflictException("invite must be attributed before qualification")
         }
+        return qualifyAttributed(invite, program, eventId, actor)
+    }
+
+    /**
+     * Creates the reward for an ATTRIBUTED [invite] under [program], keyed on [eventId], and writes
+     * its `Qualified` + `RewardRequested` outbox rows in the same transaction. The caller has
+     * already decided eligibility — the operator route above by its own checks, the ADR-0310 D1
+     * paths through `QualificationRule`. A second call with the same (invite, event) returns the
+     * reward it already made.
+     */
+    suspend fun qualifyAttributed(
+        invite: ReferralInvite,
+        program: ReferralProgram,
+        eventId: String,
+        actor: String,
+    ): ReferralReward {
+        val refereePartyId = checkNotNull(invite.refereePartyId) { "invite ${invite.id} has no referee" }
         rewards.findByInviteAndEvent(invite.id, eventId)?.let { return it }
         val now = Instant.now(clock)
         val reward = ReferralReward(
@@ -237,7 +254,7 @@ class ReferralService(
             inviteId = invite.id,
             programId = program.id,
             referrerPartyId = invite.referrerPartyId,
-            refereePartyId = invite.refereePartyId,
+            refereePartyId = refereePartyId,
             qualificationEventId = eventId,
             rewardReference = "referral-${invite.id}-$eventId",
             amount = program.rewardAmount,
@@ -253,7 +270,7 @@ class ReferralService(
             programId = program.id,
             inviteId = invite.id,
             referrerPartyId = invite.referrerPartyId,
-            refereePartyId = invite.refereePartyId,
+            refereePartyId = refereePartyId,
             qualificationEventId = eventId,
         )
         val rewardRequested = ReferralEvent.RewardRequested(

@@ -4,6 +4,7 @@
 
 package com.openbank.vop.infrastructure.observability
 
+import com.openbank.libs.observability.standardPercentiles
 import com.openbank.vop.application.port.out.VopMetricsPort
 import com.openbank.vop.application.port.out.VopRateLimitOutcome
 import com.openbank.vop.application.port.out.VopRoute
@@ -72,8 +73,7 @@ class VopMetricsAdapter(private val registry: MeterRegistry?) : VopMetricsPort {
         Timer.builder("openbank.vop.verification.duration")
             .tag("service", SERVICE)
             .tag("route", route.name.lowercase())
-            .publishPercentiles(P50, P95, P99)
-            .publishPercentileHistogram()
+            .standardPercentiles()
             .description("End-to-end Verification-of-Payee latency, including the evidence write")
             .register(r)
             .record(duration)
@@ -92,10 +92,5 @@ class VopMetricsAdapter(private val registry: MeterRegistry?) : VopMetricsPort {
 
     companion object {
         private const val SERVICE = "vop"
-
-        // The fleet-standard percentile set (libs DomainMetrics publishes the same three).
-        private const val P50 = 0.5
-        private const val P95 = 0.95
-        private const val P99 = 0.99
     }
 }

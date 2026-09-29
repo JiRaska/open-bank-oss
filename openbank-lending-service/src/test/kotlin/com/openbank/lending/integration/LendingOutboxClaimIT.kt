@@ -4,13 +4,16 @@
 package com.openbank.lending.integration
 
 import com.openbank.lending.infrastructure.persistence.repository.LendingOutboxRepositoryImpl
-import com.openbank.lending.it.PostgresRedisTestResource
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.smallrye.mutiny.coroutines.uni
@@ -32,8 +35,20 @@ import java.time.Instant
  * (the claiming pod crashed or was evicted) must not strand the row forever.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@TestProfile(LendingOutboxClaimIT.NoDispatchProfile::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class LendingOutboxClaimIT {
+
+    // This test owns the first claim. The production dispatcher runs on its own schedule and
+    // would otherwise race it for the seeded row, making the first-claim assertion flaky.
+    class NoDispatchProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "openbank.outbox.dispatch-enabled" to "false",
+        )
+    }
 
     @Inject
     lateinit var repository: LendingOutboxRepositoryImpl

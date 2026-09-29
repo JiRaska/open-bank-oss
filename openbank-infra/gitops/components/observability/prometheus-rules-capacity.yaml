@@ -197,3 +197,34 @@ spec:
               PDB (`ALLOWED DISRUPTIONS 0` on a single-replica stateful workload is the common
               one). Forcing the eviction of a database primary with no replica is how this becomes
               an outage instead of a delay.
+        # The half NodeStuckTerminating cannot see (#11304, 2026-09-28). There, a node's pods
+        # were all drained and 22 EBS volumes still never detached: the CSI detach timed out,
+        # the replacement pods could not attach (`VolumeInUse`), and Karpenter's termination
+        # controller sat in VolumesDetached=Unknown / AwaitingVolumeDetachment with no deadline.
+        # ~22 CNPG clusters were down for it while every pod-level signal said "Pending".
+        #
+        # Karpenter publishes every NodeClaim condition through operatorpkg as
+        # `operator_nodeclaim_status_condition_current_status_seconds{type,status,reason}`, whose
+        # value is the time since that condition last transitioned, and deletes the series when
+        # the condition leaves that state -- so the series existing IS the condition, and its
+        # value is how long. A healthy detach takes seconds; 15 minutes is a wedge, and with the
+        # NodePool's 1h terminationGracePeriod Karpenter will force-terminate at the hour, so
+        # this pages while there is still something to decide.
+        - alert: NodeClaimAwaitingVolumeDetachment
+          expr: |
+            operator_nodeclaim_status_condition_current_status_seconds{type="VolumesDetached",status="Unknown",reason="AwaitingVolumeDetachment"} > 900
+          for: 2m
+          labels:
+            severity: critical
+            detector: capacity
+            team: platform
+          annotations:
+            summary: "NodeClaim {{ $labels.name }} has waited over 15m for its volumes to detach"
+            description: >-
+              Karpenter has drained this node but EBS volumes are still attached to it, so every
+              pod that owns one (CNPG instances first) is Pending/ContainerCreating elsewhere with
+              `VolumeInUse`. List them with `kubectl get volumeattachment` filtered on the node,
+              and check the ebs-csi-controller logs for the detach error. The NodePool's
+              terminationGracePeriod terminates the instance at 1h, which releases the volumes;
+              terminating the EC2 instance sooner does the same. Do not strip VolumeAttachment
+              finalizers while the instance is still running -- the volume is still mounted there.

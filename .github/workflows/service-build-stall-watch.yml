@@ -18,9 +18,6 @@ on:
 
 permissions:
   contents: read
-  actions: write
-  issues: write
-  pull-requests: read
 
 concurrency:
   group: service-build-stall-watch
@@ -29,6 +26,11 @@ concurrency:
 jobs:
   watch:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+      pull-requests: read
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

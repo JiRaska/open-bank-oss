@@ -105,6 +105,37 @@ class DealEntity : PanacheEntity() {
     @Column(name = "rationale", columnDefinition = "TEXT")
     var rationale: String? = null
 
+    /** ADR-0315 D10: the JSON object an agent's draft was built from (V9). */
+    @Column(name = "draft_inputs", columnDefinition = "TEXT")
+    var draftInputs: String? = null
+
+    @Column(name = "limit_override_by")
+    var limitOverrideBy: String? = null
+
+    @Column(name = "limit_override_reason", columnDefinition = "TEXT")
+    var limitOverrideReason: String? = null
+
+    @Column(name = "limit_override_at")
+    var limitOverrideAt: Instant? = null
+
+    @Column(name = "limit_override_exposure")
+    var limitOverrideExposure: BigDecimal? = null
+
+    @Column(name = "limit_override_limit")
+    var limitOverrideLimit: BigDecimal? = null
+
+    @Column(name = "fx_side")
+    var fxSide: String? = null
+
+    @Column(name = "fx_counter_amount")
+    var fxCounterAmount: BigDecimal? = null
+
+    @Column(name = "fx_mid_rate")
+    var fxMidRate: BigDecimal? = null
+
+    @Column(name = "fx_rate_flag", columnDefinition = "TEXT")
+    var fxRateFlag: String? = null
+
     @Column(name = "created_at", nullable = false)
     lateinit var createdAt: Instant
 

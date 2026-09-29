@@ -192,14 +192,14 @@ class BusinessSigningRepositoryImpl(
                     """
                     update ApprovalRequestEntity
                        set status = ?1, claimToken = ?2, releasedAt = ?3, updatedAt = ?3
-                     where id = ?4 and entityPartyId = ?5 and kind = ?6 and status = ?7 and expiresAt > ?3
+                     where id = ?4 and entityPartyId = ?5 and kind in ?6 and status = ?7 and expiresAt > ?3
                     """.trimIndent(),
                 ).setParameter(1, ApprovalStatus.RELEASED.name)
                     .setParameter(2, claimToken)
                     .setParameter(3, now)
                     .setParameter(4, id)
                     .setParameter(5, entityPartyId)
-                    .setParameter(6, ApprovalKind.PAYMENT.name)
+                    .setParameter(6, ApprovalKind.entries.filter { it.releasable }.map { it.name })
                     .setParameter(7, ApprovalStatus.APPROVED.name)
                     .executeUpdate()
             }

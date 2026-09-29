@@ -5,6 +5,7 @@
 package com.openbank.ledger.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.ledger.application.port.`in`.GetAccountCurrencyBalanceQuery
 import com.openbank.ledger.application.port.`in`.GetControlAccountTieOutQuery
 import com.openbank.ledger.application.port.`in`.GetJournalQuery
 import com.openbank.ledger.application.port.`in`.GetJournalsByTransactionQuery
@@ -22,6 +23,7 @@ import com.openbank.ledger.application.port.out.YearCloseRepository
 import com.openbank.ledger.domain.event.AccountBookedChangedEvent
 import com.openbank.ledger.domain.event.JournalPostedEvent
 import com.openbank.ledger.domain.event.JournalReversedEvent
+import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.JournalEntry
@@ -312,6 +314,14 @@ class LedgerService(
     override suspend fun getSubLedgerBalances(query: GetSubLedgerBalancesQuery): List<SubLedgerBalance> =
         journalRepository.subLedgerBalances(query.asOf, query.subAccountId)
 
+    override suspend fun getAccountCurrencyBalance(query: GetAccountCurrencyBalanceQuery): AccountCurrencyBalance {
+        val account = glAccountRepository.findByCode(query.code)
+            ?: throw GlAccountNotFoundException("GL account ${query.code} not found")
+        val (debit, credit) =
+            journalRepository.accountBalanceInCurrency(account.id, query.currency, query.asOf, query.scope)
+        return AccountCurrencyBalance(query.code, query.currency, query.asOf, debit, credit)
+    }
+
     override suspend fun getControlAccountTieOut(query: GetControlAccountTieOutQuery): List<ControlAccountTieOut> =
         journalRepository.controlAccountTieOut(query.controlAccountId, query.asOf)
 
@@ -433,6 +443,7 @@ private fun recordPostingAmounts(entry: JournalEntry, metrics: DomainMetrics) {
 }
 
 class JournalNotFoundException(message: String) : RuntimeException(message)
+class GlAccountNotFoundException(message: String) : RuntimeException(message)
 class GlAccountValidationException(message: String) : RuntimeException(message)
 
 /**

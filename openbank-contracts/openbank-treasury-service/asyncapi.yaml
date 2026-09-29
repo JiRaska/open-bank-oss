@@ -9,10 +9,10 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.0.0
+  version: 1.3.0
   description: |
-    Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings and
-    the ČNB overnight deposit facility.
+    Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
+    ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
 
     **Transactional outbox.** Events are written to `treasury_outbox` in the same transaction as
     the deal row, its timeline entry and its ledger journal reference, and dispatched afterwards
@@ -88,7 +88,15 @@ components:
   schemas:
     ProductType:
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
+    FxSide:
+      type: [string, 'null']
+      enum: [BUY, SELL, null]
+      description: FX_SPOT only (#10896) — the bank's side on the foreign `currency`; null for money-market deals.
+
+    CounterAmount:
+      type: [number, 'null']
+      description: FX_SPOT only (#10896) — the CZK leg, principal x rate (2 dp); null for money-market deals.
 
     SourceService:
       type: string
@@ -112,6 +120,8 @@ components:
         approvedBy: { type: string, description: 'Never equal to createdBy (four-eyes, enforced in the domain and the database).' }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        fxSide: { $ref: '#/components/schemas/FxSide' }
+        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
 
     DealSettled:
       type: object
@@ -128,6 +138,8 @@ components:
         ledgerJournalId: { type: string, format: uuid }
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        fxSide: { $ref: '#/components/schemas/FxSide' }
+        counterAmount: { $ref: '#/components/schemas/CounterAmount' }
 
     DealMatured:
       type: object
@@ -163,3 +175,5 @@ components:
           description: Null when reversed from BOOKED, before anything had posted.
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
+        fxSide: { $ref: '#/components/schemas/FxSide' }
+        counterAmount: { $ref: '#/components/schemas/CounterAmount' }

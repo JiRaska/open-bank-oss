@@ -42,7 +42,7 @@ class TestBorrowerCreditPort : BorrowerCreditPort {
         calls += reference
         return Uni.createFrom().item(Unit)
     }
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> {
         calls += reference
         return Uni.createFrom().item(Unit)
     }

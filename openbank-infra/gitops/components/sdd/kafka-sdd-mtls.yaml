@@ -60,7 +60,7 @@ spec:
         host: "*"
 ---
 # ExternalSecret: sdd-service keystore projected from messaging → sdd.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -81,7 +81,7 @@ spec:
         key: sdd-service
 ---
 # ExternalSecret: shared cluster-CA truststore projected from messaging → sdd.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

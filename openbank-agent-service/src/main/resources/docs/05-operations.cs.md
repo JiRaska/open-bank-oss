@@ -17,7 +17,7 @@
 |---|---|---|
 | `OIDC_CLIENT_SECRET` | `CHANGE_ME_LOCAL_DEV_ONLY` | secret pro klienta `openbank-services` (resource server + odchozí client-credentials) |
 | `QUARKUS_OIDC_AUTH_SERVER_URL` | `http://localhost:8080/realms/openbank` | issuer Keycloak realmu |
-| `OIDC_TLS_VERIFICATION` | `none` | nastavte na `required` v reálném HTTPS deployi |
+| `OIDC_TLS_VERIFICATION` | `required` | profil `%dev` ho uvolní na `none` pro lokální Keycloak přes http |
 | `AGENT_DEFAULT_MODEL` | `mock-echo` | default model id gateway |
 | `AGENT_MODEL_ENDPOINT` | `http://litellm.ai-platform.svc:4000/v1` | base URL `openai-compat` backendu. Výchozí je in-cluster LiteLLM gateway, jediný workload, který smí komunikovat s hostovaným LLM providerem (ADR-0174/0175) — stejná hodnota, jakou nastavuje nasazení. Registrovaná model id jsou `model_name` gateway, ne id providera, takže přímá URL providera je neobsluhuje (#5736) |
 | `AGENT_MODEL_API_KEY` | *(fallback na `GROQ_API_KEY`)* | klíč pro `openai-compat` backend. V nasazení jde o **virtuální** klíč LiteLLM, nikoli klíč providera (OpenBao/ESO — nikdy v gitu) |

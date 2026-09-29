@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA server certificate for risk-engine's east-west mTLS listener (8443, client auth
+# REQUIRED). The existing HTTP listener remains during the east-west TLS migration; new consumers
+# use the parallel 8443 listener. Same shape as lending-service-internal-tls.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: risk-engine-internal-server-tls
+  namespace: risk
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: risk-engine-internal-server-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - risk-engine.risk.svc
+    - risk-engine.risk.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

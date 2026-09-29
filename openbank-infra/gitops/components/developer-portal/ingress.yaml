@@ -15,17 +15,13 @@ metadata:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
 
     # ── WAF: ModSecurity + OWASP CRS, scoped to THIS ingress (not cluster-wide) ──
+    # Both annotations are Low risk. The engine policy (SecRuleEngine On = BLOCKING,
+    # body limit, JSON audit to stdout, paranoia level 1) is NOT here any more: it
+    # was a Critical-risk `modsecurity-snippet`, and now lives in the controller's
+    # own modsecurity.conf (components/ingress-nginx/modsecurity-configmap.yaml),
+    # which the controller loads for this location because it carries no snippet.
     nginx.ingress.kubernetes.io/enable-modsecurity: "true"
     nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
-    nginx.ingress.kubernetes.io/modsecurity-snippet: |
-      SecRuleEngine On
-      SecRequestBodyAccess On
-      SecRequestBodyLimit 1048576
-      SecAuditEngine RelevantOnly
-      SecAuditLog /dev/stdout
-      SecAuditLogFormat JSON
-      # Paranoia level 1 (low false positives for a docs site); raise later if needed.
-      SecAction "id:900000,phase:1,nolog,pass,t:none,setvar:tx.paranoia_level=1"
 
     # ── Per-client rate limiting (static docs: generous but bounded) ──
     nginx.ingress.kubernetes.io/limit-rps: "30"
@@ -33,11 +29,7 @@ metadata:
     nginx.ingress.kubernetes.io/limit-connections: "20"
 
     # ── Edge security headers (belt-and-suspenders on top of the nginx.conf in the pod) ──
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      more_set_headers "Strict-Transport-Security: max-age=63072000; includeSubDomains; preload";
-      more_set_headers "X-Frame-Options: DENY";
-      more_set_headers "X-Content-Type-Options: nosniff";
-      more_set_headers "Referrer-Policy: strict-origin-when-cross-origin";
+    nginx.ingress.kubernetes.io/custom-headers: developer-portal/developer-portal-edge-headers-v1
 spec:
   ingressClassName: nginx
   tls:
@@ -54,3 +46,25 @@ spec:
                 name: developer-portal
                 port:
                   number: 8080
+---
+# Edge response headers for this host, served by ingress-nginx's `custom-headers` annotation
+# (ADR-0324 interim hardening) instead of a Critical-risk `configuration-snippet`. Keys must be
+# in the controller's `global-allowed-response-headers` (apps/ingress-nginx.yaml) or the
+# controller denies the location (503). HSTS and X-Content-Type-Options are NOT listed here:
+# the controller sets both on every response (hsts-*, add-headers).
+# IMMUTABLE, VERSIONED BY NAME, SYNC-WAVE -1 — all three are load-bearing. The controller
+# re-reads this ConfigMap only when the Ingress that names it changes (custom-headers is not
+# in its configmap-watch set and it runs with no resync period), so an in-place edit would
+# never reach nginx. Change a header by adding `-v2` and pointing the annotation at it. The
+# wave makes ArgoCD create the ConfigMap before the Ingress that references it.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: developer-portal-edge-headers-v1
+  namespace: developer-portal
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+immutable: true
+data:
+  X-Frame-Options: "DENY"
+  Referrer-Policy: "strict-origin-when-cross-origin"
