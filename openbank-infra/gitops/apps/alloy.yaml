@@ -219,7 +219,10 @@ spec:
                 // makes the STREAM label the thing every LogQL rule selects on.
                 stage.template {
                   source   = "level"
-                  template = "{{ $l := ToLower .Value }}{{ if eq $l \"warning\" }}warn{{ else }}{{ $l }}{{ end }}"
+                  // The chart renders this ConfigMap through Helm `tpl`, so the Alloy
+                  // (Go text/template) expression is wrapped in a Helm raw-string action
+                  // (double-brace, backtick) to reach Alloy verbatim.
+                  template = "{{`{{ $l := ToLower .Value }}{{ if eq $l \"warning\" }}warn{{ else }}{{ $l }}{{ end }}`}}"
                 }
 
                 // ---- demote KNOWN-TRANSIENT CloudNativePG errors to warn ----
