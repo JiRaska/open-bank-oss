@@ -1326,6 +1326,9 @@ gates:
       affinity plus the matching toleration; no target Cluster may carry its own required node
       affinity or name spot; and the targets' declared requests must stay within the load the
       pool's derived limit was sized from. Non-money-path clusters are explicitly NOT required.
+      Every node agent must follow the databases: a gitops toleration list that admits the
+      observability-pool taint without pinning to that pool (derived: alloy, falco) must also
+      tolerate openbank.io/stateful, or the money-path DB nodes run unlogged and unwatched.
     review_after: "2027-03-31"
     verified: >-
       2026-09-30 -- run on the branch: OK, 26 targets of 69 CNPG Clusters. Negative case on the
@@ -1338,6 +1341,12 @@ gates:
       toleration, a target Cluster with required nodeAffinity, one pinned to spot, target load
       above the measurement) and asserts a non-money-path cluster on spot is NOT flagged.
       Behaviour: `--kyverno` (docker, Kyverno CLI v1.19.1) 10/10 fixtures.
+      Node agents: dropping alloy's stateful toleration fails with "apps/alloy.yaml: node agent
+      at Application/spec/source/helm/valuesObject/controller tolerates the observability pool
+      but not openbank.io/stateful=true:NoSchedule"; the self-test has the same case. `--live`
+      against `kubectl get ds -A -o json` derived 7 fleet-wide DaemonSets (aws-node,
+      ebs-csi-node, eks-pod-identity-agent, kube-proxy, node-exporter, alloy, falco) and
+      reported alloy + falco MISSING on the cluster as deployed before this PR.
     min_subjects: 20   # 26 money-path clusters + temporal-db today (2026-09-30)
     selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py", ".github/scripts/check-cnpg-update-resilience.py"]
     selftest: python3 .github/scripts/check-stateful-not-on-spot.py --self-test

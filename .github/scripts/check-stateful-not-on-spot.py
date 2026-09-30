@@ -155,6 +155,112 @@ def derive() -> tuple[dict[str, str], dict[str, dict], list[str]]:
     return targets, clusters, findings
 
 
+# --- (4) node agents must follow the databases onto the stateful pool -------------------------
+# A NoSchedule taint keeps out every pod that does not tolerate it -- including the node agents.
+# Measured 2026-09-30: alloy (log shipping) and falco (runtime detection) did not tolerate
+# `openbank.io/stateful`, so the money-path database nodes would have run unlogged and unwatched.
+#
+# "Must run on every node" is DERIVED, not listed. In gitops, a toleration list that admits the
+# `workload=observability` taint WITHOUT pinning its pod to that pool (no sibling nodeSelector/
+# affinity naming observability) belongs to a workload whose author put it on the tainted pools
+# AND everywhere else -- a node agent. Every such list must also tolerate the stateful taint.
+# The EKS add-ons (aws-node, kube-proxy, ebs-csi-node, eks-pod-identity-agent) and node-exporter
+# are not configured in this tree at all and tolerate every NoSchedule taint (`operator: Exists`,
+# no key); `--live` checks them, and everything else, against a `kubectl get ds -A -o json`.
+STATEFUL_TAINT = ("openbank.io/stateful", "true")
+OBS_TAINT = ("workload", "observability")
+# Unpinned observability tolerations that are NOT node agents. Reason required; an entry that no
+# longer matches an unpinned list is itself a finding, so the exemption cannot outlive its cause.
+NOT_NODE_AGENTS: dict[str, str] = {
+    "openbank-infra/gitops/apps/vpa.yaml": "VPA recommender is a single Deployment (updater and "
+    "admission-controller are disabled); it must not be dragged onto the on-demand stateful pool",
+}
+
+
+def _tolerates(tols, key: str, value: str) -> bool:
+    for t in tols or []:
+        if not isinstance(t, dict) or (t.get("effect") not in (None, "", "NoSchedule")):
+            continue
+        if t.get("operator") == "Exists" and not t.get("key"):
+            return True
+        if t.get("key") == key and (t.get("operator") == "Exists" or str(t.get("value")) == value):
+            return True
+    return False
+
+
+def node_agent_sources() -> list[tuple[str, str, list]]:
+    """(repo path, yaml path, tolerations) for every unpinned observability-tolerating list."""
+    out: list[tuple[str, str, list]] = []
+
+    def walk(node, path, rel):
+        if isinstance(node, dict):
+            t = node.get("tolerations")
+            if isinstance(t, list) and _tolerates([x for x in t if isinstance(x, dict) and x.get("key")], *OBS_TAINT):
+                pin = json.dumps({k: v for k, v in node.items() if k in ("nodeSelector", "affinity")})
+                if OBS_TAINT[1] not in pin:
+                    out.append((rel, "/".join(path), t))
+            for k, v in node.items():
+                walk(v, path + [str(k)], rel)
+        elif isinstance(node, list):
+            for i, v in enumerate(node):
+                walk(v, path + [str(i)], rel)
+
+    for f in gatelib.rglob(REPO / RES.GITOPS, "*.yaml"):
+        rel = str(f.relative_to(REPO))
+        for d in gatelib.load_yaml_all(f, errors="replace") or []:
+            if not isinstance(d, dict):
+                continue
+            helm = ((d.get("spec") or {}).get("source") or {}).get("helm") or {}
+            if isinstance(helm.get("values"), str):  # values given as an embedded YAML string
+                d = {**d, "_values": gatelib.loads(helm["values"])}
+            walk(d, [str(d.get("kind", "?"))], rel)
+    return out
+
+
+def node_agent_findings() -> tuple[list[str], int]:
+    findings: list[str] = []
+    srcs = node_agent_sources()
+    agents = [s for s in srcs if s[0] not in NOT_NODE_AGENTS]
+    for rel, where, tols in agents:
+        if not _tolerates(tols, *STATEFUL_TAINT):
+            findings.append(f"{rel}: node agent at {where} tolerates the observability pool but not "
+                            f"{STATEFUL_TAINT[0]}={STATEFUL_TAINT[1]}:NoSchedule -- it would not run on the "
+                            f"nodes hosting the money-path databases")
+    for rel in NOT_NODE_AGENTS:
+        if not any(s[0] == rel for s in srcs):
+            findings.append(f"NOT_NODE_AGENTS[{rel}] is stale: no unpinned observability toleration there")
+    if not agents:
+        findings.append("no node-agent toleration list found in gitops -- refusing to pass vacuously "
+                        "(alloy and falco are expected)")
+    return findings, len(agents)
+
+
+def live_findings(ds_json: Path) -> list[str]:
+    """Every DaemonSet that runs on the tainted observability pool, or tolerates every taint, and
+    whose selector admits an arm64 Linux Karpenter node, must tolerate the stateful taint."""
+    findings = []
+    stateful_node = {"kubernetes.io/os": "linux", "kubernetes.io/arch": "arm64", "openbank.io/pool": "stateful",
+                     "karpenter.sh/nodepool": "stateful", "karpenter.sh/capacity-type": "on-demand"}
+    checked = 0
+    for d in json.loads(ds_json.read_text())["items"]:
+        sp = d["spec"]["template"]["spec"]
+        name = f"{d['metadata']['namespace']}/{d['metadata']['name']}"
+        if any(stateful_node.get(k, v) != v for k, v in (sp.get("nodeSelector") or {}).items()):
+            continue  # e.g. ebs-csi-node-windows: never schedules on a Linux node
+        tols = sp.get("tolerations") or []
+        if not (_tolerates([t for t in tols if t.get("key")], *OBS_TAINT) or _tolerates(tols, "__any__", "")):
+            continue  # not a fleet-wide agent (does not follow the other tainted pool either)
+        checked += 1
+        ok = _tolerates(tols, *STATEFUL_TAINT)
+        print(f"  {'ok  ' if ok else 'MISS'} {name}")
+        if not ok:
+            findings.append(f"live DaemonSet {name} runs fleet-wide but does not tolerate the stateful taint")
+    print(f"{checked} fleet-wide DaemonSets checked live")
+    if not checked:
+        findings.append("no fleet-wide DaemonSet found in the snapshot -- refusing to pass vacuously")
+    return findings
+
+
 def render_block(targets) -> str:
     body = "".join(f"          '{k}',\n" for k in sorted(targets))
     return ("    - name: targets\n      expression: >-\n        [\n" + body + "        ]\n")
@@ -249,7 +355,12 @@ def check() -> tuple[list[str], int]:
                 f"the {t_cpu:.2f} / {t_mem:.2f} stateful_load_by_zone was measured at -- re-measure it so the "
                 f"derived `stateful` NodePool limit still covers them")
 
-    gatelib.subjects(len(targets), f"money-path CNPG clusters + temporal-db routed to on-demand (of {len(clusters)})")
+    # (4) node agents
+    agent_findings, n_agents = node_agent_findings()
+    findings += agent_findings
+
+    gatelib.subjects(len(targets), f"money-path CNPG clusters + temporal-db routed to on-demand (of {len(clusters)}); "
+                                   f"{n_agents} node-agent toleration lists")
     return findings, len(targets)
 
 
@@ -309,7 +420,13 @@ def main() -> int:
     g = ap.add_mutually_exclusive_group()
     for flag in ("--self-test", "--kyverno", "--write", "--list-targets"):
         g.add_argument(flag, action="store_true")
+    g.add_argument("--live", metavar="DS_JSON", help="check a `kubectl get ds -A -o json` snapshot")
     args = ap.parse_args()
+    if args.live:
+        bad = live_findings(Path(args.live))
+        for f in bad:
+            print(f"::error::{f}")
+        return 1 if bad else 0
     if args.self_test:
         return self_test()
     if args.kyverno:
@@ -335,6 +452,11 @@ def main() -> int:
 
 _CLUSTER = ("apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\nmetadata:\n  name: {name}\n  namespace: {ns}\n"
             "spec:\n  instances: 2\n  resources:\n    requests:\n      cpu: {cpu}\n      memory: 256Mi\n{extra}")
+_AGENT = ("apiVersion: argoproj.io/v1alpha1\nkind: Application\nmetadata:\n  name: agent\nspec:\n  source:\n"
+          "    helm:\n      valuesObject:\n        tolerations:\n          - key: workload\n            operator: Equal\n"
+          "            value: observability\n            effect: NoSchedule\n{extra}")
+_STATEFUL_TOL = ("          - key: openbank.io/stateful\n            operator: Equal\n            value: \"true\"\n"
+                 "            effect: NoSchedule\n")
 _DEPLOY = ("apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: pay\n  namespace: st\nspec:\n  template:\n"
            "    spec:\n      containers:\n        - name: app\n          image: r.example/openbank-pay-service:1\n"
            "          env:\n            - name: JDBC\n              value: jdbc:postgresql://{db}-rw.st.svc:5432/pay\n")
@@ -352,7 +474,7 @@ def self_test() -> int:
                         pol_real, count=1)
     pool = tf_block(tf0, 'resource "kubectl_manifest" "nodepool_stateful"') or ""
 
-    def fleet(pay_extra="", pay_cpu="100m", db="pay-db", money="openbank-pay-service"):
+    def fleet(pay_extra="", pay_cpu="100m", db="pay-db", money="openbank-pay-service", agent_extra=_STATEFUL_TOL):
         return {
             "openbank-libs/governance/rules.yaml": f"money_path_services:\n  - {money}\n",
             "openbank-infra/gitops/components/st/db.yaml":
@@ -361,6 +483,8 @@ def self_test() -> int:
             "openbank-infra/gitops/components/st/deploy.yaml": _DEPLOY.format(db=db),
             "openbank-infra/gitops/components/temporal/db.yaml":
                 _CLUSTER.format(name="temporal-db", ns="temporal", cpu="100m", extra=""),
+            "openbank-infra/gitops/apps/alloy.yaml": _AGENT.format(extra=agent_extra),
+            "openbank-infra/gitops/apps/vpa.yaml": _AGENT.format(extra=""),
         }
 
     def run(tf, pol, files) -> list[str]:
@@ -413,6 +537,8 @@ def self_test() -> int:
         "money-path Cluster pinned to spot": (
             tf0, pol0, fleet(pay_extra="  affinity:\n    nodeSelector:\n      karpenter.sh/capacity-type: spot\n"), "names spot"),
         "declared target load outgrew the measurement": (tf0, pol0, fleet(pay_cpu="40"), "re-measure"),
+        "node agent (alloy) without the stateful toleration": (
+            tf0, pol0, fleet(agent_extra=""), "apps/alloy.yaml: node agent at"),
     }
     # The control must NOT flag a non-money-path Cluster that pins itself to spot: out of scope.
     ctrl = run(tf0, pol0, {**fleet(), "openbank-infra/gitops/components/st/db.yaml":
