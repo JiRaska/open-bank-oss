@@ -51,7 +51,8 @@ VERB_RE = re.compile(r"^\s+- (\w+)", re.MULTILINE)
 # Declared, not inferred. An entry needs a reason and is expected to shrink; the gate also fails
 # on an entry that has become granted, so the declaration cannot outlive the debt.
 #
-# All three are money-path and all three are the SAME defect, found together (#4754). They are
+# Originally three, all money-path and the SAME defect, found together (#4754); `transaction.sweep`
+# has since been granted (transaction_rest_ext.rego `operator-transaction-sweep`). The rest are
 # baselined rather than fixed here because granting them is an authoring decision: adding them to
 # `role_action_matrix` would be a grant to a machine (M2M callers authenticate with a
 # client_credentials JWT and are classified HUMAN, and `shared_m2m_write_prohibition` is not
@@ -59,12 +60,6 @@ VERB_RE = re.compile(r"^\s+- (\w+)", re.MULTILINE)
 # rego rule pinned to human operators -- which for transaction-service means creating its first
 # `*_rest_ext.rego` -- and each such edit restamps ~73 bundle files.
 KNOWN_UNGRANTED: dict[str, str] = {
-    "transaction.sweep": (
-        "#4754. Declared four-eyes, granted nowhere. Measured with `opa eval` against the "
-        "materialised transaction bundle: allow=false for every principal probed, with a "
-        "must-DENY and a must-ALLOW control in the same run. AUTHZ_ENFORCE defaults false for "
-        "transaction-service with no gitops override, so the deny is advisory today."
-    ),
     "swift.send": (
         "#4754 sibling, same shape. No literal and no prefix rule anywhere under "
         "openbank-infra/gitops/components. AUTHZ_ENFORCE defaults false for swift-service."
