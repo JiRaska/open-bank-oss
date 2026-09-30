@@ -3725,8 +3725,10 @@ gates:
       python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
     run: |
       set -euo pipefail
-      git fetch -q origin main
-      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+      # Read the PR's own tree (HEAD = the merge commit), not the base: against origin/main a PR
+      # that grants an action AND drops its KNOWN_UNGRANTED entry fails on the base's stale
+      # state (#4754), so a baseline entry could never be removed.
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref HEAD --enforce
 
   - id: openapi-version-not-taken
     name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
