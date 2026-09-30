@@ -5,11 +5,14 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -285,5 +288,72 @@ class AbstractOutboxDispatcherTest {
             .isEqualTo("ledger")
         assertThat(AbstractOutboxDispatcher.deriveServiceName("PartyOutboxDispatcher_ClientProxy"))
             .isEqualTo("party")
+    }
+
+    // ── ADR-0327 D5/D10: the v2 repository takes the drain path ───────────────
+
+    /** Minimal [OutboxRepositoryV2]: unbounded rows, one head per aggregate per claim, counts claims. */
+    private class FakeRepoV2(initial: List<OutboxEntry>) : OutboxRepositoryV2 {
+        val rows = initial.associateBy { it.eventId }.toMutableMap()
+        var claims = 0
+        val sentBatches = mutableListOf<List<UUID>>()
+        override suspend fun listProcessable(limit: Int): List<OutboxEntry> = claimProcessable(limit)
+        override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
+            claims++
+            val heads = rows.values.filter { it.status == OutboxStatus.PENDING }.distinctBy { it.aggregateId }.take(limit)
+            heads.forEach { rows[it.eventId] = it.copy(status = OutboxStatus.DISPATCHING) }
+            return heads
+        }
+        override suspend fun markSent(eventId: UUID, sentAt: Instant) = markSentBatch(listOf(eventId), sentAt)
+        override suspend fun markSentBatch(eventIds: Collection<UUID>, sentAt: Instant) {
+            sentBatches += eventIds.toList()
+            eventIds.forEach { rows[it] = rows.getValue(it).copy(status = OutboxStatus.SENT) }
+        }
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus = OutboxStatus.FAILED
+        override suspend fun oldestProcessableAge(now: Instant): Duration? = null
+        override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = 0
+        override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int = 0
+    }
+
+    @Test
+    fun `a v2 repository is drained in one tick - several claims, one markSentBatch each - and the claim timer is recorded`() {
+        val rows = (1..60).map { entry("v2.$it") }
+        val repo = FakeRepoV2(rows)
+        val reg = SimpleMeterRegistry()
+        val metrics = DomainMetrics().apply {
+            registryInstance = mockk {
+                every { isResolvable } returns true
+                every { get() } returns reg
+            }
+        }
+        val dispatcher = TestOutboxDispatcher(repo, FakePublisher(), service = "ledger", metrics = metrics)
+
+        runBlocking { dispatcher.runBatch() }
+
+        assertThat(repo.claims).describedAs("25 + 25 + 10 (short) in ONE tick").isEqualTo(3)
+        assertThat(repo.sentBatches).hasSize(3)
+        assertThat(repo.rows.values.map { it.status }).containsOnly(OutboxStatus.SENT)
+        val timer = reg.find(DomainMetrics.OUTBOX_CLAIM).tag("service", "ledger").timer()
+        assertThat(timer).isNotNull
+        assertThat(timer!!.count()).isEqualTo(3)
+        assertThat(reg.find("openbank.outbox.dispatched").tag("service", "ledger").counters().sumOf { it.count() }).isEqualTo(60.0)
+    }
+
+    @Test
+    fun `a v1 repository keeps today's one-batch-per-tick behaviour`() {
+        val rows = (1..60).map { entry("v1.$it") }
+        val repo = FakeRepo(rows)
+        val dispatcher = TestOutboxDispatcher(repo, FakePublisher())
+
+        runBlocking { dispatcher.runBatch() }
+
+        assertThat(repo.requestedLimits).describedAs("exactly one claim per tick on the v1 path").containsExactly(AbstractOutboxDispatcher.DEFAULT_BATCH_SIZE)
+        assertThat(repo.sent).hasSize(AbstractOutboxDispatcher.DEFAULT_BATCH_SIZE)
+    }
+
+    @Test
+    fun `the drain budget is 80 percent of the poll interval`() {
+        val dispatcher = TestOutboxDispatcher(FakeRepo(emptyList()), FakePublisher())
+        assertThat(dispatcher.drainBudget()).isEqualTo(Duration.ofMillis(4_000))
     }
 }
