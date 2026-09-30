@@ -669,7 +669,11 @@ jobs:
           echo "Staging pitest results from run ${RUN_ID}..."
           ARTIFACT_INVENTORY=$(api \
             "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100") || exit 1
-          ARTIFACTS=$(python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" <<< "${ARTIFACT_INVENTORY}") || exit 1
+          # Two artifacts stage into openbank-libs-runtime: the enforced `pitest-authz` lane and,
+          # since #11037, the advisory whole-module `pitest-openbank-libs-runtime` lane. Order the
+          # list so `pitest-authz` is unpacked LAST and its report (the required control) is the one
+          # that stays, exactly as before #11037 added the second lane.
+          ARTIFACTS=$(python3 -c "import json,sys; arts=[a for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]; arts.sort(key=lambda a:(a['name']=='pitest-authz',a['name'])); [print(a['id'],a['name']) for a in arts]" <<< "${ARTIFACT_INVENTORY}") || exit 1
           if [ -z "${ARTIFACTS}" ]; then
             echo "No pitest artifacts found in run ${RUN_ID} — skipping."
             exit 0
@@ -694,7 +698,10 @@ jobs:
               esac
               dest="${svc}/build/reports/pitest"
               mkdir -p "${dest}"
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" || exit 1
+              # -o and </dev/null: unzip must never prompt. On a path collision it asked
+              # "replace …?" and read its answer from this loop's stdin — the artifact list —
+              # swallowing the remaining artifacts and failing the deploy (2026-09-29).
+              unzip -o -q "/tmp/${art_name}.zip" -d "${dest}" </dev/null || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2

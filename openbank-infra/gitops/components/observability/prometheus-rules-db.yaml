@@ -124,13 +124,42 @@ spec:
         - alert: PostgresWALArchiveFailing
           # Directly relevant to the PG 16→18 upgrade blocker: no point planning
           # pg_upgrade if WAL archiving (the basis of backup/PITR) is failing.
-          expr: rate(cnpg_pg_stat_archiver_failed_count[15m]) > 0
-          for: 15m
+          #
+          # "STUCK", not "has failed recently". The previous expression was
+          # `rate(failed_count[15m]) > 0 for: 15m`, which measures a failure having happened, not
+          # archiving being broken: ONE transient failure keeps that rate above zero for exactly
+          # the 15m window, so it sits on the edge of paging for a blip (finops-db-2 held it true
+          # for 14 consecutive minutes on 2026-09-29 and then recovered on its own retry).
+          # pg_stat_archiver carries the exact state instead: a failure NEWER than the last
+          # success means the archiver has not archived anything since it last failed. That is
+          # true continuously while archiving is broken and false the moment one WAL gets
+          # through, so it both fires sooner and resolves on the real recovery.
+          #
+          # The case that motivated it (2026-09-28): pricing-db-1 failed every archive attempt
+          # from 17:02Z to ~19:11Z with `barman-cloud-wal-archive ... Unable to locate credentials`
+          # and not one success in between. Its pod had started at 13:28Z; the Pod Identity
+          # association was applied ~16:04Z and the barmanObjectStore arrived with the GitOps
+          # adoption at ~17:00Z. Adding a barmanObjectStore reconfigures archive_command IN PLACE
+          # and does not recreate the pod, and EKS Pod Identity injects credentials only at pod
+          # ADMISSION -- so the running pod could never archive, however correct the pairing
+          # (which db-backup-association-gate already enforces statically). It recovered at the
+          # 19:05Z switchover, i.e. when a pod admitted after the association took over.
+          #
+          # Primary-scoped for the same reason as the two alerts below: replicas do not archive,
+          # and a demoted former primary would otherwise keep reporting its last failure forever.
+          # Measured 2026-09-29 against live Prometheus: as written -> 0 series; the naive
+          # `last_failed_time > 0` -> 62 of 69 (every instance that has EVER failed once); over
+          # the preceding 12h the comparison was true for a single minute (treasury-db-2), well
+          # under `for: 10m`.
+          expr: |
+            cnpg_pg_stat_archiver_last_failed_time > cnpg_pg_stat_archiver_last_archived_time
+              and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
+          for: 10m
           labels:
             severity: critical
           annotations:
             summary: "Postgres WAL archiving failing on {{ $labels.namespace }}/{{ $labels.pod }}"
-            description: "archive_command has been failing for >15m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003)."
+            description: "No WAL segment has been archived since the last archive failure for >10m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003). Read the reason with `kubectl logs -n {{ $labels.namespace }} {{ $labels.pod }} | grep barman-cloud-wal-archive`. If it says `Unable to locate credentials`, the pod was admitted before its EKS Pod Identity association existed (credentials are injected only at admission): confirm the association in db-backups.tf is applied, then recreate the pod — switch over or delete the replica first, never wait for it to heal."
         - alert: PostgresNoRecoveryPoint
           # The gap PostgresWALArchiveFailing above structurally CANNOT cover. That alert fires on
           # archiver FAILURES, and a database with no barmanObjectStore never fails: CNPG's
