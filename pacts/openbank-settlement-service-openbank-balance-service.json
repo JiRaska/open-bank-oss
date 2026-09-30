@@ -64,6 +64,30 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "POST a settlement debit leg with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "currency": "CZK",
+          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
+          "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/debit"
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

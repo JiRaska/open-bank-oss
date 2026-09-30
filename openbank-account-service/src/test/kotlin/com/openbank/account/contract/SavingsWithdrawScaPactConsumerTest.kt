@@ -75,6 +75,32 @@ class SavingsWithdrawScaPactConsumerTest {
         .body(challengeBody())
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by `ScaNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
+     * positive twin filters this state out because its class-level `@TestSecurity` would
+     * authenticate the replay and answer 200.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun getChallengeUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET the approval challenge with no M2M identity is refused")
+        .path("$EXPECTED_CHALLENGES_PATH/$CHALLENGE_ID")
+        .method("GET")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "getChallengeUnauthenticatedPact")
+    fun `a challenge read with no identity is refused with 401, never disclosed`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .get(clientPath("getChallenge"))
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "getChallengePact")
     fun `the challenge binds with the purpose and party the approval gates on`(mockServer: MockServer) {
@@ -100,6 +126,9 @@ class SavingsWithdrawScaPactConsumerTest {
     }
 
     private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-account-service"
         const val PROVIDER = "openbank-sca-service"
         const val STATE = "a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists"

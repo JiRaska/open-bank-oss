@@ -90,6 +90,36 @@ class SettlementBalanceMovementPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by `BalanceNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
+     * positive twin filters this state out because its class-level `@TestSecurity` would
+     * authenticate the replay and answer 200.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun debitUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST a settlement debit leg with no M2M identity is refused")
+        .path("$EXPECTED_BALANCES_PATH/$PACT_ACCOUNT_ID/debit")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(mapper.writeValueAsString(movement("debit")))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "debitUnauthenticatedPact")
+    fun `a debit with no identity is refused with 401, never applied`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(mapper.writeValueAsString(movement("debit")))
+            .post(clientPath("debit"))
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "debitPact")
     fun `the debit leg is accepted and binds into BalanceResponse`(mockServer: MockServer) {
@@ -121,6 +151,9 @@ class SettlementBalanceMovementPactConsumerTest {
     }
 
     private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-settlement-service"
         const val PROVIDER = "openbank-balance-service"
         const val STATE = "a CZK balance exists for the balance account"

@@ -18,6 +18,7 @@ import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -58,6 +59,7 @@ class ScaPactProviderVerificationTest {
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
         private val DELEGATION_PARTY_ID = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
         // Must match SavingsWithdrawScaPactConsumerTest (openbank-account-service).
         private val SAVINGS_CHALLENGE_ID = UUID.fromString("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a")
         private val SAVINGS_PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
@@ -65,6 +67,9 @@ class ScaPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @Inject
     lateinit var challengeRepo: ScaChallengeRepository
@@ -108,7 +113,17 @@ class ScaPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     @State("a PENDING SCA challenge exists")
