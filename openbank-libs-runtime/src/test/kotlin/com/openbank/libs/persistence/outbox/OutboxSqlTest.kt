@@ -23,7 +23,11 @@ class OutboxSqlTest {
     @Test
     fun `claim is the D3 head claim - rewritten predicate, two anti-joins, SKIP LOCKED, RETURNING`() {
         val sql = OutboxSql.claim(ledger).squash()
-        assertThat(sql).startsWith("UPDATE ledger_outbox SET status = :dispatching, claimed_at = :now, updated_at = :now WHERE id IN (")
+        assertThat(
+            sql,
+        ).startsWith(
+            "UPDATE ledger_outbox SET status = :dispatching, claimed_at = :now, updated_at = :now WHERE id IN (",
+        )
         // Finding 5: status IN (...) first so the partial index applies, then the stale and backoff arms.
         assertThat(sql).contains(
             "o.status IN (:pending, :failed, :dispatching) AND (o.status <> :dispatching OR o.claimed_at < :stale) " +
@@ -32,7 +36,9 @@ class OutboxSqlTest {
         // Head rule: no older unsent row of the same aggregate.
         assertThat(sql).contains("AND (p.created_at, p.id) < (o.created_at, o.id))")
         // Nothing of the aggregate freshly in flight on any replica.
-        assertThat(sql).contains("WHERE d.aggregate_id = o.aggregate_id AND d.status = :dispatching AND d.claimed_at >= :stale)")
+        assertThat(
+            sql,
+        ).contains("WHERE d.aggregate_id = o.aggregate_id AND d.status = :dispatching AND d.claimed_at >= :stale)")
         assertThat(sql).contains("ORDER BY o.created_at, o.id LIMIT :limit FOR UPDATE SKIP LOCKED ) RETURNING *")
         assertThat(sql).describedAs("statuses are bound, never spliced").doesNotContain("'PENDING'", "'DISPATCHING'")
     }
@@ -66,12 +72,19 @@ class OutboxSqlTest {
 
     @Test
     fun `count is the PENDING plus FAILED set every v1 override counts`() {
-        assertThat(OutboxSql.countProcessable(ledger)).isEqualTo("SELECT count(*) FROM ledger_outbox WHERE status IN (:pending, :failed)")
+        assertThat(
+            OutboxSql.countProcessable(ledger),
+        ).isEqualTo("SELECT count(*) FROM ledger_outbox WHERE status IN (:pending, :failed)")
     }
 
     @Test
     fun `the incentive outliers are expressible - order column and an extra claim assignment`() {
-        val incentive = OutboxTableShape("incentive_outbox", orderColumn = "occurred_at", extraClaimAssignments = "claim_token = gen_random_uuid()")
+        val incentive =
+            OutboxTableShape(
+                "incentive_outbox",
+                orderColumn = "occurred_at",
+                extraClaimAssignments = "claim_token = gen_random_uuid()",
+            )
         val sql = OutboxSql.claim(incentive).squash()
         assertThat(sql).contains("updated_at = :now, claim_token = gen_random_uuid() WHERE id IN (")
         assertThat(sql).contains("(p.occurred_at, p.id) < (o.occurred_at, o.id)")
@@ -81,9 +94,13 @@ class OutboxSqlTest {
 
     @Test
     fun `identifiers are validated because they are spliced into statement text`() {
-        assertThatThrownBy { OutboxTableShape("ledger_outbox; DROP TABLE x") }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            OutboxTableShape("ledger_outbox; DROP TABLE x")
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { OutboxTableShape("Ledger") }.isInstanceOf(IllegalArgumentException::class.java)
-        assertThatThrownBy { OutboxTableShape("ok_outbox", orderColumn = "created_at desc") }.isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy {
+            OutboxTableShape("ok_outbox", orderColumn = "created_at desc")
+        }.isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { OutboxTableShape("ok_outbox", extraClaimAssignments = "x = 1; DELETE FROM ok_outbox") }
             .isInstanceOf(IllegalArgumentException::class.java)
     }
