@@ -118,6 +118,32 @@ def self_test() -> int:
     got, why = decide(base, [], {}, now, old, 20)
     failures += got
     print(f"{'FAIL' if got else 'PASS'}  empty required set -> skip ({why})")
+    # A permission denial must fail the workflow; the old implementation printed a
+    # warning and returned zero, so a permanently stranded armed PR looked healthy.
+    from unittest.mock import patch
+    import contextlib
+    import io
+
+    def fixture_get(path: str) -> object:
+        if "/pulls?" in path:
+            return [{"number": 42, "auto_merge": {"merge_method": "squash"}, "draft": False}]
+        if path.endswith("/pulls/42"):
+            return {"draft": False, "auto_merge": {"merge_method": "squash"}, "mergeable_state": "behind",
+                    "head": {"sha": "a" * 40, "repo": {"full_name": "example/repo"}}}
+        if "/commits/" in path:
+            return {"commit": {"committer": {"date": old.isoformat()}}}
+        raise AssertionError(f"unexpected API read {path}")
+
+    with patch.dict(globals(), {"required_contexts": lambda *_: ["Gitleaks"],
+                                "get": fixture_get, "head_checks": lambda *_: {"Gitleaks": "success"}}):
+        for status, want in ((403, 1), (409, 0)):
+            with patch.dict(globals(), {"api": lambda *_args, code=status: (code, "denied")}):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    result = run("example/repo", "main", 5, 0, False)
+                ok = result == want and (("::error::FAILED" in output.getvalue()) == (status == 403))
+                failures += not ok
+                print(f"{'PASS' if ok else 'FAIL'}  update-branch HTTP {status} -> exit {result}")
     print(f"self-test: {failures} failure(s)")
     return 1 if failures else 0
 
@@ -221,6 +247,7 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool) 
     armed = [p for p in pulls if p.get("auto_merge") and not p.get("draft")]
     print(f"{len(pulls)} open PR(s) against {branch}, {len(armed)} armed and non-draft")
     updated = 0
+    failed_updates = 0
     for p in armed:
         n = p["number"]
         full = get(f"/repos/{repo}/pulls/{n}")
@@ -247,10 +274,14 @@ def run(repo: str, branch: str, max_updates: int, debounce: int, dry_run: bool) 
         if code == 202:
             updated += 1
             print(f"UPDATE #{n} {sha[:9]}: {why}")
+        elif code == 409:
+            # A competing update changed the expected head. The next run re-reads it.
+            print(f"SKIP   #{n} {sha[:9]}: head changed during update ({code})")
         else:
-            print(f"::warning::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
-    print(f"done: {updated} update(s)")
-    return 0
+            failed_updates += 1
+            print(f"::error::FAILED #{n} {sha[:9]}: update-branch -> {code}: {data}")
+    print(f"done: {updated} update(s), {failed_updates} failed update(s)")
+    return 1 if failed_updates else 0
 
 
 def main() -> int:
