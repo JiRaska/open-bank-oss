@@ -262,4 +262,14 @@ class C7200MapperTest {
         assertThat(t.at("r0010", "c0040").isDataGap).isFalse()
         assertThat(t.at("r0010", "c0010").isDataGap).isFalse()
     }
+
+    @Test
+    fun `the template carries the source run's id and provenance, and none when there is no run`() {
+        val t = C7200Mapper.map(RiskLiquidityLookup.found(result().copy(provenance = "synthetic")), asOf)
+        assertThat(t.sourceRunId).isEqualTo("run-7")
+        assertThat(t.provenance).isEqualTo("synthetic")
+        val gap = C7200Mapper.map(RiskLiquidityLookup.unavailable("no run"), asOf)
+        assertThat(gap.sourceRunId).isNull()
+        assertThat(gap.provenance).isNull()
+    }
 }
