@@ -73,3 +73,36 @@ spec:
             description: >-
               A Job with no CronJob owner has failed; it will not run again on its own.
               kubectl -n {{ $labels.namespace }} describe job {{ $labels.job_name }}
+    # ---- alerts that nobody acts on ----
+    # Measured 2026-09-30: PushChannelSilent had fired for 22 days, the ledger's
+    # accounting day 2026-07-31 had sat in CUTOFF since 2026-08-27, three KYC
+    # orphan parties were 76 days old and domestic payments ~100 days stranded —
+    # every one of them a correct alert, all of them wallpaper, because a firing
+    # alert that nobody resolves looks exactly like one that was just raised. This
+    # meta-alert makes the AGE of a firing alert a signal of its own. It reads
+    # ALERTS_FOR_STATE (the activeAt timestamp Prometheus persists across its own
+    # restarts). Caveat worth knowing: an alert that carries a `pod` label starts a
+    # new series on every rollout, so its age resets on deploy — this rule then
+    # under-reports it, never over-reports.
+    - name: openbank.platform.alert-hygiene
+      rules:
+        - alert: AlertFiringTooLong
+          expr: |
+            (
+              time()
+                -
+              min by (alertname, severity, namespace) (
+                ALERTS_FOR_STATE{alertname!~"Watchdog|InfoInhibitor|AlertFiringTooLong"}
+              )
+            ) > 7 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.alertname }} ({{ $labels.severity }}) has been firing for {{ $value | humanizeDuration }} without being resolved"
+            description: >-
+              A correct alert that fires for a week unattended trains everyone to ignore it,
+              and hides the next real one behind it. Either fix the condition, fix the rule
+              (false positive), or silence it in Alertmanager with an owner and an expiry.
+              Never leave it firing.
