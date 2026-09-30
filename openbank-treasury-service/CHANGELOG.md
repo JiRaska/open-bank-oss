@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.9.0...treasury-service-v0.10.0) (2026-09-30)
+
+
+### Features
+
+* **treasury:** simulated counterparties quote off the risk engine's curve set ([#11555](https://github.com/JiRaska/open-bank-oss/issues/11555)) ([6933a2b](https://github.com/JiRaska/open-bank-oss/commit/6933a2b9da6ae25cff16ab11c2fe548764fa68b2))
+
 ## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.8.0...treasury-service-v0.9.0) (2026-09-30)
 
 
