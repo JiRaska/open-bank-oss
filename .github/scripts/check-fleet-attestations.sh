@@ -4,7 +4,7 @@
 #
 # Enumerates EVERY openbank-* image referenced anywhere under openbank-infra/gitops/ and
 # verifies each one carries a cosign-signed CycloneDX SBOM attestation that kyverno's
-# verify-openbank-image-sbom-attestation ClusterPolicy would accept.
+# verify-openbank-image-sbom-attestation-cel ImageValidatingPolicy would accept.
 #
 # WHY THIS IS THE GATE:
 #   kyverno verifies at ADMISSION, not continuously. An unattested image whose pod is
@@ -538,9 +538,16 @@ IMAGE_RE="${ECR_REGISTRY//./\\.}/openbank-[A-Za-z0-9._/-]+:[A-Za-z0-9._-]+"
 # the September ARC deadlock reached production unseen (#9805).
 #
 # A second literal would fix today and rot the same way tomorrow. The policies are the
-# authority on what admission requires, so the list is read out of them: every
-# `attestations[].predicateType` in `verify-*.yaml`. Adding a policy widens this gate on the
-# same commit, with nothing to remember.
+# authority on what admission requires, so the list is read out of them. Since #11437 the
+# admission policy is the policies.kyverno.io/v1 ImageValidatingPolicy
+# (cel-image-validating-sbom-attestation.yaml), whose required predicates are its
+# `attestations[].intoto.type` values; the kyverno.io/v1 `verify-*.yaml` ClusterPolicy
+# (`attestations[].predicateType`) was deleted in that PR. Both shapes are still read, so
+# re-adding either kind widens this gate on the same commit, with nothing to remember.
+# Deleting the v1 file used to empty this set outright: the glob matched nothing, the grep's
+# error went to /dev/null, and the only thing standing between the gate and a vacuous
+# "verified nothing, all good" was the empty-set check below. That check stays, and is the
+# reason the set must be derived from the file KIND, never from a file-name convention.
 #
 # cosign's `--type` accepts a predicate URI verbatim (measured against a live attested image:
 # both `https://cyclonedx.org/bom` and `https://slsa.dev/provenance/v0.2` verify exactly as
@@ -550,11 +557,30 @@ KYVERNO_DIR="${KYVERNO_DIR:-openbank-infra/gitops/components/kyverno}"
 PREDICATE_TYPES=()
 while IFS= read -r _pt; do
   [ -n "$_pt" ] && PREDICATE_TYPES+=("$_pt")
-done < <(grep -rhoE 'predicateType:[[:space:]]*[^[:space:]]+' "$KYVERNO_DIR"/verify-*.yaml 2>/dev/null \
-           | awk '{print $2}' | sort -u)
+done < <(
+  {
+    # kyverno.io/v1 ClusterPolicy verifyImages (none left after #11437; kept so a re-added
+    # one is not silently ignored).
+    grep -rhoE 'predicateType:[[:space:]]*[^[:space:]]+' "$KYVERNO_DIR"/verify-*.yaml 2>/dev/null \
+      | awk '{print $2}'
+    # policies.kyverno.io/v1 ImageValidatingPolicy: the `type:` directly under `intoto:`,
+    # only in files that declare that kind. Indent-aware so no other `type:` key can match.
+    for _f in "$KYVERNO_DIR"/*.yaml; do
+      [ -f "$_f" ] || continue
+      grep -qE '^kind:[[:space:]]*ImageValidatingPolicy[[:space:]]*$' "$_f" || continue
+      awk '
+        /^[[:space:]]*#/ { next }
+        { match($0, /^[[:space:]]*/); ind = RLENGTH }
+        want && ind > iind && $1 == "type:" { print $2; want = 0; next }
+        want && ind <= iind { want = 0 }
+        $1 == "intoto:" || $1 == "-" && $2 == "intoto:" { want = 1; iind = ind }
+      ' "$_f"
+    done
+  } | sort -u
+)
 
 if [ "${#PREDICATE_TYPES[@]}" -eq 0 ]; then
-  echo "ERROR: no predicateType found under ${KYVERNO_DIR} — the derivation is broken." >&2
+  echo "ERROR: no predicateType / intoto.type found under ${KYVERNO_DIR} — the derivation is broken." >&2
   echo "       (Failing closed: verifying nothing would otherwise 'pass' vacuously.)" >&2
   exit 1
 fi
@@ -840,7 +866,7 @@ if [ "$UNATTESTED" -gt 0 ]; then
   done
   echo
   echo "  Each is a LATENT OUTAGE. Its pods run until something reschedules them; then"
-  echo "  kyverno (verify-openbank-image-sbom-attestation, Enforce) denies admission and"
+  echo "  kyverno (verify-openbank-image-sbom-attestation-cel, Deny) denies admission and"
   echo "  they can never restart. Rebuild + attest each one BEFORE it reschedules:"
   echo "    openbank-infra/scripts/build-push-service.sh <svc>   # attests via lib/cosign-attest.sh"
 fi
@@ -884,8 +910,8 @@ if [ "$FAIL" -gt 0 ]; then
   echo
   echo "FLEET ATTESTATION GATE: FAIL — ${FAIL} of ${#IMAGES[@]} declared image(s) not deployable."
   echo
-  echo "Image-provenance admission is already Enforce in-cluster"
-  echo "(verify-openbank-image-sbom-attestation: signature + SBOM, graduated"
+  echo "Image-provenance admission is already Deny in-cluster"
+  echo "(verify-openbank-image-sbom-attestation-cel: signature + SBOM; v1 graduated"
   echo "2026-07-12), so this is a LATENT OUTAGE, not a graduation blocker: the affected pods"
   echo "keep running until something reschedules them, and are then denied admission and can"
   echo "never restart. Fix before a reschedule, not after"

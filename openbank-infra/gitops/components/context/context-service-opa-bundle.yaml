@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "e4cefef7754bc0c8"
+    openbank.tech/policy-checksum: "3fc6bbed48bd0717"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1790,12 +1790,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
