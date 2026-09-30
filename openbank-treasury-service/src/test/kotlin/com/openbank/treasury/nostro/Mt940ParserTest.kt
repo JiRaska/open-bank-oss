@@ -88,6 +88,16 @@ class Mt940ParserTest {
     }
 
     @Test
+    fun `CRLF line endings (the SWIFT wire form) parse identically to LF`() {
+        val lf = Mt940Parser.parse(NostroFixtures.mt940())
+        val crlf = Mt940Parser.parse(
+            String(NostroFixtures.mt940()).replace("\r\n", "\n").replace("\n", "\r\n").toByteArray(),
+        )
+        assertThat(crlf).isEqualTo(lf)
+        assertThat(crlf.entries.first().reference).isEqualTo("SYNTH-SVCR-0001")
+    }
+
+    @Test
     fun `no envelope, LF line endings and no 61 lines at all are fine`() {
         val s = parse(minimal(lines = "", closing = ":62F:C260925EUR100,00"))
         assertThat(s.entries).isEmpty()

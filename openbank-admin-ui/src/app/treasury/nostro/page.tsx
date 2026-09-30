@@ -129,7 +129,7 @@ function Nostro() {
       )}
 
       {result && <ReconciliationResult result={result} money={money} t={t} />}
-      {result && <Breaks iban={result.iban} money={money} t={t} />}
+      {result && <Breaks key={result.iban} iban={result.iban} money={money} t={t} />}
     </div>
   )
 }
@@ -144,8 +144,8 @@ function Breaks({ iban, money, t }: { iban: string; money: (v: number) => string
   const [state, setState] = useState<BreaksState>({ kind: 'loading' })
 
   useEffect(() => {
+    // Keyed by IBAN at the call site, so a new account remounts in `loading` — no reset here.
     let live = true
-    setState({ kind: 'loading' })
     void getJson(nostroBreaksUrl(iban), nostroBreakListSchema).then(r => {
       if (live) setState(r.ok ? { kind: 'loaded', data: r.data } : { kind: 'unavailable' })
     })
