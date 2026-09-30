@@ -12,7 +12,6 @@ import com.openbank.treasury.application.port.out.NostroStatementRepository
 import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
-import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.NostroMatcher
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
@@ -95,26 +94,22 @@ class NostroReconciliationService(
     override suspend fun reconcile(statementId: UUID): NostroReconciliation {
         val stored = statements.findById(statementId) ?: throw StatementNotFoundException(statementId)
         val statement = stored.statement
-        // A statement may span several booking days: read the ledger over the whole span, and
-        // take the opening balance as at the day BEFORE its earliest date.
-        // The span is bounded to NostroStatement.MAX_SPAN_DAYS at construction (upload is a 400).
-        val from = statement.firstDate
-        val to = statement.lastDate
-        val lines = ledger.nostroLines(stored.glCode, from, to)
-        val comparable = statement.currency == BASE_CURRENCY
+        // The balances and the lines describe ONE period: opening as at the OPBD balance's date,
+        // closing as at the CLBD balance's date, lines booked in between — (openingDate,
+        // statementDate]. Reading lines to a later day than the closing balance (or opening a day
+        // before the first entry) would turn a quiet day or a later booking into a false difference.
+        // Balances are read in the STATEMENT currency from native amounts (#11107), every nostro alike.
+        val lines = ledger.nostroLines(stored.glCode, statement.firstDate, statement.lastDate)
+        val opening = ledger.accountBalance(stored.glCode, statement.currency, statement.openingDate)
+        val closing = ledger.accountBalance(stored.glCode, statement.currency, statement.statementDate)
+        val stated = opening != null && closing != null
         return NostroMatcher.match(
             statement = statement,
             glCode = stored.glCode,
             ledgerLines = lines,
-            ledgerOpeningBalance = if (comparable) ledger.glBalance(stored.glCode, from.minusDays(1)) else null,
-            ledgerClosingBalance = if (comparable) ledger.glBalance(stored.glCode, to) else null,
-            balanceNotStated = if (comparable) null else BALANCE_NOT_STATED,
+            ledgerOpeningBalance = if (stated) opening else null,
+            ledgerClosingBalance = if (stated) closing else null,
+            balanceNotStated = if (stated) null else "ledger does not hold GL account ${stored.glCode}",
         )
-    }
-
-    companion object {
-        /** The ledger's base currency: every balance it exposes is `base_amount` in this currency. */
-        const val BASE_CURRENCY = Deal.CZK
-        const val BALANCE_NOT_STATED = "ledger exposes only base-currency (CZK) balances for this account"
     }
 }
