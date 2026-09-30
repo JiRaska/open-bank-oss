@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.9](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.8...product-catalog-v0.18.9) (2026-09-30)
+
+
+### Bug Fixes
+
+* **product-catalog:** enforce one open draft per offering ([#11545](https://github.com/JiRaska/open-bank-oss/issues/11545)) ([b65629e](https://github.com/JiRaska/open-bank-oss/commit/b65629e7931a3cf2c855734b363392d7f9814d57)), closes [#11544](https://github.com/JiRaska/open-bank-oss/issues/11544)
+
 ## [0.18.8](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.7...product-catalog-v0.18.8) (2026-09-29)
 
 

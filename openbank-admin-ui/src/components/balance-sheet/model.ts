@@ -75,7 +75,7 @@ export type BackfillActions = {
  * shows, and the page renders that refusal. A null [actor] (token unreadable) never hides approve.
  */
 export function backfillActions(
-  request: BackfillRequest,
+  request: Pick<BackfillRequest, 'proposedBy' | 'state'>,
   actor: string | null,
   perms: { decide: boolean; execute: boolean },
 ): BackfillActions {
