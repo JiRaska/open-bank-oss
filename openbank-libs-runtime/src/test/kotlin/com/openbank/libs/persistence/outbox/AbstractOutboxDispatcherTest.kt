@@ -300,7 +300,9 @@ class AbstractOutboxDispatcherTest {
         override suspend fun listProcessable(limit: Int): List<OutboxEntry> = claimProcessable(limit)
         override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
             claims++
-            val heads = rows.values.filter { it.status == OutboxStatus.PENDING }.distinctBy { it.aggregateId }.take(limit)
+            val heads = rows.values.filter {
+                it.status == OutboxStatus.PENDING
+            }.distinctBy { it.aggregateId }.take(limit)
             heads.forEach { rows[it.eventId] = it.copy(status = OutboxStatus.DISPATCHING) }
             return heads
         }
@@ -309,14 +311,15 @@ class AbstractOutboxDispatcherTest {
             sentBatches += eventIds.toList()
             eventIds.forEach { rows[it] = rows.getValue(it).copy(status = OutboxStatus.SENT) }
         }
-        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus = OutboxStatus.FAILED
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus =
+            OutboxStatus.FAILED
         override suspend fun oldestProcessableAge(now: Instant): Duration? = null
         override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = 0
         override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int = 0
     }
 
     @Test
-    fun `a v2 repository is drained in one tick - several claims, one markSentBatch each - and the claim timer is recorded`() {
+    fun `a v2 repository drains in one tick with one markSentBatch per claim and a recorded claim timer`() {
         val rows = (1..60).map { entry("v2.$it") }
         val repo = FakeRepoV2(rows)
         val reg = SimpleMeterRegistry()
@@ -336,7 +339,11 @@ class AbstractOutboxDispatcherTest {
         val timer = reg.find(DomainMetrics.OUTBOX_CLAIM).tag("service", "ledger").timer()
         assertThat(timer).isNotNull
         assertThat(timer!!.count()).isEqualTo(3)
-        assertThat(reg.find("openbank.outbox.dispatched").tag("service", "ledger").counters().sumOf { it.count() }).isEqualTo(60.0)
+        assertThat(
+            reg.find("openbank.outbox.dispatched").tag("service", "ledger").counters().sumOf {
+                it.count()
+            },
+        ).isEqualTo(60.0)
     }
 
     @Test
@@ -347,7 +354,11 @@ class AbstractOutboxDispatcherTest {
 
         runBlocking { dispatcher.runBatch() }
 
-        assertThat(repo.requestedLimits).describedAs("exactly one claim per tick on the v1 path").containsExactly(AbstractOutboxDispatcher.DEFAULT_BATCH_SIZE)
+        assertThat(
+            repo.requestedLimits,
+        ).describedAs(
+            "exactly one claim per tick on the v1 path",
+        ).containsExactly(AbstractOutboxDispatcher.DEFAULT_BATCH_SIZE)
         assertThat(repo.sent).hasSize(AbstractOutboxDispatcher.DEFAULT_BATCH_SIZE)
     }
 

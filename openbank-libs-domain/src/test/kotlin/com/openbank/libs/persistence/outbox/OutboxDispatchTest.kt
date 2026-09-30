@@ -5,7 +5,6 @@
 package com.openbank.libs.persistence.outbox
 
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -15,8 +14,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
-import java.util.concurrent.atomic.AtomicInteger
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import java.util.logging.Logger as JulLogger
@@ -443,7 +442,7 @@ class OutboxDispatchTest {
     }
 
     @Test
-    fun `v2 path publishes a batch concurrently, bounded by the semaphore, and acknowledges it with ONE markSentBatch`() {
+    fun `v2 path publishes a batch concurrently, bounded by the semaphore, with ONE markSentBatch`() {
         val rows = (1..40).map { entry("v2.$it") }
         val repo = FakeRepoV2(rows)
         val inFlight = AtomicInteger()
@@ -475,7 +474,7 @@ class OutboxDispatchTest {
 
         val result = runBlocking {
             OutboxDispatch.dispatchOnce(repo, batchSize = 3) { e ->
-                if (e.eventType.startsWith("bad")) throw IllegalStateException("broker said no")
+                if (e.eventType.startsWith("bad")) error("broker said no")
             }
         }
 
@@ -506,9 +505,11 @@ class OutboxDispatchTest {
         val v2 = FakeRepoV2(listOf(entry("c.1"), entry("c.2")))
 
         runBlocking {
-            val v1Job = async { OutboxDispatch.dispatchOnce(v1) { _ -> throw CancellationException("scope cancelled") } }
+            val v1Job =
+                async { OutboxDispatch.dispatchOnce(v1) { _ -> throw CancellationException("scope cancelled") } }
             assertThat(runCatching { v1Job.await() }.exceptionOrNull()).isInstanceOf(CancellationException::class.java)
-            val v2Job = async { OutboxDispatch.dispatchOnce(v2) { _ -> throw CancellationException("scope cancelled") } }
+            val v2Job =
+                async { OutboxDispatch.dispatchOnce(v2) { _ -> throw CancellationException("scope cancelled") } }
             assertThat(runCatching { v2Job.await() }.exceptionOrNull()).isInstanceOf(CancellationException::class.java)
         }
 

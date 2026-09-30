@@ -63,7 +63,12 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
     }
 
     /** Test seam: a deterministic jitter source for the D4 schedule. */
-    protected constructor(shape: OutboxTableShape, entityClass: Class<E>, clock: Clock, random: Random) : this(shape, entityClass, clock) {
+    protected constructor(
+        shape: OutboxTableShape,
+        entityClass: Class<E>,
+        clock: Clock,
+        random: Random,
+    ) : this(shape, entityClass, clock) {
         this.random = random
     }
 
@@ -76,16 +81,6 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
 
     /** Short service name for the DEAD warning line — defaults to the table minus `_outbox`. */
     protected open val serviceLabel: String get() = shape.table.removeSuffix("_outbox")
-
-    private fun <T> inTransaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> =
-        Panache.withTransaction { Panache.getSession().chain { session -> block(session) } }
-
-    private fun Mutiny.SelectionQuery<E>.bindEligibility(now: Instant, stale: Instant): Mutiny.SelectionQuery<E> =
-        setParameter("pending", OutboxStatus.PENDING.name)
-            .setParameter("failed", OutboxStatus.FAILED.name)
-            .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
-            .setParameter("stale", stale)
-            .setParameter("now", now)
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> {
         val now = Instant.now(clock)
@@ -107,26 +102,24 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
         }.map { rows -> rows.map { it.toEntry() } }.awaitSuspending()
     }
 
-    override suspend fun countProcessable(): Long =
-        inTransaction { s ->
-            s.createNativeQuery(OutboxSql.countProcessable(shape), java.lang.Long::class.java)
-                .setParameter("pending", OutboxStatus.PENDING.name)
-                .setParameter("failed", OutboxStatus.FAILED.name)
-                .singleResult
-        }.map { it.toLong() }.awaitSuspending()
+    override suspend fun countProcessable(): Long = inTransaction { s ->
+        s.createNativeQuery(OutboxSql.countProcessable(shape), java.lang.Long::class.java)
+            .setParameter("pending", OutboxStatus.PENDING.name)
+            .setParameter("failed", OutboxStatus.FAILED.name)
+            .singleResult
+    }.map { it.toLong() }.awaitSuspending()
 
-    override suspend fun oldestProcessableAge(now: Instant): Duration? =
-        inTransaction { s ->
-            s.createNativeQuery(OutboxSql.oldestProcessable(shape), Instant::class.java)
-                .let { q ->
-                    q.setParameter("pending", OutboxStatus.PENDING.name)
-                        .setParameter("failed", OutboxStatus.FAILED.name)
-                        .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
-                        .setParameter("stale", now.minus(DEFAULT_STALE_AFTER))
-                        .setParameter("now", now)
-                }
-                .singleResultOrNull
-        }.map { oldest -> oldest?.let { Duration.between(it, now).coerceAtLeast(Duration.ZERO) } }.awaitSuspending()
+    override suspend fun oldestProcessableAge(now: Instant): Duration? = inTransaction { s ->
+        s.createNativeQuery(OutboxSql.oldestProcessable(shape), Instant::class.java)
+            .let { q ->
+                q.setParameter("pending", OutboxStatus.PENDING.name)
+                    .setParameter("failed", OutboxStatus.FAILED.name)
+                    .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+                    .setParameter("stale", now.minus(DEFAULT_STALE_AFTER))
+                    .setParameter("now", now)
+            }
+            .singleResultOrNull
+    }.map { oldest -> oldest?.let { Duration.between(it, now).coerceAtLeast(Duration.ZERO) } }.awaitSuspending()
 
     override suspend fun markSent(eventId: UUID, sentAt: Instant) = markSentBatch(listOf(eventId), sentAt)
 
@@ -159,7 +152,13 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
                     } else {
                         val attempts = current.toInt() + 1
                         val next = OutboxFailurePolicy.statusAfterFailure(attempts, maxAttempts)
-                        val schedule = if (next == OutboxStatus.DEAD) null else OutboxBackoff.nextAttemptAt(attempts, failedAt, random)
+                        val schedule = if (next ==
+                            OutboxStatus.DEAD
+                        ) {
+                            null
+                        } else {
+                            OutboxBackoff.nextAttemptAt(attempts, failedAt, random)
+                        }
                         s.createNativeQuery<Int>(OutboxSql.markFailed(shape))
                             .setParameter("status", next.name)
                             .setParameter("attempts", attempts)
@@ -184,23 +183,21 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
                 }
         }.awaitSuspending()
 
-    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int =
-        inTransaction<Int> { s ->
-            s.createNativeQuery<Int>(OutboxSql.purgeSent(shape))
-                .setParameter("sent", OutboxStatus.SENT.name)
-                .setParameter("cut", now.minus(olderThan))
-                .setParameter("limit", batch.coerceAtLeast(1))
-                .executeUpdate()
-        }.awaitSuspending()
+    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = inTransaction<Int> { s ->
+        s.createNativeQuery<Int>(OutboxSql.purgeSent(shape))
+            .setParameter("sent", OutboxStatus.SENT.name)
+            .setParameter("cut", now.minus(olderThan))
+            .setParameter("limit", batch.coerceAtLeast(1))
+            .executeUpdate()
+    }.awaitSuspending()
 
-    override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int =
-        inTransaction<Int> { s ->
-            s.createNativeQuery<Int>(OutboxSql.purgeDead(shape))
-                .setParameter("dead", OutboxStatus.DEAD.name)
-                .setParameter("cut", now.minus(olderThan))
-                .setParameter("limit", batch.coerceAtLeast(1))
-                .executeUpdate()
-        }.awaitSuspending()
+    override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int = inTransaction<Int> { s ->
+        s.createNativeQuery<Int>(OutboxSql.purgeDead(shape))
+            .setParameter("dead", OutboxStatus.DEAD.name)
+            .setParameter("cut", now.minus(olderThan))
+            .setParameter("limit", batch.coerceAtLeast(1))
+            .executeUpdate()
+    }.awaitSuspending()
 
     companion object {
         private val log: Logger = Logger.getLogger(AbstractPanacheOutboxRepository::class.java)
@@ -211,3 +208,15 @@ abstract class AbstractPanacheOutboxRepository<E : PanacheOutboxEntity> : Outbox
         private const val LOG_ERROR_LEN = 200
     }
 }
+
+/** One `Panache.withTransaction` on the calling Vert.x context around [block]. */
+private fun <T> inTransaction(block: (Mutiny.Session) -> Uni<T>): Uni<T> =
+    Panache.withTransaction { Panache.getSession().chain { session -> block(session) } }
+
+/** Binds the parameters of [OutboxSql.eligible]: the three in-flight statuses, `:stale` and `:now`. */
+private fun <E> Mutiny.SelectionQuery<E>.bindEligibility(now: Instant, stale: Instant): Mutiny.SelectionQuery<E> =
+    setParameter("pending", OutboxStatus.PENDING.name)
+        .setParameter("failed", OutboxStatus.FAILED.name)
+        .setParameter("dispatching", OutboxStatus.DISPATCHING.name)
+        .setParameter("stale", stale)
+        .setParameter("now", now)

@@ -30,8 +30,12 @@ data class OutboxTableShape(
 ) {
     init {
         require(IDENTIFIER.matches(table)) { "outbox table name must be a plain SQL identifier, was '$table'" }
-        require(IDENTIFIER.matches(orderColumn)) { "outbox order column must be a plain SQL identifier, was '$orderColumn'" }
-        require(!extraClaimAssignments.contains(';')) { "extraClaimAssignments must be a SET fragment, not a statement" }
+        require(IDENTIFIER.matches(orderColumn)) {
+            "outbox order column must be a plain SQL identifier, was '$orderColumn'"
+        }
+        require(!extraClaimAssignments.contains(';')) {
+            "extraClaimAssignments must be a SET fragment, not a statement"
+        }
     }
 
     private companion object {
@@ -50,7 +54,8 @@ data class OutboxTableShape(
  */
 object OutboxSql {
     /** Statuses the partial indexes (D2) cover and every eligibility predicate here filters on. */
-    val IN_FLIGHT_STATUSES: List<String> = listOf(OutboxStatus.PENDING.name, OutboxStatus.FAILED.name, OutboxStatus.DISPATCHING.name)
+    val IN_FLIGHT_STATUSES: List<String> =
+        listOf(OutboxStatus.PENDING.name, OutboxStatus.FAILED.name, OutboxStatus.DISPATCHING.name)
 
     /**
      * The rewritten eligibility predicate (ADR-0327 finding 5): `status IN (…)` first so the
@@ -58,10 +63,9 @@ object OutboxSql {
      * `now - staleAfter`; `:now` is the claim instant. Alias-free so it can be spliced under any
      * correlation name via [eligible].
      */
-    fun eligible(alias: String): String =
-        "$alias.status IN (:pending, :failed, :dispatching)" +
-            " AND ($alias.status <> :dispatching OR $alias.claimed_at < :stale)" +
-            " AND ($alias.next_attempt_at IS NULL OR $alias.next_attempt_at <= :now)"
+    fun eligible(alias: String): String = "$alias.status IN (:pending, :failed, :dispatching)" +
+        " AND ($alias.status <> :dispatching OR $alias.claimed_at < :stale)" +
+        " AND ($alias.next_attempt_at IS NULL OR $alias.next_attempt_at <= :now)"
 
     /**
      * D3 claim-by-aggregate-head. Row `o` is claimable only if it is eligible, no OLDER unsent row
@@ -123,7 +127,9 @@ object OutboxSql {
 
     /** D10: `created_at` of the oldest row eligible right now, via the `(created_at, id)` partial index. */
     fun oldestProcessable(shape: OutboxTableShape): String =
-        "SELECT o.${shape.orderColumn} FROM ${shape.table} o WHERE ${eligible("o")} ORDER BY o.${shape.orderColumn}, o.id LIMIT 1"
+        "SELECT o.${shape.orderColumn} FROM ${shape.table} o WHERE ${eligible(
+            "o",
+        )} ORDER BY o.${shape.orderColumn}, o.id LIMIT 1"
 
     /** D8: batched retention; the caller loops until a short batch. */
     fun purgeSent(shape: OutboxTableShape): String =

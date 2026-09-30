@@ -249,7 +249,9 @@ class DomainMetricsTest {
 
     @Test
     fun `outboxClaimLatency renders as openbank_outbox_claim_seconds with histogram buckets for OutboxClaimSlow`() {
-        val reg = io.micrometer.prometheusmetrics.PrometheusMeterRegistry(io.micrometer.prometheusmetrics.PrometheusConfig.DEFAULT)
+        val reg = io.micrometer.prometheusmetrics.PrometheusMeterRegistry(
+            io.micrometer.prometheusmetrics.PrometheusConfig.DEFAULT,
+        )
         val dm = withRegistry(reg)
 
         val timer = dm.outboxClaimLatency("ledger")

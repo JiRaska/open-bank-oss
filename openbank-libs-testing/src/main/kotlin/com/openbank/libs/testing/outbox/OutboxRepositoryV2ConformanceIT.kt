@@ -54,8 +54,10 @@ import java.util.concurrent.TimeUnit
  * }
  * ```
  */
-// @Test methods live in src/main so testImplementation(project(":openbank-libs-testing")) can inherit them.
-@Suppress("FunctionNaming")
+// @Test methods live in src/main so testImplementation(project(":openbank-libs-testing")) can inherit them;
+// detekt excludes **/test/** from FunctionNaming and MagicNumber, and these are test fixtures (sequence
+// numbers, aggregate counts, seconds of seed skew) that only read as magic because of where they live.
+@Suppress("FunctionNaming", "MagicNumber")
 abstract class OutboxRepositoryV2ConformanceIT {
 
     /** The service's repository on the kernel base. */
@@ -87,7 +89,9 @@ abstract class OutboxRepositoryV2ConformanceIT {
     fun `two concurrent dispatchers deliver each aggregate's events once, in created_at order`() {
         val base = Instant.now().minusSeconds(60)
         val aggregates = (1..4).map { Ids.newId() }
-        val seeded = aggregates.flatMap { agg -> (1..5).map { i -> message(agg, i, "v2.order", base.plusMillis(i.toLong())) } }
+        val seeded = aggregates.flatMap { agg ->
+            (1..5).map { i -> message(agg, i, "v2.order", base.plusMillis(i.toLong())) }
+        }
         seeded.forEach { onEventLoop { seed(it) } }
         val mine = seeded.map { it.eventId }.toSet()
 
@@ -98,7 +102,15 @@ abstract class OutboxRepositoryV2ConformanceIT {
             val loops = (1..2).map {
                 pool.submit {
                     repeat(DRAIN_ROUNDS) {
-                        onEventLoop { OutboxDispatch.dispatchOnce(repository, BATCH) { e -> if (e.eventId in mine) published += e } }
+                        onEventLoop {
+                            OutboxDispatch.dispatchOnce(repository, BATCH) { e ->
+                                if (e.eventId in
+                                    mine
+                                ) {
+                                    published += e
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -108,9 +120,17 @@ abstract class OutboxRepositoryV2ConformanceIT {
         }
 
         val ours = published.filter { it.eventId in mine }
-        assertThat(ours.map { it.eventId }).describedAs("each event exactly once").doesNotHaveDuplicates().hasSize(seeded.size)
+        assertThat(
+            ours.map {
+                it.eventId
+            },
+        ).describedAs("each event exactly once").doesNotHaveDuplicates().hasSize(seeded.size)
         ours.groupBy { it.aggregateId }.forEach { (agg, events) ->
-            assertThat(events.map { seq(it) }).describedAs("aggregate %s in created_at order", agg).isEqualTo(listOf(1, 2, 3, 4, 5))
+            assertThat(
+                events.map {
+                    seq(it)
+                },
+            ).describedAs("aggregate %s in created_at order", agg).isEqualTo(listOf(1, 2, 3, 4, 5))
         }
         seeded.forEach { assertThat(onEventLoop { findEntry(it.eventId) }!!.status).isEqualTo(OutboxStatus.SENT) }
     }
@@ -128,7 +148,7 @@ abstract class OutboxRepositoryV2ConformanceIT {
         repeat(3) {
             onEventLoop {
                 OutboxDispatch.dispatchOnce(repository, BATCH) { e ->
-                    if (e.eventId == first.eventId) throw IllegalStateException("broker rejected N")
+                    if (e.eventId == first.eventId) error("broker rejected N")
                     if (e.eventId == second.eventId) published += e.eventId
                 }
             }
@@ -146,7 +166,7 @@ abstract class OutboxRepositoryV2ConformanceIT {
         val msg = message(Ids.newId(), 1, "v2.backoff", Instant.now().minusSeconds(60))
         onEventLoop { seed(msg) }
 
-        onEventLoop { OutboxDispatch.dispatchOnce(repository, BATCH) { _ -> throw IllegalStateException("first attempt fails") } }
+        onEventLoop { OutboxDispatch.dispatchOnce(repository, BATCH) { _ -> error("first attempt fails") } }
 
         val failed = onEventLoop { findEntry(msg.eventId) }!!
         assertThat(failed.status).isEqualTo(OutboxStatus.FAILED)
@@ -183,7 +203,10 @@ abstract class OutboxRepositoryV2ConformanceIT {
 
         // Past the window (the pod that claimed it died): the next claim takes it over and restamps it.
         Thread.sleep(SLACK_MS)
-        val reclaimed = onEventLoop { repository.claimProcessable(BATCH, staleAfter = Duration.ZERO) }.filter { it.eventId == msg.eventId }
+        val reclaimed = onEventLoop { repository.claimProcessable(BATCH, staleAfter = Duration.ZERO) }.filter {
+            it.eventId ==
+                msg.eventId
+        }
         assertThat(reclaimed).hasSize(1)
         assertThat(onEventLoop { findEntry(msg.eventId) }!!.claimedAt).isAfter(claimedAt)
     }
@@ -200,8 +223,8 @@ abstract class OutboxRepositoryV2ConformanceIT {
         onEventLoop {
             OutboxDispatch.dispatchOnce(repository, BATCH) { e ->
                 when (e.eventId) {
-                    failed.eventId -> throw IllegalStateException("fail it")
-                    pending.eventId -> throw IllegalStateException("keep it out of SENT")
+                    failed.eventId -> error("fail it")
+                    pending.eventId -> error("keep it out of SENT")
                     else -> Unit
                 }
             }

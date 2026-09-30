@@ -26,12 +26,13 @@ object OutboxBackoff {
     val BASE_DELAY: Duration = Duration.ofSeconds(1)
 
     /** Upper bound on the un-jittered delay. */
-    val MAX_DELAY: Duration = Duration.ofMinutes(10)
+    val MAX_DELAY: Duration = Duration.ofMinutes(MAX_DELAY_MINUTES)
 
     /** Jitter as a fraction of the delay, applied symmetrically (±). */
     const val JITTER_FRACTION: Double = 0.2
 
     private const val MAX_SHIFT = 30
+    private const val MAX_DELAY_MINUTES = 10L
 
     /**
      * Un-jittered delay for the given post-failure [attemptCount]: `min(2^attempt × 1 s, 10 min)`.

@@ -135,7 +135,10 @@ class OutboxClaimPlanIT {
         val violations = gateViolations(plan)
         report("old-index-shape", plan, violations)
         assertThat(violations)
-            .describedAs("the gate must be able to fail; with the old (status, created_at) index it must. Plan:\n%s", plan.toPrettyString())
+            .describedAs(
+                "the gate must be able to fail; with the old (status, created_at) index it must. Plan:\n%s",
+                plan.toPrettyString(),
+            )
             .isNotEmpty()
     }
 
@@ -196,7 +199,10 @@ class OutboxClaimPlanIT {
             val literal = when (value) {
                 is Number -> value.toString()
                 is UUID -> "'$value'::uuid"
-                else -> "'${value.toString().replace("'", "''")}'::timestamptz".takeIf { name == "now" || name == "stale" }
+                else -> "'${value.toString().replace("'", "''")}'::timestamptz".takeIf {
+                    name == "now" ||
+                        name == "stale"
+                }
                     ?: "'${value.toString().replace("'", "''")}'"
             }
             acc.replace(Regex(":$name\\b"), literal)
@@ -211,7 +217,8 @@ class OutboxClaimPlanIT {
         val (hit, read) = sharedBuffers(plan)
         val (sHit, sRead) = sharedBuffers(searchSubtree(plan))
         println(
-            "outbox-claim-plan[$shapeLabel]: statement shared hit+read=${hit + read} (search subtree ${sHit + sRead}, " +
+            "outbox-claim-plan[$shapeLabel]: statement shared hit+read=${hit + read} " +
+                "(search subtree ${sHit + sRead}, " +
                 "row writes ${hit + read - sHit - sRead}) seqscan=${hasSeqScan(plan)} " +
                 "gate(no Seq Scan anywhere; search subtree < $BUFFER_LIMIT) -> ${if (violations.isEmpty()) "PASS" else violations}",
         )
