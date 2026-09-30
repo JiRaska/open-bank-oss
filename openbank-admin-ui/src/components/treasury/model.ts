@@ -13,7 +13,7 @@ import type { WriteResult } from './api'
 type T = (cs: string, en: string) => string
 
 export const STATE_TONE: Record<DealState, Tone> = {
-  DRAFT: 'neutral', PENDING_APPROVAL: 'warning', BOOKED: 'info', SETTLED: 'success',
+  DRAFT: 'neutral', PENDING_APPROVAL: 'warning', BOOKED: 'info', CONFIRMED: 'info', SETTLED: 'success',
   MATURED: 'success', CANCELLED: 'neutral', REVERSED: 'danger',
 }
 
@@ -69,6 +69,7 @@ export function stateLabel(s: DealState, t: T): string {
     case 'DRAFT': return t('Koncept', 'Draft')
     case 'PENDING_APPROVAL': return t('Čeká na schválení', 'Pending approval')
     case 'BOOKED': return t('Zaúčtováno', 'Booked')
+    case 'CONFIRMED': return t('Potvrzeno protistranou', 'Confirmed')
     case 'SETTLED': return t('Vypořádáno', 'Settled')
     case 'MATURED': return t('Splatné', 'Matured')
     case 'CANCELLED': return t('Zrušeno', 'Cancelled')
@@ -125,6 +126,8 @@ export function utilisation(row: Pick<Counterparty, 'limit' | 'exposure'>): numb
 
 export type DealActions = {
   submit: boolean; cancel: boolean; approve: boolean; reject: boolean
+  /** Counterparty confirmation received (ADR-0315 D2): back office, never the deal's own creator/submitter. */
+  confirm: boolean
   settle: boolean; mature: boolean; reverse: boolean
   /** Senior override of a breached limit (ADR-0315 D4) — a role and state narrower than approve. */
   overrideLimit: boolean
@@ -159,9 +162,12 @@ export function dealActions(
     cancel: canCancel && (deal.state === 'DRAFT' || pending),
     approve: approver && pending && !ownDeal,
     reject: approver && pending,
-    settle: approver && deal.state === 'BOOKED',
+    confirm: approver && deal.state === 'BOOKED' && !ownDeal,
+    // Settlement needs CONFIRMED; a deployment with confirmation.required=false also settles from
+    // BOOKED, so the button stays offered there and the server's 409 is the answer where it is not.
+    settle: approver && (deal.state === 'CONFIRMED' || deal.state === 'BOOKED'),
     mature: approver && deal.state === 'SETTLED',
-    reverse: approver && (deal.state === 'BOOKED' || deal.state === 'SETTLED'),
+    reverse: approver && (deal.state === 'BOOKED' || deal.state === 'CONFIRMED' || deal.state === 'SETTLED'),
     overrideLimit: canOverrideLimit && overridable && !ownDeal,
     ownDeal: pending && ownDeal,
   }
