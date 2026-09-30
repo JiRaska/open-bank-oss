@@ -14,7 +14,8 @@ data class IdempotencyRecord(
     /**
      * SHA-256 request fingerprint ([RequestFingerprint]) the response was stored under, or `null`
      * for a record written before fingerprints existed (or by a caller that never supplied one).
-     * A `null` hash is treated as a match on read — see [IdempotencyStore.lookup].
+     * A `null` hash is never treated as a match: the stored request cannot be proven equal to the
+     * incoming one, so it is refused as reuse rather than replayed — see [IdempotencyStore.lookup].
      */
     val requestHash: String? = null,
 )
@@ -34,7 +35,10 @@ interface IdempotencyStore {
 
     /**
      * Legacy, fingerprint-less write. Kept for callers not yet migrated; it cannot detect a key
-     * reused for a different request. New code uses [reserve] + the fingerprinted [save].
+     * reused for a different request. New code uses the scoped [reserve] + [save] + [release].
+     *
+     * Writes only when [key] is free: the first completed response wins and a later call never
+     * overwrites it.
      */
     suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long = 86400)
 
@@ -55,9 +59,10 @@ interface IdempotencyStore {
      *
      * - [ReserveResult.Reserved]: the key was free; an in-flight marker holding [requestHash] now
      *   occupies it for [inFlightTtlSeconds]. Do the work, then [save] (or [release] on failure).
-     * - [ReserveResult.Replay]: a completed response for the same fingerprint (or a legacy record
-     *   without one) exists — return it, do not execute.
-     * - [ReserveResult.Mismatch]: the key holds a record or marker for a DIFFERENT request.
+     * - [ReserveResult.Replay]: a completed response for the same fingerprint exists — return it,
+     *   do not execute.
+     * - [ReserveResult.Mismatch]: the key holds a record or marker for a DIFFERENT request, a
+     *   record without a fingerprint, or a response too large to have been stored for replay.
      * - [ReserveResult.InFlight]: the same request is being processed right now by another caller.
      *
      * [inFlightTtlSeconds] bounds how long a crashed holder can block the key.
@@ -76,14 +81,40 @@ interface IdempotencyStore {
     suspend fun release(key: String, requestHash: String)
 
     /**
+     * Scoped [reserve]: the stored key is [IdempotencyScope.storeKey] of [key], so a key only
+     * matches a request from the same principal to the same service. Validates [key]
+     * ([IdempotencyKeys.requireValid], 400 on failure). This is the form new code uses.
+     */
+    suspend fun reserve(
+        scope: IdempotencyScope,
+        key: String,
+        requestHash: String,
+        inFlightTtlSeconds: Long = DEFAULT_IN_FLIGHT_TTL_SECONDS,
+    ): ReserveResult = reserve(scope.storeKey(key), requestHash, inFlightTtlSeconds)
+
+    /** Scoped fingerprinted [save]; completes a scoped [reserve]. */
+    suspend fun save(
+        scope: IdempotencyScope,
+        key: String,
+        requestHash: String,
+        statusCode: Int,
+        responseBody: String,
+        ttlSeconds: Long = 86400,
+    ) = save(scope.storeKey(key), requestHash, statusCode, responseBody, ttlSeconds)
+
+    /** Scoped [release]; frees the marker placed by a scoped [reserve]. */
+    suspend fun release(scope: IdempotencyScope, key: String, requestHash: String) =
+        release(scope.storeKey(key), requestHash)
+
+    /**
      * Fingerprint-checked [get] (non-atomic; prefer [reserve]): `null` when the key is unknown,
      * the stored record when its fingerprint equals [requestHash], and
      * [IdempotencyKeyReusedException] when the same key arrives with a different request.
-     * A record stored without a fingerprint is treated as a match (backward compatibility).
+     * A record stored without a fingerprint is refused the same way: it cannot be proven to
+     * belong to this request, so it is never replayed.
      */
     suspend fun lookup(key: String, requestHash: String): IdempotencyRecord? = get(key)?.also { record ->
-        val stored = record.requestHash
-        if (stored != null && stored != requestHash) throw IdempotencyKeyReusedException()
+        if (record.requestHash != requestHash) throw IdempotencyKeyReusedException()
     }
 
     companion object {

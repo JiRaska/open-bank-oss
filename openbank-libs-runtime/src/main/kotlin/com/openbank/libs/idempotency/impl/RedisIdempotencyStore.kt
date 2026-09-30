@@ -6,12 +6,13 @@ package com.openbank.libs.idempotency.impl
 
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRecord
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
-import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -43,9 +44,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  * records read (`openbank.idempotency.legacy.record.reads`) — the signal that the rollout TTL
  * window has drained and the legacy branch can go.
  *
- * Value layouts under `idempotency:<key>` (the body is always last and may contain `|`):
- *   - legacy     `status|createdAt|body`
+ * Keys: the scoped API stores under `idempotency:v2:<service>:<sha256(principal)>:<key>`
+ * ([IdempotencyScope.storeKey]); the unscoped API under `idempotency:<key>`.
+ *
+ * Value layouts (the body is always last and may contain `|`):
+ *   - legacy     `status|createdAt|body` — never replayed (no fingerprint to compare)
  *   - completed  `v2|hash|status|createdAt|body`
+ *   - oversized  `toolarge|hash|status|createdAt` — a response above [maxResponseBytes] is not kept;
+ *                a retry answers 409 rather than a truncated or fabricated body
  *   - in-flight  `inflight|hash|createdAt` (written by [reserve], never returned by [get])
  * Every check-and-write is one Lua script, so it is atomic on the Redis server.
  */
@@ -53,6 +59,7 @@ class RedisIdempotencyStore(
     private val redis: ReactiveRedisDataSource,
     private val clock: Clock,
     meterRegistry: MeterRegistry? = null,
+    private val maxResponseBytes: Int = DEFAULT_MAX_RESPONSE_BYTES,
 ) : IdempotencyStore {
 
     private val valueCommands by lazy { redis.value(String::class.java) }
@@ -62,6 +69,7 @@ class RedisIdempotencyStore(
             .register(it)
     }
     private val legacyLogged = AtomicBoolean(false)
+    private val corruptLogged = AtomicBoolean(false)
 
     override suspend fun get(key: String): IdempotencyRecord? {
         val raw = valueCommands.get("$KEY_PREFIX$key").awaitSuspending() ?: return null
@@ -70,7 +78,7 @@ class RedisIdempotencyStore(
 
     override suspend fun save(key: String, statusCode: Int, responseBody: String, ttlSeconds: Long) {
         val value = "$statusCode$SEPARATOR${OffsetDateTime.now(clock)}$SEPARATOR$responseBody"
-        valueCommands.set("$KEY_PREFIX$key", value, SetArgs().ex(ttlSeconds)).awaitSuspending()
+        eval(SAVE_IF_ABSENT_SCRIPT, key, value, ttlSeconds.toString())
     }
 
     override suspend fun save(
@@ -81,7 +89,12 @@ class RedisIdempotencyStore(
         ttlSeconds: Long,
     ) {
         checkHash(requestHash)
-        val value = "$V2_PREFIX$requestHash$SEPARATOR$statusCode$SEPARATOR${now()}$SEPARATOR$responseBody"
+        val value = if (responseBody.toByteArray(Charsets.UTF_8).size > maxResponseBytes) {
+            log.warnf("idempotent response above %d bytes not stored for replay; a retry answers 409", maxResponseBytes)
+            "$TOO_LARGE_PREFIX$requestHash$SEPARATOR$statusCode$SEPARATOR${now()}"
+        } else {
+            "$V2_PREFIX$requestHash$SEPARATOR$statusCode$SEPARATOR${now()}$SEPARATOR$responseBody"
+        }
         val written = eval(
             SAVE_SCRIPT,
             key,
@@ -101,6 +114,36 @@ class RedisIdempotencyStore(
         return classify(key, existing, requestHash)
     }
 
+    /**
+     * Scoped reserve with a deploy-transition guard. Until one record TTL after rollout, a request
+     * may still be executing (or have completed) under the unscoped `idempotency:<key>` written by a
+     * pre-scope pod. When the scoped claim succeeds, the unscoped key is consulted once:
+     *   - an in-flight marker with the SAME fingerprint → [ReserveResult.InFlight] (do not run twice);
+     *   - a completed record with the SAME fingerprint → [ReserveResult.Mismatch]: it may have been
+     *     written for another principal, so it is neither replayed nor re-executed;
+     *   - anything else (absent, other fingerprint, no fingerprint) → proceed.
+     * In the first two cases the scoped marker is released again. Once every pre-scope record has
+     * expired the unscoped key is always absent and this costs one GET.
+     */
+    override suspend fun reserve(
+        scope: IdempotencyScope,
+        key: String,
+        requestHash: String,
+        inFlightTtlSeconds: Long,
+    ): ReserveResult {
+        val storeKey = scope.storeKey(key)
+        val result = reserve(storeKey, requestHash, inFlightTtlSeconds)
+        if (result != ReserveResult.Reserved) return result
+        val unscoped = valueCommands.get("$KEY_PREFIX$key").awaitSuspending() ?: return result
+        val transition = when {
+            unscoped.startsWith("$IN_FLIGHT_PREFIX$requestHash$SEPARATOR") -> ReserveResult.InFlight
+            unscoped.startsWith("$V2_PREFIX$requestHash$SEPARATOR") -> ReserveResult.Mismatch
+            else -> return result
+        }
+        release(storeKey, requestHash)
+        return transition
+    }
+
     override suspend fun release(key: String, requestHash: String) {
         checkHash(requestHash)
         eval(RELEASE_SCRIPT, key, "$IN_FLIGHT_PREFIX$requestHash$SEPARATOR")
@@ -111,10 +154,12 @@ class RedisIdempotencyStore(
             val held = existing.removePrefix(IN_FLIGHT_PREFIX).substringBefore(SEPARATOR)
             return if (held == requestHash) ReserveResult.InFlight else ReserveResult.Mismatch
         }
+        // An oversized response was never kept, so there is nothing faithful to replay.
+        if (existing.startsWith(TOO_LARGE_PREFIX)) return ReserveResult.Mismatch
         // An undecodable value is not ours to replay or overwrite — refuse rather than execute.
         val record = decode(key, existing) ?: return ReserveResult.Mismatch
-        val stored = record.requestHash
-        return if (stored == null || stored == requestHash) ReserveResult.Replay(record) else ReserveResult.Mismatch
+        // A legacy record (no fingerprint) cannot be proven to be this request: never replay it.
+        return if (record.requestHash == requestHash) ReserveResult.Replay(record) else ReserveResult.Mismatch
     }
 
     private suspend fun eval(script: String, key: String, vararg args: String): String? {
@@ -135,7 +180,7 @@ class RedisIdempotencyStore(
      * decodes to `null`, so a legacy [get] caller never replays one.
      */
     private fun decode(key: String, raw: String): IdempotencyRecord? {
-        if (raw.startsWith(IN_FLIGHT_PREFIX)) return null
+        if (raw.startsWith(IN_FLIGHT_PREFIX) || raw.startsWith(TOO_LARGE_PREFIX)) return null
         val hash: String?
         val rest: String
         if (raw.startsWith(V2_PREFIX)) {
@@ -148,20 +193,31 @@ class RedisIdempotencyStore(
             rest = raw
             legacyReads?.increment()
             if (legacyLogged.compareAndSet(false, true)) {
-                log.info("idempotency record without a request fingerprint read; treating as a match (legacy layout)")
+                log.info("idempotency record without a request fingerprint read; never replayed (legacy layout)")
             } else {
                 log.debug("idempotency record without a request fingerprint read (legacy layout)")
             }
         }
         val parts = rest.split(SEPARATOR, limit = 3)
         if (parts.size < 3) return null
+        val status = parts[0].toIntOrNull()?.takeIf { it in 100..599 }
+        val createdAt = runCatching { OffsetDateTime.parse(parts[1]) }.getOrNull()
+        if (status == null || createdAt == null) corrupt()
         return IdempotencyRecord(
             key = key,
-            statusCode = parts[0].toIntOrNull() ?: 200,
+            statusCode = status,
             responseBody = parts[2],
-            createdAt = OffsetDateTime.parse(parts[1]),
+            createdAt = createdAt,
             requestHash = hash,
         )
+    }
+
+    /** A stored value that cannot be decoded is never replayed as a made-up response. */
+    private fun corrupt(): Nothing {
+        if (corruptLogged.compareAndSet(false, true)) {
+            log.error("idempotency record with an undecodable status or timestamp; refusing to replay it")
+        }
+        throw IdempotencyRecordCorruptException("stored idempotency record is not decodable")
     }
 
     internal companion object {
@@ -169,6 +225,10 @@ class RedisIdempotencyStore(
         const val SEPARATOR = "|"
         const val V2_PREFIX = "v2|"
         const val IN_FLIGHT_PREFIX = "inflight|"
+        const val TOO_LARGE_PREFIX = "toolarge|"
+
+        /** Default cap on a stored response body (UTF-8 bytes); see `openbank.idempotency.max-response-bytes`. */
+        const val DEFAULT_MAX_RESPONSE_BYTES = 262_144
         const val LEGACY_METRIC = "openbank.idempotency.legacy.record.reads"
         private val log: Logger = Logger.getLogger(RedisIdempotencyStore::class.java)
 
@@ -189,6 +249,11 @@ class RedisIdempotencyStore(
                 "if (not cur) or string.sub(cur, 1, #ARGV[1]) == ARGV[1] " +
                 "or string.sub(cur, 1, #ARGV[2]) == ARGV[2] then " +
                 "redis.call('SET', KEYS[1], ARGV[3], 'EX', ARGV[4]) return 1 end " +
+                "return 0"
+
+        /** SET NX EX: writes ARGV[1] (EX ARGV[2]) only when the key is free. Returns 1 when written. */
+        const val SAVE_IF_ABSENT_SCRIPT =
+            "if redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2], 'NX') then return 1 end " +
                 "return 0"
 
         /** Deletes the key only if it holds this request's in-flight marker (prefix ARGV[1]). */

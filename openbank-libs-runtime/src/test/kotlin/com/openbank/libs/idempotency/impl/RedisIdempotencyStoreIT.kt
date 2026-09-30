@@ -5,6 +5,8 @@
 package com.openbank.libs.idempotency.impl
 
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.ReserveResult
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl
@@ -173,16 +175,109 @@ class RedisIdempotencyStoreIT {
     }
 
     @Test
-    fun `a legacy record is replayed as a match and counted`(): Unit = runBlocking {
+    fun `a legacy record without a fingerprint is never replayed and is counted`(): Unit = runBlocking {
         cmd("SET", "idempotency:old", "201|2026-09-01T00:00Z|{\"x\":1}", "EX", "60")
 
-        val result = store.reserve("old", other, 30)
-
-        assertThat(result).isInstanceOf(ReserveResult.Replay::class.java)
-        assertThat((result as ReserveResult.Replay).record.requestHash).isNull()
-        assertThat(result.record.responseBody).isEqualTo("{\"x\":1}")
+        // Its request cannot be proven equal to this one, so it is a mismatch, never a replay.
+        assertThat(store.reserve("old", other, 30)).isEqualTo(ReserveResult.Mismatch)
+        assertThatThrownBy { runBlocking { store.lookup("old", other) } }
+            .isInstanceOf(IdempotencyKeyReusedException::class.java)
         assertThat(meters.counter(RedisIdempotencyStore.LEGACY_METRIC).count()).isGreaterThanOrEqualTo(1.0)
         assertThat(raw("old")).`as`("legacy record untouched").isEqualTo("201|2026-09-01T00:00Z|{\"x\":1}")
+    }
+
+    @Test
+    fun `an unparseable stored status is refused, never replayed as 200`(): Unit = runBlocking {
+        cmd("SET", "idempotency:bad", "v2|$first|abc|2026-09-01T00:00Z|{}", "EX", "60")
+
+        assertThatThrownBy { runBlocking { store.reserve("bad", first, 30) } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+        assertThatThrownBy { runBlocking { store.get("bad") } }
+            .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+    }
+
+    @Test
+    fun `the unfingerprinted save writes only when the key is free`(): Unit = runBlocking {
+        store.save("once", 200, "first")
+        store.save("once", 200, "second")
+
+        assertThat(store.get("once")!!.responseBody).isEqualTo("first")
+    }
+
+    private val alice = IdempotencyScope("sepa-payment", "alice")
+    private val bob = IdempotencyScope("sepa-payment", "bob")
+
+    @Test
+    fun `the same key and body from another principal is not replayed`(): Unit = runBlocking {
+        assertThat(store.reserve(alice, "k1", first, 30)).isEqualTo(ReserveResult.Reserved)
+        store.save(alice, "k1", first, 201, """{"id":"alice"}""", 60)
+
+        assertThat(store.reserve(bob, "k1", first, 30)).isEqualTo(ReserveResult.Reserved)
+        val replay = store.reserve(alice, "k1", first, 30) as ReserveResult.Replay
+        assertThat(replay.record.responseBody).isEqualTo("""{"id":"alice"}""")
+    }
+
+    @Test
+    fun `the same key in two services does not collide`(): Unit = runBlocking {
+        store.reserve(IdempotencyScope("account-service", "alice"), "k1", first, 30)
+
+        assertThat(store.reserve(IdempotencyScope("aml-service", "alice"), "k1", other, 30))
+            .isEqualTo(ReserveResult.Reserved)
+    }
+
+    @Test
+    fun `the stored key carries no principal and the v2 service namespace`(): Unit = runBlocking {
+        store.reserve(alice, "k1", first, 30)
+
+        val keys = cmd("KEYS", "idempotency:*")!!
+        assertThat(keys).contains("idempotency:v2:sepa-payment:").contains(":k1").doesNotContain("alice")
+    }
+
+    @Test
+    fun `transition - an unscoped in-flight marker for the same request blocks a second run`(): Unit = runBlocking {
+        cmd("SET", "idempotency:k1", "inflight|$first|2026-09-26T09:59Z", "EX", "60")
+
+        assertThat(store.reserve(alice, "k1", first, 30)).isEqualTo(ReserveResult.InFlight)
+        assertThat(store.reserve(alice, "k1", first, 30)).`as`("scoped marker was released").isEqualTo(ReserveResult.InFlight)
+        assertThat(store.reserve(alice, "k1", other, 30)).`as`("another request proceeds").isEqualTo(ReserveResult.Reserved)
+    }
+
+    @Test
+    fun `transition - an unscoped completed record for the same request is neither replayed nor re-run`(): Unit =
+        runBlocking {
+            cmd("SET", "idempotency:k1", "v2|$first|201|2026-09-26T09:59Z|{\"id\":\"x\"}", "EX", "60")
+
+            assertThat(store.reserve(bob, "k1", first, 30)).isEqualTo(ReserveResult.Mismatch)
+            assertThat(cmd("KEYS", "idempotency:v2:*")).`as`("scoped marker released").isEqualTo("[]")
+        }
+
+    @Test
+    fun `scoped concurrent reserves of one key yield exactly one Reserved`(): Unit = runBlocking {
+        val results = (1..RACE).map { async(Dispatchers.IO) { store.reserve(alice, "race", first, 30) } }.awaitAll()
+
+        assertThat(results.count { it == ReserveResult.Reserved }).isEqualTo(1)
+        assertThat(results.count { it == ReserveResult.InFlight }).isEqualTo(RACE - 1)
+    }
+
+    @Test
+    fun `key validation boundaries`(): Unit = runBlocking {
+        assertThat(store.reserve(alice, "a".repeat(128), first, 30)).isEqualTo(ReserveResult.Reserved)
+        assertThat(store.reserve(alice, "Az09._:-", first, 30)).isEqualTo(ReserveResult.Reserved)
+        for (bad in listOf("a".repeat(129), "", "has space", "slash/", "pipe|", "ümlaut")) {
+            assertThatThrownBy { runBlocking { store.reserve(alice, bad, first, 30) } }
+                .`as`(bad).isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThatThrownBy { IdempotencyScope("sepa-payment", " ") }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `an oversized response is not stored and a retry is refused, not replayed`(): Unit = runBlocking {
+        val small = RedisIdempotencyStore(ds, clock, maxResponseBytes = 8)
+        small.reserve(alice, "big", first, 30)
+        small.save(alice, "big", first, 201, "0123456789", 60)
+
+        assertThat(small.reserve(alice, "big", first, 30)).isEqualTo(ReserveResult.Mismatch)
+        assertThat(cmd("GET", "idempotency:${alice.storeKey("big")}")).doesNotContain("0123456789")
     }
 
     @Test
