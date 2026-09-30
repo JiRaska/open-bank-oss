@@ -66,6 +66,7 @@ NO_CORPUS = {
     "can-i-deploy-block-classifier-unit-test",
     "can-i-deploy-version-selector-unit-test",
     "co-deploy-set-derivation-unit-test",
+    "deploy-window-decision",
     "ensure-ecr-repository",
     "gate-runner-self-test",
     "pact-provider-version-proof-unit-test",

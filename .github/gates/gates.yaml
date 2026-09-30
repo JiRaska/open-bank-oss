@@ -434,6 +434,27 @@ gates:
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
 
+  # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
+  # stops restarting every open PR's required checks under the strict up-to-date rule.
+  - id: deploy-window-decision
+    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    name: "deploy window batches bot deploy commits without losing a deploy"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      300 of 675 first-parent commits on main over 2026-09-23..30 were bot deploy commits, each
+      one making every open PR `behind` and restarting its checks. deploy-window.py decides when
+      a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
+      it must never introduce is a built image that nothing pins, or a pin that rewinds a
+      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
+      script only runs inside the deploy workflows against live PRs, so this is where it can go
+      red before it acts.
+    review_after: "2027-03-30"
+    budget_seconds: 15
+    run: |
+      python3 .github/scripts/deploy-window.py --self-test
+
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
     group: gitops
@@ -1366,6 +1387,26 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-no-handrolled-cosign.py
+
+  - id: buildx-push-single-manifest
+    name: "buildx pushes carry --provenance=false, never an OCI index (issue #11573, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # text scan of ~200 files; under one second locally
+    # 10 push sites measured 2026-09-30; half, so the estate can shrink without a false red.
+    min_subjects: 5
+    rationale: "A buildx push without --provenance=false becomes an OCI index under the docker-container driver, which the Deny+Fail Kyverno SBOM ImageValidatingPolicy resolves as linux/amd64 and so blocks every Pod of an arm64-only image (admin-ui, #11437). This is the early warning; the decisive control is assert_single_image_manifest in cosign-attest.sh, which the self-test also exercises."
+    review_after: "2027-03-30"
+    selftest_inputs:
+      - ".github/scripts/check-buildx-push-single-manifest.py"
+      - ".github/scripts/test-cosign-attest-single-manifest.sh"
+      - "openbank-infra/scripts/lib/cosign-attest.sh"
+    selftest: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py --self-test
+      bash .github/scripts/test-cosign-attest-single-manifest.sh
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
@@ -5043,6 +5084,27 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: container-listen-port-collisions
+    name: "no two listeners on one port in a container (issue #11524, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A container that binds one port twice crashloops on `bind: address already in use`, while
+      ArgoCD reports Synced and sibling Deployments in the same file keep running. quay-cache set
+      REGISTRY_HTTP_ADDR=:5001, which collides with the :5001 debug server that distribution v3's
+      bundled config starts. The colliding listener was an image default that no manifest names.
+      The gate requires every distribution container to declare REGISTRY_HTTP_DEBUG_ADDR and every
+      *_ADDR/*_PORT env port in one container to be unique. Falsified against origin/main's
+      registry-cache.yaml before wiring: exit 1 with the quay-cache collision named, exit 0 after the fix.
+    review_after: '2027-03-29'
+    verified: "2026-09-29 — 208 containers scanned on the branch, 0 findings; the pre-fix registry-cache.yaml gives 4 findings, exit 1"
+    budget_seconds: 20
+    min_subjects: 100   # 208 containers measured 2026-09-29
+    selftest: python3 .github/scripts/check-container-listen-port-collisions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-container-listen-port-collisions.py"]
+    run: |
+      python3 .github/scripts/check-container-listen-port-collisions.py --root .
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: engagement-service
     app.kubernetes.io/part-of: engagement
   annotations:
-    openbank.tech/policy-checksum: "822bdb9a342a0e8e"
+    openbank.tech/policy-checksum: "98e83f6ee7414fde"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1609,12 +1609,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
