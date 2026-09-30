@@ -11,6 +11,7 @@ import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.security.sanitizeForLog
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
@@ -188,18 +189,24 @@ class InvalidApprovalStateMapper : ExceptionMapper<InvalidApprovalStateException
 // type, this is immune to whatever the Kotlin suspend/coroutine bridge does to WebApplicationException
 // subtypes at the JAX-RS boundary — the reason a thrown ServiceUnavailableException (503) was
 // surfacing as 422 (issue #1797).
+//
+// The client message is a CONSTANT: the exception text carries the policy engine's response body
+// or the connection error, which is internal detail. It is logged (sanitised) instead.
 @Provider
 class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
-    override fun toResponse(exception: PolicyDecisionException): Response =
-        Response.status(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus)
+    private val log = Logger.getLogger(PolicyDecisionExceptionMapper::class.java)
+    override fun toResponse(exception: PolicyDecisionException): Response {
+        log.warnf("policy decision point unavailable: %s", exception.message.sanitizeForLog())
+        return Response.status(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus)
             .entity(
                 apiError(
                     ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus,
                     ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.code,
-                    exception.message ?: "Policy decision point unavailable",
+                    "policy decision point unavailable",
                 ),
             )
             .build()
+    }
 }
 
 // Neither jakarta.validation.ConstraintViolationException NOR the Hibernate persistence
@@ -249,6 +256,8 @@ class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
             .build()
 }
 
+private const val FORBIDDEN_STATUS = 403
+
 @Provider
 class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
     override fun toResponse(exception: WebApplicationException): Response {
@@ -260,8 +269,12 @@ class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
             409 -> ErrorCode.CONFLICT.code
             else -> "HTTP_$status"
         }
+        // A 403's message is a constant: AuthorizeInterceptor puts the policy decision reason
+        // there, and that reason is for the log and the trace, never the caller
+        // (PolicyDecisionPoint KDoc). Other statuses keep their message.
+        val message = if (status == FORBIDDEN_STATUS) "Forbidden" else exception.message ?: "Request failed"
         return Response.status(status)
-            .entity(apiError(status, code, exception.message ?: "Request failed"))
+            .entity(apiError(status, code, message))
             .build()
     }
 }

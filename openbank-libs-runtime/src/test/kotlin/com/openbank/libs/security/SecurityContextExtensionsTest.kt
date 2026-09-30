@@ -5,10 +5,13 @@
 package com.openbank.libs.security
 
 import io.mockk.every
+import com.openbank.libs.api.error.ApiError
+import com.openbank.libs.api.error.WebApplicationExceptionMapper
 import io.mockk.mockk
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.core.SecurityContext
 import org.assertj.core.api.Assertions.assertThat
-import org.assertj.core.api.Assertions.assertThatThrownBy
+import org.assertj.core.api.Assertions.catchThrowable
 import org.junit.jupiter.api.Test
 import java.security.Principal
 import java.util.UUID
@@ -83,10 +86,24 @@ class SecurityContextExtensionsTest {
     }
 
     @Test
-    fun `requireAnyRole throws SecurityException when no required role is present`() {
+    fun `actorType follows Roles ALL declaration order, not a privilege ranking`() {
+        val ctx = contextWith("alice")
+        every { ctx.isUserInRole(Roles.SUPERVISOR) } returns true
+        every { ctx.isUserInRole(Roles.OPERATOR) } returns true
+
+        // OPERATOR is declared before SUPERVISOR, so it wins although SUPERVISOR is the narrower grant.
+        assertThat(ctx.actorType).isEqualTo(Roles.OPERATOR)
+    }
+
+    @Test
+    fun `requireAnyRole refuses with a 403 when no required role is present`() {
         val ctx = contextWith("alice")
 
-        assertThatThrownBy { ctx.requireAnyRole(Roles.ADMIN, Roles.PAYMENTS) }
-            .isInstanceOf(SecurityException::class.java)
+        val thrown = catchThrowable { ctx.requireAnyRole(Roles.ADMIN, Roles.PAYMENTS) }
+
+        assertThat(thrown).isInstanceOf(ForbiddenException::class.java)
+        val response = WebApplicationExceptionMapper().toResponse(thrown as ForbiddenException)
+        assertThat(response.status).isEqualTo(403)
+        assertThat((response.entity as ApiError).message).isEqualTo("Forbidden")
     }
 }
