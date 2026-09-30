@@ -5,6 +5,7 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
@@ -61,34 +62,35 @@ class SanctionsListService(
         Log.info("Manual refresh triggered for list: $listType")
         val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
-        val count = if (enumType != null) {
-            // Keep the import and its final publication under one cross-pod fence. Failed imports
-            // may have committed batches; their durable evidence is still published or withheld.
-            val result = if (publicationFence != null) {
-                publicationFence.duringRefresh(enumType) { permit ->
-                    importer.importList(enumType, list.sourceUrl).also {
-                        publisher.publishFenced(list.id, enumType, permit)
-                    }
-                }
-            } else {
-                // Unit-test constructor exercises the same orchestration with a mocked publisher.
-                importer.importList(enumType, list.sourceUrl).also {
-                    publisher.publishPending(list.id, enumType)
-                }
-            }
+        suspend fun markCompleted(result: ListImportResult): SanctionsList {
             // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
             // the usable feed count is known. Other outcomes cannot establish a new population,
             // so retain the prior reported count; committed partial changes are journaled separately.
-            if (result.outcome == ListImportOutcome.IMPORTED) {
+            val count = if (result.outcome == ListImportOutcome.IMPORTED) {
                 result.entriesImported
             } else {
                 list.lastEntryCount ?: 0
             }
-        } else {
-            list.lastEntryCount ?: 0
+            return repo.markUpdated(listType, count)
+                ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
         }
-        return repo.markUpdated(listType, count)
-            ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
+        if (enumType == null) {
+            return repo.markUpdated(listType, list.lastEntryCount ?: 0)
+                ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
+        }
+        // The metadata write belongs to the same fenced refresh as import and publication.
+        // Releasing the fence first lets an older pod overwrite a newer refresh's entry count.
+        if (publicationFence != null) {
+            return publicationFence.duringRefresh(enumType) { permit ->
+                val result = importer.importList(enumType, list.sourceUrl)
+                publisher.publishFenced(list.id, enumType, permit)
+                markCompleted(result)
+            }
+        }
+        // Unit-test constructor exercises the same orchestration with a mocked publisher.
+        val result = importer.importList(enumType, list.sourceUrl)
+        publisher.publishPending(list.id, enumType)
+        return markCompleted(result)
     }
 
     /**

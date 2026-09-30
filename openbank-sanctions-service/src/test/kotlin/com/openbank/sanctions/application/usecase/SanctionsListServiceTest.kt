@@ -7,9 +7,11 @@ package com.openbank.sanctions.application.usecase
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -451,6 +453,36 @@ class SanctionsListServiceTest {
         service.refresh(list.listType)
 
         coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+    }
+
+    @Test
+    fun `refresh persists metadata before releasing its publication fence`(): Unit = runBlocking {
+        val list = sampleList(lastEntryCount = 10)
+        val fence = mockk<SanctionsImportPublicationFence>()
+        var insideFence = false
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+            insideFence = true
+            try {
+                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                    SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
+                )
+            } finally {
+                insideFence = false
+            }
+        }
+        coEvery { repo.findByListType(list.listType) } returns list
+        coEvery { importer.importList(any(), any()) } returns ListImportResult.imported(42)
+        coEvery { publisher.publishFenced(list.id, SanctionsListType.OFAC_SDN, any()) } returns
+            SanctionsPublicationOutcome.PUBLISHED
+        coEvery { repo.markUpdated(list.listType, 42) } coAnswers {
+            assertThat(insideFence).isTrue()
+            list.copy(lastEntryCount = 42)
+        }
+
+        val result = SanctionsListService(repo, importer, clock, publisher, fence).refresh(list.listType)
+
+        assertThat(result.lastEntryCount).isEqualTo(42)
+        assertThat(insideFence).isFalse()
     }
 
     @Test
