@@ -1,0 +1,75 @@
+# Job / CronJob failure alerts with LATEST-RUN semantics.
+#
+# Replaces kubernetes-mixin's KubeJobFailed (disabled in apps/kube-prometheus-
+# stack.yaml). That rule alerts on the existence of any failed Job object; a
+# CronJob keeps its last failed runs (failedJobsHistoryLimit) beside the
+# successful ones that came after, so it stayed lit for days on crons that had
+# recovered. Measured 2026-09-30: 7 firing, 6 already green on their next run.
+# The one that was really broken (cloud-finops-collector, every run failing
+# because ClickHouse's disk was full) looked exactly like the six.
+#
+# CronJobLatestRunFailed: the newest Job a CronJob created has failed. Resolves
+# by itself on the next successful run, which is what an operator means by
+# "the cron is broken". JobFailed: a Job no CronJob owns (a migration, a one-
+# off apply) failed — those have no "next run", so existence IS the signal.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-job-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.platform.jobs
+      rules:
+        # Newest Job per CronJob: join kube_job_created to its owner, take the max
+        # creation time per (namespace, cronjob), keep the Job that equals it.
+        - record: openbank:cronjob_latest_job_created
+          expr: |
+            max by (namespace, owner_name) (
+              kube_job_created{job="kube-state-metrics"}
+              * on (namespace, job_name) group_left (owner_name)
+              kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            )
+        - alert: CronJobLatestRunFailed
+          expr: |
+            (
+              (kube_job_status_failed{job="kube-state-metrics"} > 0)
+              * on (namespace, job_name) group_left (owner_name)
+              kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            )
+            and on (namespace, job_name)
+            (
+              (
+                kube_job_created{job="kube-state-metrics"}
+                * on (namespace, job_name) group_left (owner_name)
+                kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+              )
+              == on (namespace, owner_name) group_left ()
+              openbank:cronjob_latest_job_created
+            )
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.owner_name }}: latest run failed"
+            description: >-
+              The most recent Job of this CronJob ({{ $labels.job_name }}) failed and no newer
+              run exists yet. Resolves on the next successful run. Read the pod:
+              kubectl -n {{ $labels.namespace }} logs job/{{ $labels.job_name }} --all-containers
+        - alert: JobFailed
+          expr: |
+            kube_job_status_failed{job="kube-state-metrics"} > 0
+              unless on (namespace, job_name)
+            kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed"
+            description: >-
+              A Job with no CronJob owner has failed; it will not run again on its own.
+              kubectl -n {{ $labels.namespace }} describe job {{ $labels.job_name }}
