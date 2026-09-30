@@ -91,11 +91,17 @@ def self_test() -> int:
         ("current producers", base, False),
         ("missing buildx flag", {**base, "openbank-infra/scripts/build-push-service.sh":
           base["openbank-infra/scripts/build-push-service.sh"].replace("--provenance=false", "", 1)}, True),
+        ("admin UI loses its index guard", {**base, "openbank-infra/scripts/build-push-admin-ui.sh":
+          base["openbank-infra/scripts/build-push-admin-ui.sh"].replace(
+              "  --provenance=false \\\n", "", 1)}, True),
         ("new producer", {**base, "openbank-infra/scripts/new-producer.sh":
           "docker buildx build --push .\n"}, True),
         ("removed runtime check", {**base, "openbank-infra/scripts/lib/cosign-attest.sh":
           base["openbank-infra/scripts/lib/cosign-attest.sh"].replace(
               'assert_ecr_single_image_manifest "$image" || return 1', "", 1)}, True),
+        ("auto-deploy loses its runtime check", {**base, ".github/workflows/auto-deploy.yml":
+          base[".github/workflows/auto-deploy.yml"].replace(
+              'assert_ecr_single_image_manifest "$img"', "", 1)}, True),
     ]
     for label, texts, want_errors in cases:
         errors, _ = findings(texts)
