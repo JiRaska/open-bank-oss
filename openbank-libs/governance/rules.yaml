@@ -1158,6 +1158,9 @@ alerting:
   # critical routed only to no-Ingress in-cluster receivers (ADR-0056) while warning
   # reached Slack, so the most severe alerts were the least likely to be seen.
   critical_alerts_must_egress: true
+  # #11136: GoAlert dedups on the alert SUMMARY. A goalert route must group_by ['...'] and a
+  # severity=critical summary must not interpolate $value — same producer as above.
+  goalert_dedup_key_must_be_stable: true
   enforced: enforce
   ci_producer: ".github/scripts/check-critical-alert-egress.py"
   checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
@@ -1620,8 +1623,9 @@ provenance:
   #      (run 33952524397). Do not read the local exit code as a fleet verdict.
   #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
   #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
-  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reports Enforce,
-  #      Ready, age 60d.
+  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reported Enforce,
+  #      Ready, age 60d (since #11437 the ImageValidatingPolicy
+  #      verify-openbank-image-sbom-attestation-cel, validationActions [Deny]).
   #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
   #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
   #      provenance checker. A condition on the behaviour of a gate that was never built has no
@@ -1667,9 +1671,9 @@ provenance:
     # therefore it was verified".
     basis: declared_images_not_running_pods
     enforcement_rule: >-
-      No image-provenance policy (verify-openbank-image-sbom-attestation, which since
-      2026-09-13 also carries the image-signature check, or any successor) may be set to
-      validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
+      No image-provenance policy (verify-openbank-image-sbom-attestation-cel, which also
+      carries the image-signature check, or any successor) may be set to
+      validationActions: [Deny] while this gate fails. A graduation PR must cite a
       green run of it. An unattested image is never rejected at the moment it is created --
       only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
       that a flip to Enforce is safe.
@@ -4261,6 +4265,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*SchemeAccepted*.kt"
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"

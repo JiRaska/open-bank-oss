@@ -96,7 +96,10 @@ aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS 
 # `name unknown` after the whole build has already run (#3423). Shared with auto-deploy.yml's
 # inline push path — the one where it was measured — so both producers behave identically.
 AWS_REGION="$AWS_REGION" bash "${REPO_ROOT}/.github/scripts/ensure-ecr-repository.sh" "$ECR_REPO"
-docker buildx build --platform "$PLATFORM" -t "$IMAGE" --push "$CTX"
+# --provenance=false --sbom=false: push ONE image manifest, never an OCI index (#11573).
+# A docker-container builder otherwise attaches a provenance attestation and pushes an index,
+# which the Kyverno SBOM policy resolves as linux/amd64 and denies. cosign-attest.sh refuses it.
+docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false -t "$IMAGE" --push "$CTX"
 echo "==> pushed ${IMAGE}"
 
 # 2b. Sign the image AND attest its SBOM (ADR-0029/0030 supply-chain), via the shared helper

@@ -2,7 +2,7 @@
 # Threat model — openbank-risk-engine
 
 - **Status:** Phase 0 (ADR-0313 phase 0 and D4, ADR-0314 D1/D2/D3/D4/D6/D7), sandbox only
-- **Last reviewed:** 2026-09-24
+- **Last reviewed:** 2026-09-29
 - **Owner:** risk-engine CODEOWNERS
 - **Related ADRs:** ADR-0030, ADR-0034, ADR-0137, ADR-0313, ADR-0314
 
@@ -105,3 +105,4 @@ derived per request and never stored (ADR-0314 D6).
   client certificate `finrep-internal-tls`). Plain HTTP 8159 stays open (`insecure-requests: enabled`)
   for existing callers and probes. **STRIDE-S/I:** additive — a strictly stronger path to the same
   surface. Rollback: revert the commit; 8159 is untouched.
+- **2026-09-29** — **Second 8443 caller: treasury-service reads curve sets (ADR-0315 D9).** treasury's simulated counterparties quote off the latest curve set. New grant `treasury-m2m-risk-curve-set-read` in `risk_rest_ext.rego`: `risk.curve-set.read` for `service-account-openbank-treasury` (Keycloak client `openbank-treasury`, ROLE_API only — the identity it already posts to the ledger with), keyed by principal id, never by role. **STRIDE-E:** reads only; `opa test` holds must-ALLOW (the curve read) and must-DENY (curve-set create, snapshot create and read for the same machine; the curve read for finrep's machine, same ROLE_API). **STRIDE-S/I:** transport over the existing 8443 listener with treasury's `treasury-internal-tls` client certificate (same `openbank-ca`); the derived NetworkPolicy now admits the `treasury` namespace to 8159/8443. A curve set is market data the bank already treats as an input, not customer data. **Contract:** `pacts/openbank-treasury-service-openbank-risk-engine.json` (list `limit=1`, get by id, and the 401 without identity) is replayed on every PR by `RiskEnginePactProviderVerificationTest`. Rollback: remove the rego rule; the treasury side degrades to 503 `QUOTE_UNAVAILABLE`.
