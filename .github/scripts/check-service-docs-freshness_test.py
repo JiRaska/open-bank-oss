@@ -53,6 +53,21 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
         cls.write("openbank-libs-runtime/src/main/Shared.kt", "undocumented shared behavior\n")
         cls.undocumented_libs = cls.commit("missing shared docs")
 
+        cls.git("checkout", "-b", "deleted-service-pr", cls.base)
+        cls.git("rm", "openbank-alpha-service/src/main/App.kt")
+        cls.git("commit", "-m", "delete service behavior without documentation")
+        cls.deleted_service = cls.git("rev-parse", "HEAD")
+
+        cls.git("checkout", "-b", "moved-service-pr", cls.base)
+        cls.git("mv", "openbank-alpha-service/src/main/App.kt", "openbank-alpha-service/removed-app.txt")
+        cls.git("commit", "-m", "move service behavior out of production without documentation")
+        cls.moved_service = cls.git("rev-parse", "HEAD")
+
+        cls.git("checkout", "-b", "deleted-libs-pr", cls.base)
+        cls.git("rm", "openbank-libs-runtime/src/main/Shared.kt")
+        cls.git("commit", "-m", "delete shared behavior without documentation")
+        cls.deleted_libs = cls.git("rev-parse", "HEAD")
+
         cls.git("checkout", "main")
         cls.write("openbank-beta-service/src/main/App.kt", "unrelated main change\n")
         cls.commit("main advances after PR opens")
@@ -106,6 +121,21 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
     def test_undocumented_shared_change_fails(self):
         result = self.gate("--head", self.undocumented_libs)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-libs/docs/*.md", result.stderr)
+
+    def test_deleted_service_code_requires_documentation(self):
+        result = self.gate("--head", self.deleted_service)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_moved_service_code_requires_documentation(self):
+        result = self.gate("--head", self.moved_service)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_deleted_shared_code_requires_documentation(self):
+        result = self.gate("--head", self.deleted_libs)
         self.assertEqual(1, result.returncode)
         self.assertIn("openbank-libs/docs/*.md", result.stderr)
 

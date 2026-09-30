@@ -14,7 +14,7 @@ import sys
 
 def changed_paths(repo: Path, base: str, head: str) -> set[str]:
     result = subprocess.run(
-        ["git", "diff", "--name-only", "-z", "--diff-filter=ACMR", f"{base}...{head}", "--"],
+        ["git", "diff", "--name-only", "-z", "--no-renames", "--diff-filter=ACDM", f"{base}...{head}", "--"],
         cwd=repo,
         check=True,
         capture_output=True,
