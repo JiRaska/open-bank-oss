@@ -1153,8 +1153,28 @@ jobs:
       # accepts, or give up after 8 attempts and leave it for a human).
       # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
       # re-sign land by itself, so it must happen even on the run where the guard then fails.
-      - name: Enable auto-merge
+      # Deploy window (deploy-window.py): at most one bot deploy commit per window on main.
+      # workflow_dispatch arms immediately; otherwise deploy-window-flush.yml arms a deferred PR.
+      - name: Deploy window decision
+        id: window
         if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/deploy-window"
+          # Unreadable inputs arm immediately — the pre-window behaviour, never a stranded PR.
+          if ! bash .github/scripts/deploy-window-inputs.sh "$d"; then
+            echo "::warning::deploy window inputs unreadable — arming immediately"
+            echo "decision=ARM" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          armed="$(jq 'any(.[]; .armed)' "$d/prs.json")"
+          python3 .github/scripts/deploy-window.py decide --event "$EVENT_NAME" \
+            --armed-open "$armed" --commits-json "$d/commits.json" --now "$(date -u +%s)" >> "$GITHUB_OUTPUT"
+      - name: Enable auto-merge
+        if: steps.gitops_pr.outputs.pull-request-number != '' && steps.window.outputs.decision == 'ARM'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
