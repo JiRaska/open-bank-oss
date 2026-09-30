@@ -51,8 +51,10 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             task = ('ForceDependencyResolutionPlugin_resolveProjectDependencies'
                     if resolver else 'VerifyBuildscriptFreeMarker')
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
+            # A daemon can keep writing into the temporary Gradle home after this
+            # process exits, racing tearDownClass cleanup.
             command = [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                       '--offline', task, *(['--dry-run'] if resolver else [])]
+                       '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])]
             for attempt in range(3):
                 result = subprocess.run(command, env=env, capture_output=True, text=True,
                                         timeout=120, check=False)

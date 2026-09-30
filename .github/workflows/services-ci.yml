@@ -359,6 +359,11 @@ jobs:
                  && ! grep -qE '(^| )openbank-client-product-catalog( |$)' <<< " $CHANGED "; then
                 CHANGED="$CHANGED openbank-client-product-catalog"
               fi
+              # Tests reading OTHER modules' trees escape the fan-out above (#10010 -> #11513).
+              # Derived from test sources; rationale in the script header.
+              if [ -n "${CHANGED// /}" ]; then
+                CHANGED="$CHANGED $(python3 .github/scripts/derive-fleet-scanning-test-modules.py --expand "$CHANGED")"
+              fi
               # A change to the CI recipe itself (services-ci / _service-ci) can NOT
               # alter any service's compile/test inputs, so it does NOT warrant a
               # 28-module fan-out -- that is what turned the trivial #547 cache-flag
