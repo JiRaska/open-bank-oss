@@ -16,6 +16,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
@@ -123,6 +124,10 @@ class AccountPactFolderProviderVerificationTest {
 
     @Inject
     lateinit var delegationProjectionRepository: DelegationProjectionRepository
+
+    /** Resolves to the `@Mock` TestBalanceQueryPort: balance-service does not run in this test. */
+    @Inject
+    lateinit var balancePort: BalanceQueryPort
 
     @Inject
     lateinit var vertx: Vertx
@@ -254,6 +259,25 @@ class AccountPactFolderProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /**
+     * Seeds the account interest-service's accrual read asks the balance of (#8345), and gives the
+     * in-memory balance port a CZK balance for it: `GET /{id}/balance` answers 404 when the port
+     * holds nothing, which would read as a missing route rather than a missing balance.
+     */
+    @State("a CZK balance exists for the pact account")
+    fun czkBalanceExistsForPactAccount() {
+        // Two bridged blocks, never one nested in the other: runOnVertxContext blocks the caller
+        // on a future, so calling it from inside a bridged block parks the event loop it is
+        // waiting on and times out (measured, 2026-09-30).
+        accountOwnedByKnownParty()
+        runOnVertxContext {
+            if (balancePort.getByAccountAndCurrency(ACCOUNT_ID, "CZK") == null) {
+                balancePort.initialize(ACCOUNT_ID, "CZK", java.math.BigDecimal.ZERO)
+            }
+            Unit
+        }
     }
 
     /**

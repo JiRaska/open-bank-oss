@@ -1,0 +1,77 @@
+{
+  "consumer": {
+    "name": "openbank-interest-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the booked balance of an account the accrual run is about to accrue on",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the pact account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555/balance"
+      },
+      "response": {
+        "body": {
+          "accountId": "11111111-2222-4333-8444-555555555555",
+          "currencyCode": "CZK",
+          "currentBalance": 0.0
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.currentBalance": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a booked balance with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555/balance"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}
