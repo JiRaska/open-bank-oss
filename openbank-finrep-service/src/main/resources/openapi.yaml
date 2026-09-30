@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.13.0
+  version: 1.14.0
 tags:
   - name: FINREP
   - name: COREP
@@ -392,6 +392,19 @@ components:
           description: >-
             Derived — true when at least one cell has `isDataGap`. A template with data gaps is
             still fully rendered, never silently truncated.
+        sourceRunId:
+          type: string
+          nullable: true
+          description: >-
+            The risk-engine snapshot run the figures were read from (C_02.00, C_72.00-C_76.00);
+            null for a template not built from a run, or when no run was found.
+        provenance:
+          type: string
+          nullable: true
+          description: >-
+            That run's provenance, `synthetic` or `production` (ADR-0313 D13). `synthetic` means
+            the figures come from a synthetic book and must be presented as such; null when
+            `sourceRunId` is.
 
     ApiError:
       type: object

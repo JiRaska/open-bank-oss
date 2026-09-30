@@ -88,6 +88,20 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: fleet-scanning-test-edges
+    name: "services-ci builds tests that read other modules' trees (derived, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "services-ci fans out on ^<module>/ only, so a test reading OTHER modules' sources (libs-runtime's OutboxDeadLetterAlertNamingTest) never ran when its real input changed: #10010 merged green and reddened main until #11513. The workflow derives those edges from this script; the gate keeps the detector falsifiable and fails on an empty fleet set."
+    review_after: "2027-09-30"
+    min_subjects: 1
+    budget_seconds: 10
+    selftest: python3 .github/scripts/derive-fleet-scanning-test-modules.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/derive-fleet-scanning-test-modules.py"]
+    run: |
+      python3 .github/scripts/derive-fleet-scanning-test-modules.py 2>&1
+
   - id: synthetic-taint-rest-client-boundaries
     name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
     group: kotlin
@@ -419,6 +433,27 @@ gates:
     review_after: "2027-02-19"
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
+
+  # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
+  # stops restarting every open PR's required checks under the strict up-to-date rule.
+  - id: deploy-window-decision
+    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    name: "deploy window batches bot deploy commits without losing a deploy"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      300 of 675 first-parent commits on main over 2026-09-23..30 were bot deploy commits, each
+      one making every open PR `behind` and restarting its checks. deploy-window.py decides when
+      a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
+      it must never introduce is a built image that nothing pins, or a pin that rewinds a
+      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
+      script only runs inside the deploy workflows against live PRs, so this is where it can go
+      red before it acts.
+    review_after: "2027-03-30"
+    budget_seconds: 15
+    run: |
+      python3 .github/scripts/deploy-window.py --self-test
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -1260,6 +1295,11 @@ gates:
       them), 25 money-path clusters derived for 25 money-path services. Self-test falsifies a
       single-instance money-path cluster, a restart-method cluster, missing anti-affinity, a
       disabled PDB and a money-path service whose workload vanished, against a compliant control.
+      2026-09-29 -- rule 6 (Temporal server in front of a platform database) run against the
+      main-branch temporal-helmrelease.yaml: FAIL with 10 findings (frontend/history/matching
+      at 1 replica with no PDB, and all four role blocks at the top level where the chart never
+      reads them); passes on the fixed manifest. Self-test falsifies a 1-replica role, a role
+      without a PDB and a top-level role block.
     min_subjects: 50   # 68 CNPG Clusters declared in gitops today (2026-09-28)
     selftest_inputs: [".github/scripts/check-cnpg-update-resilience.py"]
     selftest: python3 .github/scripts/check-cnpg-update-resilience.py --self-test
@@ -2473,6 +2513,26 @@ gates:
     selftest_inputs: [".github/scripts/check-merged-past-red-check.py"]
     run: |
       python3 .github/scripts/check-merged-past-red-check.py --check-declaration
+
+  # Strict required-status-checks policy + auto-merge = an armed, green PR waits `behind` forever,
+  # because auto-merge never updates a branch. auto-update-armed-prs.yml updates exactly those
+  # PRs. This gate holds its wiring: the update is driven by the GitHub App token (a GITHUB_TOKEN
+  # push triggers no workflows, so CI would never re-run and the PR would wedge), it sends
+  # expected_head_sha, and it reads the required contexts live from the branch rules.
+  - id: auto-update-armed-prs-declaration
+    name: "auto-update-armed-prs keeps its App token, live required contexts and triggers (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "An armed PR behind a strict main never merges without an update; a regression to GITHUB_TOKEN or a hard-coded context list would make the updater silently inert or unsafe."
+    review_after: "2027-03-30"
+    budget_seconds: 5
+    min_subjects: 10   # 7 workflow + 3 script declarations, 2026-09-30
+    selftest: |
+      python3 .github/scripts/auto-update-armed-prs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
+    run: |
+      python3 .github/scripts/auto-update-armed-prs.py --check-declaration
 
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
@@ -4391,7 +4451,10 @@ gates:
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
   # (ADR-0056) — while warning escaped to Slack, so the most severe alerts were the
   # least likely to be seen. Config-inspection alone hides this (the critical path
-  # looks MORE careful), which is why it is a gate. ENFORCED.
+  # looks MORE careful), which is why it is a gate. Also enforces GoAlert dedup-key
+  # stability (#11136): GoAlert dedups on the alert summary, so a goalert route must group by
+  # ['...'] and a critical summary must not interpolate $value, or orphaned alerts pile up to
+  # the 200-unacked limit and every page is rejected with HTTP 400. ENFORCED.
   - id: critical-alert-egress
     name: "critical-alert egress (rules.yaml: alerting, enforced)"
     group: security
@@ -5001,6 +5064,27 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: container-listen-port-collisions
+    name: "no two listeners on one port in a container (issue #11524, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A container that binds one port twice crashloops on `bind: address already in use`, while
+      ArgoCD reports Synced and sibling Deployments in the same file keep running. quay-cache set
+      REGISTRY_HTTP_ADDR=:5001, which collides with the :5001 debug server that distribution v3's
+      bundled config starts. The colliding listener was an image default that no manifest names.
+      The gate requires every distribution container to declare REGISTRY_HTTP_DEBUG_ADDR and every
+      *_ADDR/*_PORT env port in one container to be unique. Falsified against origin/main's
+      registry-cache.yaml before wiring: exit 1 with the quay-cache collision named, exit 0 after the fix.
+    review_after: '2027-03-29'
+    verified: "2026-09-29 — 208 containers scanned on the branch, 0 findings; the pre-fix registry-cache.yaml gives 4 findings, exit 1"
+    budget_seconds: 20
+    min_subjects: 100   # 208 containers measured 2026-09-29
+    selftest: python3 .github/scripts/check-container-listen-port-collisions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-container-listen-port-collisions.py"]
+    run: |
+      python3 .github/scripts/check-container-listen-port-collisions.py --root .
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin
