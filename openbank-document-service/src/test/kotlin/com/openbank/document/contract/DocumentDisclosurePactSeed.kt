@@ -29,7 +29,7 @@ import java.util.concurrent.TimeUnit
  * export (#8345). One implementation, so the folder twin (PR lane) and the broker twin (main push)
  * cannot seed different documents for the same interaction.
  */
-internal object DocumentDisclosurePactSeed {
+object DocumentDisclosurePactSeed {
     const val STATE = "a sealed PDF document exists for the pact disclosure"
 
     /** Must match DocumentDisclosureExportPactConsumerTest (openbank-delegation-service). */
