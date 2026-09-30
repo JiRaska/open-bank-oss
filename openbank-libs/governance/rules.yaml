@@ -1621,8 +1621,9 @@ provenance:
   #      (run 33952524397). Do not read the local exit code as a fleet verdict.
   #   3. kyverno SBOM-attestation rule Audit -> Enforce — ALREADY DONE, and this line describing
   #      it as "one line once criteria 1-2 hold" is two months stale. Live in the cluster:
-  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reports Enforce,
-  #      Ready, age 60d.
+  #      `kubectl get clusterpolicy verify-openbank-image-sbom-attestation` reported Enforce,
+  #      Ready, age 60d (since #11437 the ImageValidatingPolicy
+  #      verify-openbank-image-sbom-attestation-cel, validationActions [Deny]).
   #   4. "the advisory gate has run clean for an observation window" — THE GATE DOES NOT EXIST.
   #      `provenance` appears in no entry of .github/gates/gates.yaml and no workflow invokes a
   #      provenance checker. A condition on the behaviour of a gate that was never built has no
@@ -1668,9 +1669,9 @@ provenance:
     # therefore it was verified".
     basis: declared_images_not_running_pods
     enforcement_rule: >-
-      No image-provenance policy (verify-openbank-image-sbom-attestation, which since
-      2026-09-13 also carries the image-signature check, or any successor) may be set to
-      validationFailureAction: Enforce while this gate fails. A graduation PR must cite a
+      No image-provenance policy (verify-openbank-image-sbom-attestation-cel, which also
+      carries the image-signature check, or any successor) may be set to
+      validationActions: [Deny] while this gate fails. A graduation PR must cite a
       green run of it. An unattested image is never rejected at the moment it is created --
       only later, at a reschedule nobody scheduled -- so a passing gate is the ONLY evidence
       that a flip to Enforce is safe.

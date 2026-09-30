@@ -19,10 +19,11 @@ ADR was written ahead of have long since merged and the decision held up in prac
   admin-ui Tech Inventory SBOM viewer (`app/api/services/[name]/sbom/route.ts`) reads it live
   per-service with a fallback to the image-baked bundle. Host-side-only generation rule holds.
 - **Axis 2 (attested supply-chain SBOM)** — ✅ Shipped: `cosign attest --type cyclonedx` runs on
-  every pushed image in `auto-deploy.yml`, and the dedicated
-  `verify-openbank-image-sbom-attestation` Kyverno policy is Enforce in
-  `verify-sbom-attestation-policy.yaml`. It requires a signed CycloneDX predicate and remains
-  separate from image-signature verification, preserving independent rollout semantics.
+  every pushed image in `auto-deploy.yml`, and the Kyverno
+  `ImageValidatingPolicy` `verify-openbank-image-sbom-attestation-cel` denies admission
+  (`validationActions: [Deny]`) in `cel-image-validating-sbom-attestation.yaml`. It requires the
+  image signature and a signed CycloneDX predicate in one policy (#9805 item 4; the kyverno.io/v1
+  ClusterPolicy `verify-openbank-image-sbom-attestation` it replaced was deleted in #11437).
 
 <details>
 <summary>Original delivery note (2026-06-30), superseded above</summary>
