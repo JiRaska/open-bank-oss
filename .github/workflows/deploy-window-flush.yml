@@ -30,9 +30,10 @@ jobs:
     name: Arm the oldest deferred deploy PR
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Read-only GITHUB_TOKEN: every write (arming auto-merge, closing a superseded PR) goes through
+    # the App token. A GITHUB_TOKEN fallback would arm a merge whose commit triggers no workflows.
     permissions:
       contents: read
-      pull-requests: write
     env:
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
       GITHUB_REPOSITORY: ${{ github.repository }}
@@ -51,10 +52,16 @@ jobs:
           app-id: ${{ secrets.GITOPS_APP_ID }}
           private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
 
+      - name: Fail closed without the App token
+        if: steps.app_token.outputs.token == ''
+        run: |
+          echo "::error::GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY unavailable - refusing to arm deploy PRs with GITHUB_TOKEN (its merge would trigger no workflows)."
+          exit 1
+
       - name: Pick the deferred deploy PR to arm
         id: pick
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
           d="$RUNNER_TEMP/deploy-window"
@@ -65,7 +72,7 @@ jobs:
       - name: Close superseded deploy PRs (refuses a rollback)
         if: steps.pick.outputs.arm != ''
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
           ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
         run: |
@@ -80,7 +87,7 @@ jobs:
       - name: Enable auto-merge
         if: steps.pick.outputs.arm != ''
         env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
         run: |
           set -euo pipefail
