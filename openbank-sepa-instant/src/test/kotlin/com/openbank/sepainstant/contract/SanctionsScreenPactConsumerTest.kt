@@ -95,6 +95,36 @@ class SanctionsScreenPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the screen must answer 401 before any
+     * list is consulted. Replayed by `SanctionsNegativeAuthProviderVerificationTest`, which boots
+     * sanctions-service without a test identity; the positive twin filters this state out because
+     * its class-level `@TestSecurity` would authenticate the replay and answer 201.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun screenUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST a screen with no M2M identity is refused")
+        .path(EXPECTED_SCREEN_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(request(UNLISTED_NAME, CLEAR_KEY))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "screenUnauthenticatedPact")
+    fun `a screen with no identity is refused with 401, never screened`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(request(UNLISTED_NAME, CLEAR_KEY))
+            .post(screenPathOnClient())
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "screenClearPact")
     fun `a name on no list binds as CLEAR with no matches`(mockServer: MockServer) {
@@ -138,6 +168,9 @@ class SanctionsScreenPactConsumerTest {
     }
 
     private companion object {
+        /** sanctions-service's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-sepa-instant"
         const val PROVIDER = "openbank-sanctions-service"
 

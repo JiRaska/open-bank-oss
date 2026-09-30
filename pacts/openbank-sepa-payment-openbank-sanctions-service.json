@@ -4,6 +4,32 @@
   },
   "interactions": [
     {
+      "description": "POST a screen with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "aliases": [
+
+          ],
+          "entityType": "INDIVIDUAL",
+          "idempotencyKey": "77777777-0001-4000-8000-000000000001:debtor",
+          "name": "Zdenka Bezprijmeni"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sanctions/screen"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST a SEPA credit transfer debtor screen for a name on no sanctions or PEP list",
       "providerStates": [
         {
