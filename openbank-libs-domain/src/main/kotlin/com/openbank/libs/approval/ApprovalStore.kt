@@ -17,6 +17,9 @@ import java.time.OffsetDateTime
  */
 enum class ApprovalStatus { PENDING, APPROVED, REJECTED, EXECUTED }
 
+/** Provenance captured at creation, not inferred later from the displayed maker id. */
+enum class MakerActorKind { HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN }
+
 data class PendingApproval(
     val id: String,
     val action: String,
@@ -26,6 +29,7 @@ data class PendingApproval(
     val createdAt: OffsetDateTime,
     val decidedBy: String? = null,
     val decidedAt: OffsetDateTime? = null,
+    val makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN,
 )
 
 /** A principal tried to decide (approve/reject) their own [PendingApproval]. */
@@ -43,7 +47,13 @@ class InvalidApprovalStateException(id: String, expected: ApprovalStatus, actual
     IllegalStateException("approval '$id' must be $expected for this operation, but is $actual")
 
 interface ApprovalStore {
-    suspend fun create(action: String, resourceId: String?, makerId: String, ttlSeconds: Long = 86400): PendingApproval
+    suspend fun create(
+        action: String,
+        resourceId: String?,
+        makerId: String,
+        ttlSeconds: Long = 86400,
+        makerActorKind: MakerActorKind = MakerActorKind.UNKNOWN,
+    ): PendingApproval
 
     suspend fun find(id: String): PendingApproval?
 

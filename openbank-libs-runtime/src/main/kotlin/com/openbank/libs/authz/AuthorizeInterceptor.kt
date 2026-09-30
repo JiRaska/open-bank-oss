@@ -6,6 +6,7 @@ package com.openbank.libs.authz
 
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
@@ -405,7 +406,7 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = store.create(annotation.action, resourceId, maker)
+        val pending = store.create(annotation.action, resourceId, maker, makerActorKind = makerActorKind(query))
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -568,6 +569,13 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
  * not above it.
  */
+private fun makerActorKind(query: AuthzQuery): MakerActorKind = when {
+    query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) -> MakerActorKind.SERVICE_ACCOUNT
+    query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
+    query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
+    else -> MakerActorKind.UNKNOWN
+}
+
 private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean = this != null &&
     status == ApprovalStatus.APPROVED &&
     this.action == action &&

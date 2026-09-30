@@ -6,6 +6,7 @@ package com.openbank.libs.approval.impl
 
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.ApprovalStoreContractTest
+import com.openbank.libs.approval.MakerActorKind
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
@@ -13,6 +14,9 @@ import io.quarkus.redis.datasource.value.ReactiveValueCommands
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.Uni
 import io.vertx.mutiny.redis.client.Response
+import kotlinx.coroutines.runBlocking
+import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -50,8 +54,38 @@ class RedisApprovalStoreTest : ApprovalStoreContractTest() {
 
     private val clock = Clock.fixed(Instant.parse("2026-08-02T21:00:00Z"), ZoneOffset.UTC)
 
-    override fun newStore(): ApprovalStore {
+    override fun newStore(): ApprovalStore = newStore(mutableMapOf())
+
+    @Test
+    fun `new provenance sidecar leaves the old approval value readable`(): Unit = runBlocking {
         val backing = mutableMapOf<String, String>()
+        val store = newStore(backing)
+        val pending = store.create(
+            "sanctions.clear",
+            "check-1",
+            "agent:reviewer",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
+
+        assertThat(backing["approval:${pending.id}"]?.split('|')).hasSize(7)
+        assertThat(backing["approval-maker-kind:${pending.id}"]).isEqualTo("AI_AGENT")
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+    }
+
+    @Test
+    fun `legacy approval without sidecar stays unknown after decision`(): Unit = runBlocking {
+        val backing = mutableMapOf(
+            "approval:legacy" to "sanctions.clear|check-1|operator-1|PENDING|2026-08-02T21:00Z||",
+        )
+        val store = newStore(backing)
+
+        assertThat(store.find("legacy")?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+        store.decide("legacy", "operator-2", approve = true)
+        assertThat(store.find("legacy")?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+        assertThat(backing).doesNotContainKey("approval-maker-kind:legacy")
+    }
+
+    private fun newStore(backing: MutableMap<String, String>): ApprovalStore {
         val values = mockk<ReactiveValueCommands<String, String>>()
         every { values.get(any()) } answers { Uni.createFrom().item(backing[firstArg<String>()]) }
         every { values.set(any<String>(), any<String>(), any<SetArgs>()) } answers {

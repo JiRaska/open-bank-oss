@@ -33,6 +33,7 @@ export type DomainApprovalItem = {
   action: string
   resourceId: string | null
   maker: string | null
+  makerActorKind?: 'HUMAN' | 'AI_AGENT' | 'SERVICE_ACCOUNT' | 'CUSTOMER_PARTY' | 'UNKNOWN'
   proposedAt: string | null
 }
 

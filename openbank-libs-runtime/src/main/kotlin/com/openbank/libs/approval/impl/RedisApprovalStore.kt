@@ -7,6 +7,7 @@ package com.openbank.libs.approval.impl
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.domain.identifiers.Ids
@@ -44,6 +45,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
         resourceId: String?,
         makerId: String,
         ttlSeconds: Long,
+        makerActorKind: MakerActorKind,
     ): PendingApproval {
         val approval = PendingApproval(
             id = Ids.newId().toString(),
@@ -52,6 +54,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
             makerId = makerId,
             status = ApprovalStatus.PENDING,
             createdAt = OffsetDateTime.now(clock),
+            makerActorKind = makerActorKind,
         )
         save(approval, ttlSeconds)
         return approval
@@ -127,10 +130,18 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
     }
 
     private suspend fun save(approval: PendingApproval, ttlSeconds: Long) {
+        // Sidecar preserves the original seven-field wire value for old pods during a rolling
+        // deployment. Write it first: a failed sidecar write must not leave a newly created
+        // approval that appeared to be saved with provenance when it was not.
+        if (approval.makerActorKind != MakerActorKind.UNKNOWN) {
+            valueCommands.set(actorKindKey(approval.id), approval.makerActorKind.name, SetArgs().ex(ttlSeconds))
+                .awaitSuspending()
+        }
         valueCommands.set(key(approval.id), encode(approval), SetArgs().ex(ttlSeconds)).awaitSuspending()
     }
 
     private fun key(id: String) = "$KEY_PREFIX$id"
+    private fun actorKindKey(id: String) = "$ACTOR_KIND_KEY_PREFIX$id"
 
     // Pipe-delimited, mirroring RedisIdempotencyStore's encoding — the fields
     // (action, ids, enum name, ISO timestamps) never contain the separator.
@@ -144,9 +155,12 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
         a.decidedAt?.toString().orEmpty(),
     ).joinToString(SEPARATOR)
 
-    private fun decode(id: String, raw: String): PendingApproval? {
+    private suspend fun decode(id: String, raw: String): PendingApproval? {
         val parts = raw.split(SEPARATOR, limit = FIELD_COUNT)
         if (parts.size < FIELD_COUNT) return null
+        val actorKind = valueCommands.get(actorKindKey(id)).awaitSuspending()
+            ?.let { value -> MakerActorKind.entries.firstOrNull { it.name == value } }
+            ?: MakerActorKind.UNKNOWN
         return PendingApproval(
             id = id,
             action = parts[ACTION_IDX],
@@ -156,6 +170,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
             createdAt = OffsetDateTime.parse(parts[CREATED_AT_IDX]),
             decidedBy = parts[DECIDED_BY_IDX].ifEmpty { null },
             decidedAt = parts[DECIDED_AT_IDX].ifEmpty { null }?.let(OffsetDateTime::parse),
+            makerActorKind = actorKind,
         )
     }
 
@@ -168,6 +183,7 @@ class RedisApprovalStore(private val redis: ReactiveRedisDataSource, private val
             return 1
         """
         const val KEY_PREFIX = "approval:"
+        const val ACTOR_KIND_KEY_PREFIX = "approval-maker-kind:"
         const val SEPARATOR = "|"
         const val DECIDED_TTL_SECONDS = 86400L
         const val SCAN_COUNT = 500L

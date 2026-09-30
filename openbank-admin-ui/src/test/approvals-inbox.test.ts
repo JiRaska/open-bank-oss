@@ -217,16 +217,16 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       expect(seen.find(call => call.url.includes(path))?.authorization).toBe('Bearer operator-token')
     }
     expect(body.items).toEqual([
-      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', proposedAt: null },
-      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', proposedAt: '2026-09-20T08:00:00Z' },
-      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', proposedAt: '2026-09-20T09:00:00Z' },
-      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'newcomers@3', domain: 'audience', action: 'campaign.audience.approve', resourceId: 'newcomers@3', maker: 'marketer.three', makerActorKind: 'UNKNOWN', proposedAt: null },
+      { id: 'pack-7', domain: 'compliance-pack', action: 'lending.compliancePack.activate', resourceId: 'pack-7', maker: 'risk.officer', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T08:00:00Z' },
+      { id: 'campaign-7', domain: 'campaign', action: 'campaign.activate', resourceId: 'campaign-7', maker: 'marketer.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T09:00:00Z' },
+      { id: 'case-7', domain: 'identity-case', action: 'identity.case.secondApproval', resourceId: 'case-7', maker: 'checker.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
     ])
     expect(JSON.stringify(body)).not.toContain('Sensitive')
     expect(JSON.stringify(body)).not.toContain('Private')
   })
 
-  it('preserves human makers and submission times for treasury and ledger backfill', async () => {
+  it('preserves maker IDs and submission times without guessing actor kind for treasury and ledger backfill', async () => {
     const seen: Array<{ url: string; authorization: string | null }> = []
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       seen.push({ url: String(url), authorization: new Headers(init?.headers).get('authorization') })
@@ -247,8 +247,8 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
     expect(body.sources.treasury).toBe('ok')
     expect(body.sources['ledger-backfill']).toBe('ok')
     expect(body.items).toEqual([
-      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', proposedAt: '2026-09-20T10:00:00Z' },
-      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', proposedAt: '2026-09-20T11:00:00Z' },
+      { id: 'deal-7', domain: 'treasury', action: 'treasury.MM_PLACEMENT', resourceId: 'deal-7', maker: 'dealer.two', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T10:00:00Z' },
+      { id: 'request-7', domain: 'ledger-backfill', action: 'lending.ledgerBackfill.decide', resourceId: 'request-7', maker: 'finance.one', makerActorKind: 'UNKNOWN', proposedAt: '2026-09-20T11:00:00Z' },
     ])
   })
 
@@ -525,6 +525,7 @@ describe('federated approvals inbox (ADR-0227 D2)', () => {
       action: 'billing.post',
       resourceId: 'fee-7',
       maker: 'operator.j',
+      makerActorKind: 'UNKNOWN',
       proposedAt: '2026-07-29T11:57:00Z',
     }])
   })

@@ -11,7 +11,7 @@ info:
   # merge cannot say so, because both sides are just a version line it can textually reconcile.
   # Patch and not minor: the only change here is an ADR-0298 `description` on an existing field.
   # No schema, no operation, no behaviour.
-  version: 1.5.1
+  version: 1.6.0
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -328,6 +328,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           nullable: true

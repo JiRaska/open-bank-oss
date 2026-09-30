@@ -23,7 +23,8 @@ info:
   # with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
   # 1.12 -> 1.13 (#11642): additive — create documents 400 AMOUNT_SCALE_EXCEEDED /
   # CURRENCY_UNSUPPORTED (amount + currency are built into a kernel Money, never rounded).
-  version: 1.13.0
+  # 1.13 -> 1.14 (#11588): additive verified makerActorKind on approval responses.
+  version: 1.14.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -371,6 +372,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           nullable: true

@@ -23,7 +23,8 @@ info:
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
-  version: 1.32.0
+  # 1.32.0 -> 1.33.0 (#11588): additive verified makerActorKind on approval responses.
+  version: 1.33.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -1560,6 +1561,10 @@ components:
         resourceId: { type: string, nullable: true }
         status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
         makerId: { type: string, nullable: true, description: Principal that created the request }
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt: { type: string, format: date-time, nullable: true }
         decidedBy: { type: string, nullable: true }
     ProvisioningSnapshot:

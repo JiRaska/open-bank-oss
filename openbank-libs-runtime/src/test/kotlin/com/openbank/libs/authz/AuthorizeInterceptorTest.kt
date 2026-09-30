@@ -9,6 +9,7 @@ import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.PendingApproval
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -667,9 +668,29 @@ class AuthorizeInterceptorTest {
         assertThat(thrown.response.status).isEqualTo(202)
         assertThat(store.created).hasSize(1)
         assertThat(store.created[0].makerId).isEqualTo("user-42")
+        assertThat(store.created[0].makerActorKind).isEqualTo(MakerActorKind.HUMAN)
         assertThat(store.created[0].action).isEqualTo("party.read")
         assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "pending_approval"))
             .isEqualTo(1.0)
+    }
+
+    @Test
+    fun `four-eyes records authenticated agent and service-account provenance distinctly`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "agent:reviewer" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-test" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(MakerActorKind.AI_AGENT, MakerActorKind.SERVICE_ACCOUNT)
     }
 
     @Test

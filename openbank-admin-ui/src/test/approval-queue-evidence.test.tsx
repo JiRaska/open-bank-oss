@@ -62,7 +62,7 @@ describe('approval queue evidence contracts', () => {
       providerCalls.push({ url, authorization: new Headers(init?.headers).get('authorization') ?? undefined })
       if (url.includes('/api/v1/fees/approvals')) return json([{
         id: 'fee-approval-7', action: 'billing.feeWaiver', resourceId: 'fee-7',
-        makerId: 'maker@example.test', createdAt: '2026-09-24T10:00:00Z',
+        makerId: 'agent:reviewer', makerActorKind: 'AI_AGENT', createdAt: '2026-09-24T10:00:00Z',
       }])
       return json({ error: 'mock provider unavailable' }, 503)
     }))
@@ -71,7 +71,8 @@ describe('approval queue evidence contracts', () => {
 
     const row = await screen.findByTestId('domain-approval-billing:fee-approval-7')
     expect(row).toHaveTextContent('billing.feeWaiver')
-    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('maker@example.test')
+    expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('agent:reviewer')
+    expect(row.querySelector('[data-testid="approval-maker-kind"]')).toHaveTextContent('AI agent')
     expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('fee-7')
     expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
     expect(providerCalls.find(call => call.url.includes('/api/v1/fees/approvals'))?.authorization).toBe('Bearer mock-operator-token')
@@ -86,6 +87,7 @@ describe('approval queue evidence contracts', () => {
     expect(parseApprovalInbox(inbox)).toEqual(inbox)
     expect(parseApprovalInbox({ items: [], sources: {} })).toBeNull()
     expect(parseApprovalInbox({ ...inbox, items: [{ id: 'x', domain: 'unknown', action: 'act', resourceId: null, maker: null, proposedAt: null }] })).toBeNull()
+    expect(parseApprovalInbox({ ...inbox, items: [{ id: 'x', domain: 'billing', action: 'act', resourceId: null, maker: 'agent:someone', makerActorKind: 'HUMAN_BY_NAME', proposedAt: null }] })).toBeNull()
   })
 
   it('accepts the communication source and item returned by the federated BFF', () => {
@@ -93,7 +95,7 @@ describe('approval queue evidence contracts', () => {
       id: 'communication-approval-7', domain: 'communication', action: 'communication.publish',
       resourceId: 'message-7', maker: 'operator@example.test', proposedAt: '2026-09-24T10:00:00Z',
     }
-    expect(parseApprovalInbox({ ...inbox, items: [item] })).toEqual({ ...inbox, items: [item] })
+    expect(parseApprovalInbox({ ...inbox, items: [item] })).toEqual({ ...inbox, items: [{ ...item, makerActorKind: 'UNKNOWN' }] })
   })
 
   it('shows treasury and backfill makers with governed hand-offs', async () => {
@@ -117,7 +119,7 @@ describe('approval queue evidence contracts', () => {
     expect(backfill.querySelector('a[href="/balance-sheet/ledger-backfill"]')).not.toBeNull()
   })
 
-  it('shows a communication approval with its human maker and governed hand-off', async () => {
+  it('does not guess a communication maker kind when its provider omits provenance', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input)
       if (url.includes('/api/agent/proposals')) return json([])
@@ -133,6 +135,7 @@ describe('approval queue evidence contracts', () => {
     expect(row).toHaveTextContent('communication.publish')
     expect(row.querySelector('[data-testid="approval-resource"]')).toHaveTextContent('message-7')
     expect(row.querySelector('[data-testid="approval-maker"]')).toHaveTextContent('operator@example.test')
+    expect(row.querySelector('[data-testid="approval-maker-kind"]')).toHaveTextContent('Origin unverified')
     expect(row.querySelector('time[datetime="2026-09-24T10:00:00Z"]')).not.toBeNull()
     expect(row.querySelector('a[href="/approvals/communication"]')).not.toBeNull()
   })

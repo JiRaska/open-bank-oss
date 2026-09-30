@@ -34,6 +34,7 @@ class InMemoryApprovalStore : ApprovalStore {
         resourceId: String?,
         makerId: String,
         ttlSeconds: Long,
+        makerActorKind: MakerActorKind,
     ): PendingApproval {
         val approval = PendingApproval(
             id = "approval-${nextId++}",
@@ -42,6 +43,7 @@ class InMemoryApprovalStore : ApprovalStore {
             makerId = makerId,
             status = ApprovalStatus.PENDING,
             createdAt = OffsetDateTime.parse("2026-06-22T10:20:00Z"),
+            makerActorKind = makerActorKind,
         )
         created += approval
         approvals[approval.id] = approval
