@@ -307,6 +307,37 @@ export const minReservesSchema = z.object({
     holdingCurrency: z.string(), glAccounts: z.array(reserveMappingSchema), glAccountTypes: z.array(reserveMappingSchema),
   }),
 })
+// ČNB maintenance-period averaging (risk-engine GET /min-reserves/periods[/{id}], ADR-0315 D8).
+const calendarStatus = z.enum(['verified', 'sample-unverified'])
+export const maintenancePeriodSchema = z.object({
+  id: z.string(), start: z.iso.date(), end: z.iso.date(), baseReferenceDate: z.iso.date(),
+})
+export const maintenanceCalendarSchema = z.object({
+  calendarId: z.string(), calendarVersion: z.string(), calendarStatus, calendarSource: z.string(),
+  periods: z.array(maintenancePeriodSchema), notes: z.array(z.string()),
+})
+export const minReservePeriodSchema = z.object({
+  calendarId: z.string(), calendarVersion: z.string(), calendarStatus, calendarSource: z.string(),
+  period: maintenancePeriodSchema, evaluationDate: z.iso.date(),
+  parameterSetId: z.string(), parameterSetVersion: z.string(), holdingCurrency: z.string(),
+  baseRunId: z.string().nullable(),
+  /** Each figure below is null with its own *NotStated reason: never a stand-in zero. */
+  requirement: money.nullable(), requirementNotStated: z.string().nullable(),
+  daysInPeriod: z.number().int(), daysElapsed: z.number().int(), daysRemaining: z.number().int(),
+  daysWithData: z.number().int(),
+  /** daysWithData / daysElapsed; null before the period starts. */
+  coverage: money.nullable(),
+  missingDays: z.array(z.iso.date()),
+  days: z.array(z.object({ date: z.iso.date(), runId: z.string(), holdings: money.nullable() })),
+  averageHoldings: money.nullable(), averageNotStated: z.string().nullable(),
+  remainingRequiredAverage: money.nullable(), dailyHoldingProposal: money.nullable(),
+  proposal: z.array(z.object({ date: z.iso.date(), amount: money })).nullable(),
+  proposalNotStated: z.string().nullable(),
+  requirementMet: z.boolean().nullable(),
+  notes: z.array(z.string()),
+})
+export type MinReservePeriod = z.infer<typeof minReservePeriodSchema>
+
 export type MinReserves = z.infer<typeof minReservesSchema>
 export type ReserveBase = z.infer<typeof reserveBaseSchema>
 export type ReserveLine = z.infer<typeof reserveLineSchema>

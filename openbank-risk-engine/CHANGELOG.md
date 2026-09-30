@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.21.0...risk-engine-v0.22.0) (2026-09-30)
+
+
+### Features
+
+* **risk-engine:** record model versions and cut-off in the snapshot manifest ([#11539](https://github.com/JiRaska/open-bank-oss/issues/11539)) ([58bf6aa](https://github.com/JiRaska/open-bank-oss/commit/58bf6aaa557aa72f792517db47ac39caa6dca58e))
+* **treasury:** simulated counterparties quote off the risk engine's curve set ([#11555](https://github.com/JiRaska/open-bank-oss/issues/11555)) ([6933a2b](https://github.com/JiRaska/open-bank-oss/commit/6933a2b9da6ae25cff16ab11c2fe548764fa68b2))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.20.0...risk-engine-v0.21.0) (2026-09-29)
 
 

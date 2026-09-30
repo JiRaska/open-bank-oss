@@ -74,6 +74,9 @@ class SnapshotServiceTest {
                 it.requestedBy,
             )
         }
+
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate) =
+            error("not used by SnapshotService tests")
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)
