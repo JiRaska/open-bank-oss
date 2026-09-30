@@ -1156,6 +1156,9 @@ alerting:
   # critical routed only to no-Ingress in-cluster receivers (ADR-0056) while warning
   # reached Slack, so the most severe alerts were the least likely to be seen.
   critical_alerts_must_egress: true
+  # #11136: GoAlert dedups on the alert SUMMARY. A goalert route must group_by ['...'] and a
+  # severity=critical summary must not interpolate $value — same producer as above.
+  goalert_dedup_key_must_be_stable: true
   enforced: enforce
   ci_producer: ".github/scripts/check-critical-alert-egress.py"
   checked_manifest: "openbank-infra/gitops/apps/kube-prometheus-stack.yaml"
