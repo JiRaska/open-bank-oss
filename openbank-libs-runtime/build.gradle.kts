@@ -77,6 +77,7 @@ dependencies {
     // Issue #5482.
     compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
+    compileOnly("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
     // SyntheticTaintRequestFilter binds the trusted synthetic classification into OTel baggage
     // for the lifetime of an inbound request. Keep this compileOnly: Quarkus services already
@@ -116,6 +117,7 @@ dependencies {
     testImplementation("jakarta.ws.rs:jakarta.ws.rs-api:3.1.0")
     testImplementation("jakarta.persistence:jakarta.persistence-api:3.2.0")
     testImplementation("io.quarkus:quarkus-security:3.33.2")
+    testImplementation("org.eclipse.microprofile.jwt:microprofile-jwt-auth-api:2.1")
     // OpaPolicyDecisionPointProducerTest reads @IfBuildProperty reflectively; an annotation whose
     // class is absent at runtime is silently dropped, so the test needs arc itself.
     testImplementation("io.quarkus:quarkus-arc:3.33.2")

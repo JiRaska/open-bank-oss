@@ -25,6 +25,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.assertj.core.api.Assertions.catchThrowableOfType
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.lang.reflect.Method
@@ -93,6 +94,7 @@ class AuthorizeInterceptorTest {
             clock = Clock.fixed(Instant.parse("2026-06-22T10:20:00Z"), ZoneOffset.UTC)
         }
         every { sc.userPrincipal } returns JavaPrincipal { "user-42" }
+        every { identity.principal } returns JavaPrincipal { "user-42" }
     }
 
     private fun makeCtx(method: Method, vararg params: Any?): InvocationContext {
@@ -542,6 +544,9 @@ class AuthorizeInterceptorTest {
     @Test
     fun `principal type AI_AGENT when sub starts with agent colon`() {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:onboarding" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "agent:onboarding"
+        }
         every { identity.roles } returns setOf("ROLE_AGENT")
         val capturedQuery = mutableListOf<AuthzQuery>()
         val pdp = object : PolicyDecisionPoint {
@@ -681,16 +686,42 @@ class AuthorizeInterceptorTest {
         wirePdpAndStore(store)
 
         every { sc.userPrincipal } returns JavaPrincipal { "agent:reviewer" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "agent:reviewer"
+        }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
         every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-test" }
+        every { identity.principal } returns JavaPrincipal { "service-account-openbank-test" }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
 
         assertThat(store.created.map { it.makerActorKind })
             .containsExactly(MakerActorKind.AI_AGENT, MakerActorKind.SERVICE_ACCOUNT)
+    }
+
+    @Test
+    fun `four-eyes does not trust an agent-looking display name without an agent subject`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "agent:forged-display" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns JavaPrincipal { "agent:unverified" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(MakerActorKind.HUMAN, MakerActorKind.UNKNOWN)
     }
 
     @Test

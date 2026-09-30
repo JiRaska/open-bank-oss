@@ -24,6 +24,7 @@ import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
 import kotlinx.coroutines.runBlocking
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.eclipse.microprofile.jwt.JsonWebToken
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
@@ -432,7 +433,7 @@ class AuthorizeInterceptor {
         val sc = securityContext.get()
         val principal = Principal(
             id = sc.userPrincipal?.name ?: "anonymous",
-            type = principalType(sc),
+            type = principalType(sc, identity.get()),
             roles = identity.get().roles.toList(),
         )
         val resource = annotation.resource.takeIf { it.isNotEmpty() }?.let { expr ->
@@ -486,12 +487,21 @@ class AuthorizeInterceptor {
         return ResourceRef(type = type, id = resolvedValue.toString())
     }
 
-    private fun principalType(sc: SecurityContext): String {
-        // Convention: agents present `sub` prefixed `agent:` (ADR-0031); any
-        // other authenticated principal is HUMAN. SERVICE-to-service uses a
-        // separate mTLS path and never hits this interceptor.
+    private fun principalType(sc: SecurityContext, authenticatedIdentity: SecurityIdentity): String {
+        // The agent convention is on the verified bearer token's `sub`, not on
+        // SecurityContext.name (which may be a display/preferred username).
+        // Keep the existing HUMAN policy type for service accounts; the approval
+        // record separately preserves their SERVICE_ACCOUNT provenance.
         val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
-        return if (name.startsWith("agent:")) "AI_AGENT" else "HUMAN"
+        val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
+        if (name.startsWith("agent:")) {
+            return when {
+                subject == name -> "AI_AGENT"
+                subject == null -> "UNKNOWN"
+                else -> "HUMAN"
+            }
+        }
+        return if (subject?.startsWith("agent:") == true) "UNKNOWN" else "HUMAN"
     }
 
     private companion object {
