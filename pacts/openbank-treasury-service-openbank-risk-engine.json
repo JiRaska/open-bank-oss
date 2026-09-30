@@ -1,0 +1,240 @@
+{
+  "consumer": {
+    "name": "openbank-treasury-service"
+  },
+  "interactions": [
+    {
+      "description": "GET a curve set with its pillars for the simulated quotes",
+      "providerStates": [
+        {
+          "name": "a curve set with a CZEONIA curve exists"
+        }
+      ],
+      "request": {
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v1/risk/curve-sets/${curveSetId}",
+            "type": "ProviderState"
+          }
+        },
+        "method": "GET",
+        "path": "/api/v1/risk/curve-sets/0191c0de-0000-7000-8000-00000000c5e7"
+      },
+      "response": {
+        "body": {
+          "asOf": "2026-09-21",
+          "curves": [
+            {
+              "currency": "CZK",
+              "index": "CZEONIA",
+              "pillars": [
+                {
+                  "date": "2026-09-22",
+                  "zeroRate": 0.035
+                }
+              ]
+            }
+          ],
+          "id": "0191c0de-0000-7000-8000-00000000c5e7",
+          "provenance": "synthetic"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curves": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curves[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curves[*].pillars": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curves[*].pillars[*].date": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curves[*].pillars[*].zeroRate": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.provenance": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the newest curve set summary for the simulated quotes",
+      "providerStates": [
+        {
+          "name": "a curve set with a CZEONIA curve exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/curve-sets",
+        "query": {
+          "limit": [
+            "1"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "curveSets": [
+            {
+              "asOf": "2026-09-21",
+              "id": "0191c0de-0000-7000-8000-00000000c5e7",
+              "provenance": "synthetic"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.curveSets": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curveSets[*].asOf": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.curveSets[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.curveSets[*].provenance": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the curve sets with no identity",
+      "providerStates": [
+        {
+          "name": "no valid identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/risk/curve-sets",
+        "query": {
+          "limit": [
+            "1"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-risk-engine"
+  }
+}

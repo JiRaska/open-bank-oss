@@ -1388,6 +1388,26 @@ gates:
     run: |
       python3 .github/scripts/check-no-handrolled-cosign.py
 
+  - id: buildx-push-single-manifest
+    name: "buildx pushes carry --provenance=false, never an OCI index (issue #11573, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # text scan of ~200 files; under one second locally
+    # 10 push sites measured 2026-09-30; half, so the estate can shrink without a false red.
+    min_subjects: 5
+    rationale: "A buildx push without --provenance=false becomes an OCI index under the docker-container driver, which the Deny+Fail Kyverno SBOM ImageValidatingPolicy resolves as linux/amd64 and so blocks every Pod of an arm64-only image (admin-ui, #11437). This is the early warning; the decisive control is assert_single_image_manifest in cosign-attest.sh, which the self-test also exercises."
+    review_after: "2027-03-30"
+    selftest_inputs:
+      - ".github/scripts/check-buildx-push-single-manifest.py"
+      - ".github/scripts/test-cosign-attest-single-manifest.sh"
+      - "openbank-infra/scripts/lib/cosign-attest.sh"
+    selftest: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py --self-test
+      bash .github/scripts/test-cosign-attest-single-manifest.sh
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain
