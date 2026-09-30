@@ -36,7 +36,7 @@ class SanctionsChangePublisherImpl(
     private val stormThreshold: Double,
 ) : SanctionsChangePublisher {
     override suspend fun publishPending(listId: UUID, listType: SanctionsListType): SanctionsPublicationOutcome =
-        publish(listId, listType, fenced = false)
+        publish(listId, listType, permit = null)
 
     override suspend fun publishFenced(
         listId: UUID,
@@ -44,13 +44,13 @@ class SanctionsChangePublisherImpl(
         permit: SanctionsPublicationPermit,
     ): SanctionsPublicationOutcome {
         permit.checkFor(listType)
-        return publish(listId, listType, fenced = true)
+        return publish(listId, listType, permit)
     }
 
     private suspend fun publish(
         listId: UUID,
         listType: SanctionsListType,
-        fenced: Boolean,
+        permit: SanctionsPublicationPermit?,
     ): SanctionsPublicationOutcome {
         return Panache.withTransaction {
             Panache.getSession().chain { session ->
@@ -62,12 +62,30 @@ class SanctionsChangePublisherImpl(
                     // A concurrent refresh may have committed only its first batch. Its JDBC
                     // transaction holds this key until every batch finishes (or its pod dies).
                     // Try rather than wait: a deferred tick never selects or deletes partial evidence.
-                    if (!fenced) {
+                    if (permit == null) {
                         val importFinished = session.createNativeQuery(
                             "SELECT pg_try_advisory_xact_lock(11492, hashtext(:type))",
                             Boolean::class.java,
                         ).setParameter("type", listType.name).singleResult.awaitSuspending()
                         if (!importFinished) return@uni SanctionsPublicationOutcome.DEFERRED
+                    }
+                    // The row lock makes generation validation atomic with journal selection.
+                    // A dead JDBC owner leaves refresh_active=true; never publish its partial
+                    // journal until a successor refresh takes over and completes.
+                    if (permit == null) {
+                        val active = session.createNativeQuery(
+                            "SELECT refresh_active FROM sanctions_change_publication " +
+                                "WHERE list_type = :type FOR UPDATE",
+                            Boolean::class.java,
+                        ).setParameter("type", listType.name).singleResult.awaitSuspending()
+                        if (active) return@uni SanctionsPublicationOutcome.DEFERRED
+                    } else {
+                        val generation = session.createNativeQuery(
+                            "SELECT refresh_generation FROM sanctions_change_publication " +
+                                "WHERE list_type = :type AND refresh_active = TRUE FOR SHARE",
+                            Long::class.java,
+                        ).setParameter("type", listType.name).singleResult.awaitSuspending()
+                        check(generation == permit.generation) { "Stale sanctions refresh for $listType" }
                     }
                     val previousStorm = session.createNativeQuery(
                         "SELECT COALESCE(last_storm_fingerprint, '') FROM sanctions_change_publication " +

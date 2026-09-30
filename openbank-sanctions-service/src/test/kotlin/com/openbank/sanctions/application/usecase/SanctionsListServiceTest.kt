@@ -471,10 +471,10 @@ class SanctionsListServiceTest {
             }
         }
         coEvery { repo.findByListType(list.listType) } returns list
-        coEvery { importer.importList(any(), any()) } returns ListImportResult.imported(42)
+        coEvery { importer.importList(any(), any(), any()) } returns ListImportResult.imported(42)
         coEvery { publisher.publishFenced(list.id, SanctionsListType.OFAC_SDN, any()) } returns
             SanctionsPublicationOutcome.PUBLISHED
-        coEvery { repo.markUpdated(list.listType, 42) } coAnswers {
+        coEvery { repo.markUpdatedFenced(list.listType, 42, any()) } coAnswers {
             assertThat(insideFence).isTrue()
             list.copy(lastEntryCount = 42)
         }
@@ -483,6 +483,29 @@ class SanctionsListServiceTest {
 
         assertThat(result.lastEntryCount).isEqualTo(42)
         assertThat(insideFence).isFalse()
+    }
+
+    @Test
+    fun `queued failed refresh retains the count written by its predecessor`(): Unit = runBlocking {
+        val older = sampleList(lastEntryCount = 10)
+        val current = older.copy(lastEntryCount = 42)
+        val fence = mockk<SanctionsImportPublicationFence>()
+        coEvery { fence.duringRefresh<SanctionsList>(SanctionsListType.OFAC_SDN, any()) } coAnswers {
+            secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                SanctionsPublicationPermit(SanctionsListType.OFAC_SDN),
+            )
+        }
+        coEvery { repo.findByListType(older.listType) } returnsMany listOf(older, current)
+        coEvery { importer.importList(any(), any(), any()) } returns ListImportResult.failedKeptExisting("fixture")
+        coEvery { publisher.publishFenced(current.id, SanctionsListType.OFAC_SDN, any()) } returns
+            SanctionsPublicationOutcome.NO_CHANGES
+        coEvery { repo.markUpdatedFenced(older.listType, 42, any()) } returns current
+
+        val result = SanctionsListService(repo, importer, clock, publisher, fence).refresh(older.listType)
+
+        assertThat(result.lastEntryCount).isEqualTo(42)
+        coVerify(exactly = 1) { repo.markUpdatedFenced(older.listType, 42, any()) }
+        coVerify(exactly = 0) { repo.markUpdatedFenced(older.listType, 10, any()) }
     }
 
     @Test

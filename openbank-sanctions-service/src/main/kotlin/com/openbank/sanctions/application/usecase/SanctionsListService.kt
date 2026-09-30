@@ -7,6 +7,7 @@ package com.openbank.sanctions.application.usecase
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
@@ -20,6 +21,9 @@ import jakarta.ws.rs.NotFoundException
 import java.time.Clock
 import java.time.ZonedDateTime
 import java.util.UUID
+
+private suspend fun SanctionsListRepositoryImpl.requireList(listType: String): SanctionsList =
+    findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
 
 @ApplicationScoped
 class SanctionsListService(
@@ -60,18 +64,27 @@ class SanctionsListService(
 
     suspend fun refresh(listType: String): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
-        val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
+        val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
-        suspend fun markCompleted(result: ListImportResult): SanctionsList {
+        suspend fun markCompleted(
+            result: ListImportResult,
+            currentList: SanctionsList,
+            permit: SanctionsPublicationPermit? = null,
+        ): SanctionsList {
             // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
             // the usable feed count is known. Other outcomes cannot establish a new population,
             // so retain the prior reported count; committed partial changes are journaled separately.
             val count = if (result.outcome == ListImportOutcome.IMPORTED) {
                 result.entriesImported
             } else {
-                list.lastEntryCount ?: 0
+                currentList.lastEntryCount ?: 0
             }
-            return repo.markUpdated(listType, count)
+            val marked = if (permit == null) {
+                repo.markUpdated(listType, count)
+            } else {
+                repo.markUpdatedFenced(listType, count, permit)
+            }
+            return marked
                 ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
         }
         if (enumType == null) {
@@ -82,15 +95,18 @@ class SanctionsListService(
         // Releasing the fence first lets an older pod overwrite a newer refresh's entry count.
         if (publicationFence != null) {
             return publicationFence.duringRefresh(enumType) { permit ->
-                val result = importer.importList(enumType, list.sourceUrl)
-                publisher.publishFenced(list.id, enumType, permit)
-                markCompleted(result)
+                // A queued refresh may wait for another pod to finish. Read the list only
+                // after ownership passes, so a failed import cannot restore an older count.
+                val currentList = repo.requireList(listType)
+                val result = importer.importList(enumType, currentList.sourceUrl, permit)
+                publisher.publishFenced(currentList.id, enumType, permit)
+                markCompleted(result, currentList, permit)
             }
         }
         // Unit-test constructor exercises the same orchestration with a mocked publisher.
         val result = importer.importList(enumType, list.sourceUrl)
         publisher.publishPending(list.id, enumType)
-        return markCompleted(result)
+        return markCompleted(result, list)
     }
 
     /**

@@ -10,7 +10,10 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
+import com.openbank.sanctions.domain.model.EntityType
+import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsEntryRepositoryImpl
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
@@ -34,12 +37,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 
 /** Exercise the migration-installed trigger through the same independent PgPool used by imports. */
+@Suppress("LargeClass") // one PostgreSQL fixture verifies journal, publication, and lost-owner fencing together
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
 class SanctionsChangeJournalIT {
@@ -51,6 +56,9 @@ class SanctionsChangeJournalIT {
 
     @Inject
     lateinit var publicationFence: SanctionsImportPublicationFence
+
+    @Inject
+    lateinit var entryRepository: SanctionsEntryRepositoryImpl
 
     @Inject
     lateinit var outbox: SanctionsOutboxRepository
@@ -80,7 +88,7 @@ class SanctionsChangeJournalIT {
         execute("DELETE FROM sanctions_entries")
         execute("DELETE FROM sanctions_change_journal")
         execute("DELETE FROM sanctions_outbox")
-        execute("UPDATE sanctions_change_publication SET last_storm_fingerprint = NULL")
+        execute("UPDATE sanctions_change_publication SET last_storm_fingerprint = NULL, refresh_active = FALSE")
     }
 
     @Test
@@ -308,6 +316,77 @@ class SanctionsChangeJournalIT {
         assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
         assertThat(journalCount()).isZero()
     }
+
+    @Test
+    @Suppress("NestedBlockDepth") // two owners and a backend kill must overlap in one real-DB scenario
+    fun `lost fence connection cannot write a later batch after successor takeover`() {
+        val type = SanctionsListType.PEP_GLOBAL
+        val firstCommitted = CountDownLatch(1)
+        val resumeOld = CountDownLatch(1)
+        val old = CompletableFuture.supplyAsync {
+            runCatching {
+                runBlocking {
+                    publicationFence.duringRefresh(type) { permit ->
+                        onEventLoop { entryRepository.upsertAllFenced(listOf(entry("old-first")), permit) }
+                        firstCommitted.countDown()
+                        check(resumeOld.await(15, TimeUnit.SECONDS)) { "old refresh was not resumed" }
+                        onEventLoop { entryRepository.upsertAllFenced(listOf(entry("old-stale")), permit) }
+                    }
+                }
+            }.exceptionOrNull()
+        }
+        try {
+            assertThat(firstCommitted.await(15, TimeUnit.SECONDS)).isTrue()
+            assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+            jdbc().use { connection ->
+                val owner = connection.createStatement().use { statement ->
+                    statement.executeQuery(
+                        "SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND granted " +
+                            "AND mode = 'ExclusiveLock' AND classid = 11492::oid " +
+                            "AND objid = hashtext('PEP_GLOBAL')::oid",
+                    ).use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        rows.getInt(1)
+                    }
+                }
+                connection.prepareStatement("SELECT pg_terminate_backend(?)").use { statement ->
+                    statement.setInt(1, owner)
+                    statement.executeQuery().use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getBoolean(1)).isTrue()
+                    }
+                }
+            }
+            // The owner session disappeared, but its durable active row still withholds the
+            // first committed batch until a complete successor refresh can publish it.
+            assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+            runBlocking {
+                publicationFence.duringRefresh(type) { permit ->
+                    onEventLoop { entryRepository.upsertAllFenced(listOf(entry("new-owner")), permit) }
+                }
+            }
+        } finally {
+            resumeOld.countDown()
+        }
+        assertThat(old.get(15, TimeUnit.SECONDS)).isNotNull()
+        val names = onEventLoop {
+            pool.query("SELECT external_id FROM sanctions_entries WHERE list_type = 'PEP_GLOBAL'")
+                .execute().awaitSuspending().map { it.getString("external_id") }
+        }
+        assertThat(names).contains("old-first", "new-owner").doesNotContain("old-stale")
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+        assertThat(journalCount()).isZero()
+    }
+
+    private fun entry(externalId: String): SanctionsEntry = SanctionsEntry(
+        listType = SanctionsListType.PEP_GLOBAL,
+        externalId = externalId,
+        entityType = EntityType.INDIVIDUAL,
+        primaryName = "Fixture $externalId",
+        searchText = "fixture $externalId",
+        createdAt = Instant.parse("2026-01-01T00:00:00Z"),
+        updatedAt = Instant.parse("2026-01-01T00:00:00Z"),
+    )
 
     private suspend fun listId(listType: SanctionsListType): UUID =
         pool.preparedQuery("SELECT id FROM sanctions_lists WHERE list_type = $1")

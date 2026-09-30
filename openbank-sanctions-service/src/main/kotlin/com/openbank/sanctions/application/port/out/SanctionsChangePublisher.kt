@@ -10,7 +10,10 @@ import java.util.UUID
 enum class SanctionsPublicationOutcome { NO_CHANGES, PUBLISHED, WITHHELD, DEFERRED }
 
 /** Capability held only while one list's import and final publication own the database fence. */
-class SanctionsPublicationPermit internal constructor(private val listType: SanctionsListType) {
+class SanctionsPublicationPermit internal constructor(
+    private val listType: SanctionsListType,
+    val generation: Long = 0,
+) {
     @Volatile
     private var active = true
 
