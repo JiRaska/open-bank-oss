@@ -100,6 +100,14 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5000"
+            # distribution v3's bundled config also starts a debug/metrics server on
+            # :5001 (http.debug.addr). quay-cache serves on :5001 and crashlooped on
+            # "listen tcp :5001: bind: address already in use". Pin the debug server
+            # explicitly on every cache, outside the 5000-5002 serving range, so the
+            # image default can never collide with a serving port again. Not exposed
+            # (nothing scrapes it). Enforced by check-container-listen-port-collisions.py.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
             # In-memory blob descriptor cache: manifest lookups resolve from RAM
             # instead of re-reading the gp3 blob index on every HEAD/GET.
             # Without this, parallel dind pulls (max-parallel=8) can each issue a
@@ -218,6 +226,9 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5001"
+            # See registry-cache above: debug server pinned off the serving port.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
@@ -318,6 +329,9 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5002"
+            # See registry-cache above: debug server pinned off the serving port.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
