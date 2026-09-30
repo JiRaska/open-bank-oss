@@ -347,9 +347,18 @@ else
   echo "    sourcemaps: no GLITCHTIP_AUTH_TOKEN — upload skipped"
 fi
 
+# --provenance=false / --sbom=false: push ONE image manifest, never an OCI index. With a
+# docker-container builder, buildx defaults to attaching a provenance attestation, which turns
+# the push into an index (the arm64 image plus an `unknown/unknown` attestation-manifest). cosign
+# then signs and attests the INDEX digest, and Kyverno's ImageValidatingPolicy loader resolves an
+# index to the default linux/amd64 child, which this index does not have, so the IVP errors
+# where the v1 policy passed (#11437). SBOM and SLSA provenance are still attested below with
+# cosign, like every other fleet image; nothing is lost by dropping buildx's own copies.
 buildx_args=(
   "${SECRET_ARGS[@]}" \
   --platform "${PLATFORM}" \
+  --provenance=false \
+  --sbom=false \
   --file openbank-admin-ui/Dockerfile \
   --build-arg "BUILD_VERSION=${BUILD_VERSION}" \
   --build-arg "BUILD_GIT_SHA=${GIT_SHA}" \

@@ -206,8 +206,18 @@ class TemplateWireFormatTest {
     fun `the COREP template wire format matches the published openapi schema`() {
         val json = getJson("/api/v1/corep/templates/C_01.00", LocalDate.of(2026, 6, 30))
 
-        assertThat(json.keys).containsExactlyInAnyOrder("templateId", "period", "cells", "hasDataGaps")
+        assertThat(json.keys).containsExactlyInAnyOrder(
+            "templateId",
+            "period",
+            "cells",
+            "hasDataGaps",
+            "sourceRunId",
+            "provenance",
+        )
         assertThat(json["templateId"]).isEqualTo("C_01.00")
+        // A ledger-built template has no risk run: the additive fields are present and null.
+        assertThat(json["sourceRunId"]).isNull()
+        assertThat(json["provenance"]).isNull()
         assertThat(json["period"]).isEqualTo("2026-06-30")
         // No recognised capital line in the stubbed trial balance — every capital row is a flagged zero.
         assertThat(json["hasDataGaps"]).isEqualTo(true)

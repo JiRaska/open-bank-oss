@@ -143,7 +143,13 @@ object C7400Mapper {
             }
             addAll(unmodelledCells(currency, gap))
         }
-        return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
+        return CorepTemplate(
+            TEMPLATE_ID,
+            asOf,
+            cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })),
+            sourceRunId = result?.runId,
+            provenance = result?.provenance,
+        )
     }
 
     /** Rows the engine does not model: always gaps, with their own reason unless the whole template is a gap. */

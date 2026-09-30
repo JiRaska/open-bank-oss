@@ -214,4 +214,14 @@ class C7300MapperTest {
             assertThat(c.label.endsWith("[row code UNVERIFIED]")).isEqualTo(c.rowRef in C7300Mapper.UNVERIFIED_ROWS)
         }
     }
+
+    @Test
+    fun `the template carries the source run's id and provenance, and none when there is no run`() {
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result().copy(provenance = "synthetic")), asOf)
+        assertThat(t.sourceRunId).isEqualTo("run-7")
+        assertThat(t.provenance).isEqualTo("synthetic")
+        val gap = C7300Mapper.map(RiskLiquidityLookup.unavailable("no run"), asOf)
+        assertThat(gap.sourceRunId).isNull()
+        assertThat(gap.provenance).isNull()
+    }
 }
