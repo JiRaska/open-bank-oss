@@ -5,7 +5,7 @@ admission and you need it running now.
 
 | policy | what it requires | file |
 | --- | --- | --- |
-| `verify-openbank-image-sbom-attestation` | a valid Cosign signature **and** a `cyclonedx` attestation on the same image, both against the KMS public key — one `verifyImages` entry | `openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml` |
+| `verify-openbank-image-sbom-attestation-cel` (`ImageValidatingPolicy`) | a valid Cosign signature **and** a `cyclonedx` attestation on the same image, both against the KMS public key — one policy | `openbank-infra/gitops/components/kyverno/cel-image-validating-sbom-attestation.yaml` |
 
 **Until 2026-09-13 these were two policies** (`verify-openbank-image-signatures` held the signature
 check). They were folded into one because Kyverno v1.12.5 keeps a single verification status per
@@ -17,8 +17,9 @@ per policy (>= v1.19.0).
 
 It matches **`kind: Pod`** with `imageReferences: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*`,
 so they select every openbank service pod in every namespace — measured 2026-08-13: **74 of 416
-running pods across 46 namespaces**. There is no namespace exclusion. `failurePolicy: Ignore`, so a
-webhook that is *down* fails open; a webhook that is *up and says no* fails closed.
+running pods across 46 namespaces**. Only `kube-system` and `kyverno` are excluded. Since stage 2 of
+#11437 it is `validationActions: [Deny]` with `failurePolicy: Fail`: a webhook that is *down or slow*
+fails closed too (the v1 policy was `Ignore`). See §4a for its break-glass.
 
 This runbook exists because issue #1915 asked for it before those policies graduated, and they
 graduated first. ADR-0030 D4 is the decision; this is the way back out.
@@ -36,8 +37,7 @@ An admission denial names the policy and the rule:
 ```
 admission webhook "validate.kyverno.svc-fail" denied the request:
   policy Pod/<ns>/<name> for resource violation:
-    verify-openbank-image-sbom-attestation:
-      verify-cyclonedx-sbom-attestation: 'failed to verify image ...: .../openbank-<svc>:<tag>: no signatures found'
+    Policy verify-openbank-image-sbom-attestation-cel failed: ... .../openbank-<svc>:<tag> ...
 ```
 
 Read the **error text** out of that message — it is one policy and one rule now, so the policy
@@ -81,7 +81,7 @@ Three failure shapes have actually happened here. They look identical at the pod
 
 ### 3a. Preferred — a scoped `PolicyException` (narrow, reversible, leaves Enforce on)
 
-Model it on `pricing-image-exception.yaml`: namespaced, matched to `kind: Pod` in that one
+Model it on `pricing-image-exception-cel.yaml` (a `policies.kyverno.io` `PolicyException`): namespaced, matched to `kind: Pod` in that one
 namespace, listing the policy/rule names. Note the cost of the fold: an exception can no longer
 waive the SBOM attestation while keeping the signature check — the rule is one rule, so excepting
 it waives both for that namespace. This is strictly better than dropping the
@@ -95,8 +95,8 @@ so from experience.
 
 Only when the blast radius is fleet-wide or the deadlock in §2 applies.
 
-Edit the policy's `spec.validationFailureAction` from `Enforce` to `Audit` in its gitops file and
-sync. **This is coarser than it used to be:** the signature and SBOM checks were deliberately
+Edit the policy's `spec.validationActions` from `[Deny]` to `[Audit]` in its gitops file and
+sync (for a v1 ClusterPolicy: `spec.validationFailureAction` `Enforce` -> `Audit`). **This is coarser than it used to be:** the signature and SBOM checks were deliberately
 separate ClusterPolicies (the #770 lesson) so that dropping one did not weaken the other, and on
 Kyverno v1.12.5 that separation made the verdict nondeterministic (#9805). Until the upgrade,
 dropping this policy to Audit drops **both** checks. Prefer §3a whenever the blast radius allows it.
@@ -224,7 +224,25 @@ no-op (the harness re-runs the CEL policy on its own output and requires zero ch
 misbehaves: new Pods show an unexpected image, or pulls fail with an ECR `not found` for a
 pull-through path. Because it is `Ignore`, a webhook outage only means images pull from the origin
 registry over NAT; to stop the rewrite, delete the file by PR (Pods then pull from the origin). CNPG
-instance pods are excluded, as before. All other policies are still at stage 1.
+instance pods are excluded, as before.
+`verify-openbank-image-sbom-attestation` (the image policy) — enforcing as the `ImageValidatingPolicy`
+`verify-openbank-image-sbom-attestation-cel` (`[Deny]`, `failurePolicy: Fail`, `mutateDigest: false`),
+v1 file `verify-sbom-attestation-policy.yaml` and its v2 exception `pricing-image-exception.yaml`
+deleted; `pricing-image-exception-cel.yaml` carries the pricing waiver. **Break-glass, and what each
+lever actually does** (Kyverno 1.19.1, `pkg/webhooks/resource/ivpol/handler.go`, `validationResponse`):
+for a policy whose actions include `Deny`, a result of `RuleStatusFail` **and** `RuleStatusError`
+both become an admission error — `failurePolicy` is not consulted there. So:
+- *Kyverno unreachable or timing out* (the webhook CALL fails): set `failurePolicy: Ignore` by PR.
+  That is the only case `failurePolicy` governs; the apiserver then admits without asking.
+- *ECR, KMS or the key alias failing* (Kyverno answers, but verification errors): `failurePolicy:
+  Ignore` does **nothing** — the Pod is denied with `Policy verify-openbank-image-sbom-attestation-cel
+  error: ...`. The real break-glass is `validationActions: [Audit]` by PR (§3b): without `Deny` the
+  per-policy Fail/Error branches are skipped and the verdict only lands in PolicyReports. One residue
+  even then: an error from the engine as a whole (`HandleValidating` returning `err`, before any
+  per-policy result) is still returned as an admission error by `validate`; that is not a
+  verification verdict and has not been observed here.
+- *One namespace only*: a `PolicyException` modelled on `pricing-image-exception-cel.yaml` (§3a).
+All other policies are still at stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 
 ## 5. Related
