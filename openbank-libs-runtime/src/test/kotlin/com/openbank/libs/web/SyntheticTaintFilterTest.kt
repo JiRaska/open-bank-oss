@@ -13,8 +13,8 @@ import io.mockk.verify
 import io.opentelemetry.api.baggage.Baggage
 import io.opentelemetry.context.Context
 import io.opentelemetry.context.Scope
-import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.client.ClientRequestContext
+import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerResponseContext
 import jakarta.ws.rs.core.MultivaluedHashMap
 import jakarta.ws.rs.core.SecurityContext

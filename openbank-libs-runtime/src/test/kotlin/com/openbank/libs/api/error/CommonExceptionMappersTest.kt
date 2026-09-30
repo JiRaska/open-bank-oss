@@ -164,7 +164,9 @@ class CommonExceptionMappersTest {
 
     @Test
     fun `non-403 WebApplicationException statuses keep their message`() {
-        val body = WebApplicationExceptionMapper().toResponse(WebApplicationException("conflict detail", 409)).entity as ApiError
+        val body = WebApplicationExceptionMapper().toResponse(
+            WebApplicationException("conflict detail", 409),
+        ).entity as ApiError
         assertThat(body.message).isEqualTo("conflict detail")
     }
 

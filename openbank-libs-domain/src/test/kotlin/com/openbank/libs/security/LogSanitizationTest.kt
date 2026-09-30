@@ -139,27 +139,32 @@ class LogSanitizationTest {
         while (i < line.length) {
             val eq = line.indexOf('=', i)
             val key = line.substring(i, eq)
-            i = eq + 1
-            val sb = StringBuilder()
-            if (line[i] == '"') {
-                i++
-                while (line[i] != '"') {
-                    if (line[i] == '\\') {
-                        when (line[i + 1]) {
-                            'u' -> { sb.append(line.substring(i + 2, i + 6).toInt(16).toChar()); i += 6 }
-                            else -> { sb.append(line[i + 1]); i += 2 }
-                        }
-                    } else {
-                        sb.append(line[i]); i++
-                    }
-                }
-                i++
-            } else {
-                while (i < line.length && line[i] != ' ') { sb.append(line[i]); i++ }
-            }
-            out[key] = sb.toString()
-            i++ // the separating space
+            val (value, next) = if (line[eq + 1] == '"') readQuoted(line, eq + 2) else readBare(line, eq + 1)
+            out[key] = value
+            i = next + 1 // the separating space
         }
         return out
+    }
+
+    private fun readBare(line: String, from: Int): Pair<String, Int> {
+        val end = line.indexOf(' ', from).let { if (it < 0) line.length else it }
+        return line.substring(from, end) to end
+    }
+
+    private fun readQuoted(line: String, from: Int): Pair<String, Int> {
+        val sb = StringBuilder()
+        var i = from
+        while (line[i] != '"') {
+            if (line[i] != '\\') {
+                sb.append(line[i++])
+            } else if (line[i + 1] == 'u') {
+                sb.append(line.substring(i + 2, i + 6).toInt(16).toChar())
+                i += 6
+            } else {
+                sb.append(line[i + 1])
+                i += 2
+            }
+        }
+        return sb.toString() to i + 1
     }
 }

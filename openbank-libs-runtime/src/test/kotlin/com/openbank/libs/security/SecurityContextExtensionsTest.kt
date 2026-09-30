@@ -4,9 +4,9 @@
 
 package com.openbank.libs.security
 
-import io.mockk.every
 import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.WebApplicationExceptionMapper
+import io.mockk.every
 import io.mockk.mockk
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.core.SecurityContext
