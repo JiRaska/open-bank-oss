@@ -4425,7 +4425,10 @@ gates:
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
   # (ADR-0056) — while warning escaped to Slack, so the most severe alerts were the
   # least likely to be seen. Config-inspection alone hides this (the critical path
-  # looks MORE careful), which is why it is a gate. ENFORCED.
+  # looks MORE careful), which is why it is a gate. Also enforces GoAlert dedup-key
+  # stability (#11136): GoAlert dedups on the alert summary, so a goalert route must group by
+  # ['...'] and a critical summary must not interpolate $value, or orphaned alerts pile up to
+  # the 200-unacked limit and every page is rejected with HTTP 400. ENFORCED.
   - id: critical-alert-egress
     name: "critical-alert egress (rules.yaml: alerting, enforced)"
     group: security
