@@ -50,8 +50,15 @@ data class AccountDto(
 )
 
 /** The subset of balance-service `GET /api/v1/balances/{accountId}/{currency}` we need. */
+/**
+ * Mirror of balance-service's `Balance` as `GET /api/v1/balances/{accountId}/{currency}` serialises
+ * it: the booked balance is `bookedAmount`. This DTO used to demand a `currentBalance` field that
+ * balance-service has never sent; Jackson failed to construct it on every call, the adapter's
+ * `runCatching` turned that into `null`, and every balance-conditioned fee waiver evaluated against
+ * no balance at all (#11650, found by the consumer pact for #8345).
+ */
 @JsonIgnoreProperties(ignoreUnknown = true)
-data class BalanceDto(val accountId: String, val currency: String, val currentBalance: BigDecimal)
+data class BalanceDto(val accountId: String, val currency: String, val bookedAmount: BigDecimal)
 
 /** The subset of account-service's cursor-page envelope the discovery sweep needs. */
 @JsonIgnoreProperties(ignoreUnknown = true)
