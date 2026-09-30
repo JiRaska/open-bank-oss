@@ -44,8 +44,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   # ADR-0140 online feature store: FeatureStoreConfig @Produces an OnlineFeatureStore from
   # ReactiveRedisDataSource. Quarkus DEACTIVATES that synthetic bean at build time when neither
@@ -174,6 +172,8 @@ mp:
       console:
         json: false
     oidc:
+      tls:
+        verification: none
       enabled: false
 "%prod":
   quarkus:
@@ -207,6 +207,11 @@ mp:
     outbox:
       dispatch-enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   # Every service with an outbox entity must flip this explicitly — it defaults to false, and a
   # service that forgets ships an outbox that fills forever with no error anywhere.
   outbox:

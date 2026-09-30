@@ -333,7 +333,7 @@ spec:
 ---
 # Projects the Strimzi-minted keystore secret (messaging/audit-service) into
 # the audit namespace so the pod volume mount can reference it directly.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -355,7 +355,7 @@ spec:
 ---
 # Projects the cluster CA truststore (messaging/openbank-cluster-cluster-ca-cert)
 # into the audit namespace. Shared pattern with other Tier 2 consumers.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

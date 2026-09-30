@@ -64,11 +64,11 @@
 
 .portrait {
   position: absolute;
-  top: 0;
+  top: auto;
   right: -12px;
-  bottom: auto;
-  width: 300px;
-  height: 450px;
+  bottom: 0;
+  width: 260px;
+  height: 174px;
   overflow: hidden;
   border-radius: 48% 0 0 0;
   background: #06152f;
@@ -76,12 +76,12 @@
 }
 
 .image {
-  object-fit: cover;
-  object-position: 50% 10%;
+  object-fit: contain;
+  object-position: center bottom;
 }
 
 .lioness {
-  object-position: 74% 13%;
+  object-position: center bottom;
 }
 
 .compact {
@@ -99,11 +99,11 @@
 }
 
 .compact .portrait {
-  top: 0;
+  top: auto;
   right: -8px;
-  bottom: auto;
-  width: 168px;
-  height: 252px;
+  bottom: 0;
+  width: 160px;
+  height: 124px;
 }
 
 @media (max-width: 720px) {
@@ -122,8 +122,8 @@
   .compact .portrait {
     top: auto;
     right: -18px;
-    bottom: -112px;
+    bottom: 0;
     width: 172px;
-    height: 258px;
+    height: 118px;
   }
 }

@@ -114,6 +114,10 @@
         "description": "Treasury approver (checker for dealer trades). DECLARED ONLY: no service grants it yet; the four-eyes counterpart of ROLE_TREASURY_DEALER. #10618"
       },
       {
+        "name": "ROLE_TREASURY_SENIOR_APPROVER",
+        "description": "Treasury senior approver: records an override of a counterparty-limit breach, with a reason; never books the same deal (ADR-0315 D4)."
+      },
+      {
         "name": "ROLE_DEMO",
         "description": "Demo/guided-tour badge shown by the admin-UI (src/lib/auth/roles.ts). Existed in the live sandbox realm and in the docker dev realm but was missing here, so a cold-started cluster would not have it — added by the #2442 drift reconciliation"
       }
@@ -1080,6 +1084,25 @@
       "secret": "__TREASURY_CLIENT_SECRET__"
     },
     {
+      "clientId": "openbank-finrep",
+      "name": "OpenBank FINREP/COREP Service",
+      "description": "Per-service M2M client for COREP C 02.00: reads the risk engine's snapshot list and Pillar 1 capital (risk.snapshot.read only, ADR-0313 D6). Holds ROLE_API only; its read is granted by identity in risk_rest_ext.rego.",
+      "enabled": true,
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "bearerOnly": false,
+      "defaultClientScopes": [
+        "openid",
+        "profile",
+        "roles"
+      ],
+      "secret": "__FINREP_CLIENT_SECRET__"
+    },
+    {
       "clientId": "openbank-clearing",
       "name": "OpenBank Clearing Service",
       "description": "Per-service M2M client for clearing's net-settlement journal (ledger.create) (issue #10486). Holds ROLE_API only; its actions are granted by identity in the upstream OPA rego.",
@@ -1567,6 +1590,26 @@
       "defaultClientScopes": ["openid", "profile", "email", "roles"]
     },
     {
+      "clientId": "openbank-ops-cli",
+      "name": "Operator CLI scripts (PKCE, full access tokens)",
+      "description": "Dedicated public client for operator scripts (issue #10905) so they stop borrowing apicurio-registry's client identity; loopback redirect only, no direct grants, no lightweight tokens.",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false,
+      "protocol": "openid-connect",
+      "redirectUris": ["http://127.0.0.1/*"],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "access.token.lifespan": "300",
+        "client.use.lightweight.access.token.enabled": "false"
+      },
+      "defaultClientScopes": ["openid", "profile", "email", "roles"]
+    },
+    {
       "clientId": "openbao",
       "name": "OpenBao (SSO)",
       "enabled": true,
@@ -1745,6 +1788,14 @@
       "username": "service-account-openbank-treasury",
       "enabled": true,
       "serviceAccountClientId": "openbank-treasury",
+      "realmRoles": [
+        "ROLE_API"
+      ]
+    },
+    {
+      "username": "service-account-openbank-finrep",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-finrep",
       "realmRoles": [
         "ROLE_API"
       ]

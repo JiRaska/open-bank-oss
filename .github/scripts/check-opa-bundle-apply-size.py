@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-"""Refuse an OPA bundle that client-side apply cannot install.
+"""Refuse a GitOps ConfigMap that client-side apply cannot install.
 
 THE FAILURE THIS EXISTS TO PREVENT
 
@@ -23,10 +23,10 @@ Server-side apply tracks ownership in `metadata.managedFields` and writes no suc
 annotation, so it has no ceiling of this kind. The fix is therefore not "shrink the
 bundle" but "apply it server-side", and this check enforces exactly that pairing:
 
-    a bundle over the ceiling is fine  IF AND ONLY IF  its Application uses
+    a ConfigMap over the ceiling is fine  IF AND ONLY IF  its Application uses
     ServerSideApply=true.
 
-WHY THE SIZE ALONE IS NOT THE RULE. The bundles all carry the same shared policy sources,
+WHY THE SIZE ALONE IS NOT THE RULE. The OPA bundles all carry the same shared policy sources,
 so they sit within a few kilobytes of each other. A pure size limit would either fire on
 the whole fleet or be set so high it never fires. What actually matters is whether the
 apply mechanism can carry the object, and that is a property of the pair.
@@ -74,6 +74,7 @@ def applied_size(doc: dict) -> int:
         "kind": doc.get("kind"),
         "metadata": doc.get("metadata", {}),
         "data": doc.get("data", {}),
+        "binaryData": doc.get("binaryData", {}),
     }
     return len(json.dumps(obj, separators=(",", ":")))
 
@@ -105,7 +106,7 @@ def check(root: pathlib.Path) -> list[str]:
     apps = load_applications(root / "openbank-infra/gitops/apps")
     problems: list[str] = []
 
-    for bundle in sorted(components.glob("*/*opa-bundle*.yaml")):
+    for bundle in sorted((*components.glob("*/*.yaml"), *components.glob("*/*.yml"))):
         try:
             docs = [d for d in yaml.safe_load_all(bundle.read_text()) if d]
         except yaml.YAMLError as exc:
@@ -149,9 +150,11 @@ def self_test() -> int:
     failures = 0
     big = "x" * (ANNOTATION_LIMIT + 10_000)
 
-    for label, options, expect_problem in (
-        ("oversized bundle, no ServerSideApply", ["CreateNamespace=false"], True),
-        ("oversized bundle, ServerSideApply set", ["CreateNamespace=false", "ServerSideApply=true"], False),
+    for label, options, field, expect_problem in (
+        ("oversized policy, no ServerSideApply", ["CreateNamespace=false"], "data", True),
+        ("oversized policy, ServerSideApply set", ["CreateNamespace=false", "ServerSideApply=true"], "data", False),
+        ("oversized binary theme, no ServerSideApply", ["CreateNamespace=false"], "binaryData", True),
+        ("oversized binary theme, ServerSideApply set", ["CreateNamespace=false", "ServerSideApply=true"], "binaryData", False),
     ):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -159,13 +162,13 @@ def self_test() -> int:
             appdir = root / "openbank-infra/gitops/apps"
             comp.mkdir(parents=True)
             appdir.mkdir(parents=True)
-            (comp / "demo-opa-bundle.yaml").write_text(
+            (comp / "demo-configmap.yaml").write_text(
                 yaml.safe_dump(
                     {
                         "apiVersion": "v1",
                         "kind": "ConfigMap",
-                        "metadata": {"name": "demo-opa-bundle", "namespace": "demo"},
-                        "data": {"rest.rego": big},
+                        "metadata": {"name": "demo-configmap", "namespace": "demo"},
+                        field: {"payload": big},
                     }
                 )
             )
@@ -235,11 +238,11 @@ def main() -> int:
 
     problems = check(REPO)
     if problems:
-        print("OPA bundles that cannot be installed by client-side apply:\n")
+        print("GitOps ConfigMaps that cannot be installed by client-side apply:\n")
         for p in problems:
             print(f"::error::{p}")
         return 1
-    print("OPA bundle apply-size check: OK")
+    print("GitOps ConfigMap apply-size check: OK")
     return 0
 
 

@@ -23,7 +23,7 @@ class TransactionSourceOwnershipTest {
     @Test
     fun `untrusted source claims are rejected before calling the use case`(): Unit = runBlocking {
         val useCase = mockk<TransactionUseCase>()
-        val resource = TransactionResource(useCase, mockk(), mockk(), mockk())
+        val resource = TransactionResource(useCase, mockk(), mockk(), mockk(), mockk())
         val request = InitiateTransactionRequest(
             idempotencyKey = "synthetic-source-ownership",
             type = "DEBIT",

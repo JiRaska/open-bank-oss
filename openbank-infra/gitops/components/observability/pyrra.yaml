@@ -147,7 +147,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: pyrra
-          image: ghcr.io/pyrra-dev/pyrra:v0.9.0
+          image: ghcr.io/pyrra-dev/pyrra:v0.10.2
           args: ["kubernetes"]
           ports:
             - name: http
@@ -209,7 +209,7 @@ spec:
           effect: NoSchedule
       containers:
         - name: pyrra
-          image: ghcr.io/pyrra-dev/pyrra:v0.9.0
+          image: ghcr.io/pyrra-dev/pyrra:v0.10.2
           args:
             - api
             - --api-url=http://pyrra-kubernetes.observability.svc:9444

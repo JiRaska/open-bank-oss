@@ -18,7 +18,7 @@ benefit of a human reader makes the file unimportable. Prose about these templat
 **here**, keyed by path, never inside the JSON.
 
 That is not hypothetical. Measured against `quay.io/keycloak/keycloak:26.6.3` (the version
-`keycloak.yaml` runs) on 2026-08-06, `customers-realm-template.json` carried five
+`keycloak.yaml` ran at the time) on 2026-08-06, `customers-realm-template.json` carried five
 `"comment"` keys and the import died on the first one:
 
 ```
@@ -55,7 +55,7 @@ total silence and is discovered by the rebuild it existed to survive:
 # substitute the __PLACEHOLDER__ tokens into a scratch copy first (never commit it)
 docker run --rm -p 8080:8080 \
   -v /tmp/realm.json:/opt/keycloak/data/import/realm.json \
-  quay.io/keycloak/keycloak:26.6.3 start-dev --import-realm
+  quay.io/keycloak/keycloak:<version in keycloak.yaml's openbank-keycloak tag> start-dev --import-realm
 ```
 
 Look for `Realm '<name>' imported` **and** `Import finished successfully`, then mint a

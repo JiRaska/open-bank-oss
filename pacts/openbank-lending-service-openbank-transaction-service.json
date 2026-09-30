@@ -57,6 +57,61 @@
         },
         "status": 201
       }
+    },
+    {
+      "description": "POST the loan repayment debit from the borrower's account",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1066.19,
+          "currencyCode": "CZK",
+          "description": "Loan repayment",
+          "idempotencyKey": "loan-repayment-pact-001",
+          "sourceAccountId": "44444444-5555-4666-8777-888888888888",
+          "targetAccountId": null,
+          "type": "DEBIT",
+          "valueDate": "2026-02-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "COMPLETED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
     }
   ],
   "metadata": {

@@ -159,4 +159,100 @@ describe('Regulatory report preview', () => {
     expect(screen.getByRole('button', { name: 'Export preview as JSON' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Export preview as CSV' })).toBeDisabled()
   })
+
+  function corepResponse(templateId: string) {
+    if (templateId === 'C_02.00') {
+      return {
+        templateId, period: '2026-06-30', hasDataGaps: true,
+        cells: [
+          { rowRef: 'r0125', colRef: 'c0010', label: 'Corporates - Other', value: 4200, currency: 'CZK', isDataGap: false },
+          {
+            rowRef: 'r0010', colRef: 'c0010', label: 'TOTAL RISK EXPOSURE AMOUNT [row code UNVERIFIED]',
+            value: 0, currency: 'CZK', isDataGap: true,
+            gapReason: 'Article 92(3) TREA includes market, operational and CVA risk, which the risk engine does not compute.',
+          },
+        ],
+      }
+    }
+    return {
+      templateId: 'C_01.00', period: '2026-06-30', hasDataGaps: false,
+      cells: [{ rowRef: 'r010', colRef: 'c010', label: 'OWN FUNDS', value: 1000, currency: 'CZK', isDataGap: false }],
+    }
+  }
+
+  it('renders C 02.00 rows alongside C 01.00, from finrep-service through the same BFF path', async () => {
+    const fetchMock = vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: '2026-06-30', periods: ['2026-06-30'] }
+        : corepResponse(url.includes('C_02.00') ? 'C_02.00' : 'C_01.00'),
+    ), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(String(fetchMock.mock.calls[1][0])).toContain('/api/v1/corep/templates/C_01.00')
+    expect(String(fetchMock.mock.calls[2][0])).toContain('/api/v1/corep/templates/C_02.00')
+    expect(await screen.findByText(/OWN FUNDS/)).toBeInTheDocument()
+    expect(screen.getByText(/Corporates - Other/)).toBeInTheDocument()
+  })
+
+  it('shows a data-gap cell as the gap badge and its reason, never a bare 0', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: '2026-06-30', periods: ['2026-06-30'] }
+        : corepResponse(url.includes('C_02.00') ? 'C_02.00' : 'C_01.00'),
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    const gapCell = await screen.findByText(/DATOVÁ MEZERA/)
+    expect(gapCell).toHaveTextContent('DATOVÁ MEZERA — Article 92(3) TREA includes market, operational and CVA risk, which the risk engine does not compute.')
+    // The gap row must never render as if r0010's flagged zero were a real, attested balance.
+    expect(gapCell.textContent).not.toMatch(/^\s*0[.,]00/)
+    expect(screen.queryByText((_, el) => el?.textContent === 'CZK 0.00')).not.toBeInTheDocument()
+  })
+
+  it('keeps a "[row code UNVERIFIED]" label marker visible instead of stripping it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => new Response(JSON.stringify(
+      url.includes('/api/v1/finrep/periods')
+        ? { latest: '2026-06-30', periods: ['2026-06-30'] }
+        : corepResponse(url.includes('C_02.00') ? 'C_02.00' : 'C_01.00'),
+    ), { status: 200, headers: { 'content-type': 'application/json' } })))
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    expect(await screen.findByText(/TOTAL RISK EXPOSURE AMOUNT \[row code UNVERIFIED\]/)).toBeInTheDocument()
+  })
+
+  it('gives a clear, risk-engine-specific message when C 02.00 fails to render', async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/finrep/periods')) {
+        return new Response(JSON.stringify({ latest: '2026-06-30', periods: ['2026-06-30'] }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      if (url.includes('C_02.00')) {
+        return new Response(JSON.stringify({
+          traceId: 't-1', status: 500, code: 'INTERNAL_ERROR', message: 'risk engine read failed',
+        }), { status: 500, headers: { 'content-type': 'application/json' } })
+      }
+      return new Response(JSON.stringify(corepResponse('C_01.00')), { status: 200, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider><RegulatoryPage /></LanguageProvider>)
+
+    const corepCard = screen.getByText('CNB — Kapitálová přiměřenost (COREP)').closest('.card')
+    fireEvent.click(within(corepCard as HTMLElement).getByRole('button', { name: 'Preview export' }))
+
+    expect(await screen.findByText(/risk-engine/i)).toBeInTheDocument()
+    expect(screen.getByText(/C 02.00/)).toBeInTheDocument()
+    expect(screen.queryByText(/OWN FUNDS/)).not.toBeInTheDocument()
+  })
 })

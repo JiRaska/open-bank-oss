@@ -17,6 +17,7 @@ import com.openbank.ledger.domain.model.PeriodType
 import com.openbank.ledger.domain.model.TrialBalanceLine
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -65,6 +66,9 @@ import javax.sql.DataSource
 class LedgerPactBrokerProviderVerificationTest {
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var dataSource: DataSource
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -79,7 +83,17 @@ class LedgerPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interaction expects 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including this one, and would produce a 200.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     @State("ledger has frozen monthly trial balance for the reporting date")
@@ -170,9 +184,74 @@ class LedgerPactBrokerProviderVerificationTest {
         // No setup needed — a fresh Testcontainer DB has no journals by default.
     }
 
+    /**
+     * Mirrors [LedgerPactProviderVerificationTest.stateWithNostroJournalLine] verbatim
+     * (treasury-service's nostro-reconciliation reads, ADR-0315 D5, #10896) — the broker serves
+     * every consumer's pact for this provider, so a state this class lacks fails verification with
+     * MissingStateChangeMethod and blocks treasury-service deploys on can-i-deploy, the same
+     * failure mode documented above for balance-service's trial-balance pact.
+     */
+    @State("ledger has a nostro journal line on 1001 for the statement date")
+    fun stateWithNostroJournalLine() {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """insert into journal_entries (id, transaction_id, entry_date, value_date, description, status, created_by)
+                   values (?, ?, ?, ?, 'MM placement settlement', 'POSTED', ?)
+                   on conflict (id, entry_date) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, NOSTRO_JOURNAL_ID)
+                statement.setObject(2, NOSTRO_TRANSACTION_ID)
+                statement.setObject(3, java.sql.Date.valueOf(NOSTRO_STATEMENT_DATE))
+                statement.setObject(4, java.sql.Date.valueOf(NOSTRO_STATEMENT_DATE))
+                statement.setObject(5, NOSTRO_SYSTEM_ACTOR_ID)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                """insert into journal_lines (id, journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence)
+                   values (?, ?, ?, ?, ?, 'CZK', ?, 'CZK', ?)
+                   on conflict (id) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, NOSTRO_LINE_ID)
+                statement.setObject(2, NOSTRO_JOURNAL_ID)
+                statement.setObject(3, NOSTRO_GL_ID)
+                statement.setString(4, "C")
+                statement.setBigDecimal(5, NOSTRO_STATEMENT_AMOUNT)
+                statement.setBigDecimal(6, NOSTRO_STATEMENT_AMOUNT)
+                statement.setInt(7, 1)
+                statement.executeUpdate()
+            }
+            connection.prepareStatement(
+                """insert into journal_lines (id, journal_id, gl_account_id, side, amount, currency_code, base_amount, base_currency, sequence)
+                   values (?, ?, ?, ?, ?, 'CZK', ?, 'CZK', ?)
+                   on conflict (id) do nothing""",
+            ).use { statement ->
+                statement.setObject(1, NOSTRO_PLACEMENT_LINE_ID)
+                statement.setObject(2, NOSTRO_JOURNAL_ID)
+                statement.setObject(3, NOSTRO_PLACEMENT_GL_ID)
+                statement.setString(4, "D")
+                statement.setBigDecimal(5, NOSTRO_STATEMENT_AMOUNT)
+                statement.setBigDecimal(6, NOSTRO_STATEMENT_AMOUNT)
+                statement.setInt(7, 2)
+                statement.executeUpdate()
+            }
+        }
+    }
+
     private companion object {
         val PERIOD_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009601")
         val ASSET_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009602")
         val LIABILITY_ID: UUID = UUID.fromString("00000000-0000-0000-0000-000000009603")
+
+        const val NOSTRO_STATEMENT_DATE = "2026-03-15"
+        val NOSTRO_STATEMENT_AMOUNT: BigDecimal = BigDecimal("250000.00")
+        val NOSTRO_JOURNAL_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010896")
+        val NOSTRO_TRANSACTION_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010897")
+        val NOSTRO_LINE_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010898")
+        val NOSTRO_PLACEMENT_LINE_ID: UUID = UUID.fromString("b0000000-0000-0000-0000-000000010899")
+
+        // TreasuryChart.glAccountId("1001") / ("1500") — seeded by V29.
+        val NOSTRO_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000001001")
+        val NOSTRO_PLACEMENT_GL_ID: UUID = UUID.fromString("a0000000-0000-0000-0000-000000001500")
+        val NOSTRO_SYSTEM_ACTOR_ID: UUID = UUID.fromString("00000000-0000-0000-0000-0000000000cc")
     }
 }

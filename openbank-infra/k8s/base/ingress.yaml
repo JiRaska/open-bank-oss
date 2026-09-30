@@ -1,19 +1,42 @@
+# Edge response headers via ingress-nginx `custom-headers` (ConfigMap in the Ingress's own
+# namespace) instead of a Critical-risk `configuration-snippet` (ADR-0324 interim hardening).
+# The controller must list every key in `global-allowed-response-headers`; it sets HSTS and
+# X-Content-Type-Options itself and strips X-Powered-By (`hide-headers`) — see
+# gitops/apps/ingress-nginx.yaml for the values this base assumes. The controller re-reads a
+# custom-headers ConfigMap only when the Ingress changes, hence immutable + versioned names.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-api-edge-headers-v1
+immutable: true
+data:
+  X-Frame-Options: "DENY"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+  Cross-Origin-Opener-Policy: "same-origin"
+  Cross-Origin-Embedder-Policy: "require-corp"
+  Cross-Origin-Resource-Policy: "same-origin"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: openbank-admin-ui-edge-headers-v1
+immutable: true
+data:
+  X-Frame-Options: "DENY"
+  Content-Security-Policy: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';"
+  Referrer-Policy: "strict-origin-when-cross-origin"
+  Permissions-Policy: "geolocation=(), microphone=(), camera=()"
+  Cross-Origin-Opener-Policy: "same-origin"
+  Cross-Origin-Resource-Policy: "same-origin"
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: openbank-api
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      add_header X-Frame-Options "DENY" always;
-      add_header X-Content-Type-Options "nosniff" always;
-      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-      add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-      add_header Cross-Origin-Opener-Policy "same-origin" always;
-      add_header Cross-Origin-Embedder-Policy "require-corp" always;
-      add_header Cross-Origin-Resource-Policy "same-origin" always;
-      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-      more_clear_headers "X-Powered-By";
+    nginx.ingress.kubernetes.io/custom-headers: openbank/openbank-api-edge-headers-v1
 spec:
   ingressClassName: nginx
   rules:
@@ -34,16 +57,7 @@ metadata:
   name: openbank-admin-ui
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    nginx.ingress.kubernetes.io/configuration-snippet: |
-      add_header X-Frame-Options "DENY" always;
-      add_header X-Content-Type-Options "nosniff" always;
-      add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; frame-ancestors 'none';" always;
-      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
-      add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-      add_header Cross-Origin-Opener-Policy "same-origin" always;
-      add_header Cross-Origin-Resource-Policy "same-origin" always;
-      add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;
-      more_clear_headers "X-Powered-By";
+    nginx.ingress.kubernetes.io/custom-headers: openbank/openbank-admin-ui-edge-headers-v1
 spec:
   ingressClassName: nginx
   rules:

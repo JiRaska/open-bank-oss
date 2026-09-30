@@ -30,12 +30,18 @@ export const ROLES = {
   COMMS_EDITOR: "ROLE_COMMS_EDITOR",
   COMMS_APPROVER: "ROLE_COMMS_APPROVER",
   // #10618 department roles (realm-template.json). RISK and FINANCE drive the "Balance sheet &
-  // risk" section; the two treasury roles are declared in the realm only — no service grants
-  // them yet, so no permission below names them.
+  // risk" section; the two treasury roles drive the "Treasury" section (openbank-treasury-service,
+  // ADR-0315) and unlock nothing outside it.
   RISK:       "ROLE_RISK",
   FINANCE:    "ROLE_FINANCE",
   TREASURY_DEALER:   "ROLE_TREASURY_DEALER",
   TREASURY_APPROVER: "ROLE_TREASURY_APPROVER",
+  // ADR-0315 D4: a senior approver overrides a counterparty-limit breach on a PENDING_APPROVAL
+  // deal, with a reason. Never the deal's creator or submitter, and never the same person who
+  // later books it (TreasuryResource, four-eyes) — the domain enforces that, not the UI.
+  // #10896: nostro reconciliation. NostroResource's class-level @RolesAllowed (reads) also admits
+  // this role, unlike TreasuryResource's — see the treasury:nostro:read comment below.
+  TREASURY_SENIOR_APPROVER: "ROLE_TREASURY_SENIOR_APPROVER",
 } as const
 
 export type Role = typeof ROLES[keyof typeof ROLES]
@@ -47,7 +53,7 @@ export const PERMISSIONS = {
   // the KYC and supervisor entries their role-specific workspace can be
   // derived, but the role matrix says they may not view the dashboard — a
   // contradiction ADR-0229 D4 explicitly rules out.
-  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE],
+  "dashboard:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS, ROLES.AUDITOR, ROLES.SUPERVISOR, ROLES.KYC, ROLES.KYC_OPENER, ROLES.KYC_REVIEWER, ROLES.RISK, ROLES.FINANCE, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
   // Accounts
   "accounts:view":            [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.COMPLIANCE, ROLES.PAYMENTS],
   "accounts:create":          [ROLES.ADMIN, ROLES.OPERATOR],
@@ -92,6 +98,23 @@ export const PERMISSIONS = {
   "ledger-backfill:propose":       [ROLES.ADMIN, ROLES.FINANCE],
   "ledger-backfill:decide":        [ROLES.ADMIN, ROLES.FINANCE],
   "ledger-backfill:execute":       [ROLES.ADMIN, ROLES.FINANCE],
+  // Treasury (ADR-0315, #10618): exactly TreasuryResource's @RolesAllowed. Reads are the
+  // class-level set (ADMIN + both desk roles). Drafting/submitting is DEALER only and approving
+  // (approve/reject/settle/mature/reverse) APPROVER only — ADMIN is deliberately NOT in either
+  // write set, because the method-level @RolesAllowed does not admit it. Cancel admits both desk
+  // roles. Four-eyes between two PEOPLE is the domain's 422, not a role split.
+  "treasury:view":          [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:deal:create":   [ROLES.TREASURY_DEALER],
+  "treasury:deal:approve":  [ROLES.TREASURY_APPROVER],
+  "treasury:deal:cancel":   [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER],
+  // Senior override of a breached limit (ADR-0315 D4) — a third, narrower write than approve.
+  "treasury:deal:override-limit": [ROLES.TREASURY_SENIOR_APPROVER],
+  // #10896: NostroResource's own @RolesAllowed, not TreasuryResource's — its class-level set
+  // additionally admits ROLE_TREASURY_SENIOR_APPROVER, so the read permission does too. Upload
+  // is method-level APPROVER only, exactly like a treasury deal write: ADMIN is deliberately NOT
+  // admitted (mirrored in ADMIN_EXCLUDED_BY_SERVICE, roles.test.ts).
+  "treasury:nostro:read":   [ROLES.ADMIN, ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER, ROLES.TREASURY_SENIOR_APPROVER],
+  "treasury:nostro:upload": [ROLES.TREASURY_APPROVER],
   "lending:compliance:propose": [ROLES.ADMIN, ROLES.COMPLIANCE],
   "lending:compliance:decide":  [ROLES.ADMIN, ROLES.COMPLIANCE],
   // Campaign-service audience endpoints use campaign.read for catalogue/preview, while
@@ -328,6 +351,10 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['lending:risk:view', ['/lending/risk']],
   ['balance-sheet:view', ['/balance-sheet']],
   ['ledger-backfill:view', ['/balance-sheet/ledger-backfill']],
+  ['treasury:view', ['/treasury']],
+  ['treasury:deal:create', ['/treasury/deals/new']],
+  ['treasury:deal:approve', ['/treasury/approvals']],
+  ['treasury:nostro:read', ['/treasury/nostro']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
@@ -385,4 +412,6 @@ export const ROLE_LABELS: Record<string, { label: string; color: string; bg: str
   ROLE_DEMO:       { label: "Demo",       color: "#64748b", bg: "#f8fafc" },
   ROLE_RISK:       { label: "Risk",       color: "#be185d", bg: "#fdf2f8" },
   ROLE_FINANCE:    { label: "Finance",    color: "#04815a", bg: "#f0fdf4" },
+  ROLE_TREASURY_DEALER:   { label: "Treasury Dealer",   color: "#1d4ed8", bg: "#eff6ff" },
+  ROLE_TREASURY_APPROVER: { label: "Treasury Approver", color: "#6d28d9", bg: "#f5f3ff" },
 }

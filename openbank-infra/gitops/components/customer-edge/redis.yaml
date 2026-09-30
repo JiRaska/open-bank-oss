@@ -63,7 +63,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: redis
-          image: docker.io/valkey/valkey:8-alpine
+          image: docker.io/valkey/valkey:8.1.10-alpine
           # AOF is what makes the credential keyspace survive a restart; `everysec` bounds the
           # worst-case loss to ~1s of writes without the per-write fsync cost of `always`.
           # RDB snapshots stay off (`--save ""`): the AOF is replayed on boot and is strictly

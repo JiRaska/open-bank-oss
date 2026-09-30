@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.2...mcp-service-v0.17.3) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.1...mcp-service-v0.17.2) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/mcp-service-v0.17.0...mcp-service-v0.17.1) (2026-09-23)
 
 

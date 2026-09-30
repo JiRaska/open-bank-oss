@@ -35,30 +35,60 @@ const NAMED_COMPONENTS = [
   "DeterministicRandom",
 ]
 
-function kotlinClassExists(name: string): boolean {
-  // Search the tracked tree only; an untracked local file must not make a claim pass.
+// Under full-suite load, six sequential `git grep` spawns (one per name, each a
+// full-repo scan) measured ~0.8s apiece — ~4.8s total, against a 5s default
+// testTimeout, with no headroom once other worker threads contend for CPU.
+// Batch every NAMED_COMPONENTS pattern into ONE `git grep -o` invocation (one
+// repo scan, alternated patterns) and cache the result; an individual lookup
+// for a name outside that precomputed set (the self-test's negative case)
+// still does its own single-pattern grep, just as before.
+const existsCache = new Map<string, boolean>()
+
+function runGitGrep(args: string[]): string {
   try {
-    const out = execFileSync(
-      "git",
-      // -P, not -E: POSIX ERE has no \b, so the -E form silently matched nothing
-      // and every assertion here would have passed vacuously. The self-test below
-      // is what caught it.
-      ["grep", "-l", "-P", `(class|object|interface) ${name}\\b`, "--", "*.kt"],
-      { cwd: REPO_ROOT, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
-    )
-    return out.trim().length > 0
+    return execFileSync("git", args, {
+      cwd: REPO_ROOT,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    })
   } catch (err) {
     // git grep exits 1 for "no match" and >1 for a real failure. Collapsing both
     // to `false` would let a broken git invocation read as "the class is absent",
     // which is the direction that turns this guard into decoration.
     const status = (err as { status?: number }).status
-    if (status === 1) return false
-    throw new Error(`git grep failed for ${name} (exit ${String(status)})`)
+    if (status === 1) return ""
+    throw new Error(`git grep failed (exit ${String(status)})`)
   }
+}
+
+function primeExistsCache(names: string[]): void {
+  if (names.length === 0) return
+  // -P, not -E: POSIX ERE has no \b, so the -E form silently matched nothing
+  // and every assertion here would have passed vacuously. The self-test below
+  // is what caught it.
+  const pattern = `(class|object|interface) (${names.join("|")})\\b`
+  const out = runGitGrep(["grep", "-h", "-o", "-P", pattern, "--", "*.kt"])
+  const found = new Set(
+    out
+      .split("\n")
+      .map((line) => line.trim().split(/\s+/)[1])
+      .filter(Boolean),
+  )
+  for (const name of names) existsCache.set(name, found.has(name))
+}
+
+function kotlinClassExists(name: string): boolean {
+  const cached = existsCache.get(name)
+  if (cached !== undefined) return cached
+  const out = runGitGrep(["grep", "-l", "-P", `(class|object|interface) ${name}\\b`, "--", "*.kt"])
+  const exists = out.trim().length > 0
+  existsCache.set(name, exists)
+  return exists
 }
 
 describe("temporal page: every component claimed as shipped exists", () => {
   const page = readFileSync(PAGE, "utf8")
+  primeExistsCache(NAMED_COMPONENTS)
 
   it("the page under test is present", () => {
     expect(existsSync(PAGE)).toBe(true)
