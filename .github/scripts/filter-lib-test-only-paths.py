@@ -13,6 +13,8 @@ edit to libs-runtime's OutboxDeadLetterAlertNamingTest cost a full-fleet run on 
               library's test sources. services-ci greps the code-global regex over this
               output; the unfiltered list still drives per-module attribution, so the
               library module itself is built (`^<module>/` match).
+  --census    list the libraries whose test paths this exempts (SUBJECTS=<n>); 0 libs = the
+              probe broke (exit 1). Used as the gate's run.
   --self-test known-positive + known-negative fixtures, including a consumed testFixtures.
 
 `src/testFixtures/` is dropped too, but ONLY for a library no build script consumes via
@@ -103,6 +105,14 @@ def main(argv: list[str]) -> int:
     if "--self-test" in argv:
         return self_test()
     root = Path(__file__).resolve().parents[2]
+    if "--census" in argv:
+        libs = sorted(d.name for d in root.glob("openbank-libs*") if (d / "src/test").is_dir())
+        consumed = consumed_fixtures(root)
+        print(f"SUBJECTS={len(libs)}")
+        for lib in libs:
+            fx = "code-global (consumed)" if lib in consumed else "per-module"
+            print(f"  {lib}: src/test per-module; testFixtures {fx}")
+        return 0 if libs else 1
     paths = [ln.strip() for ln in sys.stdin if ln.strip()]
     sys.stdout.write("".join(p + "\n" for p in keep(paths, consumed_fixtures(root))))
     return 0
