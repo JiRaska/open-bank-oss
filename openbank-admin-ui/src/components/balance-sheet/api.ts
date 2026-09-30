@@ -32,11 +32,22 @@ export type WriteResult<T> =
   | { ok: true; data: T }
   | { ok: false; status: number; kind: 'refused' | 'forbidden' | 'unavailable'; message: string | null }
 
-export async function sendJson<T>(url: string, body: unknown, schema: z.ZodType<T>): Promise<WriteResult<T>> {
+/**
+ * [idempotencyKey], when given, travels as `Idempotency-Key` — required by the void endpoints (#10969).
+ * One key per user action: a network retry of the same click replays instead of acting twice.
+ */
+export async function sendJson<T>(
+  url: string,
+  body: unknown,
+  schema: z.ZodType<T>,
+  idempotencyKey?: string,
+): Promise<WriteResult<T>> {
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: idempotencyKey
+        ? { 'content-type': 'application/json', 'Idempotency-Key': idempotencyKey }
+        : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
     })
     if (res.ok) {
@@ -59,3 +70,5 @@ export async function sendJson<T>(url: string, body: unknown, schema: z.ZodType<
 
 export const riskUrl = (path: string, query?: Record<string, string>) => svcUrl(RISK, path, query)
 export const backfillUrl = (path: string, query?: Record<string, string>) => svcUrl(LENDING, `${BACKFILL_BASE}${path}`, query)
+export const voidUrl = (path: string, query?: Record<string, string>) =>
+  svcUrl(LENDING, `${BACKFILL_BASE}/voids${path}`, query)

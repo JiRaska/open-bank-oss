@@ -45,6 +45,7 @@ open class NostroStatementRepositoryImpl(private val entryRepo: NostroStatementE
             iban = s.iban
             glCode = stored.glCode
             currency = s.currency
+            openingDate = s.openingDate
             statementDate = s.statementDate
             openingBalance = s.openingBalance
             closingBalance = s.closingBalance
@@ -112,6 +113,7 @@ open class NostroStatementRepositoryImpl(private val entryRepo: NostroStatementE
                 statementId = row.statementId,
                 iban = row.iban,
                 currency = row.currency,
+                openingDate = row.openingDate,
                 statementDate = row.statementDate,
                 openingBalance = row.openingBalance,
                 closingBalance = row.closingBalance,
