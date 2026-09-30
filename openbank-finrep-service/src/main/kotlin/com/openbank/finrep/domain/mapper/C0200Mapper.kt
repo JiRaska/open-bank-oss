@@ -131,7 +131,13 @@ object C0200Mapper {
             NOT_MODELLED_ROWS.forEach { (row, label) -> add(cell(row, label, null, NOT_MODELLED_REASON)) }
             NOT_COMPUTED_ROWS.forEach { (row, label) -> add(cell(row, label, null, NOT_COMPUTED_REASON)) }
         }
-        return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedBy { it.rowRef })
+        return CorepTemplate(
+            TEMPLATE_ID,
+            asOf,
+            cells.sortedBy { it.rowRef },
+            sourceRunId = result?.runId,
+            provenance = result?.provenance,
+        )
     }
 
     private fun creditGapReason(result: RiskCapitalResult): String? = when {

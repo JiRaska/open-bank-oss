@@ -146,4 +146,14 @@ class C0200MapperTest {
             .hasMessageContaining("mortgage")
         assertThatThrownBy { cells(result(total = "1.00")) }.hasMessageContaining("total RWA")
     }
+
+    @Test
+    fun `the template carries the source run's id and provenance, and none when there is no run`() {
+        val t = C0200Mapper.map(RiskCapitalLookup.found(result().result!!.copy(provenance = "synthetic")), asOf)
+        assertThat(t.sourceRunId).isEqualTo("run-1")
+        assertThat(t.provenance).isEqualTo("synthetic")
+        val gap = C0200Mapper.map(RiskCapitalLookup.unavailable("no run"), asOf)
+        assertThat(gap.sourceRunId).isNull()
+        assertThat(gap.provenance).isNull()
+    }
 }
