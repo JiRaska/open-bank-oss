@@ -1,18 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# CEL (policies.kyverno.io/v1 MutatingPolicy) port of ecr-pull-through-rewrite.yaml —
-# kyverno.io/v1 ClusterPolicy is deprecated in Kyverno 1.19 and planned for removal
-# in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/). Read that file's header
-# for WHY each registry is rewritten and why CNPG pods are never touched.
+# ECR pull-through cache image rewrite (policies.kyverno.io/v1 MutatingPolicy). CEL port
+# of the kyverno.io/v1 ClusterPolicy `ecr-pull-through-rewrite` (ClusterPolicy is
+# deprecated in Kyverno 1.19 and planned for removal in 1.20,
+# https://kyverno.io/docs/guides/migration-to-cel/); that policy was deleted when this
+# one was enabled (#11437). The `-cel` suffix stays for metric/PolicyReport continuity.
 #
-# STAGE 1 OF 2 — SHIPPED INERT (a matchCondition that is always false; see below). A mutation has
-# no Audit mode: enabled, this would rewrite live Pods next to the v1 policy. The two
-# would agree (a rewritten ref starts with the ECR host, so the second engine no-ops),
-# but "agree" is exactly what stage 1 exists to prove, so it is proven with the Kyverno
-# 1.19.1 CLI instead (openbank-infra/tests/kyverno-cel/run.sh) and this object only has to be
-# accepted by the API server. Stage 2 removes the kill switch and deletes the v1
-# ClusterPolicy in the same PR, so exactly one engine mutates at any time.
+# Why: containerd hosts.toml mirrors cannot add a path prefix, but ECR pull-through
+# needs the rule prefix (quay/, k8s/, ...) in the path, so a mirror silently falls back
+# to the origin registry over NAT. Rewriting the ref at admission, before containerd
+# sees it, sends the pull to private ECR over the ecr.dkr VPC endpoint instead. The
+# pull-through rules live in aws/envs/sandbox-platform/ecr-pull-through-cache.tf.
+#
+# CNPG instance pods (label cnpg.io/cluster) are NEVER rewritten: the CNPG operator
+# compares the running pod's image with Cluster.spec.imageName, so a rewritten image
+# reads as permanent drift and the operator recreates the instance pod every reconcile
+# (ADR-0092). CNPG clusters that want the cache point spec.imageName at the
+# pull-through path themselves (#1290).
+#
+# Idempotent by construction, and measured (#11437): every rewritten ref starts with the
+# ECR host, which matches none of the origin prefixes, so running this policy (or the
+# former v1 one) on its own output changes nothing. That is why the v1 -> CEL swap
+# could land as one Argo sync (PruneLast: this document is applied before the v1 one
+# is pruned) with a harmless overlap instead of a window with no rewrite at all.
+#
+# failurePolicy: Ignore — if the Kyverno webhook is down, pods still start and pull
+# from the origin over NAT rather than being blocked. background disabled: only
+# admission requests are mutated, existing Pods are never touched.
 #
 # Semantics kept from v1, rule for rule:
 #   quay.io/, registry.k8s.io/, public.ecr.aws/, docker.io/, ghcr.io/ prefixes →
@@ -68,12 +83,7 @@ spec:
         (object.spec.containers + object.spec.?initContainers.orValue([])).exists(c,
           variables.prefixes.exists(p, c.image.startsWith(p[0])))
   matchConditions:
-    # STAGE-1 KILL SWITCH. Kyverno refuses a MutatingPolicy with admission evaluation
-    # disabled, so this condition is what keeps it inert: it never matches. Stage 2
-    # deletes these three lines and the v1 ClusterPolicy in the same PR.
-    - name: stage-1-disabled-until-v1-removed
-      expression: "false"
-    # CNPG instance pods own their image ref (see the v1 header). A matchCondition,
+    # CNPG instance pods own their image ref (see the header). A matchCondition,
     # not an objectSelector: the 1.19.1 CLI ignored an objectSelector here and
     # rewrote the CNPG fixture, so the exclusion lives where every engine reads it.
     - name: not-a-cnpg-instance-pod

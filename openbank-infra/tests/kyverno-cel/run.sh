@@ -32,9 +32,8 @@ run() {
 # v1.19.1, ClusterPolicy extracted from the file as on main) on 2026-09-29,
 # immediately before the removal. With it, no v1 validate policy is left to run, so
 # the v1 side of the comparison is made entirely of pinned verdicts.
-MP="$T/tmp-ecr-rewrite-cel-enabled.yaml"
 OUT="$T/tmp-mutated"
-trap 'rm -rf "$ROOT/$MP" "$ROOT/$OUT"' EXIT
+trap 'rm -rf "$ROOT/$OUT"' EXIT
 CEL=$(run "$K/cel-validating-policies.yaml" -f "$T/values.yaml" \
   --context-file "$T/context.yaml" --crd-paths "$T/rollout-crd-stub.yaml")
 python3 - "$CEL" <<'PY'
@@ -108,22 +107,36 @@ print(f"{len(keys)} rows, {fails} v1 denials, {bad} divergent")
 sys.exit(1 if bad or not fails else 0)
 PY
 
-# ── Mutation parity: ecr-pull-through-rewrite (v1) vs -cel ────────────────────────
-# The CEL port ships behind an always-false kill-switch matchCondition; test it with
-# the switch removed, and compare every container image both engines produce.
-python3 - "$ROOT/$K/ecr-pull-through-rewrite-cel.yaml" "$ROOT/$MP" <<'PY'
-import sys, yaml
-d = yaml.safe_load(open(sys.argv[1]))
-mc = d['spec']['matchConditions']
-d['spec']['matchConditions'] = [c for c in mc if c['name'] != 'stage-1-disabled-until-v1-removed']
-assert len(d['spec']['matchConditions']) == len(mc) - 1, "kill switch not found"
-open(sys.argv[2], 'w').write(yaml.safe_dump(d))
-PY
+# ── Mutation parity: ecr-pull-through-rewrite (v1, pinned) vs -cel ───────────────
+# The v1 ClusterPolicy was deleted when its CEL port was enabled (#11437). Its output
+# image per (namespace, pod, list, container) is pinned in V1_IMAGES, measured with this
+# harness (Kyverno CLI v1.19.1, v1 file as on main) on 2026-09-29, immediately before
+# the deletion. The CEL policy runs live and must produce exactly that map. It then
+# runs a second time on its own output, which must change nothing: the idempotency the
+# one-sync v1 -> CEL swap relied on, kept as a property of the policy.
 mkdir -p "$ROOT/$OUT"
-mut() { docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$T/resources.yaml" -o "$2" >/dev/null 2>&1 || true; }
-mut "$K/ecr-pull-through-rewrite.yaml" "$OUT/v1.yaml"
-mut "$MP" "$OUT/cel.yaml"
-python3 - "$ROOT/$OUT/v1.yaml" "$ROOT/$OUT/cel.yaml" <<'PY'
+rm -f "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" "$ROOT/$OUT/cel-twice.yaml"
+mut() {
+  if [ "${4:-}" = allow_nonzero ]; then
+    # The fixture batch currently exits 1 despite writing complete output; the pinned
+    # 15-image comparison below checks that output rather than trusting this status.
+    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null 2>&1 || true
+  else
+    # A failed second pass proves nothing about idempotency; surface its exit status.
+    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null
+  fi
+}
+mut "$K/ecr-pull-through-rewrite-cel.yaml" "$T/resources.yaml" "$OUT/cel.yaml" allow_nonzero
+python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" <<'PY'
+import sys, yaml
+pods = {}  # the CLI emits one document per mutation; the last one carries them all
+for d in yaml.safe_load_all(open(sys.argv[1])):
+    if d and d.get('kind') == 'Pod':
+        pods[(d['metadata'].get('namespace', ''), d['metadata']['name'])] = d
+open(sys.argv[2], 'w').write(yaml.safe_dump_all(list(pods.values())))
+PY
+mut "$K/ecr-pull-through-rewrite-cel.yaml" "$OUT/cel-pods.yaml" "$OUT/cel-twice.yaml"
+python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-twice.yaml" "$ROOT/$OUT/cel-pods.yaml" <<'PY'
 import sys, yaml
 def imgs(p):
     out = {}
@@ -134,15 +147,43 @@ def imgs(p):
             for c in d['spec'].get(f) or []:
                 out[(d['metadata'].get('namespace', ''), d['metadata']['name'], f, c['name'])] = c['image']
     return out
-a, b = imgs(sys.argv[1]), imgs(sys.argv[2])
-if not a or not b:
+V1_IMAGES = {  # measured 2026-09-29 by this harness before the v1 policy was deleted (#11437)
+    ('arc-runners', 'dr-in-arc', 'containers', 'c'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/library/busybox:1.36',
+    ('default', 'cnpg-1', 'containers', 'postgres'): 'ghcr.io/cloudnative-pg/postgresql:18.1',
+    ('default', 'dr-in-default', 'containers', 'c'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/library/busybox:1.36',
+    ('default', 'multi-registry', 'containers', 'ecr'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/prometheus/prometheus:v3.0.0',
+    ('default', 'multi-registry', 'containers', 'ecrpub'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ecr-public/docker/library/redis:7',
+    ('default', 'multi-registry', 'containers', 'hub'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/library/nginx:1.27-alpine',
+    ('default', 'multi-registry', 'containers', 'k8s'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/pause:3.10',
+    ('default', 'multi-registry', 'containers', 'lookalike'): 'myquay.io/x:1',
+    ('default', 'multi-registry', 'containers', 'quay'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/prometheus/prometheus:v3.0.0',
+    ('default', 'multi-registry', 'initContainers', 'init-bare'): 'busybox:1.36',
+    ('default', 'multi-registry', 'initContainers', 'init-ghcr'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/ghcr/cloudnative-pg/postgresql:18.1',
+    ('default', 'no-sa', 'containers', 'c'): 'busybox:1.36',
+    ('default', 'plain-sa', 'containers', 'c'): 'busybox:1.36',
+    ('kube-system', 'eks-addon', 'containers', 'k8s'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/pause:3.10',
+    ('kube-system', 'eks-addon', 'containers', 'quay'): 'quay.io/foo/bar:1',
+}
+cel = imgs(sys.argv[1])
+if not cel:
     sys.exit("mutation run produced no Pods")
-rewritten = sum(1 for k in a if a[k].startswith('265175468565.dkr.ecr.'))
+# A second-pass Pod the CLI skips is not re-emitted; fall back to its first-pass copy.
+# The CLI must still emit at least one Pod. Otherwise a failed/empty run would become
+# identical to the first pass by construction and falsely prove idempotency.
+second = imgs(sys.argv[2])
+if not second:
+    sys.exit("second mutation run produced no Pods")
+twice = {**imgs(sys.argv[3]), **second}
+rewritten = sum(1 for v in V1_IMAGES.values() if v.startswith('265175468565.dkr.ecr.'))
 bad = 0
-for k in sorted(set(a) | set(b)):
-    same = a.get(k) == b.get(k)
-    bad += not same
-    print(f"{'OK  ' if same else 'DIFF'} ecr-pull-through-rewrite {'/'.join(k):48} {b.get(k)}")
-print(f"{len(a)} images, {rewritten} rewritten by v1, {bad} divergent")
-sys.exit(1 if bad or not rewritten else 0)
+for k in sorted(set(V1_IMAGES) | set(cel)):
+    a, b = V1_IMAGES.get(k), cel.get(k)
+    bad += a != b
+    print(f"OK   ecr-pull-through-rewrite {'/'.join(k):48} {b}" if a == b else
+          f"DIFF ecr-pull-through-rewrite {'/'.join(k):48} v1={a} cel={b}")
+redo = [k for k in cel if twice.get(k) != cel[k]]
+for k in redo:
+    print(f"DIFF ecr-pull-through-rewrite second pass {'/'.join(k)}: {cel[k]} -> {twice.get(k)}")
+print(f"{len(cel)} images, {rewritten} rewritten by v1, {bad} divergent, {len(redo)} changed on a second pass")
+sys.exit(1 if bad or redo or not rewritten else 0)
 PY

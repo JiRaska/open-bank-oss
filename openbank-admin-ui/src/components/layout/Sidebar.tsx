@@ -76,6 +76,7 @@ import {
   Zap,
   Building2,
   Gift,
+  Undo2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -115,6 +116,7 @@ const balanceSheetNav: NavItem[] = [
   { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
   { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
   { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
+  { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view' },
 ]
 
 // ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
