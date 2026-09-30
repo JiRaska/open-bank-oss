@@ -26,7 +26,6 @@ both directions on synthetic manifests.
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 import tempfile
@@ -50,8 +49,7 @@ def is_quarkus_service(repo_root: Path, image_basename: str) -> bool:
 def containers(doc: dict):
     spec = doc.get("spec") or {}
     tmpl = (spec.get("template") or {}).get("spec") or {}
-    for c in tmpl.get("containers") or []:
-        yield c
+    yield from tmpl.get("containers") or []
 
 
 def evaluate(components_dir: Path, repo_root: Path):
