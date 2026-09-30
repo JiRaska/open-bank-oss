@@ -32,11 +32,18 @@ version = file("version.txt").readText().trim()
 // The generated page contains only facts from build inputs. It also supplies an
 // honest index for new services until they add authored docs to src/main/resources/docs.
 val generatedServiceDocs = layout.buildDirectory.dir("generated/service-docs")
+val sourceCommit = providers.environmentVariable("GITHUB_SHA")
+    .orElse(
+        providers.exec {
+            commandLine("git", "rev-parse", "HEAD")
+        }.standardOutput.asText.map { it.trim() },
+    )
 val generateServiceDocs by tasks.registering {
     val versionFile = layout.projectDirectory.file("version.txt")
     val openapiFile = layout.projectDirectory.file("src/main/resources/openapi.yaml")
     val authoredDocs = fileTree("src/main/resources/docs") { include("*.md") }
     inputs.file(versionFile)
+    inputs.property("sourceCommit", sourceCommit)
     inputs.files(authoredDocs)
     inputs.files(openapiFile.asFile.takeIf { it.exists() }?.let { files(it) } ?: files())
     outputs.dir(generatedServiceDocs)
@@ -45,6 +52,12 @@ val generateServiceDocs by tasks.registering {
         docs.deleteRecursively()
         docs.mkdirs()
         val releaseVersion = versionFile.asFile.readText().trim()
+        val gitCommit = sourceCommit.get().trim()
+        check(Regex("[0-9a-fA-F]{40}").matches(gitCommit)) {
+            "${project.name}: GITHUB_SHA or git rev-parse HEAD must provide a full commit hash"
+        }
+        generatedServiceDocs.get().asFile.resolve("openbank-service-build.properties")
+            .writeText("git.commit=$gitCommit\n")
         val apiVersion = if (openapiFile.asFile.isFile) {
             val info = Regex("(?m)^info:\\s*$([\\s\\S]*?)(?=^\\S|\\z)")
                 .find(openapiFile.asFile.readText())?.groupValues?.get(1).orEmpty()
@@ -61,6 +74,7 @@ val generateServiceDocs by tasks.registering {
             appendLine("|---|---|")
             appendLine("| Module | `$module` |")
             appendLine("| Release version (`version.txt`) | `$releaseVersion` |")
+            appendLine("| Source commit | `$gitCommit` |")
             appendLine("| API contract version (`openapi.yaml`) | ${apiVersion?.let { "`$it`" } ?: "No committed contract"} |")
             appendLine()
             appendLine("The running build and its Git commit are reported by `/q/openbank/docs` and `/api/v1/info`. The API contract is published at `/q/openapi` where enabled.")
@@ -79,6 +93,7 @@ val generateServiceDocs by tasks.registering {
 
 tasks.named<Copy>("processResources") {
     from(generatedServiceDocs.map { it.dir("docs") }) { into("docs") }
+    from(generatedServiceDocs.map { it.file("openbank-service-build.properties") })
     dependsOn(generateServiceDocs)
 }
 
@@ -88,7 +103,11 @@ val verifyServiceDocs by tasks.registering {
     dependsOn("processResources")
     doLast {
         val packaged = layout.buildDirectory.file("resources/main/docs/00-build.md").get().asFile
-        check(packaged.isFile && packaged.readText().contains(project.version.toString())) {
+        val source = layout.buildDirectory.file("resources/main/openbank-service-build.properties").get().asFile
+        val commit = source.takeIf { it.isFile }?.readText()
+            ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
+        check(packaged.isFile && packaged.readText().contains(project.version.toString())
+            && commit != null && packaged.readText().contains(commit)) {
             "${project.name}: current build facts were not packaged in build/resources/main/docs"
         }
     }

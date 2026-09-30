@@ -7,6 +7,7 @@ package com.openbank.vop
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.restassured.RestAssured.given
+import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasItems
@@ -82,11 +83,14 @@ class VopBootAndDocsIT {
             .body("items.slug", hasItems("00-build"))
             .extract().response()
         val version = index.path<String>("version")
+        val commit = index.path<String>("gitCommit")
+        assertThat(commit).matches("[0-9a-fA-F]{40}")
 
         given()
             .`when`().get("/q/openbank/docs/00-build")
             .then()
             .statusCode(200)
             .body(containsString("Release version (`version.txt`) | `$version`"))
+            .body(containsString("Source commit | `$commit`"))
     }
 }
