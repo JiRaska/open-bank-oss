@@ -171,7 +171,8 @@ object MinimumReserves {
 
     const val AVERAGING_NOTE =
         "Minimum reserves are held on AVERAGE over the ČNB maintenance period; this is one snapshot day, so the " +
-            "surplus / shortfall is indicative, not a compliance verdict. The maintenance-period calendar is not modelled."
+            "surplus / shortfall is indicative, not a compliance verdict. The period average is served by " +
+            "GET /api/v1/risk/min-reserves/periods/{periodId}."
 
     const val HOLDINGS_NOT_STATED =
         "No ledger GL account is mapped as the bank's current account at the ČNB (classification reserve-holding), " +

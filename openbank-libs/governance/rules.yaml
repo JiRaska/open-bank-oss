@@ -4274,6 +4274,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*SchemeAccepted*.kt"
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"

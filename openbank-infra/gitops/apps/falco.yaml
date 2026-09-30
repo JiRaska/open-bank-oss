@@ -448,6 +448,12 @@ spec:
             operator: Equal
             value: observability
             effect: NoSchedule
+          # And the on-demand `stateful` nodes hosting the money-path databases (#11608) --
+          # enforced by check-stateful-not-on-spot.py.
+          - key: openbank.io/stateful
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
   destination:
     server: https://kubernetes.default.svc
     namespace: falco

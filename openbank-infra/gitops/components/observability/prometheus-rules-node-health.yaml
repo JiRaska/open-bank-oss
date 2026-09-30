@@ -1,0 +1,61 @@
+# Node degraded while Ready (2026-09-30) — the human's 25 minutes before Karpenter acts.
+#
+# WHY THIS EXISTS. The EKS node monitoring agent (openbank-infra/aws/modules/eks/main.tf,
+# addon eks-node-monitoring-agent) adds five NodeConditions the kubelet never sets:
+# NetworkingReady, StorageReady, KernelReady, ContainerRuntimeReady and
+# AcceleratedHardwareReady. Karpenter's NodeRepair feature gate (already on, #809) treats any
+# of them at False for 30 minutes as grounds to FORCEFULLY terminate the node — no drain, PDBs
+# and do-not-disrupt ignored (karpenter.sh/docs/concepts/disruption, Node Repair). On this
+# cluster that can take a single-instance CNPG primary with it (ADR-0325). This rule fires at
+# 5 minutes so that a human sees the degraded node, and what is on it, with ~25 minutes in
+# hand to move a primary (`kubectl cnpg promote` / a controlled switchover) or to cordon and
+# replace the node on their own terms, before the forceful path runs.
+#
+# `Ready=True` is part of the condition deliberately: a node that is also NotReady is
+# KubeNodeNotReady's alert already, and the interesting state is the one that looks healthy.
+#
+# kube-state-metrics exports every condition present on the node object as
+# kube_node_status_condition{condition=<type>,status=<true|false|unknown>}, so the agent's
+# conditions appear here without any KSM configuration once the agent runs. Until the addon
+# is applied the selector matches nothing and the rule is quiet — which is also why there is
+# no `absent()` twin: absence of these conditions is the state of every node without the
+# agent, not a broken scrape. NodePodSandboxCreationFailing / NodePodsStuckStarting
+# (prometheus-rules-node-pod-startup.yaml) remain the control for the faults the agent
+# reports only as Events (IPAMDNoIPs) or not at all (an EBS volume stuck attaching).
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-node-health-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.platform.node-health
+      rules:
+        - alert: NodeDegradedWhileReady
+          expr: |
+            max by (node, condition) (
+              kube_node_status_condition{condition=~"NetworkingReady|StorageReady|KernelReady|ContainerRuntimeReady|AcceleratedHardwareReady", status="false"}
+            ) == 1
+              and on (node)
+            max by (node) (kube_node_status_condition{condition="Ready", status="true"}) == 1
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Node {{ $labels.node }} reports {{ $labels.condition }}=False while Ready"
+            description: >-
+              The EKS node monitoring agent has set {{ $labels.condition }}=False on
+              {{ $labels.node }} for 5+ minutes while the kubelet still reports Ready. Karpenter
+              NodeRepair will FORCEFULLY terminate this node once the condition has held for 30
+              minutes (10 for AcceleratedHardwareReady) — no drain, PDBs ignored. Read the reason
+              (`kubectl describe node {{ $labels.node }}` → Conditions and Events), list what runs
+              there (`kubectl get pods -A -o wide --field-selector spec.nodeName={{ $labels.node }}`),
+              and if a single-instance CNPG primary is on it, switch it over or delete the primary
+              pod onto another node NOW rather than letting the forced termination do it. Then
+              cordon and replace the NodeClaim yourself — see runbook 0026 §1.4.
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
