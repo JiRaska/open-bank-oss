@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.269.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.1...admin-ui-v0.269.0) (2026-09-30)
+
+
+### Features
+
+* **finrep:** carry the risk snapshot's provenance onto COREP templates ([#11538](https://github.com/JiRaska/open-bank-oss/issues/11538)) ([3961c7d](https://github.com/JiRaska/open-bank-oss/commit/3961c7df54357a43bddc5b9f2b1a1a92e19405ef))
+* **treasury:** simulated counterparties quote off the risk engine's curve set ([#11555](https://github.com/JiRaska/open-bank-oss/issues/11555)) ([6933a2b](https://github.com/JiRaska/open-bank-oss/commit/6933a2b9da6ae25cff16ab11c2fe548764fa68b2))
+
+
+### Bug Fixes
+
+* **admin-ui:** show approval source failure states ([#11564](https://github.com/JiRaska/open-bank-oss/issues/11564)) ([3cfb110](https://github.com/JiRaska/open-bank-oss/commit/3cfb110cda39ffc10807175b7d54034ab63ff47d))
+
+
+### Security
+
+* **infra:** enforce the image-signature + SBOM policy as a CEL ImageValidatingPolicy ([#11581](https://github.com/JiRaska/open-bank-oss/issues/11581)) ([7b1a0dc](https://github.com/JiRaska/open-bank-oss/commit/7b1a0dce1a479bbb35f4b85ff9af0820652854cf)), closes [#11437](https://github.com/JiRaska/open-bank-oss/issues/11437)
+
 ## [0.268.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.0...admin-ui-v0.268.1) (2026-09-30)
 
 
