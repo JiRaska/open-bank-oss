@@ -139,7 +139,13 @@ object C7300Mapper {
                 add(cell(row, COL_OUTFLOW, label, null, gap ?: reason))
             }
         }
-        return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
+        return CorepTemplate(
+            TEMPLATE_ID,
+            asOf,
+            cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })),
+            sourceRunId = result?.runId,
+            provenance = result?.provenance,
+        )
     }
 
     /** The gap for every c0060 (2015/61 outflow) cell: the whole-template gap, else the parameter-set gap. */

@@ -13,6 +13,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@/lib/regulatory/exportReadiness'
 import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
+import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 type Report = (typeof REPORTS)[number]
@@ -43,6 +44,9 @@ interface RegulatoryTemplate {
   /** Which of the two independent balance verdicts objected (finrep, issue #6011). */
   balanceVerdict?: BalanceVerdict
   hasDataGaps?: boolean
+  /** finrep 1.14.0: the risk-engine snapshot run the figures came from, and its provenance (ADR-0313 D13). */
+  sourceRunId?: string
+  provenance?: 'synthetic' | 'production'
 }
 
 // A genuine backend answer that a COREP template id is unknown or not yet implemented there —
@@ -216,6 +220,9 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   if (data.status === 'ready') {
     const rendered = data.templates.flatMap(template => [
       { field: `Šablona ${template.templateId}`, value: `Období ${template.period}${template.isBalanced === false ? ' · nevyvážená' : ''}${template.hasDataGaps ? ' · obsahuje datové mezery' : ''}` },
+      ...(template.provenance === 'synthetic'
+        ? [{ field: `${template.templateId} · Původ dat`, value: `SYNTETICKÁ DATA — riskový snímek ${template.sourceRunId ?? '—'}` }]
+        : []),
       ...template.cells.map((cell) => ({
         field: `${template.templateId} · ${cellLabel(template, cell)}`,
         value: cellValueText(cell),
@@ -818,6 +825,12 @@ export default function RegulatoryPage() {
                     {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
                   </div>
                 )}
+                {previewData.status === 'ready' && previewData.templates.filter(tpl => tpl.provenance === 'synthetic').map(tpl => (
+                  <div key={tpl.templateId} role="status" data-testid={`synthetic-provenance-${tpl.templateId}`} style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: 'var(--warning-text)', background: 'var(--warning-bg)', borderBottom: '1px solid var(--warning-border)' }}>
+                    <ProvenanceBadge provenance="synthetic" />
+                    <span>{tpl.templateId}{' — '}{t('vypočteno ze syntetického běhu rizikového enginu', 'computed from a synthetic risk-engine run')}{tpl.sourceRunId ? <> {'('}{t('běh', 'run')} <code>{tpl.sourceRunId}</code>{')'}</> : null}</span>
+                  </div>
+                ))}
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>
