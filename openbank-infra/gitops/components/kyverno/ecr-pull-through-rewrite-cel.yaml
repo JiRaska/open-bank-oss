@@ -39,6 +39,19 @@
 # The five v1 regexes were anchored literal prefixes, so startsWith + substring is an
 # exact equivalent; the v1 strategic-merge-by-name becomes an ApplyConfiguration on
 # the name-keyed container lists.
+#
+# Pod controllers (Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob) are
+# covered by Kyverno autogen, as v1's autogen- rules covered them. Kyverno 1.19.1
+# (pkg/cel/policies/mpol/autogen/autogen.go:70-82) rewrites `object.spec` and
+# `object.metadata.labels` to the pod template ONLY in matchConditions and mutations —
+# never in `variables` — and wraps a mutation in the template path only when it starts
+# with the root `Object{` (autogen.go:127-167). So a variable must not read
+# `object.spec`: one that read `object.spec.containers` errored on every controller with
+# `no such key: containers` (57 PolicyReport errors on 2026-09-30), and `Ignore` admitted
+# the controller unmutated. Its Pods were still rewritten at Pod admission, so pulls went
+# to ECR; what broke was the controller rewrite and the report noise. Label reads are
+# guarded by `request.kind.kind == 'Pod'`, because a controller's pod template may carry
+# no metadata at all, and optional lists are read with `.?`.
 apiVersion: policies.kyverno.io/v1
 kind: MutatingPolicy
 metadata:
@@ -64,10 +77,19 @@ spec:
   variables:
     - name: ecr
       expression: "'265175468565.dkr.ecr.eu-north-1.amazonaws.com/'"
+    # Below, `request.kind.kind == 'Pod'` guards every label read, and the labels are read
+    # as `object.metadata.?labels`, which autogen does NOT rewrite. For a controller the
+    # label reads therefore never run, so a template with no metadata cannot error
+    # (it did: `has(object.spec.template.metadata.labels)` is `no such key: metadata`
+    # on a CronJob whose template carries none — reproduced by the harness).
     - name: eksSystemPod
+      # A kube-system CONTROLLER is treated as an EKS system pod for the quay rule:
+      # its template is left at quay.io, and the Pod it creates is decided at Pod
+      # admission on the Pod's real labels — the same final image v1 produced.
       expression: >-
         request.namespace == 'kube-system' &&
-        object.metadata.?labels[?'eks.amazonaws.com/component'].orValue('') == 'true'
+        (request.kind.kind != 'Pod' ||
+          object.metadata.?labels[?'eks.amazonaws.com/component'].orValue('') == 'true')
     - name: prefixes
       # [origin prefix, ECR pull-through prefix]; quay is dropped for EKS system pods.
       expression: >-
@@ -78,25 +100,28 @@ spec:
           ['docker.io/', 'docker-hub/'],
           ['ghcr.io/', 'ghcr/']
         ].filter(p, p[0] != 'quay.io/' || !variables.eksSystemPod)
-    - name: needsRewrite
-      expression: >-
-        (object.spec.containers + object.spec.?initContainers.orValue([])).exists(c,
-          variables.prefixes.exists(p, c.image.startsWith(p[0])))
   matchConditions:
     # CNPG instance pods own their image ref (see the header). A matchCondition,
     # not an objectSelector: the 1.19.1 CLI ignored an objectSelector here and
     # rewrote the CNPG fixture, so the exclusion lives where every engine reads it.
+    # The CNPG operator creates instance Pods directly, never through a controller,
+    # so the check applies to Pods only.
     - name: not-a-cnpg-instance-pod
-      expression: "!('cnpg.io/cluster' in object.metadata.?labels.orValue({}))"
+      expression: >-
+        request.kind.kind != 'Pod' ||
+        !('cnpg.io/cluster' in object.metadata.?labels.orValue({}))
+    # Inline, not a variable: autogen rewrites `object.spec` here to the pod template.
     - name: has-rewritable-image
-      expression: variables.needsRewrite
+      expression: >-
+        (object.spec.?containers.orValue([]) + object.spec.?initContainers.orValue([])).exists(c,
+          variables.prefixes.exists(p, c.image.startsWith(p[0])))
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              containers: object.spec.containers
+              containers: object.spec.?containers.orValue([])
                 .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
                 .map(c, Object.spec.containers{
                   name: c.name,

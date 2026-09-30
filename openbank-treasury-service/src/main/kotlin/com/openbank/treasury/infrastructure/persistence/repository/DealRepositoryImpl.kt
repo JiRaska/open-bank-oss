@@ -177,9 +177,9 @@ class DealRepositoryImpl(
         return withHistories(rows)
     }
 
-    override suspend fun dueForSettlement(today: LocalDate): List<Deal> = withHistories(
+    override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>): List<Deal> = withHistories(
         Panache.withSession {
-            find("state = ?1 and valueDate <= ?2 order by valueDate asc", DealState.BOOKED.name, today).list()
+            find("state in ?1 and valueDate <= ?2 order by valueDate asc", states.map { it.name }, today).list()
         }.awaitSuspending(),
     )
 

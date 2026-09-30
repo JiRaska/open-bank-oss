@@ -43,6 +43,28 @@ data class DealBooked(
     }
 }
 
+/**
+ * ADR-0315 D2: the counterparty's confirmation of the booked terms was received. Nothing has
+ * posted. [simulated] is true when the in-process simulated counterparty set (ADR-0315 D9,
+ * sandbox only) confirmed it rather than a back-office person — a SYNTHETIC confirmation.
+ */
+data class DealConfirmed(
+    val dealId: UUID,
+    val product: ProductType,
+    val counterpartyId: String,
+    val currency: String,
+    val principal: BigDecimal,
+    val valueDate: LocalDate,
+    val confirmedBy: String,
+    val simulated: Boolean,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.deal.confirmed.v1"
+    }
+}
+
 data class DealSettled(
     val dealId: UUID,
     val product: ProductType,
@@ -89,7 +111,7 @@ data class DealReversed(
     val principal: BigDecimal,
     val reversedBy: String,
     val reason: String,
-    /** Null when the deal was reversed from BOOKED, before anything had posted. */
+    /** Null when the deal was reversed from BOOKED or CONFIRMED, before anything had posted. */
     val ledgerJournalId: UUID?,
     val occurredAt: Instant,
     val sourceService: String = SOURCE_SERVICE,

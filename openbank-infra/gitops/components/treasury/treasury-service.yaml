@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-treasury-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "11b1a39ad9b93acb"
+        openbank.tech/policy-checksum: "d60a93bbce2b23ae"
       labels:
         app.kubernetes.io/name: treasury-service
         app.kubernetes.io/part-of: treasury
@@ -119,6 +119,17 @@ spec:
             # plaintext edge, so the legacy HTTP/8101 port is not used.
             - name: LEDGER_SERVICE_URL
               value: https://ledger-service.ledger.svc:8443
+            # ADR-0315 D9: the simulated counterparties quote the risk engine's curve sets, read over
+            # its private-CA mTLS listener (8443, client auth REQUIRED; %prod TLS bucket
+            # risk-authority, the same treasury-internal-tls certificate) as treasury's own m2m
+            # identity, which risk_rest_ext.rego grants risk.curve-set.read and nothing else.
+            - name: RISK_ENGINE_URL
+              value: https://risk-engine.risk.svc:8443
+            # Quotes stay OFF here until the grant, this edge and the TLS bucket are verified live
+            # (GET /api/v1/treasury/quotes answers 200 once flipped). Off, the simulated market
+            # confirms every BOOKED deal without a quote check, exactly as before.
+            - name: OPENBANK_TREASURY_SIMULATED_QUOTES_ENABLED
+              value: "false"
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot (OIDC
             # defers discovery to the first request) — it just makes every authenticated call
             # fail later with `Name does not resolve`.

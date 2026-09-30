@@ -49,6 +49,15 @@ apicurio-db (messaging) and the databases of every non-money-path peer -- 9 clus
 derivation is used to keep it honest instead: an entry whose cluster does not exist, whose
 namespace no money-path workload calls, or that the service derivation already covers, is stale.
 
+THE CONSUMER OF A PLATFORM DATABASE (rule 6, 2026-09-29)
+An HA temporal-db buys nothing if the Temporal server in front of it is one pod per role: every
+roll of that pod empties the membership ring for its role, and every caller gets "Not enough
+hosts to serve the request" until the successor joins. So every Temporal Helm Application whose
+persistence points at a money-path platform database runs frontend, history and matching with
+`replicaCount >= 2` and a `podDisruptionBudget` -- read from `server.<role>`, where the chart
+looks. A role block written at the TOP level of the values is inert (the chart never reads it;
+the sandbox ran that way for months), so that placement is itself a finding.
+
 Usage:
     check-cnpg-update-resilience.py              # gate (exit 1 on any finding)
     check-cnpg-update-resilience.py --self-test  # prove the gate can fail
@@ -101,6 +110,35 @@ def _ns_from_kustomization(path: Path) -> str | None:
 
 def _image_name(ref: str) -> str:
     return ref.split("@", 1)[0].rsplit("/", 1)[-1].split(":", 1)[0]
+
+
+TEMPORAL_HA_ROLES = ("frontend", "history", "matching")
+TEMPORAL_ROLES = TEMPORAL_HA_ROLES + ("worker", "internal-frontend")
+
+
+def temporal_apps() -> list[tuple[str, dict]]:
+    """(path, parsed helm values) for every ArgoCD Application installing the Temporal chart."""
+    out = []
+    for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
+        try:
+            docs = gatelib.load_yaml_all(path, errors="replace")
+        except yaml.YAMLError:
+            continue  # scan() already reports unparseable files
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "Application":
+                continue
+            src = (doc.get("spec") or {}).get("source") or {}
+            if src.get("chart") != "temporal":
+                continue
+            helm = src.get("helm") or {}
+            values = helm.get("valuesObject")
+            if values is None:
+                try:
+                    values = yaml.safe_load(helm.get("values") or "") or {}
+                except yaml.YAMLError as exc:
+                    values = {"__error__": str(exc)}
+            out.append((str(path.relative_to(REPO)), values if isinstance(values, dict) else {}))
+    return out
 
 
 def scan() -> tuple[dict[str, dict], dict[str, set], list[str], dict[str, set]]:
@@ -277,6 +315,34 @@ def check() -> tuple[list[str], int]:
         if isinstance(inst, int) and inst >= 2:
             affinity(c, f"{c['path']}: Cluster {key} (instances={inst})")
 
+    # 6. the Temporal server in front of a money-path platform database is itself HA
+    for path, values in temporal_apps():
+        if "__error__" in values:
+            findings.append(f"{path}: Temporal helm values do not parse ({values['__error__']})")
+            continue
+        text = json.dumps(values)
+        backs = sorted({f"{n}/{c}" for c, n in SVC_RX.findall(text)} & set(mp_clusters))
+        if not backs:
+            continue
+        where = f"{path}: Temporal server on money-path platform database {', '.join(backs)}"
+        for role in TEMPORAL_ROLES:
+            if role in values:
+                findings.append(
+                    f"{where} declares `{role}:` at the top level of its values -- the chart reads "
+                    f"only `server.{role}`, so that block is inert"
+                )
+        server = values.get("server") or {}
+        for role in TEMPORAL_HA_ROLES:
+            rv = server.get(role) or {}
+            reps = rv.get("replicaCount", server.get("replicaCount", 1))
+            if not isinstance(reps, int) or reps < 2:
+                findings.append(
+                    f"{where}: server.{role}.replicaCount={reps}; a single pod empties the "
+                    f"membership ring on every roll (Not enough hosts) -- needs >= 2"
+                )
+            if not rv.get("podDisruptionBudget"):
+                findings.append(f"{where}: server.{role} has no podDisruptionBudget")
+
     gatelib.subjects(len(clusters), f"CNPG clusters; {len(mp_clusters)} money-path")
     return findings, len(mp_clusters)
 
@@ -342,6 +408,32 @@ spec:
 """
 
 
+_TEMPORAL = """apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: wf-helm
+  namespace: argocd
+spec:
+  source:
+    chart: temporal
+    helm:
+      values: |
+        server:
+          config:
+            persistence:
+              datastores:
+                default:
+                  sql:
+                    connectAddr: "wf-db-rw.wf.svc.cluster.local:5432"
+{roles}"""
+_ROLE = """          {role}:
+            replicaCount: {n}
+            podDisruptionBudget:
+              maxUnavailable: 1
+"""
+_ROLES_OK = "".join(_ROLE.format(role=r, n=2) for r in ("frontend", "history", "matching"))
+
+
 def self_test() -> int:
     ok = True
 
@@ -367,6 +459,7 @@ def self_test() -> int:
         + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra=_HA),
         "deploy.yaml": _DEPLOY,
         "wf.yaml": _WF.format(inst=2, extra=_HA),
+        "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK),
     }
     if run(good):
         print(f"SELF-TEST FAIL: a compliant corpus was reported: {run(good)}"); ok = False
@@ -434,6 +527,18 @@ def self_test() -> int:
     got = run(single_other, exc_short)
     if not any("reason of >= 20 chars" in f for f in got):
         print(f"SELF-TEST FAIL: an exception without a real reason was accepted: {got}"); ok = False
+    cases["single-replica Temporal matching in front of a platform database"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK.replace(
+            "matching:\n            replicaCount: 2", "matching:\n            replicaCount: 1"))},
+        "server.matching.replicaCount=1")
+    cases["Temporal role without a PDB"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(
+            roles=_ROLE.format(role="frontend", n=2) + _ROLE.format(role="history", n=2)
+            + "          matching:\n            replicaCount: 2\n")},
+        "server.matching has no podDisruptionBudget")
+    cases["Temporal role block at the top level (the inert sandbox shape)"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK) + "        history:\n          replicaCount: 3\n"},
+        "declares `history:` at the top level")
     for label, (files, needle) in cases.items():
         got = run(files)
         if not any(needle in f for f in got):
