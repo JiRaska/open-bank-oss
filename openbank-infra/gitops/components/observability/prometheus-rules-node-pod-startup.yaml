@@ -114,7 +114,7 @@ spec:
             severity: critical
             team: platform
           annotations:
-            summary: "{{ $value }} pods have been stuck starting on node {{ $labels.node }} for over 10m"
+            summary: "Pods are stuck starting on node {{ $labels.node }} for over 10m"
             description: >-
               {{ $value }} distinct pods on {{ $labels.node }} have each been in
               ContainerCreating/PodInitializing for more than 10 minutes. Several pods stuck on

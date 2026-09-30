@@ -106,7 +106,7 @@ tests:
               team: platform
               node: ip-bad
             exp_annotations:
-              summary: "2 pods have been stuck starting on node ip-bad for over 10m"
+              summary: "Pods are stuck starting on node ip-bad for over 10m"
               description: "2 distinct pods on ip-bad have each been in ContainerCreating/PodInitializing for more than 10 minutes. Several pods stuck on ONE node while the node is Ready means the node cannot start pods — a CNI with no free IPs (an ENI stuck attaching), an EBS volume stuck attaching, or a hung container runtime. List them with `kubectl get pods -A -o wide --field-selector spec.nodeName=ip-bad` and read one pod's events; if the events say FailedCreatePodSandBox or FailedAttachVolume, check the instance's ENI/volume attachment states in EC2 and replace the NodeClaim — see the runbook."
               runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
       # Before the 10m dwell + 5m for: has elapsed the same input must be silent.
