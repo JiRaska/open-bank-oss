@@ -28,6 +28,26 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the credit-offers consent with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/consents/party/c6c6c6c6-c6c6-4c6c-8c6c-c6c6c6c6c6c6/grantee/openbank/active",
+        "query": {
+          "scope": [
+            "CREDIT_OFFERS"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

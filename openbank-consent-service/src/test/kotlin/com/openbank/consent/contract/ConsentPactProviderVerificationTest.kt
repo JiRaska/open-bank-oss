@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.consent.it.ConsentPostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -70,6 +71,9 @@ import javax.sql.DataSource
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-consent-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by ConsentNegativeAuthProviderVerificationTest, which boots
+// without @TestSecurity; under this class's identity they would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class ConsentPactProviderVerificationTest {
 

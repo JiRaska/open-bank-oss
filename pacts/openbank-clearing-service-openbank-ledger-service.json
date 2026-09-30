@@ -4,6 +4,52 @@
   },
   "interactions": [
     {
+      "description": "POST a net-settlement journal with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "createdBy": "a0000000-0000-0000-0000-00000000c1e4",
+          "description": "net settlement CZ-CERTIS-20260120-001 cycle CERTIS-1",
+          "entryDate": "2026-01-20",
+          "idempotencyKey": "net-settlement:c1ea0000-0000-4000-8000-000000000001",
+          "lines": [
+            {
+              "amount": 125000.00,
+              "baseAmount": 125000.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000000001",
+              "side": "DEBIT"
+            },
+            {
+              "amount": 125000.00,
+              "baseAmount": 125000.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000001110",
+              "side": "CREDIT"
+            }
+          ],
+          "transactionId": "c1ea0000-0000-4000-8000-000000000001",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/journals"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST a balanced two-line CZK net-settlement journal for a cleared batch",
       "providerStates": [
         {

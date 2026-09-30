@@ -15,6 +15,7 @@ import com.openbank.consent.it.ConsentPostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
@@ -72,6 +73,9 @@ class ConsentPactBrokerProviderVerificationTest {
     lateinit var testPort: String
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var dataSource: DataSource
 
     @BeforeEach
@@ -84,8 +88,18 @@ class ConsentPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         // context is null on the @IgnoreNoPactsToVerify dummy invocation — skip gracefully.
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /**
