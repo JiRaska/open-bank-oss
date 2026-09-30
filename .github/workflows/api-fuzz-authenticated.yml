@@ -187,11 +187,13 @@ jobs:
       - name: Start Keycloak (throwaway realm)
         run: |
           set -euo pipefail
+          # Same version and digest as openbank-infra/docker/keycloak/Dockerfile, so the fuzzer
+          # authenticates against the Keycloak the fleet runs, not a 26.0 that predates its CVE fixes.
           docker run -d --name fuzz-keycloak -p 8543:8080 \
             -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
             -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
             -v "$PWD/.github/workflows/keycloak:/opt/keycloak/data/import:ro" \
-            quay.io/keycloak/keycloak:26.0 \
+            quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4 \
             start-dev --import-realm --http-enabled=true
           # Realm ready = the token endpoint answers.
           KC_UP=0
