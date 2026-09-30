@@ -69,10 +69,16 @@ spec:
           priorityClassName: system-node-critical
           # DaemonSet must also land on the on-demand observability nodes
           # (ADR-0082) to ship their logs — tolerate the workload taint.
+          # ...and on the on-demand `stateful` nodes that host the money-path databases
+          # (#11608): their logs must ship too. check-stateful-not-on-spot.py enforces it.
           tolerations:
             - key: workload
               operator: Equal
               value: observability
+              effect: NoSchedule
+            - key: openbank.io/stateful
+              operator: Equal
+              value: "true"
               effect: NoSchedule
         alloy:
           # Allow scheduling onto sandbox runner nodes (matches the old
