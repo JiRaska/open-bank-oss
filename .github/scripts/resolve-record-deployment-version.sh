@@ -60,8 +60,8 @@
 # rather than as evidence of anything.
 #
 # WHAT COUNTS AS A RECORDED SOURCE, AND WHY IT IS NOT release-please's ANSWER (#9898)
-# Everything under `<svc>/` except that package's release-please `exclude-paths` MINUS the
-# service's own `src/test`, which is back IN scope. release-please's exclude-paths answer a
+# Everything under `<svc>/` except its release marker files and that package's release-please
+# `exclude-paths` MINUS the service's own `src/test`, which is back IN scope. release-please's exclude-paths answer a
 # different question — "can this change the SHIPPED ARTIFACT" — and reusing them here was a
 # category error: the version this script records is the counterpart of every consumer's
 # `can-i-deploy`, so what has to be identical is not just the image but the PACT ARTEFACTS, and
@@ -113,11 +113,16 @@ set -uo pipefail
 # and not under one of the excludes it is given. Pure, no network — the self-test drives every
 # branch through it. The caller supplies the excludes; recorded_source_excludes_for decides them,
 # and `<svc>/src/test` is deliberately NOT among them (see the header, #9898).
+# version.txt and CHANGELOG.md are release metadata, not pact or verification inputs;
+# counting them made an already deployed release commit unrecordable (#11597).
 path_is_recorded_source() {
   local svc="$1" path="$2" excludes="$3" ex
   case "$path" in
     "$svc"/*) ;;
     *) return 1 ;;
+  esac
+  case "$path" in
+    "$svc/version.txt"|"$svc/CHANGELOG.md") return 1 ;;
   esac
   # `excludes` is newline-separated; a path under any of them is not a build input.
   while IFS= read -r ex; do
@@ -227,6 +232,8 @@ self_test() {
   path_is_recorded_source openbank-party-service openbank-party-service/src/main/kotlin/A.kt "$EX"; check "src/main is a recorded source" 0 $?
   path_is_recorded_source openbank-party-service openbank-party-service/build.gradle.kts "$EX"; check "build.gradle.kts is a recorded source" 0 $?
   path_is_recorded_source openbank-party-service openbank-party-service/Dockerfile "$EX"; check "Dockerfile is a recorded source" 0 $?
+  path_is_recorded_source openbank-party-service openbank-party-service/version.txt "$EX"; check "release version marker is not a recorded source" 1 $?
+  path_is_recorded_source openbank-party-service openbank-party-service/CHANGELOG.md "$EX"; check "release changelog is not a recorded source" 1 $?
   # #9898: the service's OWN tests generate its pact artefacts, so they ARE a recorded source.
   path_is_recorded_source openbank-party-service openbank-party-service/src/test/kotlin/T.kt "$EX"; check "the service's OWN src/test IS a recorded source" 0 $?
   path_is_recorded_source openbank-party-service openbank-fx-service/src/main/kotlin/A.kt "$EX"; check "another service is not our source" 1 $?
@@ -280,6 +287,12 @@ self_test() {
   printf 'src/main/kotlin/A.kt\taaa\n' >"$A"
   printf 'src/main/kotlin/A.kt\taaa\nsrc/test/kotlin/T.kt\tttt\n' >"$B"
   recorded_sources_agree openbank-party-service "$EX" "$A" "$B"; check "#9898: an ADDED test source is NOT equivalent" 1 $?
+
+  # A release-please commit changes these two files without changing the provider's
+  # pact or verification inputs. It must resolve to the previously published version.
+  printf 'src/main/kotlin/A.kt\taaa\nversion.txt\told\nCHANGELOG.md\told\n' >"$A"
+  printf 'src/main/kotlin/A.kt\taaa\nversion.txt\tnew\nCHANGELOG.md\tnew\n' >"$B"
+  recorded_sources_agree openbank-party-service "$EX" "$A" "$B"; check "#11597: release-only commit IS equivalent" 0 $?
 
   # ...and the exclusion that remains still works on a listing, not just on a path.
   printf 'src/main/A.ts\taaa\ne2e/accounts-search.spec.ts\tttt\n' >"$A"
