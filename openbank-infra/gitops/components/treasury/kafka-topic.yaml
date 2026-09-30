@@ -1,6 +1,6 @@
 # Money-market deal lifecycle events — published by treasury-service through its transactional
-# outbox (ADR-0315 D6): treasury.deal.booked.v1 / settled.v1 / matured.v1 / reversed.v1, keyed by
-# dealId so one deal's events stay ordered on one partition. Read by audit-service.
+# outbox (ADR-0315 D6): treasury.deal.booked.v1 / confirmed.v1 / settled.v1 / matured.v1 /
+# reversed.v1, keyed by dealId so one deal's events stay ordered on one partition. Read by audit-service.
 #
 # No DLQ topic here on purpose: this service has NO incoming channel. A dead-letter topic is
 # wired in the same change that introduces a consumer's rethrow, never speculatively (#5745, #5752).

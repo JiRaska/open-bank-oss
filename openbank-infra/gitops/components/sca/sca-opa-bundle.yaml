@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "54a53edfeeb323d8"
+    openbank.tech/policy-checksum: "1689331bbd71c3eb"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1020,12 +1020,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

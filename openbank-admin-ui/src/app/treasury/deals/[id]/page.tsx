@@ -65,7 +65,7 @@ function DealDetail({ id }: { id: string }) {
 
   const labels: Record<DealAction, string> = {
     submit: t('Předložit', 'Submit'), approve: t('Schválit', 'Approve'), reject: t('Zamítnout', 'Reject'),
-    cancel: t('Zrušit obchod', 'Cancel deal'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
+    cancel: t('Zrušit obchod', 'Cancel deal'), confirm: t('Potvrdit protistranou', 'Record confirmation'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
     reverse: t('Stornovat', 'Reverse'), 'override-limit': t('Překročit limit', 'Override limit'),
   }
 
@@ -103,7 +103,7 @@ function DealDetail({ id }: { id: string }) {
   if (!deal) return null
 
   const a = dealActions(deal, actor, roles)
-  const plain: DealAction[] = (['submit', 'approve', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
+  const plain: DealAction[] = (['submit', 'approve', 'confirm', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
   // override-limit needs a mandatory reason exactly like reject/reverse, so it shares the same
   // reason input and disabled-until-filled behaviour rather than a separate dialog.
   const withReason: DealAction[] = [
