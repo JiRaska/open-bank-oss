@@ -643,6 +643,9 @@ jobs:
           path: openbank-admin-ui/test-run-history
           key: test-run-history-${{ github.run_id }}
 
+      - name: Verify PIT artifact selection contract
+        run: python3 .github/scripts/test_select_pitest_artifacts.py
+
       - name: Stage pitest mutation results from latest completed weekly run
         # pitest.yml uploads one artifact per governed lane (30-day retention).
         # collect-test-intelligence.mjs reads openbank-*/build/reports/pitest/mutations.xml.
@@ -669,13 +672,13 @@ jobs:
           echo "Staging pitest results from run ${RUN_ID}..."
           ARTIFACT_INVENTORY=$(api \
             "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100") || exit 1
-          ARTIFACTS=$(python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" <<< "${ARTIFACT_INVENTORY}") || exit 1
+          ARTIFACTS=$(python3 .github/scripts/select-pitest-artifacts.py <<< "${ARTIFACT_INVENTORY}") || exit 1
           if [ -z "${ARTIFACTS}" ]; then
             echo "No pitest artifacts found in run ${RUN_ID} — skipping."
             exit 0
           fi
           DOWNLOADED=0
-          while IFS=' ' read -r art_id art_name; do
+          while IFS=' ' read -r art_id art_name svc; do
             [ -n "${art_id}" ] || continue
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
                 -L -o "/tmp/${art_name}.zip"; then
@@ -685,16 +688,16 @@ jobs:
               # prefix (pitest.yml uploads that directory as `path`). Reconstruct that
               # path so the report collectors find it — never `-d .`, which dumps
               # a full report into the repo root and gets it committed (#1104).
-              # The enforced authz lane predates component-normalized artifact names.
-              # Preserve its retained `pitest-authz` contract while staging it under
-              # the internal module that owns the report and required control.
-              case "${art_name}" in
-                pitest-authz) svc="openbank-libs-runtime" ;;
-                *) svc="${art_name#pitest-}" ;;
-              esac
+              # The selector prefers the full libs-runtime report over the
+              # overlapping authz subset and fails on any other destination
+              # collision. Never let unzip choose an arbitrary winner.
               dest="${svc}/build/reports/pitest"
+              if [ -d "${dest}" ] && [ -n "$(find "${dest}" -mindepth 1 -maxdepth 1 -print -quit)" ]; then
+                echo "PIT destination ${dest} is already populated; refusing to overwrite evidence" >&2
+                exit 1
+              fi
               mkdir -p "${dest}"
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" || exit 1
+              unzip -qn "/tmp/${art_name}.zip" -d "${dest}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
