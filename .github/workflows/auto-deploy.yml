@@ -1267,7 +1267,7 @@ jobs:
             done
           done
 
-          # Deploy window (deploy-window.py): carry forward the pins of every open, UNARMED
+          # Deploy window (deploy-window.py): carry forward the pins of open, non-draft, UNARMED
           # older gitops deploy PR, so this PR covers every pending service and
           # supersede-deploy-prs.sh below closes the older ones. Several pushes inside one window
           # then land as ONE commit on main instead of one each. A pin is carried only while main
@@ -1275,12 +1275,17 @@ jobs:
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
           if [ -n "${GH_TOKEN:-}" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
+            # Re-read the live hold after the main reset. Filtering this run's tags alone
+            # is insufficient: an older unarmed PR may contain a held image pin.
+            HELD_SERVICES="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
+              .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)"
+            HELD_IMAGES="$(for service in $HELD_SERVICES; do printf '%s/%s ' "$ECR_REGISTRY" "$service"; done)"
             for n in $( (gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
-                         --json number,headRefName,autoMergeRequest,isCrossRepository \
-                         --jq '.[] | select((.isCrossRepository | not) and .autoMergeRequest == null
+                         --json number,headRefName,autoMergeRequest,isCrossRepository,isDraft \
+                         --jq '.[] | select((.isCrossRepository | not) and (.isDraft | not) and .autoMergeRequest == null
                                  and (.headRefName | startswith("chore/gitops-auto-deploy-"))) | .number') || true); do
               carried="$(gh pr diff "$n" --repo "$GITHUB_REPOSITORY" \
-                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
+                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES $HELD_IMAGES")" \
                 || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
               [ -z "$carried" ] && continue
               echo "  carried from deferred PR #${n}:"; echo "$carried"
