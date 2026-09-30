@@ -273,7 +273,11 @@
   --sidebar-accent: var(--accent);
 }
 
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* Reset belongs below component and utility layers. An unlayered padding: 0 wins
+   over .btn and Tailwind spacing utilities regardless of selector specificity. */
+@layer base {
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+}
 
 html {
   font-family: var(--font-sans);
@@ -385,6 +389,15 @@ main {
   box-shadow: var(--shadow-md);
   border-color: var(--border-strong);
 }
+
+/* Domain workbenches use the same panel spacing on every route, including new ones.
+   Keep the base .card unpadded: edge-to-edge tables elsewhere rely on that contract. */
+.ob-domain-workbench { min-width: 0; }
+.ob-domain-workbench .card {
+  min-width: 0;
+  padding: clamp(1rem, 1.5vw, 1.5rem);
+}
+.ob-domain-workbench .input { min-width: 0; max-width: 100%; }
 
 /* ── Badge ── */
 .badge {
