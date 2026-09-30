@@ -3831,6 +3831,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/BalanceCoverClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/FxRateClient.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/client/LedgerRestClient.kt"
+      - "src/main/kotlin/com/openbank/transaction/infrastructure/rest/TransactionResource.kt"
       - "src/main/kotlin/com/openbank/transaction/infrastructure/image/LogoImages.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
