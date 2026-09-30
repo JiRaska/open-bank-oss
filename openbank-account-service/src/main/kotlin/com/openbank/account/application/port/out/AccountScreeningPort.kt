@@ -13,11 +13,7 @@ class AccountScreeningUnavailableException(cause: Throwable) :
  * verbatim: `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED` (its `openapi.yaml`), or
  * [UNKNOWN] when the response carried no status at all.
  */
-data class SanctionsScreenResult(
-    val status: String,
-    val matchScore: Double,
-    val matchedName: String?,
-) {
+data class SanctionsScreenResult(val status: String, val matchScore: Double, val matchedName: String?) {
     /**
      * Whether the screen allows an account to open. An ALLOW-list, never a deny-list: the gate used
      * to block `HIT` and `REVIEW`, and sanctions-service has never returned `REVIEW`, so a
