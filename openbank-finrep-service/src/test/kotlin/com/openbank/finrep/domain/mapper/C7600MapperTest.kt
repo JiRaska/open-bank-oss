@@ -210,4 +210,14 @@ class C7600MapperTest {
         assertThatThrownBy { render(result(stock = "1600", ratio = "6.400000", notes = listOf(note))) }
             .isInstanceOf(IllegalStateException::class.java)
     }
+
+    @Test
+    fun `the template carries the source run's id and provenance, and none when there is no run`() {
+        val t = C7600Mapper.map(RiskLiquidityLookup.found(result().copy(provenance = "synthetic")), asOf)
+        assertThat(t.sourceRunId).isEqualTo("run-7")
+        assertThat(t.provenance).isEqualTo("synthetic")
+        val gap = C7600Mapper.map(RiskLiquidityLookup.unavailable("no run"), asOf)
+        assertThat(gap.sourceRunId).isNull()
+        assertThat(gap.provenance).isNull()
+    }
 }

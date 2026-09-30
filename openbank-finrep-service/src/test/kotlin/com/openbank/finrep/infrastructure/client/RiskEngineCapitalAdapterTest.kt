@@ -30,7 +30,7 @@ class RiskEngineCapitalAdapterTest {
                     BigDecimal("150"),
                 )
             return Uni.createFrom().item(
-                CapitalResponse(id, asOf.toString(), "bcbs-d424-sa", "1", listOf(czk), czk, emptyList()),
+                CapitalResponse(id, asOf.toString(), "bcbs-d424-sa", "1", "synthetic", listOf(czk), czk, emptyList()),
             )
         }
 
@@ -53,7 +53,16 @@ class RiskEngineCapitalAdapterTest {
                 ),
             )
             return Uni.createFrom().item(
-                LiquidityResponse(id, asOf.toString(), "bcbs-d238-d295", "2", listOf(czk), czk, emptyList()),
+                LiquidityResponse(
+                    id,
+                    asOf.toString(),
+                    "bcbs-d238-d295",
+                    "2",
+                    "synthetic",
+                    listOf(czk),
+                    czk,
+                    emptyList(),
+                ),
             )
         }
     }
@@ -75,6 +84,7 @@ class RiskEngineCapitalAdapterTest {
         assertThat(risk.capitalCalls).containsExactly("newer")
         assertThat(lookup.result!!.totalRwa).isEqualByComparingTo("150")
         assertThat(lookup.result!!.classes.single().exposureClass).isEqualTo("bank")
+        assertThat(lookup.result!!.provenance).isEqualTo("synthetic")
     }
 
     @Test
@@ -117,6 +127,7 @@ class RiskEngineCapitalAdapterTest {
         assertThat(lookup.result!!.hqlaStock).isEqualByComparingTo("899")
         assertThat(lookup.result!!.netOutflows).isEqualByComparingTo("100")
         assertThat(lookup.result!!.lcrRatio).isEqualByComparingTo("8.99")
+        assertThat(lookup.result!!.provenance).isEqualTo("synthetic")
     }
 
     @Test
