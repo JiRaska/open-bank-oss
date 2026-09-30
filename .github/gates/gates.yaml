@@ -385,6 +385,7 @@ gates:
     name: "held services cannot change GitOps image pins (issue #11503)"
     group: gitops
     mode: enforced
+    budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
     rationale: "A held service must keep its GitOps image pin until the reviewed hold is removed, including automated deploy updates."
     review_after: "2027-03-30"
     selftest: python3 .github/scripts/check-deploy-holds.py --self-test
