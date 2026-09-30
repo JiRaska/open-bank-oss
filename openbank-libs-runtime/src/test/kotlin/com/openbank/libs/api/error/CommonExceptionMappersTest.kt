@@ -8,6 +8,7 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.authz.PolicyDeniedException
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
@@ -154,12 +155,21 @@ class CommonExceptionMappersTest {
     @Test
     fun `a 403 carries a constant message, never the policy decision reason`() {
         val response = WebApplicationExceptionMapper()
-            .toResponse(ForbiddenException("matrix-denies: ROLE_VIEWER lacks ledger.approve"))
+            .toResponse(PolicyDeniedException("matrix-denies: ROLE_VIEWER lacks ledger.approve"))
         val body = response.entity as ApiError
 
         assertThat(response.status).isEqualTo(403)
         assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
         assertThat(body.message).isEqualTo("Forbidden")
+    }
+
+    @Test
+    fun `a service's own ForbiddenException keeps its client-facing message`() {
+        val body = WebApplicationExceptionMapper().toResponse(
+            ForbiddenException("X-Acting-For is required"),
+        ).entity as ApiError
+        assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
+        assertThat(body.message).isEqualTo("X-Acting-For is required")
     }
 
     @Test

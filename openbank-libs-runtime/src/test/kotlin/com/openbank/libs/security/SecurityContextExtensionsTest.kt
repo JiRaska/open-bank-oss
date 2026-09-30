@@ -104,6 +104,6 @@ class SecurityContextExtensionsTest {
         assertThat(thrown).isInstanceOf(ForbiddenException::class.java)
         val response = WebApplicationExceptionMapper().toResponse(thrown as ForbiddenException)
         assertThat(response.status).isEqualTo(403)
-        assertThat((response.entity as ApiError).message).isEqualTo("Forbidden")
+        assertThat((response.entity as ApiError).code).isEqualTo("FORBIDDEN")
     }
 }

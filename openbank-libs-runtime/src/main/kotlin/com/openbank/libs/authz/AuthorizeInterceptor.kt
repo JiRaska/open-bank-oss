@@ -16,7 +16,6 @@ import jakarta.inject.Inject
 import jakarta.interceptor.AroundInvoke
 import jakarta.interceptor.Interceptor
 import jakarta.interceptor.InvocationContext
-import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.HttpHeaders
 import jakarta.ws.rs.core.MediaType
@@ -287,7 +286,7 @@ class AuthorizeInterceptor {
                 decision.reason ?: "unspecified",
             )
             m2mDecisionLine(annotation.action, query.principal.id, "deny", decision.reason)?.let(log::info)
-            throw ForbiddenException(decision.reason ?: "policy denied")
+            throw PolicyDeniedException(decision.reason ?: "policy denied")
         }
         record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
         m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)

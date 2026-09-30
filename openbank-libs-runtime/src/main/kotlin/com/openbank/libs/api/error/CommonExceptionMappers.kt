@@ -7,6 +7,7 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.authz.PolicyDeniedException
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
@@ -256,8 +257,6 @@ class UnauthorizedExceptionMapper : ExceptionMapper<UnauthorizedException> {
             .build()
 }
 
-private const val FORBIDDEN_STATUS = 403
-
 @Provider
 class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
     override fun toResponse(exception: WebApplicationException): Response {
@@ -269,10 +268,9 @@ class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
             409 -> ErrorCode.CONFLICT.code
             else -> "HTTP_$status"
         }
-        // A 403's message is a constant: AuthorizeInterceptor puts the policy decision reason
-        // there, and that reason is for the log and the trace, never the caller
-        // (PolicyDecisionPoint KDoc). Other statuses keep their message.
-        val message = if (status == FORBIDDEN_STATUS) "Forbidden" else exception.message ?: "Request failed"
+        // A policy deny's reason is for the log and the trace, never the caller (PolicyDecisionPoint
+        // KDoc), so that subtype gets a constant message. Every other exception keeps its own.
+        val message = if (exception is PolicyDeniedException) "Forbidden" else exception.message ?: "Request failed"
         return Response.status(status)
             .entity(apiError(status, code, message))
             .build()
