@@ -441,6 +441,13 @@ def mutation_projection_errors(
     )
     if 'stage-pitest-artifacts.py plan' not in pitest_stage or 'stage-pitest-artifacts.py stage' not in pitest_stage:
         errors.append("mutation staging does not preflight and isolate PIT artifacts")
+    if ('stage-pitest-artifacts.py select-run' not in pitest_stage
+            or 'status=completed&per_page=100' not in pitest_stage
+            or 'branch=main&per_page=100' not in pitest_stage):
+        errors.append("mutation staging does not cross-check PIT run inventories before selection")
+    if ("run.get(\"run_started_at\") or run.get(\"created_at\")" not in staging_script
+            or "max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))" not in staging_script):
+        errors.append("mutation projection does not select the latest completed attempt by start time")
     if 'name.startswith("pitest-")' not in staging_script or 'artifact.get("expired")' not in staging_script:
         errors.append("mutation staging does not select every retained non-expired Pitest artifact")
     if 'artifact_id in ids or name in names or owner in lanes' not in staging_script:
@@ -852,8 +859,6 @@ def check(root: Path) -> list[str]:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
     if "pitest.yml/runs?branch=main&status=completed&per_page=100" not in deploy:
         errors.append("mutation projection does not inspect completed attempts regardless of verdict")
-    if "r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True)" not in deploy:
-        errors.append("mutation projection does not select the latest completed attempt by start time")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
     pitest_workflow = text(root / ".github/workflows/pitest.yml")
@@ -1201,6 +1206,9 @@ python3 "${SELECTOR}" baseline
                 return 1
         valid_mutation_deploy = """
 Stage pitest mutation results
+status=completed&per_page=100
+branch=main&per_page=100
+python3 .github/scripts/stage-pitest-artifacts.py select-run
 python3 .github/scripts/stage-pitest-artifacts.py plan
 python3 .github/scripts/stage-pitest-artifacts.py stage
 Stage performance evidence
@@ -1209,6 +1217,8 @@ Stage performance evidence
 name.startswith("pitest-")
 artifact.get("expired")
 artifact_id in ids or name in names or owner in lanes
+run.get("run_started_at") or run.get("created_at")
+max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))
 return "openbank-libs-runtime-authz" if name == "pitest-authz" else name.removeprefix("pitest-")
 os.rename(temporary, destination)
 '''
@@ -1327,6 +1337,11 @@ function collectContracts() {}
                 "path: openbank-libs-runtime/build/reports/pitest/", "path: authz/build/reports/pitest/")),
             "fixed mutation stage is omitted": (0, lambda value: value.replace(
                 'stage-pitest-artifacts.py stage', 'echo stage')),
+            "PIT run selection loses its second API view": (0, lambda value: value.replace(
+                'branch=main&per_page=100', 'status=completed&per_page=100')),
+            "PIT run selection chooses oldest returned attempt": (5, lambda value: value.replace(
+                'max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))',
+                'min(filtered, key=lambda run_id: (filtered[run_id][0], run_id))')),
             "ambiguous mutation lanes are accepted": (5, lambda value: value.replace(
                 'artifact_id in ids or name in names or owner in lanes', 'artifact_id in ids')),
             "fixed mutation sidecar leaves its report owner": (1, lambda value: value.replace(

@@ -16,6 +16,33 @@ SPEC.loader.exec_module(module)
 
 
 class PitestStagingTest(unittest.TestCase):
+    def test_run_selection_uses_latest_attempt_not_response_order_or_conclusion(self):
+        old = {"id": 11, "status": "completed", "conclusion": "success",
+               "created_at": "2026-09-20T00:00:00Z", "run_started_at": "2026-09-20T00:00:00Z"}
+        new = {"id": 12, "status": "completed", "conclusion": "failure",
+               "created_at": "2026-09-29T00:00:00Z", "run_started_at": "2026-09-29T00:00:00Z"}
+        self.assertEqual(module.select_run(
+            {"total_count": 2, "workflow_runs": [old, new]},
+            {"total_count": 2, "workflow_runs": [new, old]},
+        ), 12)
+
+    def test_missing_newer_run_in_one_api_view_fails_closed(self):
+        old = {"id": 11, "status": "completed", "created_at": "2026-09-20T00:00:00Z"}
+        new = {"id": 12, "status": "completed", "created_at": "2026-09-29T00:00:00Z"}
+        with self.assertRaisesRegex(ValueError, "inventories disagree"):
+            module.select_run(
+                {"total_count": 1, "workflow_runs": [old]},
+                {"total_count": 2, "workflow_runs": [old, new]},
+            )
+
+    def test_partial_run_page_fails_closed(self):
+        old = {"id": 11, "status": "completed", "created_at": "2026-09-20T00:00:00Z"}
+        with self.assertRaisesRegex(ValueError, "inventory is incomplete"):
+            module.select_run(
+                {"total_count": 2, "workflow_runs": [old]},
+                {"total_count": 1, "workflow_runs": [old]},
+            )
+
     def test_two_reports_from_one_gradle_module_remain_separate(self):
         inventory = {"artifacts": [
             {"id": 11, "name": "pitest-authz", "expired": False},

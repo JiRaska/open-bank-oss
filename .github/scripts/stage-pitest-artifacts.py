@@ -17,6 +17,37 @@ from pathlib import Path, PurePosixPath
 ARTIFACT_NAME = re.compile(r"pitest-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 
+def select_run(completed_inventory: dict, all_inventory: dict) -> int | None:
+    """Require two API views to agree before choosing a PIT evidence attempt."""
+    def completed_runs(inventory: dict) -> dict[int, tuple[str, str]]:
+        runs = inventory.get("workflow_runs")
+        if not isinstance(runs, list):
+            raise ValueError("PIT run inventory has no workflow_runs list")
+        if inventory.get("total_count", len(runs)) != len(runs):
+            raise ValueError("PIT run inventory is incomplete; refusing older evidence")
+        selected: dict[int, tuple[str, str]] = {}
+        for run in runs:
+            if not isinstance(run, dict):
+                raise ValueError("PIT run inventory contains a non-object entry")
+            if run.get("status") != "completed":
+                continue
+            run_id = run.get("id")
+            started = run.get("run_started_at") or run.get("created_at")
+            created = run.get("created_at")
+            if not isinstance(run_id, int) or run_id <= 0 or not isinstance(started, str) or not isinstance(created, str):
+                raise ValueError("PIT run inventory contains incomplete provenance")
+            if run_id in selected:
+                raise ValueError(f"PIT run inventory duplicates run {run_id}")
+            selected[run_id] = (started, created)
+        return selected
+
+    filtered = completed_runs(completed_inventory)
+    unfiltered = completed_runs(all_inventory)
+    if filtered != unfiltered:
+        raise ValueError("PIT run inventories disagree; refusing possibly stale evidence")
+    return max(filtered, key=lambda run_id: (filtered[run_id][0], run_id)) if filtered else None
+
+
 def lane(name: str) -> str:
     if not ARTIFACT_NAME.fullmatch(name):
         raise ValueError(f"invalid PIT artifact name: {name!r}")
@@ -101,6 +132,9 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
     subcommands.add_parser("plan")
+    selecting = subcommands.add_parser("select-run")
+    selecting.add_argument("completed_inventory", type=Path)
+    selecting.add_argument("all_inventory", type=Path)
     staging = subcommands.add_parser("stage")
     staging.add_argument("archive", type=Path)
     staging.add_argument("owner")
@@ -108,7 +142,14 @@ def main() -> int:
     staging.add_argument("--run-id")
     args = parser.parse_args()
     try:
-        if args.command == "plan":
+        if args.command == "select-run":
+            run_id = select_run(
+                json.loads(args.completed_inventory.read_text()),
+                json.loads(args.all_inventory.read_text()),
+            )
+            if run_id is not None:
+                print(run_id)
+        elif args.command == "plan":
             for artifact_id, name, owner in plan(json.load(sys.stdin)):
                 print(f"{artifact_id}\t{name}\t{owner}")
         else:
