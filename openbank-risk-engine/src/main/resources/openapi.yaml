@@ -41,7 +41,11 @@ info:
   # 1.15.1 -> 1.16.0: additive — SnapshotRun states modelVersions (the parameter sets, IRRBB shock
   #        fingerprint, behavioural model and engine build in force when the run was recorded) and
   #        ledgerCutOff (ADR-0314 D2). Both null for a run recorded before they existed.
-  version: 1.16.0
+  # 1.16.0 -> 1.17.0: additive — ČNB minimum reserves averaged over the maintenance period
+  #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
+  #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
+  #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
+  version: 1.17.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -478,6 +482,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/min-reserves/periods:
+    get:
+      tags: [Risk]
+      operationId: listMinReservePeriods
+      summary: The configured ČNB maintenance-period calendar
+      description: |
+        The versioned maintenance-period calendar (`openbank.risk.min-reserves.maintenance-calendar`).
+        `calendarStatus` is `verified` or `sample-unverified`; a sample calendar is a stand-in, NOT
+        the official ČNB calendar, and `notes` says so. With `asOf`, only the period containing
+        that date (an empty list when none does). Requires ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR
+        or ROLE_ADMIN (action risk.snapshot.read).
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: The calendar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceCalendar'
+        '400':
+          description: asOf is not an ISO date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+  /api/v1/risk/min-reserves/periods/{periodId}:
+    get:
+      tags: [Risk]
+      operationId: getMinReservePeriod
+      summary: ČNB minimum reserves averaged over one maintenance period
+      description: |
+        Minimum reserves are met on the AVERAGE of end-of-day holdings over every calendar day of
+        the maintenance period (ADR-0315 D8). The requirement comes from the TIED_OUT snapshot on
+        the period's base reference date; holdings from the TIED_OUT snapshot of each day in the
+        period up to `asOf` (default: today in Europe/Prague), the latest recorded per day. The
+        running average is over the days WITH a snapshot, and `coverage` = daysWithData /
+        daysElapsed. The daily holding proposal is the same amount on every remaining day that
+        brings the period average to the requirement; it needs every elapsed day covered, so with
+        a gap it is null and `proposalNotStated` says why. Each null figure has a reason field;
+        none is ever a stand-in zero. The engine proposes only; it never moves money. Derived on
+        request, never stored. Requires ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN
+        (action risk.snapshot.read).
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: asOf
+          in: query
+          required: false
+          description: Evaluation date; default today (Europe/Prague)
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: The period's averaging position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinReservePeriod'
+        '400':
+          description: asOf is not an ISO date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such period in the configured calendar
 
   /api/v1/risk/curve-sets:
     get:
@@ -1663,6 +1739,96 @@ components:
         reserveClass: {type: string}
         description: {type: string}
 
+    MaintenancePeriod:
+      type: object
+      required: [id, start, end, baseReferenceDate]
+      properties:
+        id: {type: string}
+        start: {type: string, format: date}
+        end: {type: string, format: date}
+        baseReferenceDate:
+          type: string
+          format: date
+          description: The date whose reserve base sets this period's requirement
+    MaintenanceCalendar:
+      type: object
+      required: [calendarId, calendarVersion, calendarStatus, calendarSource, periods, notes]
+      properties:
+        calendarId: {type: string}
+        calendarVersion: {type: string}
+        calendarStatus: {type: string, enum: [verified, sample-unverified]}
+        calendarSource: {type: string}
+        periods:
+          type: array
+          items: {$ref: '#/components/schemas/MaintenancePeriod'}
+        notes: {type: array, items: {type: string}}
+    MinReservePeriod:
+      type: object
+      required: [calendarId, calendarVersion, calendarStatus, calendarSource, period, evaluationDate,
+        parameterSetId, parameterSetVersion, holdingCurrency, daysInPeriod, daysElapsed, daysRemaining,
+        daysWithData, missingDays, days, notes]
+      properties:
+        calendarId: {type: string}
+        calendarVersion: {type: string}
+        calendarStatus: {type: string, enum: [verified, sample-unverified]}
+        calendarSource: {type: string}
+        period: {$ref: '#/components/schemas/MaintenancePeriod'}
+        evaluationDate: {type: string, format: date}
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        holdingCurrency: {type: string}
+        baseRunId:
+          type: [string, 'null']
+          format: uuid
+          description: The TIED_OUT run on the base reference date; null when there is none
+        requirement:
+          type: [number, 'null']
+          description: Requirement from the base reference run; null with requirementNotStated
+        requirementNotStated: {type: [string, 'null']}
+        daysInPeriod: {type: integer}
+        daysElapsed: {type: integer, description: Calendar days of the period up to evaluationDate}
+        daysRemaining: {type: integer}
+        daysWithData: {type: integer, description: Elapsed days with a TIED_OUT snapshot}
+        coverage:
+          type: [number, 'null']
+          description: daysWithData / daysElapsed; null before the period starts
+        missingDays:
+          type: array
+          items: {type: string, format: date}
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, runId]
+            properties:
+              date: {type: string, format: date}
+              runId: {type: string, format: uuid}
+              holdings:
+                type: [number, 'null']
+                description: ČNB current-account balance that day; null when holdings are not stated
+        averageHoldings:
+          type: [number, 'null']
+          description: Mean holding over the days with data; null with averageNotStated, never zero
+        averageNotStated: {type: [string, 'null']}
+        remainingRequiredAverage:
+          type: [number, 'null']
+          description: Average the remaining days must hold; negative means already met
+        dailyHoldingProposal:
+          type: [number, 'null']
+          description: remainingRequiredAverage floored at zero, rounded up to the cent
+        proposal:
+          type: [array, 'null']
+          items:
+            type: object
+            required: [date, amount]
+            properties:
+              date: {type: string, format: date}
+              amount: {type: number}
+        proposalNotStated: {type: [string, 'null']}
+        requirementMet:
+          type: [boolean, 'null']
+          description: Only once the period is over, fully covered, with both sides stated
+        notes: {type: array, items: {type: string}}
     MinReserves:
       type: object
       required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, holdingCurrency,
