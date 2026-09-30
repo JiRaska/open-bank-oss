@@ -38,7 +38,10 @@ info:
   #        claimed 1.10.0; main has since reached 1.14.0, so this takes the next free number, 1.15.0.
   # 1.15.0 -> 1.15.1: description only — /capital defaults to the EU CRR parameter set
   #        (eu-crr3-sa); the response shape is unchanged.
-  version: 1.15.1
+  # 1.15.1 -> 1.16.0: additive — SnapshotRun states modelVersions (the parameter sets, IRRBB shock
+  #        fingerprint, behavioural model and engine build in force when the run was recorded) and
+  #        ledgerCutOff (ADR-0314 D2). Both null for a run recorded before they existed.
+  version: 1.16.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -637,6 +640,56 @@ components:
             run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
             that replays an existing run (idempotent replay) returns the ORIGINAL requester,
             not the caller of the replaying request.
+        modelVersions:
+          oneOf:
+            - $ref: '#/components/schemas/ModelVersions'
+            - type: 'null'
+          description: |
+            ADR-0314 D2: the model and parameter versions in force when the run was recorded.
+            Recorded, not part of inputHash — no version changes a position, so a replay returns
+            the ORIGINAL run's versions. Null means the run was recorded before this field existed.
+        ledgerCutOff:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            The instant immediately before the ledger was read. The ledger read takes only asOf
+            (no "as known at" bound), so this is recorded, not sent: a rerun reads the same data
+            while nothing dated on or before asOf is posted afterwards; if something is, the
+            rerun's inputHash differs and it becomes a new run. Null for a run recorded before
+            this field existed.
+
+    ModelVersions:
+      type: object
+      required: [engineVersion, capitalSetId, capitalSetVersion, liquiditySetId, liquiditySetVersion,
+                 irrbbShockSetVersion, irrbbShockSource, minReservesSetId, minReservesSetVersion,
+                 behaviouralModelId, behaviouralModelVersion]
+      properties:
+        engineVersion:
+          type: string
+          description: The risk engine's build version.
+        capitalSetId:
+          type: string
+        capitalSetVersion:
+          type: string
+        liquiditySetId:
+          type: string
+        liquiditySetVersion:
+          type: string
+        irrbbShockSetVersion:
+          type: string
+          description: |
+            `sha256:<16 hex>` fingerprint of the configured shock sizes and post-shock floor —
+            the IRRBB shocks carry no set id or version of their own.
+        irrbbShockSource:
+          type: string
+        minReservesSetId:
+          type: string
+        minReservesSetVersion:
+          type: string
+        behaviouralModelId:
+          type: string
+        behaviouralModelVersion:
+          type: string
 
     SnapshotRunSummary:
       type: object
