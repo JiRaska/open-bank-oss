@@ -125,6 +125,7 @@ jobs:
             || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+          python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           SHARED_CODE_RE='^openbank-libs(-[a-z0-9-]+)?/'
           SHARED_TEST_RE='^openbank-libs(-[a-z0-9-]+)?/src/test/'
@@ -143,7 +144,8 @@ jobs:
             # matrix, with all-green checking the empty-build path (ADR-0092, #846).
             # Other paths are scoped below; unknown inputs retain full-fleet scope.
             # fetch-depth:0 above makes HEAD~1 available for this diff.
-            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            DIFF_BASE=HEAD~1
+            FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
             echo "Push changed files:"; echo "$FILES"
             # Inert = provably cannot change a compile input or a contract. A service's
             # source, any build input, Pact, or unknown automation path remains relevant and
@@ -175,6 +177,13 @@ jobs:
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
               FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
+              # A raised Kover floor changes only this module's verification. Compare
+              # both complete build scripts; any other byte keeps the fleet fallback.
+              if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" \
+                 && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+                echo "Decision: shared domain build script changes only its raised coverage floor."
+                FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+              fi
               if grep -qE "${SHARED_CODE_RE}|^(gradle/|settings\\.gradle\\.kts|build\\.gradle\\.kts|gradle\\.properties|build-logic/)" <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
@@ -244,25 +253,15 @@ jobs:
             # to BASE...HEAD but observable and robust to odd ref state.
             MB=$(git merge-base "$BASE" HEAD 2>/dev/null) \
               || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
+            DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
-            # Code-global inputs every module compiles/tests against -> rebuild all.
-            # (openbank-libs*, version catalog, root build, gradle.properties,
-            # build-logic.) Shared src/test is local to its module; other changes here
-            # can alter service compile or test inputs, so the fleet must rebuild.
-            # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`.
-            # Under `set -o pipefail`, `grep -q` exits on first match and closes
-            # the pipe, so the upstream `echo` gets SIGPIPE (exit 141) and the
-            # pipeline returns 141 -> the `if` mis-reads a successful match as
-            # FALSE. Whether it fires depends racily on how far down the (sorted)
-            # file list the match sits, so early-sorting modules (account-service,
-            # openbank-libs) were silently dropped from the matrix. A here-string
-            # has no pipe and no SIGPIPE, so the test is deterministic.
-            # Governance catalogs (openbank-libs/governance/) are data for CI
-            # checks + admin-ui, not a compile/test input of any module — an
-            # ADR/control-catalog edit must not cost a 28-module fleet run.
+            # Shared code/build inputs rebuild all; shared src/test stays local.
+            # Use here-strings with grep -q: a pipe can SIGPIPE its producer under
+            # pipefail and silently miss an early-sorting shared change.
+            # Governance catalogs are CI data, not service compile inputs.
             #
             # `openbank-libs/` alone is stale since ADR-0122 split the module in two
             # (#33/#34): openbank-libs-domain and openbank-libs-runtime are compiled
@@ -295,6 +294,12 @@ jobs:
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
             FILES_GLOBAL=$(grep -vE "$SHARED_TEST_RE" <<< "$FILES_CODE" || true)
+            # Match the push selector: an exact raised-floor-only diff stays local.
+            if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" \
+               && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+              echo "Decision: shared domain build script changes only its raised coverage floor."
+              FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+            fi
             if grep -qE "${SHARED_CODE_RE}|^(gradle/|settings\\.gradle\\.kts|build\\.gradle\\.kts|gradle\\.properties|build-logic/)" <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
