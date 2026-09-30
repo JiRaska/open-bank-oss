@@ -37,6 +37,7 @@ import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
@@ -77,6 +78,7 @@ import java.util.UUID
  * AccountSecurityContractTest.
  */
 private const val ACCOUNTS_PATH = "/api/v1/accounts"
+private const val IDEMPOTENCY_SERVICE = "account-service"
 
 @Path("/api/v1/accounts")
 @Produces(MediaType.APPLICATION_JSON)
@@ -144,8 +146,10 @@ class AccountResource(
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        // Keys are per service and caller: another principal reusing this key is a different key.
+        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", ACCOUNTS_PATH, request)
-        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+        when (val reservation = idempotencyStore.reserve(scope, idempotencyKey, requestHash)) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
                 .header("X-Idempotency-Replayed", "true")
@@ -180,14 +184,14 @@ class AccountResource(
             // abandon the release mid-flight and leave the key stuck IN_PROGRESS for its full TTL.
             if (!opened) {
                 withContext(NonCancellable) {
-                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                    runCatching { idempotencyStore.release(scope, idempotencyKey, requestHash) }
                         .onFailure { Log.warn("Failed to release idempotency key after create failure", it) }
                 }
             }
         }
         val responseBody = account.toResponse()
         val json = objectMapper.writeValueAsString(responseBody)
-        idempotencyStore.save(idempotencyKey, requestHash, 201, json)
+        idempotencyStore.save(scope, idempotencyKey, requestHash, 201, json)
 
         return Response.created(URI.create("/api/v1/accounts/${account.id}"))
             .entity(responseBody)
