@@ -11,7 +11,7 @@ const decimal = z.union([z.number(), z.string()]).transform(Number).pipe(z.numbe
 const timestamp = z.string().min(1)
 
 export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD', 'FX_SPOT'] as const
-export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
+export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'CONFIRMED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
 export const CURRENCIES = ['CZK', 'EUR'] as const
 export const FX_SIDES = ['BUY', 'SELL'] as const
 /** The central bank's counterparty id (Deal.CNB_COUNTERPARTY_ID). */

@@ -1,32 +1,59 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# CEL (policies.kyverno.io/v1 ImageValidatingPolicy) SHADOW of
-# verify-openbank-image-sbom-attestation (verify-sbom-attestation-policy.yaml) —
-# kyverno.io/v1 ClusterPolicy is deprecated in Kyverno 1.19 and planned for removal in
-# 1.20 (https://kyverno.io/docs/guides/migration-to-cel/).
+# THE admission control for openbank-* images (ADR-0030 D4, ADR-0121 Axis 2): every
+# openbank-* image in a Pod must carry a valid cosign signature AND a cosign-signed
+# CycloneDX SBOM attestation (https://cyclonedx.org/bom) whose predicate has
+# bomFormat == "CycloneDX", both against the AWS KMS key alias/openbank-cosign-signing.
+# policies.kyverno.io/v1 ImageValidatingPolicy — the CEL replacement for the kyverno.io/v1
+# ClusterPolicy verify-openbank-image-sbom-attestation (verify-sbom-attestation-policy.yaml, deleted in stage 2),
+# which is deprecated in Kyverno 1.19 and removed in 1.20
+# (https://kyverno.io/docs/guides/migration-to-cel/). Stage 2 of #11437: this policy went
+# Audit -> Deny and the v1 file was deleted in the SAME PR (Argo PruneLast, so the v1
+# object is pruned after this one is synced as Deny).
 #
 # READ BEFORE TOUCHING. This is the policy class that has taken the fleet down: the
-# July Audit->Enforce flip (#887, #1197: five workloads down four days) and the
-# September SLSA deadlock (#9805). So stage 1 is built to be unable to deny anything:
-#   validationActions: [Audit]   reports only; the v1 Enforce policy keeps denying
-#   failurePolicy: Ignore        as v1
-#   mutateDigest: false          CRITICAL — the CRD DEFAULT IS TRUE. Left out, this
-#                                "audit" policy would rewrite every openbank-* Pod
-#                                image to a digest at admission. v1 had false.
+# July Audit->Enforce flip (#887, #1197: five workloads down four days), the September
+# SLSA deadlock (#9805), and the 2026-09-29 runner outage when an Audit shadow of this
+# policy saturated the admission controller (#11461). Settings and why:
+#   validationActions: [Deny]    replaces v1 validationFailureAction: Enforce
+#   failurePolicy: Fail          DELIBERATELY STRICTER than v1 (Ignore). Kyverno 1.19.1's
+#                                IVP handler (pkg/webhooks/resource/ivpol/handler.go,
+#                                validationResponse) denies a RuleStatusError under Deny
+#                                whatever failurePolicy says, so a registry / KMS-key /
+#                                in-engine timeout error already denies. The only thing
+#                                failurePolicy still decides is the webhook CALL failing:
+#                                Kyverno unreachable, or the apiserver's 30 s timeout.
+#                                Ignore there admits an unverified image whenever
+#                                admission is down or slow, so the cheapest bypass of the
+#                                control is to overload Kyverno. Fail closes it. Cost: the
+#                                IVP webhook has no image-scoped matchConditions, so a
+#                                Kyverno outage blocks Pod creates in every namespace but
+#                                kube-system and kyverno (both excluded, so Kyverno can
+#                                always restart itself). The Deny+Fail vpol webhooks
+#                                already carry that dependency for every namespace except
+#                                arc-runners; the NEW exposure is arc-runners. Mitigated by
+#                                2 admission replicas + PDB + the verify cache (#11527;
+#                                runner Pod 1.5-1.8 s warm, 6.2 s cold vs the 30 s timeout).
+#                                Break-glass: runbook 0011 §4a (set Ignore here by PR).
+#   mutateDigest: false          CRITICAL — the CRD DEFAULT IS TRUE. Left out, this policy
+#                                would rewrite every openbank-* Pod image to a digest at
+#                                admission. v1 had false.
 #   verifyDigest: false          CRD default true; v1 had false
 #   required: true               as v1
-# Per-policy verdicts: the reason v1 had to fold the signature into ONE verifyImages
-# entry was Kyverno 1.12.5's single per-image status, last writer wins (#9805 item 4).
-# 1.19 scopes it per policy (kyverno/kyverno#16800); stage 2 must still re-probe that
-# an Audit/failed shadow never turns into a denial before trusting it (see PR body).
+# Per-policy verdicts: Kyverno 1.19 scopes verification per policy
+# (kyverno/kyverno#16800), so the v1.12.5 last-writer-wins reason for folding the
+# signature and the SBOM into ONE check (#9805 item 4) no longer binds; they stay in one
+# policy because nothing needs them apart. Exception: pricing-image-exception-cel.yaml
+# (namespace `pricing` only, with its removal criteria).
 #
 # Semantics kept from v1: same image glob, same KMS public key (sha256), signature
 # verified AND a CycloneDX (https://cyclonedx.org/bom) attestation signed by the same
 # key whose predicate has bomFormat == "CycloneDX"; containers, initContainers and
 # ephemeralContainers (v1 verifyImages covered all three); background: false;
-# webhook timeout 30s; default Pod-controller autogen (v1 had autogen- rules, which
-# is what the pricing exception names). Rotate the key together with the v1 file.
+# webhook timeout 30s; default Pod-controller autogen.
+# .github/scripts/check-fleet-attestations.sh derives the predicates it verifies from
+# `attestations[].intoto.type` below: adding one widens that gate on the same commit.
 apiVersion: policies.kyverno.io/v1
 kind: ImageValidatingPolicy
 metadata:
@@ -35,12 +62,12 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4) — CEL shadow
+    policies.kyverno.io/title: Verify OpenBank image signature + SBOM attestation (ADR-0030 D4)
     policies.kyverno.io/category: Supply Chain Security
     policies.kyverno.io/severity: high
 spec:
-  validationActions: [Audit]
-  failurePolicy: Ignore
+  validationActions: [Deny]
+  failurePolicy: Fail
   webhookConfiguration:
     timeoutSeconds: 30
   evaluation:
