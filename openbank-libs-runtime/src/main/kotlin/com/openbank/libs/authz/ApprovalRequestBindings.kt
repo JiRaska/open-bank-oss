@@ -14,6 +14,7 @@ import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.RequestFingerprints
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.interceptor.InvocationContext
+import org.jboss.logging.Logger
 import java.io.File
 import java.io.InputStream
 import java.io.Reader
@@ -36,8 +37,9 @@ import kotlin.reflect.jvm.kotlinFunction
  * Framework-supplied context arguments (the coroutine continuation, JAX-RS context objects, the
  * security identity) are not part of the request and are skipped. An argument that cannot be
  * canonicalised — a stream, a file upload, a reactive publisher, or anything Jackson cannot
- * serialise — makes the request unbindable, and [of] throws: four-eyes on such an endpoint
- * refuses the call rather than issuing an approval it could not later hold to its content.
+ * serialise — makes the request unbindable, and [of] throws [PolicyDecisionException] (503): four-eyes
+ * on such an endpoint refuses the call rather than issuing an approval it could not later hold to
+ * its content. It is a wiring fault of the endpoint, not the caller's error.
  */
 internal object ApprovalRequestBindings {
 
@@ -46,6 +48,10 @@ internal object ApprovalRequestBindings {
 
     private val mapper: ObjectMapper = ObjectMapper().findAndRegisterModules()
 
+    // Compound names ("userApiKey" -> "apikey") are matched by suffix only for tokens this long,
+    // so short tokens like "pin" never match inside an unrelated word.
+    private const val MIN_COMPOUND_TOKEN_LENGTH = 5
+
     private val SENSITIVE_TOKENS = setOf(
         "password", "passphrase", "passwd", "secret", "token", "credential", "credentials",
         "pin", "cvv", "cvc", "otp", "pan", "apikey", "privatekey", "cardnumber",
@@ -53,8 +59,7 @@ internal object ApprovalRequestBindings {
     private val KEY_TOKEN_SPLIT = Regex("(?<=[a-z0-9])(?=[A-Z])|[_\\-. ]+")
     private val CONTROL_CHARS = Regex("\\p{Cntrl}")
 
-    /** Thrown when the intercepted call has an argument that cannot be bound. */
-    class UnbindableRequestException(message: String) : RuntimeException(message)
+    private val log = Logger.getLogger(ApprovalRequestBindings::class.java)
 
     fun of(ctx: InvocationContext, action: String, resourceId: String?): ApprovalRequestBinding {
         val method = ctx.method
@@ -66,9 +71,10 @@ internal object ApprovalRequestBindings {
             when {
                 value == null -> arguments[name] = null
                 isContext(value) -> Unit
-                isUnbindable(value) -> throw UnbindableRequestException(
+                isUnbindable(value) -> throw unbindable(
                     "four-eyes action '$action' cannot be bound to an approval: argument '$name' is a " +
                         "${value.javaClass.simpleName}, whose content cannot be fingerprinted",
+                    null,
                 )
                 else -> arguments[name] = value
             }
@@ -76,15 +82,21 @@ internal object ApprovalRequestBindings {
         val canonical = try {
             RequestFingerprints.canonical(mapper, arguments)
         } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
-            throw UnbindableRequestException(
+            throw unbindable(
                 "four-eyes action '$action' cannot be bound to an approval: arguments are not serialisable " +
                     "(${ex.javaClass.simpleName})",
+                ex,
             )
         }
         return ApprovalRequestBinding(
             fingerprint = RequestFingerprint.of("INVOKE", target, canonical),
             summary = summary(action, target, resourceId, canonical),
         )
+    }
+
+    private fun unbindable(message: String, cause: Throwable?): PolicyDecisionException {
+        log.errorf("four-eyes: %s — refusing", message)
+        return PolicyDecisionException(message, cause)
     }
 
     /**
@@ -112,7 +124,8 @@ internal object ApprovalRequestBindings {
     private fun isSensitiveKey(key: String): Boolean {
         val tokens = key.split(KEY_TOKEN_SPLIT).filter { it.isNotEmpty() }.map { it.lowercase() }
         val joined = tokens.joinToString("")
-        return tokens.any { it in SENSITIVE_TOKENS } || SENSITIVE_TOKENS.any { it.length > 5 && joined.endsWith(it) }
+        return tokens.any { it in SENSITIVE_TOKENS } ||
+            SENSITIVE_TOKENS.any { it.length > MIN_COMPOUND_TOKEN_LENGTH && joined.endsWith(it) }
     }
 
     private fun isContext(value: Any): Boolean {
@@ -123,7 +136,7 @@ internal object ApprovalRequestBindings {
     }
 
     private fun isUnbindable(value: Any): Boolean {
-        if (value is InputStream || value is Reader || value is File || value is Path || value is Channel) return true
+        if (UNBINDABLE_TYPES.any { it.isInstance(value) }) return true
         val types = generateSequence<Class<*>>(value.javaClass) { it.superclass }.flatMap { c ->
             sequenceOf(c) + c.interfaces.asSequence()
         }
@@ -139,6 +152,14 @@ internal object ApprovalRequestBindings {
         "io.vertx.mutiny.core.http.",
         "io.vertx.mutiny.ext.web.",
         "org.jboss.resteasy.reactive.server.",
+    )
+
+    private val UNBINDABLE_TYPES = listOf(
+        InputStream::class.java,
+        Reader::class.java,
+        File::class.java,
+        Path::class.java,
+        Channel::class.java,
     )
 
     private val UNBINDABLE_TYPE_NAMES = listOf(

@@ -88,14 +88,11 @@ class RedisApprovalStore(
             requestFingerprint = binding?.fingerprint,
             summary = binding?.summary,
         )
-        val created = eval(
+        val created = redis.eval(
             CREATE_SCRIPT,
-            listOf(key(approval.id), pendingIndex, makerIndex(action, makerId)),
-            approval.id,
-            clock.millis().toString(),
-            ttlSeconds.toString(),
-            maxPendingPerMakerAction.toString(),
-            *fields(approval).toTypedArray(),
+            listOf(key(approval.id), pendingIndex, makerIndex(prefix, action, makerId)),
+            listOf(approval.id, clock.millis().toString(), ttlSeconds.toString(), maxPendingPerMakerAction.toString()) +
+                fields(approval),
         )
         if (created?.toInteger() != 1) throw ApprovalLimitExceededException(action, maxPendingPerMakerAction)
         return approval
@@ -104,8 +101,8 @@ class RedisApprovalStore(
     override suspend fun find(id: String): PendingApproval? = findCurrent(id) ?: findLegacy(id)?.second
 
     override suspend fun findPending(limit: Int): List<PendingApproval> {
-        exec("ZREMRANGEBYSCORE", pendingIndex, "-inf", clock.millis().toString())
-        val ids = exec("ZRANGE", pendingIndex, "0", (limit - 1).coerceAtLeast(0).toString())
+        redis.exec("ZREMRANGEBYSCORE", pendingIndex, "-inf", clock.millis().toString())
+        val ids = redis.exec("ZRANGE", pendingIndex, "0", (limit - 1).coerceAtLeast(0).toString())
             ?.map { it.toString() }
             .orEmpty()
         return ids
@@ -118,14 +115,10 @@ class RedisApprovalStore(
     override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
         if (!migrateLegacy(id)) return null
         val newStatus = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED
-        val result = eval(
+        val result = redis.eval(
             DECIDE_SCRIPT,
             listOf(key(id), pendingIndex),
-            id,
-            decidedBy,
-            newStatus.name,
-            OffsetDateTime.now(clock).toString(),
-            DECIDED_TTL_SECONDS.toString(),
+            listOf(id, decidedBy, newStatus.name, OffsetDateTime.now(clock).toString(), DECIDED_TTL_SECONDS.toString()),
         ) ?: return null
         return when (result[0].toString()) {
             MISSING -> null
@@ -139,15 +132,13 @@ class RedisApprovalStore(
 
     override suspend fun markExecuted(id: String): PendingApproval? {
         if (!migrateLegacy(id)) return null
-        val result = eval(MARK_EXECUTED_SCRIPT, listOf(key(id))) ?: return null
+        val result = redis.eval(MARK_EXECUTED_SCRIPT, listOf(key(id)), emptyList()) ?: return null
         return when (result[0].toString()) {
             MISSING -> null
             STATE -> throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, statusOf(result))
             else -> findCurrent(id)
         }
     }
-
-    private fun statusOf(result: Response) = ApprovalStatus.valueOf(result[1].toString())
 
     private suspend fun findCurrent(id: String): PendingApproval? {
         if (!isPlainId(id)) return null
@@ -162,89 +153,24 @@ class RedisApprovalStore(
      */
     private suspend fun migrateLegacy(id: String): Boolean {
         if (!isPlainId(id)) return false
-        if (exec("EXISTS", key(id))?.toInteger() == 1) return true
+        if (redis.exec("EXISTS", key(id))?.toInteger() == 1) return true
         val (raw, legacy) = findLegacy(id) ?: return false
-        eval(
+        redis.eval(
             MIGRATE_SCRIPT,
             listOf("$LEGACY_KEY_PREFIX$id", key(id)),
-            raw,
-            *fields(legacy).toTypedArray(),
-            legacy.decidedBy.orEmpty(),
-            legacy.decidedAt?.toString().orEmpty(),
+            listOf(raw) + fields(legacy) + listOf(legacy.decidedBy.orEmpty(), legacy.decidedAt?.toString().orEmpty()),
         )
         // Either this call moved it, a concurrent one did, or it expired in between.
-        return exec("EXISTS", key(id))?.toInteger() == 1
+        return redis.exec("EXISTS", key(id))?.toInteger() == 1
     }
 
     private suspend fun findLegacy(id: String): Pair<String, PendingApproval>? {
         if (!isPlainId(id)) return null
-        val raw = exec("GET", "$LEGACY_KEY_PREFIX$id")?.toString() ?: return null
+        val raw = redis.exec("GET", "$LEGACY_KEY_PREFIX$id")?.toString() ?: return null
         return decodeLegacy(id, raw)?.let { raw to it }
     }
 
-    private suspend fun exec(command: String, vararg args: String): Response? =
-        redis.execute(command, *args).awaitSuspending()
-
-    private suspend fun eval(script: String, keys: List<String>, vararg args: String): Response? =
-        exec("EVAL", script, keys.size.toString(), *keys.toTypedArray(), *args)
-
     private fun key(id: String) = "$prefix$id"
-
-    private fun makerIndex(action: String, makerId: String): String {
-        val digest = MessageDigest.getInstance("SHA-256").digest("$action\n$makerId".toByteArray(Charsets.UTF_8))
-        return "${prefix}maker:" + digest.joinToString("") { "%02x".format(it) }
-    }
-
-    /** Ids are server-generated; anything else (e.g. `pending`, or a pattern) is never an approval id. */
-    private fun isPlainId(id: String) = id.length in 1..MAX_ID_LENGTH && ID_PATTERN.matches(id) && id != "pending"
-
-    private fun fields(a: PendingApproval): List<String> = listOf(
-        a.action,
-        a.resourceId.orEmpty(),
-        a.makerId,
-        a.status.name,
-        a.createdAt.toString(),
-        a.requestFingerprint.orEmpty(),
-        a.summary.orEmpty(),
-    )
-
-    private fun decodeHash(id: String, f: Map<String, String>): PendingApproval? {
-        val status = f["status"]?.let { s -> ApprovalStatus.entries.firstOrNull { it.name == s } }
-        val action = f["action"]
-        val makerId = f["makerId"]
-        val createdAt = f["createdAt"]
-        if (status == null || action == null || makerId == null || createdAt == null) return null
-        return PendingApproval(
-            id = id,
-            action = action,
-            resourceId = f["resourceId"]?.ifEmpty { null },
-            makerId = makerId,
-            status = status,
-            createdAt = OffsetDateTime.parse(createdAt),
-            decidedBy = f["decidedBy"]?.ifEmpty { null },
-            decidedAt = f["decidedAt"]?.ifEmpty { null }?.let(OffsetDateTime::parse),
-            requestFingerprint = f["fp"]?.ifEmpty { null },
-            summary = f["summary"]?.ifEmpty { null },
-        )
-    }
-
-    private fun decodeLegacy(id: String, raw: String): PendingApproval? {
-        val parts = raw.split(LEGACY_SEPARATOR, limit = LEGACY_FIELD_COUNT)
-        if (parts.size < LEGACY_FIELD_COUNT) return null
-        val status = ApprovalStatus.entries.firstOrNull { it.name == parts[LEGACY_STATUS_IDX] } ?: return null
-        return runCatching {
-            PendingApproval(
-                id = id,
-                action = parts[LEGACY_ACTION_IDX],
-                resourceId = parts[LEGACY_RESOURCE_IDX].ifEmpty { null },
-                makerId = parts[LEGACY_MAKER_IDX],
-                status = status,
-                createdAt = OffsetDateTime.parse(parts[LEGACY_CREATED_IDX]),
-                decidedBy = parts[LEGACY_DECIDED_BY_IDX].ifEmpty { null },
-                decidedAt = parts[LEGACY_DECIDED_AT_IDX].ifEmpty { null }?.let(OffsetDateTime::parse),
-            )
-        }.getOrNull()
-    }
 
     companion object {
         /** Upper bound on one maker's PENDING approvals per action, unless configured otherwise. */
@@ -253,23 +179,10 @@ class RedisApprovalStore(
 
         private const val KEY_PREFIX = "approval-v2:"
         private const val LEGACY_KEY_PREFIX = "approval:"
-        private const val LEGACY_SEPARATOR = "|"
         private const val DECIDED_TTL_SECONDS = 86400L
-        private const val MAX_ID_LENGTH = 64
-        private val ID_PATTERN = Regex("[A-Za-z0-9-]+")
         private const val MISSING = "MISSING"
         private const val SELF = "SELF"
         private const val STATE = "STATE"
-
-        // Field order of the previous pipe-delimited layout.
-        private const val LEGACY_ACTION_IDX = 0
-        private const val LEGACY_RESOURCE_IDX = 1
-        private const val LEGACY_MAKER_IDX = 2
-        private const val LEGACY_STATUS_IDX = 3
-        private const val LEGACY_CREATED_IDX = 4
-        private const val LEGACY_DECIDED_BY_IDX = 5
-        private const val LEGACY_DECIDED_AT_IDX = 6
-        private const val LEGACY_FIELD_COUNT = 7
 
         private fun configuredNamespace(): String = ConfigProvider.getConfig()
             .getOptionalValue("quarkus.application.name", String::class.java)
@@ -334,4 +247,82 @@ class RedisApprovalStore(
             return 1
         """
     }
+}
+
+@Suppress("SpreadOperator") // the Redis client API is varargs; the arrays are a handful of strings
+private suspend fun ReactiveRedisDataSource.exec(command: String, vararg args: String): Response? =
+    execute(command, *args).awaitSuspending()
+
+@Suppress("SpreadOperator")
+private suspend fun ReactiveRedisDataSource.eval(script: String, keys: List<String>, args: List<String>): Response? =
+    exec("EVAL", script, keys.size.toString(), *keys.toTypedArray(), *args.toTypedArray())
+
+private fun statusOf(result: Response) = ApprovalStatus.valueOf(result[1].toString())
+
+private fun makerIndex(prefix: String, action: String, makerId: String): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest("$action\n$makerId".toByteArray(Charsets.UTF_8))
+    return "${prefix}maker:" + digest.joinToString("") { "%02x".format(it) }
+}
+
+private const val MAX_ID_LENGTH = 64
+
+// Field order of the previous pipe-delimited layout.
+private const val LEGACY_SEPARATOR = "|"
+private const val LEGACY_ACTION_IDX = 0
+private const val LEGACY_RESOURCE_IDX = 1
+private const val LEGACY_MAKER_IDX = 2
+private const val LEGACY_STATUS_IDX = 3
+private const val LEGACY_CREATED_IDX = 4
+private const val LEGACY_DECIDED_BY_IDX = 5
+private const val LEGACY_DECIDED_AT_IDX = 6
+private const val LEGACY_FIELD_COUNT = 7
+private val ID_PATTERN = Regex("[A-Za-z0-9-]+")
+
+/** Ids are server-generated; anything else (e.g. `pending`, or a pattern) is never an approval id. */
+private fun isPlainId(id: String) = id.length in 1..MAX_ID_LENGTH && ID_PATTERN.matches(id) && id != "pending"
+
+private fun fields(a: PendingApproval): List<String> = listOf(
+    a.action,
+    a.resourceId.orEmpty(),
+    a.makerId,
+    a.status.name,
+    a.createdAt.toString(),
+    a.requestFingerprint.orEmpty(),
+    a.summary.orEmpty(),
+)
+
+private fun decodeHash(id: String, f: Map<String, String>): PendingApproval? {
+    val status = f["status"]?.let { s -> ApprovalStatus.entries.firstOrNull { it.name == s } } ?: return null
+    val makerId = f["makerId"] ?: return null
+    val createdAt = f["createdAt"] ?: return null
+    return PendingApproval(
+        id = id,
+        action = f["action"] ?: return null,
+        resourceId = f["resourceId"]?.ifEmpty { null },
+        makerId = makerId,
+        status = status,
+        createdAt = OffsetDateTime.parse(createdAt),
+        decidedBy = f["decidedBy"]?.ifEmpty { null },
+        decidedAt = f["decidedAt"]?.ifEmpty { null }?.let(OffsetDateTime::parse),
+        requestFingerprint = f["fp"]?.ifEmpty { null },
+        summary = f["summary"]?.ifEmpty { null },
+    )
+}
+
+private fun decodeLegacy(id: String, raw: String): PendingApproval? {
+    val parts = raw.split(LEGACY_SEPARATOR, limit = LEGACY_FIELD_COUNT)
+    if (parts.size < LEGACY_FIELD_COUNT) return null
+    val status = ApprovalStatus.entries.firstOrNull { it.name == parts[LEGACY_STATUS_IDX] } ?: return null
+    return runCatching {
+        PendingApproval(
+            id = id,
+            action = parts[LEGACY_ACTION_IDX],
+            resourceId = parts[LEGACY_RESOURCE_IDX].ifEmpty { null },
+            makerId = parts[LEGACY_MAKER_IDX],
+            status = status,
+            createdAt = OffsetDateTime.parse(parts[LEGACY_CREATED_IDX]),
+            decidedBy = parts[LEGACY_DECIDED_BY_IDX].ifEmpty { null },
+            decidedAt = parts[LEGACY_DECIDED_AT_IDX].ifEmpty { null }?.let(OffsetDateTime::parse),
+        )
+    }.getOrNull()
 }

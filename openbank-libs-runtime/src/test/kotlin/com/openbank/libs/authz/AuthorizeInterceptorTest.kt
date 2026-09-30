@@ -39,6 +39,7 @@ import java.security.Principal as JavaPrincipal
  * SecurityIdentity into the OPA query and the advisory / enforce toggle
  * without standing up a real OPA sidecar.
  */
+@Suppress("LargeClass") // one test class mirrors the one interceptor, whose fixtures every case shares
 class AuthorizeInterceptorTest {
 
     private lateinit var interceptor: AuthorizeInterceptor

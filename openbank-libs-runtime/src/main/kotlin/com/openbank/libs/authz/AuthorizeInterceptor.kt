@@ -292,7 +292,7 @@ class AuthorizeInterceptor {
         }
         record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
         m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)
-        requireFourEyes(ctx, annotation, query, decision)
+        if (decision.attributes["four_eyes_required"] == true) requireFourEyes(ctx, annotation, query)
     }
 
     /**
@@ -356,25 +356,19 @@ class AuthorizeInterceptor {
 
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
-     * approver when OPA flagged it `four_eyes_required`. No-op (proceeds
+     * approver; called only when OPA flagged it `four_eyes_required`. No-op (proceeds
      * immediately) unless the service opted in via [fourEyesEnforce]; once it has,
      * a missing [ApprovalStore] fails closed with 503.
      *
      * The pending approval is bound to this exact call ([ApprovalRequestBindings]): the retry that
      * carries `X-Approval-Id` must hit the same endpoint with the same arguments, or the approval
      * does not apply and a fresh one is issued. Consumption is atomic in the store, so a
-     * concurrent second retry with the same id gets 409 rather than a second execution.
+     * concurrent second retry with the same id gets 409 rather than a second execution. A call
+     * whose arguments cannot be fingerprinted is refused with 503; a maker at the store's
+     * pending-approval limit gets [com.openbank.libs.approval.ApprovalLimitExceededException]
+     * (an IllegalStateException, so 422 with its message).
      */
-    private suspend fun requireFourEyes(
-        ctx: InvocationContext,
-        annotation: Authorize,
-        query: AuthzQuery,
-        decision: AuthzDecision,
-    ) {
-        val fourEyesRequired = decision.attributes["four_eyes_required"] == true
-        if (!fourEyesRequired) {
-            return
-        }
+    private suspend fun requireFourEyes(ctx: InvocationContext, annotation: Authorize, query: AuthzQuery) {
         if (!fourEyesEnforce) {
             // OPA asked for a second approver and we are about to proceed without one. Nothing
             // recorded this before, which made it indistinguishable from "four-eyes not required" —
@@ -396,9 +390,8 @@ class AuthorizeInterceptor {
         }
         if (!approvalStore.isResolvable) {
             meters?.authzFourEyes(annotation.action, "no_approval_store")
-            // Fails CLOSED, like the missing-PDP branch: a service that enforces four-eyes but
-            // cannot record an approval must not execute the action without one. (This used to
-            // log and proceed.) 503, because it is a wiring fault, not the caller's.
+            // Fails CLOSED (503, a wiring fault) like the missing-PDP branch: an enforced action
+            // must not execute without a place to record its approval. This used to proceed.
             log.errorf(
                 "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
                     "but no ApprovalStore bean is wired — refusing. Wire an ApprovalStore for this service " +
@@ -410,13 +403,7 @@ class AuthorizeInterceptor {
         val store = approvalStore.get()
         val maker = query.principal.id
         val resourceId = query.resource?.id
-        val binding = try {
-            ApprovalRequestBindings.of(ctx, annotation.action, resourceId)
-        } catch (ex: ApprovalRequestBindings.UnbindableRequestException) {
-            meters?.authzFourEyes(annotation.action, "unbindable_request")
-            log.errorf("four-eyes: %s — refusing", ex.message)
-            throw PolicyDecisionException(ex.message ?: "four-eyes request cannot be bound to an approval", ex)
-        }
+        val binding = ApprovalRequestBindings.of(ctx, annotation.action, resourceId)
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
@@ -435,8 +422,6 @@ class AuthorizeInterceptor {
             )
         }
 
-        // ApprovalLimitExceededException propagates (an IllegalStateException, so 422 with its
-        // message): the maker already holds the configured maximum of open approvals.
         val pending = store.create(annotation.action, resourceId, maker, binding = binding)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
