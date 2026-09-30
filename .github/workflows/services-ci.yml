@@ -102,6 +102,11 @@ jobs:
             case "$1" in
               openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
                 return 0 ;;
+              .github/scripts/check-flyway-version-commit-order.py)
+                # This governance gate inspects migration commit order; it is not
+                # loaded by a service build or Pact verification. Keep other scripts
+                # on the conservative full-fleet fallback.
+                return 0 ;;
               .github/workflows/*)
                 # These two files own the service build itself. A change to either must
                 # still select the canary below; all other workflow files are external
@@ -115,6 +120,8 @@ jobs:
           }
           is_inert_service_path ".github/workflows/security-regression-test.yml" \
             || { echo "selector self-test: unrelated workflow must be inert" >&2; exit 1; }
+          is_inert_service_path ".github/scripts/check-flyway-version-commit-order.py" \
+            || { echo "selector self-test: Flyway order gate must be inert" >&2; exit 1; }
           ! is_inert_service_path ".github/workflows/services-ci.yml" \
             || { echo "selector self-test: service CI recipe must remain relevant" >&2; exit 1; }
           ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
