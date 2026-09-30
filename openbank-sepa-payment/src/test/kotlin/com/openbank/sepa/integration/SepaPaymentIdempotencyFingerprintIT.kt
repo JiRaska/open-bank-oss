@@ -64,7 +64,8 @@ class SepaPaymentIdempotencyFingerprintIT {
 
         val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
         coEvery { flakyRelease.reserve(any<IdempotencyScope>(), any(), any(), any()) } returns ReserveResult.Reserved
-        coEvery { flakyRelease.release(any<IdempotencyScope>(), any(), any()) } throws IllegalStateException("redis unavailable")
+        coEvery { flakyRelease.release(any<IdempotencyScope>(), any(), any()) } throws
+            IllegalStateException("redis unavailable")
         QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
 
         // The create failure (422, from the use case's IllegalStateException) must surface — not the
