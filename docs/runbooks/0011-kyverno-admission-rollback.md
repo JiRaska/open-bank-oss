@@ -224,7 +224,13 @@ no-op (the harness re-runs the CEL policy on its own output and requires zero ch
 misbehaves: new Pods show an unexpected image, or pulls fail with an ECR `not found` for a
 pull-through path. Because it is `Ignore`, a webhook outage only means images pull from the origin
 registry over NAT; to stop the rewrite, delete the file by PR (Pods then pull from the origin). CNPG
-instance pods are excluded, as before.
+instance pods are excluded, as before. Pod controllers (Deployment, DaemonSet, Job, CronJob, ...) are rewritten too, through
+Kyverno autogen; 1.19.1 autogen rewrites `object.spec` only in matchConditions and mutations, never in
+`variables`, so a variable that reads `object.spec` errors on every controller (`no such key:
+containers` in PolicyReports, fixed 2026-09-30). The Pods those controllers create are still rewritten
+at Pod admission, so that failure shows up as report errors and unrewritten controller specs, not as
+upstream pulls. A kube-system controller keeps its `quay.io/` images; its Pods are then decided on
+their own `eks.amazonaws.com/component` label.
 `verify-openbank-image-sbom-attestation` (the image policy) — enforcing as the `ImageValidatingPolicy`
 `verify-openbank-image-sbom-attestation-cel` (`[Deny]`, `failurePolicy: Fail`, `mutateDigest: false`),
 v1 file `verify-sbom-attestation-policy.yaml` and its v2 exception `pricing-image-exception.yaml`

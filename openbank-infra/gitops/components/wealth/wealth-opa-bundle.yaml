@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: wealth-service
     app.kubernetes.io/part-of: wealth
   annotations:
-    openbank.tech/policy-checksum: "4af8b8bb31150028"
+    openbank.tech/policy-checksum: "0c88e6a0d6dd2ea6"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -979,12 +979,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
