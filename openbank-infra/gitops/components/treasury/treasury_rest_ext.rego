@@ -4,12 +4,14 @@
 # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
 #
 # Actions gated (TreasuryResource):
-#   treasury.deal.read, treasury.counterparty.read, treasury.position.read
+#   treasury.deal.read, treasury.counterparty.read, treasury.position.read, treasury.quote.read
 #       — treasury dealers, approvers and admins (operators/admins also reach every *.read through
 #         the base rest.rego `operator-read-any` rule; this file cannot veto that)
 #   treasury.deal.draft, treasury.deal.submit — ROLE_TREASURY_DEALER
 #   treasury.deal.cancel                      — ROLE_TREASURY_DEALER or ROLE_TREASURY_APPROVER
-#   treasury.deal.approve, .reject, .settle, .mature, .reverse — ROLE_TREASURY_APPROVER
+#   treasury.deal.approve, .reject, .confirm, .settle, .mature, .reverse — ROLE_TREASURY_APPROVER
+#       (.confirm = counterparty confirmation received, ADR-0315 D2: a back-office step, so the
+#       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
 #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
 #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
 #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
@@ -25,8 +27,9 @@
 # to a machine by mistake would open booking to it.
 #
 # AI_AGENT principals get NOTHING from this file, deliberately. ADR-0315 D10's agent grant lives in
-# ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the three reads
-# + treasury.deal.draft; tools.deny: every other treasury.deal.* action and treasury.nostro.*) —
+# ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the four reads
+# + treasury.deal.draft; tools.deny: every other treasury.deal.* action — confirm included — and
+# treasury.nostro.*) —
 # and reaches this bundle through base rest.rego's `agent-charter-allows`, which hands the REST
 # action to agents.allow (charter allow AND not charter deny AND not hard-denied). A second grant
 # here would be a copy that drifts. treasury_rest_ext_test.rego holds this file to granting an agent
@@ -53,7 +56,14 @@ allowed_reasons contains "treasury-staff-read" if {
 	treasury_staff
 	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
 	role in input.principal.roles
-	input.action in {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
+	input.action in {
+		"treasury.deal.read",
+		"treasury.counterparty.read",
+		"treasury.position.read",
+		"treasury.nostro.read",
+		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
+		"treasury.quote.read",
+	}
 }
 
 allowed_reasons contains "treasury-dealer-write" if {
@@ -74,6 +84,7 @@ allowed_reasons contains "treasury-approver-write" if {
 	input.action in {
 		"treasury.deal.approve",
 		"treasury.deal.reject",
+		"treasury.deal.confirm",
 		"treasury.deal.settle",
 		"treasury.deal.mature",
 		"treasury.deal.reverse",
