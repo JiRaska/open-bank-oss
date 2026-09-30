@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.268.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.0...admin-ui-v0.268.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** align treasury and risk workbenches ([#11565](https://github.com/JiRaska/open-bank-oss/issues/11565)) ([0d97c99](https://github.com/JiRaska/open-bank-oss/commit/0d97c9984537340dcb609b32db3680438cb26319))
+
 ## [0.268.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.267.0...admin-ui-v0.268.0) (2026-09-30)
 
 
