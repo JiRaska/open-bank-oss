@@ -145,6 +145,9 @@ class NostroReconciliationApiIT {
         ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57500.00")
         val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
             .then().statusCode(201).body("glCode", equalTo("1002")).extract().path("id")
+        // The upload already reconciled once to record breaks (ADR-0315 D7); this assertion is about
+        // what ONE reconciliation reads, so it starts from the read below.
+        ledger.queries.clear()
 
         given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
             .then().statusCode(200)
