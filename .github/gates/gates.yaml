@@ -3585,6 +3585,23 @@ gates:
     run: |
       python3 .github/scripts/check-outbox-has-writer.py .
 
+  # Money-path calls WITHOUT any pact were invisible to every pact gate (#8345 criterion 4):
+  # 27 of 58 outbound @RegisterRestClients in money_path_services had no contract on 2026-09-30,
+  # found by hand. The pair set is derived from the client annotations, never listed.
+  - id: money-path-pact-coverage
+    name: "every money-path outbound REST call has a consumer pact, or a baselined reason (enforced)"
+    group: api
+    budget_seconds: 20
+    mode: enforced
+    rationale: "check-pact-provider-replay and derive-pact-drift-scope only see pacts that exist; a money-path call with no pact at all is exactly the request-path defect class (#2269) they cannot catch, and the 26-pair gap in #8345 was measured by hand. The pair set is derived from @RegisterRestClient configKeys against rules.yaml: money_path_services, with a shrink-only baseline for today's debt."
+    review_after: "2027-03-31"
+    verified: "2026-09-30 -- against origin/main with no baseline: FAIL with 27 uncovered pairs (three more than the hand-made list on #8345: billing->account, billing->balance, lending->analytics-sink). With the baseline: PASS, 58 subjects. Self-test falsifies an unbaselined uncovered pair, a stale baseline entry, an unresolvable configKey, an aliased key, an external key and a covered control."
+    min_subjects: 40   # 58 money-path outbound in-repo clients today (2026-09-30)
+    selftest: python3 .github/scripts/check-money-path-pact-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-money-path-pact-coverage.py"]
+    run: |
+      python3 .github/scripts/check-money-path-pact-coverage.py
   - id: pact-provider-replay-coverage
     name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
