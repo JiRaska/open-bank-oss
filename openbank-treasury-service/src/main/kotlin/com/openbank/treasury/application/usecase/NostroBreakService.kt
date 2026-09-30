@@ -70,7 +70,9 @@ class NostroBreakService(
         val open = breakRepo.open()
         val aged = open.filter { policy.isAged(it, today) }
         var alerted = 0
-        aged.filter { it.alertedAt == null }.forEach { b ->
+        // No `alertedAt == null` pre-filter on purpose: the repository's conditional UPDATE is the one
+        // claim, so exactly-once holds across pods and is exercised on every pass, not only in a race.
+        aged.forEach { b ->
             val now = Instant.now(clock)
             val payload = NostroBreakAged(
                 breakId = b.id,
