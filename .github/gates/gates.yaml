@@ -381,6 +381,15 @@ gates:
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
   # ==== gitops =========================================================
+  - id: deploy-hold-image-pins
+    name: "held services cannot change GitOps image pins (issue #11503)"
+    group: gitops
+    mode: enforced
+    selftest: python3 .github/scripts/check-deploy-holds.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: python3 .github/scripts/check-deploy-holds.py --root .
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a

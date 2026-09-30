@@ -93,6 +93,22 @@ if [ "$(echo "$GOT_AL" | jq -S .)" != "$(echo "$WANT_AL" | jq -S .)" ]; then
   exit 1
 fi
 
+# A held placeholder would rank first. It must be removed BEFORE the one-service
+# cap so the healthy stale service gets this tick. Once the hold is removed, the
+# still-stale placeholder is offered again without any special recovery action.
+GOT_HELD="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
+  RECONCILE_HOLDS='openbank-placeholder-svc' RECONCILE_MAX=1 bash "$PROBE" "$WORK/gitops")"
+if [ "$(echo "$GOT_HELD" | jq -c .)" != '["openbank-stale-svc"]' ]; then
+  echo "FAIL: held service consumed the reconcile cap: $GOT_HELD"
+  exit 1
+fi
+GOT_RELEASED="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
+  RECONCILE_HOLDS='' RECONCILE_MAX=1 bash "$PROBE" "$WORK/gitops")"
+if [ "$(echo "$GOT_RELEASED" | jq -c .)" != '["openbank-placeholder-svc"]' ]; then
+  echo "FAIL: released service was not re-offered: $GOT_RELEASED"
+  exit 1
+fi
+
 # Third assertion: with every pin at TIP, nothing lags (loop-stability guarantee).
 cat > gitops/deploy.yaml <<EOF
 image: repo/openbank-current-svc:sandbox-${TIP}-run32826611610
