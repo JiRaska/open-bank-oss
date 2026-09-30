@@ -4,6 +4,31 @@
   },
   "interactions": [
     {
+      "description": "POST a fraud score with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+          "amount": 1500.00,
+          "counterpartyId": null,
+          "currency": "CZK",
+          "rail": "DOMESTIC"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
       "description": "POST a fraud score for a domestic payment",
       "providerStates": [
         {

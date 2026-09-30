@@ -76,6 +76,36 @@ class FraudScorePactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by `FraudNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
+     * positive twin filters this state out because its class-level `@TestSecurity` would
+     * authenticate the replay and answer 200.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun fraudScoreUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST a fraud score with no M2M identity is refused")
+        .path(EXPECTED_SCORE_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(objectMapper.writeValueAsString(request))
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "fraudScoreUnauthenticatedPact")
+    fun `a score request with no identity is refused with 401, never scored`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(objectMapper.writeValueAsString(request))
+            .post(scorePathOnClient())
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "fraudScorePact")
     fun `the score binds into FraudScoreClientResponse with a verdict`(mockServer: MockServer) {
@@ -107,6 +137,9 @@ class FraudScorePactConsumerTest {
     }
 
     private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-domestic-payment"
         const val PROVIDER = "openbank-fraud-service"
 

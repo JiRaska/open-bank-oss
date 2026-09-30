@@ -75,6 +75,37 @@ class AmlCaseCreationPactConsumerTest {
         .status(201)
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by `AmlNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
+     * positive twin filters this state out because its class-level `@TestSecurity` would
+     * authenticate the replay and answer 201.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun createCaseUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("POST an AML case with no M2M identity is refused")
+        .path(EXPECTED_CASES_PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json", "Idempotency-Key" to idempotencyKey))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "createCaseUnauthenticatedPact")
+    fun `a case with no identity is refused with 401, never opened`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .header(idempotencyHeaderNameOnClient(), idempotencyKey)
+            .body(requestBody)
+            .post(clientPathOnClient())
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "createSanctionsHitCasePact")
     fun `createCase opens an AML case for a sanctions-hit payment via the Idempotency-Key header`(
@@ -111,6 +142,9 @@ class AmlCaseCreationPactConsumerTest {
     }
 
     private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-sepa-instant"
         const val PROVIDER = "openbank-aml-service"
 
