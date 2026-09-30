@@ -104,6 +104,72 @@ assert_cyclonedx_sbom() {
   printf '%s\n' "$serial"
 }
 
+# read_image_manifest <image-ref>
+#
+# Print the raw manifest the registry serves for <image-ref> (tag or digest) WITHOUT resolving a
+# platform — i.e. exactly the document Kyverno's loader fetches. `docker buildx imagetools` is
+# present on every producer (they all push with buildx); crane is the fallback. Returns non-zero
+# if neither can read it. Kept as its own function so the self-test can stub the registry.
+read_image_manifest() {
+  local image="$1"
+  if docker buildx version >/dev/null 2>&1; then
+    docker buildx imagetools inspect --raw "$image" && return 0
+  fi
+  if command -v crane >/dev/null 2>&1; then
+    crane manifest "$image" && return 0
+  fi
+  return 1
+}
+
+# assert_single_image_manifest <image-ref>
+#
+# Refuse to sign or attest an image whose pushed manifest is an INDEX (OCI image index or docker
+# manifest list), #11573. Kyverno's CEL ImageValidatingPolicy loader resolves an index with no
+# platform option, i.e. to the go-containerregistry default child linux/amd64; our images are
+# arm64-only, so the policy ERRORS, and under Deny+Fail that denies every Pod using the image
+# (admin-ui, #11437). buildx produces an index whenever the docker-container driver attaches its
+# own provenance/SBOM attestation, so whether a given `buildx build --push` does depends on the
+# builder driver — only reading the pushed manifest decides it.
+#
+# Accepted: application/vnd.oci.image.manifest.v1+json and
+# application/vnd.docker.distribution.manifest.v2+json (both in the running fleet). mediaType is
+# OPTIONAL in an OCI manifest, so a document without one is classified by shape: `.manifests`
+# means index, `.config` + `.layers` means image manifest. Anything else, or an unreadable
+# manifest, is refused: `cosign sign` must read the same manifest a moment later, so an
+# unreadable one cannot be signed anyway, and failing here says why.
+assert_single_image_manifest() {
+  local image="$1" raw media
+  if [ -z "$image" ]; then
+    echo "ERROR: assert_single_image_manifest requires <image>." >&2
+    return 1
+  fi
+  if ! raw="$(read_image_manifest "$image" 2>/dev/null)" || [ -z "$raw" ]; then
+    echo "ERROR: could not read the pushed manifest of ${image} (docker buildx imagetools /" >&2
+    echo "       crane) — cannot prove it is a single image manifest. Refusing to sign." >&2
+    return 1
+  fi
+  if ! media="$(printf '%s' "$raw" | jq -r '
+        if (.mediaType // "") != "" then .mediaType
+        elif (.manifests | type) == "array" then "index(no mediaType)"
+        elif (.config | type) == "object" and (.layers | type) == "array"
+          then "application/vnd.oci.image.manifest.v1+json"
+        else "unrecognised(no mediaType)" end' 2>/dev/null)"; then
+    echo "ERROR: the manifest of ${image} is not valid JSON. Refusing to sign." >&2
+    return 1
+  fi
+  case "$media" in
+    application/vnd.oci.image.manifest.v1+json | \
+    application/vnd.docker.distribution.manifest.v2+json)
+      echo "    single image manifest (${media})" >&2
+      return 0 ;;
+  esac
+  echo "ERROR: ${image} was pushed as '${media}', not a single image manifest (#11573)." >&2
+  echo "       Kyverno's SBOM ImageValidatingPolicy resolves an index as linux/amd64 and, under" >&2
+  echo "       Deny, blocks every Pod using an arm64-only image. Rebuild with ONE --platform and" >&2
+  echo "       'docker buildx build --provenance=false --sbom=false'. Refusing to sign." >&2
+  return 1
+}
+
 # cosign_attest_sbom <image-ref> <platform> [cosign-bin]
 #
 # Generate a CycloneDX SBOM for the image with trivy, check it is substantive, bind it to
@@ -134,6 +200,10 @@ cosign_attest_sbom() {
     echo "ERROR: jq unavailable — cannot check the SBOM or bind the attestation to it." >&2
     return 1
   fi
+
+  # Never attest an index (#11573) — auto-deploy reaches this function without
+  # cosign_sign_and_attest, so the guard lives on both entry points.
+  assert_single_image_manifest "$image" || return 1
 
   sbom="${TMPDIR:-/tmp}/$(echo "$image" | tr '/:@' '___').cdx.json"
 
@@ -302,6 +372,9 @@ cosign_sign_and_attest() {
     echo "       and rejected at admission. Install cosign v2.x or set COSIGN_VERSION." >&2
     return 1
   fi
+
+  # Before the signature: a signed index is permanent in the .sig tag (#11573).
+  assert_single_image_manifest "$image" || return 1
 
   echo "==> cosign sign ${image} (tag-based, $("$bin" version 2>/dev/null | awk '/GitVersion/{print $2}'))"
   if ! COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$image"; then
