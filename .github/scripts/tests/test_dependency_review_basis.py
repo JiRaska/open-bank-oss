@@ -45,7 +45,7 @@ if any('/compare/' in a for a in args):
  if any('/compare/1e009deab5085b19d3977d53f5b634a8c7f5a548...' in a for a in args):
   if case=='legacy-era-api-failure': sys.exit(1)
   print('behind' if case=='legacy-base' else 'ahead'); sys.exit(0)
- print('mergebase'); sys.exit(0)
+ print('mergebase' if '--jq' in args else json.dumps({'merge_base_commit': {'sha': 'a'*40}})); sys.exit(0)
 if case=='api-failure': sys.exit(1)
 if case=='partial-api-failure':
  print(json.dumps(dict(check_runs=[dict(name='Submit fleet dependency graph',conclusion='success')]))); sys.exit(1)
@@ -168,6 +168,9 @@ class BasisTests(unittest.TestCase):
         self.assertIn("set -euo pipefail", script)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            # The final basis recheck sleeps in Python, not in the shell. Keep
+            # the bounded production delays while making negative tests fast.
+            (root / "sitecustomize.py").write_text("import time\ntime.sleep = lambda _: None\n")
             for name, body in [("gh", GH), ("sleep", "#!/bin/sh\nexit 0\n")]:
                 p = root / name
                 p.write_text(body)
@@ -176,6 +179,7 @@ class BasisTests(unittest.TestCase):
             env = dict(
                 os.environ,
                 PATH=directory + os.pathsep + os.environ["PATH"],
+                PYTHONPATH=directory + os.pathsep + os.environ.get("PYTHONPATH", ""),
                 CASE=case,
                 CALLS=str(calls),
                 GITHUB_REPOSITORY="example/repo",
