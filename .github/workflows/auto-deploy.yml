@@ -1170,6 +1170,9 @@ jobs:
 
       - name: Rewrite image tags in gitops manifests
         id: rewrite
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1231,6 +1234,27 @@ jobs:
               UPDATED+=("$f")
             done
           done
+
+          # Deploy window (deploy-window.py): carry forward the pins of every open, UNARMED
+          # older gitops deploy PR, so this PR covers every pending service and
+          # supersede-deploy-prs.sh below closes the older ones. Several pushes inside one window
+          # then land as ONE commit on main instead of one each. A pin is carried only while main
+          # still holds the tag that PR replaced, so a service main has moved since is never
+          # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
+          if [ -n "${GH_TOKEN:-}" ]; then
+            OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
+            for n in $( (gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+                         --json number,headRefName,autoMergeRequest,isCrossRepository \
+                         --jq '.[] | select((.isCrossRepository | not) and .autoMergeRequest == null
+                                 and (.headRefName | startswith("chore/gitops-auto-deploy-"))) | .number') || true); do
+              carried="$(gh pr diff "$n" --repo "$GITHUB_REPOSITORY" \
+                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
+                || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
+              [ -z "$carried" ] && continue
+              echo "  carried from deferred PR #${n}:"; echo "$carried"
+              while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
+            done
+          fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
           # check-fleet-attestations.sh fails on an allowlist entry whose ref nothing under
@@ -1354,8 +1378,31 @@ jobs:
       # PR's required check runs register, which lags PR creation, so retry until it sticks.
       # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
       # re-sign land by itself, so it must happen even on the run where the guard then fails.
-      - name: Enable auto-merge
+      # Deploy window: at most one bot deploy commit reaches main per window, because each one
+      # makes every open PR `behind` under the strict up-to-date rule and restarts its checks.
+      # A manual workflow_dispatch always arms immediately; otherwise the first deploy after a
+      # quiet window arms at once and later ones stay open, unarmed, until
+      # deploy-window-flush.yml arms the oldest at the window. See deploy-window.py.
+      - name: Deploy window decision
+        id: window
         if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/deploy-window"
+          # Unreadable inputs arm immediately — the pre-window behaviour, never a stranded PR.
+          if ! bash .github/scripts/deploy-window-inputs.sh "$d"; then
+            echo "::warning::deploy window inputs unreadable — arming immediately"
+            echo "decision=ARM" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          armed="$(jq 'any(.[]; .armed)' "$d/prs.json")"
+          python3 .github/scripts/deploy-window.py decide --event "$EVENT_NAME" \
+            --armed-open "$armed" --commits-json "$d/commits.json" --now "$(date -u +%s)" >> "$GITHUB_OUTPUT"
+      - name: Enable auto-merge
+        if: steps.gitops_pr.outputs.pull-request-number != '' && steps.window.outputs.decision == 'ARM'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
