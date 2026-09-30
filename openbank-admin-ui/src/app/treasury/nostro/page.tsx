@@ -6,17 +6,19 @@
 // statement (NostroResource's own @RolesAllowed — upload is APPROVER only, unlike a treasury deal
 // draft it is nothing a dealer may do) and read how it compares with the ledger's nostro GL.
 // Nothing here posts to the ledger; an unmatched item is only ever listed for a person.
+// Below the result, the account's open BREAKS (ADR-0315 D7): each unmatched item with the day it was
+// first seen and its age in business days, flagged once it passes the service's alert threshold.
 
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { FileSearch, UploadCloud } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { hasPermission } from '@/lib/auth/roles'
-import { newIdempotencyKey, postNostroStatement, getJson, nostroReconciliationUrl } from '@/components/treasury/api'
-import { nostroReconciliationSchema, type NostroReconciliation } from '@/components/treasury/contracts'
+import { newIdempotencyKey, postNostroStatement, getJson, nostroBreaksUrl, nostroReconciliationUrl } from '@/components/treasury/api'
+import { nostroBreakListSchema, nostroReconciliationSchema, type NostroBreakList, type NostroReconciliation } from '@/components/treasury/contracts'
 import { formatDifference, isNonZeroDifference, MATCH_TYPE_TONE, matchTypeLabel, refusalText } from '@/components/treasury/model'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -127,6 +129,83 @@ function Nostro() {
       )}
 
       {result && <ReconciliationResult result={result} money={money} t={t} />}
+      {result && <Breaks iban={result.iban} money={money} t={t} />}
+    </div>
+  )
+}
+
+type BreaksState = { kind: 'loading' } | { kind: 'loaded'; data: NostroBreakList } | { kind: 'unavailable' }
+
+/**
+ * The account's OPEN breaks, oldest first, as the service ages them. An unavailable listing is
+ * said so — never rendered as "no breaks", which would read as a clean account.
+ */
+function Breaks({ iban, money, t }: { iban: string; money: (v: number) => string; t: (cs: string, en: string) => string }) {
+  const [state, setState] = useState<BreaksState>({ kind: 'loading' })
+
+  useEffect(() => {
+    let live = true
+    setState({ kind: 'loading' })
+    void getJson(nostroBreaksUrl(iban), nostroBreakListSchema).then(r => {
+      if (live) setState(r.ok ? { kind: 'loaded', data: r.data } : { kind: 'unavailable' })
+    })
+    return () => { live = false }
+  }, [iban])
+
+  return (
+    <div style={{ marginTop: 16 }}>
+      <h3 style={{ fontSize: 14, marginBottom: 8 }}>{t('Otevřené rozdíly (breaks) účtu', 'Open breaks on this account')}</h3>
+      <div className="card" style={{ overflowX: 'auto' }}>
+        {state.kind === 'loading' && (
+          <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Načítám…', 'Loading…')}</p>
+        )}
+        {state.kind === 'unavailable' && (
+          <p role="note" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+            {t('Seznam rozdílů se nepodařilo načíst.', 'The break list could not be loaded.')}
+          </p>
+        )}
+        {state.kind === 'loaded' && (
+          <>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+              {t(
+                `Upozornění od stáří ${state.data.alertAgeDays} pracovních dnů a částky ${money(state.data.alertMinAmount)}.`,
+                `Alert from ${state.data.alertAgeDays} business days old and an amount of ${money(state.data.alertMinAmount)}.`,
+              )}
+            </p>
+            {state.data.breaks.length === 0 ? (
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>{t('Žádné otevřené rozdíly.', 'No open breaks.')}</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Strana', 'Side')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Datum zaúčtování', 'Booking date')}</th>
+                    <th scope="col" style={{ textAlign: 'right' }}>{t('Částka', 'Amount')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Reference', 'Reference')}</th>
+                    <th scope="col" style={{ textAlign: 'left' }}>{t('Poprvé zjištěno', 'First seen')}</th>
+                    <th scope="col" style={{ textAlign: 'right' }}>{t('Stáří (prac. dny)', 'Age (business days)')}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.data.breaks.map(b => (
+                    <tr key={b.breakId}>
+                      <td>{b.side === 'STATEMENT' ? t('Výpis', 'Statement') : t('Hlavní kniha', 'Ledger')} · {b.ourSide}</td>
+                      <td>{b.bookingDate}</td>
+                      <td style={{ textAlign: 'right' }}>{money(b.amount)} {b.currency}</td>
+                      <td>{b.reference ?? t('(bez reference)', '(no reference)')}</td>
+                      <td>{b.firstSeenOn}</td>
+                      <td style={{ textAlign: 'right' }}>
+                        {b.ageBusinessDays}{' '}
+                        {b.aged && <StatusBadge status="AGED" tone="danger" label={t('Po limitu', 'Aged')} />}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </>
+        )}
+      </div>
     </div>
   )
 }
