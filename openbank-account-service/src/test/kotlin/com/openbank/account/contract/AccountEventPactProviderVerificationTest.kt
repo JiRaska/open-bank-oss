@@ -16,6 +16,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
@@ -124,6 +125,10 @@ class AccountEventPactProviderVerificationTest {
 
     @Inject
     lateinit var vertx: Vertx
+
+    /** Resolves to the `@Mock` TestBalanceQueryPort, as in the git-pact twin. */
+    @Inject
+    lateinit var balancePort: BalanceQueryPort
 
     /** See the git-pact twin: Pact-JVM calls `@State` on a thread with no Vert.x context. */
     private fun runOnVertxContext(block: suspend () -> Unit) {
@@ -235,6 +240,18 @@ class AccountEventPactProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /** Mirror of the git-pact twin's handler (#8345) — see there for why it is two bridged blocks. */
+    @State("a CZK balance exists for the pact account")
+    fun czkBalanceExistsForPactAccount() {
+        accountOwnedByKnownParty()
+        runOnVertxContext {
+            if (balancePort.getByAccountAndCurrency(ACCOUNT_ID, "CZK") == null) {
+                balancePort.initialize(ACCOUNT_ID, "CZK", java.math.BigDecimal.ZERO)
+            }
+            Unit
+        }
     }
 
     /**
