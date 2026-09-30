@@ -2,7 +2,7 @@
 # Security regression test — a security issue is never closed without a test (ADR-0279 WS1 #5).
 #
 # THE RULE. A PR that closes an issue labeled `security` must touch a test surface
-# (`src/test`, `e2e`, or `*.spec.*`/`*.test.*` anywhere). The defect history in CLAUDE.md
+# (`src/test`, `e2e`, `*.spec.*`/`*.test.*`, or `*_test.rego` anywhere). The defect history in CLAUDE.md
 # is the justification: the recurring security classes (nullable JAX-RS params, silent
 # no-op success, scheduler context loss) each shipped more than once precisely because
 # the fix PR changed only the production code, leaving the next service to rediscover the
@@ -49,6 +49,24 @@ jobs:
           script: |
             const pr = context.payload.pull_request;
             const body = pr.body || "";
+
+            // OPA tests live beside their policies and use `_test.rego`, not src/test/.
+            // Pin both sides of that distinction so a production policy cannot satisfy the
+            // security regression gate merely by being a .rego file (#11389).
+            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$|(?:^|\/)[^/]+_test\.rego$/;
+            for (const [path, expected] of [
+              ["openbank-infra/gitops/components/pricing/pricing_rest_ext_test.rego", true],
+              ["openbank-infra/gitops/components/pricing/pricing_rest_ext.rego", false],
+              ["openbank-infra/opa/policies/rest_test.rego", true],
+              ["openbank-infra/opa/policies/rest.rego", false],
+              ["openbank-infra/opa/policies/rest_test.rego.bak", false],
+              ["openbank-admin-ui/src/test/security.test.tsx", true],
+              ["openbank-admin-ui/e2e/security.spec.ts", true],
+            ]) {
+              if (TEST_SURFACE.test(path) !== expected) {
+                throw new Error(`Security test-surface matcher misclassified ${path}`);
+              }
+            }
 
             // Closing keywords only — Refs is a mention, not a resolution.
             const closing = [...new Set(
@@ -154,7 +172,6 @@ jobs:
               files.push(...next.nodes);
               pageInfo = next.pageInfo;
             }
-            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
             const touchedTests = files.map(file => file.path).filter(path => TEST_SURFACE.test(path));
             if (touchedTests.length > 0) {
               core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
@@ -163,7 +180,7 @@ jobs:
 
             core.setFailed(
               `This PR closes security issue(s) ${securityIssues.map(n => "#" + n).join(", ")} but touches no test surface ` +
-              `(src/test/, e2e/, *.spec.*, *.test.*). Add the regression test that would have caught the defect — ` +
+              `(src/test/, e2e/, *.spec.*, *.test.*, *_test.rego). Add the regression test that would have caught the defect — ` +
               `or, only if a test genuinely cannot express this fix, state \`no-test-justification: <reason>\` ` +
               `on its own line in the PR body (ADR-0279, #8590).`
             );
