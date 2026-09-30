@@ -1307,6 +1307,39 @@ gates:
     run: |
       python3 .github/scripts/check-cnpg-update-resilience.py
 
+  # 2026-09-30: 41 spot interruptions in 24h on the Karpenter `default` pool, and 134 of 140 CNPG
+  # pods on it -- every reclaim was ~13 Postgres failovers plus Temporal/Kafka restarts. The fix
+  # is three artefacts in two trees (the on-demand `stateful` NodePool in sandbox-platform, the
+  # Kyverno routing policy, and stateful manifests that do not fight it); each is one edit away
+  # from quietly re-admitting spot, and nothing else in CI reads them together.
+  - id: stateful-not-on-spot
+    name: "stateful workloads (CNPG, Kafka, Temporal) cannot land on spot capacity (enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      The stateful NodePool must stay on-demand-only, tainted and weighted; the Kyverno policy
+      must keep selecting CNPG, Strimzi and Temporal pods and keep adding required on-demand
+      affinity plus the toleration matching that taint; no stateful manifest may carry its own
+      required node affinity or name spot. The CNPG requests declared in gitops must also stay
+      within the load the pool's derived limit was sized from.
+    review_after: "2027-03-31"
+    verified: >-
+      2026-09-30 -- run on the branch: OK over 69 CNPG Clusters. Negative case on the real tree:
+      adding `spot` to the stateful pool's capacity-type fails with "must be exactly
+      [\"on-demand\"]". Self-test falsifies ten mutations (spot re-added, pool deleted, weight
+      removed, policy deleted, CNPG selector dropped, on-demand retyped, taint renamed without
+      the toleration, a Cluster with required nodeAffinity, a Cluster pinned to spot, declared
+      load above the measurement) against the unmutated real artefacts as control. Behaviour:
+      `--kyverno` (docker, Kyverno CLI v1.19.1) 7/7 fixtures; with the CNPG selector removed
+      5/7, both CNPG fixtures reported untouched.
+    min_subjects: 50   # 69 CNPG Clusters declared in gitops today (2026-09-30)
+    selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py"]
+    selftest: python3 .github/scripts/check-stateful-not-on-spot.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-stateful-not-on-spot.py
+
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
   # Rolling campaign-service into the sandbox hit five defects that each kill the pod or its

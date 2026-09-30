@@ -1,0 +1,122 @@
+# Fixtures for stateful-on-demand-cel (gitops/components/kyverno/stateful-on-demand-cel.yaml),
+# evaluated by .github/scripts/check-stateful-not-on-spot.py through the Kyverno CLI.
+# Each pod's `openbank.io/expect` annotation says whether the policy must route it to
+# on-demand ("on-demand") or leave it alone ("untouched").
+apiVersion: v1
+kind: Pod
+metadata:
+  name: pay-db-1
+  namespace: payments
+  labels:
+    cnpg.io/cluster: pay-db
+    cnpg.io/podRole: instance
+  annotations:
+    openbank.io/expect: on-demand
+spec:
+  containers:
+    - name: postgres
+      image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ledger-db-2
+  namespace: ledger
+  labels:
+    cnpg.io/cluster: ledger-db
+    cnpg.io/podRole: instance
+  annotations:
+    openbank.io/expect: on-demand
+spec:
+  # The real CNPG shape: affinity with podAntiAffinity only, plus the tolerations the
+  # DefaultTolerationSeconds admission plugin adds before any webhook runs.
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              cnpg.io/cluster: ledger-db
+  nodeSelector:
+    kubernetes.io/os: linux
+  tolerations:
+    - key: node.kubernetes.io/not-ready
+      operator: Exists
+      effect: NoExecute
+      tolerationSeconds: 300
+  containers:
+    - name: postgres
+      image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: openbank-cluster-dual-0
+  namespace: messaging
+  labels:
+    strimzi.io/controller: strimzipodset
+    strimzi.io/kind: Kafka
+  annotations:
+    openbank.io/expect: on-demand
+spec:
+  containers:
+    - name: kafka
+      image: quay.io/strimzi/kafka:0.48.0-kafka-4.1.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temporal-history-0
+  namespace: temporal
+  labels:
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/component: history
+  annotations:
+    openbank.io/expect: on-demand
+spec:
+  containers:
+    - name: temporal
+      image: docker.io/temporalio/server:1.31.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temporal-admintools-0
+  namespace: temporal
+  labels:
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/component: admintools
+  annotations:
+    openbank.io/expect: untouched
+spec:
+  containers:
+    - name: admintools
+      image: docker.io/temporalio/admin-tools:1.31.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: openbank-cluster-entity-operator-0
+  namespace: messaging
+  labels:
+    strimzi.io/kind: Kafka
+  annotations:
+    openbank.io/expect: untouched
+spec:
+  containers:
+    - name: topic-operator
+      image: quay.io/strimzi/operator:0.48.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ledger-service-0
+  namespace: ledger
+  labels:
+    app: ledger-service
+  annotations:
+    openbank.io/expect: untouched
+spec:
+  containers:
+    - name: app
+      image: example.invalid/openbank-ledger-service:1.0.0
