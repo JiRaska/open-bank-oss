@@ -8,7 +8,9 @@ import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
@@ -25,6 +27,7 @@ object DealFixtures {
 
     val dealer = Actor("dana.dealer", ActorType.HUMAN)
     val approver = Actor("adam.approver", ActorType.HUMAN)
+    val seniorApprover = Actor("sam.senior", ActorType.HUMAN)
     val agent = Actor("agent:treasury-drafter", ActorType.AI_AGENT)
     val serviceAccount = Actor("service-account-openbank-services", ActorType.SERVICE)
 
@@ -44,6 +47,7 @@ object DealFixtures {
         product: ProductType = ProductType.MM_PLACEMENT,
         counterparty: String = "SIMBK-A",
         by: Actor = dealer,
+        valueDate: LocalDate = MONDAY,
     ): Deal = Deal.draft(
         id = UUID.fromString("0191c0de-0000-7000-8000-000000000001"),
         product = product,
@@ -51,12 +55,36 @@ object DealFixtures {
         currency = currency,
         principal = BigDecimal(principal),
         rate = BigDecimal(rate),
-        tradeDate = MONDAY,
-        valueDate = MONDAY,
+        tradeDate = valueDate,
+        valueDate = valueDate,
         maturityDate = maturity,
         actor = by,
         at = NOW,
         rationale = if (by.type == ActorType.AI_AGENT) "test rationale" else null,
+        inputs = if (by.type == ActorType.AI_AGENT) """{"quote":"4.10"}""" else null,
+    )
+
+    /** Bank buys (or sells) EUR against CZK, traded Monday; value date defaults to T+2 (Wednesday). */
+    fun fxSpot(
+        eur: String = "10000.00",
+        rate: String = "25.125000",
+        side: FxSide = FxSide.BUY,
+        tradeDate: LocalDate = MONDAY,
+        valueDate: LocalDate = DayCount.spotDate(tradeDate),
+        by: Actor = dealer,
+    ): Deal = Deal.draft(
+        id = UUID.fromString("0191c0de-0000-7000-8000-00000000f0f0"),
+        product = ProductType.FX_SPOT,
+        counterpartyId = "SIMBK-A",
+        currency = "EUR",
+        principal = BigDecimal(eur),
+        rate = BigDecimal(rate),
+        tradeDate = tradeDate,
+        valueDate = valueDate,
+        maturityDate = null,
+        actor = by,
+        at = NOW,
+        fxSide = side,
     )
 
     fun withinLimit(deal: Deal) = LimitCheck.of(bankA, deal, BigDecimal.ZERO)

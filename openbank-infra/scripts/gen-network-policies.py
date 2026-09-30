@@ -48,8 +48,10 @@ service or a cross-service call:
 
 import glob
 import os
+import pathlib
 import re
 import sys
+import tempfile
 from collections import defaultdict
 
 import yaml
@@ -160,6 +162,30 @@ def load_docs():
     return docs
 
 
+def write_policies(out: str, policies: list[dict], *, dump=yaml.dump) -> None:
+    """Publish a complete policy file without exposing a truncated intermediate state."""
+    out_dir = os.path.dirname(out)
+    # Same filesystem for atomic replace, but outside manifest readers' *.yaml globs.
+    # A parallel CNPG gate once globbed this file just before replace removed it.
+    fd, tmp = tempfile.mkstemp(dir=out_dir, prefix=".network-policies-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(HEADER)
+            for pol in policies:
+                fh.write("---\n")
+                dump(pol, fh, Dumper=IndentedDumper,
+                     sort_keys=False, default_flow_style=False)
+        try:
+            mode = os.stat(out).st_mode & 0o777
+        except FileNotFoundError:
+            mode = 0o644
+        os.chmod(tmp, mode)
+        os.replace(tmp, out)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
 
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
@@ -242,12 +268,37 @@ def self_test() -> int:
         fails.append(f"the components tree {COMPONENTS} does not exist — this generator would "
                      f"produce no policies at all")
 
+    # Force an observation mid-render. The old direct "w" implementation exposed an
+    # empty file at this point and made parallel readiness collectors disagree.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        out = os.path.join(temp_dir, "network-policies.yaml")
+        old = "kind: NetworkPolicy\nmetadata:\n  name: old\n"
+        with open(out, "w", encoding="utf-8") as fh:
+            fh.write(old)
+        observed = []
+        observed_manifests = []
+
+        def observe_dump(policy, stream, **kwargs):
+            with open(out, encoding="utf-8") as fh:
+                observed.append(fh.read())
+            observed_manifests.append(sorted(str(p) for p in pathlib.Path(temp_dir).rglob("*.yaml")))
+            return yaml.dump(policy, stream, **kwargs)
+
+        write_policies(out, [{"kind": "NetworkPolicy", "metadata": {"name": "new"}}],
+                       dump=observe_dump)
+        case("readers see the complete old policy during render", observed, [old])
+        case("parallel manifest readers never see the staging file", observed_manifests, [[out]])
+        with open(out, encoding="utf-8") as fh:
+            published = fh.read()
+        case("the complete new policy is published", "name: new" in published, True)
+        case("temporary policy files are removed", os.listdir(temp_dir), ["network-policies.yaml"])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: network-policy dependency extraction is falsifiable (13 cases)")
+    print("self-test ok: dependency extraction and atomic policy publication (17 cases)")
     return 0
 
 def main():
@@ -601,12 +652,8 @@ def main():
             continue
         out = os.path.join(out_dir, "network-policies.yaml")
         policies.sort(key=lambda p: p["metadata"]["name"])
-        with open(out, "w", encoding="utf-8") as fh:
-            fh.write(HEADER)
-            for pol in policies:
-                fh.write("---\n")
-                yaml.dump(pol, fh, Dumper=IndentedDumper,
-                          sort_keys=False, default_flow_style=False)
+        # Gates share a checkout: collectors must never see a partially rendered file.
+        write_policies(out, policies)
         written.add(os.path.realpath(out))
         print(f"wrote {os.path.relpath(out, ROOT)} ({len(policies)} policies)")
 

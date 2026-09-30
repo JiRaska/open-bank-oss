@@ -194,6 +194,10 @@ class CustomerEdgeResource(
     @Inject
     lateinit var businessApprovals: BusinessPaymentApprovals
 
+    /** Feature flags this build publishes (#10281); a resource built by hand in a test has none. */
+    @Inject
+    lateinit var edgeFeatures: EdgeFeatures
+
     @ConfigProperty(name = "openbank.edge.party-service-url")
     lateinit var partyServiceUrl: String
 
@@ -1079,7 +1083,7 @@ class CustomerEdgeResource(
     @Authorize(action = "customer.sdd.update", resource = "")
     @Blocking
     @Suppress("MagicNumber") // 20-char UMR suffix from a UUID; a named const adds no clarity here
-    fun createSddMandate(body: String): Response {
+    fun createSddMandate(body: String, @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?): Response {
         val customer = customer()
         val node = runCatching { objectMapper.readTree(body) }.getOrNull() ?: return badRequest("Malformed body")
         val accountId = node.get("accountId")?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -1106,7 +1110,60 @@ class CustomerEdgeResource(
         req.put("creditorName", creditorName)
         req.put("debtorName", debtorName)
         req.put("signatureDate", java.time.LocalDate.now(clock).toString())
+        // Business multi-signature (#10281): authorising a direct debit on an entity's account is a
+        // recurring outflow. sdd-service stores no maximum amount, so the mandate is evaluated
+        // against the strictest rule — a client-stated maximum nothing enforces would be a bypass.
+        if (customer.actingFor != null) {
+            val umr = req.path("umr").asText()
+            val held = HeldPayment(
+                rail = PaymentRail.SDD_MANDATE,
+                amount = null,
+                currency = null,
+                creditor = creditorId,
+                creditorName = creditorName,
+                reference = umr,
+                debtorAccountId = accountId.toString(),
+                railRequest = req.toString(),
+                extras = mapOf(
+                    "creditorIdentifier" to creditorId,
+                    "mandateReference" to umr,
+                    "scheme" to req.path("scheme").asText(),
+                    "sequenceType" to req.path("sequenceType").asText(),
+                ),
+            )
+            holdForApproval(customer, held, scaChallengeId, "sdd.mandates.create")?.let { return it }
+        }
         return upstream.post("$sddServiceUrl/api/v1/sdd/mandates", customer.partyId.toString(), req.toString())
+    }
+
+    /**
+     * The hold view of a standing-order create body: the per-execution amount (minor units to a
+     * decimal in the currency's own exponent), currency and creditor. Null when any is unusable.
+     */
+    private fun heldStandingOrder(enriched: String, debit: UUID): HeldPayment? {
+        val node = runCatching { objectMapper.readTree(enriched) }.getOrNull() ?: return null
+        val minor = node.path("amountMinorUnits").takeIf { it.isIntegralNumber && it.canConvertToLong() }
+            ?.asLong()?.takeIf { it > 0 } ?: return null
+        val currency = node.path("currency").asText("").uppercase().takeIf { CURRENCY_CODE.matches(it) }
+            ?: return null
+        val digits = runCatching { java.util.Currency.getInstance(currency).defaultFractionDigits }.getOrNull()
+            ?.takeIf { it >= 0 } ?: return null
+        val creditor = node.path("creditorIban").asText("").takeIf { it.isNotBlank() } ?: return null
+        return HeldPayment(
+            rail = PaymentRail.STANDING_ORDER,
+            amount = java.math.BigDecimal.valueOf(minor, digits).toPlainString(),
+            currency = currency,
+            creditor = creditor,
+            creditorName = node.path("creditorName").asText("").takeIf { it.isNotBlank() },
+            reference = node.path("remittanceInfo").asText("").takeIf { it.isNotBlank() },
+            debtorAccountId = debit.toString(),
+            railRequest = enriched,
+            extras = mapOf(
+                "frequency" to node.path("frequency").asText("").takeIf { it.isNotBlank() },
+                "startDate" to node.path("startDate").asText("").takeIf { it.isNotBlank() },
+                "replacesStandingOrderId" to node.path("replacesStandingOrderId").asText("").takeIf { it.isNotBlank() },
+            ),
+        )
     }
 
     /** Cancel a SEPA Direct Debit mandate the caller owns (terminal — no more collections). */
@@ -3422,7 +3479,11 @@ class CustomerEdgeResource(
     @Path("/standing-orders")
     @Authorize(action = "customer.standing-orders.create")
     @Blocking
-    fun createStandingOrder(body: String, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+    fun createStandingOrder(
+        body: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        @HeaderParam("X-SCA-Challenge-Id") scaChallengeId: String?,
+    ): Response {
         val customer = customer()
         val debit = extractTextField(objectMapper, body, "debitAccountId")
             ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
@@ -3430,6 +3491,9 @@ class CustomerEdgeResource(
         if (!ownsAccount(debit, customer.partyId)) {
             return forbidden("Debit account does not belong to caller")
         }
+        // An edit (#10281) names the order it replaces; standing-order-service swaps them in one
+        // transaction. The replaced order must be the caller's own — same guard as pause/cancel.
+        replacementRefusal(body, customer.partyId)?.let { return it }
         var enriched = injectField(objectMapper, body, "partyId", customer.partyId.toString())
             ?: return badRequest("Malformed standing-order body")
         enriched = injectField(
@@ -3444,6 +3508,13 @@ class CustomerEdgeResource(
         if (extractTextField(objectMapper, enriched, "startDate") == null) {
             enriched =
                 injectField(objectMapper, enriched, "startDate", java.time.LocalDate.now(clock).toString()) ?: enriched
+        }
+        // Business multi-signature (#10281): a standing order for an entity is a recurring outflow
+        // and follows the entity's signing policy, banded by its per-execution amount.
+        if (customer.actingFor != null) {
+            val held = heldStandingOrder(enriched, debit)
+                ?: return badRequest("Missing or malformed amountMinorUnits/currency/creditorIban")
+            holdForApproval(customer, held, scaChallengeId, "standingOrders.create")?.let { return it }
         }
         val resp = upstream.post(
             "$standingOrderServiceUrl/api/v1/standing-orders",
@@ -5085,6 +5156,28 @@ class CustomerEdgeResource(
      * are party-unaware (id-only), so the edge resolves the order, confirms it belongs to the
      * JWT party (403 otherwise — no existence oracle), runs [action], and audits the outcome.
      */
+    /** Null when the body names no replaced order, or names one of the caller's own (#10281). */
+    private fun replacementRefusal(body: String, partyId: UUID): Response? {
+        val raw = extractTextField(objectMapper, body, "replacesStandingOrderId") ?: return null
+        // Not live in this build: refuse rather than send a field an older standing-order-service
+        // would ignore, which would create a second order and cancel nothing (double debit).
+        if (!this::edgeFeatures.isInitialized || !edgeFeatures.replaceEnabled()) {
+            return Response.status(Response.Status.NOT_IMPLEMENTED)
+                .entity("""{"error":"Standing-order replace is not enabled","code":"REPLACE_NOT_ENABLED"}""")
+                .type(MediaType.APPLICATION_JSON).build()
+        }
+        val replaced = runCatching { UUID.fromString(raw) }.getOrNull()
+            ?: return badRequest("Malformed replacesStandingOrderId")
+        return if (ownsStandingOrder(replaced, partyId)) null else forbidden("Standing order does not belong to caller")
+    }
+
+    private fun ownsStandingOrder(id: UUID, partyId: UUID): Boolean {
+        val json = upstream.get("$standingOrderServiceUrl/api/v1/standing-orders/$id", partyId.toString())
+            .takeIf { it.statusInfo.family == Response.Status.Family.SUCCESSFUL }
+            ?.let { it.entity as? String } ?: return false
+        return extractTextField(objectMapper, json, "partyId") == partyId.toString()
+    }
+
     private fun standingOrderLifecycle(id: UUID, operation: String, action: (String) -> Response): Response {
         val customer = customer()
         val orderJson = upstream.get("$standingOrderServiceUrl/api/v1/standing-orders/$id", customer.partyId.toString())
@@ -5174,8 +5267,8 @@ class CustomerEdgeResource(
     private fun scaGate(
         scaChallengeId: String?,
         customer: CustomerIdentity,
-        amount: String,
-        currency: String,
+        amount: String?,
+        currency: String?,
         creditor: String?,
         operation: String,
     ): Response? {
@@ -5196,8 +5289,9 @@ class CustomerEdgeResource(
         val consumeBody = objectMapper.createObjectNode().apply {
             // The challenge was raised and decided by the human (SCA is theirs, not the entity's).
             put("partyId", customer.human.toString())
-            put("amount", amount)
-            put("currency", currency)
+            // Null only for an SDD mandate (#10281): it has no amount, and its challenge links none.
+            amount?.let { put("amount", it) }
+            currency?.let { put("currency", it) }
             creditor?.let { put("creditor", it) }
         }
         val consume = upstream.post(
@@ -5556,6 +5650,8 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+
+        private val CURRENCY_CODE = Regex("^[A-Z]{3}$")
 
         /**
          * The path transaction-service puts in `merchant.logoUrl`, and the path this edge serves it

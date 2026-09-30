@@ -1,0 +1,50 @@
+# Gateway API + Envoy Gateway CRDs (ADR-0324 Phase 0).
+#
+# Owned by their own Application, not by the `envoy-gateway` chart, for three reasons:
+#   1. CHANNEL. gateway-helm v1.9.1 bundles the Gateway API *experimental* channel
+#      (TCPRoute/UDPRoute/TLSRoute/ListenerSet/x-k8s.io types). ADR-0324 only needs the
+#      standard channel (Gateway/GatewayClass/HTTPRoute/GRPCRoute/ReferenceGrant/
+#      BackendTLSPolicy); gateway-crds-helm lets us pin `channel: standard`.
+#   2. UPGRADES. The main chart ships them in a subchart `crds/` directory, which Helm
+#      installs once and never upgrades. Here they are ordinary templates, so a chart bump
+#      is a CRD bump, applied server-side (the CRDs exceed the client-side-apply
+#      last-applied annotation limit, hence ServerSideApply=true).
+#   3. BLAST RADIUS. Deleting a CRD cascades to every Gateway/HTTPRoute/policy of that
+#      kind. So this Application does NOT prune and carries NO resources-finalizer:
+#      removing or renaming this file must never take the edge's routing objects with it.
+#      Retiring a CRD is a deliberate manual step.
+#
+# Chart version verified 2026-09-28 against the OCI registry manifest
+# (docker.io/envoyproxy/gateway-crds-helm:v1.9.1). Keep targetRevision equal to the
+# `envoy-gateway` Application's — the controller and its CRDs are released together.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: envoy-gateway-crds
+  namespace: argocd
+spec:
+  project: default
+  source:
+    # Scheme-less repoURL + chart = Helm-from-OCI in Argo CD (no repo secret needed for a
+    # public registry).
+    repoURL: docker.io/envoyproxy
+    chart: gateway-crds-helm
+    targetRevision: v1.9.1
+    helm:
+      valuesObject:
+        crds:
+          gatewayAPI:
+            enabled: true
+            channel: standard
+          envoyGateway:
+            enabled: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: envoy-gateway-system
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - ServerSideApply=true

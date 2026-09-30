@@ -1361,6 +1361,39 @@ test_matrix_allows_does_not_grant_an_unseeded_action if {
 		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
 }
 
+# #3765 / ADR-0223: the matrix is a staff grant. A service-account holding the SAME role gets
+# nothing from it — neither the shared backend client nor the edge, nor any future client — while
+# the human control with that role on that action is still granted.
+test_matrix_allows_never_grants_a_service_account if {
+	matrix := {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read", "ledger.create", "opsmessage.compose"]}}}
+	every id in {"service-account-openbank-services", "service-account-openbank-edge", "service-account-openbank-newcomer"} {
+		every action in {"account.read", "ledger.create", "opsmessage.compose"} {
+			not rest.allowed_reasons["matrix-allows"] with input as {
+				"principal": {"id": id, "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+				"action": action,
+			}
+				with data.rules.authz as matrix
+		}
+	}
+	every action in {"account.read", "ledger.create", "opsmessage.compose"} {
+		rest.allowed_reasons["matrix-allows"] with input as {
+			"principal": {"id": "op-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+			"action": action,
+		}
+			with data.rules.authz as matrix
+	}
+}
+
+# The exclusion is a PREFIX on the id, not a substring: a human whose id merely contains the
+# idiom elsewhere keeps the grant.
+test_matrix_allows_exclusion_is_a_prefix if {
+	rest.allowed_reasons["matrix-allows"] with input as {
+		"principal": {"id": "ops-service-account-reviewer", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "account.read",
+	}
+		with data.rules.authz as {"role_action_matrix": {"ROLE_OPERATOR": {"grant": ["account.read"]}}}
+}
+
 # A role absent from the matrix: the lookup is undefined, the rule does not fire, and a
 # bundle whose rules.yaml predates the key sees no behaviour change.
 test_matrix_allows_absent_role_and_absent_key_are_silent if {

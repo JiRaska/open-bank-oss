@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.1...lending-service-v0.39.2) (2026-09-29)
+
+
+### Bug Fixes
+
+* **lending:** debit the borrower's account when a repayment is recorded ([#11505](https://github.com/JiRaska/open-bank-oss/issues/11505)) ([d990f8c](https://github.com/JiRaska/open-bank-oss/commit/d990f8ce37c6d6963b9d33c592c5c42de2656b37))
+
+## [0.39.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.0...lending-service-v0.39.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.39.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.38.0...lending-service-v0.39.0) (2026-09-28)
+
+
+### Features
+
+* **lending:** bind Idempotency-Key to a request fingerprint ([#10958](https://github.com/JiRaska/open-bank-oss/issues/10958)) ([4d0ba3d](https://github.com/JiRaska/open-bank-oss/commit/4d0ba3d4ef50bc0f4ec24f89363999611eb8f081))
+
+## [0.38.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.1...lending-service-v0.38.0) (2026-09-26)
+
+
+### Features
+
+* **lending:** four-eyes void of an executed backfill's synthetic loans ([#10972](https://github.com/JiRaska/open-bank-oss/issues/10972)) ([30e2049](https://github.com/JiRaska/open-bank-oss/commit/30e2049acc41af80bb3aa6857cb212b8f3f97490))
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
+## [0.37.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.37.0...lending-service-v0.37.1) (2026-09-26)
+
+
+### Bug Fixes
+
+* **lending:** stop counting idempotent replays as posted in the ledger backfill ([#10938](https://github.com/JiRaska/open-bank-oss/issues/10938)) ([a28de17](https://github.com/JiRaska/open-bank-oss/commit/a28de17cd76c5203622236b02b2bb005c840f098))
+
 ## [0.37.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.36.0...lending-service-v0.37.0) (2026-09-25)
 
 

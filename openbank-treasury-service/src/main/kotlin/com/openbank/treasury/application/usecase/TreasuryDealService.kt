@@ -6,6 +6,7 @@ package com.openbank.treasury.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.treasury.application.port.`in`.AccrualRun
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
 import com.openbank.treasury.application.port.`in`.DealView
@@ -17,10 +18,14 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FxMidRatePort
+import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
 import com.openbank.treasury.domain.model.DealMatured
@@ -29,6 +34,7 @@ import com.openbank.treasury.domain.model.DealSettled
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
@@ -51,6 +57,8 @@ class TreasuryDealService(
     private val ledger: LedgerPostingPort,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val fxMid: FxMidRatePort = FxMidRatePort.NONE,
+    private val fxTolerance: FxRateTolerance = FxRateTolerance.DISABLED,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -58,20 +66,31 @@ class TreasuryDealService(
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = LocalDate.now(clock)
-        val deal = Deal.draft(
+        val tradeDate = command.tradeDate ?: today
+        val valueDate = command.valueDate
+            ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
+        val drafted = Deal.draft(
             id = Ids.newId(),
             product = command.product,
             counterpartyId = command.counterpartyId,
             currency = command.currency,
             principal = command.principal,
             rate = command.rate,
-            tradeDate = command.tradeDate ?: today,
-            valueDate = command.valueDate,
+            tradeDate = tradeDate,
+            valueDate = requireNotNull(valueDate) { "valueDate is required" },
             maturityDate = command.maturityDate,
             actor = actor,
             at = now,
             rationale = command.rationale,
+            inputs = command.inputs,
+            fxSide = command.fxSide,
         )
+        // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
+        val deal = if (fxTolerance.enabled) {
+            drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
+        } else {
+            drafted
+        }
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
@@ -101,10 +120,20 @@ class TreasuryDealService(
                     createdBy = booked.createdBy.id,
                     approvedBy = actor.id,
                     occurredAt = booked.updatedAt,
+                    fxSide = booked.fx?.side,
+                    counterAmount = booked.fx?.counterAmount,
                 ),
             ),
         )
         return deals.save(booked, event = event, command = cmd(key, APPROVE, dealId))
+    }
+
+    override suspend fun overrideLimit(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, OVERRIDE, dealId)?.let { return it } }
+        val deal = load(dealId)
+        // Measured now; approval re-checks, and refuses if exposure has grown past what was overridden.
+        val overridden = deal.overrideLimit(actor, reason, limitCheck(deal), clock.instant())
+        return deals.save(overridden, command = cmd(key, OVERRIDE, dealId))
     }
 
     override suspend fun reject(dealId: UUID, reason: String, actor: Actor, key: String?): Deal {
@@ -135,6 +164,8 @@ class TreasuryDealService(
                     maturityDate = settled.maturityDate,
                     ledgerJournalId = ref.journalId,
                     occurredAt = settled.updatedAt,
+                    fxSide = settled.fx?.side,
+                    counterAmount = settled.fx?.counterAmount,
                 ),
             ),
         )
@@ -145,7 +176,14 @@ class TreasuryDealService(
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
         val matured = deal.mature(actor, LocalDate.now(clock), clock.instant())
-        val ref = post(PostingRules.maturity(matured), matured.maturityDate, "treasury ${matured.product} maturity")
+        // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
+        // accrued account instead of booking the whole interest to income in one amount.
+        accrueThrough(deal, deal.maturityDate)
+        val ref = post(
+            PostingRules.maturity(matured, accruedSoFar(deal)),
+            matured.maturityDate,
+            "treasury ${matured.product} maturity",
+        )
         val event = DealEvent(
             DealMatured.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -169,7 +207,8 @@ class TreasuryDealService(
         key?.let { k -> replay(k, REVERSE, dealId)?.let { return it } }
         val deal = load(dealId)
         val reversed = deal.reverse(actor, reason, clock.instant())
-        val ref = PostingRules.reversal(reversed, deal.state)
+        val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
+        val ref = PostingRules.reversal(reversed, deal.state, accrued)
             ?.let { post(it, LocalDate.now(clock), "treasury ${deal.product} reversal") }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
@@ -184,6 +223,8 @@ class TreasuryDealService(
                     reason = reason,
                     ledgerJournalId = ref?.journalId,
                     occurredAt = reversed.updatedAt,
+                    fxSide = reversed.fx?.side,
+                    counterAmount = reversed.fx?.counterAmount,
                 ),
             ),
         )
@@ -194,12 +235,22 @@ class TreasuryDealService(
 
     override suspend fun list(state: DealState?): List<Deal> = deals.list(state)
 
-    override suspend fun counterparties(): List<CounterpartyExposure> = counterparties.list().flatMap { cp ->
+    override suspend fun counterparties(): List<CounterpartyExposure> {
+        val overrides = deals.pendingLimitOverrides()
+        return counterparties.list().flatMap { cp -> exposures(cp, overrides) }
+    }
+
+    private suspend fun exposures(cp: Counterparty, overrides: List<Deal>): List<CounterpartyExposure> =
         Deal.SUPPORTED_CURRENCIES.sorted().mapNotNull { ccy ->
             if (!cp.limits.containsKey(ccy)) return@mapNotNull null
-            CounterpartyExposure(cp, ccy, cp.limitFor(ccy), deals.exposure(cp.id, ccy, null))
+            CounterpartyExposure(
+                counterparty = cp,
+                currency = ccy,
+                limit = cp.limitFor(ccy),
+                exposure = deals.exposure(cp.id, ccy, null),
+                activeOverrides = overrides.count { it.holdsActiveLimitOverride(cp.id, ccy) },
+            )
         }
-    }
 
     /**
      * Outstanding principal on [asOf]: a deal that has SETTLED (or since MATURED) and whose
@@ -215,7 +266,8 @@ class TreasuryDealService(
             CurrencyPosition(
                 currency = ccy,
                 placed = sum(ProductType.MM_PLACEMENT),
-                borrowed = sum(ProductType.MM_BORROWING),
+                // Lombard borrowing from ČNB is a borrowing: it reduces the net like an interbank one.
+                borrowed = sum(ProductType.MM_BORROWING) + sum(ProductType.CNB_LOMBARD),
                 atCnb = sum(ProductType.CNB_DEPOSIT_FACILITY),
             )
         }
@@ -235,6 +287,44 @@ class TreasuryDealService(
         )
     }
 
+    /**
+     * ADR-0315 D5. One deal failing (ledger down) must not stop the pass, and must not be swallowed:
+     * it is counted and returned for the scheduler to log. Idempotent: a day already accrued is
+     * skipped here, and the ledger deduplicates on the per-day key if two passes race.
+     */
+    override suspend fun accrueInterest(asOf: LocalDate): AccrualRun {
+        val outcomes = deals.list(DealState.SETTLED).map { d ->
+            runCatching { accrueThrough(d, minOf(asOf, d.maturityDate)) }
+        }
+        return AccrualRun(
+            journals = outcomes.sumOf { it.getOrDefault(0) },
+            failures = outcomes.mapNotNull { it.exceptionOrNull() },
+        )
+    }
+
+    /** Post each day after the last accrued one, up to and including [through]. Returns journals posted. */
+    private suspend fun accrueThrough(deal: Deal, through: LocalDate): Int {
+        var day = (lastAccrued(deal) ?: deal.valueDate).plusDays(1)
+        var posted = 0
+        while (!day.isAfter(through)) {
+            PostingRules.accrual(deal, day)?.let { spec ->
+                deals.recordJournal(post(spec, day, "treasury ${deal.product} accrual $day"))
+                posted++
+            }
+            day = day.plusDays(1)
+        }
+        return posted
+    }
+
+    /** The last day with a recorded accrual; a day that adds nothing posts no journal and is not recorded. */
+    private suspend fun lastAccrued(deal: Deal): LocalDate? = deals.journals(deal.id)
+        .filter { it.event == PostingEvent.ACCRUED }
+        .maxOfOrNull { LocalDate.parse(it.idempotencyKey.substringAfterLast(':')) }
+
+    /** Σ of the posted dailies — exactly the cumulative accrual at the last recorded day. */
+    private suspend fun accruedSoFar(deal: Deal): BigDecimal =
+        lastAccrued(deal)?.let { PostingRules.accruedThrough(deal, it) } ?: BigDecimal.ZERO
+
     private suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): LedgerJournalRef {
         val journalId = ledger.post(spec, entryDate, description)
         return LedgerJournalRef(spec.dealId, spec.event, spec.idempotencyKey, journalId, clock.instant())
@@ -242,7 +332,8 @@ class TreasuryDealService(
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
-        val exposure = if (deal.product.isAsset) deals.exposure(cp.id, deal.currency, deal.id) else BigDecimal.ZERO
+        val consumes = deal.product.isAsset || deal.product == ProductType.FX_SPOT
+        val exposure = if (consumes) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
         return LimitCheck.of(cp, deal, exposure)
     }
 
@@ -270,6 +361,7 @@ class TreasuryDealService(
         const val DRAFT = "DRAFT"
         const val SUBMIT = "SUBMIT"
         const val APPROVE = "APPROVE"
+        const val OVERRIDE = "OVERRIDE_LIMIT"
         const val REJECT = "REJECT"
         const val CANCEL = "CANCEL"
         const val SETTLE = "SETTLE"

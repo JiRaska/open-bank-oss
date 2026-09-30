@@ -38,6 +38,13 @@ class LedgerBackfillRequestRepositoryImpl :
     override fun findProposedByHash(planHash: String): Uni<LedgerBackfillRequestEntity?> =
         find("planHash = ?1 and state = ?2", planHash, ProposalState.PROPOSED).firstResult()
 
+    @WithSession
+    override fun findSignedOffByHash(planHash: String): Uni<List<LedgerBackfillRequestEntity>> = find(
+        "planHash = ?1 and state in ?2 order by proposedAt desc",
+        planHash,
+        listOf(ProposalState.APPROVED, ProposalState.EXECUTED),
+    ).list()
+
     @WithTransaction
     override fun compareAndSetDecision(entity: LedgerBackfillRequestEntity): Uni<Int> =
         Panache.getSession().flatMap { session ->

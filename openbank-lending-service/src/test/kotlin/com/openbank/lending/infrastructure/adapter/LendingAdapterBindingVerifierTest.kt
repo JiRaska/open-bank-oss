@@ -31,7 +31,7 @@ private class RestStubLedgerPort : LedgerPostingPort {
 private class RestStubBorrowerCreditPort : BorrowerCreditPort {
     override fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> =
         Uni.createFrom().item(Unit)
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> =
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> =
         Uni.createFrom().item(Unit)
 }
 

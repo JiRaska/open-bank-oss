@@ -38,4 +38,6 @@ data class SnapshotRun(
     val status: TieOutStatus,
     val positionCount: Int,
     val mismatches: List<TieOutMismatch>,
+    /** The caller's principal name (SecurityIdentity), or null for a run recorded before this field existed. */
+    val requestedBy: String? = null,
 )

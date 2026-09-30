@@ -4,8 +4,9 @@
 
 package com.openbank.lending.integration
 
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.QuarkusTestProfile
 import io.quarkus.test.junit.TestProfile
@@ -57,7 +58,10 @@ import javax.sql.DataSource
  * measures, so it is written entirely against endpoints and a table that already exist.
  */
 @QuarkusTest
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 @TestProfile(CompliancePackReplicaConvergenceIT.FastRefresh::class)
 class CompliancePackReplicaConvergenceIT {
 

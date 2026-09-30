@@ -42,7 +42,7 @@ class TestBorrowerCreditPort : BorrowerCreditPort {
         calls += reference
         return Uni.createFrom().item(Unit)
     }
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> {
         calls += reference
         return Uni.createFrom().item(Unit)
     }
@@ -83,5 +83,23 @@ class TestRecordingLedgerPostingPort : com.openbank.lending.application.port.out
         }
         journals.putIfAbsent(posting.reference, posting)
         return Uni.createFrom().item(Unit)
+    }
+
+    /** Emulates ledger-service's `Idempotent-Replayed` header: a repeated reference is REPLAYED (#10904). */
+    override fun postReportingReplay(
+        posting: com.openbank.lending.application.port.out.LedgerPosting,
+    ): Uni<com.openbank.lending.application.port.out.LedgerPostResult> {
+        recorded += posting
+        if (failOnce.remove(posting.reference)) {
+            return Uni.createFrom().failure(IllegalStateException("injected ledger failure for ${posting.reference}"))
+        }
+        val first = journals.putIfAbsent(posting.reference, posting) == null
+        return Uni.createFrom().item(
+            if (first) {
+                com.openbank.lending.application.port.out.LedgerPostResult.POSTED
+            } else {
+                com.openbank.lending.application.port.out.LedgerPostResult.REPLAYED
+            },
+        )
     }
 }

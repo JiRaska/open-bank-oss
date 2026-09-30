@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.4](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.3...fraud-service-v0.15.4) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.2...fraud-service-v0.15.3) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/fraud-service-v0.15.1...fraud-service-v0.15.2) (2026-09-13)
 
 
