@@ -18,7 +18,7 @@ lineage:
       description: posts settlement, maturity and reversal journals via POST /api/v1/journals (ADR-0315 D5)
     - serviceName: audit-service
       relationType: topic
-      description: openbank.treasury.deal.events (booked/settled/matured/reversed) reach the audit trail
+      description: openbank.treasury.deal.events (booked/confirmed/settled/matured/reversed) reach the audit trail
 databaseLineage:
   ownedDatabases:
     - openbank_treasury
