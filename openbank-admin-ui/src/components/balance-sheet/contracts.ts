@@ -96,6 +96,23 @@ export const backfillExecutionSchema = z.object({
     loans: z.array(z.looseObject({ loanId: z.string(), status: z.string(), legsPosted: z.number().int(), legsTotal: z.number().int() })),
   }),
 })
+// Void of back-posted loans (#10969, console #11487): GET/POST /api/v1/lending/ledger-backfill/voids.
+// The dry-run answers the backfill plan shape; a void names the EXECUTED backfill it offsets.
+export const voidRequestSchema = z.object({
+  id: z.string(), sourceRequestId: z.string(), state: backfillStateSchema, voidDate: z.string(),
+  planHash: z.string(), loanCount: z.number().int(), legCount: z.number().int(), proposedBy: z.string(),
+  decidedBy: z.string().nullable(), decisionReason: z.string().nullable(), executedBy: z.string().nullable(),
+  lastResult: z.string().nullable().optional(),
+  proposedAt: z.string().nullable().optional(), decidedAt: z.string().nullable().optional(),
+  executedAt: z.string().nullable().optional(),
+})
+export const voidRequestListSchema = z.object({ requests: z.array(voidRequestSchema) })
+export const voidExecutionSchema = z.object({
+  execution: z.looseObject({
+    requestId: z.string(), executed: z.boolean(), complete: z.boolean(),
+    loans: z.array(z.looseObject({ loanId: z.string(), status: z.string() })),
+  }),
+})
 
 // IRRBB (risk-engine GET /snapshots/{id}/irrbb, ADR-0313 phase 1).
 export const SCENARIOS = ['parallel-up', 'parallel-down', 'steepener', 'flattener', 'short-up', 'short-down'] as const
@@ -340,4 +357,6 @@ export type CurveSet = z.infer<typeof curveSetSchema>
 export type BackfillPlan = z.infer<typeof backfillPlanSchema>
 export type BackfillRequest = z.infer<typeof backfillRequestSchema>
 export type BackfillExecution = z.infer<typeof backfillExecutionSchema>
+export type VoidRequest = z.infer<typeof voidRequestSchema>
+export type VoidExecution = z.infer<typeof voidExecutionSchema>
 export type Provenance = z.infer<typeof provenance>
