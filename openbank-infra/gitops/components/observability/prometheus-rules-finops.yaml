@@ -203,7 +203,7 @@ spec:
             team: platform
             route: finops-agent
           annotations:
-            summary: "Node churn during business hours — {{ $value }} nodes"
+            summary: "Node churn during business hours"
             description: "Karpenter terminated {{ $value }} nodes during business hours (07:00–20:00 UTC). This causes unnecessary EBS detach races and cross-AZ traffic spikes. Prometheus server UTC assumed."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
 

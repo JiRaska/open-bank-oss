@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.83.0...customer-edge-v0.84.0) (2026-09-29)
+
+
+### Features
+
+* **delegation:** add OTP-gated external disclosure boundary ([#9237](https://github.com/JiRaska/open-bank-oss/issues/9237)) ([b6288a2](https://github.com/JiRaska/open-bank-oss/commit/b6288a2985121121ba5739682db74118f9ba884a))
+
 ## [0.83.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.82.0...customer-edge-v0.83.0) (2026-09-26)
 
 

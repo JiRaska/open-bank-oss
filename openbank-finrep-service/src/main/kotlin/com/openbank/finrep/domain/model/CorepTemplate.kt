@@ -19,6 +19,14 @@ import java.time.LocalDate
  * produce a real, attested value for that row. A report with data gaps is still fully rendered
  * (every row present, gap cells explicit zeros), never silently truncated.
  */
-data class CorepTemplate(val templateId: String, val period: LocalDate, val cells: List<CorepCell>) {
+data class CorepTemplate(
+    val templateId: String,
+    val period: LocalDate,
+    val cells: List<CorepCell>,
+    /** The risk-engine snapshot run the figures came from; null for a template not built from one. */
+    val sourceRunId: String? = null,
+    /** That run's provenance (`synthetic` | `production`, ADR-0313 D13), so a synthetic-sourced template is labelled. */
+    val provenance: String? = null,
+) {
     val hasDataGaps: Boolean get() = cells.any { it.isDataGap }
 }

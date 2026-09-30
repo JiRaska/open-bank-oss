@@ -21,11 +21,55 @@ spec:
     targetRevision: 3.9.1
     helm:
       valuesObject:
-        # Sandbox FinOps: single replica per component (raise + add PDBs for prod,
-        # where the admission webhook must be HA or it can block all admissions).
+        # Sandbox FinOps: single replica for the background, reports and cleanup
+        # controllers (raise + add PDBs for prod). The ADMISSION controller is the
+        # exception: its webhooks run with failurePolicy Fail, so one pod is a single
+        # point of failure for every Pod create in the cluster. 2026-09-29: one
+        # replica at a 500m limit, doing SBOM verification twice (v1 Enforce + the
+        # CEL IVP shadow), hit `context canceled` and denied every ARC runner Pod
+        # (#11461, #11437). Cost of the second replica: one more pod at 250m/256Mi
+        # requests (limits 1500m/512Mi), i.e. +0.25 vCPU / +256Mi reserved.
         admissionController:
-          replicas: 1
+          replicas: 2
+          # The chart renders its PDB whenever replicas > 1; set it explicitly so
+          # the intent does not hang on that implicit rule. minAvailable 1 keeps one
+          # webhook endpoint through a node drain / Karpenter consolidation.
+          podDisruptionBudget:
+            enabled: true
+            minAvailable: 1
+          # Chart default antiAffinity (enabled) already prefers distinct nodes by
+          # kubernetes.io/hostname. Also spread across zones; ScheduleAnyway so a
+          # single-zone capacity shortfall degrades placement instead of leaving
+          # the second replica Pending.
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: admission-controller
+                  app.kubernetes.io/instance: kyverno
           container:
+            # Image-verify cache (cmd/internal/flag.go, Kyverno 1.19.1): on by
+            # default, TTL 60m, --imageVerifyCacheMaxSize 1000. That "size" is a
+            # ristretto MaxCost, and since 1.19 an entry carrying attestation
+            # payloads costs its payload BYTES (pkg/image/verification/cache/
+            # client.go payloadCost). The CEL ImageValidatingPolicy caches its
+            # attestations that way (pkg/cel/libs/imageverify/impl.go
+            # SetWithPayload), so at the default budget of 1000 B a ~4 MB runner
+            # SBOM can never be admitted to the cache and every IVP admission
+            # re-downloads and re-verifies it. v1 verifyImages entries cost 1 each
+            # and are unaffected. 64Mi fits the runner SBOM plus every service SBOM
+            # (largest ~0.72 MB) with headroom, inside the 512Mi limit (~190Mi in
+            # use). Stated explicitly (enabled + TTL too) so the budget is reviewed
+            # here, not inherited. Note v1's verify-openbank-image-sbom-attestation
+            # sets useCache: false per rule, which bypasses this cache entirely.
+            # Quoted: an unquoted integer this large renders through the chart's
+            # range as 6.7108864e+07, which Go's Int64 flag parser rejects at boot.
+            extraArgs:
+              imageVerifyCacheEnabled: true
+              imageVerifyCacheMaxSize: "67108864"
+              imageVerifyCacheTTLDuration: 60m
             # Under container:, not beside replicas. The admission controller is the
             # one component whose chart reads resources from
             # admissionController.container.resources (3.2.6 and 3.9.1 alike); the
@@ -108,7 +152,7 @@ spec:
           maxContextSize: 8Mi
         features:
           # 1.13 flipped the chart default to disabled (CVE-2024-48921). The pricing
-          # PolicyException (components/kyverno/pricing-image-exception.yaml) is
+          # PolicyException (components/kyverno/pricing-image-exception-cel.yaml) is
           # load-bearing, so keep exceptions on, from any namespace, as on 1.12.
           # Narrowing `namespace` is a separate, reviewable tightening.
           policyExceptions:
