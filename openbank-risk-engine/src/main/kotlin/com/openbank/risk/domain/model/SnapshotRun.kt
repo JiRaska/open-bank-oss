@@ -40,4 +40,15 @@ data class SnapshotRun(
     val mismatches: List<TieOutMismatch>,
     /** The caller's principal name (SecurityIdentity), or null for a run recorded before this field existed. */
     val requestedBy: String? = null,
+    /** Model / parameter versions in force when recorded; null for a run recorded before they were. */
+    val modelVersions: ModelVersions? = null,
+    /**
+     * The instant immediately before the ledger was read — the knowledge cut-off of this run.
+     * Ledger's read API takes only `asOf` (no "as known at" bound), so this is RECORDED, not sent:
+     * a rerun reads the same data only while posted journals are immutable and nothing dated on or
+     * before `asOf` is posted after this instant. When something is, the rerun's input hash differs
+     * and it becomes a new run beside this one — never a silent overwrite. Null for a run recorded
+     * before the field existed.
+     */
+    val ledgerCutOff: Instant? = null,
 )
