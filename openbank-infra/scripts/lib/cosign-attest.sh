@@ -65,6 +65,38 @@ resolve_cosign_v2() {
   printf '%s\n' "$bin"
 }
 
+# Refuse to sign an OCI index. Kyverno's image loader resolves an index to its default
+# linux/amd64 child, while these ECR images are arm64-only. A signature on the index
+# cannot make that child resolution succeed at admission (#11573).
+assert_ecr_single_image_manifest() {
+  local image="$1" account region repository reference image_id media_type
+  if [[ ! "$image" =~ ^([0-9]{12})\.dkr\.ecr\.([a-z0-9-]+)\.amazonaws\.com(\.cn)?/([^:@]+)(:[^:@]+|@sha256:[0-9a-f]{64})$ ]]; then
+    echo "ERROR: expected a tagged or digest-pinned private ECR image, got ${image}." >&2
+    return 1
+  fi
+  account="${BASH_REMATCH[1]}"
+  region="${BASH_REMATCH[2]}"
+  repository="${BASH_REMATCH[4]}"
+  reference="${BASH_REMATCH[5]}"
+  case "$reference" in
+    :*) image_id="imageTag=${reference#:}" ;;
+    @*) image_id="imageDigest=${reference#@}" ;;
+  esac
+  if ! media_type="$(aws ecr describe-images --region "$region" --registry-id "$account" \
+       --repository-name "$repository" --image-ids "$image_id" \
+       --query 'imageDetails[0].imageManifestMediaType' --output text)"; then
+    echo "ERROR: could not determine image manifest type for ${image}; refusing to sign." >&2
+    return 1
+  fi
+  case "$media_type" in
+    application/vnd.oci.image.manifest.v1+json|application/vnd.docker.distribution.manifest.v2+json)
+      return 0 ;;
+    *)
+      echo "ERROR: ${image} has manifest type ${media_type}; a single image manifest is required before signing." >&2
+      return 1 ;;
+  esac
+}
+
 # assert_cyclonedx_sbom <sbom-file>
 #
 # Fail unless the file is a substantive CycloneDX document. trivy can exit 0 having
@@ -295,6 +327,8 @@ cosign_attest_slsa_provenance() {
 cosign_sign_and_attest() {
   local image="$1" platform="$2"
   local bin
+
+  assert_ecr_single_image_manifest "$image" || return 1
 
   bin="$(resolve_cosign_v2 || true)"
   if [ -z "$bin" ]; then

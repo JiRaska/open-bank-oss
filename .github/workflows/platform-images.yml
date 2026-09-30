@@ -168,7 +168,7 @@ jobs:
           bash .github/scripts/ensure-ecr-repository.sh "$IMAGE"
           docker buildx create --use --name obplatform --driver docker-container >/dev/null 2>&1 \
             || docker buildx use obplatform
-          docker buildx build --platform "$PLATFORM" --provenance=false \
+          docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false \
             --metadata-file "$RUNNER_TEMP/meta.json" -t "$ref" --push "$CONTEXT"
           digest="$(jq -r '."containerimage.digest"' "$RUNNER_TEMP/meta.json")"
           case "$digest" in sha256:*) ;; *) echo "::error::no digest in buildx metadata"; exit 1 ;; esac

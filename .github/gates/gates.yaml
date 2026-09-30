@@ -1397,6 +1397,22 @@ gates:
     run: |
       python3 .github/scripts/check-no-handrolled-cosign.py
 
+  - id: ecr-single-image-manifest
+    name: "ECR image pushes and signing reject OCI indexes (#11573, enforced)"
+    group: supplychain
+    mode: enforced
+    rationale: "An arm64-only OCI index is signed at its parent digest, but admission resolves its absent amd64 child and denies the pod. Check every tracked buildx producer and retain the runtime ECR manifest assertion before signing."
+    review_after: "2027-03-30"
+    budget_seconds: 10
+    min_subjects: 11
+    selftest_inputs: [".github/scripts/check-ecr-single-manifest-builds.py", "openbank-infra/scripts/lib/cosign-attest.sh", "openbank-infra/scripts/lib/test-cosign-image-manifest.sh"]
+    selftest: |
+      python3 .github/scripts/check-ecr-single-manifest-builds.py --self-test
+      bash openbank-infra/scripts/lib/test-cosign-image-manifest.sh
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-ecr-single-manifest-builds.py
+
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
     group: supplychain

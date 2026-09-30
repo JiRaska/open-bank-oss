@@ -38,7 +38,7 @@ echo "    platform: ${PLATFORM}"
 
 echo "==> ECR login + buildx push"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
-docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" -t "$IMAGE" --push openbank-infra/docker/keycloak
+docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false -f "$DOCKERFILE" -t "$IMAGE" --push openbank-infra/docker/keycloak
 echo "==> pushed ${IMAGE}"
 
 # Sign + attest with Cosign (ADR-0029/0030 D4). Kyverno's verify-openbank-image-sbom-attestation
