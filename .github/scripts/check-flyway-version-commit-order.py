@@ -75,6 +75,11 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "V15 (Stories) deployed before the additive graph migrations V13/V14; "
         "QUARKUS_FLYWAY_OUT_OF_ORDER=true set in components/campaign/campaign-service.yaml, "
         "with its own note to remove once all environments have recorded V13/V14.",
+    "openbank-treasury-service/src/main/resources/db/migration/V10__nostro_statement_opening_date.sql":
+        "#11113 landed V10 after #11121 had put V11 on main (2026-09-29). Measured before "
+        "baselining: the sandbox openbank_treasury flyway_schema_history ends at V9, so NO "
+        "database has applied V11 without V10 and the next deploy applies V10 then V11 in order. "
+        "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
 }
 
 
