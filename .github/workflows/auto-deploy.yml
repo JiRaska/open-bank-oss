@@ -646,7 +646,7 @@ jobs:
               bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
                 2>&1 | sed "s/^/[${svc}] /" || return 1
               echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
-              docker buildx build --platform linux/arm64 --provenance=false \
+              docker buildx build --platform linux/arm64 --provenance=false --sbom=false \
                 -f "${svc}/Dockerfile" -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
                 "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
               return 0 ;;
@@ -705,6 +705,7 @@ jobs:
             docker buildx build \
               --platform linux/arm64 \
               --provenance=false \
+              --sbom=false \
               -t "${image}" \
               --push \
               "${ctx}" 2>&1 | sed "s/^/[${svc}] /" || return 1
@@ -773,6 +774,11 @@ jobs:
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             img="${ECR_REGISTRY}/${svc}:${TAG}"
+            if ! assert_ecr_single_image_manifest "$img"; then
+              echo "::error::${svc} was pushed as an index or has an unreadable manifest"
+              rc=1
+              continue
+            fi
             echo "==> cosign sign ${img}"
             COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$img" || { echo "::error::cosign sign failed for ${svc}"; rc=1; }
           done
