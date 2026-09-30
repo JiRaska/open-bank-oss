@@ -31,6 +31,22 @@ That is deliberately conservative: an unprovable path is treated as no path.
 This gate does NOT argue against in-perimeter paging (ADR-0088's intent stands).
 It only requires that it is not the ONLY leg.
 
+SECOND INVARIANT - GoAlert dedup-key stability (#11136). GoAlert's Prometheus
+Alertmanager integration (v0.34.1, prometheusalertmanager.go) dedups on the alert
+SUMMARY: `CommonAnnotations.summary`, else `alertname + " " + <instances joined by ",">`.
+When a notification group holds several alerts, that string follows group membership,
+so every membership change opens a NEW GoAlert alert, and the eventual `resolved`
+payload carries yet another summary and closes nothing. Measured on sandbox 2026-09-29:
+all 200 triggered alerts in GoAlert were such orphans (e.g. `PostgresWALArchiveFailing
+<ip>:9187,<ip>:9187,...`, `KyvernoEnforcePolicyBlocking ,,,,`), which is exactly GoAlert's
+`unacked_alerts_per_service` limit; at that point it answers every new alert with
+HTTP 400 and Alertmanager (4xx = unrecoverable) drops the page. So:
+  * every route delivering to a GoAlert receiver must group by `['...']` (one alert
+    per group, so the summary is that alert's own and the resolve matches it), and
+  * a severity=critical rule's `summary` must not interpolate `$value` (it changes on
+    every evaluation, so each re-notification is a new GoAlert alert). Put the value
+    in `description`, which GoAlert does not key on.
+
 Requires pyyaml (installed by the ci.yml step that precedes it). ENFORCED.
 Usage: check-critical-alert-egress.py [kube-prometheus-stack.yaml path]
 """
@@ -38,6 +54,7 @@ Usage: check-critical-alert-egress.py [kube-prometheus-stack.yaml path]
 from __future__ import annotations
 
 import pathlib
+import re
 import sys
 
 import yaml
@@ -113,6 +130,66 @@ def _walk_routes(route: dict, receivers_hit: list[str]) -> None:
         if _matchers_select_critical(child) and child.get("receiver"):
             receivers_hit.append(child["receiver"])
         _walk_routes(child, receivers_hit)
+
+
+GOALERT_MARKER = "goalert"
+VOLATILE_SUMMARY = re.compile(r"\$value\b|\.Value\b")
+RULES_ROOT = REPO / "openbank-infra"
+
+
+def receiver_is_goalert(name: str, receiver: dict) -> bool:
+    if GOALERT_MARKER in name.lower():
+        return True
+    for w in receiver.get("webhook_configs") or []:
+        target = str(w.get("url_file") or w.get("url") or "") if isinstance(w, dict) else ""
+        if GOALERT_MARKER in target.lower():
+            return True
+    return False
+
+
+def goalert_routes_with_unstable_grouping(root: dict, receivers: dict) -> list[str]:
+    """Routes reaching a GoAlert receiver whose EFFECTIVE group_by is not ['...'].
+
+    group_by is inherited, so a child that sets none gets its parent's.
+    """
+    bad: list[str] = []
+
+    def walk(route: dict, inherited, path: str) -> None:
+        group_by = route.get("group_by", inherited)
+        name = route.get("receiver")
+        if name and receiver_is_goalert(name, receivers.get(name, {})) and group_by != ["..."]:
+            bad.append(f"{path} -> {name} (effective group_by={group_by})")
+        for i, child in enumerate(route.get("routes") or []):
+            if isinstance(child, dict):
+                walk(child, group_by, f"{path}.routes[{i}]")
+
+    walk(root, root.get("group_by"), "route")
+    return bad
+
+
+def critical_rules_with_volatile_summary(rules_root: pathlib.Path) -> list[str]:
+    bad: list[str] = []
+    for path in sorted(rules_root.rglob("*.yaml")):
+        text = path.read_text(errors="replace")
+        if "PrometheusRule" not in text:
+            continue
+        try:
+            docs = list(yaml.safe_load_all(text))
+        except yaml.YAMLError:
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "PrometheusRule":
+                continue
+            for group in (doc.get("spec") or {}).get("groups") or []:
+                for rule in (group or {}).get("rules") or []:
+                    if not isinstance(rule, dict) or "alert" not in rule:
+                        continue
+                    if (rule.get("labels") or {}).get("severity") != "critical":
+                        continue
+                    summary = str((rule.get("annotations") or {}).get("summary") or "")
+                    if VOLATILE_SUMMARY.search(summary):
+                        bad.append(f"{path.relative_to(REPO)}: {rule['alert']}")
+    return bad
 
 
 def self_test() -> int:
@@ -195,12 +272,37 @@ def self_test() -> int:
     if sorted(hits) != ["deep-pager", "top-pager"]:
         fails.append(f"nested critical routes not both found: {hits}")
 
+    # --- GoAlert dedup stability (#11136) ------------------------------------------------
+    recv = {"goalert": {"webhook_configs": [{"url_file": "/etc/x/url"}]},
+            "pager": {"webhook_configs": [{"url_file": "/etc/alertmanager/secrets/goalert-webhook-url/url"}]},
+            "slack-alerts": {"slack_configs": [{}]}}
+    # THE DEFECT: goalert inherits the root's multi-alert grouping -> summary drifts.
+    if not goalert_routes_with_unstable_grouping(
+            {"group_by": ["alertname", "service"], "routes": [
+                {"matchers": ['severity = "critical"'], "receiver": "goalert"}]}, recv):
+        fails.append("inherited multi-alert group_by on a goalert route was not flagged")
+    # Identified by url_file, not only by receiver name.
+    if not goalert_routes_with_unstable_grouping(
+            {"group_by": ["alertname"], "routes": [{"receiver": "pager"}]}, recv):
+        fails.append("goalert receiver identified by url_file was not flagged")
+    # Fixed shape passes, ['...'] inherited from a parent passes, slack is not policed.
+    if goalert_routes_with_unstable_grouping(
+            {"group_by": ["alertname"], "routes": [
+                {"receiver": "goalert", "group_by": ["..."]},
+                {"receiver": "slack-alerts"},
+                {"group_by": ["..."], "routes": [{"receiver": "pager"}]}]}, recv):
+        fails.append("a goalert route grouped by ['...'] was flagged")
+    if not VOLATILE_SUMMARY.search("{{ $value }} nodes"):
+        fails.append("a $value summary was not classified volatile")
+    if VOLATILE_SUMMARY.search("{{ $labels.pod }} down"):
+        fails.append("a $labels summary was classified volatile")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: critical-alert-egress is falsifiable (17 cases)")
+    print("self-test ok: critical-alert-egress is falsifiable (22 cases)")
     return 0
 
 
@@ -253,6 +355,24 @@ def main() -> int:
             "(in-perimeter paging may stay alongside it, but not as the only leg). "
             "See rules.yaml: alerting.critical_alerts_must_egress."
         )
+        return 1
+
+    unstable = goalert_routes_with_unstable_grouping(root, receivers)
+    volatile = critical_rules_with_volatile_summary(RULES_ROOT)
+    for item in unstable:
+        print(
+            "::error::check-critical-alert-egress: GoAlert route does not group by ['...']: "
+            f"{item}. GoAlert dedups on the summary, which for a multi-alert group follows "
+            "group membership, so the alerts it opens are never closed by the resolve and "
+            "accumulate until unacked_alerts_per_service (200) rejects every page (#11136)."
+        )
+    for item in volatile:
+        print(
+            "::error::check-critical-alert-egress: severity=critical summary interpolates "
+            f"$value: {item}. GoAlert dedups on the summary, so each re-notification opens a "
+            "new alert that no resolve closes. Move the value into `description` (#11136)."
+        )
+    if unstable or volatile:
         return 1
 
     print(

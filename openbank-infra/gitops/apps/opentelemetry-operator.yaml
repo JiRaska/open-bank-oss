@@ -21,6 +21,17 @@ spec:
     targetRevision: 0.123.1
     helm:
       valuesObject:
+        # This operator OWNS its CRDs: the Instrumentation in `accounts` (and any future
+        # OpenTelemetryCollector) needs them, and the chart installed them. Pinned explicitly
+        # (it matches the chart default) so nobody turns it off on the assumption that
+        # the plain otel-collector Deployment makes them unnecessary. That Deployment is
+        # the trace/metric pipeline, and this operator only injects agents into it. A
+        # startup log saying "OpenTelemetryCollector CRDs are not present" together with
+        # "failed to autodetect ... i/o timeout" does NOT mean the CRDs are missing. Autodetect
+        # could not reach the API server (see operator.networkpolicy below) and reported
+        # every CRD group as absent.
+        crds:
+          create: true
         manager:
           # The operator's self-managed NetworkPolicy pins egress to the API server's endpoint
           # IPs as it saw them at startup. EKS rotates its control-plane ENIs, and after a
