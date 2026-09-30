@@ -75,10 +75,6 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
-    # libs-testing brings the Kafka extension, but this service has no Kafka channels.
-    kafka:
-      devservices:
-        enabled: false
     management:
       enabled: false
     http:

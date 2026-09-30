@@ -143,10 +143,6 @@ quarkus:
   quarkus:
     oidc:
       enabled: false
-    # Integration tests use in-memory messaging; an idle Kafka Dev Service adds a flaky broker boot.
-    kafka:
-      devservices:
-        enabled: false
     # health/metrics on the main HTTP port under test — RestAssured targets a single port,
     # so the management interface (default :8086) must be folded back in (else /q/health/* 404s).
     management:
