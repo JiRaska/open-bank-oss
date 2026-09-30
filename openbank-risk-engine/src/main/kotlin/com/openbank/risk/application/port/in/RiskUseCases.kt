@@ -22,8 +22,10 @@ import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
+import com.openbank.risk.domain.reserves.MaintenanceCalendar
 import com.openbank.risk.domain.reserves.MinReserveParameters
 import com.openbank.risk.domain.reserves.MinReserveResult
+import com.openbank.risk.domain.reserves.PeriodAveraging
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -33,6 +35,9 @@ data class SnapshotOutcome(val run: SnapshotRun, val replayed: Boolean)
 
 interface SnapshotUseCase {
     suspend fun listRuns(limit: Int): List<SnapshotRunSummary>
+
+    /** One TIED_OUT run per as-of date in [from]..[to], the latest recorded; oldest date first. */
+    suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary>
 
     /** [requestedBy] is the caller's principal name; a replay keeps the first run's requester. */
     suspend fun createSnapshot(asOf: LocalDate, requestedBy: String? = null): SnapshotOutcome
@@ -122,6 +127,25 @@ data class MinReservesAnalysis(
     val parameters: MinReserveParameters,
     val result: MinReserveResult,
 )
+
+/** One maintenance period's averaging under a versioned calendar and parameter set (ADR-0315 D8). */
+data class MinReservesPeriodAnalysis(
+    val calendar: MaintenanceCalendar,
+    val parameters: MinReserveParameters,
+    /** The TIED_OUT run whose base sets the requirement; null when there is none on the reference date. */
+    val baseRunId: UUID?,
+    val averaging: PeriodAveraging,
+)
+
+interface MinReservesPeriodUseCase {
+    fun calendar(): MaintenanceCalendar
+
+    /** [asOf] is the evaluation date (default: today); unknown period → [MaintenancePeriodNotFoundException]. */
+    suspend fun analysePeriod(periodId: String, asOf: LocalDate?): MinReservesPeriodAnalysis
+}
+
+class MaintenancePeriodNotFoundException(periodId: String) :
+    RuntimeException("maintenance period '$periodId' is not in the configured calendar")
 
 interface MinReservesUseCase {
     /** 404 for an unknown run, 409 ([com.openbank.risk.application.port.out.UntiedSnapshotException]) for an UNTIED one. */
