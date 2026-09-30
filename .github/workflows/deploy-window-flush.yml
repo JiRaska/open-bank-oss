@@ -1,0 +1,94 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Deploy window flusher (see .github/scripts/deploy-window.py).
+#
+# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before, but arm its
+# auto-merge only when the window allows it: at most one bot deploy commit reaches main per
+# window, because each one makes every open PR `behind` under the strict up-to-date rule and
+# restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
+# what lands it. Every tick it picks the OLDEST deferred deploy PR once the window has elapsed
+# and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
+# rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
+# workflows use. A manual `workflow_dispatch` of either deploy workflow never waits for this.
+
+name: Deploy window flush
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-window-flush
+  cancel-in-progress: false
+
+jobs:
+  flush:
+    name: Arm the oldest deferred deploy PR
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
+      GITHUB_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Same App token as the deploy workflows: arming with GITHUB_TOKEN would merge a commit
+      # that triggers no workflows (anti-recursion), so ArgoCD's downstream checks never run.
+      - name: Mint a GitHub App installation token
+        id: app_token
+        if: env.GITOPS_APP_ID != ''
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - name: Pick the deferred deploy PR to arm
+        id: pick
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/deploy-window"
+          bash .github/scripts/deploy-window-inputs.sh "$d"
+          python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
+            --commits-json "$d/commits.json" --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Close superseded deploy PRs (refuses a rollback)
+        if: steps.pick.outputs.arm != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ARM: ${{ steps.pick.outputs.arm }}
+          ARM_HEAD: ${{ steps.pick.outputs.arm_head }}
+        run: |
+          set -euo pipefail
+          case "$ARM_HEAD" in
+            chore/gitops-auto-deploy-*) prefix=chore/gitops-auto-deploy- ;;
+            chore/admin-ui-deploy-*)    prefix=chore/admin-ui-deploy- ;;
+            *) echo "::error::unexpected deploy head ${ARM_HEAD}"; exit 1 ;;
+          esac
+          bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
+
+      - name: Enable auto-merge
+        if: steps.pick.outputs.arm != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          ARM: ${{ steps.pick.outputs.arm }}
+        run: |
+          set -euo pipefail
+          id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
+          # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one
+          gh api graphql -f query='mutation($id: ID!) {
+            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
+              pullRequest { number }
+            }
+          }' -f id="$id" >/dev/null
+          echo "auto-merge armed on deferred deploy PR #${ARM}"
