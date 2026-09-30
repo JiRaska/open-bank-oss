@@ -1147,66 +1147,8 @@ jobs:
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/admin-ui-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
-      # Enable auto-merge so ArgoCD gets the new tag without a manual PR merge.
-      # Uses the same retry pattern as auto-deploy.yml (required checks register with
-      # a small lag after PR creation → keep retrying until enablePullRequestAutoMerge
-      # accepts, or give up after 8 attempts and leave it for a human).
-      # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
-      # re-sign land by itself, so it must happen even on the run where the guard then fails.
-      # Deploy window (deploy-window.py): at most one bot deploy commit per window on main.
-      # workflow_dispatch arms immediately; otherwise deploy-window-flush.yml arms a deferred PR.
-      - name: Deploy window decision
-        id: window
-        if: steps.gitops_pr.outputs.pull-request-number != ''
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/deploy-window"
-          # Unreadable inputs arm immediately — the pre-window behaviour, never a stranded PR.
-          if ! bash .github/scripts/deploy-window-inputs.sh "$d"; then
-            echo "::warning::deploy window inputs unreadable — arming immediately"
-            echo "decision=ARM" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          armed="$(jq 'any(.[]; .armed)' "$d/prs.json")"
-          python3 .github/scripts/deploy-window.py decide --event "$EVENT_NAME" \
-            --armed-open "$armed" --commits-json "$d/commits.json" --now "$(date -u +%s)" >> "$GITHUB_OUTPUT"
-      - name: Enable auto-merge
-        if: steps.gitops_pr.outputs.pull-request-number != '' && steps.window.outputs.decision == 'ARM'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          script: |
-            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number,
-            });
-            const mutation = `mutation($id: ID!) {
-              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-                pullRequest { number }
-              }
-            }`;
-            for (let i = 1; i <= 8; i++) {
-              try {
-                await github.graphql(mutation, { id: pr.node_id });
-                core.info(`auto-merge enabled (attempt ${i})`);
-                return;
-              } catch (e) {
-                core.info(`attempt ${i}/8 not ready: ${e.message}`);
-                await new Promise(r => setTimeout(r, 12000));
-              }
-            }
-            // setFailed, NOT notice (issue #6231): a deploy PR with auto-merge unarmed never
-            // merges, so the deploy silently does not happen while every job stays green and
-            // the only evidence is one notice line in a job nobody opens. Same change as
-            // auto-deploy.yml — the two share this step verbatim.
-            core.setFailed(
-              `auto-merge could not be enabled on PR #${pull_number} after 8 attempts, so this deploy ` +
-              `will NOT land on its own — the PR stays open until someone merges it. Check the App ` +
-              `token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) and branch protection.`
-            );
+      # deploy-window-flush.yml is the sole auto-merge writer. Its workflow_run trigger
+      # admits this PR after this workflow completes; its schedule retries missed triggers.
 
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check

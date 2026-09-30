@@ -10,11 +10,10 @@ open PR `behind` and restarts its required checks. Measured over 2026-09-23T09:0
 MECHANISM. Nothing about HOW a deploy is built, gated, opened or recorded changes. Only the
 moment a deploy PR's auto-merge is ARMED does:
 
-  * `decide`  — called by the deploy workflows right after they open their PR. ARM when the
-                run is a manual `workflow_dispatch` (hotfix path: always immediate), or when no
-                deploy PR is currently armed and the last deploy commit on main is at least one
-                window old. Otherwise DEFER: the PR stays open, unarmed.
-  * `flush`   — called by deploy-window-flush.yml on a short cron. Picks the OLDEST deferred
+  * `decide`  — pure decision retained for self-tests and manual diagnosis. Deploy producers
+                never arm directly, because independent reads can both see no armed PR.
+  * `flush`   — the sole auto-merge writer, called by deploy-window-flush.yml after either
+                deploy workflow completes and on a short recovery cron. Picks the OLDEST deferred
                 deploy PR once the window has elapsed and nothing is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
