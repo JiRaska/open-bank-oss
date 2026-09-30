@@ -13,7 +13,23 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # Additive recertification review and evidence routes.
+  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
+  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
+  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
+  # (1.57.0) in the same turn as this edit and confirmed free with
+  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
+  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
+  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
+  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
+  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
+  # takes the next free version (ADR-0048).
+  # 1.62.0 -> 1.65.0: additive — Lístky (/loyalty, /loyalty/benefits, /loyalty/earn-sources,
+  # /loyalty/redemptions, /loyalty/grants) and member-get-member (/referrals/program,
+  # /referrals/invites GET+POST, /referrals/attributions). NOT 1.63.0/1.64.0: claimed by open PRs
+  # #9417/#9237 against this file (and 1.59.0 by #9215). The 503 LOYALTY_UNAVAILABLE on the
+  # /loyalty routes is part of the same unreleased additive bump (main is still 1.62.0).
+  # 1.65.0 -> 1.66.0 (#9215): additive — recertification review and evidence routes.
+  # 1.66.0 -> 1.67.0 (#10059): additive — 422 INITIATOR_IDENTITY_MISMATCH on the KYB initiator route.
   # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
   # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
   # decisions are always the human signer's.
@@ -23,8 +39,10 @@ info:
   # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
   # X-Acting-For (no shape change).
   # 1.72.0 -> 1.73.0: anonymous OTP-gated sealed disclosure download.
-  # 1.73.0 -> 1.74.0 (#10016): additive GET /capabilities (ADR-0310 D5).
-  version: 1.74.0
+  # 1.73.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5). NOT 1.74.0: claimed by
+  # open PR #9430 against this file. Read off live origin/main (1.73.0); 1.75.0 is on no open PR
+  # and not in main's history (`git log -S 'version: 1.75.0' origin/main -- <this file>`, no hits).
+  version: 1.75.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,

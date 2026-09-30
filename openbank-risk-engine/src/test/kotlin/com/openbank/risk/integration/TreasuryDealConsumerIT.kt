@@ -83,6 +83,9 @@ class TreasuryDealConsumerIT {
         // The three malformed sends above are processed asynchronously by the consumer; without a
         // wait here, the counter assertions below race the consumer and can read fewer than 3.
         awaitOutcomeAtLeast("malformed", 3.0)
+        // The replayed settle is counted asynchronously too; asserting it without a wait failed
+        // intermittently in CI (#11536's build) while passing locally.
+        awaitOutcomeAtLeast("unchanged", 1.0)
 
         val onBook = runBlocking { book.dealsOnBook(LocalDate.parse("2026-09-26")) }.single { it.dealId == deal }
         assertThat(onBook.state).isEqualTo("SETTLED")

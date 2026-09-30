@@ -2,7 +2,7 @@
 #
 # Verifies that EVERY openbank-* image declared anywhere under openbank-infra/gitops/ —
 # app containers, initContainers and sidecars alike — carries a cosign-signed CycloneDX
-# SBOM attestation that kyverno's verify-openbank-image-sbom-attestation ClusterPolicy
+# SBOM attestation that kyverno's verify-openbank-image-sbom-attestation-cel ImageValidatingPolicy
 # (Enforce) would accept.
 #
 # WHY ON A SCHEDULE, not just on PRs:
@@ -177,7 +177,7 @@ jobs:
 
           **This is latent, not cosmetic.** Affected pods keep running until something
           reschedules them (node roll, eviction, scale-up) — then kyverno
-          (\`verify-openbank-image-sbom-attestation\`, Enforce) denies admission and they can
+          (\`verify-openbank-image-sbom-attestation-cel\`, Deny) denies admission and they can
           never restart. Fix before a reschedule, not after.
 
           Run: ${RUN_URL} — the job summary and the \`fleet-attestation-report\` artifact list
