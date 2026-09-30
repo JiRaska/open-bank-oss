@@ -4,10 +4,13 @@
 
 package com.openbank.libs.authz
 
+import com.openbank.libs.approval.ApprovalLimitExceededException
+import com.openbank.libs.approval.ApprovalRequestBinding
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -110,6 +113,29 @@ class AuthorizeInterceptorTest {
     data class DummyRequest(val granteeId: String, val scopes: List<String>)
 
     data class DummyRequestWithNullableField(val granteeId: String?)
+
+    @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
+    @Authorize(action = "interest.create")
+    fun dummyCreate(request: DummyRequest?) = Unit
+
+    @Suppress("UnusedParameter")
+    @Authorize(action = "interest.create")
+    fun dummyUpload(body: java.io.InputStream?) = Unit
+
+    private val annotatedUploadMethod: Method =
+        AuthorizeInterceptorTest::class.java.getMethod("dummyUpload", java.io.InputStream::class.java)
+
+    data class SecretRequest(val accountId: String, val newPin: String, val note: String)
+
+    @Suppress("UnusedParameter")
+    @Authorize(action = "interest.create")
+    fun dummySecret(request: SecretRequest?) = Unit
+
+    private val annotatedSecretMethod: Method =
+        AuthorizeInterceptorTest::class.java.getMethod("dummySecret", SecretRequest::class.java)
+
+    private val annotatedCreateMethod: Method =
+        AuthorizeInterceptorTest::class.java.getMethod("dummyCreate", DummyRequest::class.java)
 
     @Suppress("UnusedParameter") // invoked only via InvocationContext reflection, not directly
     @Authorize(action = "consent.grant", resource = "#request.granteeId")
@@ -640,7 +666,7 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
-    fun `four-eyes required and enforced but no ApprovalStore wired proceeds unchanged`() {
+    fun `four-eyes required and enforced but no ApprovalStore wired fails closed with 503`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
         interceptor.pdp = mockk {
             every { isResolvable } returns true
@@ -648,8 +674,11 @@ class AuthorizeInterceptorTest {
         }
         interceptor.fourEyesEnforce = true
         interceptor.approvalStore = mockk { every { isResolvable } returns false }
-        val result = interceptor.authorize(makeCtx(annotatedMethod))
-        assertThat(result).isEqualTo("ok")
+        val ctx = makeCtx(annotatedMethod)
+        assertThatThrownBy { interceptor.authorize(ctx) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("approval store")
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
         assertThat(counter("openbank.authz.four_eyes", "action", "party.read", "outcome", "no_approval_store"))
             .isEqualTo(1.0)
     }
@@ -672,17 +701,61 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `four-eyes enforced, an approval only unlocks the exact request it was issued for`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        val approved = DummyRequest("rate-plan-1", listOf("0.5"))
+        val different = DummyRequest("rate-plan-1", listOf("99.0"))
+
+        val pendingResponse = catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedCreateMethod, approved))
+        }
+        assertThat(pendingResponse.response.status).isEqualTo(202)
+        val approvalId = store.created.single().id
+        runBlocking { store.decide(approvalId, "checker-99", approve = true) }
+        withApprovalHeader(approvalId)
+
+        val otherBody = catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedCreateMethod, different))
+        }
+        assertThat(otherBody)
+            .describedAs("an approval issued for one request body must not execute a different body")
+            .isNotNull
+        assertThat(runBlocking { store.find(approvalId) }?.status).isEqualTo(ApprovalStatus.APPROVED)
+
+        assertThat(interceptor.authorize(makeCtx(annotatedCreateMethod, approved))).isEqualTo("ok")
+        assertThat(runBlocking { store.find(approvalId) }?.status).isEqualTo(ApprovalStatus.EXECUTED)
+    }
+
+    /**
+     * The real maker-checker flow: the maker's first call is paused (202, which records the bound
+     * approval), a distinct checker approves it, and the maker's retry carries the header.
+     */
+    private fun issueApproved(store: InMemoryApprovalStore, method: Method, vararg params: Any?): PendingApproval {
+        catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(makeCtx(method, *params)) }
+        val pending = store.created.last()
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        withApprovalHeader(pending.id)
+        return pending
+    }
+
+    private fun PendingApproval.binding() = ApprovalRequestBinding(requestFingerprint!!, summary)
+
+    private fun withApprovalHeader(approvalId: String) {
+        interceptor.httpHeaders = mockk {
+            every { isResolvable } returns true
+            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(approvalId) }
+        }
+    }
+
+    @Test
     fun `four-eyes enforced, valid approved approval id proceeds and consumes it`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
-        val pending = runBlocking { store.create("party.read", null, "user-42") }
-        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
-        }
+        val pending = issueApproved(store, annotatedMethod)
 
         val result = interceptor.authorize(makeCtx(annotatedMethod))
         assertThat(result).isEqualTo("ok")
@@ -700,12 +773,7 @@ class AuthorizeInterceptorTest {
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
-        val pending = runBlocking { store.create("party.read", null, "user-42") }
-        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
-        }
+        val pending = issueApproved(store, annotatedMethod)
         interceptor.authorize(makeCtx(annotatedMethod)) // consumes it: APPROVED -> EXECUTED
 
         assertThatThrownBy { runBlocking { store.decide(pending.id, "checker-100", approve = true) } }
@@ -730,16 +798,17 @@ class AuthorizeInterceptorTest {
 
         // Approved, but for a DIFFERENT maker than the current principal (user-42) — a
         // guessed/shared approval id must not unlock someone else's request.
-        val pending = runBlocking { store.create("party.read", null, "someone-else") }
-        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        // Same request fingerprint, so only the maker differs.
+        val own = issueApproved(store, annotatedMethod)
+        val pending = runBlocking {
+            store.create("party.read", null, "someone-else", binding = own.binding())
         }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        withApprovalHeader(pending.id)
 
         assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
             .isInstanceOf(WebApplicationException::class.java)
-        assertThat(store.created).hasSize(2) // the mismatched attempt re-issues a fresh pending approval
+        assertThat(store.created).hasSize(3) // the mismatched attempt re-issues a fresh pending approval
     }
 
     @Test
@@ -753,19 +822,22 @@ class AuthorizeInterceptorTest {
         // holds satisfies every call, so "approve this one decision" silently becomes "approve any
         // decision of this kind". sanctions.clear was in exactly that state until the resource
         // expression was narrowed to the specific check id.
-        val pending = runBlocking { store.create("consent.grant", "grantee-A", "user-42") }
-        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
+        // The approval carries grantee-B's request fingerprint, so only the resource differs.
+        val requestB = DummyRequest("grantee-B", emptyList())
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethodWithDottedResource, requestB))
         }
+        val bindingB = store.created.last().binding()
+        val pending = runBlocking { store.create("consent.grant", "grantee-A", "user-42", binding = bindingB) }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        withApprovalHeader(pending.id)
 
         assertThatThrownBy {
-            interceptor.authorize(makeCtx(annotatedMethodWithDottedResource, DummyRequest("grantee-B", emptyList())))
+            interceptor.authorize(makeCtx(annotatedMethodWithDottedResource, requestB))
         }.isInstanceOf(WebApplicationException::class.java)
         assertThat(store.created)
             .describedAs("the mismatched resource must re-issue a fresh pending approval, not proceed")
-            .hasSize(2)
+            .hasSize(3)
     }
 
     @Test
@@ -774,14 +846,73 @@ class AuthorizeInterceptorTest {
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
-        val pending = runBlocking { store.create("party.read", null, "user-42") } // never decided
-        interceptor.httpHeaders = mockk {
-            every { isResolvable } returns true
-            every { get() } returns mockk { every { getRequestHeader("X-Approval-Id") } returns listOf(pending.id) }
-        }
+        // Bound to this exact request, but never decided.
+        catchThrowableOfType(WebApplicationException::class.java) { interceptor.authorize(makeCtx(annotatedMethod)) }
+        withApprovalHeader(store.created.single().id)
 
         assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
             .isInstanceOf(WebApplicationException::class.java)
+    }
+
+    @Test
+    fun `four-eyes enforced, an approved approval with no request binding never satisfies a call`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        // Created directly by application code, as savings proposals do: same action, maker and
+        // resource, approved — but not issued for any intercepted request.
+        val pending = runBlocking { store.create("party.read", null, "user-42") }
+        runBlocking { store.decide(pending.id, "checker-99", approve = true) }
+        withApprovalHeader(pending.id)
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedMethod)) }
+            .isInstanceOf(WebApplicationException::class.java)
+        assertThat(runBlocking { store.find(pending.id) }?.status).isEqualTo(ApprovalStatus.APPROVED)
+    }
+
+    @Test
+    fun `four-eyes enforced, an argument whose content cannot be fingerprinted fails closed`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        val ctx = makeCtx(annotatedUploadMethod, java.io.ByteArrayInputStream(byteArrayOf(1, 2, 3)))
+
+        assertThatThrownBy { interceptor.authorize(ctx) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("cannot be bound")
+        assertThat(store.created).isEmpty()
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
+
+    @Test
+    fun `four-eyes enforced, the pending approval carries a bounded summary with credentials redacted`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedSecretMethod, SecretRequest("ACC-1", "hunter2", "a".repeat(5000))))
+        }
+
+        val summary = store.created.single().summary!!
+        assertThat(summary).contains("interest.create").contains("ACC-1").doesNotContain("hunter2")
+        assertThat(summary.length).isLessThanOrEqualTo(ApprovalRequestBinding.MAX_SUMMARY_LENGTH)
+        assertThat(summary).doesNotContain("\n")
+    }
+
+    @Test
+    fun `four-eyes enforced, a maker at the pending limit gets a clear error, not another approval`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore(maxPendingPerMakerAction = 1)
+        wirePdpAndStore(store)
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedCreateMethod, DummyRequest("a", emptyList())))
+        }
+
+        assertThatThrownBy { interceptor.authorize(makeCtx(annotatedCreateMethod, DummyRequest("b", emptyList()))) }
+            .isInstanceOf(ApprovalLimitExceededException::class.java)
+            .hasMessageContaining("interest.create")
+        assertThat(store.created).hasSize(1)
     }
 
     @Test

@@ -88,9 +88,10 @@ import kotlin.reflect.jvm.kotlinFunction
  * see [requireFourEyes] — until a second, distinct principal decides a
  * [com.openbank.libs.approval.PendingApproval] via the service's own
  * approval-decide endpoint and the maker retries with `X-Approval-Id`.
- * Default off and no-op without a wired [ApprovalStore], so shipping this in
- * the shared libs JAR does not retroactively change behavior for services
- * that haven't opted in.
+ * Default off, so shipping this in the shared libs JAR does not retroactively
+ * change behavior for services that haven't opted in; once opted in, a missing
+ * [ApprovalStore] fails closed (503). An approval is bound to the request it was
+ * issued for and consumed atomically — see [requireFourEyes].
  */
 @Authorize(action = "")
 @Interceptor
@@ -291,7 +292,7 @@ class AuthorizeInterceptor {
         }
         record(annotation.action, "allow", query.principal.type, decision.reason ?: "unspecified")
         m2mDecisionLine(annotation.action, query.principal.id, "allow", decision.reason)?.let(log::info)
-        requireFourEyes(annotation, query, decision)
+        requireFourEyes(ctx, annotation, query, decision)
     }
 
     /**
@@ -356,10 +357,20 @@ class AuthorizeInterceptor {
     /**
      * ADR-0155: gate an otherwise-allowed money-path action behind a second
      * approver when OPA flagged it `four_eyes_required`. No-op (proceeds
-     * immediately) unless the service opted in via [fourEyesEnforce] AND wired
-     * an [ApprovalStore] — see the class KDoc.
+     * immediately) unless the service opted in via [fourEyesEnforce]; once it has,
+     * a missing [ApprovalStore] fails closed with 503.
+     *
+     * The pending approval is bound to this exact call ([ApprovalRequestBindings]): the retry that
+     * carries `X-Approval-Id` must hit the same endpoint with the same arguments, or the approval
+     * does not apply and a fresh one is issued. Consumption is atomic in the store, so a
+     * concurrent second retry with the same id gets 409 rather than a second execution.
      */
-    private suspend fun requireFourEyes(annotation: Authorize, query: AuthzQuery, decision: AuthzDecision) {
+    private suspend fun requireFourEyes(
+        ctx: InvocationContext,
+        annotation: Authorize,
+        query: AuthzQuery,
+        decision: AuthzDecision,
+    ) {
         val fourEyesRequired = decision.attributes["four_eyes_required"] == true
         if (!fourEyesRequired) {
             return
@@ -385,28 +396,32 @@ class AuthorizeInterceptor {
         }
         if (!approvalStore.isResolvable) {
             meters?.authzFourEyes(annotation.action, "no_approval_store")
-            // Code review finding: this used to fall into the same silent-proceed branch as
-            // "four-eyes not required" / "not enforced", with no log at all — indistinguishable
-            // from a service correctly not opting in. Mirrors the log.errorf the PDP-missing
-            // branch above already uses for an analogous misconfiguration; still proceeds
-            // (ADR-0155 D3 deliberately keeps this a no-op, not a fail-closed 503) but now at
-            // least leaves an operator-visible trail that four-eyes was supposed to gate this.
+            // Fails CLOSED, like the missing-PDP branch: a service that enforces four-eyes but
+            // cannot record an approval must not execute the action without one. (This used to
+            // log and proceed.) 503, because it is a wiring fault, not the caller's.
             log.errorf(
                 "four-eyes: action=%s is flagged four_eyes_required with authz.four-eyes.enforce=true, " +
-                    "but no ApprovalStore bean is wired — proceeding WITHOUT the second-approver gate. " +
-                    "Wire an ApprovalStore for this service or set authz.four-eyes.enforce=false until it is.",
+                    "but no ApprovalStore bean is wired — refusing. Wire an ApprovalStore for this service " +
+                    "or set authz.four-eyes.enforce=false until it is.",
                 annotation.action,
             )
-            return
+            throw PolicyDecisionException("four-eyes approval store not configured")
         }
         val store = approvalStore.get()
         val maker = query.principal.id
         val resourceId = query.resource?.id
+        val binding = try {
+            ApprovalRequestBindings.of(ctx, annotation.action, resourceId)
+        } catch (ex: ApprovalRequestBindings.UnbindableRequestException) {
+            meters?.authzFourEyes(annotation.action, "unbindable_request")
+            log.errorf("four-eyes: %s — refusing", ex.message)
+            throw PolicyDecisionException(ex.message ?: "four-eyes request cannot be bound to an approval", ex)
+        }
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
             val approval = store.find(approvalId)
-            if (approval.satisfies(annotation.action, resourceId, maker)) {
+            if (approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint)) {
                 store.markExecuted(approvalId)
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return
@@ -420,7 +435,9 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = store.create(annotation.action, resourceId, maker)
+        // ApprovalLimitExceededException propagates (an IllegalStateException, so 422 with its
+        // message): the maker already holds the configured maximum of open approvals.
+        val pending = store.create(annotation.action, resourceId, maker, binding = binding)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -577,14 +594,22 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  */
 
 /**
- * A supplied approval only unlocks THIS exact action, resource, and original maker.
+ * A supplied approval only unlocks THIS exact action, resource, original maker and request
+ * ([requestFingerprint], see [ApprovalRequestBindings]). An approval with no fingerprint was not
+ * issued by this interceptor and never satisfies it.
  *
  * Top-level rather than a class member because it reads no interceptor state, and
  * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
  * not above it.
  */
-private fun PendingApproval?.satisfies(action: String, resourceId: String?, maker: String): Boolean = this != null &&
+private fun PendingApproval?.satisfies(
+    action: String,
+    resourceId: String?,
+    maker: String,
+    requestFingerprint: String,
+): Boolean = this != null &&
     status == ApprovalStatus.APPROVED &&
     this.action == action &&
     this.resourceId == resourceId &&
-    makerId == maker
+    makerId == maker &&
+    this.requestFingerprint == requestFingerprint
