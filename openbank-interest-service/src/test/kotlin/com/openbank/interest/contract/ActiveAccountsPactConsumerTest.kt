@@ -70,6 +70,34 @@ class ActiveAccountsPactConsumerTest {
         )
         .toPact()
 
+    /**
+     * The refusal half (ADR-0279 #3): with no M2M identity the call must answer 401 before the
+     * handler runs. Replayed by `AccountNegativeAuthProviderVerificationTest`, which boots the provider without a test identity; the
+     * positive twin filters this state out because its class-level `@TestSecurity` would
+     * authenticate the replay and answer 200.
+     */
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun activeAccountsUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET the ACTIVE accounts page with no M2M identity is refused")
+        .path(EXPECTED_ACTIVE_PATH)
+        .method("GET")
+        .query("limit=$PAGE_LIMIT")
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "activeAccountsUnauthenticatedPact")
+    fun `a discovery page with no identity is refused with 401, never listed`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .queryParam("limit", PAGE_LIMIT)
+            .get(clientDerivedActivePath())
+            .then()
+            .statusCode(401)
+    }
+
     @Test
     @PactTestFor(pactMethod = "activeAccountsPact")
     fun `a page of active accounts binds with rows and a pagination flag the run can follow`(mockServer: MockServer) {
@@ -100,6 +128,9 @@ class ActiveAccountsPactConsumerTest {
     }
 
     private companion object {
+        /** The provider's NEGATIVE_AUTH_STATE, served by its NegativeAuth provider class. */
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
         const val CONSUMER = "openbank-interest-service"
         const val PROVIDER = "openbank-account-service"
 

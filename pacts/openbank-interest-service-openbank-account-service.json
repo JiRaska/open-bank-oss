@@ -103,6 +103,26 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the ACTIVE accounts page with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {

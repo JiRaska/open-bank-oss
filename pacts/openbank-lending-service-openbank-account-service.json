@@ -60,6 +60,29 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "GET the borrower's accounts with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "50"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
     }
   ],
   "metadata": {
