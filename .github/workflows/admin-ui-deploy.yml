@@ -669,34 +669,23 @@ jobs:
           echo "Staging pitest results from run ${RUN_ID}..."
           ARTIFACT_INVENTORY=$(api \
             "https://api.github.com/repos/${REPO}/actions/runs/${RUN_ID}/artifacts?per_page=100") || exit 1
-          ARTIFACTS=$(python3 -c "import json,sys; [print(a['id'],a['name']) for a in json.load(sys.stdin).get('artifacts',[]) if a['name'].startswith('pitest-') and not a['expired']]" <<< "${ARTIFACT_INVENTORY}") || exit 1
+          # Preflight the whole run: duplicate names or projected lanes must fail
+          # before any report can be promoted into the deployment snapshot.
+          ARTIFACTS=$(python3 .github/scripts/stage-pitest-artifacts.py plan <<< "${ARTIFACT_INVENTORY}") || exit 1
           if [ -z "${ARTIFACTS}" ]; then
             echo "No pitest artifacts found in run ${RUN_ID} — skipping."
             exit 0
           fi
           DOWNLOADED=0
-          while IFS=' ' read -r art_id art_name; do
+          while IFS=$'\t' read -r art_id art_name svc; do
             [ -n "${art_id}" ] || continue
+            archive="${RUNNER_TEMP}/pitest-${art_id}.zip"
             if api "https://api.github.com/repos/${REPO}/actions/artifacts/${art_id}/zip" \
-                -L -o "/tmp/${art_name}.zip"; then
-              # Each artifact zip's top-level is the pitest
-              # report contents (mutations.xml, index.html, com.openbank.*/ …) because
-              # actions/upload-artifact@v7 strips the <component>/build/reports/pitest/
-              # prefix (pitest.yml uploads that directory as `path`). Reconstruct that
-              # path so the report collectors find it — never `-d .`, which dumps
-              # a full report into the repo root and gets it committed (#1104).
-              # The enforced authz and advisory libs-runtime lanes both publish a
-              # mutations.xml. Keep them separate: extracting both into the same
-              # directory prompts unzip and can silently substitute one verdict.
-              case "${art_name}" in
-                pitest-authz) svc="openbank-libs-runtime-authz" ;;
-                *) svc="${art_name#pitest-}" ;;
-              esac
-              dest="${svc}/build/reports/pitest"
-              mkdir -p "${dest}"
-              # A future duplicate must fail this stage, never consume the next
-              # artifact-list line as an interactive answer to unzip's prompt.
-              unzip -q "/tmp/${art_name}.zip" -d "${dest}" </dev/null || exit 1
+                -L -o "${archive}"; then
+              # The ZIP contains report contents, not the module prefix. Stage
+              # each evidence lane in a fresh private directory and publish it
+              # atomically; never merge two archives or prompt on overwrite.
+              python3 .github/scripts/stage-pitest-artifacts.py stage "${archive}" "${svc}" . --run-id "${RUN_ID}" || exit 1
               DOWNLOADED=$((DOWNLOADED + 1))
             else
               echo "PIT artifact ${art_name} could not be downloaded; refusing incomplete Test Intelligence image" >&2
