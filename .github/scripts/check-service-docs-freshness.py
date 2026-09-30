@@ -12,14 +12,15 @@ import subprocess
 import sys
 
 
-def changed_paths(base: str) -> set[str]:
+def changed_paths(repo: Path, base: str, head: str) -> set[str]:
     result = subprocess.run(
-        ["git", "diff", "--name-only", "--diff-filter=ACMR", f"{base}...HEAD"],
+        ["git", "diff", "--name-only", "-z", "--diff-filter=ACMR", f"{base}...{head}", "--"],
+        cwd=repo,
         check=True,
         capture_output=True,
         text=True,
     )
-    return set(result.stdout.splitlines())
+    return set(filter(None, result.stdout.split("\0")))
 
 
 def missing_updates(repo: Path, paths: set[str]) -> list[str]:
@@ -53,10 +54,11 @@ def missing_updates(repo: Path, paths: set[str]) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", required=True, help="PR base commit or ref")
+    parser.add_argument("--head", required=True, help="Actual PR head commit, never the synthetic merge commit")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     try:
-        failures = missing_updates(repo, changed_paths(args.base))
+        failures = missing_updates(repo, changed_paths(repo, args.base, args.head))
     except subprocess.CalledProcessError as exc:
         print(f"Cannot compare service documentation with {args.base}: {exc}", file=sys.stderr)
         return 2
