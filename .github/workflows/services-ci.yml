@@ -103,9 +103,6 @@ jobs:
               openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
                 return 0 ;;
               .github/scripts/check-flyway-version-commit-order.py)
-                # This governance gate inspects migration commit order; it is not
-                # loaded by a service build or Pact verification. Keep other scripts
-                # on the conservative full-fleet fallback.
                 return 0 ;;
               .github/workflows/*)
                 # These two files own the service build itself. A change to either must
