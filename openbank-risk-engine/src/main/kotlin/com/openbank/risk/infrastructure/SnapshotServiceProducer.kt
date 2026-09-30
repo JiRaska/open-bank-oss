@@ -101,7 +101,7 @@ class SnapshotServiceProducer {
         capital: CapitalConfig,
         liquidity: LiquidityConfig,
         reserves: MinReservesConfig,
-        @ConfigProperty(name = "quarkus.application.version") engineVersion: String,
+        @ConfigProperty(name = "quarkus.application.version", defaultValue = "0.0.0") engineVersion: String,
         @ConfigProperty(name = "openbank.risk.irrbb.shock-sizes") shockSizes: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.shock-source") shockSource: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor") floor: Optional<String>,
