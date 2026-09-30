@@ -4,6 +4,7 @@
 
 package com.openbank.risk.infrastructure.rest
 
+import com.openbank.risk.application.port.`in`.MaintenancePeriodNotFoundException
 import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.UntiedSnapshotException
@@ -19,6 +20,10 @@ class ExceptionMappers {
 
     @ServerExceptionMapper
     fun notFound(e: SnapshotNotFoundException): Response =
+        Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
+
+    @ServerExceptionMapper
+    fun periodNotFound(e: MaintenancePeriodNotFoundException): Response =
         Response.status(Response.Status.NOT_FOUND).entity(mapOf("error" to e.message)).build()
 
     @ServerExceptionMapper

@@ -7,6 +7,7 @@ package com.openbank.treasury.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
+import com.openbank.treasury.application.port.`in`.QuoteBoard
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
@@ -14,6 +15,7 @@ import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.SimulatedQuote
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -46,6 +48,9 @@ data class DraftDealRequest(
 )
 
 data class ReasonRequest(val reason: String? = null)
+
+/** Optional body of `POST /deals/{id}/confirm`: the counterparty's confirmation reference, if any. */
+data class ConfirmRequest(val reference: String? = null)
 
 data class LimitCheckResponse(
     val currency: String,
@@ -255,3 +260,57 @@ data class CurrencyPositionResponse(
 }
 
 data class PositionsResponse(val asOf: LocalDate, val positions: List<CurrencyPositionResponse>)
+
+/**
+ * `GET /quotes` (ADR-0315 D9). [synthetic] is ALWAYS true, on the board and on every quote: these
+ * are invented counterparties pricing off the risk engine's curve, never a dealable market price.
+ */
+data class QuoteBoardResponse(
+    val product: ProductType,
+    val currency: String,
+    val tenorDays: Int,
+    val synthetic: Boolean,
+    val quotes: List<QuoteResponse>,
+) {
+    companion object {
+        fun from(board: QuoteBoard) = QuoteBoardResponse(
+            product = board.product,
+            currency = board.currency,
+            tenorDays = board.tenorDays,
+            synthetic = true,
+            quotes = board.quotes.map { QuoteResponse.from(it, board.product) },
+        )
+    }
+}
+
+data class QuoteResponse(
+    val counterpartyId: String,
+    val synthetic: Boolean,
+    val bid: BigDecimal,
+    val ask: BigDecimal,
+    /** The side a deal of the requested product is struck at: bid for a placement, ask for a borrowing. */
+    val dealRate: BigDecimal,
+    val mid: BigDecimal,
+    val spreadBp: Int,
+    val curveSetId: UUID,
+    val curveAsOf: LocalDate,
+    val curveIndex: String,
+    /** The risk engine's label for the curve's market data (`synthetic` / `production`). */
+    val curveProvenance: String,
+) {
+    companion object {
+        fun from(q: SimulatedQuote, product: ProductType) = QuoteResponse(
+            counterpartyId = q.counterpartyId,
+            synthetic = q.synthetic,
+            bid = q.bid,
+            ask = q.ask,
+            dealRate = q.rateFor(product),
+            mid = q.mid,
+            spreadBp = q.spreadBp,
+            curveSetId = q.curveSetId,
+            curveAsOf = q.curveAsOf,
+            curveIndex = q.curveIndex,
+            curveProvenance = q.curveProvenance,
+        )
+    }
+}

@@ -73,6 +73,25 @@ class TestRecordingLedgerPostingPort : com.openbank.lending.application.port.out
     val journals: MutableMap<String, com.openbank.lending.application.port.out.LedgerPosting> =
         java.util.concurrent.ConcurrentHashMap()
 
+    /**
+     * The ledger's line invariant, emulated (#11487): ledger-service stores `journal_lines.amount` under
+     * `CHECK (amount > 0)`. The postings are built into lines exactly as the real adapter does
+     * ([com.openbank.lending.infrastructure.client.LendingJournalFactory]) and a non-positive line is
+     * refused. Without this the stub accepted the backfill void's negated mirrors, which the real ledger
+     * refused for all 44 loans on the sandbox.
+     */
+    private fun ledgerRefusal(posting: com.openbank.lending.application.port.out.LedgerPosting): Throwable? {
+        val lines = com.openbank.lending.infrastructure.client.LendingJournalFactory.buildLines(
+            posting,
+            com.openbank.lending.infrastructure.client.LendingGlChart.accountsFor(posting.amount.currency.code),
+        )
+        return lines.firstOrNull { it.amount.signum() <= 0 }?.let {
+            IllegalStateException(
+                "ledger refuses ${posting.reference}: line amount ${it.amount} violates chk_journal_lines_amount",
+            )
+        }
+    }
+
     /** References that fail exactly once — failure injection for the stop-and-re-run path. */
     val failOnce: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
@@ -81,6 +100,7 @@ class TestRecordingLedgerPostingPort : com.openbank.lending.application.port.out
         if (failOnce.remove(posting.reference)) {
             return Uni.createFrom().failure(IllegalStateException("injected ledger failure for ${posting.reference}"))
         }
+        ledgerRefusal(posting)?.let { return Uni.createFrom().failure(it) }
         journals.putIfAbsent(posting.reference, posting)
         return Uni.createFrom().item(Unit)
     }
@@ -93,6 +113,7 @@ class TestRecordingLedgerPostingPort : com.openbank.lending.application.port.out
         if (failOnce.remove(posting.reference)) {
             return Uni.createFrom().failure(IllegalStateException("injected ledger failure for ${posting.reference}"))
         }
+        ledgerRefusal(posting)?.let { return Uni.createFrom().failure(it) }
         val first = journals.putIfAbsent(posting.reference, posting) == null
         return Uni.createFrom().item(
             if (first) {
