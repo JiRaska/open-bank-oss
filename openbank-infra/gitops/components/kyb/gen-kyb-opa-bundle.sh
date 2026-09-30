@@ -38,7 +38,7 @@ OUT=$REPO/openbank-infra/gitops/components/kyb/kyb-opa-bundle.yaml
   echo "    openbank.tech/policy-checksum: \"$CHECKSUM\""
   echo "data:"
   echo "  rest.rego: |"
-  sed 's/^/    /' "$REST_REGO" | sed 's/[[:space:]]*$//'
+  sed 's/^/    /' "$REST_REGO" | expand -t 4 | sed 's/[[:space:]]*$//'
   echo "  kyb_rest_ext.rego: |"
   sed 's/^/    /' "$KYB_REST_EXT" | sed 's/[[:space:]]*$//'
   echo "  agents.rego: |"

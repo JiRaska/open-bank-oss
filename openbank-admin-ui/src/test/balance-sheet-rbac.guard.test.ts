@@ -21,6 +21,9 @@ const PAGES: [string, string, string][] = [
   ['app/balance-sheet/snapshots/[id]/page.tsx', '/balance-sheet/snapshots/sample', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/irrbb/page.tsx', '/balance-sheet/snapshots/sample/irrbb', 'balance-sheet:view'],
   ['app/balance-sheet/snapshots/[id]/liquidity/page.tsx', '/balance-sheet/snapshots/sample/liquidity', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/liquidity-forecast/page.tsx', '/balance-sheet/snapshots/sample/liquidity-forecast', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/capital/page.tsx', '/balance-sheet/snapshots/sample/capital', 'balance-sheet:view'],
+  ['app/balance-sheet/snapshots/[id]/min-reserves/page.tsx', '/balance-sheet/snapshots/sample/min-reserves', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/page.tsx', '/balance-sheet/curve-sets', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/[id]/page.tsx', '/balance-sheet/curve-sets/sample', 'balance-sheet:view'],
   ['app/balance-sheet/ledger-backfill/page.tsx', '/balance-sheet/ledger-backfill', 'ledger-backfill:view'],
@@ -70,10 +73,10 @@ describe('balance sheet & risk — route and page gates', () => {
     }
   })
 
-  it('treasury roles are declared only: they unlock no permission at all', () => {
+  it('treasury roles unlock only the Treasury section and the workspace landing (ADR-0315)', () => {
     for (const role of [ROLES.TREASURY_DEALER, ROLES.TREASURY_APPROVER]) {
       const unlocked = (Object.keys(PERMISSIONS) as Permission[]).filter(p => hasPermission([role], p))
-      expect(unlocked, role).toEqual([])
+      expect(unlocked.every(p => p === 'dashboard:view' || p.startsWith('treasury:')), `${role}: ${unlocked.join(',')}`).toBe(true)
     }
   })
 
@@ -137,6 +140,38 @@ describe('LCR / NSFR read — ADR-0313 phase 1', () => {
 
   it('the liquidity page is visible to risk, finance and admin only', () => {
     const p = permissionForPath('/balance-sheet/snapshots/x/liquidity')!
+    const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
+    expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
+  })
+})
+
+describe('Credit-risk capital read — ADR-0313 phase 2', () => {
+  it('the capital endpoint is a plain read: risk.snapshot.read, no method-level role widening', () => {
+    const at = riskResource.indexOf('@Path("/{id}/capital")')
+    expect(at).toBeGreaterThan(0)
+    const block = riskResource.slice(at, riskResource.indexOf('suspend fun capital', at))
+    expect(block).toContain('@Authorize(action = "risk.snapshot.read", resource = "#id")')
+    expect(block).not.toContain('@RolesAllowed')
+  })
+
+  it('the capital page is visible to risk, finance and admin only', () => {
+    const p = permissionForPath('/balance-sheet/snapshots/x/capital')!
+    const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
+    expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
+  })
+})
+
+describe('ČNB minimum reserve requirement read — ADR-0313/ADR-0315', () => {
+  it('the min-reserves endpoint is a plain read: risk.snapshot.read, no method-level role widening', () => {
+    const at = riskResource.indexOf('@Path("/{id}/min-reserves")')
+    expect(at).toBeGreaterThan(0)
+    const block = riskResource.slice(at, riskResource.indexOf('suspend fun minReserves', at))
+    expect(block).toContain('@Authorize(action = "risk.snapshot.read", resource = "#id")')
+    expect(block).not.toContain('@RolesAllowed')
+  })
+
+  it('the min-reserves page is visible to risk, finance and admin only', () => {
+    const p = permissionForPath('/balance-sheet/snapshots/x/min-reserves')!
     const granted = Object.values(ROLES).filter(r => hasPermission([r], p)).sort()
     expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
   })

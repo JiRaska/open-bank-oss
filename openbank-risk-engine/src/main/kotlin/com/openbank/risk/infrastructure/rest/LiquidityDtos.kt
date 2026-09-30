@@ -7,6 +7,7 @@ package com.openbank.risk.infrastructure.rest
 import com.openbank.risk.application.port.`in`.LiquidityAnalysis
 import com.openbank.risk.domain.liquidity.CurrencyLiquidity
 import com.openbank.risk.domain.liquidity.GlClass
+import com.openbank.risk.domain.liquidity.HqlaStock
 import com.openbank.risk.domain.liquidity.Liquidity
 import com.openbank.risk.domain.liquidity.LiquidityFactor
 import com.openbank.risk.domain.liquidity.LiquidityLine
@@ -117,8 +118,12 @@ data class LiquidityResponse(
     val parameterSetId: String,
     val parameterSetVersion: String,
     val currencies: List<CurrencyLiquidityDto>,
-    /** Present only for a single-currency book. */
+    /** All currencies combined in CZK at the ČNB fixing for asOf; null (with [totalNotStated]) when a fixing is missing. */
     val total: CurrencyLiquidityDto?,
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateDto>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     val unclassified: List<UnclassifiedBalanceDto>,
     val notes: List<String>,
     val assumptions: LiquidityAssumptionsDto,
@@ -127,29 +132,31 @@ data class LiquidityResponse(
 fun LiquidityLine.toDto() =
     LiquidityLineDto(label, glAccountCode, amount.money(), factor, factorKey, weighted.money(), citation)
 
+fun HqlaStock.toDto() = HqlaDto(
+    lines = lines.map {
+        HqlaLineDto(
+            it.level.wire,
+            it.glClass.wire,
+            it.glAccountCode,
+            it.marketValue.money(),
+            it.haircut,
+            it.afterHaircut.money(),
+        )
+    },
+    level1 = level1.money(),
+    level2a = level2a.money(),
+    level2b = level2b.money(),
+    adjustmentFor15Cap = adjustmentFor15Cap.money(),
+    adjustmentFor40Cap = adjustmentFor40Cap.money(),
+    level2bCapBinding = level2bCapBinding,
+    level2CapBinding = level2CapBinding,
+    stock = stock.money(),
+)
+
 fun CurrencyLiquidity.toDto() = CurrencyLiquidityDto(
     currency = currency,
     lcr = LcrDto(
-        hqla = HqlaDto(
-            lines = lcr.hqla.lines.map {
-                HqlaLineDto(
-                    it.level.wire,
-                    it.glClass.wire,
-                    it.glAccountCode,
-                    it.marketValue.money(),
-                    it.haircut,
-                    it.afterHaircut.money(),
-                )
-            },
-            level1 = lcr.hqla.level1.money(),
-            level2a = lcr.hqla.level2a.money(),
-            level2b = lcr.hqla.level2b.money(),
-            adjustmentFor15Cap = lcr.hqla.adjustmentFor15Cap.money(),
-            adjustmentFor40Cap = lcr.hqla.adjustmentFor40Cap.money(),
-            level2bCapBinding = lcr.hqla.level2bCapBinding,
-            level2CapBinding = lcr.hqla.level2CapBinding,
-            stock = lcr.hqla.stock.money(),
-        ),
+        hqla = lcr.hqla.toDto(),
         outflows = lcr.outflows.map { it.toDto() },
         inflows = lcr.inflows.map { it.toDto() },
         totalOutflows = lcr.totalOutflows.money(),
@@ -180,7 +187,9 @@ fun LiquidityAnalysis.toResponse(): LiquidityResponse {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         currencies = perCurrency,
-        total = result.totalCurrency?.let { t -> perCurrency.single { it.currency == t } },
+        total = result.total?.toDto(),
+        fxRates = result.fxRates.map { FxRateDto(it.currency, it.rate, it.fixingDate.toString(), it.source) },
+        totalNotStated = result.totalNotStated,
         unclassified = result.unclassified.map {
             UnclassifiedBalanceDto(it.glAccountCode, it.glAccountType, it.currency, it.amount.money(), it.reason)
         },
@@ -195,8 +204,8 @@ private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
         parameterSetId = parameters.id,
         parameterSetVersion = parameters.version,
         source = parameters.source,
-        scope = "BCBS standard factors; EU CRR / Delegated Regulation (EU) 2015/61 deviations not applied.",
-        factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], it.citation) },
+        scope = parameters.regime.scope,
+        factors = LiquidityFactor.entries.map { FactorDto(it.key, parameters[it], parameters.citation(it)) },
         classification = LiquidityClassificationDto(
             retailStableShare = c.retailStableShare,
             operationalDepositShare = c.operationalDepositShare,
@@ -234,7 +243,10 @@ private fun LiquidityAnalysis.assumptions(): LiquidityAssumptionsDto {
             "100% (¶43(c)) — a proxy for d295 footnote 19's > 90 days past due, which the data does not carry.",
         notInData =
         "No undrawn committed facilities (d238 ¶131), no term deposits, no issued debt, no derivatives and " +
-            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, not zero-weighted.",
+            "no securities financing are in the snapshot: those outflow / inflow / RSF categories are absent, " +
+            "not zero-weighted. " +
+            "The one secured funding line is the ČNB lombard (GL 2320, 0% outflow / 0% ASF); the collateral " +
+            "pledged for it is not in the snapshot, so HQLA may be overstated while it is outstanding.",
         currencyAggregation = Liquidity.AGGREGATION_NOTE,
     )
 }

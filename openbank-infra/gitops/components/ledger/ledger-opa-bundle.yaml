@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: ledger-service
     app.kubernetes.io/part-of: ledger
   annotations:
-    openbank.tech/policy-checksum: "c3fd83e95f617750"
+    openbank.tech/policy-checksum: "3679d38e1c6f22e9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -794,13 +803,22 @@ data:
 
     # ADR-0315 — treasury-service on its own identity (named oidc-client `m2m`, Keycloak client
     # `openbank-treasury`, ROLE_API only). It posts the settlement, maturity and reversal journals of a
-    # money-market deal -> ledger.create and NOTHING else: a reversal is an offsetting journal it posts
-    # itself (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse, and it
-    # reads nothing from the ledger.
+    # money-market deal -> ledger.create: a reversal is an offsetting journal it posts itself
+    # (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse.
     allowed_reasons contains "service-treasury-ledger-post" if {
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-treasury"
     	input.action == "ledger.create"
+    }
+
+    # Nostro reconciliation (ADR-0315, #10896): treasury reads the journals of one statement date
+    # (GET /api/v1/journals -> ledger.list) and the trial balance (GET /api/v1/journals/trial-balance
+    # -> ledger.read) to compare the nostro GL against the correspondent's camt.053. Read-only; it
+    # never posts a reconciling entry.
+    allowed_reasons contains "service-treasury-ledger-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-treasury"
+    	input.action in {"ledger.list", "ledger.read"}
     }
 
     # Only transaction-service's client exposes a reverseJournal call. lending-service and
@@ -1161,6 +1179,27 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1847,6 +1886,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

@@ -242,6 +242,19 @@ set) apply equally to the new `ledger.approval.decide` action.
 
 ## 8. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
 - **2026-09-21** — **First per-service M2M identity on the ledger write path (#10486 step 1).**
   interest-service's capitalization journal now arrives as its own Keycloak client
   `openbank-interest` (principal `service-account-openbank-interest`, realm role `ROLE_API` only)
@@ -535,3 +548,56 @@ set) apply equally to the new `ledger.approval.decide` action.
   leaves 1001 untouched and treasury's CZK postings fail with 422 rather than land elsewhere.
   **STRIDE-T:** no validation or posting path changes — the accounts are ordinary leaves under the
   same currency-match and balance checks, written only through `postJournal`.
+- **2026-09-26** — **`POST /api/v1/journals` answers `Idempotent-Replayed: true|false` (#10904).**
+  A replayed idempotency key got the same 201 and the same body as the original posting, so a
+  caller could not tell a posting from a no-op. The lending ledger backfill proved the harm: a second
+  request replayed all 352 legs, booked nothing, and still reported 44 loans as posted. The use case
+  now returns whether the key was already posted, from both the sequential replay and the
+  concurrent-race recovery, and the resource sets the header. Status code and body are unchanged.
+  **STRIDE-I:** the header tells the caller only whether a key it supplied itself was already
+  posted. It is set solely on the authenticated create path (`ROLE_API`/`ROLE_OPERATOR`, then
+  per-identity rego), and answering at all already required a balanced, valid request, so it is no
+  oracle over other callers' keys beyond what the unchanged replay body already returned.
+  **STRIDE-R:** it strengthens non-repudiation, because a caller's audit record can now tell "posted"
+  from "already posted". No validation, posting, lock or outbox path changes. Rollback: drop the header.
+
+- **2026-09-27** — **ApprovalResource migrated onto ApprovalEndpointSupport (#10917/#11031/#11062),
+  no wire change.** The maker-checker four-eyes endpoints (`GET .../approvals`,
+  `PATCH .../approvals/{id}`) now delegate their body — limit clamping, the null-body-is-400
+  guard (#3029), unknown-id-is-404, checker-identity resolution and the self-approval refusal — to
+  the shared `ApprovalEndpointSupport` (libs-runtime). Only the `@Path`/`@RolesAllowed`/
+  `@Authorize` annotations and the Quarkus resource class stay per-service. Paths, roles, status
+  codes and JSON field names are unchanged; `ApprovalResourceMappingTest` covers the mapping.
+  **Risk class:** none — response-plumbing de-duplication only; the self-approval check (a maker
+  cannot approve their own request) is preserved verbatim in the shared implementation, and a
+  maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
+  implementation this PR replaces.
+
+- **2026-09-27** — **Read-only balance in an account's own currency (#11107).**
+  `GET /api/v1/journals/accounts/{code}/balance?asOf=&currency=` sums the native `amount` of booked
+  lines on one GL account in one transaction currency (every other aggregate here sums the CZK
+  `base_amount`), so a foreign-currency nostro such as 1002 EUR has a balance in EUR. It is gated
+  exactly like the trial balance (`@RolesAllowed` read roles, OPA `ledger.read`); no new action, no
+  rego change, no write, lock or outbox path. **STRIDE-T (misstatement):** only lines whose own
+  currency equals `currency` contribute, which also excludes the FX revaluation's base-only CZK legs;
+  `scope` defaults to `REAL_ONLY` as on the trial balance. `AccountCurrencyBalanceIT` asserts the exact
+  sum against real Postgres with a base-only line, a later line, a PENDING line and another account's
+  lines present; dropping the currency predicate turns 3 of its 4 tests red. **STRIDE-I:** it reveals
+  one account's total that the trial balance already reveals to the same callers, in a different
+  unit. Required `asOf`/`currency` are nullable + `requireNotNull` (400), an unknown code is 404.
+  Rollback: remove the endpoint.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site is migrated to
+  `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

@@ -6,8 +6,6 @@ package com.openbank.psd2.infrastructure.rest.filter
 
 import io.mockk.every
 import io.mockk.mockk
-import io.mockk.slot
-import io.mockk.verify
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.UriInfo
@@ -16,11 +14,18 @@ import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import java.security.KeyPairGenerator
 import java.security.Signature
+import java.time.Duration
 import java.util.Base64
 
 /**
  * QSEAL message-signature gate (ADR-0090 P4): only the Berlin write surface (`POST v1/payments` or
  * `v1/consents`) is checked; advisory mode (default) logs but never blocks, enforce mode rejects.
+ *
+ * The filter method now returns `Uni<Response?>` (#11008-follow-up): reading the entity stream is
+ * genuinely blocking, so it — and the verification that depends on the raw bytes — is offloaded to
+ * a worker pool instead of running inline on the IO thread the guarded `suspend` resource methods
+ * otherwise keep it on. Every assertion below awaits that Uni; the filter no longer calls
+ * `ctx.abortWith(...)` directly.
  */
 class QsealSignatureFilterTest {
 
@@ -70,14 +75,17 @@ class QsealSignatureFilterTest {
         return ctx
     }
 
+    private fun await(filter: QsealSignatureFilter, ctx: ContainerRequestContext): Response? =
+        filter.filter(ctx).await().atMost(Duration.ofSeconds(5))
+
     @Test
     fun `non-write paths are not intercepted`() {
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("GET", "v1/accounts", null, null, null, ByteArray(0))
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(result).isNull()
     }
 
     @Test
@@ -85,9 +93,9 @@ class QsealSignatureFilterTest {
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("GET", "v1/payments/sepa-credit-transfers/p-1/status", null, null, null, ByteArray(0))
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(result).isNull()
     }
 
     @Test
@@ -95,21 +103,19 @@ class QsealSignatureFilterTest {
         val filter = QsealSignatureFilter(enforce = false)
         val ctx = ctxFor("POST", "v1/payments/sepa-credit-transfers", null, null, null, "{}".toByteArray())
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        verify(exactly = 0) { ctx.abortWith(any()) }
+        assertThat(result).isNull()
     }
 
     @Test
     fun `enforce mode rejects a missing signature with 401 SIGNATURE_INVALID`() {
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("POST", "v1/consents", null, null, null, "{}".toByteArray())
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
     }
 
     @Test
@@ -118,12 +124,10 @@ class QsealSignatureFilterTest {
         val body = """{"amount":"1.00"}""".toByteArray()
         val sigHeader = "keyId=\"tpp-1\",algorithm=\"rsa-sha256\",headers=\"digest\",signature=\"AAAA\""
         val ctx = ctxFor("POST", "v1/payments/sepa-credit-transfers", sigHeader, testCertPem, "SHA-256=wrong", body)
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
     }
 
     @Test
@@ -142,11 +146,20 @@ class QsealSignatureFilterTest {
         // testCertPem's public key does not correspond to kp.private, so verification fails.
         val filter = QsealSignatureFilter(enforce = true)
         val ctx = ctxFor("POST", "v1/payments/sepa-credit-transfers", sigHeader, testCertPem, digest, body)
-        val captured = slot<Response>()
-        every { ctx.abortWith(capture(captured)) } returns Unit
 
-        filter.filter(ctx)
+        val result = await(filter, ctx)
 
-        assertThat(captured.captured.status).isEqualTo(401)
+        assertThat(result?.status).isEqualTo(401)
+    }
+
+    // #10997: the runtime path form carries a leading slash; the write surface must still be checked.
+    @Test
+    fun `enforce mode rejects a missing signature on a slash-prefixed path`() {
+        val filter = QsealSignatureFilter(enforce = true)
+        val ctx = ctxFor("POST", "/v1/payments/sepa-credit-transfers", null, null, null, "{}".toByteArray())
+
+        val result = await(filter, ctx)
+
+        assertThat(result?.status).isEqualTo(401)
     }
 }

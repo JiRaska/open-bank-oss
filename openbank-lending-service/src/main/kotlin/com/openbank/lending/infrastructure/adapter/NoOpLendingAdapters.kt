@@ -173,7 +173,7 @@ class NoOpBorrowerCreditPort : BorrowerCreditPort {
         return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("credit", reference))
     }
 
-    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit> {
+    override fun debit(reference: String, borrowerAccountId: UUID, amount: Money, description: String): Uni<Unit> {
         log.warnf("borrower-credit backend not configured: REFUSING debit %s ref=%s", amount, reference)
         return Uni.createFrom().failure(BorrowerCreditBackendNotConfiguredException("debit", reference))
     }

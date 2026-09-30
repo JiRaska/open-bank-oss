@@ -28,8 +28,6 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
   datasource:
     db-kind: postgresql
     username: ${POSTGRES_USER:openbank}
@@ -74,6 +72,8 @@ quarkus:
     log:
       level: DEBUG
     oidc:
+      tls:
+        verification: none
       enabled: false
 
 "%test":

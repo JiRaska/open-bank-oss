@@ -42,13 +42,16 @@ data class LimitCheck(
     val breached: Boolean get() = exposureAfter > limit
 
     companion object {
-        /** A borrowing consumes no credit limit, so its check carries a zero deal amount. */
+        /**
+         * A borrowing consumes no credit limit, so its check carries a zero deal amount. An FX spot
+         * is checked against the CZK limit by its CZK equivalent ([Deal.limitCurrency]/[Deal.limitAmount]).
+         */
         fun of(counterparty: Counterparty, deal: Deal, exposureBefore: BigDecimal) = LimitCheck(
             counterpartyId = counterparty.id,
-            currency = deal.currency,
-            limit = counterparty.limitFor(deal.currency),
+            currency = deal.limitCurrency,
+            limit = counterparty.limitFor(deal.limitCurrency),
             exposureBefore = exposureBefore,
-            dealAmount = if (deal.product.isAsset) deal.principal else BigDecimal.ZERO,
+            dealAmount = deal.limitAmount,
         )
     }
 }

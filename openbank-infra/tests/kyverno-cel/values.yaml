@@ -1,0 +1,20 @@
+# Cluster state the policies read, supplied to the v1 engine (values) — context.yaml
+# carries the same state for the CEL engine. A Rollout `ledger-service` exists in
+# namespace `ledger`; nothing else does.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Value
+metadata: {name: values}
+namespaceSelector:
+  - {name: default, labels: {kubernetes.io/metadata.name: default}}
+  - {name: arc-runners, labels: {kubernetes.io/metadata.name: arc-runners}}
+  - {name: kube-system, labels: {kubernetes.io/metadata.name: kube-system}}
+  - {name: observability, labels: {kubernetes.io/metadata.name: observability}}
+  - {name: ledger, labels: {kubernetes.io/metadata.name: ledger}}
+policies:
+  - name: block-deployment-if-rollout-exists
+    rules:
+      - name: block-if-rollout-exists
+        values: {existingRolloutName: ""}
+    resources:
+      - name: ledger-service
+        values: {existingRolloutName: ledger-service}

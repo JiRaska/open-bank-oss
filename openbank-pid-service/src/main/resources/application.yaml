@@ -63,8 +63,6 @@ quarkus:
     client-id: ${QUARKUS_OIDC_CLIENT_ID:openbank-services}
     credentials:
       secret: ${QUARKUS_OIDC_CREDENTIALS_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
-    tls:
-      verification: none
 
   opentelemetry:
     tracer:
@@ -147,6 +145,11 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
+  # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
+  authz:
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 100
@@ -221,3 +224,9 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:true}"
+
+"%dev":
+  quarkus:
+    oidc:
+      tls:
+        verification: none

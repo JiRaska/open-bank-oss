@@ -188,7 +188,6 @@ lie about who the customer paid.
 | **I**nfo disclosure | The catalogue becomes a record of where a cardholder was | The table is keyed by acquirer descriptor and holds public business data only — nothing in it is keyed by customer, card or transaction, stated in both `V16__create_merchant_catalog.sql` and the entity KDoc. `GET /unmatched` returns raw descriptors and their counts, never the transactions or accounts they came from |
 | **D**oS | `GET /unmatched` scans the whole transactions table on every operator refresh | `recentDescriptions` is a bounded, ordered window — `scan` is clamped to `MAX_SCAN` (20 000) and page size to `MAX_PAGE_SIZE`, both server-side via `coerceIn`, so a caller cannot widen the query. It lives in `TransactionDescriptorRepository` rather than the domain repository, keeping catalogue curation off the transaction persistence port |
 | **E**oP | A viewer edits the catalogue | Read and write roles are separate: `list`/`unmatched` admit `VIEWER`, `upsert`/`delete` do not, and the OPA action differs too, so a viewer is denied at both layers |
-
 ## 4e. Self-hosted merchant logos — STRIDE supplement
 
 `merchant_logo` stores the logo bitmaps and `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`
@@ -291,6 +290,26 @@ allowlist needs no policy change at all.
 **Rollback:** revert, or simply unset the allowlist — with no hosts configured the endpoint refuses
 every URL and the upload path is unaffected.
 
+## 4h. Customer-set spend categories (#8573) — STRIDE supplement
+
+`TransactionCategoryResource` (`PUT`/`DELETE /api/v1/transactions/{id}/category`,
+`GET /category-overrides`) is a new inbound REST surface. It writes no money and creates no
+transaction, but it decides what a customer's own statement says their spending was, so a bad row
+is the bank misdescribing where the money went.
+
+Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has since taken §4f (per-town locations) and §4g (logo ingest) — both of which landed while this branch was open, so the section number it reserved was already spent twice over.
+
+| STRIDE | Threat | Mitigation |
+| --- | --- | --- |
+| **S**poofing | An unauthenticated or under-privileged caller writes categories | `@RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)` plus OPA `@Authorize(action = "transaction.categorise")`, declared in `rules-opa-data.yaml` so `AUTHZ_ENFORCE=true` fails closed rather than defaulting to allow |
+| **T**ampering | A caller forges a counterparty key and writes a row scoped to a counterparty the customer never dealt with | The key is never accepted as input. The caller names a transaction; the server derives the key through `CounterpartyKey.of`, which is also the only producer used on the read path, so a client cannot address a row it could not reach by reading |
+| **T**ampering | The category is filed against the wrong account on an internal transfer, which touches two | `accountId` is required and checked against the transaction's `sourceAccountId`/`targetAccountId`; a mismatch is a 400. It is deliberately not inferred — only the caller knows which statement it is viewing |
+| **R**epudiation | No record of who set a category | `created_at`/`updated_at` are stamped. **Not** an audit trail: the row carries no actor identity. Recorded as a gap, not claimed as a control |
+| **I**nfo disclosure | One customer reads another's categorisation of their counterparties | Every repository method takes `accountId` and every query filters on it — the account is the only tenancy boundary this table has. `findFor` additionally scopes to the counterparty keys on the page being read |
+| **I**nfo disclosure | The stored category leaks a retired or unrecognised value back to a client | The read path drops values failing `SpendCategory.isKnown`, so a category retired from the shared vocabulary renders as absent rather than as a name no client can display or undo |
+| **D**oS | Unbounded override rows per account | Rows are keyed `(account_id, counterparty_key)`, so an account has at most one row per counterparty it has actually transacted with; there is no path that mints keys without a matching transaction |
+| **E**oP | An M2M service account recategorises a customer's spending | **Not mitigated.** `transaction.categorise` sits in the `ROLE_OPERATOR` matrix, which the shared M2M service account holds, and is declared in `shared_m2m_matrix_write_grants` (#3765). Declaring is an acknowledgement, not a control. No money moves, but the statement's description of the customer's own spending can be changed by a non-human caller. The narrower fix is an identity-scoped rule naming the caller, which does not exist for operator writes fleet-wide |
+
 ## 5. Residual risks / assumptions
 
 - **Booked balance is now a ledger projection (ADR-0039 Phase D-2).** The saga no longer debits/credits
@@ -329,12 +348,36 @@ every URL and the upload path is unaffected.
 
 ## 6. Change log
 
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, `@RolesAllowed`/`@Authorize` values, status codes, JSON field
+  names and `openapi.yaml` are unchanged. Only the `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag`
+  annotations remain per-service, and `checkerId(identity)` is resolved AFTER the null-body check
+  (same ordering `decide` documents in libs-runtime, fixed in #11033/#11047).
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-25** — **Transport control tightened: OIDC TLS verification is `required` outside `%dev` (#10865).** `quarkus.oidc(-client).tls.verification: none` sat at the top level of `application.yaml`, so it applied to `%prod` too; inert while the in-cluster Keycloak leg is plain http, it would have skipped certificate and hostname validation of the token issuer / JWKS the moment that leg moved to https (Spoofing of the IdP). It now lives under `"%dev":` only, and gate `oidc-tls-verification-profile-scoped` keeps it there.
+
 - **2026-09-08** — Logo ingest from an operator-named URL (`POST …/logo/fetch`), plus `GET …/logo-sources` so the operator screen can tell "off by design" from "broken" (§4g). This is the service's only outbound internet call and an SSRF primitive by construction; it is fenced by an allowlist that is **empty by default**, https-only, a publicly-routable check on every resolved address, and refusal (not following) of redirects. Fetched bytes get the same re-encode as an upload. Residual DNS-rebinding risk is recorded in §4g rather than claimed closed. Rollback: unset the allowlist and the endpoint refuses everything.
 
 - **2026-09-07** — Per-town merchant locations (`merchant_location`, `…/locations[/{cityToken}]`) and a `precision` field on `MerchantGeo` (§4f). The seeded catalogue pinned each chain at one Prague coordinate, so a Billa purchase in Brno rendered 185 km from where it happened; coordinates now say whether they are `EXACT` (the place the money was spent) or `CITY` (representative for the town), and `EXACT` is refused without the device id that would justify it — in the API and in a `CHECK` constraint. No new caller, role or network edge. Rollback: revert; geo falls back to the catalogue pin.
 
 - **2026-09-07** — Merchant logos are stored and served by this service (`merchant_logo`, `GET|PUT|DELETE /api/v1/merchants/{descriptorKey}/logo`), and `merchant.logoUrl` became a derived origin-relative path instead of a catalogue-controlled URL (§4e). Two boundaries moved: operator-uploaded binary content that a customer app renders, and a URL clients dereference. The design point is privacy — an external logo host would have learned each customer's IP together with the merchant they paid, every statement render. Uploads are re-encoded rather than stored, which is what refuses SVG/polyglots and strips EXIF; header dimensions are checked before any pixel buffer is allocated. Rollback: revert; the field returns to null and the additive migration can stay or be dropped.
 
+- **2026-09-06** — New inbound REST surface `TransactionCategoryResource`: a customer sets, clears and lists their own spend category, keyed by counterparty rather than by transaction (#8573). New trust boundary crossing, hence §4f. No money path touched and `merchantCategory` keeps its MCC meaning — the resolved value is a new additive field. Two gaps recorded rather than claimed away: the row has no actor identity, and the new action is reachable by the shared M2M service account. Rollback: revert the commit and drop the table (see the migration's Rollback note); the read path falls back to the merchant catalogue, which is what renders today.
 - **2026-09-05** — New inbound REST surface `MerchantCatalogResource` (`/api/v1/merchants`): list, an unmatched-descriptor worklist, upsert and delete, so the D5 catalogue §4c reads can actually be filled (#8573). New trust boundary crossing, hence §4d. No money path touched and no cardholder data added — the table stays keyed by acquirer descriptor. Residual gap recorded rather than papered over: the row records `updated_at` but not who edited it. Rollback: revert the commit; §4c degrades to the empty catalogue it reads today, which already renders the raw descriptor.
 
 - **2026-08-24** — Synthetic-journey taint now propagates over this service's existing internal balance, FX and ledger REST clients through `SyntheticTaintClientFilter` (ADR-0252, #4348). This adds no caller, endpoint, network-policy edge, privilege or transaction-control bypass. It preserves the marker before a downstream persistence/event boundary; a fleet gate requires every new client to choose propagation or a reasoned external boundary.
@@ -569,3 +612,19 @@ every URL and the upload path is unaffected.
 - **2026-09-21** — **Batch 2 of #10486, both directions.** **Inbound:** four more identity rules on `transaction.create` in `transaction_rest_ext.rego` — `service-domestic-payment-transaction-create`, `service-sepa-instant-transaction-create`, `service-swift-transaction-create`, `service-interest-transaction-create` — each gated on `input.principal.id` and on that single action; no RBAC change (`initiateTransaction` already admits `ROLE_API` since batch 1). **Outbound:** `LedgerRestClient` and `BalanceCoverRestClient` now mint their bearer from the NAMED oidc-client `m2m`, Keycloak client `openbank-transaction` (`ROLE_API` only); ledger-service grants it `ledger.create` + `ledger.reverse` (`service-transaction-ledger-write`) and balance-service `balance.hold` + `balance.holdRelease` (`service-transaction-balance-hold`). The principal holds no grant on transaction-service itself (`test_transaction_service_own_identity_has_no_grant_here`). `FxServiceRestClient` stays on the shared client. **STRIDE-S:** a new credential. Its secret is generated by Keycloak in the live realm, stored by the owner's provisioning script at Vault KV `keycloak/transaction-service` (`client_secret`), projected by the `transaction-service-m2m-oidc` ExternalSecret and never seen by the repo; the env ref is `optional: false`, so an unseeded entry blocks the new pod loudly (CreateContainerConfigError) rather than calling with an empty credential. Compromise of this secret reaches only `ledger.create`, `ledger.reverse`, `balance.hold` and `balance.holdRelease`, against the shared secret's 54 money-path writes. **Repudiation improves:** the upstream's OPA decision reason and principal now name this service instead of "some caller on the shared client". The service's other rest-clients stay on the shared `openbank-services` client until their own edges migrate (asserted by `M2mOidcClientIdentityWiringTest`). Rollback: revert the commit (the clients return to the shared token).
 - **2026-09-21** — **Transaction reads admitted by named machine identity (#10486 batch 5).** `service-party-transaction-read` grants `service-account-openbank-party` (`ROLE_API` only) `transaction.list` for party-service's GDPR Art. 15 aggregation, which used to ride the shared client's `ROLE_OPERATOR`. RBAC already admitted `ROLE_API` on list/search/read, so OPA is the only control against every other `ROLE_API` holder; `transaction_rest_ext_test.rego` asserts another service account and the shared client with `ROLE_API` only are denied list, read and search. Rollback: revert the commit.
 - **2026-09-21** — **Three more transaction-read identities (#10486 batch 7).** `service-statement-transaction-search` (statement-service, `transaction.search`), `service-agent-transaction-read` (agent-service, `transaction.list` and `transaction.read`) and `service-mcp-transaction-read` (mcp-service, `transaction.list`), each `ROLE_API` only. The two AI-agent identities get exactly what a charter can reach: `query.ledger.readonly` (compliance-officer, ui-assistant) for agent-service, and `query.transaction.readonly` (mcp-anonymous) for mcp-service. `transaction_rest_ext_test.rego` denies another service account and the shared client every read (negative case run: widening the mcp rule to a prefix turned two tests red). Rollback: revert the commit.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site (stranded on the
+  older `support.decide(id, request, identity)` form by #11079 merging just ahead of this fix) is
+  migrated to `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

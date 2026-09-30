@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.15.0...sepa-payment-v0.15.1) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.4...sepa-payment-v0.15.0) (2026-09-28)
+
+
+### Features
+
+* **sepa-payment:** bind Idempotency-Key to a request fingerprint ([#10948](https://github.com/JiRaska/open-bank-oss/issues/10948)) ([cefef67](https://github.com/JiRaska/open-bank-oss/commit/cefef673d15dec06c20c13e452e03488836dee8f))
+
+## [0.14.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.3...sepa-payment-v0.14.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.14.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.14.2...sepa-payment-v0.14.3) (2026-09-23)
 
 

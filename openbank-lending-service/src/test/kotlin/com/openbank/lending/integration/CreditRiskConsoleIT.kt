@@ -4,9 +4,10 @@
 
 package com.openbank.lending.integration
 
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
+import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
@@ -40,7 +41,10 @@ import java.util.UUID
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 @QuarkusTestResource(CreditRiskConsoleIT.InMemoryKafkaResource::class)
-@QuarkusTestResource(PostgresRedisTestResource::class)
+@QuarkusTestResource(
+    value = PostgresRedisTestResource::class,
+    initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
+)
 class CreditRiskConsoleIT {
     @jakarta.inject.Inject
     lateinit var dataSource: io.agroal.api.AgroalDataSource
@@ -180,13 +184,15 @@ class CreditRiskConsoleIT {
     @Order(8)
     @TestSecurity(user = "risk-it-analyst", roles = ["ROLE_CREDIT_RISK"])
     fun `whole-book summary retains defaulted exposure beyond list cap and marks stale evidence`() {
+        // The endpoint's Clock is UTC; JDBC current_date uses the session time zone.
+        val utcToday = "timezone('UTC', current_timestamp)::date"
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO loan(id, application_id, party_id, principal, currency, nominal_annual_rate,
                     term_periods, method, first_due_date, status)
                 SELECT gen_random_uuid(), ?::uuid, gen_random_uuid(), 100, 'ZAR', 0.08,
-                    12, 'ANNUITY', current_date + 30, 'DEFAULTED' FROM generate_series(1, 1001)
+                    12, 'ANNUITY', $utcToday + 30, 'DEFAULTED' FROM generate_series(1, 1001)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setString(1, applicationId)
@@ -197,7 +203,7 @@ class CreditRiskConsoleIT {
                     """
                     INSERT INTO loan_provisioning(id, loan_id, period, as_of, outstanding_balance, currency,
                         days_past_due, bucket, stage, expected_credit_loss, model_version)
-                    SELECT gen_random_uuid(), id, to_char(current_date, 'YYYY-MM-DD'), current_date, 100, 'ZAR',
+                    SELECT gen_random_uuid(), id, to_char($utcToday, 'YYYY-MM-DD'), $utcToday, 100, 'ZAR',
                         120, 'DPD_90_PLUS', 'STAGE_3', 45, 'test-model-v1' FROM loan WHERE currency = 'ZAR'
                     """.trimIndent(),
                 )
@@ -213,7 +219,7 @@ class CreditRiskConsoleIT {
         assertThat((row["over90Outstanding"] as Number).toDouble()).isEqualTo(100100.0)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeUpdate("UPDATE loan_provisioning SET as_of = current_date - 1 WHERE currency = 'ZAR'")
+                statement.executeUpdate("UPDATE loan_provisioning SET as_of = $utcToday - 1 WHERE currency = 'ZAR'")
                 statement.executeUpdate(
                     "UPDATE loan SET status = 'CLOSED' WHERE id = (SELECT min(id::text)::uuid FROM loan WHERE currency = 'ZAR')",
                 )

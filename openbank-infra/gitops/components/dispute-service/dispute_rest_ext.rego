@@ -171,3 +171,12 @@ allowed_reasons contains "dispute-staff-write" if {
 # identified by input.principal.id (Keycloak's `service-account-<clientId>` convention) — and
 # they are identified in order to be EXCLUDED from the write plane, never gated on a bare
 # HUMAN + ROLE_OPERATOR check, which they would satisfy.
+
+# #10486 batch 8: agent-service's dispute_list / dispute_get / dispute_list_by_account / dispute_get_timeline tools (DisputeServiceClient, query.disputes.readonly, held by the compliance-officer charter only). It used to reach these reads on the shared
+# service-account-openbank-services principal's ROLE_OPERATOR; it now presents its own identity
+# (ROLE_API only), and this rule is that principal's whole grant here: the read verbs, never a write.
+allowed_reasons contains "service-agent-dispute-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-agent"
+	input.action in {"dispute.list", "dispute.read"}
+}
