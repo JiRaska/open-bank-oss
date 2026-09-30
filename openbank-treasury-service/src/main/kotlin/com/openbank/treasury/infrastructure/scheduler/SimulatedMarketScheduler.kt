@@ -17,8 +17,9 @@ import java.time.Duration
 
 /**
  * The SIMULATED counterparty set (ADR-0315 D9) — SYNTHETIC, sandbox only. It stands in for the
- * counterparty's confirmation and the payment system's settlement: every BOOKED deal whose value
- * date has come is settled, every SETTLED deal whose maturity has come is matured, each posting
+ * counterparty's confirmation and the payment system's settlement: every BOOKED deal is confirmed
+ * (a synthetic confirmation, ADR-0315 D2), every CONFIRMED deal whose value date has come is
+ * settled, every SETTLED deal whose maturity has come is matured, each posting
  * its journal through the ledger API exactly as a human approver's explicit settle would. Real
  * confirmation matching and dealing-platform connectivity are out of scope (ADR-0313).
  *
@@ -54,6 +55,9 @@ class SimulatedMarketScheduler(
                 r.failures.forEach { log.error("simulated market could not move a deal", it) }
                 if (r.failures.isEmpty()) liveness?.recordSuccess()
                 if (r.moved > 0) log.infof("simulated market moved %d deal(s)", r.moved)
+                if (r.declined > 0) {
+                    log.infof("simulated counterparties declined %d deal(s) struck off their quote", r.declined)
+                }
             }
             .onFailure { log.error("simulated market pass failed", it) }
     }

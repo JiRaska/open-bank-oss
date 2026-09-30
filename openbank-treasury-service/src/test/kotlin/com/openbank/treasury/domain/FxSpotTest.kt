@@ -71,11 +71,13 @@ class FxSpotTest {
     fun `reversal of a settled spot is the flipped settlement, from BOOKED nothing, and there is no maturity`() {
         val settled = fxSpot().submit(dealer, LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO), NOW)
             .approve(approver, LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO), NOW)
+            .confirm(approver, NOW)
             .settle(approver, MONDAY.plusDays(2), NOW)
         val reversal = PostingRules.reversal(settled, DealState.SETTLED)!!
         assertThat(reversal.lines).hasSize(4)
         assertThat(reversal.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
         assertThat(PostingRules.reversal(settled, DealState.BOOKED)).isNull()
+        assertThat(PostingRules.reversal(settled, DealState.CONFIRMED)).isNull()
         assertThatThrownBy { settled.mature(approver, MONDAY.plusDays(30), NOW) }
             .isInstanceOf(IllegalStateException::class.java)
         assertThatThrownBy { PostingRules.maturity(settled) }.isInstanceOf(IllegalArgumentException::class.java)
@@ -93,13 +95,15 @@ class FxSpotTest {
     }
 
     @Test
-    fun `an FX spot consumes the limit while pending or booked, and releases it on settlement`() {
+    fun `an FX spot consumes the limit while pending, booked or confirmed, and releases it on settlement`() {
         val check = LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO)
         val pending = fxSpot().submit(dealer, check, NOW)
         val booked = pending.approve(approver, check, NOW)
+        val confirmed = booked.confirm(approver, NOW)
         assertThat(pending.consumesLimit).isTrue()
         assertThat(booked.consumesLimit).isTrue()
-        assertThat(booked.settle(approver, MONDAY.plusDays(2), NOW).consumesLimit).isFalse()
+        assertThat(confirmed.consumesLimit).isTrue()
+        assertThat(confirmed.settle(approver, MONDAY.plusDays(2), NOW).consumesLimit).isFalse()
     }
 
     @Test
