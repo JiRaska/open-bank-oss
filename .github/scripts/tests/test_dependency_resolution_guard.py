@@ -53,7 +53,10 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
             env = dict(os.environ, GRADLE_USER_HOME=str(self.gradle_home))
             return subprocess.run(
                 [str(ROOT / 'gradlew'), '-p', str(fixture), '--init-script', str(GUARD),
-                 '--offline', task, *(['--dry-run'] if resolver else [])],
+                 # --no-daemon: a daemon started with GRADLE_USER_HOME=<temp dir> outlives the call
+                 # and keeps writing into that dir, so tearDownClass's cleanup raced it and failed
+                 # with "Directory not empty" (seen on #11546, unrelated to the PR under test).
+                 '--no-daemon', '--offline', task, *(['--dry-run'] if resolver else [])],
                 env=env, capture_output=True, text=True, timeout=120, check=False,
             )
 
