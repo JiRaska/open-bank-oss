@@ -36,6 +36,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.provider.ValueSource
+import org.junit.jupiter.params.ParameterizedTest
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -279,6 +281,44 @@ class AccountServiceTest {
 
         coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
         verify(exactly = 0) { metrics.accountCreated(any(), any()) }
+    }
+
+    /**
+     * sanctions-service's real vocabulary. The gate used to block only HIT and REVIEW — a status
+     * sanctions never returns — so every one of these opened the account.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = ["POTENTIAL_HIT", "ESCALATED", "UNKNOWN", "SOMETHING_NEW"])
+    fun `openAccount is blocked for every screening status other than CLEAR and WHITELISTED`(status: String) {
+        val command = openAccountCommand(legalName = "Fuzzy Match Person")
+
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen(any(), any()) } returns
+            SanctionsScreenResult(status, 0.72, "Fuzzy Match Person")
+
+        assertThatThrownBy { runBlocking { service.openAccount(command) } }
+            .describedAs("status %s must not open an account", status)
+            .isInstanceOf(AccountOpeningBlockedByScreeningException::class.java)
+
+        coVerify(exactly = 0) { accountRepository.saveNewAccount(any(), any(), any(), any()) }
+        verify(exactly = 0) { metrics.accountCreated(any(), any()) }
+    }
+
+    @Test
+    fun `openAccount proceeds when compliance has WHITELISTED the match`(): Unit = runBlocking {
+        val iban = Iban.of("CZ6508000000192000145399")
+        val command = openAccountCommand(legalName = "Cleared Customer")
+
+        coEvery { accountRepository.findByIdempotencyKey(any()) } returns null
+        coEvery { sanctionsScreening.screen("Cleared Customer", any()) } returns
+            SanctionsScreenResult("WHITELISTED", 0.9, "Cleared Customer")
+        every { ibanGenerator.generate(command.currency) } returns iban
+        coEvery { accountRepository.existsByIban(iban) } returns false
+        coEvery { accountRepository.saveNewAccount(any(), any(), any(), any()) } answers { firstArg() }
+        coEvery { balancePort.initialize(any(), any(), any()) } returns Unit
+        coEvery { eventPublisher.publish(any(), any(), any()) } returns Unit
+
+        assertThat(service.openAccount(command).status).isEqualTo(AccountStatus.ACTIVE)
     }
 
     @Test
