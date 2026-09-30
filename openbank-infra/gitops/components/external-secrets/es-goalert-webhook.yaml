@@ -24,3 +24,13 @@ spec:
       remoteRef:
         key: goalert
         property: url
+    # Dead-man heartbeat (kube-prometheus-stack.yaml route `deadman`). Create the
+    # heartbeat monitor in GoAlert (service openbank-alerts -> Heartbeat Monitors,
+    # timeout 5m), then `bao kv patch openbank/goalert heartbeat_url=<url>`.
+    # Until the property exists ESO reports SecretSyncedError for this object
+    # (ExternalSecretNotReady fires) while the already-synced `url` key stays in
+    # the live Secret — loud, not silent, by design.
+    - secretKey: heartbeat_url
+      remoteRef:
+        key: goalert
+        property: heartbeat_url
