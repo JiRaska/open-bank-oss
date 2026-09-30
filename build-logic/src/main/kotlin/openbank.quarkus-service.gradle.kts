@@ -28,6 +28,74 @@ group = "com.openbank"
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
 
+// Every service publishes documentation from the same build that produces its JAR.
+// The generated page contains only facts from build inputs. It also supplies an
+// honest index for new services until they add authored docs to src/main/resources/docs.
+val generatedServiceDocs = layout.buildDirectory.dir("generated/service-docs")
+val generateServiceDocs by tasks.registering {
+    val versionFile = layout.projectDirectory.file("version.txt")
+    val openapiFile = layout.projectDirectory.file("src/main/resources/openapi.yaml")
+    val authoredDocs = fileTree("src/main/resources/docs") { include("*.md") }
+    inputs.file(versionFile)
+    inputs.files(authoredDocs)
+    inputs.files(openapiFile.asFile.takeIf { it.exists() }?.let { files(it) } ?: files())
+    outputs.dir(generatedServiceDocs)
+    doLast {
+        val docs = generatedServiceDocs.get().asFile.resolve("docs")
+        docs.deleteRecursively()
+        docs.mkdirs()
+        val releaseVersion = versionFile.asFile.readText().trim()
+        val apiVersion = if (openapiFile.asFile.isFile) {
+            val info = Regex("(?m)^info:\\s*$([\\s\\S]*?)(?=^\\S|\\z)")
+                .find(openapiFile.asFile.readText())?.groupValues?.get(1).orEmpty()
+            Regex("(?m)^\\s+version:\\s*['\"]?([^'\"\\s#]+)")
+                .find(info)?.groupValues?.get(1)
+        } else null
+        val module = project.name
+        docs.resolve("00-build.md").writeText(buildString {
+            appendLine("# Build facts — $module")
+            appendLine()
+            appendLine("Generated from this service's build inputs. This page is packaged in the running service, not copied from the Admin UI.")
+            appendLine()
+            appendLine("| Source | Value |")
+            appendLine("|---|---|")
+            appendLine("| Module | `$module` |")
+            appendLine("| Release version (`version.txt`) | `$releaseVersion` |")
+            appendLine("| API contract version (`openapi.yaml`) | ${apiVersion?.let { "`$it`" } ?: "No committed contract"} |")
+            appendLine()
+            appendLine("The running build and its Git commit are reported by `/q/openbank/docs` and `/api/v1/info`. The API contract is published at `/q/openapi` where enabled.")
+        })
+        if (authoredDocs.none { it.name == "README.md" || it.name == "README.en.md" || it.name == "README.cs.md" }) {
+            docs.resolve("README.md").writeText(buildString {
+                appendLine("# $module")
+                appendLine()
+                appendLine("This service publishes its own build facts and any authored documentation packaged with the service.")
+                appendLine()
+                appendLine("See [build facts](./00-build.md) and the service's `/q/openapi` endpoint for its generated API contract.")
+            })
+        }
+    }
+}
+
+tasks.named<Copy>("processResources") {
+    from(generatedServiceDocs.map { it.dir("docs") }) { into("docs") }
+    dependsOn(generateServiceDocs)
+}
+
+val verifyServiceDocs by tasks.registering {
+    group = "verification"
+    description = "Verify that generated service documentation is packaged with the service."
+    dependsOn("processResources")
+    doLast {
+        val packaged = layout.buildDirectory.file("resources/main/docs/00-build.md").get().asFile
+        check(packaged.isFile && packaged.readText().contains(project.version.toString())) {
+            "${project.name}: current build facts were not packaged in build/resources/main/docs"
+        }
+    }
+}
+
+tasks.named("check") { dependsOn(verifyServiceDocs) }
+
 repositories {
     // GCS mirror of Maven Central FIRST (#849): the in-cluster runner pool shares one
     // NAT egress IP, and fleet-wide build storms get that IP 429-throttled by Central.

@@ -396,6 +396,12 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require service documentation with production changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA"
+
   build:
     needs: changes
     if: needs.changes.outputs.any == 'true'

@@ -12,7 +12,7 @@ import { ServerlessTierBadge } from '@/components/finops/ServerlessTierBadge'
 import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { findService } from '@/lib/services/registry'
+import { findService, SERVICE_REGISTRY } from '@/lib/services/registry'
 
 // Static fallback / backlog base. The live list comes from the cluster at runtime
 // (see the effect below: /api/services/health → ADR-0051 Kubernetes discovery), so a
@@ -86,7 +86,7 @@ interface DocsStatus {
   error?: string
 }
 
-interface Candidate { id: string; label: string; group: string; desc?: string }
+interface Candidate { id: string; label: string; group: string; desc?: string; catalogShort?: string }
 
 // Catalog modules that ship no runtime service: the shared libraries and the IaC
 // module. `kind: 'ui'` (admin-ui) and `kind: 'library'` (openbank-libs) are excluded
@@ -101,10 +101,23 @@ const NON_FLEET_MODULES = new Set(['infra', 'libs-domain', 'libs-runtime', 'libs
  * hand-counted. The previous hardcoded "33" was stale by 21 services; a derived
  * count cannot drift.
  */
-function fleetSize(services: { short: string; kind: string }[]): number {
+function fleetSize(services: { short: string; kind: string; runnable?: boolean }[]): number {
   return services.filter(
-    s => s.kind !== 'ui' && s.kind !== 'library' && !NON_FLEET_MODULES.has(s.short),
+    s => s.runnable === true || (s.runnable === undefined && s.kind !== 'ui' && s.kind !== 'library' && !NON_FLEET_MODULES.has(s.short)),
   ).length
+}
+
+interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null }
+
+function candidateFromCatalog(module: CatalogModule): Candidate {
+  const registered = SERVICE_REGISTRY.find(service => service.container === module.name)
+  const id = registered?.id ?? module.short.replace(/-service$/, '')
+  return {
+    id,
+    label: registered?.label ?? module.apiTitle ?? module.short.replaceAll('-', ' '),
+    group: registered?.group ?? 'platform',
+    catalogShort: module.short,
+  }
 }
 
 /**
@@ -119,6 +132,7 @@ function fleetSize(services: { short: string; kind: string }[]): number {
  * module directory, which differs from the k8s workload name for security-scanner.
  */
 function catalogShortFor(c: Candidate): string {
+  if (c.catalogShort) return c.catalogShort
   const entry = findService(c.id)
   return entry ? entry.container.replace(/^openbank-/, '') : c.id
 }
@@ -141,7 +155,7 @@ export default function ServicesDocsOverviewPage() {
     let mounted = true
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
-      .then((data: { services?: { short: string; kind: string }[] } | null) => {
+      .then((data: { services?: CatalogModule[] } | null) => {
         if (mounted && Array.isArray(data?.services)) setFleetCount(fleetSize(data.services))
       })
       .catch(() => { /* catalog snapshot absent — omit the number */ })
@@ -159,6 +173,17 @@ export default function ServicesDocsOverviewPage() {
       const byId = new Map<string, Candidate>(
         (STATIC_CANDIDATES as readonly Candidate[]).map(c => [c.id, c]),
       )
+      try {
+        const catalogResponse = await fetch('/api/catalog/services', { cache: 'no-store' })
+        if (catalogResponse.ok) {
+          const catalog = await catalogResponse.json() as { services?: CatalogModule[] }
+          for (const module of catalog.services ?? []) {
+            if (module.runnable !== true) continue
+            const candidate = candidateFromCatalog(module)
+            if (!byId.has(candidate.id)) byId.set(candidate.id, candidate)
+          }
+        }
+      } catch { /* keep the static fallback */ }
       let src: 'kubernetes' | 'static' = 'static'
       try {
         const r = await fetch('/api/services/health', { cache: 'no-store' })
@@ -170,8 +195,12 @@ export default function ServicesDocsOverviewPage() {
           if (body.source === 'kubernetes' && body.services?.length) {
             src = 'kubernetes'
             for (const s of body.services) {
-              const id = s.name.replace(/-service$/, '')
-              if (!byId.has(id)) byId.set(id, { id, label: s.label || id, group: s.group })
+              const registered = SERVICE_REGISTRY.find(service => service.k8sName === s.name || service.container === `openbank-${s.name}`)
+              const id = registered?.id ?? s.name.replace(/-service$/, '')
+              const existing = byId.get(id)
+              byId.set(id, existing
+                ? { ...existing, group: s.group }
+                : { id, label: s.label || id, group: s.group, catalogShort: s.name })
             }
           }
         }
@@ -255,7 +284,7 @@ export default function ServicesDocsOverviewPage() {
             {loading ? '…' : `${withDocs.length} / ${candidates.length}`}
           </div>
           <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            {t('služeb má dokumentaci', 'services have documentation')}
+            {t('dokumentací dostupných z běžících verzí', 'documentation sets available from running versions')}
             {!loading && (
               <span style={{ color: 'var(--text-tertiary)', marginLeft: '6px' }}>
                 · {source === 'kubernetes'
@@ -266,8 +295,8 @@ export default function ServicesDocsOverviewPage() {
           </div>
         </div>
         <div style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-tertiary)', maxWidth: '420px', lineHeight: 1.5 }}>
-          {t('Seznam služeb je odvozen živě z clusteru (ADR-0051) sjednocený s katalogem; dokumentaci přidáte složkou docs/ se souborem README.md v repu služby.',
-             'The service list is derived live from the cluster (ADR-0051) unioned with the catalogue; add documentation via a docs/ folder with a README.md in the service repo.')}
+          {t('Seznam vychází z katalogu buildu a z clusteru. Každá služba publikuje dokumentaci ze svého image na /q/openbank/docs; vlastní kapitoly patří do src/main/resources/docs/.',
+             'The list comes from the build catalog and cluster. Each service publishes docs from its own image at /q/openbank/docs; authored chapters live in src/main/resources/docs/.')}
         </div>
       </div>
 
@@ -304,7 +333,7 @@ export default function ServicesDocsOverviewPage() {
           <select value={statusFilter} disabled={loading} onChange={event => setStatusFilter(event.target.value as typeof statusFilter)} style={{ padding: '7px 28px 7px 9px', border: '1px solid var(--border)', borderRadius: 'var(--r-md)', background: 'var(--surface-2)', color: 'var(--text-primary)', fontSize: '12px' }}>
             <option value="all">{t('Všechny', 'All')}</option>
             <option value="documented">{t('S dokumentací', 'Documented')}</option>
-            <option value="missing">{t('Bez dokumentace', 'Missing docs')}</option>
+            <option value="missing">{t('Nedostupná', 'Unavailable')}</option>
           </select>
         </label>
         <span role="status" aria-live="polite" style={{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-tertiary)' }}>
@@ -358,7 +387,7 @@ export default function ServicesDocsOverviewPage() {
       {!loading && withoutDocs.length > 0 && (
         <section>
           <h2 style={{ fontSize: '13px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-secondary)', marginBottom: '12px' }}>
-            {t('Zatím bez dokumentace', 'Not yet documented')} ({withoutDocs.length})
+            {t('Dokumentace nyní nedostupná', 'Documentation currently unavailable')} ({withoutDocs.length})
           </h2>
           <div style={{
             background: 'var(--surface)',
@@ -371,8 +400,9 @@ export default function ServicesDocsOverviewPage() {
             <AlertCircle size={14} style={{ color: 'var(--text-tertiary)', flexShrink: 0, marginTop: '2px' }} />
             <div style={{ flex: 1 }}>
               <div style={{ color: 'var(--text-secondary)', marginBottom: '8px' }}>
-                {t('Aby se služba sem zařadila, přidejte do jejího repa', 'To document a service, add to its repo')}{' '}
-                <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 'var(--r-sm)', fontSize: '11px' }}>docs/README.md</code>
+                {t('Služba nemusí být nasazená nebo její endpoint neodpovídá. Ručně psané kapitoly se ukládají do',
+                   'The service may not be deployed or its endpoint may not respond. Authored chapters belong in')}{' '}
+                <code style={{ background: 'var(--surface-2)', padding: '1px 6px', borderRadius: 'var(--r-sm)', fontSize: '11px' }}>src/main/resources/docs/README.md</code>
                 {' '}{t('podle vzoru', 'following the pattern of')}{' '}
                 <Link href="/services/libs/docs" style={{ color: 'var(--accent)' }}>openbank-libs/docs/</Link>.
               </div>
