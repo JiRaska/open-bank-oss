@@ -94,3 +94,64 @@ tests:
             exp_annotations:
               summary: "Postgres base backup has gone stale on pricing/pricing-db-1"
               description: "This primary's newest completed base backup is over 30h old and every ScheduledBackup in the fleet is daily, so at least one run has been missed. A recovery point still exists, so this is not PostgresNoRecoveryPoint -- the chain has stopped advancing. Check `kubectl get scheduledbackup -n pricing` and `kubectl get backup -n pricing` for the newest attempt and its failure, and confirm against the Cluster's own .status.lastSuccessfulBackup, which is what this metric mirrors (runbook 0003)."
+
+  # ---- PostgresWALArchiveFailing: "stuck", not "failed once" ----------------------------------
+  - interval: 1m
+    # The 2026-09-28 pricing-db-1 shape: archiving worked (last success at t=60s), then every
+    # attempt failed (a new failure each minute) and nothing got through. Must fire.
+    name: "a primary whose archiver keeps failing with no success fires PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "60+0x60"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 120+60x58"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pricing
+              pod: pricing-db-1
+            exp_annotations:
+              summary: "Postgres WAL archiving failing on pricing/pricing-db-1"
+              description: "No WAL segment has been archived since the last archive failure for >10m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003). Read the reason with `kubectl logs -n pricing pricing-db-1 | grep barman-cloud-wal-archive`. If it says `Unable to locate credentials`, the pod was admitted before its EKS Pod Identity association existed (credentials are injected only at admission): confirm the association in db-backups.tf is applied, then recreate the pod — switch over or delete the replica first, never wait for it to heal."
+
+  - interval: 1m
+    # The blip the old `rate(failed_count[15m]) > 0` expression nearly paged on: one failure
+    # at t=120s, the retry succeeds a minute later. Must NOT fire at any point.
+    name: "a single transient archive failure that the retry fixes does NOT fire PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "60 60 60 180+60x57"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 120+0x58"
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 1+0x58"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
+
+  - interval: 1m
+    # A replica (e.g. a demoted former primary) keeps its last failure forever because it no
+    # longer archives. Must NOT fire.
+    name: "a replica whose last archiver event was a failure does NOT fire PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-2"}'
+        values: "60+0x60"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-2"}'
+        values: "120+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-2"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
