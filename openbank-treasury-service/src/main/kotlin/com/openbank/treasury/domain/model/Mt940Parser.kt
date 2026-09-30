@@ -9,9 +9,12 @@ import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
-import java.time.DateTimeException
 import java.time.LocalDate
 import java.time.MonthDay
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.time.format.ResolverStyle
+import kotlin.math.abs
 
 /**
  * SWIFT MT940 customer statement, mapped onto the SAME [NostroStatement] a camt.053 produces
@@ -38,17 +41,17 @@ object Mt940Parser {
     /** A statement body larger than this is refused before it is read: the camt limit's order. */
     const val MAX_BYTES = 1_048_576
 
-    private const val MAX_INTEGER_DIGITS = 15
     private const val MAX_REFERENCE = 255
-    private const val YEAR_BASE = 2000
-    private const val CENTURY = 100
 
     private val TAG = Regex("^:(\\d{2}[A-Z]?):(.*)$")
-    private val BALANCE = Regex("^([CD])(\\d{6})([A-Z]{3})(\\d{1,15},\\d{0,4})$")
+    private val BALANCE = Regex("^(?<mark>[CD])(?<date>\\d{6})(?<ccy>[A-Z]{3})(?<amount>\\d{1,15},\\d{0,4})$")
     private val LINE_61 =
         Regex(
-            "^(\\d{6})(\\d{4})?(RC|RD|C|D)([A-Z])?(\\d{1,15},\\d{0,4})([NFS][A-Z0-9]{3})([^/]{0,16})(?://(.{0,16}))?$",
+            "^(?<value>\\d{6})(?<entry>\\d{4})?(?<mark>RC|RD|C|D)[A-Z]?(?<amount>\\d{1,15},\\d{0,4})" +
+                "[NFS][A-Z0-9]{3}(?<owner>[^/]{0,16})(?://(?<bank>.{0,16}))?$",
         )
+
+    private fun MatchResult.group(name: String): String = groups[name]?.value.orEmpty()
 
     fun parse(bytes: ByteArray): NostroStatement {
         require(bytes.size <= MAX_BYTES) { "MT940 statement is larger than $MAX_BYTES bytes" }
@@ -162,9 +165,9 @@ object Mt940Parser {
     private fun balance(raw: String, tag: String): Balance {
         val m =
             requireNotNull(BALANCE.matchEntire(raw)) { "MT940 :$tag: is not a balance (C/D YYMMDD CCY amount): '$raw'" }
-        val (mark, date, ccy, amount) = m.destructured
-        val value = amount(amount, tag)
-        return Balance(date(date, tag), ccy, if (mark == "D") value.negate() else value)
+        val value = Mt940Values.amount(m.group("amount"), tag)
+        val signed = if (m.group("mark") == "D") value.negate() else value
+        return Balance(Mt940Values.date(m.group("date"), tag), m.group("ccy"), signed)
     }
 
     private fun entries(fields: List<Pair<String, String>>, currency: String): List<StatementEntry> {
@@ -186,14 +189,15 @@ object Mt940Parser {
             requireNotNull(LINE_61.matchEntire(firstLine)) {
                 "MT940 :61: line $sequence is malformed: '${firstLine.take(MAX_ECHO)}'"
             }
-        val (valueRaw, entryRaw, mark, _, amountRaw, _, ownerRef, bankRef) = m.destructured
-        val valueDate = date(valueRaw, "61")
-        val booking = if (entryRaw.isEmpty()) valueDate else entryDate(valueDate, entryRaw)
-        val amount = amount(amountRaw, "61")
+        val mark = m.group("mark")
+        val valueDate = Mt940Values.date(m.group("value"), "61")
+        val entryRaw = m.group("entry")
+        val booking = if (entryRaw.isEmpty()) valueDate else Mt940Values.entryDate(valueDate, entryRaw)
+        val amount = Mt940Values.amount(m.group("amount"), "61")
         require(amount.signum() > 0) { "MT940 :61: line $sequence has a zero amount" }
         val reference = listOf(
-            ownerRef.trim().takeUnless { it.isEmpty() || it == "NONREF" },
-            bankRef.trim().takeUnless { it.isEmpty() },
+            m.group("owner").trim().takeUnless { it.isEmpty() || it == "NONREF" },
+            m.group("bank").trim().takeUnless { it.isEmpty() },
             narrative?.replace('\n', ' ')?.trim()?.takeUnless { it.isEmpty() },
         ).firstOrNull { it != null }?.take(MAX_REFERENCE)
         return StatementEntry(
@@ -205,33 +209,39 @@ object Mt940Parser {
             reference = reference,
         )
     }
+}
+
+/** MT940 dates and amounts, held to what the store can represent — the camt.053 rules. */
+internal object Mt940Values {
+    private const val MAX_INTEGER_DIGITS = 15
+    private val YYMMDD: DateTimeFormatter = DateTimeFormatter.ofPattern(
+        "uuMMdd",
+    ).withResolverStyle(ResolverStyle.STRICT)
+    private val MMDD: DateTimeFormatter = DateTimeFormatter.ofPattern("MMdd")
+
+    /** YYMMDD in 2000–2099 (the `uu` pattern's base), strictly: 260230 is refused, not rolled over. */
+    fun date(yymmdd: String, tag: String): LocalDate = try {
+        LocalDate.parse(yymmdd, YYMMDD)
+    } catch (e: DateTimeParseException) {
+        throw IllegalArgumentException("MT940 :$tag: carries an invalid date '$yymmdd'", e)
+    }
 
     /** The entry date carries no year: the one nearest the value date (a line can cross New Year). */
-    private fun entryDate(valueDate: LocalDate, mmdd: String): LocalDate {
+    fun entryDate(valueDate: LocalDate, mmdd: String): LocalDate {
         val md = try {
-            MonthDay.of(mmdd.substring(0, 2).toInt(), mmdd.substring(2, 4).toInt())
-        } catch (e: DateTimeException) {
+            MonthDay.parse(mmdd, MMDD)
+        } catch (e: DateTimeParseException) {
             throw IllegalArgumentException("MT940 :61: entry date '$mmdd' is not a date", e)
         }
         return listOf(-1, 0, 1).mapNotNull { dy ->
             val y = valueDate.year + dy
             if (md.isValidYear(y)) md.atYear(y) else null
-        }.minBy { kotlin.math.abs(it.toEpochDay() - valueDate.toEpochDay()) }
-    }
-
-    private fun date(yymmdd: String, tag: String): LocalDate = try {
-        LocalDate.of(
-            YEAR_BASE + yymmdd.substring(0, 2).toInt() % CENTURY,
-            yymmdd.substring(2, 4).toInt(),
-            yymmdd.substring(4, 6).toInt(),
-        )
-    } catch (e: DateTimeException) {
-        throw IllegalArgumentException("MT940 :$tag: carries an invalid date '$yymmdd'", e)
+        }.minBy { abs(it.toEpochDay() - valueDate.toEpochDay()) }
     }
 
     /** SWIFT decimal comma; held to what NUMERIC(19,4) stores exactly, like camt.053. */
-    private fun amount(raw: String, tag: String): BigDecimal {
-        val normalized = raw.replace(',', '.').let { if (it.endsWith('.')) it.dropLast(1) else it }
+    fun amount(raw: String, tag: String): BigDecimal {
+        val normalized = raw.replace(',', '.').removeSuffix(".")
         val value = BigDecimal(normalized)
         require(value.precision() - value.scale() <= MAX_INTEGER_DIGITS) {
             "MT940 :$tag: amount has more than $MAX_INTEGER_DIGITS integer digits: $raw"

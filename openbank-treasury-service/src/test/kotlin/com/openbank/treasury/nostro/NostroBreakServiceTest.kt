@@ -87,14 +87,12 @@ class NostroBreakServiceTest {
         clock,
     )
 
-    private fun upload() = runBlocking {
-        reconciliation().upload(
-            Camt053Parser.parse(NostroFixtures.xml()),
-            "sha",
-            "k-${UUID.randomUUID()}",
-            Actor("anna.approver", ActorType.HUMAN),
-        )
-    }
+    private suspend fun upload() = reconciliation().upload(
+        Camt053Parser.parse(NostroFixtures.xml()),
+        "sha",
+        "k-${UUID.randomUUID()}",
+        Actor("anna.approver", ActorType.HUMAN),
+    )
 
     @Test
     fun `sweep records breaks, ages them, and alerts once per break over both thresholds`() = runBlocking<Unit> {
