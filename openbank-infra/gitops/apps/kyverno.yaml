@@ -152,7 +152,7 @@ spec:
           maxContextSize: 8Mi
         features:
           # 1.13 flipped the chart default to disabled (CVE-2024-48921). The pricing
-          # PolicyException (components/kyverno/pricing-image-exception.yaml) is
+          # PolicyException (components/kyverno/pricing-image-exception-cel.yaml) is
           # load-bearing, so keep exceptions on, from any namespace, as on 1.12.
           # Narrowing `namespace` is a separate, reviewable tightening.
           policyExceptions:
