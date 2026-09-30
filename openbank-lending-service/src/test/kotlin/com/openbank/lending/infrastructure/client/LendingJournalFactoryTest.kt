@@ -168,6 +168,26 @@ class LendingJournalFactoryTest {
     }
 
     @Test
+    fun `a negated posting of every kind is its exact reversal with positive line amounts (#11487)`() {
+        // The ledger refuses a non-positive line (chk_journal_lines_amount CHECK amount > 0). The backfill
+        // void's mirrors negate the original leg, and all 44 loans failed on the sandbox because the lines
+        // carried the negative value. A negated posting must swap the sides and book the absolute amount.
+        PostingKind.entries.forEach { kind ->
+            val original = LendingJournalFactory.buildLines(posting(kind, "loan:1:$kind"), accounts)
+            val mirror = LendingJournalFactory.buildLines(posting(kind, "void:loan:1:$kind", "-12000.00"), accounts)
+            assertThat(mirror).describedAs("%s mirror amounts", kind).allSatisfy {
+                assertThat(it.amount.signum()).isEqualTo(1)
+            }
+            assertThat(mirror.single { side(it) == "DEBIT" }.glAccountId)
+                .describedAs("%s mirror debit", kind)
+                .isEqualTo(original.single { side(it) == "CREDIT" }.glAccountId)
+            assertThat(mirror.single { side(it) == "CREDIT" }.glAccountId)
+                .describedAs("%s mirror credit", kind)
+                .isEqualTo(original.single { side(it) == "DEBIT" }.glAccountId)
+        }
+    }
+
+    @Test
     fun `request carries the reference as idempotency key and a deterministic transaction id`() {
         val p = posting(PostingKind.DISBURSEMENT, "loan:42:disbursement")
         val request = LendingJournalFactory.buildRequest(p, accounts, actor, date)
