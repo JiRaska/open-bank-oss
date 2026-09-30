@@ -5,7 +5,8 @@
 -- may settle straight from BOOKED is `openbank.treasury.confirmation.required` (default true);
 -- in the sandbox the simulated market confirms every BOOKED deal on its next pass.
 --
--- V13 because V11 is on main and V12 is the nostro opening-date migration (#11113, renumbered by #11557).
+-- V13, not V12: V12 was briefly claimed by a since-closed renumbering of the nostro migration;
+-- it stays unused. V10 (nostro, #11113) lands after V11 and is baselined by #11562.
 --
 -- Rollback (only while no CONFIRMED row exists — check first; move any back to BOOKED by hand
 -- only if the confirmation is to be discarded):
