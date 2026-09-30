@@ -50,6 +50,7 @@ KEY_ALIASES = {
     "ledger-api": "openbank-ledger-service",
     "sepa-payment-service": "openbank-sepa-payment",
     "product-catalog-api": "openbank-product-catalog",
+    "tpp-registry": "openbank-tpp-registry-service",
 }
 
 # Providers outside this repository. A pact against them would verify nothing here.
@@ -217,9 +218,12 @@ def main() -> int:
         return self_test()
     uncovered, errors, subjects = audit(Path(args.root))
     if args.print_baseline:
+        # Errors still go to stderr: a baseline printed over an unresolvable key would hide it.
+        for e in errors:
+            print(f"::error::{e}", file=sys.stderr)
         for c, p, f in sorted(uncovered):
             print(f"{pair_key(c, p)}  # {f} — no consumer pact yet (#8345)")
-        return 0
+        return 1 if errors else 0
     return report(uncovered, errors, subjects, load_baseline())
 
 
