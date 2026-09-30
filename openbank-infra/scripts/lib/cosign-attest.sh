@@ -82,9 +82,11 @@ assert_ecr_single_image_manifest() {
     :*) image_id="imageTag=${reference#:}" ;;
     @*) image_id="imageDigest=${reference#@}" ;;
   esac
-  if ! media_type="$(aws ecr describe-images --region "$region" --registry-id "$account" \
+  # BatchGetImage is already granted to every ECR push role; DescribeImages is not.
+  # A missing/unsupported image returns no accepted media type and fails closed below.
+  if ! media_type="$(aws ecr batch-get-image --region "$region" --registry-id "$account" \
        --repository-name "$repository" --image-ids "$image_id" \
-       --query 'imageDetails[0].imageManifestMediaType' --output text)"; then
+       --query 'images[0].imageManifestMediaType' --output text)"; then
     echo "ERROR: could not determine image manifest type for ${image}; refusing to sign." >&2
     return 1
   fi

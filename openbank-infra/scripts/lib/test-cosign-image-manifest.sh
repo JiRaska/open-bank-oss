@@ -19,6 +19,7 @@ aws() {
 }
 
 assert_ecr_single_image_manifest "$image"
+grep -Fq -- 'ecr batch-get-image' "$calls"
 grep -Fq -- "--registry-id ${account}" "$calls"
 grep -Fq -- '--region example-region-1' "$calls"
 grep -Fq -- '--repository-name openbank-test' "$calls"
