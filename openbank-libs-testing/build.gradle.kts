@@ -71,13 +71,18 @@ dependencies {
     // No Quarkus BOM here (this module isn't a Quarkus service), so pinned directly, matching
     // libs.versions.toml's quarkus = "3.33.2".
     api("io.quarkus:quarkus-vertx:3.33.2")
-    api("io.quarkus:quarkus-messaging-kafka:3.33.2")
+    // Only OutboxDispatchConformanceIT uses Kafka metadata. Its current consumer (ledger)
+    // declares the Kafka extension itself; publishing it here starts an unused broker in
+    // database-only services that import the shared Postgres test resource.
+    compileOnly("io.quarkus:quarkus-messaging-kafka:3.33.2")
+    testImplementation("io.quarkus:quarkus-messaging-kafka:3.33.2")
     // Bridges a Kotlin suspend block into the Uni VertxContextSupport.subscribeAndAwait expects
     // (io.smallrye.mutiny.coroutines.uni), matching LedgerOutboxDispatchIT's own pattern.
     api("io.smallrye.reactive:mutiny-kotlin:3.1.1")
     // Same version-pin situation as quarkus-vertx/quarkus-messaging-kafka above — this catalog
     // alias also has no version.ref (every other consumer relies on the Quarkus BOM).
-    api("io.smallrye.reactive:smallrye-reactive-messaging-in-memory:4.33.0")
+    compileOnly("io.smallrye.reactive:smallrye-reactive-messaging-in-memory:4.33.0")
+    testImplementation("io.smallrye.reactive:smallrye-reactive-messaging-in-memory:4.33.0")
 
     // Testcontainers resource kit — QuarkusTestResourceLifecycleManager (from quarkus-junit5,
     // which transitively brings quarkus-test-common) + the container types the canonical
