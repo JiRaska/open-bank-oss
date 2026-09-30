@@ -79,10 +79,16 @@ object LendingJournalFactory {
             else -> terminationAccountPair(posting.kind, accounts)
         }
         val ccy = posting.amount.currency.code
-        val value = posting.amount.amount
+        // A NEGATIVE amount is the reversal of that posting kind (#11487): the ledger stores only positive
+        // line amounts (chk_journal_lines_amount CHECK amount > 0), so the reversal swaps the two sides and
+        // books the absolute value, the same convention buildProvisioningLines uses for a signed delta.
+        // Live flows only post positive amounts; the backfill void's `void:<reference>` mirrors negate the
+        // original leg, and every one of them was refused by the ledger before this (44/44 loans FAILED).
+        val value = posting.amount.amount.abs()
+        val (dr, cr) = if (posting.amount.amount.signum() < 0) credit to debit else debit to credit
         return listOf(
-            JournalLineRequest(debit, "DEBIT", value, ccy, null, value, ccy),
-            JournalLineRequest(credit, "CREDIT", value, ccy, null, value, ccy),
+            JournalLineRequest(dr, "DEBIT", value, ccy, null, value, ccy),
+            JournalLineRequest(cr, "CREDIT", value, ccy, null, value, ccy),
         )
     }
 
