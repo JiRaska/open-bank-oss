@@ -58,6 +58,9 @@ class SnapshotReproducibilityTest {
         val positions = mutableMapOf<UUID, List<Position>>()
         val instruments = mutableMapOf<UUID, List<Instrument>>()
 
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate) =
+            error("not used by the reproducibility tests")
+
         override suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String) =
             runs.firstOrNull { it.asOf == asOf && it.inputHash == inputHash }
 
