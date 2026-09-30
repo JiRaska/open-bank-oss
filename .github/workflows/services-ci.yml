@@ -139,21 +139,10 @@ jobs:
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
             CHANGED="$ALL"
           elif [ "${{ github.event_name }}" = "push" ]; then
-            # A push to main normally re-runs the WHOLE fleet so every provider
-            # re-verifies every consumer's current contract (Pact matrix completeness,
-            # ADR-0092) and publishes fresh results the SHA's auto-deploy gates on (#846).
-            # But a push that changed ONLY inert paths — release-please version.txt /
-            # CHANGELOG.md / manifest bumps, admin-ui deploy chores, gitops/infra
-            # (openbank-infra), or docs — cannot alter any service's compile inputs OR
-            # any pact, so a ~40-module rebuild produces zero new pacts and re-runs
-            # identical verifications. That was ~69% of a multi-hundred-job main-push
-            # backlog (2026-07-15). Skip the build entirely in that case: all-green still
-            # goes green on an empty matrix (the "nothing to build" path), exactly like a
-            # PR that touches no service module, so branch protection is unaffected.
-            # Any push touching a build-relevant path still triggers the FULL fleet — the
-            # safe direction is over-build, never under-build (an under-build would leave a
-            # stale/missing Pact verification). fetch-depth:0 above guarantees HEAD~1
-            # exists (main is squash-merged => each push is a single commit).
+            # Inert-only pushes cannot change service code or Pacts: skip their
+            # matrix, with all-green checking the empty-build path (ADR-0092, #846).
+            # Other paths are scoped below; unknown inputs retain full-fleet scope.
+            # fetch-depth:0 above makes HEAD~1 available for this diff.
             FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
             echo "Push changed files:"; echo "$FILES"
             # Inert = provably cannot change a compile input or a contract. A service's
