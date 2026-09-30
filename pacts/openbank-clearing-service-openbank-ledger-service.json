@@ -1,0 +1,101 @@
+{
+  "consumer": {
+    "name": "openbank-clearing-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a balanced two-line CZK net-settlement journal for a cleared batch",
+      "providerStates": [
+        {
+          "name": "the standard chart of accounts is seeded"
+        }
+      ],
+      "request": {
+        "body": {
+          "createdBy": "a0000000-0000-0000-0000-00000000c1e4",
+          "description": "net settlement CZ-CERTIS-20260120-001 cycle CERTIS-1",
+          "entryDate": "2026-01-20",
+          "idempotencyKey": "net-settlement:c1ea0000-0000-4000-8000-000000000001",
+          "lines": [
+            {
+              "amount": 125000.00,
+              "baseAmount": 125000.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000000001",
+              "side": "DEBIT"
+            },
+            {
+              "amount": 125000.00,
+              "baseAmount": 125000.00,
+              "baseCurrencyCode": "CZK",
+              "currencyCode": "CZK",
+              "fxRate": null,
+              "glAccountId": "a0000000-0000-0000-0000-000000001110",
+              "side": "CREDIT"
+            }
+          ],
+          "transactionId": "c1ea0000-0000-4000-8000-000000000001",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/journals"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "status": "POSTED",
+          "transactionId": "c1ea0000-0000-4000-8000-000000000001"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.transactionId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-ledger-service"
+  }
+}

@@ -48,6 +48,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    // Consumer-driven contract for this service's outbound money-path call (issue #8345).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
