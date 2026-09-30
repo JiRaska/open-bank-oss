@@ -2488,6 +2488,26 @@ gates:
     run: |
       python3 .github/scripts/check-merged-past-red-check.py --check-declaration
 
+  # Strict required-status-checks policy + auto-merge = an armed, green PR waits `behind` forever,
+  # because auto-merge never updates a branch. auto-update-armed-prs.yml updates exactly those
+  # PRs. This gate holds its wiring: the update is driven by the GitHub App token (a GITHUB_TOKEN
+  # push triggers no workflows, so CI would never re-run and the PR would wedge), it sends
+  # expected_head_sha, and it reads the required contexts live from the branch rules.
+  - id: auto-update-armed-prs-declaration
+    name: "auto-update-armed-prs keeps its App token, live required contexts and triggers (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "An armed PR behind a strict main never merges without an update; a regression to GITHUB_TOKEN or a hard-coded context list would make the updater silently inert or unsafe."
+    review_after: "2027-03-30"
+    budget_seconds: 5
+    min_subjects: 10   # 7 workflow + 3 script declarations, 2026-09-30
+    selftest: |
+      python3 .github/scripts/auto-update-armed-prs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
+    run: |
+      python3 .github/scripts/auto-update-armed-prs.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
