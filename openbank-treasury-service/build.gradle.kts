@@ -4,6 +4,9 @@
 
 plugins {
     id("openbank.quarkus-service")
+    // Inline version (not the shared catalog) so enabling mutation testing stays path-scoped to
+    // this service and does not trigger a fleet-wide rebuild. 1.19.0 supports Gradle 9.
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -73,4 +76,24 @@ kover {
             }
         }
     }
+}
+
+// Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3, issue #8349). Weekly + manual
+// via pitest.yml, advisory — never a per-PR gate.
+//
+// Why this service: it is money-path (ADR-0315) and its domain is the densest in the fleet by the
+// pitest.yml measure — 142 branch sites across 6 files. Deal's state machine, the four-eyes and
+// limit checks, day-count interest and the posting rules decide what reaches the ledger. A
+// surviving mutant there is a booking the checks were supposed to stop.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.treasury.domain.*")
+    targetTests = setOf("com.openbank.treasury.domain.*", "com.openbank.treasury.application.usecase.*")
+    // Advisory (ADR-0063): pitest.yml reports the score and warns below 70%; the Gradle task itself
+    // must not fail the run, so the threshold is 0 until the score is measured and sustained.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
+    excludedClasses = setOf("com.openbank.treasury.domain.*Kt")
 }
