@@ -75,4 +75,18 @@ class VopBootAndDocsIT {
             .statusCode(200)
             .body(containsString("What this service does"))
     }
+
+    @Test
+    fun `running service serves generated facts from its own build`() {
+        val index = given().`when`().get("/q/openbank/docs").then().statusCode(200)
+            .body("items.slug", hasItems("00-build"))
+            .extract().response()
+        val version = index.path<String>("version")
+
+        given()
+            .`when`().get("/q/openbank/docs/00-build")
+            .then()
+            .statusCode(200)
+            .body(containsString("Release version (`version.txt`) | `$version`"))
+    }
 }

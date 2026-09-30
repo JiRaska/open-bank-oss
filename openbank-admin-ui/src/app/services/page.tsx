@@ -22,13 +22,9 @@ import { findService, SERVICE_REGISTRY } from '@/lib/services/registry'
 // source.
 //
 // Every id here MUST have a SERVICE_REGISTRY entry (src/lib/services/registry.ts).
-// There is NO name-guessing fallback: the docs loader is exact-match on the registry
-// id (`libs` is the one special case — it reads the image-baked bundle instead of a
-// live service). An id with no registry entry renders a card whose docs link 404s
-// with `Unknown service`. A stale comment here once promised an
-// `openbank-<id>-service` → `openbank-<id>` fallback that docs.ts never implemented,
-// which is how 7 such dead cards accumulated. Enforced by
-// src/test/service-registry.guard.test.ts.
+// Registry entries are preferred. Newly deployed services can also resolve through
+// Kubernetes discovery; the loader accepts only discovered workload URLs. `libs` is
+// the special case that reads the image-baked documentation bundle.
 const STATIC_CANDIDATES = [
   { id: 'libs',                label: 'openbank-libs',         group: 'platform' },
   { id: 'account',             label: 'Account Service',       group: 'core' },
@@ -83,6 +79,9 @@ interface DocsStatus {
   id: string
   hasDocs: boolean
   sections?: number
+  version?: string
+  gitCommit?: string
+  source?: 'live' | 'bundle'
   error?: string
 }
 
@@ -109,14 +108,14 @@ function fleetSize(services: { short: string; kind: string; runnable?: boolean }
 
 interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null }
 
-function candidateFromCatalog(module: CatalogModule): Candidate {
-  const registered = SERVICE_REGISTRY.find(service => service.container === module.name)
-  const id = registered?.id ?? module.short.replace(/-service$/, '')
+function candidateFromCatalog(catalogModule: CatalogModule): Candidate {
+  const registered = SERVICE_REGISTRY.find(service => service.container === catalogModule.name)
+  const id = registered?.id ?? catalogModule.short.replace(/-service$/, '')
   return {
     id,
-    label: registered?.label ?? module.apiTitle ?? module.short.replaceAll('-', ' '),
+    label: registered?.label ?? catalogModule.apiTitle ?? catalogModule.short.replaceAll('-', ' '),
     group: registered?.group ?? 'platform',
-    catalogShort: module.short,
+    catalogShort: catalogModule.short,
   }
 }
 
@@ -177,9 +176,9 @@ export default function ServicesDocsOverviewPage() {
         const catalogResponse = await fetch('/api/catalog/services', { cache: 'no-store' })
         if (catalogResponse.ok) {
           const catalog = await catalogResponse.json() as { services?: CatalogModule[] }
-          for (const module of catalog.services ?? []) {
-            if (module.runnable !== true) continue
-            const candidate = candidateFromCatalog(module)
+          for (const catalogModule of catalog.services ?? []) {
+            if (catalogModule.runnable !== true) continue
+            const candidate = candidateFromCatalog(catalogModule)
             if (!byId.has(candidate.id)) byId.set(candidate.id, candidate)
           }
         }
@@ -216,8 +215,16 @@ export default function ServicesDocsOverviewPage() {
           try {
             const rr = await fetch(`/api/services/${c.id}/docs`, { cache: 'no-store' })
             if (!rr.ok) return { id: c.id, hasDocs: false }
-            const body = await rr.json() as { items?: unknown[] }
-            return { id: c.id, hasDocs: true, sections: body.items?.length ?? 0 }
+            const body = await rr.json() as { items?: unknown[]; version?: string; gitCommit?: string; source?: 'live' | 'bundle' }
+            if (!body.items?.length) return { id: c.id, hasDocs: false }
+            return {
+              id: c.id,
+              hasDocs: true,
+              sections: body.items?.length ?? 0,
+              version: body.version,
+              gitCommit: body.gitCommit,
+              source: body.source,
+            }
           } catch (err) {
             return { id: c.id, hasDocs: false, error: String(err) }
           }
@@ -247,6 +254,7 @@ export default function ServicesDocsOverviewPage() {
   })
   const withDocs = filteredCandidates.filter(c => statuses[c.id]?.hasDocs)
   const withoutDocs = filteredCandidates.filter(c => !statuses[c.id]?.hasDocs)
+  const liveDocs = candidates.filter(c => statuses[c.id]?.hasDocs && statuses[c.id]?.source === 'live').length
 
   // openbank-libs is the one card with editorial copy; its fleet count is derived,
   // never hardcoded.
@@ -299,6 +307,14 @@ export default function ServicesDocsOverviewPage() {
              'The list comes from the build catalog and cluster. Each service publishes docs from its own image at /q/openbank/docs; authored chapters live in src/main/resources/docs/.')}
         </div>
       </div>
+
+      {!loading && (
+        <div role="status" aria-live="polite" style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', fontSize: '11px', color: 'var(--text-secondary)' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}><span style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }} />{t(`${liveDocs} živě ze služeb`, `${liveDocs} live from services`)}</span>
+          <span>·</span>
+          <span>{t(`${candidates.length - liveDocs} ostatních položek: přibalené knihovny nebo nedostupný endpoint`, `${candidates.length - liveDocs} other entries: bundled libraries or unavailable endpoints`)}</span>
+        </div>
+      )}
 
       {/* Serverless tiers & plan (scale-to-zero) — ADR-0057 / ADR-0083 */}
       <ServerlessLegend />
@@ -372,6 +388,12 @@ export default function ServicesDocsOverviewPage() {
                   <span style={{ color: GROUP_LABELS[svc.group]?.color }}>{GROUP_LABELS[svc.group]?.label}</span>
                   <ServerlessTierBadge serviceId={svc.id} dense />
                 </div>
+                {(statuses[svc.id]?.version || statuses[svc.id]?.gitCommit) && (
+                  <div style={{ fontSize: '11px', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                    {statuses[svc.id]?.version && <span>{t('Verze', 'Version')} {statuses[svc.id]?.version}</span>}
+                    {statuses[svc.id]?.gitCommit && <span>{statuses[svc.id]?.version ? ' · ' : ''}{t('Build', 'Build')} {statuses[svc.id]?.gitCommit?.slice(0, 8)}</span>}
+                  </div>
+                )}
                 {descFor(svc) && (
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                     {descFor(svc)}
