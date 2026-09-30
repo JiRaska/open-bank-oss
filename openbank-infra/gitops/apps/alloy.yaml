@@ -187,6 +187,64 @@ spec:
                     correlationId = "mdc.correlationId",
                   }
                 }
+
+                // ---- demote KNOWN-TRANSIENT CloudNativePG errors to warn ----
+                // Measured over 48h (2026-09-27/29): 12,188 of the 13,691 level=error lines
+                // from CNPG `postgres` containers -- a third of ALL level=error lines in the
+                // fleet (36,650) -- were the built-in metrics exporter failing to reach a
+                // Postgres that was not accepting connections yet (or any more): the local
+                // socket not created, or `FATAL: the database system is starting up /
+                // shutting down / not yet accepting connections`. That is every instance
+                // start, stop and switchover, and it buried the errors that matter (a
+                // `barman-cloud-wal-archive` failure, a Vault login failure, a webhook
+                // outage) under hundreds of lines per database.
+                //
+                // Each match is deliberately narrow: the exporter/runOnServer message AND a
+                // not-running-yet cause. Anything else from the same message -- an auth
+                // failure, a missing role, a query error -- keeps level=error. The
+                // `Reconciler error` rule only takes errors whose cause is exactly
+                // `context canceled` (a reconcile interrupted by the pod or operator
+                // stopping); the other ~90% of Reconciler errors in the same window were real
+                // (webhook calls failing, Backup terminal errors, WAL-archive failures, secret
+                // refresh failures) and stay errors. A Postgres that never comes up is not
+                // hidden by this: its own FATAL/PANIC lines are untouched and
+                // PostgresInstanceDown pages on the scrape.
+                //
+                // The replacement happens on the EXTRACTED level, before stage.labels turns it
+                // into the stream label; the original value is kept as structured metadata.
+                // Demoted lines stay in Loki, carry `demoted_from=error` as structured
+                // metadata, and are found with {level="warn"} | demoted_from="error".
+                stage.match {
+                  selector = `{container="postgres"} |~ "\"level\":\"error\"" |~ "\"msg\":\"(Error collecting user query|while parsing runOnServer queries|while checking runOnServer version matches)\"" |~ "(server error: FATAL: the database system is (starting up|shutting down|not yet accepting connections)|dial unix /controller/run/\\.s\\.PGSQL\\.5432: connect: no such file or directory)"`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+                stage.match {
+                  selector = `{container="postgres"} |~ "\"level\":\"error\"" |= "\"msg\":\"Reconciler error\"" |~ "\"error\":\"[^\"]*: context canceled\""`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+                stage.match {
+                  selector = `{namespace="cnpg-system", container="manager"} |~ "\"level\":\"error\"" |= "\"msg\":\"Reconciler error\"" |~ "\"error\":\"[^\"]*: context canceled\""`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+
                 // Low-cardinality -> label.
                 stage.labels {
                   values = { level = "" }
