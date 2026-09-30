@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.8.0...treasury-service-v0.9.0) (2026-09-30)
+
+
+### Features
+
+* **treasury:** reconcile foreign-currency nostros on native ledger balances ([#11113](https://github.com/JiRaska/open-bank-oss/issues/11113)) ([8b87841](https://github.com/JiRaska/open-bank-oss/commit/8b87841d4924961c30559094143a55d0e894ab08))
+
 ## [0.8.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.7.0...treasury-service-v0.8.0) (2026-09-29)
 
 
