@@ -169,12 +169,6 @@ class RedisIdempotencyStore(
 
     private fun now(): String = OffsetDateTime.now(clock).toString()
 
-    private fun checkHash(requestHash: String) {
-        require(requestHash.isNotEmpty() && !requestHash.contains(SEPARATOR)) {
-            "requestHash must be non-empty and must not contain '$SEPARATOR'"
-        }
-    }
-
     /**
      * Decodes a completed record (legacy or v2). An in-flight marker is not a response and
      * decodes to `null`, so a legacy [get] caller never replays one.
@@ -200,9 +194,15 @@ class RedisIdempotencyStore(
         }
         val parts = rest.split(SEPARATOR, limit = 3)
         if (parts.size < 3) return null
-        val status = parts[0].toIntOrNull()?.takeIf { it in 100..599 }
+        val status = parts[0].toIntOrNull()?.takeIf { it in HTTP_STATUS_RANGE }
         val createdAt = runCatching { OffsetDateTime.parse(parts[1]) }.getOrNull()
-        if (status == null || createdAt == null) corrupt()
+        // A stored value that cannot be decoded is never replayed as a made-up response.
+        if (status == null || createdAt == null) {
+            if (corruptLogged.compareAndSet(false, true)) {
+                log.error("idempotency record with an undecodable status or timestamp; refusing to replay it")
+            }
+            throw IdempotencyRecordCorruptException("stored idempotency record is not decodable")
+        }
         return IdempotencyRecord(
             key = key,
             statusCode = status,
@@ -210,14 +210,6 @@ class RedisIdempotencyStore(
             createdAt = createdAt,
             requestHash = hash,
         )
-    }
-
-    /** A stored value that cannot be decoded is never replayed as a made-up response. */
-    private fun corrupt(): Nothing {
-        if (corruptLogged.compareAndSet(false, true)) {
-            log.error("idempotency record with an undecodable status or timestamp; refusing to replay it")
-        }
-        throw IdempotencyRecordCorruptException("stored idempotency record is not decodable")
     }
 
     internal companion object {
@@ -231,6 +223,13 @@ class RedisIdempotencyStore(
         const val DEFAULT_MAX_RESPONSE_BYTES = 262_144
         const val LEGACY_METRIC = "openbank.idempotency.legacy.record.reads"
         private val log: Logger = Logger.getLogger(RedisIdempotencyStore::class.java)
+        private val HTTP_STATUS_RANGE = 100..599
+
+        private fun checkHash(requestHash: String) {
+            require(requestHash.isNotEmpty() && !requestHash.contains(SEPARATOR)) {
+                "requestHash must be non-empty and must not contain '$SEPARATOR'"
+            }
+        }
 
         /** GET-or-SET: returns the existing value, or sets the marker (ARGV[1], EX ARGV[2]) and returns nil. */
         const val RESERVE_SCRIPT =

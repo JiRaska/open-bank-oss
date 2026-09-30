@@ -238,8 +238,12 @@ class RedisIdempotencyStoreIT {
         cmd("SET", "idempotency:k1", "inflight|$first|2026-09-26T09:59Z", "EX", "60")
 
         assertThat(store.reserve(alice, "k1", first, 30)).isEqualTo(ReserveResult.InFlight)
-        assertThat(store.reserve(alice, "k1", first, 30)).`as`("scoped marker was released").isEqualTo(ReserveResult.InFlight)
-        assertThat(store.reserve(alice, "k1", other, 30)).`as`("another request proceeds").isEqualTo(ReserveResult.Reserved)
+        assertThat(
+            store.reserve(alice, "k1", first, 30),
+        ).`as`("scoped marker was released").isEqualTo(ReserveResult.InFlight)
+        assertThat(
+            store.reserve(alice, "k1", other, 30),
+        ).`as`("another request proceeds").isEqualTo(ReserveResult.Reserved)
     }
 
     @Test
