@@ -27,6 +27,7 @@ const PAGES: [string, string, string][] = [
   ['app/balance-sheet/curve-sets/page.tsx', '/balance-sheet/curve-sets', 'balance-sheet:view'],
   ['app/balance-sheet/curve-sets/[id]/page.tsx', '/balance-sheet/curve-sets/sample', 'balance-sheet:view'],
   ['app/balance-sheet/ledger-backfill/page.tsx', '/balance-sheet/ledger-backfill', 'ledger-backfill:view'],
+  ['app/balance-sheet/ledger-backfill/voids/page.tsx', '/balance-sheet/ledger-backfill/voids', 'ledger-backfill:view'],
 ]
 
 /** Roles named by the first class-level / method-level @RolesAllowed, `Roles.X` resolved to `ROLE_X`. */
