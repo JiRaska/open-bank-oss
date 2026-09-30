@@ -434,6 +434,27 @@ gates:
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
 
+  # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
+  # stops restarting every open PR's required checks under the strict up-to-date rule.
+  - id: deploy-window-decision
+    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    name: "deploy window batches bot deploy commits without losing a deploy"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      300 of 675 first-parent commits on main over 2026-09-23..30 were bot deploy commits, each
+      one making every open PR `behind` and restarting its checks. deploy-window.py decides when
+      a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
+      it must never introduce is a built image that nothing pins, or a pin that rewinds a
+      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
+      script only runs inside the deploy workflows against live PRs, so this is where it can go
+      red before it acts.
+    review_after: "2027-03-30"
+    budget_seconds: 15
+    run: |
+      python3 .github/scripts/deploy-window.py --self-test
+
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
     group: gitops
@@ -1274,6 +1295,11 @@ gates:
       them), 25 money-path clusters derived for 25 money-path services. Self-test falsifies a
       single-instance money-path cluster, a restart-method cluster, missing anti-affinity, a
       disabled PDB and a money-path service whose workload vanished, against a compliant control.
+      2026-09-29 -- rule 6 (Temporal server in front of a platform database) run against the
+      main-branch temporal-helmrelease.yaml: FAIL with 10 findings (frontend/history/matching
+      at 1 replica with no PDB, and all four role blocks at the top level where the chart never
+      reads them); passes on the fixed manifest. Self-test falsifies a 1-replica role, a role
+      without a PDB and a top-level role block.
     min_subjects: 50   # 68 CNPG Clusters declared in gitops today (2026-09-28)
     selftest_inputs: [".github/scripts/check-cnpg-update-resilience.py"]
     selftest: python3 .github/scripts/check-cnpg-update-resilience.py --self-test
