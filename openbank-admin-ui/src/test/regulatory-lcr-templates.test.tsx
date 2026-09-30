@@ -179,4 +179,25 @@ describe('Regulatory catalogue — LCR templates', () => {
     expect(await screen.findByText(/není v tomto prostředí nasazená/)).toBeInTheDocument()
     expect(screen.queryByText('Šablona zatím není na backendu nasazena')).not.toBeInTheDocument()
   })
+
+  it('labels a template built from a synthetic risk run, with the run id, and stays silent for production', async () => {
+    const runId = '0190a4c0-0000-7000-8000-00000000c020'
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/v1/finrep/periods')) return periodsOk()
+      const templateId = ['C_72.00', 'C_73.00', 'C_74.00', 'C_76.00'].find(id => url.includes(id)) as string
+      const body = { templateId, period: '2026-06-30', hasDataGaps: false, cells: lcrCell(templateId) }
+      const extra = templateId === 'C_72.00'
+        ? { sourceRunId: runId, provenance: 'synthetic' }
+        : { sourceRunId: 'prod-run', provenance: 'production' }
+      return new Response(JSON.stringify({ ...body, ...extra }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }))
+
+    await openLcrPreview()
+
+    const banner = await screen.findByTestId('synthetic-provenance-C_72.00')
+    expect(banner).toHaveTextContent(/Syntetická data|Synthetic data/)
+    expect(banner).toHaveTextContent(runId)
+    expect(screen.queryByTestId('synthetic-provenance-C_73.00')).toBeNull()
+    expect(screen.queryByText('prod-run')).toBeNull()
+  })
 })

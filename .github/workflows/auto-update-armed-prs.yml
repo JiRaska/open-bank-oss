@@ -1,0 +1,62 @@
+# Keep ARMED PRs up to date with `main` (strict required-status-checks policy).
+#
+# `main-protection` requires a PR to be up to date with `main` before it merges, and auto-merge
+# never updates a branch. So a PR with auto-merge armed and every required check green goes
+# `behind` the moment anything else lands, and waits for a human to press "Update branch".
+# This does that for armed PRs only; the decision logic and its self-test live in
+# .github/scripts/auto-update-armed-prs.py, and gate `auto-update-armed-prs-declaration` holds
+# the wiring below in place.
+name: Auto-update armed PRs
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    # Fallback for a push whose workflow dispatch GitHub dropped (never acquired retroactively).
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Decide and log only; do not update any branch"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to main supersedes this run: its decisions would be made against a stale main.
+  group: auto-update-armed-prs
+  cancel-in-progress: true
+
+jobs:
+  update:
+    name: update behind + green + armed PRs
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      # The update itself uses the GitHub App token below. GITHUB_TOKEN stays read-only: a push
+      # made with it triggers no workflows, so CI would never re-run on the new head.
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Mint the GitHub App installation token
+        id: app_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+
+      - name: Update behind + green + armed PRs
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: |
+          set -euo pipefail
+          # shellcheck disable=SC2086  # DRY_RUN is empty or a single flag
+          python3 .github/scripts/auto-update-armed-prs.py \
+            --repo "${GITHUB_REPOSITORY}" --branch main \
+            --max-updates 5 --debounce-minutes 20 ${DRY_RUN}
