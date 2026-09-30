@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import pathlib
+import re
 import subprocess
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -19,6 +20,12 @@ EXPECTED_CALLS = {
 }
 EXEMPT = {".github/workflows/ghcr-publish.yml"}
 FLAGS = ("--provenance=false", "--sbom=false")
+INDEX_FLAGS = re.compile(r"--(provenance|sbom)(?:=([^\s\\]+))?(?=\s|\\|$)")
+
+
+def bad_index_flags(command: str) -> list[str]:
+    """Reject an overriding flag even when the required false flag is also present."""
+    return [match.group(0) for match in INDEX_FLAGS.finditer(command) if match.group(2) != "false"]
 
 
 def sources(root: pathlib.Path = ROOT) -> dict[str, str]:
@@ -69,6 +76,8 @@ def findings(texts: dict[str, str]) -> tuple[list[str], int]:
                 for flag in FLAGS:
                     if flag not in command:
                         errors.append(f"{path}:{line}: pushed ECR image lacks {flag}")
+                for flag in bad_index_flags(command):
+                    errors.append(f"{path}:{line}: pushed ECR image has conflicting {flag}")
     for path in EXPECTED_CALLS.keys() - seen:
         errors.append(f"{path}: known buildx producer disappeared; review the replacement")
     admin = texts.get("openbank-infra/scripts/build-push-admin-ui.sh", "")
@@ -76,6 +85,8 @@ def findings(texts: dict[str, str]) -> tuple[list[str], int]:
     for flag in (*FLAGS, "--push"):
         if flag not in args:
             errors.append(f"build-push-admin-ui.sh: buildx_args lacks {flag}")
+    for flag in bad_index_flags(args):
+        errors.append(f"build-push-admin-ui.sh: buildx_args has conflicting {flag}")
     helper = texts.get("openbank-infra/scripts/lib/cosign-attest.sh", "")
     if 'assert_ecr_single_image_manifest "$image" || return 1' not in helper:
         errors.append("cosign-attest.sh: runtime manifest check missing before signing")
@@ -94,6 +105,12 @@ def self_test() -> int:
         ("admin UI loses its index guard", {**base, "openbank-infra/scripts/build-push-admin-ui.sh":
           base["openbank-infra/scripts/build-push-admin-ui.sh"].replace(
               "  --provenance=false \\\n", "", 1)}, True),
+        ("later flag re-enables buildx SBOM", {**base, "openbank-infra/scripts/build-push-service.sh":
+          base["openbank-infra/scripts/build-push-service.sh"].replace(
+              "--sbom=false", "--sbom=false --sbom=true", 1)}, True),
+        ("admin UI re-enables buildx provenance", {**base, "openbank-infra/scripts/build-push-admin-ui.sh":
+          base["openbank-infra/scripts/build-push-admin-ui.sh"].replace(
+              "  --sbom=false \\\n", "  --sbom=false --provenance=true \\\n", 1)}, True),
         ("new producer", {**base, "openbank-infra/scripts/new-producer.sh":
           "docker buildx build --push .\n"}, True),
         ("removed runtime check", {**base, "openbank-infra/scripts/lib/cosign-attest.sh":
