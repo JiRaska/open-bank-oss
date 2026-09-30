@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.268.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.267.0...admin-ui-v0.268.0) (2026-09-30)
+
+
+### Features
+
+* **admin-ui:** four-eyes console for voiding back-posted loans ([#11537](https://github.com/JiRaska/open-bank-oss/issues/11537)) ([b7a59d2](https://github.com/JiRaska/open-bank-oss/commit/b7a59d216c045001b96cc34d0444940bdfb6cb04)), closes [#11487](https://github.com/JiRaska/open-bank-oss/issues/11487)
+
 ## [0.267.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.266.0...admin-ui-v0.267.0) (2026-09-29)
 
 
