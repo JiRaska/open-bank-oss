@@ -114,7 +114,13 @@ object C7600Mapper {
             cell("r0230", "Reduction for inflows subject to higher cap of 90 %", null, HIGHER_CAP_REASON),
             cell("r0240", "Reduction for inflows subject to cap of 75 %", r?.cappedInflows, null),
         )
-        return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedBy { it.rowRef })
+        return CorepTemplate(
+            TEMPLATE_ID,
+            asOf,
+            cells.sortedBy { it.rowRef },
+            sourceRunId = result?.runId,
+            provenance = result?.provenance,
+        )
     }
 
     /** Why the buffer cannot be stated: pledged collateral unmodelled, or no post-cap buffer reported. */
