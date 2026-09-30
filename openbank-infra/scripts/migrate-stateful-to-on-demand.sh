@@ -2,7 +2,14 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Move CNPG clusters off spot, ONE CLUSTER AT A TIME, by switchover -- never by rolling the fleet.
+# Move the money-path databases (and temporal-db) off spot, ONE CLUSTER AT A TIME, by switchover
+# -- never by rolling the fleet.
+#
+# TARGET SET: exactly the clusters the policy routes, taken from
+# `check-stateful-not-on-spot.py --list-targets` (derived from rules.yaml money_path_services +
+# the service -> cluster mapping in gitops; the script refuses to run if that derivation has any
+# unresolved money-path service). Order: money-path clusters alphabetically, temporal-db LAST.
+# Every other CNPG cluster stays on spot by the owner's decision (#11608) and is never touched.
 #
 # The Kyverno policy `stateful-on-demand-cel` only affects pods when they are CREATED, so a pod
 # moves to on-demand capacity only when it is recreated. Spot interruptions do that by themselves
@@ -104,9 +111,14 @@ k get mutatingpolicies.policies.kyverno.io stateful-on-demand-cel >/dev/null 2>&
 command -v kubectl-cnpg >/dev/null 2>&1 || { echo "kubectl cnpg plugin not found" >&2; exit 1; }
 [ "$APPLY" = 1 ] || log "DRY RUN -- nothing will be changed; pass --apply to act"
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+TARGETS="$(python3 "$ROOT/.github/scripts/check-stateful-not-on-spot.py" --list-targets)" \
+  || { echo "target derivation failed (unresolved money-path service) -- refusing to guess" >&2; exit 1; }
+[ -n "$TARGETS" ] || { echo "derived target set is empty -- refusing to run" >&2; exit 1; }
+log "targets: $(printf '%s\n' "$TARGETS" | wc -l | tr -d ' ') clusters (temporal-db last)"
+
 done_n=0
-k get clusters.postgresql.cnpg.io -A -o jsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name}{"\n"}{end}' \
-  | while IFS=/ read -r ns cl; do
+printf '%s\n' "$TARGETS" | while IFS=/ read -r ns cl; do
   [ -z "$ONLY" ] || [ "$ONLY" = "$ns/$cl" ] || continue
   [ "$done_n" -lt "$MAX" ] || { log "reached --max $MAX; stopping"; break; }
   primary="$(k -n "$ns" get cluster "$cl" -o jsonpath='{.status.currentPrimary}')"

@@ -1,38 +1,39 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Stateful workloads never run on spot (policies.kyverno.io/v1 MutatingPolicy).
+# Money-path databases never run on spot (policies.kyverno.io/v1 MutatingPolicy).
 #
 # Why: on 2026-09-29/30 the Karpenter `default` pool (spot) took 41 interruptions in 24h,
-# and 134 of the 140 CNPG instance pods ran on it. Every reclaim was ~13 Postgres failovers
-# at once plus Temporal and Kafka restarts -- the common cause behind Temporal "no usable
-# database connection", CNPG reconciler noise and SCA "Connection refused".
+# and 134 of the 140 CNPG instance pods ran on it; every reclaim was ~13 Postgres failovers.
 #
-# What: on pod CREATE, a pod that is
-#   - a CNPG pod (label cnpg.io/cluster -- instance pods and their initdb/join jobs),
-#   - a Strimzi broker/controller pod (strimzi.io/controller=strimzipodset), or
-#   - a Temporal server role (namespace temporal, app.kubernetes.io/name=temporal,
-#     component frontend|history|matching|worker)
-# gets REQUIRED node affinity karpenter.sh/capacity-type In [on-demand] (so no spot node can
-# take it) and a toleration for the `stateful` NodePool's taint (so the on-demand pool built
-# for it, aws/envs/sandbox-platform/main.tf `nodepool_stateful`, weight 100, can). The
-# constraint is the CAPACITY TYPE, not the pool label, on purpose: if this policy syncs
-# before that NodePool is applied, the `default` pool still provisions on-demand for these
-# pods, so nothing strands Pending on the rollout order.
+# Scope (owner decision 2026-09-30, #11608): ONLY the CNPG clusters backing a service in
+# `rules.yaml: money_path_services`, plus temporal/temporal-db (every payment saga's state).
+# Every other CNPG cluster, Kafka and the Temporal server roles stay on spot: they run two
+# instances/replicas behind a PDB, and on-demand for them was not worth its price.
 #
-# Why a mutation and not 70 Cluster edits: Cluster.spec.affinity is part of the pod spec CNPG
-# renders, so editing it ROLLS every cluster in one Argo sync -- the 2026-09-28 outage shape.
-# This touches only pods being created. CNPG does not see it as drift: the operator compares
-# its own rendered spec against the cnpg.io/podSpec annotation it stamped, never against the
-# live pod (measured 2026-09-30: live CNPG pods already carry admission-added tolerations,
-# pod-identity env and volumes absent from that annotation, and did not roll). Contrast the
-# IMAGE, which CNPG does compare live -- why ecr-pull-through-rewrite-cel excludes CNPG pods.
-# Strimzi (revision annotation) and ReplicaSets likewise never diff the live pod.
+# The cluster list below is DERIVED, never hand-edited: .github/scripts/check-stateful-not-on-spot.py
+# computes it from money_path_services + the service -> `<cluster>-rw.<ns>.svc` mapping in gitops
+# (the same derivation as check-cnpg-update-resilience.py) and fails CI when this block differs.
+# A new money-path service therefore fails the gate until `--write` regenerates the block; a
+# money-path service whose cluster cannot be resolved fails it outright (fail closed).
 #
-# failurePolicy: Ignore -- if Kyverno is down, a DB pod is created unmutated and may land
-# on spot. That is the pre-2026-09-30 state (degraded), whereas Fail would block every DB
-# pod from being recreated at all (outage). `check-stateful-not-on-spot.py` holds this file,
-# the NodePool and the fixtures in openbank-infra/tests/kyverno-cel/stateful-* together.
+# What: on pod CREATE, a pod labelled cnpg.io/cluster=<name> in a namespace/<name> on the list
+# (instance pods and their initdb/join jobs) gets REQUIRED node affinity
+# karpenter.sh/capacity-type In [on-demand] and a toleration for the `stateful` NodePool's taint
+# (aws/envs/sandbox-platform/main.tf `nodepool_stateful`, weight 100). The constraint is the
+# CAPACITY TYPE, not the pool label, on purpose: if this policy syncs before that NodePool is
+# applied, the `default` pool still provisions on-demand, so nothing strands Pending.
+#
+# Why a mutation and not Cluster edits: Cluster.spec.affinity is part of the pod spec CNPG
+# renders, so editing it ROLLS the cluster -- across 26 clusters in one Argo sync, the 2026-09-28
+# outage shape. This touches only pods being created. CNPG does not see it as drift: the operator
+# compares its rendered spec against the cnpg.io/podSpec annotation it stamped, never the live pod
+# (measured 2026-09-30: live CNPG pods already carry admission-added tolerations, pod-identity env
+# and volumes absent from that annotation, and did not roll). Contrast the IMAGE, which CNPG does
+# compare live -- why ecr-pull-through-rewrite-cel excludes CNPG pods.
+#
+# failurePolicy: Ignore -- if Kyverno is down, a DB pod is created unmutated and may land on spot
+# (degraded, the pre-2026-09-30 state); Fail would block every DB pod from being recreated (outage).
 apiVersion: policies.kyverno.io/v1
 kind: MutatingPolicy
 metadata:
@@ -41,7 +42,7 @@ metadata:
     app.kubernetes.io/part-of: kyverno-policies
     openbank.io/plane: platform
   annotations:
-    policies.kyverno.io/title: "Route stateful workloads (CNPG, Kafka, Temporal) to on-demand capacity"
+    policies.kyverno.io/title: "Route money-path databases (and temporal-db) to on-demand capacity"
     policies.kyverno.io/category: "Reliability"
     policies.kyverno.io/severity: "high"
 spec:
@@ -58,14 +59,42 @@ spec:
   variables:
     - name: labels
       expression: "object.metadata.?labels.orValue({})"
+    # BEGIN GENERATED targets -- check-stateful-not-on-spot.py --write; do not edit by hand
+    - name: targets
+      expression: >-
+        [
+          'accounts/accounts-db',
+          'balances/balances-db',
+          'billing/billing-db',
+          'consent/consent-db',
+          'delegation/delegation-db',
+          'fraud/fraud-db',
+          'fx/fx-db',
+          'interest/interest-db',
+          'ledger/ledger-db',
+          'lending/lending-db',
+          'payments/card-issuance-db',
+          'payments/clearing-db',
+          'payments/domestic-payment-db',
+          'payments/sepa-instant-db',
+          'payments/sepa-payment-db',
+          'payments/settlement-service-db',
+          'payments/standing-order-db',
+          'payments/swift-service-db',
+          'payments/transaction-db',
+          'payments/vop-db',
+          'psd2/psd2-db',
+          'sanctions/sanctions-db',
+          'sca/sca-db',
+          'sdd/sdd-db',
+          'temporal/temporal-db',
+          'treasury/treasury-db',
+        ]
+    # END GENERATED targets
     - name: isStateful
       expression: >-
-        'cnpg.io/cluster' in variables.labels ||
-        variables.labels[?'strimzi.io/controller'].orValue('') == 'strimzipodset' ||
-        (request.namespace == 'temporal' &&
-         variables.labels[?'app.kubernetes.io/name'].orValue('') == 'temporal' &&
-         variables.labels[?'app.kubernetes.io/component'].orValue('') in
-           ['frontend', 'history', 'matching', 'worker'])
+        'cnpg.io/cluster' in variables.labels &&
+        (request.namespace + '/' + variables.labels['cnpg.io/cluster']) in variables.targets
     - name: hasToleration
       expression: >-
         object.spec.?tolerations.orValue([]).exists(t,
@@ -94,7 +123,7 @@ spec:
     # atomic map an ApplyConfiguration may not touch, and a JSON patch creating one needs
     # an untyped map value, which panics the Kyverno 1.19.1 CEL engine (measured
     # 2026-09-30). nodeAffinity is a typed struct. Three shapes: no affinity at all
-    # (Strimzi/Temporal pods), affinity without nodeAffinity (CNPG: podAntiAffinity only),
+    # (fixtures), affinity without nodeAffinity (real CNPG pods: podAntiAffinity only),
     # nodeAffinity without a required block. A pod that ALREADY carries required node
     # affinity is left alone -- its terms are OR'ed, so appending one would widen rather
     # than narrow -- and check-stateful-not-on-spot.py fails if any stateful manifest in

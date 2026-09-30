@@ -229,18 +229,20 @@ locals {
   default_spot_pools = 156
 
   # --- `stateful` pool (on-demand, tainted) ---------------------------------
-  # Measured 2026-09-30 on the live cluster: summed container REQUESTS of the pods
-  # the `stateful-workloads-on-demand` Kyverno policy routes (CNPG instance pods,
-  # Strimzi broker/controller pods, Temporal server roles), grouped by the AZ each
-  # pod runs in. Grouped by AZ because it cannot be pooled across AZs: a CNPG
-  # instance is bound to its EBS volume, and the volume to its AZ.
-  #   CNPG 140 pods 14.50 vCPU / 35.88 GiB (gitops declares the same 14.50 / 35.88
-  #   over 69 Clusters — check-stateful-not-on-spot.py holds this table to that sum),
-  #   Temporal 7 pods 1.40 / 1.75, Kafka 1 pod 0.25 / 1.12.
+  # SCOPE (owner decision 2026-09-30, #11608): only the CNPG clusters backing
+  # `rules.yaml: money_path_services`, plus temporal/temporal-db -- 26 clusters, the
+  # set the `stateful-on-demand-cel` Kyverno policy routes (derived, see that file).
+  # Other CNPG clusters, Kafka and the Temporal server stay on spot.
+  # Measured 2026-09-30 on the live cluster: summed container REQUESTS of those 26
+  # clusters' 52 instance pods, grouped by the AZ each pod runs in. Grouped by AZ
+  # because it cannot be pooled across AZs: a CNPG instance is bound to its EBS
+  # volume, and the volume to its AZ. Total 5.80 vCPU / 14.00 GiB;
+  # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
+  # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
-    "eu-north-1a" = { cpu = 3.80, memory_gib = 9.12, pods = 32 }
-    "eu-north-1b" = { cpu = 8.95, memory_gib = 21.88, pods = 88 }
-    "eu-north-1c" = { cpu = 3.40, memory_gib = 7.75, pods = 28 }
+    "eu-north-1a" = { cpu = 0.55, memory_gib = 1.25, pods = 4 }
+    "eu-north-1b" = { cpu = 4.25, memory_gib = 10.50, pods = 41 }
+    "eu-north-1c" = { cpu = 1.00, memory_gib = 2.25, pods = 7 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
   # exactly two units, so the limit below bounds both). USABLE = kubelet allocatable
@@ -262,19 +264,18 @@ locals {
   stateful_nodepool_mem_limit = "${local.stateful_nodes * local.stateful_node.memory_gib}Gi"
 }
 
-# `stateful` — ON-DEMAND ONLY, tainted, for workloads whose restart is a database
-# failover (issue linked in the PR). 2026-09-29/30: 41 spot interruptions in 24h on
-# the `default` pool, each one costing ~13 CNPG failovers plus Temporal and Kafka
-# restarts, because 134 of 140 CNPG pods lived on spot.
+# `stateful` — ON-DEMAND ONLY, tainted, for the money-path databases and temporal-db
+# (#11608). 2026-09-29/30: 41 spot interruptions in 24h on the `default` pool, each
+# one costing ~13 CNPG failovers, because 134 of 140 CNPG pods lived on spot.
 #
 # Pods reach this pool through the Kyverno MutatingPolicy
-# gitops/components/kyverno/stateful-on-demand-cel.yaml, which on pod CREATE adds a
-# nodeSelector `karpenter.sh/capacity-type: on-demand` and a toleration for the
-# taint below. NOT a nodeSelector on this pool's own label, on purpose: if this
-# NodePool is missing (policy synced by Argo before this root is applied) the
-# `default` pool can still provision on-demand for them, so a stateful pod is never
-# stranded Pending by the rollout order. `weight = 100` is what makes Karpenter
-# choose THIS pool over `default` (weight 0) for them once it exists.
+# gitops/components/kyverno/stateful-on-demand-cel.yaml, which on pod CREATE adds
+# REQUIRED node affinity `karpenter.sh/capacity-type In [on-demand]` and a toleration
+# for the taint below. NOT this pool's own label, on purpose: if this NodePool is
+# missing (policy synced by Argo before this root is applied) the `default` pool can
+# still provision on-demand for them, so no database is stranded Pending by the
+# rollout order. `weight = 100` is what makes Karpenter choose THIS pool over
+# `default` (weight 0) for them once it exists.
 #
 # Admission-time only: existing pods are untouched, so merging/applying this rolls
 # NOTHING. Pods move one at a time as they are recreated — see the PR for the waved
@@ -306,7 +307,7 @@ resource "kubectl_manifest" "nodepool_stateful" {
             { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["m"] },
             { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
             { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["xlarge", "2xlarge"] },
-            # All three AZs: every AZ holds CNPG volumes (32/88/28 pods, 2026-09-30).
+            # All three AZs: every AZ holds target volumes (4/41/7 pods, 2026-09-30).
             { key = "topology.kubernetes.io/zone", operator = "In", values = keys(local.stateful_load_by_zone) },
           ]
           nodeClassRef = {
@@ -620,14 +621,15 @@ resource "kubectl_manifest" "nodepool_default" {
       # DaemonSet tax once instead of 22 times. Memory stays at 4x the CPU cap
       # so CPU remains the single binding guardrail, per the note above.
       #
-      # 72 KEPT (2026-09-30) although the stateful set (~16 vCPU of requests)
-      # moves to the `stateful` pool. The move is gradual — a pod leaves only when
-      # it is recreated — so for weeks both pools hold part of it, and lowering
-      # this now would re-arm the #809/#3496 stall on the pool that still carries
-      # most of it. The combined CEILING therefore grows by
-      # local.stateful_nodepool_cpu_limit, stated here so it is not silent; SPEND
-      # does not, because pods move rather than duplicate. Once the migration
-      # reports 0 routed pods on spot, lower this by ceil(16.15 / 4) x 4 = 20.
+      # 72 KEPT (2026-09-30) although the money-path databases + temporal-db
+      # (5.80 vCPU of requests, 26 clusters) move to the `stateful` pool. The move
+      # is gradual — a pod leaves only when it is recreated — so lowering this now
+      # would take capacity from the pool that still carries them. The combined
+      # CEILING therefore grows by local.stateful_nodepool_cpu_limit (28), stated
+      # here so it is not silent; SPEND does not, because pods move rather than
+      # duplicate. Once `migrate-stateful-to-on-demand.sh` reports every target on
+      # on-demand, this could drop by ceil(5.80 / 4) x 4 = 8 — small enough that
+      # keeping the surge headroom is the better trade; revisit with #3496's numbers.
       limits = {
         cpu    = "72"
         memory = "288Gi"

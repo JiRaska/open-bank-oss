@@ -1,14 +1,15 @@
 # Fixtures for stateful-on-demand-cel (gitops/components/kyverno/stateful-on-demand-cel.yaml),
 # evaluated by .github/scripts/check-stateful-not-on-spot.py through the Kyverno CLI.
 # Each pod's `openbank.io/expect` annotation says whether the policy must route it to
-# on-demand ("on-demand") or leave it alone ("untouched").
+# on-demand ("on-demand") or leave it alone ("untouched"). In scope (2026-09-30): only CNPG
+# clusters in the policy's generated `targets` list (money-path DBs + temporal-db).
 apiVersion: v1
 kind: Pod
 metadata:
-  name: pay-db-1
+  name: transaction-db-1
   namespace: payments
   labels:
-    cnpg.io/cluster: pay-db
+    cnpg.io/cluster: transaction-db
     cnpg.io/podRole: instance
   annotations:
     openbank.io/expect: on-demand
@@ -57,7 +58,7 @@ metadata:
     strimzi.io/controller: strimzipodset
     strimzi.io/kind: Kafka
   annotations:
-    openbank.io/expect: on-demand
+    openbank.io/expect: untouched
 spec:
   containers:
     - name: kafka
@@ -72,7 +73,7 @@ metadata:
     app.kubernetes.io/name: temporal
     app.kubernetes.io/component: history
   annotations:
-    openbank.io/expect: on-demand
+    openbank.io/expect: untouched
 spec:
   containers:
     - name: temporal
@@ -120,3 +121,50 @@ spec:
   containers:
     - name: app
       image: example.invalid/openbank-ledger-service:1.0.0
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: temporal-db-1
+  namespace: temporal
+  labels:
+    cnpg.io/cluster: temporal-db
+    cnpg.io/podRole: instance
+  annotations:
+    openbank.io/expect: on-demand
+spec:
+  containers:
+    - name: postgres
+      image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+# A NON-money-path CNPG cluster: stays on spot by the owner's decision.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: aml-db-1
+  namespace: aml
+  labels:
+    cnpg.io/cluster: aml-db
+    cnpg.io/podRole: instance
+  annotations:
+    openbank.io/expect: untouched
+spec:
+  containers:
+    - name: postgres
+      image: ghcr.io/cloudnative-pg/postgresql:18.1
+---
+# Right cluster NAME in the wrong namespace must not match: the key is namespace/name.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ledger-db-1
+  namespace: sandbox-copy
+  labels:
+    cnpg.io/cluster: ledger-db
+    cnpg.io/podRole: instance
+  annotations:
+    openbank.io/expect: untouched
+spec:
+  containers:
+    - name: postgres
+      image: ghcr.io/cloudnative-pg/postgresql:18.1
