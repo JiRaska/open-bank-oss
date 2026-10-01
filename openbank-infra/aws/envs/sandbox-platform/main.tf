@@ -236,13 +236,13 @@ locals {
   # Measured 2026-09-30 on the live cluster: summed container REQUESTS of those 26
   # clusters' 52 instance pods, grouped by the AZ each pod runs in. Grouped by AZ
   # because it cannot be pooled across AZs: a CNPG instance is bound to its EBS
-  # volume, and the volume to its AZ. Total 5.80 vCPU / 14.00 GiB;
+  # volume, and the volume to its AZ. Total 5.80 vCPU / 14.88 GiB (memory raised by #11621);
   # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
   # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
-    "eu-north-1a" = { cpu = 0.55, memory_gib = 1.25, pods = 4 }
-    "eu-north-1b" = { cpu = 4.25, memory_gib = 10.50, pods = 41 }
-    "eu-north-1c" = { cpu = 1.00, memory_gib = 2.25, pods = 7 }
+    "eu-north-1a" = { cpu = 0.55, memory_gib = 1.375, pods = 4 }
+    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.125, pods = 41 }
+    "eu-north-1c" = { cpu = 1.00, memory_gib = 2.375, pods = 7 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
   # exactly two units, so the limit below bounds both). USABLE = kubelet allocatable
