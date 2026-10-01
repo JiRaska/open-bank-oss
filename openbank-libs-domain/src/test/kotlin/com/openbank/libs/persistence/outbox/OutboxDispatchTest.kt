@@ -528,11 +528,40 @@ class OutboxDispatchTest {
             OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { _ -> yield() }
         }
 
-        // 25 + 25 + 20 (short) → three claims, all 70 rows dispatched in one tick.
-        assertThat(repo.claims.get()).isEqualTo(3)
+        // 25 + 25 + 20 (short, but it dispatched — it may have promoted a head) + 0 → four
+        // claims, all 70 rows dispatched in one tick.
+        assertThat(repo.claims.get()).isEqualTo(4)
         assertThat(result.claimed).isEqualTo(70)
         assertThat(result.outcomes).hasSize(70)
         assertThat(repo.rows.values.map { it.status }).containsOnly(OutboxStatus.SENT)
+    }
+
+    @Test
+    fun `drain sends a hot aggregate's whole backlog in one tick - a short batch that dispatched re-claims`() {
+        val agg = UUID.randomUUID()
+        val base = Instant.parse("2026-10-01T00:00:00Z")
+        val rows = (1..3).map { i -> entry("hot.$i").copy(aggregateId = agg, createdAt = base.plusMillis(i.toLong())) }
+        val repo = FakeRepoV2(rows)
+        val order = mutableListOf<String>()
+
+        runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { e -> order += e.eventType }
+        }
+
+        // Each claim sees only the aggregate's head; stopping on the first short batch sent ONE.
+        assertThat(order).containsExactly("hot.1", "hot.2", "hot.3")
+        assertThat(repo.claims.get()).isEqualTo(4)
+    }
+
+    @Test
+    fun `drain stops on a short batch that dispatched nothing - everything left is parked`() {
+        val repo = FakeRepoV2((1..3).map { entry("parked.$it") })
+
+        runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { _ -> error("rejected") }
+        }
+
+        assertThat(repo.claims.get()).describedAs("no re-claim after an all-failed short batch").isEqualTo(1)
     }
 
     @Test

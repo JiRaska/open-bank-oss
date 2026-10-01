@@ -161,7 +161,8 @@ object OutboxDispatch {
 
     /**
      * Drain loop (ADR-0327 D5): call [dispatchOnce] until a batch comes back **short** (fewer
-     * rows than [batchSize] — the table is empty or every remaining aggregate is parked), the
+     * rows than [batchSize]) **and dispatched nothing** — the table is empty or every remaining
+     * aggregate is parked; a short batch that sent something may have promoted a new head — the
      * wall-clock [budget] is spent, or a batch was abandoned on a transport-unavailable signal
      * (looping on an open breaker would just burn ticks). A burst of 1 000 rows therefore drains
      * in one tick instead of forty; a service on the v1 path is unaffected because its dispatcher
@@ -184,8 +185,16 @@ object OutboxDispatch {
             outcomes += result.outcomes
             claimed += result.claimed
             abandoned = result.abandoned
-            val short = result.claimed < batchSize
-        } while (!short && !abandoned && System.nanoTime() < deadline)
+            // A short batch alone does not mean "drained" under the D3 head claim: sending an
+            // aggregate's head is exactly what makes its next row claimable, and that row was
+            // invisible to the claim that just ran. Stopping on `short` capped a hot aggregate at
+            // one event per TICK, not per drain iteration as D3 promises (and failed the v1
+            // conformance kit's two-events-one-aggregate-one-tick case). So a short batch only
+            // ends the drain when it dispatched nothing — then every remaining row is parked
+            // (backoff, in flight elsewhere, or behind a failed head) and re-claiming is pointless.
+            val drained = result.claimed < batchSize &&
+                result.outcomes.none { it is OutboxDispatchOutcome.Dispatched }
+        } while (!drained && !abandoned && System.nanoTime() < deadline)
         return OutboxDispatchResult(outcomes, claimed, abandoned)
     }
 
