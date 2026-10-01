@@ -28,6 +28,7 @@ import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -106,6 +107,9 @@ class AccountingDayScheduler(
 
     @Inject
     lateinit var meterRegistry: MeterRegistry
+
+    @Inject
+    lateinit var tieOutScheduler: TieOutScheduler
 
     // Nullable, not `lateinit` — a money-path job must never fail because its observability
     // wiring was not initialised (same reasoning as TieOutScheduler).
@@ -217,11 +221,16 @@ class AccountingDayScheduler(
      * produced while the day could still change is a snapshot, not evidence.
      */
     private suspend fun tieOutEligibleDays() {
+        val reRunBudget = AtomicInteger(maxCatchUpDays)
         accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF).forEach { day ->
             runStep("tie-out", day.businessDate) {
-                val run = tieOutRunRepository.findLatestFor(day.businessDate) ?: return@runStep
                 val cutoffAt = day.cutoffAt ?: return@runStep
-                if (run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
+                val run = tieOutRunRepository.findLatestFor(day.businessDate)
+                if (needsPostCutoffRun(run?.runAt, cutoffAt)) {
+                    requestTieOut(day.businessDate, cutoffAt, reRunBudget)
+                    return@runStep
+                }
+                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
                             businessDate = day.businessDate,
@@ -238,6 +247,27 @@ class AccountingDayScheduler(
                 }
             }
         }
+    }
+
+    /**
+     * A CUTOFF day has no verdict recorded at/after its cutoff. A run that PREDATES the cutoff
+     * can never be superseded by [TieOutScheduler]'s daily catch-up (it only moves forward past
+     * the latest `as_of`), so a day cut off late — e.g. opened and cut off by an operator weeks
+     * after its business date — would sit in CUTOFF forever. With no run at all, the normal
+     * 06:00 path gets the stuck-cutoff window to deliver first, so the cadence is unchanged.
+     * A post-cutoff verdict of any status (BREAK/ERROR included) stops re-requests: those stay
+     * visible through the stuck gauge, never through a re-run loop.
+     */
+    private fun needsPostCutoffRun(lastRunAt: Instant?, cutoffAt: Instant): Boolean = when {
+        lastRunAt == null -> cutoffAt.isBefore(accountingClock.instant().minus(Duration.ofHours(stuckCutoffHours)))
+        else -> lastRunAt.isBefore(cutoffAt)
+    }
+
+    /** Bounded per tick by [maxCatchUpDays]; the day transitions on the next tick that sees the verdict. */
+    private suspend fun requestTieOut(date: LocalDate, cutoffAt: Instant, budget: AtomicInteger) {
+        if (budget.getAndDecrement() <= 0) return
+        log.infof("Accounting day %s has no tie-out verdict after its cutoff %s — requesting one", date, cutoffAt)
+        tieOutScheduler.runTieOutFor(date)
     }
 
     /** Re-publish the count of days sitting in CUTOFF longer than the threshold. */

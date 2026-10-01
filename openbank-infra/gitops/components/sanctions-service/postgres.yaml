@@ -72,13 +72,16 @@ spec:
   # 256Mi request): request = ceil(max_ws x 1.3) to a 64Mi step, limit 2x request.
   # shared_buffers stays at the Postgres default (128MB), under a third of the request.
   # CnpgWorkingSetAboveRequest (prometheus-rules-db.yaml) flags the next overrun.
+  # 2026-10-01: 448Mi -> 640Mi. sanctions-db-2 measured 472Mi working set (7d max) after the
+  # list re-ingest, over the 448Mi request (CnpgWorkingSetAboveRequest). Same formula:
+  # ceil(472 x 1.3) = 614 -> 640Mi, limit 2x.
   resources:
     requests:
       cpu: 100m
-      memory: 448Mi
+      memory: 640Mi
     limits:
       cpu: "1"
-      memory: 896Mi
+      memory: 1280Mi
   postgresql:
     parameters:
       wal_keep_size: "64MB"

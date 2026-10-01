@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# DR restore check bootstrap (policies.kyverno.io/v1 GeneratingPolicy, Kyverno 1.19).
+#
+# dr-restore-verify.yml creates a throwaway `dr-verify-<run-id>` namespace and restores
+# ledger-db into it. The openbank-dr runner must NOT be able to write network policy or
+# Secrets (Trivy KSV-0041; dr-runner-rbac.yaml grants it neither), so a trusted
+# controller bootstraps both when the namespace is created:
+#
+#   ledger-dr-check-network-isolation  NetworkPolicy `ledger-dr-check-isolation`: the
+#       check pod (app.kubernetes.io/name=ledger-service-dr-check) takes no ingress and
+#       may egress only to the restored cluster on 5432 and to kube-dns on 53.
+#   ledger-dr-check-database-identity  ExternalSecret `ledger-dr-check-db`: a RANDOM
+#       per-run password from the `ledger-dr-check-db-password` ESO ClusterGenerator
+#       (components/platform/dr-check-bootstrap.yaml). CNPG reads it as the
+#       passwordSecret of the read-only managed role `ledger_dr_check`. Nothing is
+#       derived from the restore-owner credential, so the check workload never holds
+#       anything from which the owner password could be recovered.
+#
+# Both match Namespace CREATE only, `background` off, as the kyverno.io/v1 originals on
+# the source branch did. The namespace and everything generated into it are deleted
+# by the workflow's own teardown.
+# Tested offline with the Kyverno 1.19.1 CLI: openbank-infra/tests/kyverno-dr-generate/.
+apiVersion: policies.kyverno.io/v1
+kind: GeneratingPolicy
+metadata:
+  name: ledger-dr-check-network-isolation
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Isolate the DR restore check workload
+    policies.kyverno.io/category: Disaster Recovery
+    policies.kyverno.io/severity: high
+spec:
+  evaluation:
+    synchronize:
+      enabled: true
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [namespaces]
+  matchConditions:
+    - name: dr-verify-namespace
+      expression: >-
+        object.metadata.name.startsWith('dr-verify-') &&
+        size(object.metadata.name) > size('dr-verify-')
+  variables:
+    - name: nsName
+      expression: object.metadata.name
+    - name: isolation
+      expression: >-
+        [
+          {
+            "apiVersion": dyn("networking.k8s.io/v1"),
+            "kind": dyn("NetworkPolicy"),
+            "metadata": dyn({"name": "ledger-dr-check-isolation", "namespace": variables.nsName}),
+            "spec": dyn({
+              "podSelector": {"matchLabels": {"app.kubernetes.io/name": "ledger-service-dr-check"}},
+              "policyTypes": ["Ingress", "Egress"],
+              "ingress": [],
+              "egress": [
+                {
+                  "to": [{"podSelector": {"matchLabels": {"cnpg.io/cluster": "ledger-db-restored"}}}],
+                  "ports": [{"protocol": "TCP", "port": 5432}]
+                },
+                {
+                  "to": [{
+                    "namespaceSelector": {"matchLabels": {"kubernetes.io/metadata.name": "kube-system"}},
+                    "podSelector": {"matchLabels": {"k8s-app": "kube-dns"}}
+                  }],
+                  "ports": [{"protocol": "UDP", "port": 53}, {"protocol": "TCP", "port": 53}]
+                }
+              ]
+            })
+          }
+        ]
+  generate:
+    - expression: generator.Apply(variables.nsName, variables.isolation)
+---
+apiVersion: policies.kyverno.io/v1
+kind: GeneratingPolicy
+metadata:
+  name: ledger-dr-check-database-identity
+  labels:
+    app.kubernetes.io/part-of: kyverno-policies
+    openbank.io/plane: platform
+  annotations:
+    policies.kyverno.io/title: Random per-run reader credential for the DR restore check
+    policies.kyverno.io/category: Disaster Recovery
+    policies.kyverno.io/severity: high
+spec:
+  evaluation:
+    # The ExternalSecret is static; the password lives in the ESO-owned Secret and is
+    # created once (refreshPolicy: CreatedOnce), so there is nothing to keep in sync.
+    synchronize:
+      enabled: false
+  matchConstraints:
+    resourceRules:
+      - apiGroups: [""]
+        apiVersions: [v1]
+        operations: [CREATE]
+        resources: [namespaces]
+  matchConditions:
+    - name: dr-verify-namespace
+      expression: >-
+        object.metadata.name.startsWith('dr-verify-') &&
+        size(object.metadata.name) > size('dr-verify-')
+  variables:
+    - name: nsName
+      expression: object.metadata.name
+    - name: credential
+      expression: >-
+        [
+          {
+            "apiVersion": dyn("external-secrets.io/v1"),
+            "kind": dyn("ExternalSecret"),
+            "metadata": dyn({"name": "ledger-dr-check-db", "namespace": variables.nsName}),
+            "spec": dyn({
+              "refreshPolicy": "CreatedOnce",
+              "target": {
+                "name": "ledger-dr-check-db",
+                "creationPolicy": "Owner",
+                "template": {
+                  "type": "kubernetes.io/basic-auth",
+                  "metadata": {"labels": {"cnpg.io/reload": "true"}},
+                  "data": {"username": "ledger_dr_check", "password": "{{ .password }}"}
+                }
+              },
+              "dataFrom": [{
+                "sourceRef": {"generatorRef": {
+                  "apiVersion": "generators.external-secrets.io/v1alpha1",
+                  "kind": "ClusterGenerator",
+                  "name": "ledger-dr-check-db-password"
+                }}
+              }]
+            })
+          }
+        ]
+  generate:
+    - expression: generator.Apply(variables.nsName, variables.credential)

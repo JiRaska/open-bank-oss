@@ -12,6 +12,7 @@ import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.LedgerConflictException
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
+import com.openbank.ledger.infrastructure.schedule.TieOutScheduler
 import com.openbank.ledger.it.PostgresTestResource
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -42,6 +43,12 @@ import java.util.UUID
  * evidence, and [com.openbank.ledger.infrastructure.schedule.TieOutScheduler]'s forward-only
  * cursor never checked it again. It sat in CUTOFF indefinitely and held
  * `AccountingDayStuckInCutoff` firing, masking any other stuck day.
+ *
+ * The re-check itself is [com.openbank.ledger.infrastructure.schedule.AccountingDayScheduler]'s
+ * (#11790: it calls `TieOutScheduler.runTieOutFor(date)` for such a day). That run is written for
+ * an OLD `as_of` with the newest `runAt`, so this IT also pins the cursor half of #11680:
+ * [TieOutRunRepository.findLatest] must order by `as_of`, or the re-check drags the forward
+ * catch-up cursor back to the old day and the tie-out cron re-walks every day after it.
  *
  * Drives the REAL crons (two seconds, against a real Postgres) for the same reason as
  * [LedgerSchedulerVertxContextIT]: a direct call supplies the Vert.x context the scheduler does not.
@@ -74,6 +81,9 @@ class AccountingDayCutoffRecheckIT {
 
     @Inject
     lateinit var accountingClock: AccountingClock
+
+    @Inject
+    lateinit var tieOutScheduler: TieOutScheduler
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
@@ -170,6 +180,20 @@ class AccountingDayCutoffRecheckIT {
     }
 
     @Test
+    fun `a tie-out run for an OLD date does not drag the forward catch-up cursor back`() {
+        // The exact write AccountingDayScheduler's re-check makes (#11790): runTieOutFor(oldDate).
+        // Compared with the anchor, not with a cursor read here: a cursor already dragged back by an
+        // earlier run would make a before/after comparison vacuous.
+        val yesterday = accountingClock.today().minusDays(1)
+        onEventLoop { tieOutScheduler.runTieOutFor(CURSOR_PROBE_DAY) }
+
+        assertThat(onEventLoop { tieOutRuns.findLatestFor(CURSOR_PROBE_DAY) }).isNotNull()
+        assertThat(onEventLoop { tieOutRuns.findLatest() }!!.asOf)
+            .describedAs("findLatest is the catch-up cursor; a run for an old as_of must not move it back")
+            .isAfterOrEqualTo(yesterday)
+    }
+
+    @Test
     fun `opening a day earlier than the latest day on the calendar is refused`() {
         assertThatThrownBy {
             onEventLoop {
@@ -184,6 +208,7 @@ class AccountingDayCutoffRecheckIT {
         val STALE_OK_DAY: LocalDate = LocalDate.of(2020, 1, 10)
         val BROKEN_DAY: LocalDate = LocalDate.of(2020, 2, 10)
         val BACKDATED_DAY: LocalDate = LocalDate.of(2020, 4, 10)
+        val CURSOR_PROBE_DAY: LocalDate = LocalDate.of(2020, 5, 10)
         const val SEED_ACTOR = "it-seed"
         const val BUDGET_NANOS = 60_000_000_000L
         const val POLL_INTERVAL_MILLIS = 250L

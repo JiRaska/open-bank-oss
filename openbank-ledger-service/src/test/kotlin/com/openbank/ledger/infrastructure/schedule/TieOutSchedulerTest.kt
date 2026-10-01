@@ -5,11 +5,8 @@
 package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
-import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.GlAccountRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
-import com.openbank.ledger.domain.model.AccountingDayRecord
-import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.GlAccountType
@@ -41,10 +38,6 @@ class TieOutSchedulerTest {
     private val ledger = mockk<LedgerUseCase>()
     private val glAccounts = mockk<GlAccountRepository>()
     private val runs = mockk<TieOutRunRepository>()
-    private val days = mockk<AccountingDayRepository>().also {
-        // No CUTOFF day behind the cursor unless a test says so (#11680 re-check).
-        coEvery { it.findInStatus(AccountingDayStatus.CUTOFF) } returns emptyList()
-    }
     private val registry = SimpleMeterRegistry()
     private val clock = Clock.fixed(Instant.parse("2026-07-16T04:00:00Z"), ZoneOffset.UTC)
 
@@ -57,7 +50,7 @@ class TieOutSchedulerTest {
         NoOpClusterLock(),
         noOpDomainMetrics(),
         registry,
-    ).also { it.accountingDayRepository = days }
+    )
 
     /**
      * A [DomainMetrics] with no resolvable registry — every metric method is a documented no-op,
@@ -233,7 +226,7 @@ class TieOutSchedulerTest {
                 NoOpClusterLock(),
                 noOpDomainMetrics(),
                 registry,
-            ).also { it.accountingDayRepository = days }
+            )
         val account = control("2100")
         coEvery { glAccounts.findByCode(any()) } returns null
         coEvery { glAccounts.findByCode("2100") } returns account
@@ -259,114 +252,5 @@ class TieOutSchedulerTest {
 
         coVerify(exactly = 0) { runs.save(any()) }
         coVerify(exactly = 0) { glAccounts.findByCode(any()) }
-    }
-
-    // --- CUTOFF re-check (issue #11680) ----------------------------------------------------
-
-    private fun cutoffDay(date: LocalDate, cutoffAt: Instant) =
-        AccountingDayRecord.open(date, cutoffAt.minusSeconds(DAY_SECONDS), "test")
-            .transitionTo(AccountingDayStatus.CUTOFF, "test", cutoffAt)
-
-    private fun run(asOf: LocalDate, runAt: Instant, status: TieOutRunStatus = TieOutRunStatus.OK) =
-        runRecord(asOf).copy(runAt = runAt, status = status)
-
-    private fun recordSavedDates(): MutableList<LocalDate> {
-        val savedDates = mutableListOf<LocalDate>()
-        coEvery { runs.save(any()) } answers {
-            val record = firstArg<TieOutRunRecord>()
-            savedDates.add(record.asOf)
-            record
-        }
-        return savedDates
-    }
-
-    @Test
-    fun `re-checks a CUTOFF day behind the cursor whose only run predates its cutoff`() {
-        // The live 2026-07-31 shape: OK run on 08-01, day cut off weeks later.
-        val stale = LocalDate.of(2026, 6, 30)
-        val cutoffAt = Instant.parse("2026-07-10T07:15:00Z")
-        val neverChecked = LocalDate.of(2026, 7, 1)
-        coEvery { days.findInStatus(AccountingDayStatus.CUTOFF) } returns
-            listOf(cutoffDay(stale, cutoffAt), cutoffDay(neverChecked, cutoffAt))
-        coEvery { runs.findLatestFor(stale) } returns run(stale, Instant.parse("2026-07-01T04:00:00Z"))
-        coEvery { runs.findLatestFor(neverChecked) } returns null
-        coEvery { runs.findLatest() } returns runRecord(LocalDate.of(2026, 7, 15)) // forward: nothing
-        coEvery { glAccounts.findByCode(any()) } returns null
-        val saved = recordSavedDates()
-
-        runBlocking { scheduler.runTieOut() }
-
-        assertThat(saved).containsExactly(stale, neverChecked)
-    }
-
-    @Test
-    fun `does not re-check a day with a post-cutoff verdict, nor one the forward catch-up just checked`() {
-        val cutoffAt = Instant.parse("2026-07-14T22:00:00Z")
-        val alreadyBroken = LocalDate.of(2026, 7, 1)
-        val forward = LocalDate.of(2026, 7, 15)
-        coEvery { days.findInStatus(AccountingDayStatus.CUTOFF) } returns
-            listOf(cutoffDay(alreadyBroken, cutoffAt), cutoffDay(forward, cutoffAt))
-        coEvery { runs.findLatestFor(alreadyBroken) } returns
-            run(alreadyBroken, cutoffAt.plusSeconds(60), TieOutRunStatus.BREAK)
-        coEvery { runs.findLatestFor(forward) } returns null
-        coEvery { runs.findLatest() } returns runRecord(LocalDate.of(2026, 7, 14))
-        coEvery { glAccounts.findByCode(any()) } returns null
-        val saved = recordSavedDates()
-
-        runBlocking { scheduler.runTieOut() }
-
-        // Forward catch-up unchanged (15th, once); the BREAK day is not re-run.
-        assertThat(saved).containsExactly(forward)
-    }
-
-    @Test
-    fun `a re-check that finds a break records BREAK and pages like any run`() {
-        val stale = LocalDate.of(2026, 6, 30)
-        val cutoffAt = Instant.parse("2026-07-10T07:15:00Z")
-        coEvery { days.findInStatus(AccountingDayStatus.CUTOFF) } returns listOf(cutoffDay(stale, cutoffAt))
-        coEvery { runs.findLatestFor(stale) } returns run(stale, Instant.parse("2026-07-01T04:00:00Z"))
-        coEvery { runs.findLatest() } returns runRecord(LocalDate.of(2026, 7, 15))
-        val account = control("2100")
-        coEvery { glAccounts.findByCode(any()) } returns null
-        coEvery { glAccounts.findByCode("2100") } returns account
-        coEvery { ledger.getControlAccountTieOut(any()) } returns listOf(tieOut(account.id, BigDecimal("5")))
-        val saved = slot<TieOutRunRecord>()
-        coEvery { runs.save(capture(saved)) } answers { saved.captured }
-
-        runBlocking { scheduler.runTieOut() }
-
-        assertThat(saved.captured.asOf).isEqualTo(stale)
-        assertThat(saved.captured.status).isEqualTo(TieOutRunStatus.BREAK)
-        assertThat(saved.captured.runAt).isAfter(cutoffAt)
-        assertThat(registry.counter("openbank.subledger.tieout.break").count()).isEqualTo(1.0)
-    }
-
-    @Test
-    fun `re-check is bounded by the catch-up cap, oldest first`() {
-        val capped = TieOutScheduler(
-            ledger,
-            glAccounts,
-            runs,
-            clock,
-            maxCatchUpDays = 2,
-            NoOpClusterLock(),
-            noOpDomainMetrics(),
-            registry,
-        ).also { it.accountingDayRepository = days }
-        val cutoffAt = Instant.parse("2026-07-10T07:15:00Z")
-        val stuck = (1..4).map { LocalDate.of(2026, 6, it) }
-        coEvery { days.findInStatus(AccountingDayStatus.CUTOFF) } returns stuck.map { cutoffDay(it, cutoffAt) }
-        coEvery { runs.findLatestFor(any()) } returns null
-        coEvery { runs.findLatest() } returns runRecord(LocalDate.of(2026, 7, 15))
-        coEvery { glAccounts.findByCode(any()) } returns null
-        val saved = recordSavedDates()
-
-        runBlocking { capped.runTieOut() }
-
-        assertThat(saved).containsExactly(stuck[0], stuck[1])
-    }
-
-    private companion object {
-        const val DAY_SECONDS = 86_400L
     }
 }
