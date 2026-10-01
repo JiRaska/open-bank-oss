@@ -590,6 +590,42 @@ class LendingService @Inject constructor(
             }
         }
 
+    /** The local half of a booking; every call joins the caller's locked transaction (#11626). */
+    private fun bookLocally(
+        loan: Loan,
+        rows: List<LoanInstallment>,
+        application: LoanApplication,
+        disbursedBy: String,
+    ): Uni<Loan> = loans.save(loan)
+        .flatMap { saved -> installments.saveAll(rows).map { saved } }
+        .flatMap { saved ->
+            when (
+                val st = machine.apply(
+                    transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
+                )
+            ) {
+                is OriginationTransitionResult.Rejected ->
+                    Uni.createFrom().failure(IllegalStateException(st.reason))
+                is OriginationTransitionResult.Applied ->
+                    // Still a claim, not a blind write, even under the lock: the predicate is the
+                    // second line of defence and costs nothing.
+                    claimTransition(application.status, application.copy(status = st.newState))
+                        .call { savedApp ->
+                            events.emit(
+                                transitionEvidence(
+                                    savedApp,
+                                    application.status.name,
+                                    st.newState,
+                                    disbursedBy,
+                                    OriginationActorKind.HUMAN,
+                                    "disbursement booked",
+                                ),
+                            )
+                        }
+                        .map { saved }
+            }
+        }
+
     @Suppress("LongMethod") // ADR-0100: clock-stamp fields push this 3 lines past threshold
     private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
         val now = OffsetDateTime.now(clock)
@@ -627,40 +663,28 @@ class LendingService @Inject constructor(
                 closingBalance = i.closingBalance,
             )
         }
-        return loans.save(loan)
-            .flatMap { saved -> installments.saveAll(rows).map { saved } }
-            .flatMap { saved ->
-                when (
-                    val st = machine.apply(
-                        transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
-                    )
-                ) {
-                    is OriginationTransitionResult.Rejected ->
-                        Uni.createFrom().failure(IllegalStateException(st.reason))
-                    is OriginationTransitionResult.Applied ->
-                        // Claimed, not blind-written: without the predicate two concurrent
-                        // disbursements of one READY_TO_DISBURSE application both post cash to the
-                        // ledger. The claim runs before the posting, so the loser pays nothing.
-                        // It does NOT make disbursement atomic — the loan row and its schedule are
-                        // written before the claim, so a refused racer still leaves an unreferenced
-                        // loan behind. That is pre-existing (today BOTH racers book one) and needs
-                        // its own change; see the pull request for #3850.
-                        claimTransition(application.status, application.copy(status = st.newState))
-                            .call { savedApp ->
-                                events.emit(
-                                    transitionEvidence(
-                                        savedApp,
-                                        application.status.name,
-                                        st.newState,
-                                        disbursedBy,
-                                        OriginationActorKind.HUMAN,
-                                        "disbursement booked",
-                                    ),
-                                )
-                            }
-                            .map { saved }
-                }
+        // One transaction for every LOCAL write of the booking (#11626): the loan row, its
+        // schedule, the DISBURSED claim on the application and the transition evidence commit
+        // together or not at all. Measured before this: three transaction ids for one request
+        // (loan, application, outbox), so a crash between them left a loan with a schedule that no
+        // claim and no event referenced. The application row is locked for the duration, which
+        // also serialises two concurrent disbursements of one application — the loser now finds
+        // the row no longer READY_TO_DISBURSE and rolls back its loan instead of orphaning it.
+        //
+        // The ledger posting and the borrower credit that follow are remote calls and stay
+        // OUTSIDE this transaction on purpose: a database transaction must not wait on another
+        // service, and `loan.disbursed` is emitted only once the money has actually moved.
+        return applications.withLocked(application.id) { locked ->
+            if (locked == null || locked.status != OriginationState.READY_TO_DISBURSE) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Application ${application.id} is no longer READY_TO_DISBURSE: ${locked?.status}",
+                    ),
+                )
+            } else {
+                bookLocally(loan, rows, application, disbursedBy)
             }
+        }
             .flatMap { saved ->
                 // Cash leaves the bank in two bookings, not one. The ledger journal below only ever
                 // touches internal GL accounts (Loans Receivable, Funding Clearing — see

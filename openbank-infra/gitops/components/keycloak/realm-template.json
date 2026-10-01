@@ -930,6 +930,7 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "openid",
+        "profile",
         "roles"
       ],
       "secret": "__DELEGATION_DISCLOSURE_CLIENT_SECRET__"

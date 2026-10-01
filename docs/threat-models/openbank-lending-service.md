@@ -134,9 +134,18 @@
   - **Silently succeeding without paying.** Either the lookup returning no account, or the credit
     call itself failing, surfaces as a **failed disbursement** — the `loan.disbursed` outbox event
     (and everything downstream: statements, notifications) does not fire. The loan's origination
-    state was already claimed `DISBURSED` by the point this crossing runs (a pre-existing atomicity
-    gap #3850 already tracks, not new here); a failure past that point needs the same operator
-    attention #3850 does.
+    state was already claimed `DISBURSED` by the point this crossing runs; a failure past that
+    point still needs operator attention, because the remote calls sit outside the booking
+    transaction by design (a database transaction must not wait on another service).
+  - **A half-booked loan (#11626, fixed 2026-09-30).** Before the fix the local half of a booking
+    was three transactions — the `loan` row and its schedule, then the `DISBURSED` claim on the
+    application, then the transition evidence — measured as three distinct `xmin` values for one
+    request. A crash between them left a loan with a schedule that no claim and no event
+    referenced, and two concurrent disbursements could both book a loan before one lost the claim.
+    `LoanApplicationRepository.withLocked` now locks the application row and every local write
+    joins that one transaction, so the loser of a race rolls its loan back instead of orphaning
+    it. `LendingOutboxWriteIT` asserts the four rows share one `xmin` and is red against the old
+    code (`expected "813" but was "815"`).
   - **Paying twice on retry.** `idempotencyKey = "loan:<id>:disbursement-credit"` is deterministic
     per loan — a retried disbursement call replays the same credit rather than paying again, the
     same shape the ledger crossing (item 2) already uses.
