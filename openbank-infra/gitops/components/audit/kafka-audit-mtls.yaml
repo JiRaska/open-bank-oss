@@ -281,6 +281,15 @@ spec:
           patternType: literal
         operations: [Read, Describe]
         host: "*"
+      # components/lending -- #10266 bounded approved-guarantee references (guaranteeId, loanId,
+      # revision, bankScope; no names, accounts or amounts). Money-path producer, so Audit is a
+      # reader by owner decision (2026-10-01) alongside the Context consumer.
+      - resource:
+          type: topic
+          name: openbank.lending.graph.references
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
       - resource:
           type: group
           name: audit-service

@@ -862,6 +862,14 @@ Source proof failure must propagate; a prior positive result cannot substitute
 for the approval-time check. A later source change requires live revalidation
 at authorized source read time; a Kafka pointer alone establishes no Context
 edge or current guarantee validity.
+Audit is a reader of `openbank.lending.graph.references` (owner decision,
+2026-10-01): the topic is money-path, so audit-service subscribes to it, attributes
+it to `lending-service` through `TopicProducers`, and holds an exact-name literal
+Read/Describe ACL. Audit therefore stores the exact pointer, including `loanId` and
+`guaranteeId`, in its append-only trail. That trail is readable only by audit roles
+and already holds loan identifiers from `openbank.lending.events`, so no new
+principal gains loan scope; the pointer still carries no guarantor, amount,
+document or staff identity.
 - **2026-09-20** — **New outbound edge: product-catalog over private-CA mTLS (8443).** `RestCatalogLoanProfilePort`
   now reaches `product-catalog.accounts.svc:8443` with the client certificate `lending-internal-tls`
   (`%prod` TLS bucket `catalog-authority`, TLSv1.3). Previously `PRODUCT_CATALOG_URL` was unset in
