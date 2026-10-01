@@ -78,6 +78,12 @@ spec:
             secrets:
               - goalert-webhook-url
               - alertmanager-slack
+              # Dead-man heartbeat URL (route `deadman`). Created by the ops step that makes
+              # the GoAlert heartbeat monitor (#11666) and owned by nobody else — see below.
+              # It MUST exist before this list changes: the operator mounts these as
+              # non-optional volumes, so a missing Secret holds Alertmanager in
+              # ContainerCreating on its next restart.
+              - alertmanager-deadman
             # On-demand observability pool (ADR-0082) — survive spot reclamation.
             nodeSelector:
               workload: observability
@@ -108,10 +114,12 @@ spec:
                 # whole observability pool died, the one signal designed to say so went
                 # nowhere. Route it, first and unconditionally, to a GoAlert heartbeat
                 # monitor: GoAlert pages (via ntfy + the on-call policy) when the beat
-                # stops. The heartbeat URL is key `heartbeat_url` of the `goalert-webhook-url`
-                # Secret, written by the ops step that creates the monitor (see
-                # es-goalert-webhook.yaml for why it is not an ExternalSecret key).
-                # While that key is missing, this receiver's url_file does not exist,
+                # stops. The heartbeat URL lives in its own Secret `alertmanager-deadman`
+                # (key `url`). It was first put into `goalert-webhook-url` next to the paging
+                # URL; ESO owns that Secret (creationPolicy Owner) and rewrites its whole
+                # `data` on every sync, so the key vanished within the hour — mergePolicy
+                # Merge governs the template, not keys written from outside (2026-10-01).
+                # While the key is missing, this receiver's url_file does not exist,
                 # every send fails and AlertmanagerFailedToSendAlerts reaches Slack via the
                 # route just below — which is the correct, visible state for "the dead-man
                 # is not wired yet", never a silent one.
@@ -203,7 +211,7 @@ spec:
                   # accepted, so Alertmanager's webhook payload is fine. One beat a minute,
                   # heartbeat timeout set to 5m in GoAlert. send_resolved is meaningless
                   # for a signal whose value is that it never resolves.
-                  - url_file: /etc/alertmanager/secrets/goalert-webhook-url/heartbeat_url
+                  - url_file: /etc/alertmanager/secrets/alertmanager-deadman/url
                     send_resolved: false
               - name: 'goalert'
                 webhook_configs:
