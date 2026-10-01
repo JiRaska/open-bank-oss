@@ -82,3 +82,55 @@ class NostroStatementEntryEntity : PanacheEntity() {
     @Column(name = "reference")
     var reference: String? = null
 }
+
+@Entity
+@Table(name = "nostro_breaks")
+class NostroBreakEntity : PanacheEntity() {
+    @Column(name = "break_uuid", nullable = false, unique = true)
+    lateinit var breakUuid: UUID
+
+    @Column(name = "break_key", nullable = false, unique = true)
+    lateinit var breakKey: String
+
+    @Column(name = "iban", nullable = false)
+    lateinit var iban: String
+
+    @Column(name = "gl_code", nullable = false)
+    lateinit var glCode: String
+
+    @Column(name = "currency", nullable = false)
+    lateinit var currency: String
+
+    @Column(name = "side", nullable = false)
+    lateinit var side: String
+
+    @Column(name = "our_side", nullable = false)
+    lateinit var ourSide: String
+
+    @Column(name = "amount", nullable = false)
+    lateinit var amount: BigDecimal
+
+    @Column(name = "booking_date", nullable = false)
+    lateinit var bookingDate: LocalDate
+
+    @Column(name = "reference")
+    var reference: String? = null
+
+    @Column(name = "statement_uuid", nullable = false)
+    lateinit var statementUuid: UUID
+
+    @Column(name = "statement_sequence")
+    var statementSequence: Int? = null
+
+    @Column(name = "ledger_line_id")
+    var ledgerLineId: UUID? = null
+
+    @Column(name = "first_seen_on", nullable = false)
+    lateinit var firstSeenOn: LocalDate
+
+    @Column(name = "resolved_on")
+    var resolvedOn: LocalDate? = null
+
+    @Column(name = "alerted_at")
+    var alertedAt: Instant? = null
+}

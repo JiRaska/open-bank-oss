@@ -9,10 +9,13 @@ import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.BreakAlertPolicy
+import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
+import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
@@ -152,4 +155,29 @@ interface NostroReconciliationUseCase {
 
     /** Compare the statement with the ledger's nostro GL for the statement date. Posts nothing. */
     suspend fun reconcile(statementId: UUID): NostroReconciliation
+}
+
+/** A break with its age evaluated for a given day (ADR-0315 D7). */
+data class NostroBreakView(val brk: NostroBreak, val ageBusinessDays: Int, val aged: Boolean)
+
+/** The outcome of one sweep: statements observed (and failed), open and aged breaks, alerts written. */
+data class NostroBreakSweep(
+    val observed: Int,
+    val failures: List<Throwable>,
+    val open: Int,
+    val aged: Int,
+    val alerted: Int,
+)
+
+interface NostroBreakUseCase {
+    /** Reconcile [statementId] and record what it leaves unmatched as breaks; resolves what now matches. */
+    suspend fun observe(statementId: UUID): BreakChanges
+
+    /** Observe every recent statement, then alert (once each) on open breaks over the threshold. */
+    suspend fun sweep(today: LocalDate): NostroBreakSweep
+
+    /** Breaks of a CONFIGURED nostro [iban], oldest first. @throws NostroAccountNotFoundException */
+    suspend fun breaks(iban: String, includeResolved: Boolean): List<NostroBreakView>
+
+    val policy: BreakAlertPolicy
 }

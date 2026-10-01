@@ -36,6 +36,17 @@ repositories {
     mavenCentral()
 }
 
+dependencies {
+    // Structured console logging. `quarkus.log.console.json` is a key that ONLY this extension
+    // reads: without it on the application's classpath the key is accepted, does nothing, and
+    // the console falls back to the text pattern formatter. Declared here rather than in
+    // openbank-libs-runtime because that module applies no Quarkus BOM — every service does
+    // (`enforcedPlatform(libs.quarkus.bom)`), so the version is the platform's and cannot rot.
+    // The shared key names live in openbank-libs-runtime's microprofile-config.properties;
+    // `json-logging-extension-present` (gates.yaml) holds the two halves together.
+    "implementation"("io.quarkus:quarkus-logging-json")
+}
+
 kotlin {
     // Pin to JDK 25 (Temurin LTS) across the whole fleet. Without an explicit
     // toolchain the build falls back to the system default JDK which may differ

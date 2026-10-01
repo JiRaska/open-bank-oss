@@ -2,7 +2,7 @@
 # Security regression test — a security issue is never closed without a test (ADR-0279 WS1 #5).
 #
 # THE RULE. A PR that closes an issue labeled `security` must touch a test surface
-# (`src/test`, `e2e`, or `*.spec.*`/`*.test.*` anywhere). The defect history in CLAUDE.md
+# (`src/test`, `e2e`, `*.spec.*`/`*.test.*`, or Rego `*_test.rego`). The defect history in CLAUDE.md
 # is the justification: the recurring security classes (nullable JAX-RS params, silent
 # no-op success, scheduler context loss) each shipped more than once precisely because
 # the fix PR changed only the production code, leaving the next service to rediscover the
@@ -154,7 +154,7 @@ jobs:
               files.push(...next.nodes);
               pageInfo = next.pageInfo;
             }
-            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$/;
+            const TEST_SURFACE = /src\/test\/|\/e2e\/|\.(spec|test)\.[tj]sx?$|(?:^|\/)[^/]+_test\.rego$/;
             const touchedTests = files.map(file => file.path).filter(path => TEST_SURFACE.test(path));
             if (touchedTests.length > 0) {
               core.info(`Test surface touched (${touchedTests.length} file(s)); security issue(s) ${securityIssues.join(", ")} close with a regression test.`);
@@ -163,7 +163,7 @@ jobs:
 
             core.setFailed(
               `This PR closes security issue(s) ${securityIssues.map(n => "#" + n).join(", ")} but touches no test surface ` +
-              `(src/test/, e2e/, *.spec.*, *.test.*). Add the regression test that would have caught the defect — ` +
+              `(src/test/, e2e/, *.spec.*, *.test.*, *_test.rego). Add the regression test that would have caught the defect — ` +
               `or, only if a test genuinely cannot express this fix, state \`no-test-justification: <reason>\` ` +
               `on its own line in the PR body (ADR-0279, #8590).`
             );
