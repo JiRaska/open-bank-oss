@@ -1,0 +1,22 @@
+# glitchtip-pg is the one CNPG cluster created by a third-party chart
+# (apps/glitchtip.yaml -> glitchtip chart -> CNPG Cluster), and the chart does
+# not expose `spec.monitoring.enablePodMonitor`. Every other cluster in the
+# estate sets it, which is why PostgresClusterUnscraped (prometheus-rules-
+# cnpg-coverage.yaml) fired for exactly this one from 2026-09-28. Declare the
+# PodMonitor here, shaped like the one CNPG generates, so the crash-report
+# database is watched like the rest.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: glitchtip-pg
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    cnpg.io/cluster: glitchtip-pg
+spec:
+  selector:
+    matchLabels:
+      cnpg.io/cluster: glitchtip-pg
+  podMetricsEndpoints:
+    - port: metrics
+      interval: 30s
