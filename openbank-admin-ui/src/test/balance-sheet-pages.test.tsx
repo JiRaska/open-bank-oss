@@ -330,6 +330,31 @@ describe('snapshots', () => {
     expect(card.querySelector('.badge-success')).toBeNull()
     expect(screen.queryByText(/Within limit|V limitu/)).toBeNull()
   })
+
+  it('shows a loan instrument by its contract number, and an instrument without one by its id', async () => {
+    const instrument = (id: string, contractNumber?: string | null) => ({
+      id, kind: 'AMORTISING_LOAN', glAccountCode: '1200', currency: 'CZK', outstanding: 1000, valueDate: '2026-01-10',
+      maturityDate: '2027-01-15', rateTerms: null, counterpartyRef: null, ifrs9Stage: null, loan: null,
+      ...(contractNumber === undefined ? {} : { contractNumber }),
+    })
+    router = url => {
+      if (url.includes('/instruments')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30',
+          instruments: [instrument('loan-uuid-1', 'UV-2026-000123'), instrument('loan-uuid-2', null), instrument('loan-uuid-3')],
+        })
+      }
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    // #11107: the loan with a number is referenced by it; the others fall back to the id handle.
+    const numbered = await screen.findByRole('button', { name: /UV-2026-000123/ })
+    expect(numbered.getAttribute('title')).toMatch(/The reference is the contract number/)
+    const fallbacks = screen.getAllByRole('button', { name: /Loan LOAN/ })
+    expect(fallbacks).toHaveLength(2)
+    expect(fallbacks[0].getAttribute('title')).toMatch(/No contract number/)
+  })
 })
 
 const IRRBB = (ratio: number | null, tier1: boolean) => ({

@@ -45,11 +45,13 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  # 1.17.0 -> 1.18.0: (#11716) liquidity and capital are read by category, not by raw loan id.
-  # 1.18.0 -> 1.21.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
-  #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input. (This PR
-  #        originally claimed 1.16.0; #11539 and #11546 take 1.16.0 and 1.17.0, #11716 took 1.18.0, and open PRs #11718 / #11719 / #11722
-  #        claim 1.18.1 / 1.19.0 / 1.20.0, so this takes 1.21.0.)
+  # 1.17.0 -> 1.18.0: #11716 (liquidity and capital read by category).
+  # 1.18.0 -> 1.20.0 (#11107): additive — Instrument.contractNumber, the source contract's human
+  #        reference (a loan's UV-YYYY-NNNNNN from lending); null for other kinds and for runs
+  #        recorded before it existed. 1.18.1 and 1.19.0 are claimed by open PRs #11718, #11719
+  #        and #11549.
+  # 1.20.0 -> 1.21.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
+  #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input.
   version: 1.21.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
@@ -925,6 +927,12 @@ components:
           description: Opaque party reference; identity stays in party-service.
         ifrs9Stage:
           type: [string, 'null']
+        contractNumber:
+          type: [string, 'null']
+          description: >-
+            Human reference of the source contract — for a loan, lending's contract number
+            (UV-YYYY-NNNNNN, #11107). Display only: not an identity (that is id) and not part of
+            the run's input hash. Null for other instrument kinds and for runs recorded before it.
         loan:
           type: [object, 'null']
           properties:

@@ -59,6 +59,8 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // sca-events-out Kafka emitter is switched to in-memory connector in tests.
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract for this service's outbound money-path call (issue #8345).
+    testImplementation(libs.pact.consumer)
 }
 
 tasks.test {

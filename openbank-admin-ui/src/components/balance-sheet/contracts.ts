@@ -36,6 +36,9 @@ export const instrumentSchema = z.object({
     resetFrequencyMonths: z.number().int().nullable(), nextResetDate: z.string().nullable(),
   }).nullable(),
   counterpartyRef: z.string().nullable(), ifrs9Stage: z.string().nullable(),
+  // risk-engine 1.20.0 (#11107): the source contract's human reference (a loan's UV-YYYY-NNNNNN).
+  // nullish: an older risk-engine omits it, and runs recorded before it carry null.
+  contractNumber: z.string().nullish(),
   loan: z.looseObject({
     method: z.string(), periodsPerYear: z.number().int(), remainingPeriods: z.number().int(), nextDueDate: z.string().nullable(),
   }).nullable(),
