@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.libs.llm
 
+import com.openbank.libs.security.BoundedBodyHandlers
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
@@ -66,7 +67,7 @@ class OpenAiCompatibleEmbeddingAdapter(
                     ),
                 )
                 .build()
-            val resp = withContext(Dispatchers.IO) { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+            val resp = withContext(Dispatchers.IO) { http.send(request, BoundedBodyHandlers.ofString()) }
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("embedding backend returned HTTP %d", resp.statusCode())
                 metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_HTTP_ERROR, 0, 0, System.nanoTime() - startedAt)

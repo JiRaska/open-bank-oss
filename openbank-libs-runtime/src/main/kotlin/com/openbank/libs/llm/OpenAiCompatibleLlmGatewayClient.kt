@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.libs.llm
 
+import com.openbank.libs.security.BoundedBodyHandlers
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
@@ -119,7 +120,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 .build()
             // Blocking send off the event loop.
             val resp = withContext(Dispatchers.IO) {
-                http.send(request, HttpResponse.BodyHandlers.ofString())
+                http.send(request, BoundedBodyHandlers.ofString())
             }
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("LLM backend %s returned HTTP %d", baseUrl, resp.statusCode())
