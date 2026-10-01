@@ -82,8 +82,17 @@
 # unclassifiable path or an outright crash all exit non-zero, so a caller that keys on the exit
 # status fails closed to today's REFUSE without needing to parse anything.
 #
+# THE PROVIDER-TEST OVERLAY MODE (--own-test-overlay, #11597)
+# prove-pact-provider-version.sh verifies an older provider version P with the provider's TEST
+# tree taken from a later main commit F (new @State handlers land test-only, and a service is
+# not rebuilt for a test-only change, so P is otherwise stuck without them). That caller replaces
+# `<svc>/src/test` wholesale, so that one subtree is the only thing allowed to differ; every other
+# input above — the rest of `<svc>/` (src/main, resources, build.gradle.kts, Dockerfile,
+# version.txt, CHANGELOG.md), every shared module, build-logic, gradle/, root build files — must
+# still be the same git object. One definition of "production build input", not a second copy.
+#
 # Usage:
-#   pact-version-tree-equivalent.sh <service> <pact_sha> <dispatch_sha>
+#   pact-version-tree-equivalent.sh [--own-test-overlay] <service> <pact_sha> <dispatch_sha>
 #   pact-version-tree-equivalent.sh --self-test
 #
 # Prints one TAB-separated line: EQUIVALENT|DIFFERENT<TAB><human reason>.
@@ -165,6 +174,27 @@ in_scope_modules() {
   printf '%s\n' "$seen" | command grep -v '^$' | sort -u
 }
 
+# The children of <dir> at either commit (union), one repo-relative path per line.
+children_at_either() {
+  local dir="$1" a="$2" b="$3"
+  { git ls-tree --name-only "$a" -- "$dir/" 2>/dev/null; git ls-tree --name-only "$b" -- "$dir/" 2>/dev/null; } | sort -u
+}
+
+# The service's own scope. Whole directory normally; with OWN_TEST_OVERLAY=1 every child of
+# `<svc>` and of `<svc>/src` EXCEPT `<svc>/src/test`, so that subtree alone may differ.
+own_scope() {
+  local svc="$1" a="$2" b="$3" c
+  if [ "${OWN_TEST_OVERLAY:-0}" != 1 ]; then printf '%s\n' "$svc"; return; fi
+  for c in $(children_at_either "$svc" "$a" "$b"); do
+    [ "$c" = "$svc/src" ] && continue
+    printf '%s\n' "$c"
+  done
+  for c in $(children_at_either "$svc/src" "$a" "$b"); do
+    [ "$c" = "$svc/src/test" ] && continue
+    printf '%s\n' "$c"
+  done
+}
+
 # ── the decision ───────────────────────────────────────────────────────────────────────
 equivalent() {
   local svc="$1" pact_sha="$2" dispatch_sha="$3"
@@ -183,7 +213,7 @@ equivalent() {
   # 1. Build the list of in-scope PATHS: this service whole, each dependency module's compile
   #    inputs, the global build directories, and the two `.github/` files that reach the image.
   local scope="" m d a b
-  scope="$svc"
+  scope="$(own_scope "$svc" "$pact_sha" "$dispatch_sha")"
   for m in $(in_scope_modules "$dispatch_sha" "$svc"); do
     [ "$m" = "$svc" ] && continue
     for d in "${DEP_SUBPATHS[@]}"; do scope="$scope"$'\n'"$m/$d"; done
@@ -204,6 +234,10 @@ equivalent() {
     || differs "could not diff ${pact_sha} against ${dispatch_sha}"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
+    # Overlay mode: the caller replaces exactly this subtree from the later commit.
+    if [ "${OWN_TEST_OVERLAY:-0}" = 1 ]; then
+      case "$p" in "$svc"/src/test/*) continue ;; esac
+    fi
     case "$p" in */*) top="${p%%/*}" ;; *) top="" ;; esac
     if [ -z "$top" ]; then
       # A root-level file. Default is IN SCOPE, so a build-config file cannot slip past; step 1
@@ -370,7 +404,28 @@ selftest() {
   # 11. Usage errors fail closed.
   _expect "missing arguments" DIFFERENT svc-a "$base"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 17 cases on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  # 12. --own-test-overlay (#11597). KNOWN-POSITIVE: a pair differing only in the service's own
+  #     src/test is equivalent in overlay mode — and the SAME pair must stay DIFFERENT without the
+  #     flag (case 3b above), so the flag is what changes the answer, not a broken comparison.
+  local o0 o1 o2 o3 o4 o5
+  o0="$(_commit svc-a/src/main/A.kt overlay-base)"
+  o1="$(_commit svc-a/src/test/T.kt overlay-test-only)"
+  _expect "overlay: own src/test only" EQUIVALENT --own-test-overlay svc-a "$o0" "$o1"
+  _expect "no overlay: own src/test only" DIFFERENT svc-a "$o0" "$o1"
+  # KNOWN-NEGATIVES: each production input still refuses in overlay mode.
+  o2="$(_commit svc-a/src/main/A.kt overlay-main)"
+  _expect "overlay: own src/main changed" DIFFERENT --own-test-overlay svc-a "$o1" "$o2"
+  o3="$(_commit svc-a/version.txt 9.9.9)"
+  _expect "overlay: own version.txt changed" DIFFERENT --own-test-overlay svc-a "$o2" "$o3"
+  o4="$(_commit openbank-libs-domain/src/main/D.kt overlay-libs)"
+  _expect "overlay: shared libs src/main changed" DIFFERENT --own-test-overlay svc-a "$o3" "$o4"
+  o5="$(_commit build-logic/build.gradle.kts overlay-logic)"
+  _expect "overlay: build-logic changed" DIFFERENT --own-test-overlay svc-a "$o4" "$o5"
+  # A src/ sibling that is not `test` (e.g. src/integrationTest, src/testFixtures) is NOT overlaid.
+  local o6; o6="$(_commit svc-a/src/testFixtures/F.kt fixture)"
+  _expect "overlay: own src/testFixtures added" DIFFERENT --own-test-overlay svc-a "$o5" "$o6"
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: 24 cases (17 + 7 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 
@@ -378,6 +433,9 @@ if [ "${1:-}" = "--self-test" ] || [ "${1:-}" = "--selftest" ]; then
   selftest
   exit $?
 fi
+
+OWN_TEST_OVERLAY=0
+if [ "${1:-}" = "--own-test-overlay" ]; then OWN_TEST_OVERLAY=1; shift; fi
 
 if [ $# -ne 3 ]; then
   verdict DIFFERENT "usage: $0 <service> <pact_sha> <dispatch_sha> — refusing rather than assuming equivalence"

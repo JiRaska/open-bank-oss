@@ -449,7 +449,11 @@ jobs:
           set -euo pipefail
           cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh \
             "$RUNNER_TEMP/prove-pact-provider-version.sh"
-          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh"
+          # The equivalence proof the runner calls must be the trusted one too: P's own copy may
+          # predate --own-test-overlay, and P must never get to judge its own equivalence.
+          cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
+            "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -482,7 +486,7 @@ jobs:
           git checkout --detach --quiet "$RESOLVED_REF"
           echo "$RESOLVED_REF is on main — publishing the verification against it."
 
-      - name: Check out P and overlay the one approved Ledger provider fixture from F
+      - name: Check out P and overlay the provider test tree from F (equivalence-proven)
         env:
           SERVICE: ${{ inputs.service }}
           REQUESTED_FIXTURE_REF: ${{ inputs.ref }}
@@ -497,8 +501,10 @@ jobs:
             FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
             git fetch --quiet origin main "$FIXTURE_REF"
             FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
-            # The script proves P/F/main ancestry, requires this checkout to be P, and writes
-            # exactly LedgerPactBrokerProviderVerificationTest.kt from F into the P worktree.
+            # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
+            # are byte-identical in every production build input of SERVICE, it replaces
+            # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger's original
+            # single-fixture overlay, kept as the fallback (#11597).
             bash "$PROOF_RUNNER" --prepare-overlay \
               "$SERVICE" "$PROVIDER_VERSION" "$FIXTURE_VERSION" origin/main
           else
