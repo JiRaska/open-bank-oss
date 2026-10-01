@@ -19,7 +19,7 @@
 #     1. for each REPLICA on a spot node: delete the pod; CNPG recreates it on the same PVC, the
 #        policy routes it to an on-demand node in the volume's AZ; wait until the cluster is
 #        healthy again. No write outage: the primary is untouched.
-#     2. if the PRIMARY is on spot: `kubectl cnpg promote` a replica that is now on on-demand
+#     2. if the PRIMARY is on spot: switch over (status.targetPrimary, as `kubectl cnpg promote`) to a replica that is now on on-demand
 #        (a switchover: seconds of write unavailability, the same as a CNPG minor update), wait
 #        healthy, then delete the old primary's pod -- now a replica -- and wait healthy again.
 #   then sleep, then the next cluster.
@@ -63,10 +63,31 @@ log() { printf '%s %s\n' "$(date -u +%H:%M:%SZ)" "$*"; }
 run() { if [ "$APPLY" = 1 ]; then log "RUN: $*"; "$@"; else log "DRY: $*"; fi; }
 
 capacity_of_pod() { # ns pod -> spot | on-demand | unknown
-  local node
+  # Two label vocabularies on this cluster: Karpenter nodes carry karpenter.sh/capacity-type
+  # (spot|on-demand); the EKS managed bootstrap node group carries ONLY
+  # eks.amazonaws.com/capacityType (ON_DEMAND|SPOT). Reading just the first one made every pod on
+  # the bootstrap group look like spot and planned a pointless switchover for it (interest-db-1,
+  # 2026-10-01 dry run).
+  local node kc ec
   node="$(k -n "$1" get pod "$2" -o jsonpath='{.spec.nodeName}' 2>/dev/null || true)"
   [ -n "$node" ] || { echo unknown; return; }
-  k get node "$node" -o jsonpath='{.metadata.labels.karpenter\.sh/capacity-type}' 2>/dev/null || echo unknown
+  kc="$(k get node "$node" -o jsonpath='{.metadata.labels.karpenter\.sh/capacity-type}' 2>/dev/null || true)"
+  ec="$(k get node "$node" -o jsonpath='{.metadata.labels.eks\.amazonaws\.com/capacityType}' 2>/dev/null || true)"
+  case "$kc|$ec" in
+    on-demand\|*|*\|ON_DEMAND) echo on-demand ;;
+    spot\|*|*\|SPOT) echo spot ;;
+    *) echo unknown ;;
+  esac
+}
+
+promote() { # ns cluster target -- switchover to target, the same status write `kubectl cnpg promote`
+  # performs (targetPrimary + timestamp + phase), so the script needs no kubectl plugin. The
+  # operator does the actual work: fences the old primary, waits for the target to catch up,
+  # promotes it. Status is a subresource, hence --subresource=status (kubectl >= 1.24).
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  run k -n "$1" patch cluster "$2" --subresource=status --type=merge -p \
+    "{\"status\":{\"targetPrimary\":\"$3\",\"targetPrimaryTimestamp\":\"$ts\",\"phase\":\"Switchover in progress\",\"phaseReason\":\"Switching over to $3 (migrate-stateful-to-on-demand)\"}}"
 }
 
 wait_healthy() { # ns cluster
@@ -108,7 +129,6 @@ recreate_pod() { # ns cluster pod
 k get nodepool stateful >/dev/null 2>&1 || { echo "NodePool 'stateful' not found: apply sandbox-platform first" >&2; exit 1; }
 k get mutatingpolicies.policies.kyverno.io stateful-on-demand-cel >/dev/null 2>&1 \
   || { echo "MutatingPolicy 'stateful-on-demand-cel' not found: kyverno-policies not synced" >&2; exit 1; }
-command -v kubectl-cnpg >/dev/null 2>&1 || { echo "kubectl cnpg plugin not found" >&2; exit 1; }
 [ "$APPLY" = 1 ] || log "DRY RUN -- nothing will be changed; pass --apply to act"
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -138,7 +158,7 @@ printf '%s\n' "$TARGETS" | while IFS=/ read -r ns cl; do
     target=""
     for p in $pods; do [ "$p" != "$primary" ] && target="$p"; done
     [ -n "$target" ] || { log "  STOP: $ns/$cl has no replica to switch over to"; exit 1; }
-    run kubectl cnpg --context "$CTX" -n "$ns" promote "$cl" "$target"
+    promote "$ns" "$cl" "$target"
     if [ "$APPLY" = 1 ]; then sleep 20; wait_healthy "$ns" "$cl" || exit 1; fi
     recreate_pod "$ns" "$cl" "$primary" || exit 1
     ;;
