@@ -1,0 +1,114 @@
+# Scrape the observability stack itself.
+#
+# Measured 2026-09-30: of the eleven workloads in this namespace only Loki,
+# Grafana, Prometheus and Alertmanager were scraped. Tempo, Alloy (16 pods),
+# Pyroscope, the OTel collector, GoAlert and ntfy exposed metrics that
+# nothing read — so a Tempo ingester dropping spans, an Alloy pod stalled on
+# a node, a Pyroscope with no ingest, or GoAlert failing to page would have
+# been invisible to the very system whose job is to make things visible.
+# `loki_discarded_samples_total` was the only reason the 25% log-discard
+# defect was measurable at all, and only because Loki happened to be scraped.
+#
+# One file, one ServiceMonitor per component, each selecting the Service its
+# chart or manifest already creates (label sets verified against the live
+# objects). `release: kube-prometheus-stack` is not required (the stack sets
+# *SelectorNilUsesHelmValues: false) but kept for parity with servicemonitor-loki.
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tempo
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [observability]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: tempo
+  endpoints:
+    - port: tempo-prom-metrics
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: pyroscope
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [observability]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: pyroscope
+      app.kubernetes.io/instance: pyroscope
+      app.kubernetes.io/component: all
+  endpoints:
+    - port: http2
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: alloy
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [observability]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: alloy
+      app.kubernetes.io/instance: alloy
+  endpoints:
+    - port: http-metrics
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: ntfy
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [observability]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ntfy
+  endpoints:
+    - port: http
+      interval: 30s
+      path: /metrics
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: goalert
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames: [observability]
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goalert
+  endpoints:
+    - port: metrics
+      interval: 30s
+      path: /metrics
