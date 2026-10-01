@@ -1,13 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [security, libs, authn, privacy-gdpr]
 summary: "Four shared primitives in com.openbank.libs.security, no new module: egress allowlist, DPoP/mTLS token check, Transit field protection, Valkey rate limit; optional JOSE/Redis types load only via opt-in service subclasses (#6240)."
+followup: "#11604 — FieldProtector landed; egress control, sender-constrained tokens and rate limit remain"
 ---
 
 # ADR-0320 — openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives
