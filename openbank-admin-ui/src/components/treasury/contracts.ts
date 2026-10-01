@@ -42,6 +42,10 @@ export const limitCheckSchema = z.object({
 export const transitionSchema = z.object({
   from: dealStateSchema.nullable(), to: dealStateSchema, actor: z.string(), actorType: z.string(),
   at: timestamp, note: z.string().nullable(),
+  // API 1.14.0: the limit figures behind a submit/approve note. Optional — an older server omits it.
+  limitSnapshot: z.object({
+    limit: decimal, currency: z.string(), exposureAfter: decimal, headroomAfter: decimal,
+  }).nullable().optional(),
 })
 
 export const journalRefSchema = z.object({
