@@ -4,15 +4,17 @@
 
 package com.openbank.transaction.infrastructure.ingest
 
+import com.openbank.libs.security.EgressConnector
+import com.openbank.libs.security.EgressDeniedException
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.SafeHttpClient
 import com.openbank.transaction.infrastructure.image.LogoImages
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.net.InetAddress
 import java.net.URI
-import java.net.UnknownHostException
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 import java.util.Optional
 
@@ -42,11 +44,11 @@ import java.util.Optional
  *     host answers 302 to the metadata service, and a client that follows it has done exactly what
  *     the allowlist was written to prevent.
  *
- * **Residual risk, stated rather than papered over.** Between the address check and the connection
- * the name can be re-resolved by the JDK's own connect, so a DNS-rebinding attacker who controls an
- * *allowlisted* name can still steer the second lookup. Closing that needs connecting to a pinned
- * IP with SNI/Host preserved, which `java.net.http.HttpClient` does not expose. The allowlist is
- * what bounds it: the attacker must already own a name the bank chose to trust.
+ * **DNS rebinding is closed by [SafeHttpClient] (ADR-0320 P1).** The checks above run first so an
+ * operator gets a specific refusal; the fetch itself then resolves the name ONCE, vets every
+ * address again, and connects to that pinned address with SNI/Host and certificate identity bound
+ * to the name — so the JDK can no longer re-resolve between the check and the connection. An
+ * IP-literal allowlist entry is never fetched: the egress policy refuses literals outright.
  *
  * What comes back is bytes, and bytes are not an image until [LogoImages] says so — the download is
  * capped, then decoded, dimension-checked and re-encoded like any upload.
@@ -88,12 +90,29 @@ class LogoFetcher(
     /** The configured allowlist, for the operator API to report rather than make an operator guess. */
     fun allowedHosts(): Set<String> = allowedHosts
 
-    private val client: HttpClient = HttpClient.newBuilder()
-        // NEVER, not NORMAL. See the class KDoc: following one redirect is how an allowlist is
-        // defeated, and there is no logo worth reachable-by-redirect.
-        .followRedirects(HttpClient.Redirect.NEVER)
-        .connectTimeout(CONNECT_TIMEOUT)
-        .build()
+    /** Visible for testing: lets a unit test pin a stub host's address. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
+    /** Visible for testing: lets a unit test observe the connection without a real TLS peer. */
+    internal var connector: EgressConnector = EgressConnector.PLAIN
+
+    /**
+     * HTTPS-only, public-address-only, never follows a redirect (a 3xx comes back as a status), and
+     * reads at most [LogoImages.MAX_UPLOAD_BYTES] — the same four fences, enforced on the pinned
+     * connection. IP-literal entries are dropped here: [EgressPolicy] does not admit literals.
+     */
+    private val client: SafeHttpClient by lazy {
+        val names = allowedHosts.filter { runCatching { EgressPolicy.fromConfig(listOf(it)) }.isSuccess }
+        SafeHttpClient(
+            EgressPolicy.fromConfig(names),
+            resolver = resolver,
+            connector = connector,
+            connectTimeout = CONNECT_TIMEOUT,
+            readTimeout = REQUEST_TIMEOUT,
+            callTimeout = REQUEST_TIMEOUT,
+            maxResponseBytes = LogoImages.MAX_UPLOAD_BYTES,
+        )
+    }
 
     /**
      * Fetch [rawUrl], or refuse it.
@@ -125,28 +144,25 @@ class LogoFetcher(
 
         val response = try {
             client.send(
-                HttpRequest.newBuilder(uri)
-                    .header("Accept", "image/png,image/jpeg,image/gif")
-                    .header("User-Agent", USER_AGENT)
-                    .timeout(REQUEST_TIMEOUT)
-                    .GET()
-                    .build(),
-                HttpResponse.BodyHandlers.ofInputStream(),
+                EgressRequest(
+                    method = "GET",
+                    url = uri.toString(),
+                    headers = mapOf("Accept" to "image/png,image/jpeg,image/gif", "User-Agent" to USER_AGENT),
+                ),
             )
+        } catch (e: EgressDeniedException) {
+            throw RefusedException("refused by the egress policy: ${e.decision.reason} (${e.decision.detail})", e)
         } catch (e: java.io.IOException) {
             throw RefusedException("fetch failed: ${e.message}", e)
-        } catch (e: InterruptedException) {
-            Thread.currentThread().interrupt()
-            throw RefusedException("fetch was interrupted", e)
         }
 
-        requireUsableStatus(response.statusCode())
+        requireUsableStatus(response.status)
 
-        val bytes = response.body().use { readCapped(it) }
+        val bytes = readCapped(response.body.inputStream())
         return Fetched(
             bytes = bytes,
             sourceUrl = uri.toString(),
-            contentType = response.headers().firstValue("content-type").orElse(null),
+            contentType = response.header("content-type"),
         )
     }
 
@@ -181,8 +197,8 @@ class LogoFetcher(
     @Suppress("ThrowsCount")
     private fun requirePubliclyRoutable(host: String) {
         val addresses = try {
-            InetAddress.getAllByName(host)
-        } catch (e: UnknownHostException) {
+            resolver.resolve(host)
+        } catch (e: java.io.IOException) {
             throw RefusedException("host '$host' does not resolve: ${e.message}", e)
         }
         if (addresses.isEmpty()) throw RefusedException("host '$host' resolves to no address")
