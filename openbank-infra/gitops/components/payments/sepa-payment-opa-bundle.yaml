@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sepa-payment
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "a1b42d00a71a6882"
+    openbank.tech/policy-checksum: "7b59c3241f0f3da4"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -1020,6 +1029,29 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.quote.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.confirm
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1706,6 +1738,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose

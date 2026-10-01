@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.16.0...finrep-service-v0.17.0) (2026-09-30)
+
+
+### Features
+
+* **finrep:** carry the risk snapshot's provenance onto COREP templates ([#11538](https://github.com/JiRaska/open-bank-oss/issues/11538)) ([3961c7d](https://github.com/JiRaska/open-bank-oss/commit/3961c7df54357a43bddc5b9f2b1a1a92e19405ef))
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.15.1...finrep-service-v0.16.0) (2026-09-29)
+
+
+### Features
+
+* **finrep:** gap C 02.00 unless the capital was computed under EU CRR ([#11506](https://github.com/JiRaska/open-bank-oss/issues/11506)) ([4dee41c](https://github.com/JiRaska/open-bank-oss/commit/4dee41cc0d851b577a0d39ea69ed47cfc7bf7ebd))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.15.0...finrep-service-v0.15.1) (2026-09-29)
 
 

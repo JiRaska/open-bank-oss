@@ -218,7 +218,8 @@ openbank:
         bcbs-d238-d295:
           # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
           # "3": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
-          version: "3"
+          # "4": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
+          version: "4"
           regime: bcbs
           source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
           factors:
@@ -235,6 +236,7 @@ openbank:
             lcr-central-bank-secured-outflow: 0  # d238 ¶114-115
             lcr-retail-loan-inflow: 0.50         # d238 ¶153
             lcr-fi-inflow: 1.00                  # d238 ¶154
+            lcr-inflow-fi-placement-30d: 1.00    # d238 ¶154; MM placements maturing ≤ 30 days
             lcr-operational-deposit-inflow: 0    # d238 ¶156 (and ¶98)
             lcr-inflow-cap: 0.75                 # d238 ¶69, ¶144
             nsfr-asf-capital: 1.00               # d295 ¶21(a)
@@ -260,7 +262,8 @@ openbank:
         # corporate deposits (Art. 28) are not modelled: no GL class maps to them.
         eu-2015-61-crr2:
           # "2": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
-          version: "2"
+          # "3": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
+          version: "3"
           regime: eu
           source: "Delegated Regulation (EU) 2015/61 as amended by (EU) 2018/1620 (LCR) and Regulation (EU) 575/2013 Part Six Title IV as amended by (EU) 2019/876 (NSFR); UNVERIFIED factors keep the BCBS d238/d295 value"
           factors:
@@ -277,6 +280,7 @@ openbank:
             lcr-central-bank-secured-outflow: 0         # 2015/61 Art. 28(3)(a)
             lcr-retail-loan-inflow: 0.50                # 2015/61 Art. 32(3)(a)
             lcr-fi-inflow: 1.00                         # 2015/61 Art. 32(2)(a)
+            lcr-inflow-fi-placement-30d: 1.00           # 2015/61 Art. 32(1), 32(2)(a); MM placements ≤ 30 days
             lcr-operational-deposit-inflow: 0           # 2015/61 Art. 32(3)(d)
             lcr-inflow-cap: 0.75                        # 2015/61 Art. 33(1)
             nsfr-asf-capital: 1.00                      # CRR Art. 428o
@@ -320,9 +324,10 @@ openbank:
         # deposits with the central bank). 1002 EUR nostro is treated like 1001. Money-market
         # placements 1500/1501 are claims on banks whose d238 ¶154 100% inflow and d295 ¶39(b) 15%
         # RSF both depend on RESIDUAL MATURITY (≤30 days / <6 months), which a GL-level mapping
-        # cannot see — so they are mapped conservatively as other-asset (no inflow, 100% RSF) until
-        # the risk engine reads treasury deals as contract-level MONEY_MARKET_DEAL instruments
-        # (ADR-0314 D4 follow-up). Borrowings 2300/2301 are unsecured wholesale funding from
+        # cannot see — so they are mapped conservatively as other-asset (no inflow, 100% RSF). A
+        # placement read as a contract-level MONEY_MARKET_DEAL instrument whose maturity is ≤ 30 days
+        # additionally counts as an LCR inflow (lcr-inflow-fi-placement-30d); a GL-level balance
+        # (no contract data) still does not. Borrowings 2300/2301 are unsecured wholesale funding from
         # financial institutions: other-liability (100% outflow, d238 ¶141 conservative; 0% ASF,
         # d295 ¶25(b)). Accrued interest follows its principal's side.
         gl-accounts:
@@ -358,56 +363,111 @@ openbank:
         gl-account-types:
           INCOME: current-year-result
           EXPENSE: current-year-result
-    # ADR-0313 phase 2: Pillar 1 credit-risk capital, STANDARDISED APPROACH. A VERSIONED parameter
-    # set — bump parameter-set-version on any change here; every /capital result names the id and
-    # version it was computed with. Risk weights: BCBS d424 "Basel III: Finalising post-crisis
-    # reforms" (Dec 2017), Part I. Minimum ratios: bcbs189 "Basel III: A global regulatory framework
-    # ..." (Dec 2010, rev. June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied.
-    # Every key is required (CapitalConfig is a mapping; the domain rejects missing or unknown keys,
-    # risk weights outside [0, 12.5] and minimum ratios outside (0, 1]) — nothing has a code default.
+    # ADR-0313 phase 2: Pillar 1 credit-risk capital, STANDARDISED APPROACH. VERSIONED parameter
+    # sets under parameter-sets.<id> — bump a set's version on any change to it; every /capital
+    # result names the id and version it was computed with. Every key is required (CapitalConfig is
+    # a mapping; the domain rejects missing or unknown keys, risk weights outside [0, 12.5] and
+    # minimum ratios outside (0, 1]; every DECLARED set is validated at startup, and an undeclared
+    # parameter-set-id fails the boot) — nothing has a code default.
     capital:
       sa:
-        parameter-set-id: bcbs-d424-sa
-        # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES, below.
-        parameter-set-version: "2"
-        source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
-        factors:
-          rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
-          # d424 ¶8 is a NATIONAL DISCRETION ("a lower risk weight may be applied") for the bank's
-          # own central bank in domestic currency, funded in it. 0 is the value the discretion is
-          # normally exercised with; it applies ONLY in classification.domestic-currency below, and
-          # is shown as a discretion in every result. Set it to rw-sovereign-unrated to decline it.
-          rw-sovereign-domestic-currency: 0
-          rw-bank-scra-grade-a: 0.40             # d424 ¶21 Table 7 base (¶22-23)
-          rw-bank-scra-grade-b: 0.75             # d424 ¶21 Table 7 base (¶25-27)
-          rw-bank-scra-grade-c: 1.50             # d424 ¶21 Table 7 base (¶28-29)
-          rw-retail-regulatory: 0.75             # d424 ¶55
-          rw-retail-other: 1.00                  # d424 ¶57
-          rw-corporate-unrated: 1.00             # d424 ¶40 Table 10 (unrated), ¶41
-          rw-defaulted: 1.50                     # d424 ¶92 (specific provisions < 20%)
-          rw-cash: 0                             # d424 ¶96(i)
-          rw-cash-items-in-collection: 0.20      # d424 ¶97
-          rw-other-asset: 1.00                   # d424 ¶95
-          min-cet1-ratio: 0.045                  # bcbs189 ¶50
-          min-tier1-ratio: 0.06                  # bcbs189 ¶50
-          min-total-capital-ratio: 0.08          # bcbs189 ¶50 (the 8% own-funds requirement)
+        # Which set below is applied. The platform is an EU (Czech) credit institution and finrep
+        # reports COREP C 02.00 under the CRR, so the EU CRR set is the default; the BCBS d424 set
+        # stays declared and selectable (OPENBANK_RISK_CAPITAL_SA_PARAMETER_SET_ID=bcbs-d424-sa).
+        parameter-set-id: eu-crr3-sa
+        parameter-sets:
+          # Risk weights: BCBS d424 "Basel III: Finalising post-crisis reforms" (Dec 2017), Part I.
+          # Minimum ratios: bcbs189 "Basel III: A global regulatory framework ..." (Dec 2010, rev.
+          # June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied in this set.
+          bcbs-d424-sa:
+            # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES,
+            # in classification below (shared by every set).
+            version: "2"
+            regime: bcbs
+            source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
+            # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
+            # person" cannot be verified from the snapshot: not-defaulted loans are "other retail"
+            # (¶57, 100%). corporate-unrated (¶40-41 / ¶58, also 100%) is the equivalent reading for
+            # SMEs; regulatory-retail (75%) only with evidence of ALL ¶55 criteria.
+            retail-treatment: other-retail
+            factors:
+              rw-sovereign-unrated: 1.00             # d424 ¶7 Table 1 (unrated)
+              # d424 ¶8 is a NATIONAL DISCRETION ("a lower risk weight may be applied") for the bank's
+              # own central bank in domestic currency, funded in it. 0 is the value the discretion is
+              # normally exercised with; it applies ONLY in classification.domestic-currency below, and
+              # is shown as a discretion in every result. Set it to rw-sovereign-unrated to decline it.
+              rw-sovereign-domestic-currency: 0
+              rw-bank-scra-grade-a: 0.40             # d424 ¶21 Table 7 base (¶22-23)
+              rw-bank-scra-grade-b: 0.75             # d424 ¶21 Table 7 base (¶25-27)
+              rw-bank-scra-grade-c: 1.50             # d424 ¶21 Table 7 base (¶28-29)
+              rw-retail-regulatory: 0.75             # d424 ¶55
+              rw-retail-other: 1.00                  # d424 ¶57
+              rw-corporate-unrated: 1.00             # d424 ¶40 Table 10 (unrated), ¶41
+              rw-defaulted: 1.50                     # d424 ¶92 (specific provisions < 20%)
+              rw-cash: 0                             # d424 ¶96(i)
+              rw-cash-items-in-collection: 0.20      # d424 ¶97
+              rw-other-asset: 1.00                   # d424 ¶95
+              min-cet1-ratio: 0.045                  # bcbs189 ¶50
+              min-tier1-ratio: 0.06                  # bcbs189 ¶50
+              min-total-capital-ratio: 0.08          # bcbs189 ¶50 (the 8% own-funds requirement)
+          # Regulation (EU) 575/2013 (CRR) as amended by CRR2 (EU) 2019/876 and CRR3 (EU) 2024/1623:
+          # Part Three Title II Chapter 2 (standardised approach) risk weights and Art. 92(1) minima,
+          # for the exposure classes this engine models. UNVERIFIED = the article and the weight are
+          # relied on but the PARAGRAPH is not confirmed against the consolidated CRR3 text (#11107):
+          # Art. 121 (SCRA table), Art. 122 (unrated corporate), Art. 123 (retail 75%) and Art. 134
+          # (which of (2)/(3) is cash in hand 0% and which cash items in collection 20%).
+          eu-crr3-sa:
+            version: "1"
+            regime: eu
+            source: "Regulation (EU) 575/2013 as amended by (EU) 2019/876 and (EU) 2024/1623, Part Three Title II Chapter 2 (standardised approach) and Art. 92(1); paragraphs marked UNVERIFIED in the factor citations are not confirmed against the consolidated text"
+            # CRR has NO "other retail" class: an exposure that does not meet ALL Art. 123 criteria
+            # (natural person or SME; one of a significant number of similar exposures; total owed by
+            # the obligor group ≤ EUR 1m) is a corporate exposure, Art. 122. None of those criteria is
+            # verifiable from the snapshot, so loans and overdrafts are corporate-unrated (100%);
+            # regulatory-retail (75%, Art. 123) only with evidence. other-retail is REFUSED here.
+            retail-treatment: corporate-unrated
+            factors:
+              rw-sovereign-unrated: 1.00             # CRR Art. 114(1)
+              # CRR Art. 114(4): Member State central government / central bank, denominated AND
+              # funded in its domestic currency: 0% — a rule, not a discretion as in d424 ¶8. Applies
+              # only in classification.domestic-currency (the ČNB in CZK).
+              rw-sovereign-domestic-currency: 0
+              # CRR3 Art. 121 SCRA, unrated institutions — paragraph UNVERIFIED. Short-term weights
+              # (original maturity ≤ 3 months: A 20%, B 50%, C 150%) need maturities a GL balance does
+              # not carry, so the base weights apply; the grade in use is classification.bank-scra-grade.
+              rw-bank-scra-grade-a: 0.40             # CRR Art. 121 — paragraph UNVERIFIED
+              rw-bank-scra-grade-b: 0.75             # CRR Art. 121 — paragraph UNVERIFIED
+              rw-bank-scra-grade-c: 1.50             # CRR Art. 121 — paragraph UNVERIFIED
+              rw-retail-regulatory: 0.75             # CRR Art. 123 — paragraph UNVERIFIED
+              # No CRR counterpart (see retail-treatment above). Required by the factor list, never
+              # applied: the set refuses retail-treatment other-retail.
+              rw-retail-other: 1.00
+              rw-corporate-unrated: 1.00             # CRR Art. 122 (unrated) — paragraph UNVERIFIED
+              # CRR Art. 127(1): 150% where specific credit risk adjustments < 20% of the unsecured
+              # part, 100% otherwise. The adjustment per loan is not in the data, so 150% for every
+              # defaulted loan — the CONSERVATIVE bucket.
+              rw-defaulted: 1.50
+              rw-cash: 0                             # CRR Art. 134 cash in hand — paragraph UNVERIFIED; no GL mapped
+              rw-cash-items-in-collection: 0.20      # CRR Art. 134 items in collection — paragraph UNVERIFIED; no GL mapped
+              rw-other-asset: 1.00                   # CRR Art. 134(1) other items
+              min-cet1-ratio: 0.045                  # CRR Art. 92(1)(a)
+              min-tier1-ratio: 0.06                  # CRR Art. 92(1)(b)
+              min-total-capital-ratio: 0.08          # CRR Art. 92(1)(c) (the 8% own-funds requirement)
+        # Shared by every set above.
         classification:
-          # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
-          # person" cannot be verified from the snapshot: not-defaulted loans are "other retail"
-          # (¶57, 100%). corporate-unrated (¶40-41 / ¶58, also 100%) is the equivalent reading for
-          # SMEs; regulatory-retail (75%) only with evidence of ALL ¶55 criteria.
-          retail-treatment: other-retail
           # No external ratings and no counterparty capital disclosures in the data: every bank
-          # exposure is SCRA (d424 ¶17(b), ¶21), and ¶23 / ¶26 send a counterparty whose published
-          # requirements are not made available to Grade C. Short-term weights (¶30, original
-          # maturity ≤ 3 months) need maturities a GL balance does not carry, so base weights.
+          # exposure is SCRA (d424 ¶17(b), ¶21; CRR Art. 121), and d424 ¶23 / ¶26 send a counterparty
+          # whose published requirements are not made available to Grade C. Short-term weights
+          # (d424 ¶30; CRR Art. 121 short-term, original maturity ≤ 3 months) need maturities a GL
+          # balance does not carry, so base weights.
           bank-scra-grade: C
-          # The currency the d424 ¶8 discretion covers (the ČNB, in CZK).
+          # The currency the d424 ¶8 discretion / CRR Art. 114(4) covers (the ČNB, in CZK).
           domestic-currency: CZK
           # GL code -> class. ONLY accounts named here (or by type below) are classified; any
           # other ASSET balance is listed as not classified, never weighted. Deliberately absent:
-          # 1000 Cash and Cash Equivalents (not known to be ¶96 physical cash; NOT treated like 1100:
-          # cash may qualify for 0% under ¶96(i), so a 100% default would be a different claim).
+          # 1000 Cash and Cash Equivalents (not known to be physical cash, d424 ¶96(i) / CRR Art. 134
+          # cash in hand; NOT treated like 1100: cash may qualify for 0%, so a 100% default would be
+          # a different claim).
           #
           # Version "2" (#10896, #11107): the three blocks below were unclassified and gapped every
           # COREP C 02.00 credit-risk row on the sandbox. Each is a POLICY CHOICE awaiting owner
@@ -531,6 +591,67 @@ openbank:
           EQUITY: not-a-liability
           INCOME: not-a-liability
           EXPENSE: not-a-liability
+      # Maintenance-period calendar (ADR-0315 D8): reserves are held on AVERAGE over each period.
+      # STATUS sample-unverified: the ČNB publishes the maintenance-period calendar, and it was NOT
+      # checked for this file. The periods below are CALENDAR MONTHS of 2026 with the base taken on
+      # the last day of the previous month — a stand-in that makes the averaging computable, NOT the
+      # official calendar. Every /min-reserves/periods response repeats the status and a SAMPLE note.
+      # Replacing it with the published calendar: set status verified, cite it in source, bump
+      # version (tracked in #11107).
+      maintenance-calendar:
+        id: cnb-pmr-maintenance-calendar
+        version: "1"
+        status: sample-unverified
+        source: "SAMPLE / UNVERIFIED: calendar months of 2026, base on the last day of the previous month; not the ČNB calendar"
+        periods:
+          - id: "2026-01"
+            start: "2026-01-01"
+            end: "2026-01-31"
+            base-reference-date: "2025-12-31"
+          - id: "2026-02"
+            start: "2026-02-01"
+            end: "2026-02-28"
+            base-reference-date: "2026-01-31"
+          - id: "2026-03"
+            start: "2026-03-01"
+            end: "2026-03-31"
+            base-reference-date: "2026-02-28"
+          - id: "2026-04"
+            start: "2026-04-01"
+            end: "2026-04-30"
+            base-reference-date: "2026-03-31"
+          - id: "2026-05"
+            start: "2026-05-01"
+            end: "2026-05-31"
+            base-reference-date: "2026-04-30"
+          - id: "2026-06"
+            start: "2026-06-01"
+            end: "2026-06-30"
+            base-reference-date: "2026-05-31"
+          - id: "2026-07"
+            start: "2026-07-01"
+            end: "2026-07-31"
+            base-reference-date: "2026-06-30"
+          - id: "2026-08"
+            start: "2026-08-01"
+            end: "2026-08-31"
+            base-reference-date: "2026-07-31"
+          - id: "2026-09"
+            start: "2026-09-01"
+            end: "2026-09-30"
+            base-reference-date: "2026-08-31"
+          - id: "2026-10"
+            start: "2026-10-01"
+            end: "2026-10-31"
+            base-reference-date: "2026-09-30"
+          - id: "2026-11"
+            start: "2026-11-01"
+            end: "2026-11-30"
+            base-reference-date: "2026-10-31"
+          - id: "2026-12"
+            start: "2026-12-01"
+            end: "2026-12-31"
+            base-reference-date: "2026-11-30"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

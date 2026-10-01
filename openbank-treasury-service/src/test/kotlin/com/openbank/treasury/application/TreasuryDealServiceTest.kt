@@ -10,21 +10,31 @@ import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
+import com.openbank.treasury.application.port.out.CurveSetPort
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FxMidRatePort
+import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
+import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
 import com.openbank.treasury.domain.DealFixtures
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.CounterpartyKind
+import com.openbank.treasury.domain.model.CurvePillar
+import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.MarketCurve
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.QuoteUnavailableException
+import com.openbank.treasury.domain.model.Side
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
@@ -51,7 +61,47 @@ class TreasuryDealServiceTest {
         override suspend fun list() = all
     }
     private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
-    private val service get() = TreasuryDealService(deals, cps, ledger, mapper, clock)
+    private var fxMid: FxMidRatePort = FxMidRatePort.NONE
+    private var tolerance: FxRateTolerance = FxRateTolerance.DISABLED
+    private var confirmationRequired = true
+    private var curveSet: CurveSetView? = null
+    private var curvesDown = false
+    private val curvePort = CurveSetPort {
+        if (curvesDown) throw QuoteUnavailableException("risk engine unreachable") else curveSet
+    }
+    private var quotes: SimulatedQuoteService? = null
+    private val service get() =
+        TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes)
+
+    /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
+    private fun quotesOn() {
+        curveSet = CurveSetView(
+            UUID.fromString("0191c0de-0000-7000-8000-00000000c5e7"),
+            monday,
+            "synthetic",
+            listOf(MarketCurve("CZEONIA", "CZK", listOf(CurvePillar(monday.plusDays(1), BigDecimal("0.035"))))),
+        )
+        quotes = SimulatedQuoteService(curvePort, cps, mapOf("SIMBK-A" to 5), enabled = true)
+    }
+
+    /** Bank buys (or sells) EUR against CZK; value date left to default (T+2). */
+    private fun fx(
+        eur: String = "10000.00",
+        rate: String = "25.000000",
+        side: FxSide = FxSide.BUY,
+        valueDate: LocalDate? = null,
+    ) = DraftDealCommand(
+        ProductType.FX_SPOT,
+        "SIMBK-A",
+        "EUR",
+        BigDecimal(eur),
+        BigDecimal(rate),
+        null,
+        valueDate,
+        null,
+        null,
+        fxSide = side,
+    )
 
     private fun cmd(
         principal: String = "100000.00",
@@ -91,22 +141,28 @@ class TreasuryDealServiceTest {
     }
 
     @Test
-    fun `the simulated market settles on value date and matures on maturity, posting each once`(): Unit = runBlocking {
-        val b = book()
-        assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
-        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
-        assertThat(service.runSimulatedMarket().moved).isEqualTo(0)
-        clock = Clock.offset(clock, java.time.Duration.ofDays(7))
-        assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
-        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.MATURED)
-        // Maturity first catches the daily accrual up (ADR-0315 D5): seven days, then the maturity.
-        assertThat(ledger.posted.map { it.idempotencyKey }).containsExactly(
-            "treasury:${b.id}:settled",
-            *(1L..7L).map { "treasury:${b.id}:accrued:${monday.plusDays(it)}" }.toTypedArray(),
-            "treasury:${b.id}:matured",
-        )
-        assertThat(deals.findById(b.id)!!.history.last().actor.id).isEqualTo("system:simulated-market")
-    }
+    fun `the simulated market confirms, settles on value date and matures on maturity, posting each once`(): Unit =
+        runBlocking {
+            val b = book()
+            assertThat(service.runSimulatedMarket().moved).describedAs("confirm + settle").isEqualTo(2)
+            assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(b.id)!!.history.map { it.to }).containsSubsequence(
+                DealState.BOOKED,
+                DealState.CONFIRMED,
+                DealState.SETTLED,
+            )
+            assertThat(service.runSimulatedMarket().moved).isEqualTo(0)
+            clock = Clock.offset(clock, java.time.Duration.ofDays(7))
+            assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
+            assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.MATURED)
+            // Maturity first catches the daily accrual up (ADR-0315 D5): seven days, then the maturity.
+            assertThat(ledger.posted.map { it.idempotencyKey }).containsExactly(
+                "treasury:${b.id}:settled",
+                *(1L..7L).map { "treasury:${b.id}:accrued:${monday.plusDays(it)}" }.toTypedArray(),
+                "treasury:${b.id}:matured",
+            )
+            assertThat(deals.findById(b.id)!!.history.last().actor.id).isEqualTo("system:simulated-market")
+        }
 
     @Test
     fun `a failing deal does not stop the simulated market pass, and is reported`(): Unit = runBlocking {
@@ -114,9 +170,9 @@ class TreasuryDealServiceTest {
         val b = book()
         ledger.failFor = a.id
         val run = service.runSimulatedMarket()
-        assertThat(run.moved).isEqualTo(1)
+        assertThat(run.moved).describedAs("both confirmed, only b settled").isEqualTo(3)
         assertThat(run.failures).hasSize(1)
-        assertThat(deals.findById(a.id)!!.state).isEqualTo(DealState.BOOKED)
+        assertThat(deals.findById(a.id)!!.state).isEqualTo(DealState.CONFIRMED)
         assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
     }
 
@@ -260,6 +316,237 @@ class TreasuryDealServiceTest {
         assertThat(ledger.posted.filter { it.event == PostingEvent.ACCRUED }.map { it.dealId }).containsExactly(b.id)
     }
 
+    // --- #10896: FX spot ---------------------------------------------------------------------------
+
+    @Test
+    fun `an FX spot defaults to T+2 and is checked against the CZK limit by its CZK equivalent`(): Unit = runBlocking {
+        book(cmd(principal = "700000.00")) // a CZK placement: 700k of the 1M CZK limit
+        val d = service.draft(fx(eur = "10000.00", rate = "25.000000"), DealFixtures.dealer)
+        assertThat(d.valueDate).isEqualTo(monday.plusDays(2))
+        assertThat(d.maturityDate).isEqualTo(d.valueDate)
+        val pending = service.submit(d.id, DealFixtures.dealer)
+        assertThat(pending.limitCheck!!.currency).isEqualTo("CZK")
+        assertThat(pending.limitCheck!!.dealAmount).isEqualByComparingTo("250000.00")
+        assertThat(pending.limitCheck!!.exposureBefore).isEqualByComparingTo("700000.00")
+        assertThat(pending.limitCheck!!.breached).isFalse()
+        // The same EUR amount at a rate that pushes the CZK leg past the headroom breaches.
+        val big = service.draft(fx(eur = "20000.00", rate = "25.000000"), DealFixtures.dealer)
+        assertThat(service.submit(big.id, DealFixtures.dealer).limitCheck!!.breached)
+            .describedAs("500k CZK on top of 700k + 250k exceeds 1M").isTrue()
+        assertThatThrownBy { runBlocking { service.approve(big.id, DealFixtures.approver) } }
+            .isInstanceOf(LimitBreachedException::class.java)
+    }
+
+    @Test
+    fun `an FX spot drafted on a Friday values on the next Tuesday`(): Unit = runBlocking {
+        clock = Clock.fixed(DealFixtures.FRIDAY.atTime(9, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        assertThat(service.draft(fx(), DealFixtures.dealer).valueDate).isEqualTo(DealFixtures.FRIDAY.plusDays(4))
+    }
+
+    @Test
+    fun `an FX spot settles both legs once on its value date and never matures`(): Unit = runBlocking {
+        val b = book(fx(eur = "1000.00", rate = "24.915000"))
+        assertThat(deals.events.single().payload).contains("\"fxSide\":\"BUY\"").contains("\"counterAmount\":24915.00")
+        assertThat(service.runSimulatedMarket().moved).describedAs("confirmed, not yet settled").isEqualTo(1)
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        assertThat(service.runSimulatedMarket().moved).isEqualTo(1)
+        val settlement = ledger.posted.single()
+        assertThat(settlement.idempotencyKey).isEqualTo("treasury:${b.id}:settled")
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+            .containsExactly(
+                "DEBIT 1002 1000.00 EUR",
+                "CREDIT 1991 1000.00 EUR",
+                "DEBIT 1990 24915.00 CZK",
+                "CREDIT 1001 24915.00 CZK",
+            )
+        clock = Clock.offset(clock, java.time.Duration.ofDays(30))
+        assertThat(
+            service.runSimulatedMarket().moved,
+        ).describedAs("a settled spot is not due for maturity").isEqualTo(0)
+        assertThat(service.accrueInterest(LocalDate.now(clock)).journals).isEqualTo(0)
+        assertThatThrownBy { runBlocking { service.mature(b.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(ledger.posted).hasSize(1)
+        val czk = service.counterparties().first { it.counterparty.id == "SIMBK-A" && it.currency == "CZK" }
+        assertThat(czk.exposure).describedAs("settlement releases the limit").isEqualByComparingTo("0")
+    }
+
+    @Test
+    fun `reversing a settled FX spot posts the flipped four legs`(): Unit = runBlocking {
+        val b = book(fx(side = FxSide.SELL))
+        clock = Clock.offset(clock, java.time.Duration.ofDays(2))
+        service.runSimulatedMarket()
+        service.reverse(b.id, "wrong side", DealFixtures.approver)
+        val (settled, reversed) = ledger.posted
+        assertThat(settled.lines.first().let { it.side to it.glCode }).isEqualTo(Side.CREDIT to "1002")
+        assertThat(reversed.lines.map { it.glCode to it.side }).isEqualTo(
+            settled.lines.map { it.glCode to (if (it.side == Side.DEBIT) Side.CREDIT else Side.DEBIT) },
+        )
+        assertThat(deals.events.last().eventType).isEqualTo("treasury.deal.reversed.v1")
+        assertThat(deals.events.last().payload).contains("\"fxSide\":\"SELL\"")
+    }
+
+    @Test
+    fun `the rate check is off by default, and when on flags - never blocks - a rate outside tolerance`(): Unit =
+        runBlocking {
+            assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).isNull()
+            tolerance = FxRateTolerance(true, BigDecimal("1.0"))
+            fxMid = FxMidRatePort { ccy, _ -> if (ccy == "EUR") BigDecimal("25.00") else null }
+            val within = service.draft(fx(rate = "25.200000"), DealFixtures.dealer)
+            assertThat(within.fx!!.rateFlag).isNull()
+            assertThat(within.fx!!.midRate).isEqualByComparingTo("25.00")
+            val off = service.draft(fx(rate = "26.000000"), DealFixtures.dealer)
+            assertThat(off.fx!!.rateFlag).contains("deviates 4.0000 %")
+            assertThat(off.history.last().note).startsWith("rate flagged:")
+            assertThat(service.submit(off.id, DealFixtures.dealer).state).isEqualTo(DealState.PENDING_APPROVAL)
+            fxMid = FxMidRatePort.NONE
+            assertThat(service.draft(fx(), DealFixtures.dealer).fx!!.rateFlag).contains("mid unavailable")
+        }
+
+    // --- ADR-0315 D2: CONFIRMED ------------------------------------------------------------------
+
+    @Test
+    fun `a back-office confirm emits the confirmed event via the outbox and posts nothing`(): Unit = runBlocking {
+        val b = book()
+        val c = service.confirm(b.id, "CPTY-42", DealFixtures.approver, "k-confirm")
+        assertThat(c.state).isEqualTo(DealState.CONFIRMED)
+        assertThat(ledger.posted).isEmpty()
+        val event = deals.events.last()
+        assertThat(event.eventType).isEqualTo("treasury.deal.confirmed.v1")
+        assertThat(event.payload).contains("\"confirmedBy\":\"adam.approver\"").contains("\"simulated\":false")
+        // A replay of the key answers with the deal as it stands, and emits nothing more.
+        assertThat(service.confirm(b.id, "CPTY-42", DealFixtures.approver, "k-confirm").state)
+            .isEqualTo(DealState.CONFIRMED)
+        assertThat(deals.events.count { it.eventType == "treasury.deal.confirmed.v1" }).isEqualTo(1)
+    }
+
+    @Test
+    fun `the simulated confirmation is labelled simulated on the event`(): Unit = runBlocking {
+        book()
+        service.runSimulatedMarket()
+        assertThat(deals.events.single { it.eventType == "treasury.deal.confirmed.v1" }.payload)
+            .contains("\"simulated\":true")
+            .contains("\"confirmedBy\":\"system:simulated-market\"")
+    }
+
+    @Test
+    fun `with confirmation required a BOOKED deal is refused settlement until confirmed`(): Unit = runBlocking {
+        val b = book()
+        assertThatThrownBy { runBlocking { service.settle(b.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("confirmation is required")
+        assertThat(ledger.posted).describedAs("a refused settlement posts nothing").isEmpty()
+        service.confirm(b.id, null, DealFixtures.approver)
+        assertThat(service.settle(b.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `with confirmation not required a legacy BOOKED deal settles directly, manually and in the market`(): Unit =
+        runBlocking {
+            confirmationRequired = false
+            val manual = book()
+            assertThat(service.settle(manual.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(manual.id)!!.history.map { it.to }).doesNotContain(DealState.CONFIRMED)
+            val market = book(cmd(principal = "1000.00"))
+            service.runSimulatedMarket()
+            assertThat(deals.findById(market.id)!!.state).isEqualTo(DealState.SETTLED)
+        }
+
+    @Test
+    fun `an agent cannot confirm through the use case either`(): Unit = runBlocking {
+        val b = book()
+        assertThatThrownBy { runBlocking { service.confirm(b.id, null, DealFixtures.agent) } }
+            .isInstanceOf(com.openbank.treasury.domain.model.ActorNotPermittedException::class.java)
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.BOOKED)
+        assertThat(deals.events.map { it.eventType }).doesNotContain("treasury.deal.confirmed.v1")
+    }
+
+    // --- ADR-0315 D9: simulated counterparties quote, and confirm only at their quote -------------
+
+    private fun mm(rate: String, product: ProductType = ProductType.MM_PLACEMENT, cp: String = "SIMBK-A") =
+        DraftDealCommand(
+            product, cp, "CZK",
+            BigDecimal(
+                "1000.00",
+            ),
+            BigDecimal(rate), null, monday, monday.plusDays(30), null,
+        )
+
+    @Test
+    fun `the quote board lists synthetic banks with a spread, off the latest curve set`(): Unit = runBlocking {
+        quotesOn()
+        val board = quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 30)
+        assertThat(
+            board.quotes.map {
+                it.counterpartyId
+            },
+        ).describedAs("the central bank never quotes").containsExactly("SIMBK-A")
+        val q = board.quotes.single()
+        assertThat(q.bid).isEqualByComparingTo("3.4070")
+        assertThat(q.ask).isEqualByComparingTo("3.5070")
+        assertThat(q.synthetic).isTrue()
+    }
+
+    @Test
+    fun `quotes are refused while off, for an unquoted product, and unavailable without a curve set`(): Unit =
+        runBlocking {
+            val off = SimulatedQuoteService(curvePort, cps, mapOf("SIMBK-A" to 5), enabled = false)
+            assertThatThrownBy { runBlocking { off.quotes(ProductType.MM_PLACEMENT, "CZK", 30) } }
+                .isInstanceOf(IllegalStateException::class.java)
+            quotesOn()
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.FX_SPOT, "CZK", 30) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 366) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            curveSet = null
+            assertThatThrownBy { runBlocking { quotes!!.quotes(ProductType.MM_PLACEMENT, "CZK", 30) } }
+                .isInstanceOf(QuoteUnavailableException::class.java)
+        }
+
+    @Test
+    fun `the simulated counterparty confirms a deal struck at its quote and declines one struck off it`(): Unit =
+        runBlocking {
+            quotesOn()
+            val atBid = book(mm("3.40"))
+            val overBid = book(mm("3.60"))
+            val borrowAtAsk = book(mm("3.51", product = ProductType.MM_BORROWING))
+            val run = service.runSimulatedMarket()
+            assertThat(run.declined).isEqualTo(1)
+            assertThat(run.failures).isEmpty()
+            assertThat(deals.findById(atBid.id)!!.state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(borrowAtAsk.id)!!.state).isEqualTo(DealState.SETTLED)
+            assertThat(deals.findById(overBid.id)!!.state).describedAs("left for a person").isEqualTo(DealState.BOOKED)
+            val note = deals.findById(atBid.id)!!.history.single { it.to == DealState.CONFIRMED }.note
+            assertThat(note).contains("synthetic quote bid 3.4070 / ask 3.5070").contains("CZEONIA")
+            assertThat(ledger.posted.map { it.dealId }).doesNotContain(overBid.id)
+        }
+
+    @Test
+    fun `an unquoted deal - the central bank - is confirmed as before quotes existed`(): Unit = runBlocking {
+        quotesOn()
+        val cnb =
+            book(cmd(principal = "5000.00", product = ProductType.CNB_DEPOSIT_FACILITY, cp = "CNB", maturity = null))
+        service.runSimulatedMarket()
+        assertThat(deals.findById(cnb.id)!!.state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
+    fun `an unreadable curve is a reported failure, never a silent confirmation`(): Unit = runBlocking {
+        quotesOn()
+        val b = book(mm("3.40"))
+        curvesDown = true
+        val run = service.runSimulatedMarket()
+        assertThat(run.failures.single()).isInstanceOf(QuoteUnavailableException::class.java)
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.BOOKED)
+    }
+
+    @Test
+    fun `a money-market draft without a value date is refused`(): Unit = runBlocking {
+        val noDate = cmd().copy(valueDate = null)
+        assertThatThrownBy { runBlocking { service.draft(noDate, DealFixtures.dealer) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
     private class RecordingLedger : LedgerPostingPort {
         val posted = mutableListOf<JournalSpec>()
         var failFor: UUID? = null
@@ -294,17 +581,18 @@ class TreasuryDealServiceTest {
 
         override suspend fun findById(dealId: UUID) = rows[dealId]
         override suspend fun list(state: DealState?) = rows.values.filter { state == null || it.state == state }
-        override suspend fun dueForSettlement(today: LocalDate) =
-            rows.values.filter { it.state == DealState.BOOKED && !it.valueDate.isAfter(today) }
-        override suspend fun dueForMaturity(today: LocalDate) =
-            rows.values.filter { it.state == DealState.SETTLED && !it.maturityDate.isAfter(today) }
+        override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>) =
+            rows.values.filter { it.state in states && !it.valueDate.isAfter(today) }
+        override suspend fun dueForMaturity(today: LocalDate) = rows.values.filter {
+            it.state == DealState.SETTLED && !it.maturityDate.isAfter(today) && it.product != ProductType.FX_SPOT
+        }
         override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?) =
             rows.values.filter {
                 it.counterpartyId == counterpartyId &&
-                    it.currency == currency &&
+                    it.limitCurrency == currency &&
                     it.consumesLimit &&
                     it.id != excludeDealId
-            }.sumOf { it.principal }
+            }.sumOf { it.limitAmount }
         override suspend fun pendingLimitOverrides() =
             rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
         override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }

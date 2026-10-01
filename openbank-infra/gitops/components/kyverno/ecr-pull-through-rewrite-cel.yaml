@@ -1,18 +1,33 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# CEL (policies.kyverno.io/v1 MutatingPolicy) port of ecr-pull-through-rewrite.yaml —
-# kyverno.io/v1 ClusterPolicy is deprecated in Kyverno 1.19 and planned for removal
-# in 1.20 (https://kyverno.io/docs/guides/migration-to-cel/). Read that file's header
-# for WHY each registry is rewritten and why CNPG pods are never touched.
+# ECR pull-through cache image rewrite (policies.kyverno.io/v1 MutatingPolicy). CEL port
+# of the kyverno.io/v1 ClusterPolicy `ecr-pull-through-rewrite` (ClusterPolicy is
+# deprecated in Kyverno 1.19 and planned for removal in 1.20,
+# https://kyverno.io/docs/guides/migration-to-cel/); that policy was deleted when this
+# one was enabled (#11437). The `-cel` suffix stays for metric/PolicyReport continuity.
 #
-# STAGE 1 OF 2 — SHIPPED INERT (a matchCondition that is always false; see below). A mutation has
-# no Audit mode: enabled, this would rewrite live Pods next to the v1 policy. The two
-# would agree (a rewritten ref starts with the ECR host, so the second engine no-ops),
-# but "agree" is exactly what stage 1 exists to prove, so it is proven with the Kyverno
-# 1.19.1 CLI instead (openbank-infra/tests/kyverno-cel/run.sh) and this object only has to be
-# accepted by the API server. Stage 2 removes the kill switch and deletes the v1
-# ClusterPolicy in the same PR, so exactly one engine mutates at any time.
+# Why: containerd hosts.toml mirrors cannot add a path prefix, but ECR pull-through
+# needs the rule prefix (quay/, k8s/, ...) in the path, so a mirror silently falls back
+# to the origin registry over NAT. Rewriting the ref at admission, before containerd
+# sees it, sends the pull to private ECR over the ecr.dkr VPC endpoint instead. The
+# pull-through rules live in aws/envs/sandbox-platform/ecr-pull-through-cache.tf.
+#
+# CNPG instance pods (label cnpg.io/cluster) are NEVER rewritten: the CNPG operator
+# compares the running pod's image with Cluster.spec.imageName, so a rewritten image
+# reads as permanent drift and the operator recreates the instance pod every reconcile
+# (ADR-0092). CNPG clusters that want the cache point spec.imageName at the
+# pull-through path themselves (#1290).
+#
+# Idempotent by construction, and measured (#11437): every rewritten ref starts with the
+# ECR host, which matches none of the origin prefixes, so running this policy (or the
+# former v1 one) on its own output changes nothing. That is why the v1 -> CEL swap
+# could land as one Argo sync (PruneLast: this document is applied before the v1 one
+# is pruned) with a harmless overlap instead of a window with no rewrite at all.
+#
+# failurePolicy: Ignore — if the Kyverno webhook is down, pods still start and pull
+# from the origin over NAT rather than being blocked. background disabled: only
+# admission requests are mutated, existing Pods are never touched.
 #
 # Semantics kept from v1, rule for rule:
 #   quay.io/, registry.k8s.io/, public.ecr.aws/, docker.io/, ghcr.io/ prefixes →
@@ -24,6 +39,19 @@
 # The five v1 regexes were anchored literal prefixes, so startsWith + substring is an
 # exact equivalent; the v1 strategic-merge-by-name becomes an ApplyConfiguration on
 # the name-keyed container lists.
+#
+# Pod controllers (Deployment, DaemonSet, StatefulSet, ReplicaSet, Job, CronJob) are
+# covered by Kyverno autogen, as v1's autogen- rules covered them. Kyverno 1.19.1
+# (pkg/cel/policies/mpol/autogen/autogen.go:70-82) rewrites `object.spec` and
+# `object.metadata.labels` to the pod template ONLY in matchConditions and mutations —
+# never in `variables` — and wraps a mutation in the template path only when it starts
+# with the root `Object{` (autogen.go:127-167). So a variable must not read
+# `object.spec`: one that read `object.spec.containers` errored on every controller with
+# `no such key: containers` (57 PolicyReport errors on 2026-09-30), and `Ignore` admitted
+# the controller unmutated. Its Pods were still rewritten at Pod admission, so pulls went
+# to ECR; what broke was the controller rewrite and the report noise. Label reads are
+# guarded by `request.kind.kind == 'Pod'`, because a controller's pod template may carry
+# no metadata at all, and optional lists are read with `.?`.
 apiVersion: policies.kyverno.io/v1
 kind: MutatingPolicy
 metadata:
@@ -49,10 +77,19 @@ spec:
   variables:
     - name: ecr
       expression: "'265175468565.dkr.ecr.eu-north-1.amazonaws.com/'"
+    # Below, `request.kind.kind == 'Pod'` guards every label read, and the labels are read
+    # as `object.metadata.?labels`, which autogen does NOT rewrite. For a controller the
+    # label reads therefore never run, so a template with no metadata cannot error
+    # (it did: `has(object.spec.template.metadata.labels)` is `no such key: metadata`
+    # on a CronJob whose template carries none — reproduced by the harness).
     - name: eksSystemPod
+      # A kube-system CONTROLLER is treated as an EKS system pod for the quay rule:
+      # its template is left at quay.io, and the Pod it creates is decided at Pod
+      # admission on the Pod's real labels — the same final image v1 produced.
       expression: >-
         request.namespace == 'kube-system' &&
-        object.metadata.?labels[?'eks.amazonaws.com/component'].orValue('') == 'true'
+        (request.kind.kind != 'Pod' ||
+          object.metadata.?labels[?'eks.amazonaws.com/component'].orValue('') == 'true')
     - name: prefixes
       # [origin prefix, ECR pull-through prefix]; quay is dropped for EKS system pods.
       expression: >-
@@ -63,30 +100,28 @@ spec:
           ['docker.io/', 'docker-hub/'],
           ['ghcr.io/', 'ghcr/']
         ].filter(p, p[0] != 'quay.io/' || !variables.eksSystemPod)
-    - name: needsRewrite
-      expression: >-
-        (object.spec.containers + object.spec.?initContainers.orValue([])).exists(c,
-          variables.prefixes.exists(p, c.image.startsWith(p[0])))
   matchConditions:
-    # STAGE-1 KILL SWITCH. Kyverno refuses a MutatingPolicy with admission evaluation
-    # disabled, so this condition is what keeps it inert: it never matches. Stage 2
-    # deletes these three lines and the v1 ClusterPolicy in the same PR.
-    - name: stage-1-disabled-until-v1-removed
-      expression: "false"
-    # CNPG instance pods own their image ref (see the v1 header). A matchCondition,
+    # CNPG instance pods own their image ref (see the header). A matchCondition,
     # not an objectSelector: the 1.19.1 CLI ignored an objectSelector here and
     # rewrote the CNPG fixture, so the exclusion lives where every engine reads it.
+    # The CNPG operator creates instance Pods directly, never through a controller,
+    # so the check applies to Pods only.
     - name: not-a-cnpg-instance-pod
-      expression: "!('cnpg.io/cluster' in object.metadata.?labels.orValue({}))"
+      expression: >-
+        request.kind.kind != 'Pod' ||
+        !('cnpg.io/cluster' in object.metadata.?labels.orValue({}))
+    # Inline, not a variable: autogen rewrites `object.spec` here to the pod template.
     - name: has-rewritable-image
-      expression: variables.needsRewrite
+      expression: >-
+        (object.spec.?containers.orValue([]) + object.spec.?initContainers.orValue([])).exists(c,
+          variables.prefixes.exists(p, c.image.startsWith(p[0])))
   mutations:
     - patchType: ApplyConfiguration
       applyConfiguration:
         expression: >-
           Object{
             spec: Object.spec{
-              containers: object.spec.containers
+              containers: object.spec.?containers.orValue([])
                 .filter(c, variables.prefixes.exists(p, c.image.startsWith(p[0])))
                 .map(c, Object.spec.containers{
                   name: c.name,

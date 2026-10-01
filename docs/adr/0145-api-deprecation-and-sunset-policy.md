@@ -1,13 +1,14 @@
 ---
 date: 2026-07-02
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [api-contract, psd2-api, governance]
 summary: "Adopt an API deprecation policy on top of the existing header mechanism: oasdiff decides what is breaking, external paths keep a 180-day sunset window, notification is two-channel, and removal requires evidence of zero live traffic."
+followup: "#11602 — developer-portal changelog and the zero-traffic check before removal are unbuilt"
 ---
 
 # ADR-0145 — API deprecation and sunset policy

@@ -52,6 +52,7 @@ class OutboxDeadLetterAlertNamingTest {
     private val alertRules = mapOf(
         "card-issuance" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "billing" to File("../openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"),
+        "referral" to File("../openbank-infra/gitops/components/referral/prometheus-rules-referral.yaml"),
     )
 
     @Test

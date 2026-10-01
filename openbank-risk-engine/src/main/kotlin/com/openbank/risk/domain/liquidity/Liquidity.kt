@@ -7,6 +7,7 @@ package com.openbank.risk.domain.liquidity
 import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Instrument
+import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.LoanExtension
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
@@ -198,6 +199,9 @@ object Liquidity {
                                 centralBankSecuredFunding = true
                             }
                             acc.glAccount(p, cls)
+                            if (p.kind == PositionKind.TREASURY_DEAL) {
+                                acc.placementInflow(p, cls, p.instrumentId?.let(byId::get), asOf)
+                            }
                         }
                     }
                 }
@@ -218,6 +222,18 @@ object Liquidity {
             ),
         )
     }
+
+    /**
+     * Ids of the contract-level instruments whose position [compute] counts in the HQLA stock — a
+     * money-market deal on an account the parameter set classifies as HQLA (1510 ČNB deposit
+     * facility, Level 1). Read off the same [LiquidityClassification.classOf] call [compute] makes,
+     * so there is one classification, not a second list of "HQLA accounts" to drift from it.
+     */
+    fun hqlaInstrumentIds(positions: List<Position>, params: LiquidityParameters): Set<String> = positions.asSequence()
+        .filter { it.kind == PositionKind.TREASURY_DEAL && it.instrumentId != null }
+        .filter { params.classification.classOf(it.glAccountCode, it.glAccountType)?.isHqla == true }
+        .mapNotNull { it.instrumentId }
+        .toSet()
 
     /** d238 Annex 1 ¶5, with the 2/3, 15/85 and 15/60 ratios derived from the two configured caps. */
     fun hqlaStock(lines: List<HqlaLine>, level2Cap: BigDecimal, level2bCap: BigDecimal): HqlaStock {
@@ -428,6 +444,25 @@ object Liquidity {
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }
+        }
+
+        /**
+         * A contract-level money-market placement (a claim on a financial customer) maturing within
+         * the 30-day horizon is an inflow of its outstanding principal (d238 ¶154, EU 2015/61 Art.
+         * 32(2)(a)); beyond it, none. Accrued interest stays GL-level, as for a bullet loan. An HQLA
+         * deal (the ČNB deposit facility, 1510) is already in the stock and is never also an inflow
+         * (EU 2015/61 Art. 32(6), d238 ¶142-143 — points UNVERIFIED). Its GL class keeps deciding the RSF.
+         */
+        fun placementInflow(p: Position, c: GlClass, instrument: Instrument?, asOf: LocalDate) {
+            if (c.isHqla || instrument?.kind != InstrumentKind.MONEY_MARKET_DEAL || p.amount.signum() <= 0) return
+            val maturity = instrument.maturityDate ?: return
+            if (maturity < asOf || maturity > asOf.plusDays(LCR_HORIZON_DAYS)) return
+            inflows += line(
+                "Money-market placement ${instrument.id}: principal due $maturity (≤ 30 days)",
+                p.glAccountCode,
+                p.amount,
+                LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D,
+            )
         }
 
         /** An HQLA account: its level and haircut (d238 ¶49-54) and its RSF (d295 ¶36-40). */

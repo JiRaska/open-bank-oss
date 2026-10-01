@@ -28,10 +28,12 @@ vi.mock('recharts', () => {
 })
 
 import LedgerBackfillPage from '@/app/balance-sheet/ledger-backfill/page'
+import LedgerBackfillVoidPage from '@/app/balance-sheet/ledger-backfill/voids/page'
 import SnapshotDetailPage from '@/app/balance-sheet/snapshots/[id]/page'
 import SnapshotCapitalPage from '@/app/balance-sheet/snapshots/[id]/capital/page'
 import SnapshotIrrbbPage from '@/app/balance-sheet/snapshots/[id]/irrbb/page'
 import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/page'
+import SnapshotLiquidityForecastPage from '@/app/balance-sheet/snapshots/[id]/liquidity-forecast/page'
 import SnapshotMinReservesPage from '@/app/balance-sheet/snapshots/[id]/min-reserves/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
 
@@ -110,6 +112,77 @@ describe('ledger backfill — four-eyes in the console', () => {
     fireEvent.click(post)
     await screen.findByText(/Backfill complete|Doúčtování dokončeno/)
     expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/requests/appr-1/execute?execute=true')
+  })
+})
+
+describe('ledger backfill void — four-eyes in the console (#10969, #11487)', () => {
+  const SOURCE = { ...REQUEST, id: 'src-1', state: 'EXECUTED', proposedBy: 'petr.finance', executedBy: 'petr.finance', executedAt: '2026-09-26T07:48:34Z' }
+  const VOID = {
+    sourceRequestId: 'src-1', voidDate: '2026-09-30', planHash: 'v', loanCount: 44, legCount: 352,
+    decidedBy: null, decisionReason: null, executedBy: null, lastResult: null, proposedAt: '2026-09-30T08:00:00Z',
+  }
+  const V_OWN = { ...VOID, id: 'v-own', state: 'PROPOSED', proposedBy: 'jana.finance' }
+  const V_OTHER = { ...VOID, id: 'v-other', state: 'PROPOSED', proposedBy: 'petr.finance' }
+  const V_APPROVED = { ...VOID, id: 'v-appr', state: 'APPROVED', proposedBy: 'petr.finance', decidedBy: 'jana.finance' }
+  const PLAN = {
+    plan: { cutoverDate: '2026-09-30', planHash: 'v', tieOut: [], loans: [{ loanId: 'l1', currency: 'CZK', status: 'ACTIVE', unpaidPrincipal: 1, legs: [] }] },
+    executable: true, journalCount: 352, glTotals: [{ code: '1200', currency: 'CZK', debit: 1, credit: 0, net: 1 }],
+  }
+  beforeEach(() => {
+    router = (url, init) => {
+      if (url.includes('/voids/plan')) return json(PLAN)
+      if (url.includes('/voids/v-other/decide')) return json({ error: 'Maker and checker must differ' }, 422)
+      if (url.includes('/voids/v-appr/execute')) {
+        return json({ execution: { requestId: 'v-appr', executed: true, complete: true, loans: [{ loanId: 'l1', status: 'VOIDED', legs: [] }] }, offsetGlTotals: [] })
+      }
+      if (url.endsWith('/ledger-backfill/voids') && init?.method === 'POST') return json({ ...V_OWN }, 201)
+      if (url.includes('/ledger-backfill/voids') && !init?.method) return json({ requests: [V_OWN, V_OTHER, V_APPROVED] })
+      if (url.includes('/ledger-backfill/requests') && !init?.method) return json({ requests: [SOURCE, APPROVED] })
+      return json({}, 404)
+    }
+  })
+
+  it('lists voids through the lending BFF and offers only EXECUTED backfills as sources', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(calls.some(c => c.url === '/api/svc/lending-service/api/v1/lending/ledger-backfill/voids?limit=25')).toBe(true)
+    const options = screen.getAllByRole('option').map(o => (o as HTMLOptionElement).value)
+    expect(options).toEqual(['src-1'])
+  })
+
+  it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /Navrhnout storno|Propose void/ }))
+    await screen.findByText(/Void proposal recorded|Návrh storna zaznamenán/)
+    expect(calls.find(c => c.url.includes('/voids/plan'))!.url).toContain('sourceRequestId=src-1')
+    const post = calls.find(c => c.url.endsWith('/ledger-backfill/voids') && c.init?.method === 'POST')!
+    expect(JSON.parse(String(post.init?.body))).toEqual({ sourceRequestId: 'src-1' })
+    expect((post.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('hides approve from the proposer and shows the backend 422 on a refused decision', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findByText(/You proposed this|Tento návrh je váš/)
+    const approve = screen.getAllByRole('button', { name: /^(Schválit|Approve)$/ })
+    expect(approve).toHaveLength(1)
+    fireEvent.click(approve[0])
+    await screen.findByText(/Maker and checker must differ/)
+    const decide = calls.find(c => c.url.includes('/voids/v-other/decide'))!
+    expect((decide.init?.headers as Record<string, string>)['Idempotency-Key']).toBeTruthy()
+  })
+
+  it('executes only after explicit confirmation, with execute=true', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    fireEvent.click(await screen.findByRole('button', { name: /Provést|Execute/ }))
+    const run = screen.getByRole('button', { name: /^(Stornovat|Void loans)$/ }) as HTMLButtonElement
+    expect(run.disabled).toBe(true)
+    expect(calls.some(c => c.url.includes('/execute'))).toBe(false)
+    fireEvent.click(screen.getAllByRole('checkbox')[0])
+    fireEvent.click(run)
+    await screen.findByText(/Void complete|Storno dokončeno/)
+    expect(calls.find(c => c.url.includes('/execute'))!.url).toContain('/voids/v-appr/execute?execute=true')
   })
 })
 
@@ -394,6 +467,85 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
   })
 })
 
+const fRow = (fromDay: number, toDay: number, behaviouralOutflows: number, cumulative: number, minCumulative = cumulative) => ({
+  fromDay, toDay, from: '2026-10-01', to: `2026-10-${String(toDay).padStart(2, '0')}`,
+  contractualInflows: 0, contractualOutflows: 0, behaviouralInflows: 0, behaviouralOutflows,
+  inflows: 0, outflows: behaviouralOutflows, net: behaviouralOutflows, cumulative, minCumulative,
+})
+const FORECAST = (survival: number | null, hqla: boolean) => ({
+  runId: 'run-6', asOf: '2026-09-30', provenance: 'synthetic', curveSetId: 'cs-1', curveSetProvenance: 'synthetic',
+  model: { id: 'nmd-linear-core', version: '1.0.0', coreRatio: 0.7, coreRunoffYears: 5, annualDepositRate: 0 },
+  parameterSetId: 'bcbs-d238-d295', parameterSetVersion: '2', horizonDays: 90, dailyDays: 30,
+  currencies: [{
+    currency: 'CZK',
+    hqla: hqla ? { lines: [], level1: 1000, level2a: 0, level2b: 0, adjustmentFor15Cap: 0, adjustmentFor40Cap: 0, level2bCapBinding: false, level2CapBinding: false, stock: 1000 } : null,
+    openingLiquidity: hqla ? 1000 : 0,
+    survivalHorizonDays: survival, survivalDate: survival === null ? null : '2026-10-01',
+    minimumCumulative: survival === null ? 550 : -450, flowsBeyondHorizon: 57,
+    ladder: survival === null ? [fRow(1, 1, -450, 550), fRow(2, 2, 0, 550)] : [fRow(1, 1, -450, -450), fRow(2, 2, 0, -450)],
+  }],
+  assumptions: [
+    { key: 'opening-liquidity', statement: 'Opening liquidity is the HQLA stock as the LCR reports it.' },
+    { key: 'new-business-not-modelled', statement: 'New business is not modelled.' },
+  ],
+})
+
+describe('Liquidity forecast (survival horizon)', () => {
+  const route = (body: unknown, status = 200) => (url: string) => url.includes('/curve-sets')
+    ? json({ curveSets: [{ id: 'cs-1', asOf: '2026-09-30', provenance: 'synthetic', source: 'desk', recordedAt: '2026-09-30T06:00:00Z', indices: ['CZEONIA'] }] })
+    : json(body, status)
+
+  it('shows the ladder, the opening HQLA and a survival horizon that is not breached as such, never as a day', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    const forecastCalls = calls.filter(c => c.url.includes('/liquidity-forecast'))
+    expect(forecastCalls.length).toBeGreaterThan(0)
+    expect(forecastCalls.every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/liquidity-forecast?') && c.url.includes('curveSetId=cs-1') && c.url.includes('horizonDays=90'))).toBe(true)
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/no shortfall within 90 days|bez výpadku do 90 dnů/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(0)
+    expect(screen.getByText(/New business is not modelled/)).toBeTruthy()
+    expect(screen.getByText(/bcbs-d238-d295 v2/)).toBeTruthy()
+    expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
+  })
+
+  it('names the breach day, marks negative rows and says when a currency holds no HQLA', async () => {
+    router = route(FORECAST(1, false))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('survival-CZK').textContent).toMatch(/day 1|1\. den/)
+    expect(document.querySelectorAll('tr[data-negative="true"]').length).toBe(2)
+    expect(screen.getByText(/no HQLA held in this currency|nemá žádná HQLA/)).toBeTruthy()
+  })
+
+  it('marks a weekly row that dips negative mid-week even though it ends positive', async () => {
+    const body = FORECAST(null, true)
+    body.currencies[0].ladder = [fRow(1, 1, -450, 550), fRow(31, 37, 0, 120, -80)]
+    router = route(body)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    expect(screen.getByTestId('min-cumulative-CZK-31').textContent).toMatch(/80/)
+    const negative = document.querySelectorAll('tr[data-negative="true"]')
+    expect(negative.length).toBe(1)
+    expect(negative[0].textContent).toMatch(/31–37/)
+  })
+
+  it('sends the chosen horizon', async () => {
+    router = route(FORECAST(null, true))
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('survival-CZK')
+    await act(async () => { fireEvent.change(screen.getByLabelText(/^(Forecast horizon|Horizont prognózy)$/), { target: { value: '365' } }) })
+    expect(calls.some(c => c.url.includes('/liquidity-forecast') && c.url.includes('horizonDays=365'))).toBe(true)
+  })
+
+  it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {
+    router = route({ error: 'UNTIED', runId: 'run-6', mismatches: [] }, 409)
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: 'run-6' })} />)
+    await act(async () => { await Promise.resolve() })
+    expect(screen.queryByTestId('survival-CZK')).toBeNull()
+  })
+})
+
 const reserveLine = (label: string, amount: number, reserveClass: string, glAccountCode: string | null = '9001') =>
   ({ label, glAccountCode, amount, reserveClass })
 const MIN_RESERVES = (opts: {
@@ -435,7 +587,9 @@ describe('ČNB minimum reserve requirement', () => {
     router = () => json(MIN_RESERVES())
     await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
     await screen.findByTestId('total-holdings')
-    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')).toBe(true)
+    expect(calls[0].url).toBe('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')
+    // every other call is the maintenance-period read, through the same BFF path
+    expect(calls.slice(1).every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/min-reserves/periods'))).toBe(true)
     expect(screen.getByTestId('total-holdings').textContent).toMatch(/2[\s ,.]?500/)
     expect(screen.getByTestId('requirement').textContent).toMatch(/2[\s ,.]?000/)
     expect(screen.getByTestId('surplus').textContent).toMatch(/500/)
@@ -486,6 +640,64 @@ describe('ČNB minimum reserve requirement', () => {
     expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
     expect(screen.getByRole('alert').textContent).toContain('1000')
     expect(screen.getByText(/Excluded balances|Vyloučené zůstatky/)).toBeTruthy()
+  })
+
+  const PERIOD_ID = '2026-09'
+  const CALENDAR = {
+    calendarId: 'cnb-pmr-maintenance-calendar', calendarVersion: '1', calendarStatus: 'sample-unverified',
+    calendarSource: 'SAMPLE / UNVERIFIED', notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'],
+    periods: [{ id: PERIOD_ID, start: '2026-09-01', end: '2026-09-30', baseReferenceDate: '2026-08-31' }],
+  }
+  const PERIOD = (over: Record<string, unknown> = {}) => ({
+    calendarId: CALENDAR.calendarId, calendarVersion: '1', calendarStatus: 'sample-unverified', calendarSource: 'SAMPLE / UNVERIFIED',
+    period: CALENDAR.periods[0], evaluationDate: '2026-09-30', parameterSetId: 'cnb-pmr', parameterSetVersion: '2', holdingCurrency: 'CZK',
+    baseRunId: 'run-base', requirement: 2000, requirementNotStated: null,
+    daysInPeriod: 30, daysElapsed: 3, daysRemaining: 27, daysWithData: 3, coverage: 1, missingDays: [],
+    days: [{ date: '2026-09-01', runId: 'r1', holdings: 1900 }, { date: '2026-09-02', runId: 'r2', holdings: 2000 }, { date: '2026-09-03', runId: 'r3', holdings: 2100 }],
+    averageHoldings: 2000, averageNotStated: null, remainingRequiredAverage: 2000, dailyHoldingProposal: 2000,
+    proposal: [{ date: '2026-09-04', amount: 2000 }], proposalNotStated: null, requirementMet: null,
+    notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'], ...over,
+  })
+  const periodRouter = (period: unknown, calendar: unknown = CALENDAR) => (url: string) => {
+    if (url.includes(`/min-reserves/periods/${PERIOD_ID}`)) return json(period)
+    if (url.includes('/min-reserves/periods')) return json(calendar)
+    return json(MIN_RESERVES())
+  }
+
+  it('shows the maintenance period of the run date: sample badge, requirement, average, coverage and proposal', async () => {
+    router = periodRouter(PERIOD())
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-proposal')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/min-reserves/periods?asOf=2026-09-30')).toBe(true)
+    expect(calls.some(c => c.url === `/api/svc/risk-engine/api/v1/risk/min-reserves/periods/${PERIOD_ID}?asOf=2026-09-30`)).toBe(true)
+    expect(screen.getByText(/Sample, unverified calendar|Vzorový, neověřený kalendář/)).toBeTruthy()
+    expect(screen.getByTestId('period-requirement').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-average').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-coverage').textContent).toMatch(/3 \/ 3/)
+    expect(document.querySelectorAll('tr[data-period-day="true"]').length).toBe(3)
+  })
+
+  it('a not-stated average and proposal show their reasons, never a zero figure', async () => {
+    router = periodRouter(PERIOD({
+      averageHoldings: null, averageNotStated: 'No ledger GL account is mapped as the bank current account at the ČNB',
+      remainingRequiredAverage: null, dailyHoldingProposal: null, proposal: null, proposalNotStated: 'holdings not stated',
+      days: [{ date: '2026-09-01', runId: 'r1', holdings: null }], daysWithData: 1, coverage: 0.3333, missingDays: ['2026-09-02', '2026-09-03'],
+    }))
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-average-not-stated')
+    expect(screen.getByTestId('period-average-not-stated').textContent).toContain('current account at the ČNB')
+    expect(screen.getByTestId('period-proposal-not-stated').textContent).toContain('holdings not stated')
+    expect(screen.queryByTestId('period-average')).toBeNull()
+    expect(screen.queryByTestId('period-proposal')).toBeNull()
+    expect(screen.getByTestId('period-missing-days').textContent).toContain('2026-09-02')
+    expect(screen.getByTestId('maintenance-period').textContent).not.toMatch(/\b0[.,]00\b/)
+  })
+
+  it('a run date outside the calendar says so instead of showing period figures', async () => {
+    router = periodRouter(PERIOD(), { ...CALENDAR, periods: [] })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-none')
+    expect(calls.some(c => c.url.includes(`/min-reserves/periods/${PERIOD_ID}`))).toBe(false)
   })
 
   it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {

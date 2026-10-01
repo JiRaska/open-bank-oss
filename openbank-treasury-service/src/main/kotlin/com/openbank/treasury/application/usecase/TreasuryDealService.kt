@@ -18,13 +18,17 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FxMidRatePort
+import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
+import com.openbank.treasury.domain.model.DealConfirmed
 import com.openbank.treasury.domain.model.DealMatured
 import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
@@ -46,14 +50,25 @@ import java.util.UUID
  * its old state with the journal already in the ledger; the retry re-posts under the same key,
  * the ledger returns the ORIGINAL entry, and the state change commits — never a double posting.
  * Nothing posts before BOOKED: only settle / mature / reverse-from-SETTLED call the ledger.
+ *
+ * [confirmationRequired] (`openbank.treasury.confirmation.required`, default true, ADR-0315 D2):
+ * settlement needs a CONFIRMED deal. False keeps the pre-CONFIRMED behaviour (settle straight from
+ * BOOKED) for a deployment that has no confirmation step yet; there is no data migration either way.
  */
-@Suppress("TooManyFunctions")
+// LongParameterList: a plain application class wired by one CDI producer; every parameter is a
+// collaborator or a deployment decision, and bundling them would only hide which is which.
+@Suppress("TooManyFunctions", "LongParameterList")
 class TreasuryDealService(
     private val deals: DealRepository,
     private val counterparties: CounterpartyRepository,
     private val ledger: LedgerPostingPort,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
+    private val fxMid: FxMidRatePort = FxMidRatePort.NONE,
+    private val fxTolerance: FxRateTolerance = FxRateTolerance.DISABLED,
+    private val confirmationRequired: Boolean = true,
+    /** ADR-0315 D9: when set and enabled, a simulated counterparty confirms only deals struck at its quote. */
+    private val simulatedQuotes: SimulatedQuoteService? = null,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -61,20 +76,31 @@ class TreasuryDealService(
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
         val today = LocalDate.now(clock)
-        val deal = Deal.draft(
+        val tradeDate = command.tradeDate ?: today
+        val valueDate = command.valueDate
+            ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
+        val drafted = Deal.draft(
             id = Ids.newId(),
             product = command.product,
             counterpartyId = command.counterpartyId,
             currency = command.currency,
             principal = command.principal,
             rate = command.rate,
-            tradeDate = command.tradeDate ?: today,
-            valueDate = command.valueDate,
+            tradeDate = tradeDate,
+            valueDate = requireNotNull(valueDate) { "valueDate is required" },
             maturityDate = command.maturityDate,
             actor = actor,
             at = now,
             rationale = command.rationale,
+            inputs = command.inputs,
+            fxSide = command.fxSide,
         )
+        // #10896: flag (never block) an FX deal rate outside tolerance of fx-service's mid.
+        val deal = if (fxTolerance.enabled) {
+            drafted.checkRate(fxMid.mid(drafted.currency, tradeDate), fxTolerance.tolerancePercent, now)
+        } else {
+            drafted
+        }
         return deals.save(deal, command = key?.let { CommandKey(it, DRAFT, deal.id) })
     }
 
@@ -104,6 +130,8 @@ class TreasuryDealService(
                     createdBy = booked.createdBy.id,
                     approvedBy = actor.id,
                     occurredAt = booked.updatedAt,
+                    fxSide = booked.fx?.side,
+                    counterAmount = booked.fx?.counterAmount,
                 ),
             ),
         )
@@ -128,10 +156,32 @@ class TreasuryDealService(
         return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
     }
 
+    override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, CONFIRM, dealId)?.let { return it } }
+        val confirmed = load(dealId).confirm(actor, clock.instant(), reference)
+        val event = DealEvent(
+            DealConfirmed.EVENT_TYPE,
+            objectMapper.writeValueAsString(
+                DealConfirmed(
+                    dealId = confirmed.id,
+                    product = confirmed.product,
+                    counterpartyId = confirmed.counterpartyId,
+                    currency = confirmed.currency,
+                    principal = confirmed.principal,
+                    valueDate = confirmed.valueDate,
+                    confirmedBy = actor.id,
+                    simulated = actor == Actor.SIMULATED_MARKET,
+                    occurredAt = confirmed.updatedAt,
+                ),
+            ),
+        )
+        return deals.save(confirmed, event = event, command = cmd(key, CONFIRM, dealId))
+    }
+
     override suspend fun settle(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
-        val settled = deal.settle(actor, LocalDate.now(clock), clock.instant())
+        val settled = deal.settle(actor, LocalDate.now(clock), clock.instant(), confirmationRequired)
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
@@ -146,6 +196,8 @@ class TreasuryDealService(
                     maturityDate = settled.maturityDate,
                     ledgerJournalId = ref.journalId,
                     occurredAt = settled.updatedAt,
+                    fxSide = settled.fx?.side,
+                    counterAmount = settled.fx?.counterAmount,
                 ),
             ),
         )
@@ -203,6 +255,8 @@ class TreasuryDealService(
                     reason = reason,
                     ledgerJournalId = ref?.journalId,
                     occurredAt = reversed.updatedAt,
+                    fxSide = reversed.fx?.side,
+                    counterAmount = reversed.fx?.counterAmount,
                 ),
             ),
         )
@@ -257,12 +311,31 @@ class TreasuryDealService(
      */
     override suspend fun runSimulatedMarket(): SimulatedMarketRun {
         val today = LocalDate.now(clock)
-        val outcomes = deals.dueForSettlement(today).map { d -> runCatching { settle(d.id, Actor.SIMULATED_MARKET) } } +
-            deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, Actor.SIMULATED_MARKET) } }
+        val market = Actor.SIMULATED_MARKET
+        // ADR-0315 D9: the simulated counterparty confirms BOOKED deals first (a SYNTHETIC
+        // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
+        // the settlement pass below finds them CONFIRMED whatever `confirmationRequired` says. A
+        // quoted deal struck off the counterparty's quote is DECLINED: it stays BOOKED for a person.
+        val confirmations = deals.list(DealState.BOOKED).map { d -> runCatching { simulatedConfirm(d, market) } }
+        val settleable = Deal.settleableStates(confirmationRequired)
+        val moves = deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
+            deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, market) } }
         return SimulatedMarketRun(
-            moved = outcomes.count { it.isSuccess },
-            failures = outcomes.mapNotNull { it.exceptionOrNull() },
+            moved = confirmations.count { it.getOrNull() == true } + moves.count { it.isSuccess },
+            failures = confirmations.mapNotNull { it.exceptionOrNull() } + moves.mapNotNull { it.exceptionOrNull() },
+            declined = confirmations.count { it.getOrNull() == false },
         )
+    }
+
+    /** True = confirmed; false = the simulated counterparty declined (struck off its quote). */
+    private suspend fun simulatedConfirm(deal: Deal, market: Actor): Boolean {
+        val quote = simulatedQuotes?.quoteFor(deal)
+        if (quote != null && !quote.accepts(deal)) return false
+        val reference = quote?.let {
+            "synthetic quote bid ${it.bid} / ask ${it.ask} % (${it.curveIndex}, curve set ${it.curveSetId})"
+        }
+        confirm(deal.id, reference, market)
+        return true
     }
 
     /**
@@ -310,7 +383,8 @@ class TreasuryDealService(
 
     private suspend fun limitCheck(deal: Deal): LimitCheck {
         val cp = counterparties.findById(deal.counterpartyId) ?: throw UnknownCounterpartyException(deal.counterpartyId)
-        val exposure = if (deal.product.isAsset) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
+        val consumes = deal.product.isAsset || deal.product == ProductType.FX_SPOT
+        val exposure = if (consumes) deals.exposure(cp.id, deal.limitCurrency, deal.id) else BigDecimal.ZERO
         return LimitCheck.of(cp, deal, exposure)
     }
 
@@ -341,6 +415,7 @@ class TreasuryDealService(
         const val OVERRIDE = "OVERRIDE_LIMIT"
         const val REJECT = "REJECT"
         const val CANCEL = "CANCEL"
+        const val CONFIRM = "CONFIRM"
         const val SETTLE = "SETTLE"
         const val MATURE = "MATURE"
         const val REVERSE = "REVERSE"

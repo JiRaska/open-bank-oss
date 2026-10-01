@@ -32,7 +32,20 @@ info:
   #        Liquidity.totalNotStated says why a total is absent. Per-currency results unchanged.
   # 1.13.0 -> 1.14.0: additive — SnapshotRun and SnapshotRunSummary state requestedBy, preserving
   #        the original requester on a replay; a scheduled run names its system requester.
-  version: 1.14.0
+  # 1.14.0 -> 1.15.0: additive — liquidity survival forecast GET /snapshots/{id}/liquidity-forecast
+  #        (ADR-0313 "forecasting"): a daily-then-weekly funding-gap ladder cumulated from the LCR's
+  #        HQLA stock, and the first day the cumulative position turns negative. This PR originally
+  #        claimed 1.10.0; main has since reached 1.14.0, so this takes the next free number, 1.15.0.
+  # 1.15.0 -> 1.15.1: description only — /capital defaults to the EU CRR parameter set
+  #        (eu-crr3-sa); the response shape is unchanged.
+  # 1.15.1 -> 1.16.0: additive — SnapshotRun states modelVersions (the parameter sets, IRRBB shock
+  #        fingerprint, behavioural model and engine build in force when the run was recorded) and
+  #        ledgerCutOff (ADR-0314 D2). Both null for a run recorded before they existed.
+  # 1.16.0 -> 1.17.0: additive — ČNB minimum reserves averaged over the maintenance period
+  #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
+  #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
+  #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
+  version: 1.17.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -332,17 +345,77 @@ paths:
               schema:
                 $ref: '#/components/schemas/Untied'
 
+  /api/v1/risk/snapshots/{id}/liquidity-forecast:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotLiquidityForecast
+      summary: Liquidity survival horizon and funding-gap ladder of a TIED_OUT run under a curve set
+      description: |
+        A ladder of the SAME flows `/cash-flows` projects (loans and money-market deals
+        contractual, customer deposits behavioural under the named model) — except the flows of
+        instruments whose account the parameter set classifies as HQLA (e.g. the ČNB deposit
+        facility), which are already in the opening stock and would otherwise count twice — one row per calendar day for the first `dailyDays`
+        days and weekly after that, cut at `horizonDays`. Inflows are positive, outflows negative,
+        each split contractual / behavioural. `cumulative` is the position at the end of a row and
+        `minCumulative` the lowest end-of-day position within it:
+        the opening liquidity — the HQLA stock after haircuts and caps exactly as `/liquidity`
+        reports it under the parameter set named here — plus every net flow so far.
+        `survivalHorizonDays` is the first day the DAILY cumulative position is negative, null when
+        it never is within the horizon. Everything the projection does not model (new business,
+        GL-level positions without contract terms, stress) is listed in `assumptions` as not
+        modelled. Per currency, no FX conversion. Derived on request, never stored.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+        - name: curveSetId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: horizonDays
+          in: query
+          required: false
+          description: Forecast horizon in calendar days after as-of.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+            default: 90
+      responses:
+        '200':
+          description: The run's liquidity forecast
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiquidityForecast'
+        '400':
+          description: Missing or malformed `curveSetId`, `horizonDays` outside 1..365, or a curve set for another as-of date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run or curve set
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
   /api/v1/risk/snapshots/{id}/capital:
     get:
       tags: [Risk]
       operationId: getSnapshotCapital
       summary: Pillar 1 credit-risk capital (standardised approach) of a TIED_OUT run
       description: |
-        Credit-risk risk-weighted assets under the BCBS d424 standardised approach, per exposure
-        class and per position, with the risk weight, its configuration key and its d424
-        paragraph; the own-funds requirement (8% × RWA, bcbs189 ¶50); and CET1 / Tier 1 / Total
-        capital ratios when own funds are in the snapshot (`ratiosNotComputable` says why not).
-        BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied. The ratios use
+        Credit-risk risk-weighted assets under the standardised approach, per exposure class and
+        per position, with the risk weight, its configuration key and the article / paragraph it
+        cites; the own-funds requirement (8% × RWA); and CET1 / Tier 1 / Total capital ratios when
+        own funds are in the snapshot (`ratiosNotComputable` says why not). Weights come from the
+        versioned parameter set `openbank.risk.capital.sa.*`, named on the result. The default set
+        is `eu-crr3-sa` (Regulation (EU) 575/2013 as amended by CRR2 / CRR3, Part Three Title II
+        Chapter 2, minima Art. 92(1)); the BCBS d424 set `bcbs-d424-sa` stays selectable. The ratios use
         CREDIT-RISK RWA only, so they are an upper bound. Per currency, plus a CZK `total` and
         requirement: every other currency's EAD and RWA converted at the ČNB fixing in effect at
         00:00 Prague on asOf (the ledger FX revaluation's rule; a weekend takes the prior business
@@ -409,6 +482,78 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Untied'
+
+  /api/v1/risk/min-reserves/periods:
+    get:
+      tags: [Risk]
+      operationId: listMinReservePeriods
+      summary: The configured ČNB maintenance-period calendar
+      description: |
+        The versioned maintenance-period calendar (`openbank.risk.min-reserves.maintenance-calendar`).
+        `calendarStatus` is `verified` or `sample-unverified`; a sample calendar is a stand-in, NOT
+        the official ČNB calendar, and `notes` says so. With `asOf`, only the period containing
+        that date (an empty list when none does). Requires ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR
+        or ROLE_ADMIN (action risk.snapshot.read).
+      parameters:
+        - name: asOf
+          in: query
+          required: false
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: The calendar
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceCalendar'
+        '400':
+          description: asOf is not an ISO date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+  /api/v1/risk/min-reserves/periods/{periodId}:
+    get:
+      tags: [Risk]
+      operationId: getMinReservePeriod
+      summary: ČNB minimum reserves averaged over one maintenance period
+      description: |
+        Minimum reserves are met on the AVERAGE of end-of-day holdings over every calendar day of
+        the maintenance period (ADR-0315 D8). The requirement comes from the TIED_OUT snapshot on
+        the period's base reference date; holdings from the TIED_OUT snapshot of each day in the
+        period up to `asOf` (default: today in Europe/Prague), the latest recorded per day. The
+        running average is over the days WITH a snapshot, and `coverage` = daysWithData /
+        daysElapsed. The daily holding proposal is the same amount on every remaining day that
+        brings the period average to the requirement; it needs every elapsed day covered, so with
+        a gap it is null and `proposalNotStated` says why. Each null figure has a reason field;
+        none is ever a stand-in zero. The engine proposes only; it never moves money. Derived on
+        request, never stored. Requires ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN
+        (action risk.snapshot.read).
+      parameters:
+        - name: periodId
+          in: path
+          required: true
+          schema: {type: string}
+        - name: asOf
+          in: query
+          required: false
+          description: Evaluation date; default today (Europe/Prague)
+          schema: {type: string, format: date}
+      responses:
+        '200':
+          description: The period's averaging position
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinReservePeriod'
+        '400':
+          description: asOf is not an ISO date
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such period in the configured calendar
 
   /api/v1/risk/curve-sets:
     get:
@@ -571,6 +716,56 @@ components:
             run (e.g. `system:risk-engine-eod-snapshot` for the nightly EOD snapshot). A POST
             that replays an existing run (idempotent replay) returns the ORIGINAL requester,
             not the caller of the replaying request.
+        modelVersions:
+          oneOf:
+            - $ref: '#/components/schemas/ModelVersions'
+            - type: 'null'
+          description: |
+            ADR-0314 D2: the model and parameter versions in force when the run was recorded.
+            Recorded, not part of inputHash — no version changes a position, so a replay returns
+            the ORIGINAL run's versions. Null means the run was recorded before this field existed.
+        ledgerCutOff:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            The instant immediately before the ledger was read. The ledger read takes only asOf
+            (no "as known at" bound), so this is recorded, not sent: a rerun reads the same data
+            while nothing dated on or before asOf is posted afterwards; if something is, the
+            rerun's inputHash differs and it becomes a new run. Null for a run recorded before
+            this field existed.
+
+    ModelVersions:
+      type: object
+      required: [engineVersion, capitalSetId, capitalSetVersion, liquiditySetId, liquiditySetVersion,
+                 irrbbShockSetVersion, irrbbShockSource, minReservesSetId, minReservesSetVersion,
+                 behaviouralModelId, behaviouralModelVersion]
+      properties:
+        engineVersion:
+          type: string
+          description: The risk engine's build version.
+        capitalSetId:
+          type: string
+        capitalSetVersion:
+          type: string
+        liquiditySetId:
+          type: string
+        liquiditySetVersion:
+          type: string
+        irrbbShockSetVersion:
+          type: string
+          description: |
+            `sha256:<16 hex>` fingerprint of the configured shock sizes and post-shock floor —
+            the IRRBB shocks carry no set id or version of their own.
+        irrbbShockSource:
+          type: string
+        minReservesSetId:
+          type: string
+        minReservesSetVersion:
+          type: string
+        behaviouralModelId:
+          type: string
+        behaviouralModelVersion:
+          type: string
 
     SnapshotRunSummary:
       type: object
@@ -1134,6 +1329,78 @@ components:
         level2CapBinding: {type: boolean}
         stock: {type: number}
 
+    LiquidityForecastRow:
+      type: object
+      required: [fromDay, toDay, from, to, contractualInflows, contractualOutflows, behaviouralInflows,
+        behaviouralOutflows, inflows, outflows, net, cumulative, minCumulative]
+      properties:
+        fromDay: {type: integer, description: First calendar day after as-of in the row (inclusive)}
+        toDay: {type: integer, description: Last calendar day after as-of in the row (inclusive)}
+        from: {type: string, format: date}
+        to: {type: string, format: date}
+        contractualInflows: {type: number}
+        contractualOutflows: {type: number, description: Negative or zero}
+        behaviouralInflows: {type: number}
+        behaviouralOutflows: {type: number, description: Negative or zero}
+        inflows: {type: number}
+        outflows: {type: number}
+        net: {type: number}
+        cumulative: {type: number, description: Opening liquidity plus every net flow up to `toDay`}
+        minCumulative:
+          type: number
+          description: >-
+            Lowest end-of-day cumulative position within the row. Equals `cumulative` on a daily row;
+            on a weekly row it shows a mid-week negative that the end-of-week `cumulative` hides.
+
+    CurrencyLiquidityForecast:
+      type: object
+      required: [currency, openingLiquidity, minimumCumulative, flowsBeyondHorizon, ladder]
+      properties:
+        currency: {type: string}
+        hqla:
+          oneOf:
+            - {$ref: '#/components/schemas/Hqla'}
+            - {type: 'null'}
+          description: The LCR's HQLA stock of this currency; null when it holds no HQLA
+        openingLiquidity: {type: number}
+        survivalHorizonDays: {type: [integer, 'null'], description: First day the cumulative position is negative}
+        survivalDate: {type: [string, 'null'], format: date}
+        minimumCumulative: {type: number}
+        flowsBeyondHorizon: {type: integer, description: Projected flows dated after the horizon, not in the ladder}
+        ladder:
+          type: array
+          items:
+            $ref: '#/components/schemas/LiquidityForecastRow'
+
+    LiquidityForecast:
+      type: object
+      required: [runId, asOf, provenance, curveSetId, curveSetProvenance, model, parameterSetId,
+        parameterSetVersion, horizonDays, dailyDays, currencies, assumptions]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        curveSetId: {type: string, format: uuid}
+        curveSetProvenance: {type: string}
+        model:
+          $ref: '#/components/schemas/BehaviouralModel'
+        parameterSetId: {type: string, description: The liquidity parameter set the opening HQLA comes from}
+        parameterSetVersion: {type: string}
+        horizonDays: {type: integer}
+        dailyDays: {type: integer, description: Rows are daily up to this day, weekly after}
+        currencies:
+          type: array
+          items:
+            $ref: '#/components/schemas/CurrencyLiquidityForecast'
+        assumptions:
+          type: array
+          items:
+            type: object
+            required: [key, statement]
+            properties:
+              key: {type: string}
+              statement: {type: string}
+
     CurrencyLiquidity:
       type: object
       required: [currency, lcr, nsfr]
@@ -1472,6 +1739,96 @@ components:
         reserveClass: {type: string}
         description: {type: string}
 
+    MaintenancePeriod:
+      type: object
+      required: [id, start, end, baseReferenceDate]
+      properties:
+        id: {type: string}
+        start: {type: string, format: date}
+        end: {type: string, format: date}
+        baseReferenceDate:
+          type: string
+          format: date
+          description: The date whose reserve base sets this period's requirement
+    MaintenanceCalendar:
+      type: object
+      required: [calendarId, calendarVersion, calendarStatus, calendarSource, periods, notes]
+      properties:
+        calendarId: {type: string}
+        calendarVersion: {type: string}
+        calendarStatus: {type: string, enum: [verified, sample-unverified]}
+        calendarSource: {type: string}
+        periods:
+          type: array
+          items: {$ref: '#/components/schemas/MaintenancePeriod'}
+        notes: {type: array, items: {type: string}}
+    MinReservePeriod:
+      type: object
+      required: [calendarId, calendarVersion, calendarStatus, calendarSource, period, evaluationDate,
+        parameterSetId, parameterSetVersion, holdingCurrency, daysInPeriod, daysElapsed, daysRemaining,
+        daysWithData, missingDays, days, notes]
+      properties:
+        calendarId: {type: string}
+        calendarVersion: {type: string}
+        calendarStatus: {type: string, enum: [verified, sample-unverified]}
+        calendarSource: {type: string}
+        period: {$ref: '#/components/schemas/MaintenancePeriod'}
+        evaluationDate: {type: string, format: date}
+        parameterSetId: {type: string}
+        parameterSetVersion: {type: string}
+        holdingCurrency: {type: string}
+        baseRunId:
+          type: [string, 'null']
+          format: uuid
+          description: The TIED_OUT run on the base reference date; null when there is none
+        requirement:
+          type: [number, 'null']
+          description: Requirement from the base reference run; null with requirementNotStated
+        requirementNotStated: {type: [string, 'null']}
+        daysInPeriod: {type: integer}
+        daysElapsed: {type: integer, description: Calendar days of the period up to evaluationDate}
+        daysRemaining: {type: integer}
+        daysWithData: {type: integer, description: Elapsed days with a TIED_OUT snapshot}
+        coverage:
+          type: [number, 'null']
+          description: daysWithData / daysElapsed; null before the period starts
+        missingDays:
+          type: array
+          items: {type: string, format: date}
+        days:
+          type: array
+          items:
+            type: object
+            required: [date, runId]
+            properties:
+              date: {type: string, format: date}
+              runId: {type: string, format: uuid}
+              holdings:
+                type: [number, 'null']
+                description: ČNB current-account balance that day; null when holdings are not stated
+        averageHoldings:
+          type: [number, 'null']
+          description: Mean holding over the days with data; null with averageNotStated, never zero
+        averageNotStated: {type: [string, 'null']}
+        remainingRequiredAverage:
+          type: [number, 'null']
+          description: Average the remaining days must hold; negative means already met
+        dailyHoldingProposal:
+          type: [number, 'null']
+          description: remainingRequiredAverage floored at zero, rounded up to the cent
+        proposal:
+          type: [array, 'null']
+          items:
+            type: object
+            required: [date, amount]
+            properties:
+              date: {type: string, format: date}
+              amount: {type: number}
+        proposalNotStated: {type: [string, 'null']}
+        requirementMet:
+          type: [boolean, 'null']
+          description: Only once the period is over, fully covered, with both sides stated
+        notes: {type: array, items: {type: string}}
     MinReserves:
       type: object
       required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, holdingCurrency,

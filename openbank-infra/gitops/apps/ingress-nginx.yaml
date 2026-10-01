@@ -60,7 +60,7 @@ spec:
             # Ingress carrying a Critical annotation is not rejected at apply — the
             # controller silently DROPS the whole Ingress from nginx.conf and the
             # host falls back to the fake default certificate. The Kyverno policy
-            # components/kyverno/deny-nginx-snippet-annotations.yaml turns that into a
+            # deny-nginx-snippet-annotations-cel (components/kyverno/cel-validating-policies.yaml) turns that into a
             # loud admission denial (ArgoCD SyncFailed) instead.
             allow-snippet-annotations: "false"
             annotations-risk-level: "High"

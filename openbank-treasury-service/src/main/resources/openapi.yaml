@@ -13,23 +13,38 @@ info:
   #        available, utilisation %, breached flag and active senior-override count.
   # 1.7.0: additive — nostro reconciliation (#10896): POST /nostro/statements (camt.053 upload,
   #        ROLE_TREASURY_APPROVER) and GET /nostro/statements/{id}/reconciliation.
-  version: 1.7.0
+  # 1.8.0: additive — FX_SPOT deal terms, settlement and response fields (#10896).
+  #        Invalid rates and rounded-to-zero counter amounts return 400.
+  # 1.10.0: additive — DraftDealRequest.inputs / Deal.inputs: the JSON object an AI agent's draft was
+  #         built from, required with `rationale` when an agent drafts (ADR-0315 D10).
+  # 1.11.0: additive — native-currency nostro balance reconciliation; unknown GL remains explicitly
+  #         unstated, and an unavailable ledger balance is a 502.
+  # 1.12.0: additive — POST /deals/{id}/confirm and DealState CONFIRMED (ADR-0315 D2): the
+  #        counterparty's confirmation of a BOOKED deal; settlement requires it unless
+  #        openbank.treasury.confirmation.required is false.
+  # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
+  #        counterparties off the risk engine's latest curve set plus a configured spread.
+  version: 1.13.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
-    `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
-    `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason on its
-    timeline.
+    `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
+    booking) or `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason
+    on its timeline. `CONFIRMED` records that the counterparty confirmed the booked terms (a
+    back-office person, never the deal's creator or submitter; in the sandbox the simulated
+    counterparty set). Settlement requires `CONFIRMED`; a deployment with
+    `openbank.treasury.confirmation.required=false` may also settle straight from `BOOKED`.
 
     **Four-eyes is enforced in the domain**: the approver must be neither the deal's creator nor
     its submitter (422 `FOUR_EYES_VIOLATION`), and only a human may submit, approve, reject,
-    cancel, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
+    cancel, confirm, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
     refused with 403 `ACTOR_NOT_PERMITTED`. An AI agent may draft, and must then supply a
-    `rationale`.
+    `rationale` and the `inputs` it used (ADR-0315 D10); its draft consumes no limit, and only a
+    human dealer can submit it.
 
     **Counterparty limits** cap outstanding PLACED principal per counterparty and currency
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
-    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior-approver override
-    is not built yet.
+    again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
+    a bounded override with a reason; four-eyes separation still applies at booking.
 
     **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
@@ -42,6 +57,15 @@ info:
     and ACT/360 interest as a money-market borrowing; like any borrowing it consumes no limit.
     Settlement credits the ledger's "Borrowings from CNB" liability (2320). The collateral pledge
     that backs a lombard loan is NOT modelled.
+
+    **FX spot** (`FX_SPOT`): the bank buys or sells a foreign currency against CZK. Name the legs
+    with `buyCurrency`/`sellCurrency` (one must be CZK); `principal` is the FOREIGN amount and
+    `rate` the dealer's rate in CZK per unit. `valueDate` defaults to T+2 business days (weekends
+    skipped) and may not be later. Same four-eyes lifecycle; the limit check runs against the
+    counterparty's CZK limit on the CZK equivalent, consumed until settlement. Settlement posts
+    both legs through the ledger's FX position accounts; an FX spot never accrues or matures
+    (`mature` is 409). The rate may be checked against fx-service's mid within a configured
+    tolerance — a deviation FLAGS the deal (`fx.rateFlag`), it never blocks it.
 
     **Ledger postings** go through ledger-service's journal API only, keyed
     `treasury:<dealId>:<event>` and balanced per currency: settlement, maturity (principal plus
@@ -213,11 +237,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
 
+  /api/v1/treasury/deals/{id}/confirm:
+    post:
+      tags: [Treasury]
+      operationId: confirmDeal
+      summary: Record the counterparty's confirmation of a BOOKED deal (CONFIRMED); posts nothing
+      description: |
+        ADR-0315 D2. ROLE_TREASURY_APPROVER (the back office). The confirmer must be neither the
+        deal's creator nor its submitter (422 `FOUR_EYES_VIOLATION`); an AI agent or a service
+        account is refused (403). Emits `treasury.deal.confirmed.v1`.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: FOUR_EYES_VIOLATION (the creator or submitter may not confirm the deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/deals/{id}/settle:
     post:
       tags: [Treasury]
       operationId: settleDeal
-      summary: Settle a BOOKED deal on or after its value date; posts the settlement journal
+      summary: Settle a CONFIRMED deal on or after its value date; posts the settlement journal
+      description: |
+        A BOOKED deal answers 409 until confirmed, unless the deployment sets
+        `openbank.treasury.confirmation.required=false`.
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -243,7 +299,7 @@ paths:
     post:
       tags: [Treasury]
       operationId: reverseDeal
-      summary: Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal
+      summary: Reverse a BOOKED, CONFIRMED or SETTLED deal; a settled one gets an offsetting journal
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -314,6 +370,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Positions'
+
+  /api/v1/treasury/quotes:
+    get:
+      tags: [Treasury]
+      operationId: getSimulatedQuotes
+      summary: SYNTHETIC bid/ask of the simulated counterparties for a product, currency and tenor
+      description: |
+        ADR-0315 D9, sandbox only. Each SYNTHETIC bank counterparty with a configured half-spread
+        quotes the risk engine's latest curve set (CZK → CZEONIA, EUR → ESTR; linear on zero rates,
+        flat outside the pillars) converted to ACT/360 simple percent, ± its spread. `bid` is what
+        the counterparty pays for a deposit (a placement is struck at the bid), `ask` what it charges
+        to lend (a borrowing is struck at the ask). `synthetic` is always true. With the simulated
+        market or its quotes switched off the endpoint answers 409; when no quote can be priced (no
+        curve set or curve, risk engine unreachable or refusing) 503 `QUOTE_UNAVAILABLE`.
+      parameters:
+        - name: product
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [MM_PLACEMENT, MM_BORROWING]
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [CZK, EUR]
+        - name: tenorDays
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: The quote board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteBoard'
+        '400':
+          description: Missing or invalid product, currency or tenorDays
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '503':
+          description: QUOTE_UNAVAILABLE — no curve set or curve, or the risk engine unreachable or refusing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/nostro/statements:
     post:
@@ -388,6 +499,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
+        '502':
+          description: |
+            ledger-service answered the balance read with something that is neither a balance nor
+            its unknown-account 404 (e.g. a ledger that does not serve the route yet) — the
+            reconciliation cannot be computed (`LEDGER_UNAVAILABLE`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
   securitySchemes:
@@ -441,18 +561,18 @@ components:
   schemas:
     ProductType:
       type: string
-      # x-extensible-enum, not enum (1.5.0, #10896): products GROW as ADR-0315 D2 lands them
-      # (CNB_LOMBARD now). A client must tolerate an unknown product; a closed set would make every
+      # x-extensible-enum, not enum (1.8.0, #10896): products GROW as ADR-0315 D2 lands them
+      # (CNB_LOMBARD and FX_SPOT now). A client must tolerate an unknown product; a closed set would make every
       # new product a URL-major break. The same idiom as risk-engine's Position.kind.
-      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+      x-extensible-enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DraftProductType:
       # What a client may SEND: closed, so the server's validation is what the document says. A new
       # product widens it (additive for a request). Responses use the open ProductType above.
       type: string
-      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD]
+      enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DealState:
       type: string
-      enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
+      enum: [DRAFT, PENDING_APPROVAL, BOOKED, CONFIRMED, SETTLED, MATURED, CANCELLED, REVERSED]
     Error:
       type: object
       required: [error]
@@ -464,15 +584,32 @@ components:
           type: [string, 'null']
     DraftDealRequest:
       type: object
-      required: [product, counterpartyId, currency, principal, rate, valueDate]
+      required: [product, counterpartyId, principal, rate]
       properties:
         product: { $ref: '#/components/schemas/DraftProductType' }
         counterpartyId: { type: string, examples: [SIMBK-A] }
-        currency: { type: string, enum: [CZK, EUR] }
-        principal: { type: number, exclusiveMinimum: 0 }
-        rate: { type: number, minimum: 0, description: 'Annual percentage, ACT/360. Must be > 0 for CNB_LOMBARD.' }
+        currency:
+          type: string
+          enum: [CZK, EUR]
+          description: Required for money-market deals. For FX_SPOT optional; if given, the foreign currency.
+        principal: { type: number, exclusiveMinimum: 0, description: 'For FX_SPOT the foreign-currency amount' }
+        rate:
+          type: number
+          minimum: 0
+          description: 'Annual percentage, ACT/360 (must be > 0 for CNB_LOMBARD); for FX_SPOT the deal rate in CZK per 1 unit of the foreign currency'
         tradeDate: { type: string, format: date, description: Defaults to today }
-        valueDate: { type: string, format: date }
+        valueDate:
+          type: string
+          format: date
+          description: Required for money-market deals. For FX_SPOT defaults to T+2 business days, and may not be later.
+        buyCurrency:
+          type: string
+          enum: [CZK, EUR]
+          description: FX_SPOT only (required there) — the currency the bank buys.
+        sellCurrency:
+          type: string
+          enum: [CZK, EUR]
+          description: FX_SPOT only (required there) — the currency the bank sells.
         maturityDate:
           type: string
           format: date
@@ -480,6 +617,47 @@ components:
         rationale:
           type: string
           description: Required when an AI agent drafts (ADR-0315 D10).
+        inputs:
+          type: object
+          additionalProperties: true
+          description: >
+            The data an AI agent built the draft from (quote, curve point, headroom, position), as a
+            JSON object. Required with `rationale` when an AI agent drafts (ADR-0315 D10); optional
+            for a human dealer. Stored and returned verbatim.
+    QuoteBoard:
+      type: object
+      required: [product, currency, tenorDays, synthetic, quotes]
+      properties:
+        product: { type: string, enum: [MM_PLACEMENT, MM_BORROWING] }
+        currency: { type: string }
+        tenorDays: { type: integer }
+        synthetic: { type: boolean, const: true, description: Always true — invented counterparties, never a dealable market price. }
+        quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatedQuote'
+    SimulatedQuote:
+      type: object
+      required: [counterpartyId, synthetic, bid, ask, dealRate, mid, spreadBp, curveSetId, curveAsOf, curveIndex, curveProvenance]
+      properties:
+        counterpartyId: { type: string }
+        synthetic: { type: boolean, const: true }
+        bid: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty pays for a deposit (floored at 0).' }
+        ask: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty charges to lend.' }
+        dealRate: { type: number, description: 'The side a deal of the requested product is struck at: bid for MM_PLACEMENT, ask for MM_BORROWING.' }
+        mid: { type: number, description: The curve mid for the tenor. }
+        spreadBp: { type: integer, description: The counterparty's configured half-spread in basis points. }
+        curveSetId: { type: string, format: uuid }
+        curveAsOf: { type: string, format: date }
+        curveIndex: { type: string }
+        curveProvenance: { type: string, description: "The risk engine's label for the curve's market data (synthetic / production)." }
+    ConfirmRequest:
+      type: object
+      properties:
+        reference:
+          type: [string, 'null']
+          maxLength: 200
+          description: The counterparty's confirmation reference, recorded on the deal's timeline.
     ReasonRequest:
       type: object
       required: [reason]
@@ -519,6 +697,18 @@ components:
         at: { type: string, format: date-time }
         coversExposureUpTo: { type: number }
         limitAtOverride: { type: number }
+    FxTerms:
+      type: object
+      description: FX_SPOT only (#10896) — both legs from the bank's side, and the rate check.
+      properties:
+        side: { type: string, enum: [BUY, SELL], description: The bank's side on the foreign currency }
+        buyCurrency: { type: string }
+        buyAmount: { type: number }
+        sellCurrency: { type: string }
+        sellAmount: { type: number }
+        dealRate: { type: number, description: CZK per 1 unit of the foreign currency }
+        midRate: { type: [number, 'null'], description: fx-service mid at drafting, when the check ran }
+        rateFlag: { type: [string, 'null'], description: Why the rate was flagged; null when not flagged }
     Deal:
       type: object
       properties:
@@ -540,6 +730,9 @@ components:
         submittedBy: { type: [string, 'null'] }
         approvedBy: { type: [string, 'null'] }
         rationale: { type: [string, 'null'] }
+        inputs:
+          type: [string, 'null']
+          description: The JSON object an AI agent's draft was built from, serialised verbatim (ADR-0315 D10).
         limitCheck:
           oneOf:
             - $ref: '#/components/schemas/LimitCheck'
@@ -547,6 +740,10 @@ components:
         limitOverride:
           oneOf:
             - $ref: '#/components/schemas/LimitOverride'
+            - type: 'null'
+        fx:
+          oneOf:
+            - $ref: '#/components/schemas/FxTerms'
             - type: 'null'
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
@@ -653,20 +850,22 @@ components:
         ledgerOpeningBalance:
           type: [number, 'null']
           description: >
-            Ledger GL net as of the day before the statement's earliest date. NULL when the ledger
-            cannot state it in the statement currency (see balanceNotStated).
+            Ledger GL net (debit − credit of native amounts in the statement currency) as of the
+            opening (OPBD) balance's date. NULL only when the ledger does not hold the
+            GL account (see balanceNotStated).
         openingDifference: {type: [number, 'null'], description: NULL whenever ledgerOpeningBalance is}
         statementClosingBalance: {type: number}
         ledgerClosingBalance:
           type: [number, 'null']
-          description: Ledger GL net as of the statement's latest date. NULL as ledgerOpeningBalance.
+          description: Ledger GL net in the statement currency as of the closing (CLBD) balance's date. NULL as ledgerOpeningBalance.
         closingDifference: {type: [number, 'null'], description: NULL whenever ledgerClosingBalance is}
         balanceNotStated:
           type: [string, 'null']
           description: >
-            Why the ledger balances are NULL — the ledger exposes only base-currency (CZK)
-            balances, so a nostro in any other currency has no comparable figure. NULL when the
-            balances are stated.
+            Why the ledger balances are NULL. Balances are read in the statement currency for every
+            nostro (CZK and foreign alike), so this is set only when the ledger answers that it
+            does not hold the GL account (404) — a chart not yet migrated in that environment. NULL
+            whenever the balances are stated.
         reconciled:
           type: [boolean, 'null']
           description: >
@@ -682,3 +881,10 @@ components:
         unmatchedLedgerLines:
           type: array
           items: {$ref: '#/components/schemas/NostroLedgerLine'}
+        outOfPeriodEntries:
+          type: array
+          description: >
+            Statement entries booked outside the period its balances describe (after the OPBD date,
+            up to the CLBD date). Refused at upload today; a statement stored before that rule still
+            reconciles, and each such entry is listed here AND in unmatchedStatementEntries.
+          items: {$ref: '#/components/schemas/NostroStatementEntry'}

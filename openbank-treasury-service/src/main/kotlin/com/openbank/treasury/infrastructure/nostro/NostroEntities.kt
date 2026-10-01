@@ -36,6 +36,9 @@ class NostroStatementEntity : PanacheEntity() {
     @Column(name = "currency", nullable = false)
     lateinit var currency: String
 
+    @Column(name = "opening_date", nullable = false)
+    lateinit var openingDate: LocalDate
+
     @Column(name = "statement_date", nullable = false)
     lateinit var statementDate: LocalDate
 

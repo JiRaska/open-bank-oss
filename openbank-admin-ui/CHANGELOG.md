@@ -1,5 +1,60 @@
 # Changelog
 
+## [0.269.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.1...admin-ui-v0.269.0) (2026-09-30)
+
+
+### Features
+
+* **finrep:** carry the risk snapshot's provenance onto COREP templates ([#11538](https://github.com/JiRaska/open-bank-oss/issues/11538)) ([3961c7d](https://github.com/JiRaska/open-bank-oss/commit/3961c7df54357a43bddc5b9f2b1a1a92e19405ef))
+* **treasury:** simulated counterparties quote off the risk engine's curve set ([#11555](https://github.com/JiRaska/open-bank-oss/issues/11555)) ([6933a2b](https://github.com/JiRaska/open-bank-oss/commit/6933a2b9da6ae25cff16ab11c2fe548764fa68b2))
+
+
+### Bug Fixes
+
+* **admin-ui:** show approval source failure states ([#11564](https://github.com/JiRaska/open-bank-oss/issues/11564)) ([3cfb110](https://github.com/JiRaska/open-bank-oss/commit/3cfb110cda39ffc10807175b7d54034ab63ff47d))
+
+
+### Security
+
+* **infra:** enforce the image-signature + SBOM policy as a CEL ImageValidatingPolicy ([#11581](https://github.com/JiRaska/open-bank-oss/issues/11581)) ([7b1a0dc](https://github.com/JiRaska/open-bank-oss/commit/7b1a0dce1a479bbb35f4b85ff9af0820652854cf)), closes [#11437](https://github.com/JiRaska/open-bank-oss/issues/11437)
+
+## [0.268.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.0...admin-ui-v0.268.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* **admin-ui:** align treasury and risk workbenches ([#11565](https://github.com/JiRaska/open-bank-oss/issues/11565)) ([0d97c99](https://github.com/JiRaska/open-bank-oss/commit/0d97c9984537340dcb609b32db3680438cb26319))
+
+## [0.268.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.267.0...admin-ui-v0.268.0) (2026-09-30)
+
+
+### Features
+
+* **admin-ui:** four-eyes console for voiding back-posted loans ([#11537](https://github.com/JiRaska/open-bank-oss/issues/11537)) ([b7a59d2](https://github.com/JiRaska/open-bank-oss/commit/b7a59d216c045001b96cc34d0444940bdfb6cb04)), closes [#11487](https://github.com/JiRaska/open-bank-oss/issues/11487)
+
+## [0.267.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.266.0...admin-ui-v0.267.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** book FX spot deals ([#11048](https://github.com/JiRaska/open-bank-oss/issues/11048)) ([9688749](https://github.com/JiRaska/open-bank-oss/commit/9688749512b66697efc82913b021e1ee10b05df8))
+* **treasury:** let an AI assistant draft deals it can never book ([#11121](https://github.com/JiRaska/open-bank-oss/issues/11121)) ([41a371c](https://github.com/JiRaska/open-bank-oss/commit/41a371c0952a0ff7555839041e192680e429dea2))
+
+## [0.266.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.265.0...admin-ui-v0.266.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** nostro reconciliation upload and result ([#11077](https://github.com/JiRaska/open-bank-oss/issues/11077)) ([fb76cea](https://github.com/JiRaska/open-bank-oss/commit/fb76cead571b3d592f458592536a9696f68746dc))
+* **risk-engine:** forecast the liquidity survival horizon from a snapshot ([#11040](https://github.com/JiRaska/open-bank-oss/issues/11040)) ([44cbf58](https://github.com/JiRaska/open-bank-oss/commit/44cbf58b03a562ad31fd0ae6e1697a80f8c9b6f1))
+
+## [0.265.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.1...admin-ui-v0.265.0) (2026-09-29)
+
+
+### Features
+
+* **admin-ui:** book ČNB lombard borrowings ([#11120](https://github.com/JiRaska/open-bank-oss/issues/11120)) ([9a43293](https://github.com/JiRaska/open-bank-oss/commit/9a432938bfcf383791eb9a96a5111c63b7577546))
+
 ## [0.264.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.264.0...admin-ui-v0.264.1) (2026-09-29)
 
 

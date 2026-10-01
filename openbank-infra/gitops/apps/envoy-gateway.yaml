@@ -14,7 +14,7 @@
 # chart versions, not image digests, so neither is digest-pinned here.
 #
 # Images are docker.io/-prefixed by the chart and the controller, so Kyverno's
-# `rewrite-docker-hub` rule (ecr-pull-through-rewrite.yaml) sends them through the ECR
+# docker.io/ prefix rewrite (ecr-pull-through-rewrite-cel.yaml) sends them through the ECR
 # pull-through cache like every other third-party chart; the openbank-* signature/SBOM
 # policy does not match them. No Kyverno change is needed.
 apiVersion: argoproj.io/v1alpha1

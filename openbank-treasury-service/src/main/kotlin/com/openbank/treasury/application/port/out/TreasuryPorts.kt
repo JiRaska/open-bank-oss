@@ -7,6 +7,7 @@ package com.openbank.treasury.application.port.out
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.treasury.domain.model.Counterparty
+import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.JournalSpec
@@ -60,8 +61,11 @@ interface DealRepository {
 
     suspend fun list(state: DealState?): List<Deal>
 
-    /** Deals due for the simulated market: BOOKED with valueDate <= today, SETTLED with maturity <= today. */
-    suspend fun dueForSettlement(today: LocalDate): List<Deal>
+    /**
+     * Deals due for the simulated market: in one of [states] (see [Deal.settleableStates]) with
+     * valueDate <= today; SETTLED with maturity <= today.
+     */
+    suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>): List<Deal>
 
     suspend fun dueForMaturity(today: LocalDate): List<Deal>
 
@@ -94,6 +98,39 @@ interface CounterpartyRepository {
 interface LedgerPostingPort {
     /** Returns the ledger's journal id — the original one on an idempotent replay. */
     suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
+}
+
+/**
+ * fx-service's mid rate for `currency`/CZK on [asOf] (#10896), used only to FLAG an FX spot deal
+ * rate outside tolerance. Null = no mid available. treasury has no fx-service client yet, so the
+ * wired implementation is [NONE] and the check is off by default ([FxRateTolerance]).
+ */
+fun interface FxMidRatePort {
+    suspend fun mid(currency: String, asOf: LocalDate): BigDecimal?
+
+    companion object {
+        val NONE = FxMidRatePort { _, _ -> null }
+    }
+}
+
+/** Versioned config `openbank.treasury.fx-spot.rate-check.*`: off unless a mid source is wired. */
+data class FxRateTolerance(val enabled: Boolean, val tolerancePercent: BigDecimal) {
+    init {
+        require(tolerancePercent.signum() >= 0) { "tolerance must not be negative" }
+    }
+
+    companion object {
+        val DISABLED = FxRateTolerance(false, BigDecimal("2.0"))
+    }
+}
+
+/**
+ * The risk engine's latest curve set (ADR-0315 D9, ADR-0313 D4), read as treasury's own identity.
+ * Null = the engine holds no curve set yet. Throws `QuoteUnavailableException` when the engine
+ * cannot be read.
+ */
+fun interface CurveSetPort {
+    suspend fun latest(): CurveSetView?
 }
 
 /** This service's outbox table; `persistInTransaction` chains inside the aggregate's transaction. */

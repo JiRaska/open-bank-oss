@@ -65,7 +65,7 @@ function DealDetail({ id }: { id: string }) {
 
   const labels: Record<DealAction, string> = {
     submit: t('Předložit', 'Submit'), approve: t('Schválit', 'Approve'), reject: t('Zamítnout', 'Reject'),
-    cancel: t('Zrušit obchod', 'Cancel deal'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
+    cancel: t('Zrušit obchod', 'Cancel deal'), confirm: t('Potvrdit protistranou', 'Record confirmation'), settle: t('Vypořádat', 'Settle'), mature: t('Ukončit ke splatnosti', 'Mature'),
     reverse: t('Stornovat', 'Reverse'), 'override-limit': t('Překročit limit', 'Override limit'),
   }
 
@@ -103,7 +103,7 @@ function DealDetail({ id }: { id: string }) {
   if (!deal) return null
 
   const a = dealActions(deal, actor, roles)
-  const plain: DealAction[] = (['submit', 'approve', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
+  const plain: DealAction[] = (['submit', 'approve', 'confirm', 'settle', 'mature', 'cancel'] as const).filter(k => a[k])
   // override-limit needs a mandatory reason exactly like reject/reverse, so it shares the same
   // reason input and disabled-until-filled behaviour rather than a separate dialog.
   const withReason: DealAction[] = [
@@ -147,6 +147,27 @@ function DealDetail({ id }: { id: string }) {
           </tbody>
         </table>
       </div>
+
+      {deal.fx && (
+        <div className="card" style={{ marginBottom: 16 }} data-testid="fx-terms">
+          <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Podmínky FX spotu', 'FX spot terms')}</h2>
+          <div style={{ fontSize: 13, display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <StatusBadge status={deal.fx.side} tone={deal.fx.side === 'BUY' ? 'info' : 'warning'} label={deal.fx.side} />
+            <span>{`${deal.fx.buyCurrency}/${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kupuje', 'Buys')} ${money(deal.fx.buyAmount)} ${deal.fx.buyCurrency}`}</span>
+            <span>{`${t('Prodává', 'Sells')} ${money(deal.fx.sellAmount)} ${deal.fx.sellCurrency}`}</span>
+            <span>{`${t('Kurz obchodu', 'Deal rate')} ${deal.fx.dealRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            {deal.fx.midRate !== null && (
+              <span>{`${t('Střední kurz fx-service', 'fx-service mid')} ${deal.fx.midRate.toLocaleString(locale, { maximumFractionDigits: 4 })}`}</span>
+            )}
+          </div>
+          {deal.fx.rateFlag && (
+            <div role="alert" style={{ color: 'var(--danger-text)', marginTop: 8 }}>
+              {t(`Kurz označen: ${deal.fx.rateFlag}`, `Rate flagged: ${deal.fx.rateFlag}`)}
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card" style={{ marginBottom: 16 }}>
         <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 8 }}>{t('Kontrola limitu', 'Limit check')}</h2>

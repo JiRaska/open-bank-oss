@@ -20,7 +20,7 @@ import java.math.BigDecimal
  */
 class CreditRiskCapitalTest {
 
-    private val shipped = CapitalTestParameters.shipped()
+    private val shipped = CapitalTestParameters.bcbs()
     private val asOf = Fixtures.AS_OF
 
     private fun gl(code: String, type: String, amount: String, ccy: String = "CZK") =

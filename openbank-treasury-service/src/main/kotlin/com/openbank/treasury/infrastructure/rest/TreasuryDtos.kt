@@ -4,14 +4,18 @@
 
 package com.openbank.treasury.infrastructure.rest
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
+import com.openbank.treasury.application.port.`in`.QuoteBoard
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.CounterpartyKind
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.SimulatedQuote
 import java.math.BigDecimal
 import java.time.Instant
 import java.time.LocalDate
@@ -32,9 +36,21 @@ data class DraftDealRequest(
     /** Omit for overnight (next business day). Ignored for CNB_DEPOSIT_FACILITY and CNB_LOMBARD, always overnight. */
     val maturityDate: LocalDate? = null,
     val rationale: String? = null,
+    /**
+     * ADR-0315 D10: the data an AI agent built this draft from, as a JSON object. Required (with
+     * `rationale`) when the caller is an agent; optional for a human dealer.
+     */
+    val inputs: JsonNode? = null,
+    /** FX_SPOT only: the currency the bank buys; exactly one of buy/sell is CZK. */
+    val buyCurrency: String? = null,
+    /** FX_SPOT only: the currency the bank sells. */
+    val sellCurrency: String? = null,
 )
 
 data class ReasonRequest(val reason: String? = null)
+
+/** Optional body of `POST /deals/{id}/confirm`: the counterparty's confirmation reference, if any. */
+data class ConfirmRequest(val reference: String? = null)
 
 data class LimitCheckResponse(
     val currency: String,
@@ -94,9 +110,13 @@ data class DealResponse(
     val submittedBy: String?,
     val approvedBy: String?,
     val rationale: String?,
+    /** The JSON object an agent's draft was built from (ADR-0315 D10), verbatim; null for a human draft. */
+    val inputs: String?,
     val limitCheck: LimitCheckResponse?,
     /** A senior approver's recorded override of a limit breach (ADR-0315 D4); null when none. */
     val limitOverride: LimitOverrideResponse?,
+    /** FX_SPOT only (#10896); null for money-market deals. */
+    val fx: FxTermsResponse?,
     val createdAt: Instant,
     val updatedAt: Instant,
     val history: List<TransitionResponse>,
@@ -122,10 +142,12 @@ data class DealResponse(
             submittedBy = d.submittedBy?.id,
             approvedBy = d.approvedBy?.id,
             rationale = d.rationale,
+            inputs = d.inputs,
             limitCheck = d.limitCheck?.let(LimitCheckResponse::from),
             limitOverride = d.limitOverride?.let {
                 LimitOverrideResponse(it.by.id, it.reason, it.at, it.coversExposureUpTo, it.limitAtOverride)
             },
+            fx = FxTermsResponse.from(d),
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {
@@ -133,6 +155,35 @@ data class DealResponse(
             },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
         )
+    }
+}
+
+/** Both legs of an FX spot, named from the bank's side, plus the rate check (#10896). */
+data class FxTermsResponse(
+    val side: FxSide,
+    val buyCurrency: String,
+    val buyAmount: BigDecimal,
+    val sellCurrency: String,
+    val sellAmount: BigDecimal,
+    val dealRate: BigDecimal,
+    val midRate: BigDecimal?,
+    val rateFlag: String?,
+) {
+    companion object {
+        fun from(d: Deal): FxTermsResponse? {
+            val fx = d.fx ?: return null
+            val buy = fx.side == FxSide.BUY
+            return FxTermsResponse(
+                side = fx.side,
+                buyCurrency = if (buy) d.currency else Deal.CZK,
+                buyAmount = if (buy) d.principal else fx.counterAmount,
+                sellCurrency = if (buy) Deal.CZK else d.currency,
+                sellAmount = if (buy) fx.counterAmount else d.principal,
+                dealRate = d.rate,
+                midRate = fx.midRate,
+                rateFlag = fx.rateFlag,
+            )
+        }
     }
 }
 
@@ -209,3 +260,57 @@ data class CurrencyPositionResponse(
 }
 
 data class PositionsResponse(val asOf: LocalDate, val positions: List<CurrencyPositionResponse>)
+
+/**
+ * `GET /quotes` (ADR-0315 D9). [synthetic] is ALWAYS true, on the board and on every quote: these
+ * are invented counterparties pricing off the risk engine's curve, never a dealable market price.
+ */
+data class QuoteBoardResponse(
+    val product: ProductType,
+    val currency: String,
+    val tenorDays: Int,
+    val synthetic: Boolean,
+    val quotes: List<QuoteResponse>,
+) {
+    companion object {
+        fun from(board: QuoteBoard) = QuoteBoardResponse(
+            product = board.product,
+            currency = board.currency,
+            tenorDays = board.tenorDays,
+            synthetic = true,
+            quotes = board.quotes.map { QuoteResponse.from(it, board.product) },
+        )
+    }
+}
+
+data class QuoteResponse(
+    val counterpartyId: String,
+    val synthetic: Boolean,
+    val bid: BigDecimal,
+    val ask: BigDecimal,
+    /** The side a deal of the requested product is struck at: bid for a placement, ask for a borrowing. */
+    val dealRate: BigDecimal,
+    val mid: BigDecimal,
+    val spreadBp: Int,
+    val curveSetId: UUID,
+    val curveAsOf: LocalDate,
+    val curveIndex: String,
+    /** The risk engine's label for the curve's market data (`synthetic` / `production`). */
+    val curveProvenance: String,
+) {
+    companion object {
+        fun from(q: SimulatedQuote, product: ProductType) = QuoteResponse(
+            counterpartyId = q.counterpartyId,
+            synthetic = q.synthetic,
+            bid = q.bid,
+            ask = q.ask,
+            dealRate = q.rateFor(product),
+            mid = q.mid,
+            spreadBp = q.spreadBp,
+            curveSetId = q.curveSetId,
+            curveAsOf = q.curveAsOf,
+            curveIndex = q.curveIndex,
+            curveProvenance = q.curveProvenance,
+        )
+    }
+}

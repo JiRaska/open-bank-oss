@@ -98,8 +98,10 @@ class RiskEngineCapitalPactConsumerTest {
             newJsonBody { o ->
                 o.uuid("runId", java.util.UUID.fromString(EXAMPLE_RUN_ID))
                 o.stringValue("asOf", REPORTING_DATE)
-                o.stringType("parameterSetId", "bcbs-d424-sa")
+                o.stringType("parameterSetId", "eu-crr3-sa")
                 o.stringType("parameterSetVersion", "1")
+                // Type only: the run may be synthetic or production; finrep must carry whichever it is (ADR-0313 D13).
+                o.stringType("provenance", "synthetic")
                 o.eachLike("currencies") { c -> currency(c) }
                 // The engine's total is the whole book in CZK (risk-engine API 1.11.0): C 02.00 renders it
                 // only in CZK, so the currency is pinned, not merely typed.
@@ -127,6 +129,8 @@ class RiskEngineCapitalPactConsumerTest {
                 o.stringValue("asOf", REPORTING_DATE)
                 o.stringType("parameterSetId", "eu-2015-61-crr2")
                 o.stringType("parameterSetVersion", "2")
+                // Type only: the run may be synthetic or production; finrep must carry whichever it is (ADR-0313 D13).
+                o.stringType("provenance", "synthetic")
                 o.eachLike("currencies") { c -> currencyLiquidity(c) }
                 // The total is every currency combined in CZK at the ČNB fixing (risk-engine API 1.13.0,
                 // EU 2015/61 Art. 4(5)): C 72.00-76.00 render it only in CZK, so the currency is pinned,
@@ -252,10 +256,14 @@ class RiskEngineCapitalPactConsumerTest {
                     currencyCount = c.currencies.size,
                     unclassifiedBalances = c.unclassified.size,
                     totalNotStated = c.totalNotStated,
+                    provenance = c.provenance,
                 ),
             ),
             LocalDate.parse(REPORTING_DATE),
         )
+        assertThat(c.provenance).isNotBlank()
+        assertThat(template.provenance).isEqualTo(c.provenance)
+        assertThat(template.sourceRunId).isEqualTo(c.runId)
         assertThat(total.currency).isEqualTo("CZK")
         assertThat(total.classes.single().exposureClass).isEqualTo("cash")
         // The example carries one unclassified balance, so the render must refuse the credit rows
@@ -290,10 +298,14 @@ class RiskEngineCapitalPactConsumerTest {
                     unclassifiedBalances = l.unclassified.size,
                     notes = l.notes,
                     totalNotStated = l.totalNotStated,
+                    provenance = l.provenance,
                 ),
             ),
             LocalDate.parse(REPORTING_DATE),
         )
+        assertThat(l.provenance).isNotBlank()
+        assertThat(template.provenance).isEqualTo(l.provenance)
+        assertThat(template.sourceRunId).isEqualTo(l.runId)
         assertThat(total.currency).isEqualTo("CZK")
         assertThat(l.totalNotStated).isNull()
         assertThat(l.notes).containsExactly(PLEDGED_NOTE_EXAMPLE)
