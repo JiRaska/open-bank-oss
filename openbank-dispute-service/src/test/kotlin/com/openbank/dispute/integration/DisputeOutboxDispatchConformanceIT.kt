@@ -28,7 +28,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(DisputeOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(DisputeOutboxDispatchConformanceIT.InMemoryKafkaResource::class)
+@QuarkusTestResource(value = DisputeOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(PostgresTestResource::class)
 class DisputeOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -39,7 +39,8 @@ class DisputeOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("dispute-outbox-out")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("dispute-outbox-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

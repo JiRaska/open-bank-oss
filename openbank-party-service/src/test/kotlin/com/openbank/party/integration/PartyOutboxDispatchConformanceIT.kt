@@ -29,7 +29,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(PartyOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(PartyOutboxDispatchConformanceIT.InMemoryKafkaResource::class)
+@QuarkusTestResource(value = PartyOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(
     value = PostgresRedpandaTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
@@ -43,7 +43,9 @@ class PartyOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("party-outbox-out")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("party-outbox-out") +
+            InMemoryConnector.switchIncomingChannelsToInMemory("aml-events-in", "consent-events-in", "kyc-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

@@ -26,6 +26,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(TppOutboxRepositoryV2IT.NoDispatchProfile::class)
+@QuarkusTestResource(value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],

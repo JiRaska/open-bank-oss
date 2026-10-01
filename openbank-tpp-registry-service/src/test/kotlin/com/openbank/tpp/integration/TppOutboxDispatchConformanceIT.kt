@@ -29,7 +29,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(TppOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class)
+@QuarkusTestResource(value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
@@ -43,7 +43,8 @@ class TppOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("tpp-events-out")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchOutgoingChannelsToInMemory("tpp-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

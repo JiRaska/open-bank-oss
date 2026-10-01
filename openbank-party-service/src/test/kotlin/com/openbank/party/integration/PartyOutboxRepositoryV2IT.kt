@@ -26,6 +26,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(PartyOutboxRepositoryV2IT.NoDispatchProfile::class)
+@QuarkusTestResource(value = PartyOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
 @QuarkusTestResource(
     value = PostgresRedpandaTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
