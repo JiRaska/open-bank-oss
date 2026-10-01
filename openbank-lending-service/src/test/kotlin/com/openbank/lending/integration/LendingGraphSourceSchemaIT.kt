@@ -329,7 +329,7 @@ class LendingGraphSourceSchemaIT {
     fun `evidence tables reject truncate even with table ownership`() {
         dataSource.connection.use { connection ->
             assertThatThrownBy {
-                // V23's receipt FK rejects a plain TRUNCATE before the immutable-evidence
+                // V29's receipt FK rejects a plain TRUNCATE before the immutable-evidence
                 // trigger runs; CASCADE proves the trigger still blocks an owning caller.
                 connection.createStatement().use { it.execute("TRUNCATE lending_graph_guarantee CASCADE") }
             }.hasMessageContaining("cannot be truncated")
