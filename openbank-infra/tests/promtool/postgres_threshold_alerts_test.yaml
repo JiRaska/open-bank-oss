@@ -34,6 +34,21 @@ tests:
               description: "This primary has no first recoverability point — no base backup exists, so the database cannot be restored to any moment. WAL archiving alone is not a backup. Check `kubectl get cluster -n pricing` for a barmanObjectStore, then force a base backup with an on-demand `kind: Backup`. Verify by listing the destination in S3, never by reading ContinuousArchiving (runbook 0003)."
 
   - interval: 1m
+    # A cluster declared in openbank:cnpg_backup_exempt (glitchtip-pg, unbacked by design, #1444)
+    # must NOT fire. The pricing case above is the must-fire half, so this exemption cannot be
+    # satisfied by a rule that has simply stopped firing for everyone.
+    name: "a primary of a declared backup-exempt cluster does NOT fire PostgresNoRecoveryPoint"
+    input_series:
+      - series: 'cnpg_collector_first_recoverability_point{namespace="observability",pod="glitchtip-pg-1"}'
+        values: "0+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="observability",pod="glitchtip-pg-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PostgresNoRecoveryPoint
+        exp_alerts: []
+
+  - interval: 1m
     # The primary filter is load-bearing and the rule's comment says so: unfiltered, the
     # expression matches every healthy replica (19 of them, measured 2026-08-19). This is the
     # must-NOT-fire half.

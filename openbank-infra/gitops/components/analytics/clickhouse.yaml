@@ -88,6 +88,10 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/clickhouse
+            - name: server-config
+              mountPath: /etc/clickhouse-server/config.d/retention.xml
+              subPath: retention.xml
+              readOnly: true
             - name: init
               mountPath: /docker-entrypoint-initdb.d
               readOnly: true
@@ -119,6 +123,9 @@ spec:
         - name: init
           configMap:
             name: clickhouse-init
+        - name: server-config
+          configMap:
+            name: clickhouse-server-config
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -126,4 +133,52 @@ spec:
         accessModes: [ReadWriteOnce]
         resources:
           requests:
+            # Left at 10Gi ON PURPOSE: volumeClaimTemplates is immutable on a live
+            # StatefulSet, so editing it here would fail every ArgoCD sync of this app.
+            # The live PVC was grown to 20Gi by `kubectl patch pvc data-clickhouse-0`
+            # (gp3 allowVolumeExpansion) on 2026-09-30; the template only matters for a
+            # freshly created PVC, where the TTLs below keep 10Gi sufficient.
             storage: 10Gi
+---
+# ClickHouse's own diagnostic tables had no retention and logged at TRACE.
+#
+# Measured 2026-09-30: data-clickhouse-0 at 100% (9.7G of 10Gi, 32 MB free) —
+# KubePersistentVolumeFillingUp critical — and 9.11 GiB of that was the `system`
+# database: text_log 6.22 GiB, trace_log 958 MiB, metric_log 929 MiB,
+# asynchronous_metric_log 688 MiB. The warehouse itself (openbank_analytics) was
+# 78 MiB. Stock ClickHouse writes every server log line at `logger.level=trace`
+# into system.text_log and keeps it forever; on a 10Gi volume the diagnostics
+# outgrow the data they diagnose within weeks, then every INSERT from
+# analytics-sink and the cloud-finops-collector CronJob fails (that is why the
+# collector's latest run was red).
+#
+# Cure at the cause: TTL on every system log table and WARN-level logging. Note
+# ClickHouse applies a changed system-log definition by RENAMING the old table
+# to <name>_N and creating a fresh one, so the tables already on disk (the
+# `text_log_0` etc. measured above) keep their bytes until dropped — see the
+# one-time cleanup in this PR's description.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-server-config
+  namespace: analytics
+  labels:
+    app.kubernetes.io/name: clickhouse
+    app.kubernetes.io/part-of: openbank
+data:
+  retention.xml: |
+    <clickhouse>
+      <logger>
+        <level>warning</level>
+        <console_log_level>warning</console_log_level>
+      </logger>
+      <text_log>
+        <level>warning</level>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </text_log>
+      <trace_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
+      <metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></metric_log>
+      <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
+      <query_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></query_log>
+      <part_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></part_log>
+    </clickhouse>
