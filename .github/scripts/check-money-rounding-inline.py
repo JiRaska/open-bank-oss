@@ -27,15 +27,14 @@ TOKEN = re.compile(r"RoundingMode\.|setScale\(")
 
 # Measured on origin/main 2026-09-26. Services absent here have a baseline of 0.
 BASELINE = {
+    "openbank-interest-service": 6,
+    "openbank-fx-service": 4,
     "openbank-delegation-service": 5,
     "openbank-domestic-payment": 2,
-    "openbank-fx-service": 7,
-    "openbank-interest-service": 6,
     "openbank-ledger-service": 8,
     "openbank-lending-service": 1,
     "openbank-sca-service": 2,
     "openbank-sdd-service": 2,
-    "openbank-transaction-service": 11,
 }
 
 
