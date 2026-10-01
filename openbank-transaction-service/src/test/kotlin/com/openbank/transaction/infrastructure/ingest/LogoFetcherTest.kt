@@ -9,10 +9,10 @@ import com.openbank.libs.security.EgressResolver
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import java.util.concurrent.atomic.AtomicInteger
-import java.net.InetSocketAddress
 import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * These are about what [LogoFetcher] REFUSES to connect to.
