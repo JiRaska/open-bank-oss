@@ -100,6 +100,7 @@ class NotificationEgressAllowListTest {
         val pub = TeamsOversightWebhookPublisher().also {
             it.enabled = true
             it.url = Optional.of("https://tenant.webhook.office.com/webhookb2/x")
+            it.allowedHosts = NotificationEgress.DEFAULT_ALLOWED_HOSTS.split(',')
             it.resolver = loopback
         }
         assertThat(pub.publish(signal()).await().indefinitely()).isFalse()

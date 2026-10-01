@@ -27,7 +27,6 @@ object NotificationEgress {
     /** Teams webhooks are per-tenant hosts (`<tenant>.webhook.office.com`) and must be added per env. */
     const val ALLOWED_HOSTS_PROPERTY = "openbank.notification.egress.allowed-hosts"
     const val DEFAULT_ALLOWED_HOSTS = "hooks.slack.com,oauth2.googleapis.com,fcm.googleapis.com"
-    val DEFAULT_ALLOWED_HOST_LIST: List<String> = DEFAULT_ALLOWED_HOSTS.split(',')
 
     fun client(
         allowedHosts: List<String>,

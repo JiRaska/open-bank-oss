@@ -51,7 +51,7 @@ class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
         name = NotificationEgress.ALLOWED_HOSTS_PROPERTY,
         defaultValue = NotificationEgress.DEFAULT_ALLOWED_HOSTS,
     )
-    var allowedHosts: List<String> = NotificationEgress.DEFAULT_ALLOWED_HOST_LIST
+    lateinit var allowedHosts: List<String>
 
     /** Visible for testing: lets a unit test pin a stub host to loopback. */
     internal var resolver: EgressResolver = EgressResolver.SYSTEM
