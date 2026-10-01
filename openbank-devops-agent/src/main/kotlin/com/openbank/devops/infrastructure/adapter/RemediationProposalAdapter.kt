@@ -52,7 +52,7 @@ class RemediationProposalAdapter(private val config: DevOpsConfig) : Remediation
      * `api.github.com`; a GitHub Enterprise host must be added to `openbank.egress.allowed-hosts`.
      */
     @ConfigProperty(name = "openbank.egress.allowed-hosts", defaultValue = "api.github.com")
-    var allowedHosts: List<String> = listOf("api.github.com")
+    lateinit var allowedHosts: List<String>
 
     /** Visible for testing: lets a unit test pin a stub host to loopback. */
     internal var resolver: EgressResolver = EgressResolver.SYSTEM
