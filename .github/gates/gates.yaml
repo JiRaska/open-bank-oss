@@ -4110,7 +4110,7 @@ gates:
     group: gitops
     mode: enforced
     min_subjects: 50   # 66 Quarkus workloads in gitops components today (2026-09-30)
-    budget_seconds: 10   # pure YAML walk, ~1s measured locally
+    budget_seconds: 45   # 11.7s measured on the CI runner (66 workloads x build.gradle reads), ~1s locally
     rationale: "A service without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT exports every span to localhost:4317 in the cluster; nothing errors and Tempo cannot report a service it never heard from. customer-edge, the public entry point, shipped that way."
     review_after: "2027-03-30"
     selftest_inputs: [".github/scripts/check-otel-endpoint-declared.py"]
