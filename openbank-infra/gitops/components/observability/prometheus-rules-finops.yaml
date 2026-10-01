@@ -33,11 +33,18 @@ spec:
         # D1a: Absolute daily NAT egress threshold (50 GB). Uses a 24h rate window
         # normalised to bytes/day. Fires if any namespace exceeds the threshold.
         - alert: FinOpsNatEgressSpikeAbsolute
+          # A pod with hostNetwork: true has no network namespace of its own, so cAdvisor
+          # reports the NODE's interface counters for it. Every such pod therefore "sends" the
+          # whole node's traffic. Measured 2026-10-01: the GuardDuty runtime agent DaemonSet
+          # (hostNetwork) read as 1.9 TB/day across 23 pods and fired this alert, while the
+          # largest real namespace was argocd at 21 GB/day. max_over_time keeps pods that have
+          # since been replaced excluded for the whole 24h window.
           expr: |
             sum by (namespace) (
               rate(container_network_transmit_bytes_total{
                 namespace!~"kube-system|monitoring|observability|cert-manager"
               }[24h])
+              unless on (namespace, pod) max_over_time(kube_pod_info{host_network="true"}[24h])
             ) * 86400 > 53687091200
           for: 30m
           labels:
