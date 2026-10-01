@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.39.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.2...lending-service-v0.39.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **lending:** book the backfill void's mirrors as reversals the ledger accepts ([#11582](https://github.com/JiRaska/open-bank-oss/issues/11582)) ([b4787fd](https://github.com/JiRaska/open-bank-oss/commit/b4787fdfc71de5ea596854253456e9f3005f772e)), closes [#11487](https://github.com/JiRaska/open-bank-oss/issues/11487)
+
 ## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.1...lending-service-v0.39.2) (2026-09-29)
 
 
