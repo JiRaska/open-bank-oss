@@ -1415,7 +1415,7 @@ class LendingService @Inject constructor(
         require(period == asOf.toString() || period == java.time.YearMonth.from(asOf).toString()) {
             "Reporting key must match asOf (yyyy-MM-dd or legacy yyyy-MM)"
         }
-        return provisionBatch(period, asOf, limit, 0, 0)
+        return provisionBatch(period, asOf, limit, 0, 0, null)
     }
 
     private fun provisionBatch(
@@ -1424,7 +1424,14 @@ class LendingService @Inject constructor(
         limit: Int,
         assessed: Int,
         posted: Int,
+        previousBatchIds: Set<LoanId>?,
     ): Uni<ProvisioningRunOutcome> = loans.findUnprovisioned(period, limit).flatMap { active ->
+        val batchIds = active.map { it.id }.toSet()
+        if (active.isNotEmpty() && batchIds == previousBatchIds) {
+            return@flatMap Uni.createFrom().failure(
+                IllegalStateException("Provisioning scan made no progress for period $period"),
+            )
+        }
         Multi.createFrom().iterable(active)
             .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
             .collect().asList()
@@ -1434,7 +1441,7 @@ class LendingService @Inject constructor(
                 if (active.size < limit) {
                     Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals))
                 } else {
-                    provisionBatch(period, asOf, limit, total, journals)
+                    provisionBatch(period, asOf, limit, total, journals, batchIds)
                 }
             }
     }
