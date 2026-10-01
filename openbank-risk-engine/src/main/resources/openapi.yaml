@@ -46,10 +46,11 @@ info:
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
   # 1.17.0 -> 1.18.0: (#11716) liquidity and capital are read by category, not by raw loan id.
-  # 1.18.0 -> 1.19.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
+  # 1.18.0 -> 1.21.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
   #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input. (This PR
-  #        originally claimed 1.16.0; #11539 and #11546 take 1.16.0 and 1.17.0, and #11716 took 1.18.0, so this takes 1.19.0.)
-  version: 1.19.0
+  #        originally claimed 1.16.0; #11539 and #11546 take 1.16.0 and 1.17.0, #11716 took 1.18.0, and open PRs #11718 / #11719 / #11722
+  #        claim 1.18.1 / 1.19.0 / 1.20.0, so this takes 1.21.0.)
+  version: 1.21.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
