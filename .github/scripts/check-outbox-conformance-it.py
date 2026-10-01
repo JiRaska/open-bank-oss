@@ -36,7 +36,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-balance-service",
     "openbank-billing-service",
     "openbank-card-issuance-service",
-    "openbank-case-coordinator-agent",
     "openbank-clearing-service",
     "openbank-consent-service",
     "openbank-delegation-service",
@@ -48,14 +47,12 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-fx-service",
     "openbank-incentive-service",
     "openbank-interest-service",
-    "openbank-kyb-service",
     "openbank-kyc-service",
     "openbank-lending-service",
     "openbank-loyalty-service",
     "openbank-notification-service",
     "openbank-party-service",
     "openbank-pid-service",
-    "openbank-referral-service",
     "openbank-sanctions-service",
     "openbank-sca-service",
     "openbank-sdd-service",
@@ -67,7 +64,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-tpp-registry-service",
     "openbank-transaction-service",
     "openbank-treasury-service",
-    "openbank-wealth-service",
 }
 
 

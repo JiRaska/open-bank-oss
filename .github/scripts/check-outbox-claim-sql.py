@@ -38,7 +38,6 @@ BASELINE: dict[str, int] = {
     "openbank-balance-service/src/main/kotlin/com/openbank/balance/infrastructure/persistence/repository/BalanceOutboxRepositoryImpl.kt": 1,
     "openbank-billing-service/src/main/kotlin/com/openbank/billing/infrastructure/outbox/BillingOutboxRepositoryImpl.kt": 1,
     "openbank-card-issuance-service/src/main/kotlin/com/openbank/cardissuance/infrastructure/persistence/repository/CardOutboxRepositoryImpl.kt": 1,
-    "openbank-case-coordinator-agent/src/main/kotlin/com/openbank/casecoordinator/infrastructure/persistence/CaseOutboxRepositoryImpl.kt": 1,
     "openbank-clearing-service/src/main/kotlin/com/openbank/clearing/infrastructure/persistence/repository/ClearingOutboxRepositoryImpl.kt": 1,
     "openbank-consent-service/src/main/kotlin/com/openbank/consent/infrastructure/persistence/repository/ConsentOutboxRepositoryImpl.kt": 1,
     "openbank-delegation-service/src/main/kotlin/com/openbank/delegation/infrastructure/persistence/repository/DelegationOutboxRepositoryImpl.kt": 1,
@@ -51,7 +50,6 @@ BASELINE: dict[str, int] = {
     "openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/persistence/repository/FxOutboxRepositoryImpl.kt": 1,
     "openbank-incentive-service/src/main/kotlin/com/openbank/incentive/infrastructure/persistence/IncentivePersistence.kt": 1,
     "openbank-interest-service/src/main/kotlin/com/openbank/interest/infrastructure/persistence/repository/InterestOutboxRepositoryImpl.kt": 1,
-    "openbank-kyb-service/src/main/kotlin/com/openbank/kyb/infrastructure/persistence/repository/KybOutboxRepositoryImpl.kt": 1,
     "openbank-kyc-service/src/main/kotlin/com/openbank/kyc/infrastructure/persistence/repository/KycOutboxRepositoryImpl.kt": 1,
     "openbank-ledger-service/src/main/kotlin/com/openbank/ledger/infrastructure/persistence/repository/LedgerOutboxRepositoryImpl.kt": 1,
     "openbank-lending-service/src/main/kotlin/com/openbank/lending/infrastructure/persistence/repository/LendingOutboxRepositoryImpl.kt": 1,
@@ -59,7 +57,6 @@ BASELINE: dict[str, int] = {
     "openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastructure/persistence/repository/NotificationOutboxRepositoryImpl.kt": 1,
     "openbank-party-service/src/main/kotlin/com/openbank/party/infrastructure/persistence/repository/PartyOutboxRepositoryImpl.kt": 1,
     "openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/persistence/repository/PidOutboxRepositoryImpl.kt": 1,
-    "openbank-referral-service/src/main/kotlin/com/openbank/referral/infrastructure/persistence/repository/ReferralOutboxRepositoryImpl.kt": 1,
     "openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/infrastructure/persistence/repository/SanctionsOutboxRepositoryImpl.kt": 1,
     "openbank-sca-service/src/main/kotlin/com/openbank/sca/infrastructure/persistence/repository/ScaOutboxRepositoryImpl.kt": 1,
     "openbank-sdd-service/src/main/kotlin/com/openbank/sdd/infrastructure/persistence/repository/SddOutboxRepositoryImpl.kt": 1,
@@ -71,7 +68,6 @@ BASELINE: dict[str, int] = {
     "openbank-tpp-registry-service/src/main/kotlin/com/openbank/tpp/infrastructure/persistence/repository/TppOutboxRepositoryImpl.kt": 1,
     "openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/repository/TransactionOutboxRepositoryImpl.kt": 1,
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/persistence/repository/TreasuryOutboxRepositoryImpl.kt": 1,
-    "openbank-wealth-service/src/main/kotlin/com/openbank/wealth/infrastructure/persistence/repository/WealthOutboxRepositoryImpl.kt": 1,
 }
 
 
