@@ -769,7 +769,7 @@ jobs:
           printf '%s' "$body" > "$body_file"
           code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
             "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
-            'application/json')"
+            'application/hal+json, application/json')"
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
           echo "Pact publication accepted (HTTP $code)."
 
