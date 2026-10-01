@@ -36,6 +36,9 @@ export const instrumentSchema = z.object({
     resetFrequencyMonths: z.number().int().nullable(), nextResetDate: z.string().nullable(),
   }).nullable(),
   counterpartyRef: z.string().nullable(), ifrs9Stage: z.string().nullable(),
+  // risk-engine 1.20.0 (#11107): the source contract's human reference (a loan's UV-YYYY-NNNNNN).
+  // nullish: an older risk-engine omits it, and runs recorded before it carry null.
+  contractNumber: z.string().nullish(),
   loan: z.looseObject({
     method: z.string(), periodsPerYear: z.number().int(), remainingPeriods: z.number().int(), nextDueDate: z.string().nullable(),
   }).nullable(),
@@ -141,7 +144,7 @@ export const irrbbSchema = z.object({
   }),
   shockNotConfigured: z.array(z.string()),
   unpriced: z.array(z.string()),
-  // risk-engine openapi 1.19.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.
+  // risk-engine openapi 1.21.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.
   // Optional+nullable so an older engine (and a single-currency book) both parse.
   reportingAggregate: z.object({
     currency: z.string(),
