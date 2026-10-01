@@ -28,7 +28,6 @@ import sys
 import tempfile
 from functools import lru_cache
 from pathlib import Path
-from unittest.mock import patch
 
 import yaml
 

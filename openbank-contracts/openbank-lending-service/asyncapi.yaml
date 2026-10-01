@@ -36,6 +36,8 @@ channels:
         $ref: '#/components/messages/CreditLoanTransition'
       LendingLedgerBackfillTransition:
         $ref: '#/components/messages/LendingLedgerBackfillTransition'
+      LendingLedgerBackfillVoidTransition:
+        $ref: '#/components/messages/LendingLedgerBackfillVoidTransition'
       LoanDisbursed:
         $ref: '#/components/messages/LoanDisbursed'
       LoanInterestAccrued:
@@ -86,6 +88,10 @@ components:
         $ref: '#/components/schemas/LegacyLendingPayload'
     LendingLedgerBackfillTransition:
       name: lending.ledger_backfill.transition
+      payload:
+        $ref: '#/components/schemas/LegacyLendingPayload'
+    LendingLedgerBackfillVoidTransition:
+      name: lending.ledger_backfill_void.transition
       payload:
         $ref: '#/components/schemas/LegacyLendingPayload'
     LoanDisbursed:
