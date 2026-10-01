@@ -13,6 +13,8 @@ metadata:
   name: pact-broker
   labels:
     openbank.io/plane: infra
+    # ADR-0324: admits this namespace's HTTPRoutes to the shared Envoy Gateway.
+    openbank.io/edge-gateway: shared
     app.kubernetes.io/part-of: platform
     pod-security.kubernetes.io/audit: restricted
     pod-security.kubernetes.io/warn: restricted

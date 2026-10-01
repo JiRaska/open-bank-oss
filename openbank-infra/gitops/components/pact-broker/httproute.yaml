@@ -1,0 +1,77 @@
+# pact.open-bank.tech on the shared Envoy Gateway (ADR-0324 Phase 1, first host moved).
+#
+# Same posture as the Ingress it replaces (ADR-0092): a public machine endpoint gated by the
+# broker's own HTTP Basic auth. The nginx-era edge headers move here as typed
+# ResponseHeaderModifier entries — including HSTS and nosniff, which ingress-nginx used to add
+# controller-wide and nothing adds on this data plane unless the route says so.
+#
+# STAGED, NOT YET CUT OVER. This route serves on the Envoy NLB but publishes NO DNS
+# (`external-dns.kubernetes.io/controller: none` below; external-dns v0.23.0 applies its
+# controller-match filter to route informers), so pact.open-bank.tech still resolves to
+# ingress-nginx. Reason: the listener's DNS-01 certificate takes minutes to issue while
+# external-dns re-syncs every minute — publishing in the same change would race CI runners onto
+# a listener with no certificate. The cutover change removes that annotation and sets
+# `ingress-hostname-source: annotation-only` on ingress.yaml, after the certificate is Ready and
+# `curl --resolve pact.open-bank.tech:443:<envoy-nlb-ip> https://pact.open-bank.tech/diagnostic/status/heartbeat`
+# answers 200 with the headers below.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pact-broker
+  namespace: pact-broker
+  annotations:
+    # Staged: removed by the cutover change (see the header).
+    external-dns.kubernetes.io/controller: none
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-pact-broker
+  hostnames:
+    - pact.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=31536000; includeSubDomains"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: X-Frame-Options
+                value: SAMEORIGIN
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+      backendRefs:
+        - name: pact-broker
+          port: 9292
+---
+# http://pact.open-bank.tech -> https (the nginx ssl-redirect annotation's replacement).
+# Redirect-only: no backendRefs, so it grants the Gateway no reach into this namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pact-broker-https-redirect
+  namespace: pact-broker
+  annotations:
+    # The redirect must not publish the hostname a second time; the HTTPS route owns the record.
+    external-dns.kubernetes.io/controller: none
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: http
+  hostnames:
+    - pact.open-bank.tech
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

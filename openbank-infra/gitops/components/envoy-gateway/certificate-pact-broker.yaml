@@ -1,0 +1,17 @@
+# Edge certificate for pact.open-bank.tech on the shared Gateway (ADR-0324 Phase 1).
+# Lives in envoy-gateway-system because a Gateway listener reads certificateRefs from its own
+# namespace without a ReferenceGrant. DNS-01 (letsencrypt-prod), so issuance does not depend on
+# which load balancer the hostname currently resolves to — it is ready before the DNS cutover.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pact-broker-edge-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: pact-broker-edge-tls
+  dnsNames:
+    - pact.open-bank.tech
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+    group: cert-manager.io

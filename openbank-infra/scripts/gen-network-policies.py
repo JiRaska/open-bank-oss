@@ -74,6 +74,9 @@ OBSERVABILITY_NS = "observability"
 SECURITY_SCANNER_NS = "security-scanner"
 ADMIN_UI_NS = "admin-ui"
 INGRESS_NS = "ingress-nginx"
+# ADR-0324: the Envoy Gateway data plane (the EnvoyProxy pods behind the second NLB) runs in the
+# controller namespace, so a backend an HTTPRoute names is called FROM here.
+GATEWAY_NS = "envoy-gateway-system"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
 
@@ -186,6 +189,23 @@ def write_policies(out: str, policies: list[dict], *, dump=yaml.dump) -> None:
 
 
 
+def httproute_backends(doc: dict) -> list[tuple[str, str, int | None]]:
+    """(namespace, service, port) for every Service backend an HTTPRoute forwards to.
+
+    A backendRef without `namespace` resolves to the route's own namespace (Gateway API
+    semantics); a non-Service backendRef (`kind` other than Service) is skipped. Redirect-only
+    rules carry no backendRefs and contribute nothing, which is correct: nothing is called.
+    """
+    ns = (doc.get("metadata", {}) or {}).get("namespace")
+    out = []
+    for rule in (doc.get("spec", {}) or {}).get("rules", []) or []:
+        for ref in rule.get("backendRefs", []) or []:
+            if (ref.get("kind") or "Service") != "Service" or not ref.get("name"):
+                continue
+            out.append((ref.get("namespace") or ns, ref["name"], ref.get("port")))
+    return out
+
+
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
 
@@ -213,6 +233,20 @@ def self_test() -> int:
             fails.append(f"{label}: expected {want}, got {got}")
 
     # The everyday shape: an in-cluster service URL with an explicit port.
+    route = {
+        "kind": "HTTPRoute",
+        "metadata": {"name": "r", "namespace": "pact-broker"},
+        "spec": {"rules": [
+            {"backendRefs": [{"name": "pact-broker", "port": 9292}]},
+            {"backendRefs": [{"name": "other", "namespace": "shared", "port": 80}]},
+            {"backendRefs": [{"kind": "Backend", "name": "ext", "port": 443}]},
+            {"filters": [{"type": "RequestRedirect"}]},
+        ]},
+    }
+    case("an HTTPRoute backend resolves to the route namespace and a cross-namespace one keeps its own; "
+         "non-Service backends and redirect-only rules call nothing",
+         httproute_backends(route),
+         [("pact-broker", "pact-broker", 9292), ("shared", "other", 80)])
     case("an http svc URL with a port is extracted",
          urls("url: http://openbank-ledger-service.openbank.svc:8080/api"),
          [("openbank-ledger-service", "openbank", "8080")])
@@ -317,6 +351,7 @@ def main():
     edges = defaultdict(set)
     edge_ports = defaultdict(set)  # (callee_ns, callee_svc) -> ports
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
+    gateway_backends = defaultdict(set)  # (ns, svc-name) -> ports reached via an HTTPRoute
     http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
     # ns -> the broker ports that namespace's clients actually name in their bootstrap URLs.
     # The port is DERIVED rather than hardcoded (#3393): this rule used to emit a literal
@@ -430,6 +465,10 @@ def main():
                         port = (be.get("port", {}) or {}).get("number")
                         ingress_backends[(ns, be["name"])].add(port)
 
+        elif kind == "HTTPRoute" and ns:
+            for be_ns, be_svc, be_port in httproute_backends(doc):
+                gateway_backends[(be_ns, be_svc)].add(be_port)
+
         elif kind == "HTTPScaledObject" and ns:
             # ADR-0083 T1 pilot: the KEDA HTTP add-on interceptor
             # (keda-add-ons-http-interceptor.keda.svc) is the actual caller once the
@@ -529,6 +568,10 @@ def main():
             for p in ingress_backends.get((ns, wl_name), set())
         }
 
+        gw_ports = {
+            resolve_pod_port(ns, wl_name, p)
+            for p in gateway_backends.get((ns, wl_name), set())
+        }
         rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
             peers = [ns_peer(c) for c in callers if c != ADMIN_UI_NS]
@@ -570,6 +613,13 @@ def main():
             rules.append({
                 "from": [ns_peer(INGRESS_NS)],
                 "ports": [{"protocol": "TCP", "port": p} for p in sorted(ing_ports)],
+            })
+
+        if gw_ports:
+            # ADR-0324: the shared Envoy Gateway reaches this backend through an HTTPRoute.
+            rules.append({
+                "from": [ns_peer(GATEWAY_NS)],
+                "ports": [{"protocol": "TCP", "port": p} for p in sorted(gw_ports)],
             })
 
         by_dir[wl.get("dir") or ns_dir.get(ns)].append({

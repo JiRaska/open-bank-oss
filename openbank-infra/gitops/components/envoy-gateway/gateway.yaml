@@ -3,7 +3,10 @@
 #
 # The shared edge (ADR-0324): one GatewayClass, one EnvoyProxy, one Gateway.
 #
-# PHASE 0 — NOTHING IS ROUTED. The Gateway exists so the controller provisions the proxy
+# PHASE 1 (in progress) — pact.open-bank.tech is staged here (pact-broker/httproute.yaml): served
+# on the Envoy NLB, DNS not yet cut over.
+#
+# PHASE 0 — NOTHING WAS ROUTED. The Gateway exists so the controller provisions the proxy
 # Deployment and its LoadBalancer Service (the second NLB), and so the data plane can be
 # observed before any host moves. Its listener admits HTTPRoutes only from namespaces
 # carrying `openbank.io/edge-gateway: shared`, and no namespace carries that label yet.
@@ -52,10 +55,21 @@ spec:
         annotations:
           service.beta.kubernetes.io/aws-load-balancer-type: nlb
           service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
+      # Two replicas, zone spread and a PDB from the first host that moves (ADR-0324 Phase 1).
+      # With one replica a node drain or an OOM takes the edge down for every migrated host;
+      # ingress-nginx has run two since #11334 for exactly that reason, so the "as ingress-nginx"
+      # single-replica FinOps note that used to sit here no longer described either controller.
       envoyDeployment:
-        # Single replica for sandbox FinOps, as ingress-nginx. Prod raises this and adds
-        # envoyPDB.
-        replicas: 1
+        replicas: 2
+        pod:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: ScheduleAnyway
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: proxy
+                  app.kubernetes.io/managed-by: envoy-gateway
         container:
           # Envoy Gateway's default proxy request is 100m / 512Mi; an idle sandbox edge
           # needs a fraction of that. Limits match the ingress-nginx controller's.
@@ -66,6 +80,8 @@ spec:
             limits:
               cpu: "1"
               memory: 256Mi
+      envoyPDB:
+        minAvailable: 1
   telemetry:
     metrics:
       # Stated explicitly: podmonitors.yaml scrapes this endpoint (:19001
@@ -84,6 +100,25 @@ spec:
     - name: http
       protocol: HTTP
       port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              openbank.io/edge-gateway: shared
+    # ── Phase 1 hosts: one HTTPS listener per host, its certificate in this namespace ──────
+    # (certificate-*.yaml, DNS-01 via letsencrypt-prod, so no HTTP-01 solver has to reach the
+    # Gateway). Per-host listeners rather than a wildcard keep each host's attachment explicit:
+    # a route can bind only the listener whose hostname it matches.
+    - name: https-pact-broker
+      protocol: HTTPS
+      port: 443
+      hostname: pact.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pact-broker-edge-tls
       allowedRoutes:
         namespaces:
           from: Selector
