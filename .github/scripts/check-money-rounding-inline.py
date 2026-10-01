@@ -30,7 +30,7 @@ BASELINE = {
     "openbank-delegation-service": 5,
     "openbank-domestic-payment": 2,
     "openbank-fx-service": 7,
-    "openbank-interest-service": 14,
+    "openbank-interest-service": 6,
     "openbank-ledger-service": 8,
     "openbank-lending-service": 1,
     "openbank-sca-service": 2,

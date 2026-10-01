@@ -33,6 +33,7 @@ import com.openbank.interest.domain.tax.WithholdingTaxPolicy
 import com.openbank.interest.infrastructure.observability.InterestCapitalizationMetrics
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
@@ -391,7 +392,7 @@ class InterestService(
         if (currencies.size > 1) return Uni.createFrom().failure(mixedCurrencyFailure(accountId, productId, currencies))
         val ccy = CurrencyCode.of(currencies.single())
         val total = accruals.fold(BigDecimal.ZERO) { acc, a -> acc + a.accruedAmount }
-        val gross = total.setScale(ccy.defaultFractionDigits, RoundingMode.HALF_UP)
+        val gross = RoundingPolicy.LEDGER_POSTING.round(total, ccy)
         // Before the claim, so a refusal leaves every accrual ACCRUING and nothing to unwind.
         if (gross.signum() < 0) {
             return Uni.createFrom().failure(negativeGrossFailure(accountId, productId, toDate, gross, ccy.code))
@@ -403,7 +404,7 @@ class InterestService(
         // so the withholding row a retry commits matches the journal the ledger idempotently replays.
         return claimProfile(accountId, accruals, alreadyClaimed).flatMap { profile ->
             val tax = WithholdingTaxPolicy.compute(gross, ccy.code, profile, toDate)
-            val net = tax.netAmount.setScale(ccy.defaultFractionDigits, RoundingMode.HALF_UP)
+            val net = RoundingPolicy.LEDGER_POSTING.round(tax.netAmount, ccy)
             val cap = InterestCapitalization(
                 accountId = accountId,
                 productId = productId,
