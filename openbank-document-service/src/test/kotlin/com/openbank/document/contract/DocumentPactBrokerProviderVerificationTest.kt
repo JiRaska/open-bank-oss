@@ -11,9 +11,14 @@ import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.libs.storage.ObjectStorePort
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import io.vertx.core.Vertx
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -64,6 +69,18 @@ class DocumentPactBrokerProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
+    lateinit var documentRepository: DocumentRepositoryPort
+
+    @Inject
+    lateinit var objectStore: ObjectStorePort
+
+    @Inject
+    lateinit var vertx: Vertx
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -73,7 +90,17 @@ class DocumentPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /**
@@ -95,4 +122,8 @@ class DocumentPactBrokerProviderVerificationTest {
     fun statePreviewRendererAvailable() {
         // Intentionally empty — see the KDoc above.
     }
+
+    /** Same seed as the folder twin, so both lanes verify the export against identical state. */
+    @State(DocumentDisclosurePactSeed.STATE)
+    fun sealedPdfDocumentExists() = DocumentDisclosurePactSeed.seed(vertx, documentRepository, objectStore)
 }
