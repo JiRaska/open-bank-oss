@@ -30,7 +30,9 @@ class SanctionsScreeningAdapter : AccountSanctionsScreeningPort {
             ),
         ).awaitSuspending()
         SanctionsScreenResult(
-            status = response.status ?: "CLEAR",
+            // Never default a missing status to CLEAR: that turned a malformed or renamed response
+            // into a passed screen. UNKNOWN does not permit opening (SanctionsScreenResult).
+            status = response.status?.uppercase() ?: SanctionsScreenResult.UNKNOWN,
             matchScore = response.overallScore ?: 0.0,
             matchedName = response.matches.firstOrNull()?.matchedName,
         )

@@ -58,6 +58,8 @@ dependencies {
     testImplementation(libs.wiremock.standalone)
     // ADR-0063 P2: consumer-driven contract tests (Pact).
     testImplementation(libs.pact.consumer)
+    // Provider replay of standing-order's create-payment pact from the git-pact folder (#8345).
+    testImplementation(libs.pact.provider)
 }
 
 kover {
