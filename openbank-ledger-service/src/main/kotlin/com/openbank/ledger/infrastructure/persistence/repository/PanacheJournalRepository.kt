@@ -21,6 +21,7 @@ import com.openbank.ledger.infrastructure.persistence.entity.JournalLineEntity
 import com.openbank.ledger.infrastructure.persistence.entity.LedgerIdempotencyEntity
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -29,7 +30,6 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -388,16 +388,14 @@ class PanacheJournalRepository(
     )
 
     private fun JournalLineEntity.toDomainLine(): JournalLine {
-        val txScale = CurrencyCode.of(currencyCode).defaultFractionDigits
-        val baseScale = CurrencyCode.of(baseCurrency).defaultFractionDigits
         return JournalLine(
             id = id,
             journalId = journalId,
             glAccountId = glAccountId,
             side = if (side == "D") JournalSide.DEBIT else JournalSide.CREDIT,
-            amount = Money.of(amount.setScale(txScale, RoundingMode.HALF_EVEN), currencyCode),
+            amount = Money.of(RoundingPolicy.MONEY_SCALE.round(amount, CurrencyCode.of(currencyCode)), currencyCode),
             fxRate = fxRate,
-            baseAmount = Money.of(baseAmount.setScale(baseScale, RoundingMode.HALF_EVEN), baseCurrency),
+            baseAmount = Money.of(RoundingPolicy.MONEY_SCALE.round(baseAmount, CurrencyCode.of(baseCurrency)), baseCurrency),
             sequence = sequence,
             subAccountId = subAccountId,
         )
