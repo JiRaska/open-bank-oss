@@ -42,6 +42,8 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 @ApplicationScoped
+// One adapter method per LoanApplicationRepository port method (hexagonal), like the fleet's other *RepositoryImpl.
+@Suppress("TooManyFunctions")
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: LendingMapper,
