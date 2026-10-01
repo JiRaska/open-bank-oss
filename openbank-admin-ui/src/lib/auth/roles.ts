@@ -146,7 +146,7 @@ export const PERMISSIONS = {
   // VIEWER/OPERATOR/ADMIN/KYC only (PartyResource.kt). Compliance and the
   // split KYC opener/reviewer roles use their own case endpoints and must not
   // receive a PII party directory link that the backend will 403.
-  "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC],
+  "parties:view":         [ROLES.ADMIN, ROLES.OPERATOR, ROLES.VIEWER, ROLES.KYC, ROLES.RISK],
   // Mirrors party-service POST /api/v1/parties: a viewer may inspect parties but
   // must never be offered a customer-creation workflow.
   "parties:create":       [ROLES.ADMIN, ROLES.OPERATOR, ROLES.KYC],
