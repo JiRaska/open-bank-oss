@@ -24,7 +24,10 @@ info:
   #        openbank.treasury.confirmation.required is false.
   # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
   #        counterparties off the risk engine's latest curve set plus a configured spread.
-  version: 1.13.0
+  # 1.14.0: additive — GET /positions answers basis ACTUAL | PROJECTED, the accounting day `today`
+  #         (Europe/Prague) it was judged against, the counted deal states, and a per-currency
+  #         dealCount. A date after today is a projection of concluded deals, no longer all zeros.
+  version: 1.14.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -359,7 +362,11 @@ paths:
         - name: asOf
           in: query
           required: false
-          description: Defaults to today. A deal counts when it has settled and valueDate <= asOf < maturityDate.
+          description: |
+            Defaults to the bank's accounting day today (Europe/Prague). A counted deal is in the
+            position when valueDate <= asOf < maturityDate. Up to and including today the basis is
+            ACTUAL and only SETTLED or MATURED deals count; after today it is PROJECTED and BOOKED
+            and CONFIRMED deals count too, on their contracted dates — no new deals are assumed.
           schema:
             type: string
             format: date
@@ -786,12 +793,22 @@ components:
       type: object
       properties:
         asOf: { type: string, format: date }
+        today: { type: string, format: date, description: The accounting day (Europe/Prague) asOf was judged against }
+        basis:
+          type: string
+          enum: [ACTUAL, PROJECTED]
+          description: ACTUAL when asOf <= today (settled deals only), PROJECTED when asOf is after today
+        countedStates:
+          type: array
+          description: The deal states this answer counted
+          items: { $ref: '#/components/schemas/DealState' }
         positions:
           type: array
           items:
             type: object
             properties:
               currency: { type: string }
+              dealCount: { type: integer, description: Deals outstanding in this currency on asOf }
               placed: { type: number }
               borrowed: { type: number }
               atCnb: { type: number }
