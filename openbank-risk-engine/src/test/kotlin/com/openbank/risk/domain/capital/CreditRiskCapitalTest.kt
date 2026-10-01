@@ -97,6 +97,9 @@ class CreditRiskCapitalTest {
         assertThat(lines.single { it.glAccountCode == "1500" }.factorKey).isEqualTo("rw-bank-scra-grade-c")
         assertThat(lines.single { it.glAccountCode == "1510" }.factorKey).isEqualTo("rw-sovereign-domestic-currency")
         assertThat(lines.map { it.citation }).allMatch { it.startsWith("BCBS d424 ¶") }
+        assertThat(lines.single { it.instrumentId == "L-DEFAULT" }.ifrs9Stage).isEqualTo("STAGE_3")
+        assertThat(lines.single { it.instrumentId == "L-RETAIL" }.ifrs9Stage).isEqualTo("STAGE_1")
+        assertThat(lines.single { it.glAccountCode == "1500" }.ifrs9Stage).isNull()
     }
 
     @Test
@@ -150,6 +153,7 @@ class CreditRiskCapitalTest {
         assertThat(r.total!!.ownFunds).isNull()
         assertThat(r.ratios).isNull()
         assertThat(r.ratiosNotComputable).contains("no own-funds GL account")
+        assertThat(r.ratiosNotComputableCode).isEqualTo(RatiosNotComputable.NO_OWN_FUNDS)
         assertThat(r.ownFundsRequirement).describedAs("the requirement needs only RWA").isEqualByComparingTo("1852")
     }
 
@@ -213,6 +217,7 @@ class CreditRiskCapitalTest {
         assertThat(r.ownFundsRequirement).isNull()
         assertThat(r.ratios).isNull()
         assertThat(r.ratiosNotComputable).contains("multi-currency")
+        assertThat(r.ratiosNotComputableCode?.wire).isEqualTo("multi-currency")
         assertThat(r.currencies.single { it.currency == "EUR" }.totalRwa).isEqualByComparingTo("150")
     }
 }
