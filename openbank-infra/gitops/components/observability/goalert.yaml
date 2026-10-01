@@ -149,6 +149,13 @@ spec:
           env:
             - name: GOALERT_LISTEN
               value: ":8080"
+            # Prometheus metrics on a separate listener (goalert_*: notification
+            # sends, failures, queue depth, heartbeat state). Scraped by
+            # servicemonitor-observability-stack.yaml. Until 2026-09-30 GoAlert's
+            # delivery health was known only from Alertmanager's side of the
+            # webhook — which is how the 98%-rejected episode (#11136) ran unseen.
+            - name: GOALERT_LISTEN_PROMETHEUS
+              value: ":8081"
             # Keycloak OIDC SSO (set in the DB via `goalert set-config`) builds its
             # callback from PUBLIC_URL, so it must be the browser-reachable URL.
             # GoAlert has no ingress (ADR-0056) → accessed via port-forward:
@@ -171,6 +178,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: 8081
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -214,3 +223,6 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+    - name: metrics
+      port: 8081
+      targetPort: metrics
