@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.21.0
+  version: 1.21.1
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
