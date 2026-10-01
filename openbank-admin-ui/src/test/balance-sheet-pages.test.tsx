@@ -358,7 +358,7 @@ describe('Liquidity (LCR / NSFR)', () => {
     expect(screen.getByTestId('nsfr-CZK').textContent).toContain('180')
     expect(screen.getByText(/bcbs-d238-d295 v1/)).toBeTruthy()
     expect(screen.getAllByText(/2015\/61 deviations not applied/).length).toBeGreaterThan(0)
-    expect(screen.getByText('BCBS d238 ¶69, ¶144')).toBeTruthy()
+    expect(document.querySelector('td[title="BCBS d238 ¶69, ¶144"]')).not.toBeNull()
     expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Unclassified balances|Nezařazené zůstatky/)).toBeNull()
   })
@@ -434,7 +434,8 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
     expect(screen.getByTestId('requirement').textContent).toMatch(/1[\s\u00a0,.]?580/)
     expect(screen.getByTestId('ratio-total').textContent).toContain('20')
     expect(document.querySelectorAll('tr[data-class]').length).toBe(3)
-    expect(screen.getAllByText(/SCRA Grade C base: 150%/).length).toBeGreaterThan(0)
+    // Citations render as a plain article reference; the engine's full citation is the cell's title.
+    expect(document.querySelector('tr[data-class="bank"] td[title*="SCRA Grade C base: 150%"]')).not.toBeNull()
     expect(screen.getByText(/bcbs-d424-sa v1/)).toBeTruthy()
     expect(screen.getAllByText(/EU CRR Part Three Title II Chapter 2 not applied/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/UPPER BOUND/).length).toBe(1)
