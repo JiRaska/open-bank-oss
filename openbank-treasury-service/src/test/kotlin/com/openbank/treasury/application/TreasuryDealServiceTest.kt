@@ -134,6 +134,47 @@ class TreasuryDealServiceTest {
         assertTradeDateDefaultsToPrague(java.time.Instant.parse("2026-01-15T23:30:00Z"), LocalDate.parse("2026-01-16"))
     }
 
+    @Test
+    fun `after 22 00 UTC in summer the simulated market settles a deal valued on the Prague day`(): Unit =
+        runBlocking { assertSettlesOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), "2026-07-16") }
+
+    @Test
+    fun `after 23 00 UTC in winter the simulated market settles a deal valued on the Prague day`(): Unit =
+        runBlocking { assertSettlesOnPragueDay(java.time.Instant.parse("2026-01-15T23:30:00Z"), "2026-01-16") }
+
+    @Test
+    fun `after 22 00 UTC the simulated market matures a deal due on the Prague day`(): Unit = runBlocking {
+        val b = bookOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+        service.runSimulatedMarket()
+        // 22:30 UTC on the 22nd is the 23rd in Prague: the maturity date.
+        clock = Clock.fixed(java.time.Instant.parse("2026-07-22T22:30:00Z"), ZoneOffset.UTC)
+        service.runSimulatedMarket()
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.MATURED)
+        assertThat(ledger.entryDates["treasury:${b.id}:matured"]).isEqualTo(LocalDate.parse("2026-07-23"))
+    }
+
+    @Test
+    fun `a reversal after 22 00 UTC is entered on the Prague day`(): Unit = runBlocking {
+        val b = bookOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+        service.runSimulatedMarket()
+        service.reverse(b.id, "test", DealFixtures.approver)
+        assertThat(ledger.entryDates["treasury:${b.id}:reversed"]).isEqualTo(LocalDate.parse("2026-07-16"))
+    }
+
+    private suspend fun assertSettlesOnPragueDay(at: java.time.Instant, pragueDay: String) {
+        val prague = LocalDate.parse(pragueDay)
+        val b = bookOnPragueDay(at, prague)
+        // Under the UTC date the value date is still tomorrow and the deal would stay CONFIRMED.
+        service.runSimulatedMarket()
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
+        assertThat(ledger.entryDates["treasury:${b.id}:settled"]).isEqualTo(prague)
+    }
+
+    private suspend fun bookOnPragueDay(at: java.time.Instant, prague: LocalDate): Deal {
+        clock = Clock.fixed(at, ZoneOffset.UTC)
+        return book(cmd(maturity = prague.plusDays(7)).copy(tradeDate = prague, valueDate = prague))
+    }
+
     private suspend fun assertTradeDateDefaultsToPrague(at: java.time.Instant, prague: LocalDate) {
         clock = Clock.fixed(at, ZoneOffset.UTC)
         val c = cmd(maturity = prague.plusDays(7)).copy(tradeDate = null, valueDate = prague)
@@ -567,10 +608,12 @@ class TreasuryDealServiceTest {
 
     private class RecordingLedger : LedgerPostingPort {
         val posted = mutableListOf<JournalSpec>()
+        val entryDates = mutableMapOf<String, LocalDate>()
         var failFor: UUID? = null
         override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
             if (spec.dealId == failFor) error("ledger unavailable")
             posted += spec
+            entryDates[spec.idempotencyKey] = entryDate
             return UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray())
         }
     }
