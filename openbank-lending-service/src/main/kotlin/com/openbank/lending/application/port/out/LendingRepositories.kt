@@ -21,6 +21,13 @@ import java.time.OffsetDateTime
 import java.util.UUID
 
 interface LoanApplicationRepository {
+    /**
+     * Serializes an origination step with its local writes in one transaction (#11626): the
+     * application row is locked for the duration, and every repository call made inside
+     * [operation] joins that transaction. Same contract as [LoanRepository.withLocked].
+     */
+    fun <T> withLocked(id: LoanApplicationId, operation: (LoanApplication?) -> Uni<T>): Uni<T>
+
     fun save(application: LoanApplication): Uni<LoanApplication>
     fun findById(id: LoanApplicationId): Uni<LoanApplication?>
     fun findByParty(partyId: UUID): Uni<List<LoanApplication>>
