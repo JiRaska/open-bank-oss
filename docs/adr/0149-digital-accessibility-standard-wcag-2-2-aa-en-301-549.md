@@ -1,13 +1,14 @@
 ---
 date: 2026-07-02
 decision-status: accepted
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [i18n-a11y, compliance, admin-ui]
 summary: "Adopt WCAG 2.2 AA aligned with EN 301 549 as the conformance target for customer-facing surfaces; the internal admin UI gets only a non-blocking axe-core guard test, being outside European Accessibility Act scope."
+followup: "#11603 — only admin-ui is checked by axe; developer-portal has no accessibility check"
 ---
 
 # ADR-0149 — Digital accessibility standard (WCAG 2.2 AA / EN 301 549)
