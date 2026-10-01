@@ -205,12 +205,17 @@ spec:
           # chart cannot carry a pod-identity backup role (#1444). It only became visible here
           # once it was scraped (2026-10-01). Each exemption is a record with a reason, so the
           # list is reviewable and a backup-less money-path cluster can never hide in it silently.
+          # The cluster label is derived only to join the exemption list and stripped again
+          # (outer label_replace to ""), so the alert keeps the label set GoAlert dedups on.
           expr: |
-            (
-              label_replace(cnpg_collector_first_recoverability_point == 0, "cluster", "$1", "pod", "(.+)-[0-9]+")
-                and on (namespace, pod) cnpg_pg_replication_in_recovery == 0
+            label_replace(
+              (
+                label_replace(cnpg_collector_first_recoverability_point == 0, "cluster", "$1", "pod", "(.+)-[0-9]+")
+                  and on (namespace, pod) cnpg_pg_replication_in_recovery == 0
+              )
+              unless on (namespace, cluster) openbank:cnpg_backup_exempt,
+              "cluster", "", "", ""
             )
-            unless on (namespace, cluster) openbank:cnpg_backup_exempt
           for: 30m
           labels:
             severity: critical
