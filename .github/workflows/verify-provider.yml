@@ -14,6 +14,17 @@ name: Verify one provider
 run-name: "pact-verify:${{ inputs.service }}:${{ inputs.reconcile_key || 'manual' }}:${{ inputs.reconcile_key && 'auto' || 'manual' }}"
 
 on:
+  workflow_call:
+    inputs:
+      service:
+        required: true
+        type: string
+      ref:
+        required: true
+        type: string
+    secrets:
+      PACT_BROKER_PASSWORD:
+        required: true
   workflow_dispatch:
     inputs:
       service:
