@@ -28,6 +28,19 @@ spec:
         # single replica. Unmatched alerts fall through to a no-op receiver and
         # stay visible in the Alertmanager UI + Grafana alert list; `warning`
         # and `critical` both egress to Slack (see the routing tree below).
+        # KubeJobFailed (kubernetes-mixin) fires on `kube_job_failed > 0`, i.e. on the
+        # EXISTENCE of a failed Job object. A CronJob keeps its last failed Jobs
+        # (failedJobsHistoryLimit) next to the successful runs that followed, so the
+        # alert stays lit for days after the cron recovered. Measured 2026-09-30:
+        # seven KubeJobFailed firing, six of them for crons whose next run had
+        # succeeded (arc-stuck-runner-reaper, journey-*, argocd-sync-verifier,
+        # keycloak-realm-drift, sbom-drift-scanner); the one real failure
+        # (cloud-finops-collector) was indistinguishable from the six. Replaced by
+        # CronJobLatestRunFailed + JobFailed in prometheus-rules-jobs.yaml, which
+        # alert on the LATEST run of each CronJob and on Jobs no CronJob owns.
+        defaultRules:
+          disabled:
+            KubeJobFailed: true
         alertmanager:
           enabled: true
           # Single replica -> minAvailable:1 blocks ANY voluntary eviction (Karpenter
