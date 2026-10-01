@@ -31,6 +31,7 @@ data class ExposureLineDto(
     val rwa: BigDecimal,
     val factorKey: String,
     val citation: String,
+    val ifrs9Stage: String?,
 )
 
 data class ExposureClassDto(
@@ -115,6 +116,8 @@ data class CapitalResponse(
     val ownFundsRequirement: BigDecimal?,
     val ratios: CapitalRatiosDto?,
     val ratiosNotComputable: String?,
+    /** Machine-readable reason: multi-currency | no-positions | no-own-funds | zero-rwa. */
+    val ratiosNotComputableCode: String?,
     val unclassified: List<UnclassifiedBalanceDto>,
     val notes: List<String>,
     val assumptions: CapitalAssumptionsDto,
@@ -152,6 +155,7 @@ fun CurrencyCapital.toDto() = CurrencyCapitalDto(
             it.rwa.cash(),
             it.factorKey,
             it.citation,
+            it.ifrs9Stage,
         )
     },
     totalEad = totalEad.cash(),
@@ -178,6 +182,7 @@ fun CapitalAnalysis.toResponse(): CapitalResponse {
         ownFundsRequirement = result.ownFundsRequirement?.cash(),
         ratios = result.ratios?.let { CapitalRatiosDto(it.cet1.toDto(), it.tier1.toDto(), it.total.toDto()) },
         ratiosNotComputable = result.ratiosNotComputable,
+        ratiosNotComputableCode = result.ratiosNotComputableCode?.wire,
         unclassified = result.unclassified.map {
             UnclassifiedBalanceDto(it.glAccountCode, it.glAccountType, it.currency, it.amount.cash(), it.reason)
         },
