@@ -47,7 +47,7 @@ dependencies {
     // version matching openbank-settlement-service so enabling it stays path-scoped to this service.
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
     implementation(project(":openbank-libs-temporal"))
-    implementation("io.temporal:temporal-sdk:1.25.1")
+    implementation(libs.temporal.sdk)
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-iso20022"))
     implementation(project(":openbank-libs-runtime"))
@@ -71,7 +71,7 @@ dependencies {
     // a machine-readable marker only after its span/attribute assertions pass.
     testImplementation(project(":openbank-libs-testing"))
     // ADR-0120 Phase 1: in-memory Temporal test environment for the payment workflow tests.
-    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation(libs.temporal.testing)
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
 }
 

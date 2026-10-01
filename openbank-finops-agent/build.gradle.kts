@@ -27,7 +27,7 @@ dependencies {
     implementation(libs.jackson.datatype.jsr310)
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
     implementation(project(":openbank-libs-temporal"))
-    implementation("io.temporal:temporal-sdk:1.25.1")
+    implementation(libs.temporal.sdk)
     implementation(project(":openbank-libs"))
     // Durable cost-anomaly memory (ADR-0112 / ADR-0148): reactive Panache + Flyway, mirroring
     // devops-agent. Reactive PG for the app; JDBC only so Flyway can run migrations.
@@ -36,7 +36,7 @@ dependencies {
     implementation(libs.quarkus.reactive.pg.client)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.flyway)
-    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation(libs.temporal.testing)
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)

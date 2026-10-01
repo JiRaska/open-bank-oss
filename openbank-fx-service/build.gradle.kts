@@ -41,8 +41,8 @@ dependencies {
     implementation(project(":openbank-libs-runtime"))
     // Shared TemporalConfig + TemporalClientProducer (ADR-0209 D1, #2572).
     implementation(project(":openbank-libs-temporal"))
-    implementation("io.temporal:temporal-sdk:1.25.1")
-    testImplementation("io.temporal:temporal-testing:1.25.1")
+    implementation(libs.temporal.sdk)
+    testImplementation(libs.temporal.testing)
     testImplementation("io.grpc:grpc-inprocess:1.65.1")
     // TraceContract: assert the observable distributed shape of a real operation (Test Intelligence
     // `trace` evidence) without exporting trace ids, attribute values or payloads.

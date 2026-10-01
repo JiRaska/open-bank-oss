@@ -44,7 +44,7 @@ dependencies {
     // expiry, idle-case abandonment. The client/adapter half is build-time gated by
     // openbank.temporal.enabled; the worker half by openbank.kyb.worker.enabled.
     implementation(project(":openbank-libs-temporal"))
-    implementation("io.temporal:temporal-sdk:1.25.1")
+    implementation(libs.temporal.sdk)
 
     testImplementation(libs.quarkus.junit5)
     testImplementation(libs.quarkus.test.security)
@@ -57,7 +57,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
-    testImplementation("io.temporal:temporal-testing:1.25.1")
+    testImplementation(libs.temporal.testing)
     testImplementation("io.grpc:grpc-inprocess:1.68.1")
 }
 
