@@ -84,12 +84,15 @@ interface IdempotencyStore {
      * Scoped [reserve]: the stored key is [IdempotencyScope.storeKey] of [key], so a key only
      * matches a request from the same principal to the same service. Validates [key]
      * ([IdempotencyKeys.requireValid], 400 on failure). This is the form new code uses.
+     *
+     * The scoped overloads take every argument explicitly (no defaults) so their arity never
+     * overlaps the unscoped ones — an `any()`-matcher mock of either form stays unambiguous.
      */
     suspend fun reserve(
         scope: IdempotencyScope,
         key: String,
         requestHash: String,
-        inFlightTtlSeconds: Long = DEFAULT_IN_FLIGHT_TTL_SECONDS,
+        inFlightTtlSeconds: Long,
     ): ReserveResult = reserve(scope.storeKey(key), requestHash, inFlightTtlSeconds)
 
     /** Scoped fingerprinted [save]; completes a scoped [reserve]. */
@@ -99,7 +102,7 @@ interface IdempotencyStore {
         requestHash: String,
         statusCode: Int,
         responseBody: String,
-        ttlSeconds: Long = 86400,
+        ttlSeconds: Long,
     ) = save(scope.storeKey(key), requestHash, statusCode, responseBody, ttlSeconds)
 
     /** Scoped [release]; frees the marker placed by a scoped [reserve]. */
@@ -120,6 +123,9 @@ interface IdempotencyStore {
     companion object {
         /** Default lifetime of an in-flight marker: long enough for a slow request, short enough to self-heal. */
         const val DEFAULT_IN_FLIGHT_TTL_SECONDS: Long = 300
+
+        /** Default lifetime of a completed record. */
+        const val DEFAULT_RECORD_TTL_SECONDS: Long = 86400
     }
 }
 

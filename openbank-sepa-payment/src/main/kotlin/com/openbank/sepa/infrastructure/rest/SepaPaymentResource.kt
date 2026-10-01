@@ -88,7 +88,7 @@ class SepaPaymentResource(
         // Keys are per service and caller: another principal reusing this key is a different key.
         val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
-        when (val reservation = idempotencyStore.reserve(scope, idempotencyKey, requestHash)) {
+        when (val reservation = idempotencyStore.reserve(scope, idempotencyKey, requestHash, IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS)) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -117,7 +117,14 @@ class SepaPaymentResource(
             }
         }
         val responseBody = payment.toResponse()
-        idempotencyStore.save(scope, idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(
+            scope,
+            idempotencyKey,
+            requestHash,
+            201,
+            objectMapper.writeValueAsString(responseBody),
+            IdempotencyStore.DEFAULT_RECORD_TTL_SECONDS,
+        )
 
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)

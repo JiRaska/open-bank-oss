@@ -86,7 +86,7 @@ class AmlCaseResource(
         // Keys are per service and caller: another principal reusing this key is a different key.
         val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CASES_PATH, request)
-        when (val reservation = idempotencyStore.reserve(scope, idempotencyKey, requestHash)) {
+        when (val reservation = idempotencyStore.reserve(scope, idempotencyKey, requestHash, IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS)) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -120,6 +120,7 @@ class AmlCaseResource(
             requestHash = requestHash,
             statusCode = 201,
             responseBody = objectMapper.writeValueAsString(responseBody),
+            ttlSeconds = IdempotencyStore.DEFAULT_RECORD_TTL_SECONDS,
         )
 
         return Response.created(URI.create("/api/v1/aml/cases/${amlCase.id}"))
