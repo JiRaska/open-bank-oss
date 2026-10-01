@@ -13,6 +13,12 @@
 //     are in no exposure class, so RWA is understated by them.
 //   - Every risk weight is shown with its BCBS d424 paragraph; the parameter set id/version, the
 //     scope statement and every classification choice are on the page with the figures.
+//   - Exposures are read by exposure class and IFRS 9 stage (one row each, with counts), the
+//     per-loan items behind an expander and named by product/maturity; a loan id is only a
+//     copyable reference. Class/stage names and the "not computable" reason are localised from
+//     the engine's codes; the engine's English long form stays under "How it is computed".
+//   - A citation the engine marks UNVERIFIED shows its article only; the marker is an internal
+//     review flag, never user-facing text.
 
 'use client'
 
@@ -22,6 +28,12 @@ import { ArrowLeft, Landmark } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
+import { ItemLabel } from '@/components/balance-sheet/ItemLabel'
+import { CategoryTable } from '@/components/balance-sheet/CategoryTable'
+import { loanLabel, useSnapshotInstruments } from '@/components/balance-sheet/instrumentLabels'
+import type { Instrument } from '@/components/balance-sheet/contracts'
+import { formatMoney, formatPercent, groupExposures } from '@/lib/risk/aggregate'
+import { withoutReviewMarkers, categoryCountText, exposureClassLabel, ifrs9StageLabel, plainCitation, ratiosNotComputableText } from '@/lib/risk/labels'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import { capitalSchema, type Capital, type CurrencyCapital } from '@/components/balance-sheet/contracts'
@@ -69,21 +81,23 @@ function SnapshotCapital({ id }: { id: string }) {
     <div>
       <PageHeader
         title={t('Kapitál: úvěrové riziko (standardizovaný přístup)', 'Capital: credit risk (standardised approach)')}
-        subtitle={t(`Běh ${id}`, `Run ${id}`)}
+        subtitle={data ? t(`Snímek rozvahy k ${new Date(data.asOf).toLocaleDateString(locale)}`, `Balance-sheet snapshot as of ${new Date(data.asOf).toLocaleDateString(locale)}`) : t('Snímek rozvahy', 'Balance-sheet snapshot')}
         icon={<Landmark size={20} aria-hidden="true" />}
         actions={back}
       />
       {kind ? (
         <DataUnavailable kind={kind} service="risk-engine" feature={t('kapitálový požadavek', 'capital requirement')} lang={language} />
       ) : data ? (
-        <CapitalBody data={data} locale={locale} />
+        <CapitalBody data={data} locale={locale} runId={id} />
       ) : null}
     </div>
   )
 }
 
-function CapitalBody({ data, locale }: { data: Capital; locale: string }) {
-  const { t } = useLanguage()
+function CapitalBody({ data, locale, runId }: { data: Capital; locale: string; runId: string }) {
+  const { t, language } = useLanguage()
+  const lang = language === 'cs' ? 'cs' : 'en'
+  const instruments = useSnapshotInstruments(runId, data.currencies.some(c => c.lines.some(l => !!l.instrumentId)))
   const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
   const a = data.assumptions
   const ratioRows = data.ratios
@@ -97,8 +111,8 @@ function CapitalBody({ data, locale }: { data: Capital; locale: string }) {
     <>
       <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <ProvenanceBadge provenance={data.provenance} />
-        <StatusBadge status="PARAMS" tone="neutral" label={`${t('Sada parametrů', 'Parameter set')} ${data.parameterSetId} v${data.parameterSetVersion}`} />
-        <span style={{ fontSize: 12 }}>{a.scope}</span>
+        <StatusBadge status="PARAMS" tone="neutral" label={`${t('Sada parametrů', 'Parameter set')} ${data.parameterSetId} v${data.parameterSetVersion}`} /> {/* raw-id-ok: parameter-set name, not an entity id */}
+        <span style={{ fontSize: 12 }}>{t('Pilíř 1, úvěrové riziko, standardizovaný přístup.', 'Pillar 1 credit risk, standardised approach.')}</span>
       </div>
 
       {data.unclassified.length > 0 && (
@@ -163,7 +177,7 @@ function CapitalBody({ data, locale }: { data: Capital; locale: string }) {
                       {ratioPercent(r.minimum, locale)}{' '}
                       <StatusBadge status={r.meetsMinimum ? 'OK' : 'BREACH'} tone={r.meetsMinimum ? 'success' : 'danger'} label={r.meetsMinimum ? t('splněno', 'met') : t('nesplněno', 'not met')} />
                     </td>
-                    <td style={{ fontSize: 11 }}>{r.citation}</td>
+                    <td style={{ fontSize: 11 }} title={r.citation}>{plainCitation(r.citation, lang).article}</td>
                   </tr>
                 ))}
               </tbody>
@@ -172,21 +186,26 @@ function CapitalBody({ data, locale }: { data: Capital; locale: string }) {
         ) : (
           <p role="note" data-testid="ratios-not-computable" style={{ fontSize: 13 }}>
             <StatusBadge status="N/A" tone="warning" label={t('Poměry nelze spočítat', 'Ratios not computable')} />{' '}
-            {data.ratiosNotComputable}
+            {ratiosNotComputableText(data.ratiosNotComputableCode, lang) ?? data.ratiosNotComputable}
           </p>
         )}
-        <p role="note" style={{ ...note, marginTop: 8 }}>{a.creditRiskOnly}</p>
+        <p role="note" style={{ ...note, marginTop: 8 }}>
+          {t(
+            'Poměry jsou horní odhad: rizikově vážená aktiva zahrnují jen úvěrové riziko, bez tržního a operačního rizika. Více měn se sčítá v CZK kurzem ČNB k datu snímku.',
+            'The ratios are an upper bound: risk-weighted assets cover credit risk only, without market and operational risk. Several currencies are added up in CZK at the CNB fixing for the snapshot date.',
+          )}
+        </p>
       </section>
 
-      {data.notes.filter(n => n !== a.creditRiskOnly).map(n => <p key={n} role="note" style={note}>{n}</p>)}
+      {data.currencies.map(c => <CurrencySection key={c.currency} c={c} locale={locale} single={data.total?.currency === c.currency} instruments={instruments} />)}
 
-      {data.currencies.map(c => <CurrencySection key={c.currency} c={c} locale={locale} single={data.total?.currency === c.currency} />)}
-
-      <div className="card">
-        <h2 style={h2}>{t('Předpoklady a zdroje', 'Assumptions and sources')}</h2>
+      <details className="card">
+        <summary style={{ ...h2, cursor: 'pointer' }}>{t('Jak se to počítá — předpoklady a zdroje', 'How it is computed — assumptions and sources')}</summary>
+        <p style={{ fontSize: 12, margin: '8px 0' }}>{withoutReviewMarkers(a.scope)}</p>
+        {[a.creditRiskOnly, ...data.notes.filter(n => n !== a.creditRiskOnly)].map(n => <p key={n} role="note" style={note}>{withoutReviewMarkers(n)}</p>)}
         <p style={{ fontSize: 12, marginBottom: 8 }}>{a.source}</p>
         <ul style={{ fontSize: 12, paddingLeft: 16, display: 'grid', gap: 4, marginBottom: 12 }}>
-          {a.classification.choices.map(choice => <li key={choice}>{choice}</li>)}
+          {a.classification.choices.map(choice => <li key={choice}>{withoutReviewMarkers(choice)}</li>)}
           <li>EAD: {a.exposureValue}</li>
           <li>{t('Zajištění (CRM)', 'Credit-risk mitigation')}: {a.creditRiskMitigation}</li>
           <li>{t('Podrozvahové položky', 'Off-balance sheet')}: {a.offBalanceSheet}</li>
@@ -209,20 +228,21 @@ function CapitalBody({ data, locale }: { data: Capital; locale: string }) {
             <thead><tr><th scope="col" style={left}>{t('Faktor', 'Factor')}</th><th scope="col" style={right}>{t('Hodnota', 'Value')}</th><th scope="col" style={left}>{t('Zdroj', 'Source')}</th></tr></thead>
             <tbody>
               {a.factors.map(f => (
-                <tr key={f.key}><td>{f.key}</td><td style={right}>{(f.value * 100).toLocaleString(locale)} %</td><td>{f.citation}</td></tr>
+                <tr key={f.key}><td>{f.key}</td><td style={right}>{formatPercent(f.value, locale)}</td><td title={f.citation}>{plainCitation(f.citation, lang).article}</td></tr>
               ))}
             </tbody>
           </table>
         </div>
-      </div>
+      </details>
     </>
   )
 }
 
-function CurrencySection({ c, locale, single }: { c: CurrencyCapital; locale: string; single: boolean }) {
-  const { t } = useLanguage()
-  const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const pct = (v: number) => `${(v * 100).toLocaleString(locale)} %`
+function CurrencySection({ c, locale, single, instruments }: { c: CurrencyCapital; locale: string; single: boolean; instruments: Map<string, Instrument> | null }) {
+  const { t, language } = useLanguage()
+  const lang = language === 'cs' ? 'cs' : 'en'
+  const money = (v: number) => formatMoney(v, locale, c.currency)
+  const groups = groupExposures(c.lines)
   return (
     <section className="card" style={{ marginBottom: 16 }} aria-label={t(`Úvěrové riziko ${c.currency}`, `Credit risk ${c.currency}`)}>
       <h2 style={h2}>{c.currency}{single ? ` · ${t('celkem (jednoměnová kniha)', 'total (single-currency book)')}` : ''}</h2>
@@ -231,43 +251,64 @@ function CurrencySection({ c, locale, single }: { c: CurrencyCapital; locale: st
       <div style={{ overflowX: 'auto', marginBottom: 12 }}>
         <table style={table} aria-label={t(`RWA podle třídy ${c.currency}`, `RWA by class ${c.currency}`)}>
           <thead><tr>
-            <th scope="col" style={left}>{t('Třída', 'Class')}</th><th scope="col" style={right}>EAD</th>
-            <th scope="col" style={right}>RWA</th><th scope="col" style={left}>{t('Zdroj', 'Source')}</th>
+            <th scope="col" style={left}>{t('Třída expozice', 'Exposure class')}</th>
+            <th scope="col" style={right}>{t('Expozice (EAD)', 'Exposure (EAD)')}</th>
+            <th scope="col" style={right}>RWA</th>
+            <th scope="col" style={left}>{t('Regulatorní základ', 'Regulatory basis')}</th>
           </tr></thead>
           <tbody>
             {c.classes.map(k => (
               <tr key={k.exposureClass} data-class={k.exposureClass}>
-                <td>{k.exposureClass}</td><td style={right}>{money(k.ead)}</td><td style={right}>{money(k.rwa)}</td>
-                <td style={{ fontSize: 11 }}>{k.citations.join('; ')}</td>
+                <td>{exposureClassLabel(k.exposureClass, lang)}</td>
+                <td style={{ ...right, whiteSpace: 'nowrap' }}>{money(k.ead)}</td>
+                <td style={{ ...right, whiteSpace: 'nowrap' }}>{money(k.rwa)}</td>
+                <td style={{ fontSize: 11, color: 'var(--text-secondary)', paddingLeft: 12 }} title={k.citations.join('; ')}>
+                  {[...new Set(k.citations.map(x => plainCitation(x, lang).article))].join('; ')}
+                </td>
               </tr>
             ))}
-            <tr style={{ fontWeight: 600 }}><td>{t('Celkem', 'Total')}</td><td style={right}>{money(c.totalEad)}</td><td style={right}>{money(c.totalRwa)}</td><td /></tr>
+            <tr style={{ fontWeight: 600 }}><td>{t('Celkem', 'Total')}</td><td style={{ ...right, whiteSpace: 'nowrap' }}>{money(c.totalEad)}</td><td style={{ ...right, whiteSpace: 'nowrap' }}>{money(c.totalRwa)}</td><td /></tr>
           </tbody>
         </table>
       </div>
 
       <h3 style={{ ...h2, fontSize: 13 }}>{t('Expozice', 'Exposures')}</h3>
       <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-        <table style={table}>
-          <thead><tr>
-            <th scope="col" style={left}>{t('Položka', 'Item')}</th><th scope="col" style={right}>EAD</th>
-            <th scope="col" style={right}>{t('Riziková váha', 'Risk weight')}</th><th scope="col" style={right}>RWA</th>
-            <th scope="col" style={left}>{t('Zdroj', 'Source')}</th>
-          </tr></thead>
-          <tbody>
-            {c.lines.map((l, i) => (
-              <tr key={`${l.label}-${i}`}>
-                <td>{l.label}</td><td style={right}>{money(l.ead)}</td><td style={right}>{pct(l.riskWeight)}</td>
-                <td style={right}>{money(l.rwa)}</td><td style={{ fontSize: 11 }}>{l.citation}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <CategoryTable
+          caption={t(`Expozice ${c.currency}`, `Exposures ${c.currency}`)}
+          columns={[
+            { key: 'ead', header: t('Expozice (EAD)', 'Exposure (EAD)'), numeric: true },
+            { key: 'rw', header: t('Riziková váha', 'Risk weight'), numeric: true },
+            { key: 'rwa', header: 'RWA', numeric: true },
+          ]}
+          rows={groups.map(g => ({
+            key: g.key,
+            label: g.ifrs9Stage || g.unit === 'loans'
+              ? `${exposureClassLabel(g.exposureClass, lang)} · ${ifrs9StageLabel(g.ifrs9Stage, lang)}`
+              : exposureClassLabel(g.exposureClass, lang),
+            countText: categoryCountText(g, lang),
+            values: [money(g.ead), formatPercent(g.riskWeight, locale), money(g.rwa)],
+            basis: plainCitation(g.citation, lang),
+            items: g.items.length > 1 || g.unit === 'loans'
+              ? () => g.items.map((l, i) => {
+                  const named = l.instrumentId
+                    ? loanLabel(instruments?.get(l.instrumentId), l.glAccountCode, lang, locale)
+                    : { label: l.glAccountCode ? t(`Účet ${l.glAccountCode}`, `Account ${l.glAccountCode}`) : exposureClassLabel(l.exposureClass, lang) }
+                  return {
+                    key: `${l.instrumentId ?? l.glAccountCode ?? ''}-${i}`,
+                    label: <ItemLabel label={named.label} sublabel={named.sublabel} reference={l.instrumentId} />,
+                    values: [money(l.ead), formatPercent(l.riskWeight, locale), money(l.rwa)],
+                  }
+                })
+              : undefined,
+          }))}
+          totals={[money(c.totalEad), null, money(c.totalRwa)]}
+        />
       </div>
 
       <h3 style={{ ...h2, fontSize: 13 }}>{t('Kapitál z účtů 6000–6060', 'Own funds from accounts 6000–6060')}</h3>
       {c.ownFunds ? (
-        <p style={{ fontSize: 12 }}>
+        <p style={{ fontSize: 12 }} data-currency={c.currency}>
           CET1 {money(c.ownFunds.cet1BeforeDeductions)} {t('před odpočty', 'before deductions')}, {t('odpočty', 'deductions')} {money(c.ownFunds.cet1Deductions)} → <strong>CET1 {money(c.ownFunds.cet1)}</strong> · AT1 {money(c.ownFunds.at1)} · <strong>Tier 1 {money(c.ownFunds.tier1)}</strong> · Tier 2 {money(c.ownFunds.tier2)} · <strong>{t('Celkem', 'Total')} {money(c.ownFunds.total)}</strong>
         </p>
       ) : (

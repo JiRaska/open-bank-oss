@@ -198,3 +198,60 @@ describe('reconciliation result rendering', () => {
     expect(status.textContent).toMatch(/No such statement|Výpis nebyl nalezen/)
   })
 })
+
+describe('open breaks with age (ADR-0315 D7)', () => {
+  beforeEach(() => {
+    session.roles = ['ROLE_TREASURY_DEALER']
+  })
+
+  const brk = (overrides: Partial<Record<string, unknown>> = {}) => ({
+    breakId: 'b-1', side: 'STATEMENT', ourSide: 'DEBIT', amount: 5000, currency: 'CZK', bookingDate: '2026-09-25',
+    reference: 'SYNTH-BREAK-REF', statementUuid: STATEMENT.id, statementSequence: 3, ledgerLineId: null,
+    firstSeenOn: '2026-09-25', resolvedOn: null, ageBusinessDays: 4, aged: true, alertedAt: '2026-10-01T08:00:00Z',
+    ...overrides,
+  })
+
+  const load = async () => {
+    await renderPage(<NostroReconciliationPage />)
+    fireEvent.change(screen.getByLabelText(/Statement ID|ID výpisu/), { target: { value: STATEMENT.id } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^(Load|Načíst)$/ })) })
+    await screen.findByText(/SYNTH-STMT-1/)
+  }
+
+  it('lists the account\'s breaks with their age and flags the aged one', async () => {
+    router = url => {
+      if (url.includes('/reconciliation')) return json(reconciliation())
+      if (url.includes(`/nostro/${STATEMENT.iban}/breaks`)) {
+        return json({
+          iban: STATEMENT.iban, alertAgeDays: 3, alertMinAmount: 0,
+          breaks: [brk(), brk({ breakId: 'b-2', side: 'LEDGER', ourSide: 'CREDIT', amount: 42, reference: 'fee', statementSequence: null, ledgerLineId: 'l-9', ageBusinessDays: 1, aged: false, alertedAt: null })],
+        })
+      }
+      return json({}, 404)
+    }
+    await load()
+
+    expect(await screen.findByText('SYNTH-BREAK-REF')).toBeInTheDocument()
+    expect(calls.some(c => c.url === `/api/svc/treasury-service/api/v1/treasury/nostro/${STATEMENT.iban}/breaks`)).toBe(true)
+    expect(screen.getAllByText(/^(Aged|Po limitu)$/).length).toBe(1)
+    expect(screen.getByText(/Alert from 3 business days|Upozornění od stáří 3/)).toBeInTheDocument()
+    expect(screen.getByText(/^(Ledger|Hlavní kniha) · CREDIT$/)).toBeInTheDocument()
+  })
+
+  it('says the list is unavailable rather than showing an empty (clean-looking) account', async () => {
+    router = url => (url.includes('/reconciliation') ? json(reconciliation()) : json({}, 502))
+    await load()
+    expect(await screen.findByText(/The break list could not be loaded|Seznam rozdílů se nepodařilo načíst/)).toBeInTheDocument()
+    expect(screen.queryByText(/No open breaks|Žádné otevřené rozdíly/)).toBeNull()
+  })
+
+  it('an account with no breaks says so', async () => {
+    router = url => {
+      if (url.includes('/reconciliation')) return json(reconciliation())
+      if (url.includes('/breaks')) return json({ iban: STATEMENT.iban, alertAgeDays: 3, alertMinAmount: 0, breaks: [] })
+      return json({}, 404)
+    }
+    await load()
+    expect(await screen.findByText(/No open breaks|Žádné otevřené rozdíly/)).toBeInTheDocument()
+  })
+})
