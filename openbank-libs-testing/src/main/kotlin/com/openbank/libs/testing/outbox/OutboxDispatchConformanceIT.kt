@@ -80,6 +80,14 @@ abstract class OutboxDispatchConformanceIT {
     protected abstract suspend fun findEntry(eventId: UUID): OutboxEntry?
 
     /**
+     * The event type a seeded row carries. Defaults to the suite's own synthetic names; a service
+     * whose publisher ROUTES by event type (one emitter per type, an unknown type is an error —
+     * referral is the first) returns a type it actually wires, so the suite exercises the real
+     * routing instead of failing on a type no producer ever writes.
+     */
+    protected open fun eventType(suggested: String): String = suggested
+
+    /**
      * Reactive Panache needs a Vert.x duplicated context; the JUnit thread is not one. Every
      * concrete [seed]/[findEntry] implementation should run its Panache call through this.
      */
@@ -103,7 +111,7 @@ abstract class OutboxDispatchConformanceIT {
         val aggregateId = Ids.newId()
         val first = OutboxMessage(
             aggregateId = aggregateId,
-            eventType = "test.event.posted",
+            eventType = eventType("test.event.posted"),
             payload = """{"seq":1}""",
             // createdAt DELIBERATELY omitted: the default is what ~48 fleet call sites use, and
             // passing it here is what made this suite blind to the epoch default (#3272).
@@ -177,7 +185,7 @@ abstract class OutboxDispatchConformanceIT {
     fun `replaying dispatch after a row is SENT does not re-publish it`() {
         val message = OutboxMessage(
             aggregateId = Ids.newId(),
-            eventType = "test.event.replay",
+            eventType = eventType("test.event.replay"),
             payload = """{"once":true}""",
             createdAt = Instant.now(),
         )
@@ -207,7 +215,7 @@ abstract class OutboxDispatchConformanceIT {
         // abandoned and those rows sit DISPATCHING until the stale reclaim. A v1 (sequential)
         // repository passes this trivially, which is correct — it never sends concurrently.
         val batch = (1..CONCURRENT_BATCH).map { i ->
-            OutboxMessage(aggregateId = Ids.newId(), eventType = "test.event.batch", payload = """{"seq":$i}""")
+            OutboxMessage(aggregateId = Ids.newId(), eventType = eventType("test.event.batch"), payload = """{"seq":$i}""")
         }
         batch.forEach { onEventLoop { seed(it) } }
 
