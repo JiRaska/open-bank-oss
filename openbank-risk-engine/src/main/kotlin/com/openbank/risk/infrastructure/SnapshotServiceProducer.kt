@@ -27,6 +27,8 @@ import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
 import com.openbank.risk.application.usecase.MinReservesPeriodService
 import com.openbank.risk.application.usecase.MinReservesService
+import com.openbank.risk.application.usecase.ReferenceCurveSetSeeder
+import com.openbank.risk.application.usecase.ReportingFixings
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.irrbb.IrrbbParameters
@@ -130,6 +132,15 @@ class SnapshotServiceProducer {
     fun curveSetUseCase(repository: CurveSetRepository, clock: Clock): CurveSetUseCase =
         CurveSetService(repository, clock)
 
+    /** The sandbox reference curves; refuses to seed under `production` provenance (ADR-0313 D13). */
+    @Produces
+    @ApplicationScoped
+    fun referenceCurveSetSeeder(
+        repository: CurveSetRepository,
+        snapshots: SnapshotUseCase,
+        clock: Clock,
+    ): ReferenceCurveSetSeeder = ReferenceCurveSetSeeder(repository, snapshots, Provenance.parse(provenance), clock)
+
     /** The behavioural model is code, not config: a parameter change is a new model version. */
     @Produces
     @ApplicationScoped
@@ -155,11 +166,13 @@ class SnapshotServiceProducer {
         @ConfigProperty(name = "openbank.risk.irrbb.shock-source") shockSource: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor") floor: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor-source") floorSource: Optional<String>,
+        fixings: FxFixingRepository,
     ): IrrbbUseCase = IrrbbService(
         snapshots,
         curveSets,
         BehaviouralModel.NMD_PHASE0,
         irrbbParameters(shockSizes, shockSource, floor, floorSource),
+        ReportingFixings(fixings),
     )
 
     /**

@@ -141,11 +141,17 @@ class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismat
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
 
 interface CurveSetRepository {
-    /** The [limit] most recently recorded curve sets, newest first. */
-    suspend fun listRecent(limit: Int): List<CurveSetSummary>
+    /** The [limit] most recently recorded curve sets, newest first; only those as of [asOf] when given. */
+    suspend fun listRecent(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
+
+    /**
+     * Like [save], but a set whose id is already stored is left untouched and `false` is returned —
+     * the idempotent write for sets with a deterministic id (the sandbox reference set).
+     */
+    suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean
 
     suspend fun findById(id: UUID): CurveSet?
 }

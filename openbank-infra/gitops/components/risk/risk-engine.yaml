@@ -135,6 +135,11 @@ spec:
             # environment states the decision rather than inheriting the default.
             - name: OPENBANK_RISK_EOD_SNAPSHOT_ENABLED
               value: "true"
+            # ADR-0313 D4/D13: sandbox reference curve sets (illustrative demo quotes, provenance
+            # synthetic) for every recent snapshot date, so IRRBB and the liquidity forecast have a
+            # curve set to use. Refused by the engine under production provenance.
+            - name: OPENBANK_RISK_REFERENCE_CURVES_ENABLED
+              value: "true"
             - name: LENDING_SERVICE_URL
               value: https://lending-service.lending.svc:8443
             # ledger-service's private-CA mTLS listener (8443, client auth REQUIRED); client cert
