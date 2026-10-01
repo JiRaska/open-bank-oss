@@ -108,7 +108,7 @@ class SanctionsScreenPactConsumerTest {
         .path(EXPECTED_SCREEN_PATH)
         .method("POST")
         .headers(mapOf("Content-Type" to "application/json"))
-        .body(request(UNLISTED_NAME, CLEAR_KEY))
+        .body(request(UNLISTED_NAME, UNAUTHENTICATED_KEY))
         .willRespondWith()
         .status(401)
         .toPact()
@@ -119,7 +119,7 @@ class SanctionsScreenPactConsumerTest {
         given()
             .baseUri(mockServer.getUrl())
             .contentType("application/json")
-            .body(request(UNLISTED_NAME, CLEAR_KEY))
+            .body(request(UNLISTED_NAME, UNAUTHENTICATED_KEY))
             .post(screenPathOnClient())
             .then()
             .statusCode(401)
@@ -183,7 +183,10 @@ class SanctionsScreenPactConsumerTest {
 
         /** This rail's own key shape at its call sites: `<paymentId>:debtor` / `<paymentId>:creditor`. */
         const val CLEAR_KEY = "66666666-0001-4000-8000-000000000001:debtor"
-        const val HIT_KEY = "66666666-0002-4000-8000-000000000002reditor"
+        const val HIT_KEY = "66666666-0002-4000-8000-000000000002:creditor"
+
+        /** Distinct from CLEAR_KEY, so a 401 that ever authenticated could not pre-empt the CLEAR replay. */
+        const val UNAUTHENTICATED_KEY = "66666666-0003-4000-8000-000000000003:debtor"
 
         /** LITERAL, retyped from sanctions-service's resource — never derived from the client. */
         const val EXPECTED_SCREEN_PATH = "/api/v1/sanctions/screen"

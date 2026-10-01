@@ -16,7 +16,7 @@
 
           ],
           "entityType": "INDIVIDUAL",
-          "idempotencyKey": "55555555-0001-4000-8000-000000000001:debtor",
+          "idempotencyKey": "55555555-0003-4000-8000-000000000003:debtor",
           "name": "Zdenka Bezprijmeni"
         },
         "headers": {
@@ -90,7 +90,7 @@
 
           ],
           "entityType": "INDIVIDUAL",
-          "idempotencyKey": "55555555-0002-4000-8000-000000000002reditor",
+          "idempotencyKey": "55555555-0002-4000-8000-000000000002:creditor",
           "name": "Vladimir Putin"
         },
         "headers": {
