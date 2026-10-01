@@ -251,6 +251,59 @@ both become an admission error — `failurePolicy` is not consulted there. So:
 All other policies are still at stage 1.
 Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 
+## 4b. After merging ANY mutating policy change — check that ArgoCD converges
+
+A `MutatingPolicy` / `ClusterPolicy` with `mutate:` rewrites pod templates at admission. ArgoCD
+diffs desired state against a **server-side dry-run**, i.e. through the webhook as it is *now*; the
+live template of every controller admitted *before* the change was mutated by the old policy (or
+not at all). The two differ, the app is `OutOfSync`, and every self-heal sync applies a no-op —
+which never re-enters the webhook — and reports "successfully synced". Measured 2026-09-30: 13
+objects across 12 apps, ~50 minutes, until a `rollout restart` by hand.
+
+CI cannot see this — there is no manifest difference, only a difference between admission then and
+admission now. The control is the alert `ArgoCDAppOutOfSyncNotHealing`
+(`prometheus-rules-argocd.yaml`, warning after 30 minutes); this step is how the person merging the
+change gets there in 5.
+
+**Before the merge**, record the baseline:
+
+```bash
+kubectl -n argocd get applications -o json | python3 -c '
+import json,sys
+apps=json.load(sys.stdin)["items"]
+oos=[a["metadata"]["name"] for a in apps if a["status"]["sync"]["status"]!="Synced"]
+print(len(oos),"OutOfSync:",oos)'
+```
+
+**After the merge** (give the root app one reconcile, ~3 minutes), re-run it. New names in the list
+that stay there through a second run five minutes later are the drift. Then confirm the mechanism
+on ONE controller that carries an upstream image the policy rewrites (a Grafana, Loki or Tempo
+Deployment/StatefulSet is a good pick — anything not built by this repo):
+
+```bash
+NS=observability; KIND=statefulset; NAME=tempo
+kubectl -n $NS get $KIND $NAME -o jsonpath='{.spec.template.spec.containers[*].image}'; echo   # live
+kubectl -n $NS get $KIND $NAME -o yaml \
+  | kubectl apply --dry-run=server -f - -o jsonpath='{.spec.template.spec.containers[*].image}'; echo   # admitted now
+```
+
+If the two lines differ, the policy is doing what it should and the live objects simply predate it.
+Remedy is to re-admit them:
+
+```bash
+kubectl -n $NS rollout restart $KIND/$NAME
+```
+
+Do single-replica stateful workloads (Tempo, Loki, Prometheus, OpenBao, any `*-db` with
+`instances: 1`) last and one at a time — each restart is a short outage of that component (Tempo:
+46 s without trace ingestion on 2026-09-30, now visible via `TempoTraceIngestionStalled`). Each app
+returns to `Synced` within one reconcile of its restart; re-run the count to confirm it is back to
+the baseline.
+
+If the count is back to baseline without any restart, the policy did not change what admission
+produces for existing objects and there is nothing to do. If an app stays `OutOfSync` and the two
+image lines are *identical*, the cause is something else — runbook 0026 §2.3.
+
 ## 5. Related
 
 - ADR-0030 D4 (supply-chain verification), ADR-0144 (graduation criteria)
@@ -260,3 +313,5 @@ Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
 - #1915 — the issue this runbook closes out
 - #9805 item 4 — why the verify policies are folded into one on Kyverno v1.12.5, and why an Audit
   verify policy could deny
+- #11622 / runbook 0026 §2 — ArgoCD drift that self-heal reports as synced, and the alert that
+  carries it (`ArgoCDAppOutOfSyncNotHealing`)
