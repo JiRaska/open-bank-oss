@@ -244,7 +244,10 @@ change_requirements:
       - "every property the DTO has is declared on the request-body schema"
     gate: openapi-request-schema-conformance
     enforced: advisory
-    target_enforce_date: "2026-09-30"
+    # Moved 2026-09-30 -> 2026-10-31 (#11682): findings burned down 122 -> 0 (#8828), but under
+    # --enforce a missing generated document still returns 0 as "Not a finding", so a flip
+    # would enforce a check that can silently examine nothing. Fix that, re-scan, then flip.
+    target_enforce_date: "2026-10-31"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
     # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
     # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
@@ -649,7 +652,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
   release_scope_mismatch:
     # The inverse failure mode of service_code_change above: release-please attributes a
@@ -670,7 +673,7 @@ change_requirements:
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144, same timeline as service_code_change (same root-cause class)
+    target_enforce_date: "2026-10-31"   # ADR-0144; moved 2026-10-01: producer live, false-positive rate unmeasured before --enforce (#11692)
     # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
     # in the "Validate manifests" job on every PR, right after release-registration consistency.
     # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
@@ -728,7 +731,9 @@ change_requirements:
       - "mp.messaging channel config expressed as nested YAML, not a dotted key inside a mapping"
     gate: dotted-mp-messaging-keys
     enforced: advisory
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-12-31 (#11683): re-measured 2026-10-01 at 185 occurrences (still
+    # growing); retirement needs a ruling on the ~170 keys the enforced ratchet never reads.
+    target_enforce_date: "2026-12-31"   # ADR-0144
     # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
     # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
     # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
@@ -806,7 +811,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version.txt==package.json half is already enforced (check-admin-ui-version-sync.sh, ci.yml); 'test added for new behavior' has no automated detector, same gap as service_code_change"
   admin_ui_docs_currency:
     # Documentation must stay current. Any change to a process or an admin-ui
@@ -1484,7 +1489,9 @@ coverage:
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
     enforced: advisory                  # weekly advisory runs are live; blocking flip pending sustained >=70%
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-12-31 (#11684): pitest run 36545321433 (2026-09-29) has balance
+    # 69.7% and sepa-payment 69.6% below 70, ledger at 70.0; not "sustained".
+    target_enforce_date: "2026-12-31"   # ADR-0144
     ci_producer: .github/workflows/pitest.yml
     # Fleet rollout re-verified complete per the ADR-0063 criterion (2026-07-11, issue #265 D3):
     # 10/17 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
@@ -1607,7 +1614,9 @@ provenance:
   # only when ALL enforce_criteria below hold. (A blind flip would outage deploys of
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
-  target_enforce_date: "2026-09-30"   # ADR-0144
+  # Moved 2026-09-30 -> 2027-03-31 (#11685): criteria 1 and 4 need producers that do not
+  # exist yet (fleet-coverage evidence check; a provenance gate) — waiting cannot meet them.
+  target_enforce_date: "2027-03-31"   # ADR-0144
   # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
   # said neither did; the other two cannot be met by waiting, because nothing measures them.
   #
@@ -1818,7 +1827,9 @@ dependencies:
     # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
+    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
+    target_enforce_date: "2026-10-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
