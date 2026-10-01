@@ -49,7 +49,6 @@ data class AccountDto(
     val partyId: String? = null,
 )
 
-/** The subset of balance-service `GET /api/v1/balances/{accountId}/{currency}` we need. */
 /**
  * Mirror of balance-service's `Balance` as `GET /api/v1/balances/{accountId}/{currency}` serialises
  * it: the booked balance is `bookedAmount`. This DTO used to demand a `currentBalance` field that
