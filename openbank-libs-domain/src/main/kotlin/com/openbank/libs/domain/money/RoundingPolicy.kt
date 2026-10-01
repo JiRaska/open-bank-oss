@@ -13,7 +13,7 @@ private const val INTEREST_ACCRUAL_SCALE = 6
 /** interest-service InterestService.kt:137 daily-rate scale (annualRate / 360|365). */
 private const val INTEREST_DAILY_RATE_SCALE = 10
 
-/** fx-service FxRate.INVERSE_SCALE / CnbFixing per-unit rate / transaction IMPLIED_FX_RATE_SCALE. */
+/** fx-service FxRate inverse and CnbFixing per-unit rate, transaction implied rate; matches numeric(18,8). */
 private const val FX_RATE_SCALE = 8
 
 /** interest-service WithholdingTaxPolicy.TAX_SCALE: whole currency units. */
@@ -41,8 +41,9 @@ private const val TREASURY_INTEREST_WORK_SCALE = 12
  * rule lives, it does not change a posted amount. Changing a policy's mode or scale is a
  * customer-visible change and needs its own PR with a money-path review.
  *
- * `MoneyRoundingPolicyCallSiteTest` pins every policy to the literal expression of a real call
- * site, so a policy that drifts from the code it claims to describe fails the build.
+ * Call sites use these policies instead of an inline `setScale`/`RoundingMode` — enforced for
+ * money-path services by the `money-rounding-inline-ratchet` gate — and
+ * `MoneyRoundingPolicyCallSiteTest` pins each policy's (scale, mode), so editing one fails the build.
  */
 enum class RoundingPolicy(val fixedScale: Int?, val mode: RoundingMode, val rationale: String) {
     /**
