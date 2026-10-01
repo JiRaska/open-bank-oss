@@ -250,7 +250,9 @@ function SnapshotDetail({ id }: { id: string }) {
                   <tbody>
                     {visibleInstruments.map(i => (
                       <tr key={i.id}>
-                        <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }}>{i.id}</td>
+                        {/* #11107: a loan's contract number is what a risk officer reads; the id stays
+                            available as the title so the two can never be confused. */}
+                        <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} title={i.id}>{i.contractNumber ?? i.id}</td>
                         <td>{i.kind}</td>
                         <td>{i.glAccountCode ?? '—'}</td>
                         <td style={{ textAlign: 'right' }}>{money(i.outstanding)}</td>
