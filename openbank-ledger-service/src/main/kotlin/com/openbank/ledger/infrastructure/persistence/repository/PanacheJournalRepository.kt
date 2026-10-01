@@ -387,19 +387,20 @@ class PanacheJournalRepository(
         synthetic = synthetic,
     )
 
-    private fun JournalLineEntity.toDomainLine(): JournalLine {
-        return JournalLine(
-            id = id,
-            journalId = journalId,
-            glAccountId = glAccountId,
-            side = if (side == "D") JournalSide.DEBIT else JournalSide.CREDIT,
-            amount = Money.of(RoundingPolicy.MONEY_SCALE.round(amount, CurrencyCode.of(currencyCode)), currencyCode),
-            fxRate = fxRate,
-            baseAmount = Money.of(RoundingPolicy.MONEY_SCALE.round(baseAmount, CurrencyCode.of(baseCurrency)), baseCurrency),
-            sequence = sequence,
-            subAccountId = subAccountId,
-        )
-    }
+    private fun JournalLineEntity.toDomainLine(): JournalLine = JournalLine(
+        id = id,
+        journalId = journalId,
+        glAccountId = glAccountId,
+        side = if (side == "D") JournalSide.DEBIT else JournalSide.CREDIT,
+        amount = rehydrate(amount, currencyCode),
+        fxRate = fxRate,
+        baseAmount = rehydrate(baseAmount, baseCurrency),
+        sequence = sequence,
+        subAccountId = subAccountId,
+    )
+
+    private fun rehydrate(value: BigDecimal, currency: String): Money =
+        Money.of(RoundingPolicy.MONEY_SCALE.round(value, CurrencyCode.of(currency)), currency)
 
     private fun Any?.toUuid(): UUID = when (this) {
         is UUID -> this
