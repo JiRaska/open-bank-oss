@@ -111,6 +111,26 @@ spec:
           annotations:
             summary: "Postgres deadlocks on {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.datname }})"
             description: "Deadlocks are being detected continuously for >10m — contended write ordering, money-path correctness risk."
+        - alert: CnpgWorkingSetAboveRequest
+          # A Postgres pod using more memory than it REQUESTS is scheduled on a
+          # lie: Karpenter bin-packs by requests, so the node is over-committed
+          # and this pod is first in line for eviction under pressure. No static
+          # gate can see runtime usage, hence an alert. 2026-09-30: sanctions-db
+          # (334Mi) and accounts-db (285Mi) had run above a 256Mi request with
+          # nothing reporting it. `for: 30m` skips startup/recovery spikes (WAL
+          # replay after a switchover) and a short checkpoint burst; a pod that
+          # stays above its request for half an hour needs a bigger request.
+          # container="postgres" matches CNPG instance pods only.
+          expr: |
+            max by (namespace, pod) (container_memory_working_set_bytes{container="postgres"})
+              > on (namespace, pod)
+            max by (namespace, pod) (kube_pod_container_resource_requests{container="postgres", resource="memory"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres working set above memory request on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "The postgres container's working set has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max working set x 1.3), 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
         - alert: PostgresTransactionWraparoundRisk
           # xid age climbing toward the 2^31 wraparound horizon. autovacuum
           # freezes at 200M by default; 300M means freezing is falling behind.
