@@ -719,6 +719,8 @@ class LendingService @Inject constructor(
                                 // self-consistent naming choice this PR preserves rather than introduces).
                                 payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
                                     """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                    // #11107: optional, additive — the human contract number.
+                                    (saved.contractNumber?.let { """"contractNumber":"$it",""" } ?: "") +
                                     """"principal":"${saved.principal}",""" +
                                     // ADR-0314 D5: the rate terms, so the risk engine can tell a
                                     // fixed loan from a floating one without asking lending.

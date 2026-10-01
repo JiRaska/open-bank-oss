@@ -165,6 +165,9 @@ class LendingOutboxWriteIT {
         }
         loanId = response.jsonPath().getString("id")
         assertThat(loanId).isNotBlank()
+        // #11107: the loan the REST call returns already carries the number the repository drew.
+        val contractNumber = response.jsonPath().getString("contractNumber")
+        assertThat(contractNumber).matches("UV-\\d{4}-\\d{6,}")
 
         dataSource.connection.use { conn ->
             conn.prepareStatement(
@@ -176,6 +179,7 @@ class LendingOutboxWriteIT {
                     assertThat(rs.getString("event_type")).isEqualTo("loan.disbursed")
                     assertThat(rs.getString("payload")).contains(loanId)
                     assertThat(rs.getString("payload")).contains("\"rateType\":\"FLOATING\"")
+                    assertThat(rs.getString("payload")).contains("\"contractNumber\":\"$contractNumber\"")
                     // #9003 falsification: do not accept "the default is Instant.now()" as proof —
                     // assert the row that lands through the REAL emitter is not epoch-stamped
                     // (44 of 45 sandbox rows carried 1970-01-01, the #3272 defect class).
@@ -185,12 +189,14 @@ class LendingOutboxWriteIT {
             }
             // The loan row carries the terms the application was approved with.
             conn.prepareStatement(
-                "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date FROM loan WHERE id = ?",
+                "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date, contract_number " +
+                    "FROM loan WHERE id = ?",
             ).use { ps ->
                 ps.setObject(1, UUID.fromString(loanId))
                 ps.executeQuery().use { rs ->
                     assertThat(rs.next()).isTrue()
                     assertThat(rs.getString("rate_type")).isEqualTo("FLOATING")
+                    assertThat(rs.getString("contract_number")).isEqualTo(contractNumber)
                     assertThat(rs.getString("rate_index")).isEqualTo("PRIBOR_3M")
                     assertThat(rs.getBigDecimal("spread")).isEqualByComparingTo("0.025")
                     assertThat(rs.getInt("reset_frequency_months")).isEqualTo(3)
