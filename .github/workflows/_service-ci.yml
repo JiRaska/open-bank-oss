@@ -463,6 +463,12 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: ${{ inputs.ref == '' && inputs.provider_version == '' && 1 || 0 }}
 
+      - name: Stage trusted Pact Broker retry helper
+        run: |
+          set -euo pipefail
+          cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
+          bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
+
       - name: Check out a requested provider version only after proving it is on main
         if: inputs.ref != '' || inputs.provider_version != ''
         env:
@@ -755,12 +761,14 @@ jobs:
             --argjson contracts "$contracts" \
             '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
           echo "Publishing ${#files[@]} pact(s) for ${{ inputs.service }} @ ${GITHUB_SHA::8} (branch ${BRANCH})"
-          code="$(curl -sS -o /tmp/pact-publish.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' \
-            "${PACT_BROKER_URL%/}/contracts/publish" --data-binary "$body")"
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
+            'application/json')"
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
-          [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
+          echo "Pact publication accepted (HTTP $code)."
 
       # A full-fleet run discovers every Gradle module, including consumer-only modules such as
       # analytics-sink that intentionally do not apply openbank.quarkus-service and therefore
@@ -817,19 +825,12 @@ jobs:
           set -euo pipefail
           endpoint="${PACT_BROKER_URL%/}/pacts/provider/${SERVICE}/for-verification"
           body='{"consumerVersionSelectors":[{"mainBranch":true}],"includePendingStatus":false}'
-          http_code="$(curl -sS -o /tmp/pact-preflight.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' -H 'Accept: application/hal+json, application/json' \
-            "$endpoint" --data-binary "$body" || echo "curl_failed")"
-
-          if [ "$http_code" = "curl_failed" ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: could not reach $endpoint at all (connection/DNS/TLS failure). This is a broker-reachability problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code from $endpoint. The broker rejected or failed the selector request before verification could start — this is a broker-side problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          http_code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "$endpoint" "$body_file" /tmp/pact-preflight.json \
+            'application/hal+json, application/json')"
           if ! jq empty /tmp/pact-preflight.json 2>/dev/null; then
             byte_count="$(wc -c < /tmp/pact-preflight.json | tr -d ' ')"
             echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code but the body ($byte_count bytes) is not valid JSON. pact-jvm's HalClient cannot parse this either — expect a downstream NullPointerException in fetchConsumersWithSelectorsV2 if this preflight is bypassed. This is a broker-side malformed-response problem, not a ${SERVICE} contract regression."

@@ -242,6 +242,35 @@ spec:
                 (proc.exepath = "/controller/manager"
                  and proc.name = "manager")
 
+            # The three that remained after the exceptions above (measured 2026-09-30,
+            # 59 events/24h): the Envoy Gateway CONTROLLER (its whole job is watching
+            # Gateway/HTTPRoute objects — 41/day; the envoy data-plane pods in the
+            # same namespace are deliberately NOT excused, a proxy has no business at
+            # the API server); the Strimzi KRaft broker JVM (the KafkaAgent inside
+            # the `kafka` container reads its own Pod/Node for rack and readiness —
+            # 16/day, pname tini/bash only); and the CNPG instance manager caught one
+            # tick earlier, while runc is still exec-ing it (pname containerd-shim,
+            # exepath /usr/sbin/runc — the macro above only matches once the process
+            # has become /controller/manager).
+            - macro: openbank_envoy_gateway_controller
+              condition: >
+                (k8s.ns.name = "envoy-gateway-system"
+                 and container.name = "envoy-gateway"
+                 and proc.exepath = "/usr/local/bin/envoy-gateway")
+
+            - macro: openbank_strimzi_kafka_agent
+              condition: >
+                (k8s.ns.name = "messaging"
+                 and container.name = "kafka"
+                 and proc.name = "java"
+                 and proc.pname in (tini, bash))
+
+            - macro: openbank_cnpg_instance_manager_exec
+              condition: >
+                (container.name = "postgres"
+                 and proc.exepath = "/usr/sbin/runc"
+                 and proc.pname = "containerd-shim")
+
             - macro: user_known_contact_k8s_api_server_activities
               condition: >
                 (openbank_controller_namespaces
@@ -249,7 +278,10 @@ spec:
                  or openbank_admin_ui_bff
                  or openbank_strimzi_operator
                  or openbank_strimzi_entity_operator
-                 or openbank_cnpg_instance_manager)
+                 or openbank_cnpg_instance_manager
+                 or openbank_cnpg_instance_manager_exec
+                 or openbank_envoy_gateway_controller
+                 or openbank_strimzi_kafka_agent)
               override:
                 condition: replace
 

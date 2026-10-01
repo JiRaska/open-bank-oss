@@ -661,7 +661,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
   release_scope_mismatch:
     # The inverse failure mode of service_code_change above: release-please attributes a
@@ -682,7 +682,7 @@ change_requirements:
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144, same timeline as service_code_change (same root-cause class)
+    target_enforce_date: "2026-10-31"   # ADR-0144; moved 2026-10-01: producer live, false-positive rate unmeasured before --enforce (#11692)
     # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
     # in the "Validate manifests" job on every PR, right after release-registration consistency.
     # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
@@ -820,7 +820,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version.txt==package.json half is already enforced (check-admin-ui-version-sync.sh, ci.yml); 'test added for new behavior' has no automated detector, same gap as service_code_change"
   admin_ui_docs_currency:
     # Documentation must stay current. Any change to a process or an admin-ui

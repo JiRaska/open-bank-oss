@@ -60,8 +60,10 @@
 # rather than as evidence of anything.
 #
 # WHAT COUNTS AS A RECORDED SOURCE, AND WHY IT IS NOT release-please's ANSWER (#9898)
-# Everything under `<svc>/` except its release marker files and that package's release-please
-# `exclude-paths` MINUS the service's own `src/test`, which is back IN scope. release-please's exclude-paths answer a
+# Everything under `<svc>/` except that package's release-please `exclude-paths` MINUS the
+# service's own `src/test`, which is back IN scope.
+# Release metadata (`<svc>/version.txt`, `<svc>/CHANGELOG.md`) is OUT of scope for every
+# released package (#11597): a release-please commit changes nothing a pact can see. release-please's exclude-paths answer a
 # different question — "can this change the SHIPPED ARTIFACT" — and reusing them here was a
 # category error: the version this script records is the counterpart of every consumer's
 # `can-i-deploy`, so what has to be identical is not just the image but the PACT ARTEFACTS, and
@@ -204,6 +206,31 @@ recorded_source_excludes_for() {
     [ "$ex" = "${svc}/src/test" ] && continue
     printf '%s\n' "$ex"
   done
+  # Release metadata (#11597). A release-please commit touches ONLY these two files, and neither
+  # can change a pact artefact or a verification result: no test reads them, and the version string
+  # they feed (quarkus.application.version) is not part of any contract. Keeping them in scope made
+  # every release commit "not provably equivalent" to the last published build, so its deploy
+  # recorded NOTHING and every consumer's can-i-deploy kept gating against the PREVIOUS deployed
+  # version until the service happened to deploy again — measured on transaction-service 989b5beb,
+  # which blocked lending's money-path fix for hours. Only for released packages: an unknown package
+  # still yields nothing, the safe direction.
+  if package_is_released "$svc" "$cfg"; then
+    printf '%s\n' "${svc}/version.txt" "${svc}/CHANGELOG.md"
+  fi
+}
+
+# True when <svc> is a release-please package — i.e. it has a version.txt and a CHANGELOG.md that
+# release-please, not a human, rewrites.
+package_is_released() {
+  local svc="$1" cfg="${2:-release-please-config.json}"
+  [ -f "$cfg" ] || return 1
+  python3 - "$cfg" "$svc" <<'PY'
+import json, sys
+try:
+    sys.exit(0 if sys.argv[2] in json.load(open(sys.argv[1])).get("packages", {}) else 1)
+except Exception:
+    sys.exit(1)
+PY
 }
 
 # ── self-test ────────────────────────────────────────────────────────────────────────────
@@ -239,6 +266,10 @@ self_test() {
   path_is_recorded_source openbank-party-service openbank-fx-service/src/main/kotlin/A.kt "$EX"; check "another service is not our source" 1 $?
   path_is_recorded_source openbank-party-service openbank-fx-service/src/test/kotlin/T.kt "$EX"; check "a DEPENDENCY's src/test is not our source" 1 $?
   path_is_recorded_source openbank-party-service docs/adr/0001.md "$EX"; check "a doc is not our source" 1 $?
+  # #11597: release metadata is not a recorded source; a same-named file deeper down still is.
+  path_is_recorded_source openbank-party-service openbank-party-service/version.txt "$EX"; check "#11597: version.txt is not a recorded source" 1 $?
+  path_is_recorded_source openbank-party-service openbank-party-service/CHANGELOG.md "$EX"; check "#11597: CHANGELOG.md is not a recorded source" 1 $?
+  path_is_recorded_source openbank-party-service openbank-party-service/src/main/resources/version.txt "$EX"; check "#11597: a nested version.txt IS a recorded source" 0 $?
   # PREFIX TRAP: a sibling whose name starts with ours must not match.
   path_is_recorded_source openbank-ledger openbank-ledger-service/src/main/kotlin/A.kt "$EX"; check "prefix sibling does not match" 1 $?
   # admin-ui keeps exactly one exclusion: e2e is Playwright, it generates no pact. Its own
@@ -255,11 +286,13 @@ self_test() {
     # `rc=0; [ … ] || rc=1` rather than reading `$?` after a test: shellcheck SC2319, and a bare
     # `$?` after a condition is the kind of thing that silently starts reporting the wrong command.
     got="$(recorded_source_excludes_for openbank-party-service)"
-    rc=0; [ -z "$got" ] || rc=1; check "deriver: party-service has no exclusions left (src/test dropped)" 0 "$rc"
+    rc=0; [ "$got" = "$(printf '%s\n' openbank-party-service/version.txt openbank-party-service/CHANGELOG.md)" ] || rc=1
+    check "deriver: party-service excludes only release metadata (src/test dropped, #11597)" 0 "$rc"
     got="$(excludes_for openbank-party-service)"
     rc=0; [ "$got" = "openbank-party-service/src/test" ] || rc=1; check "deriver: release-please still declares src/test (one definition, not a copy)" 0 "$rc"
     got="$(recorded_source_excludes_for openbank-admin-ui)"
-    rc=0; [ "$got" = "openbank-admin-ui/e2e" ] || rc=1; check "deriver: admin-ui keeps e2e and loses src/test" 0 "$rc"
+    rc=0; [ "$got" = "$(printf '%s\n' openbank-admin-ui/e2e openbank-admin-ui/version.txt openbank-admin-ui/CHANGELOG.md)" ] || rc=1
+    check "deriver: admin-ui keeps e2e, loses src/test, gains release metadata" 0 "$rc"
     got="$(recorded_source_excludes_for openbank-no-such-service)"
     rc=0; [ -z "$got" ] || rc=1; check "deriver: an unknown package yields nothing" 0 "$rc"
   else
@@ -298,6 +331,15 @@ self_test() {
   printf 'src/main/A.ts\taaa\ne2e/accounts-search.spec.ts\tttt\n' >"$A"
   printf 'src/main/A.ts\taaa\ne2e/accounts-search.spec.ts\tZZZ\n' >"$B"
   recorded_sources_agree openbank-admin-ui "$EX_UI" "$A" "$B"; check "admin-ui: a differing e2e spec only IS equivalent" 0 $?
+
+  # KNOWN-POSITIVE for #11597, the measured shape: transaction-service 989b5beb was a release
+  # commit (only version.txt + CHANGELOG.md changed) and recorded NOTHING. It must be equivalent now.
+  printf 'src/main/kotlin/A.kt\taaa\nversion.txt\tv1\nCHANGELOG.md\tc1\n' >"$A"
+  printf 'src/main/kotlin/A.kt\taaa\nversion.txt\tv2\nCHANGELOG.md\tc2\n' >"$B"
+  recorded_sources_agree openbank-party-service "$EX" "$A" "$B"; check "#11597: a release-metadata-only change IS equivalent" 0 $?
+  # ...and the near-miss: a release commit that ALSO carries a code change is still not.
+  printf 'src/main/kotlin/A.kt\tZZZ\nversion.txt\tv2\nCHANGELOG.md\tc2\n' >"$B"
+  recorded_sources_agree openbank-party-service "$EX" "$A" "$B"; check "#11597: release metadata plus a code change is NOT equivalent" 1 $?
 
   printf 'src/main/kotlin/A.kt\taaa\n' >"$A"
   printf 'src/main/kotlin/A.kt\tbbb\n' >"$B"

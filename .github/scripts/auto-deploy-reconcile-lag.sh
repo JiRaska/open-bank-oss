@@ -42,9 +42,34 @@
 # empty (standalone/test use) no allowlist is applied — every manifest service is a
 # candidate, which is what the unit test exercises.
 #
-# STALE = there is a build-relevant main commit AFTER the pinned commit. This is stable: a
-# service re-driven to sandbox-<tip> reports no lag next tick (nothing is newer than tip),
-# so it does not loop. A pin that is not a real commit (placeholder such as sandbox-pending
+# STALE = the pinned commit and HEAD are NOT the same artifact for that service. "Same
+# artifact" has exactly ONE definition in this repo, pact-version-tree-equivalent.sh (#3432):
+# the service's own directory, the compile inputs of every openbank-libs* module and every
+# `project(":…")` dependency, build-logic/, gradle/, root build config and Dockerfile.deploy,
+# compared as git tree objects, with an unrecognised path failing CLOSED (= lagging). This
+# probe calls it instead of keeping a second path list, because the second list is what broke
+# (#11597): it named only <svc>/src/main + a few build files, so a change that reached the
+# image ONLY through a shared library, build-logic or the version catalog was invisible here.
+# The push path does fan those out (libs-change-dependents.sh), but that run is one-shot: on
+# 2026-09-29 both the #9145 (libs-domain src/main) and #10276 (build-logic) fan-out runs died
+# in `Build + push` (attestation step timeout; fleet attestation gate) before can-i-deploy,
+# and no reconcile tick could ever re-offer ledger, pinned at sandbox-a5fb1b4f, again. The
+# service's own src/test is in scope too (its tree is compared whole): a provider's @State
+# handlers live there, and the broker only learns them when that version is deployed.
+#
+# WAVE BEHAVIOUR. A single shared-library commit makes most of the fleet non-equivalent at
+# once. RECONCILE_MAX (below) is what spreads that: oldest pin first, at most N per tick, the
+# rest logged as deferred and picked up on the next tick (every 3h). Only app images move —
+# the probe reads `openbank-*:sandbox-*` image fields, which exist solely in Deployment and
+# Rollout manifests; no CNPG Cluster, and so no money-path database pod, is ever rewritten.
+#
+# Modules that are not Gradle modules (no build.gradle.kts at HEAD — the Python renderer)
+# cannot be classified by the equivalence script, which would refuse them forever and
+# re-drive them every tick. For those alone the probe keeps the push trigger's own globs.
+#
+# This is stable: a service re-driven to sandbox-<tip> is equivalent to tip by construction
+# (identical commit), and stays equivalent while main moves through paths that cannot reach
+# its image, so it does not loop. A pin that is not a real commit (placeholder such as sandbox-pending
 # / sandbox-init) always counts as stale — it has never been deployed for real.
 #
 # Usage: auto-deploy-reconcile-lag.sh [gitops-root]
@@ -54,22 +79,39 @@
 #     allowlist filter is applied.
 #   RECONCILE_HOLDS (env): space-separated services held by live main governance.
 #     Excluded before the oldest-first cap, so a held service cannot consume a slot.
-# Must run inside a full-history checkout (fetch-depth: 0) with main checked out.
+# Must run inside a full-history checkout (fetch-depth: 0) with main checked out. Any CWD
+# inside that checkout works: the probe anchors itself at the repository root (a relative
+# gitops-root argument is resolved against the caller's CWD first).
 set -euo pipefail
 
-GITOPS_ROOT="${1:-openbank-infra/gitops/components}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+EQUIV="${SCRIPT_DIR}/pact-version-tree-equivalent.sh"
+[ -f "$EQUIV" ] || { echo "::error::missing ${EQUIV} — cannot decide artifact equivalence" >&2; exit 2; }
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" \
+  || { echo "::error::not inside a git checkout — run from the repository" >&2; exit 2; }
+if [ -n "${1:-}" ]; then
+  case "$1" in
+    /*) GITOPS_ROOT="$1" ;;
+    *)  GITOPS_ROOT="$(cd "$1" 2>/dev/null && pwd)" \
+          || { echo "::error::gitops root '$1' does not exist" >&2; exit 2; } ;;
+  esac
+else
+  GITOPS_ROOT="${REPO_ROOT}/openbank-infra/gitops/components"
+fi
+# A missing gitops root would make the grep below find nothing and print `[]` — "everything up
+# to date" from a probe that never looked. Refuse instead.
+[ -d "$GITOPS_ROOT" ] || { echo "::error::gitops root ${GITOPS_ROOT} is not a directory" >&2; exit 2; }
+cd "$REPO_ROOT"
+HEAD_SHA="$(git rev-parse HEAD)"
 # Newline-delimited allowlist for O(1) membership tests; empty => no filter.
-ALLOWLIST="$(printf '%s\n' ${RECONCILE_SERVICES:-} | sort -u)"
+ALLOWLIST="$(tr -s ' \t' '\n' <<< "${RECONCILE_SERVICES:-}" | sed '/^$/d' | sort -u)"
 # Cap how many stranded services one tick re-drives, oldest-deployed first, so the first
 # reconcile after this lands does not fan out a whole backlog (23 services today) into a
 # single build fan-out + one giant gitops PR. The remainder drain on later ticks and are
 # logged, never silently dropped. 0 => unlimited.
 RECONCILE_MAX="${RECONCILE_MAX:-12}"
 
-# Build-relevant paths per service — mirrors the auto-deploy.yml push-trigger globs
-# (openbank-*/src/main/**, plus the module build file). Shared-lib changes are deliberately
-# NOT considered here: they already fan out to the whole fleet on the push path, and folding
-# them in would make every lib commit re-drive every service through reconcile too.
 # Each entry: "<sortkey>\t<svc>" — sortkey is the pinned commit's epoch (0 for a placeholder
 # pin), so the oldest-deployed / never-deployed strands are re-driven first under the cap.
 lagging=()
@@ -107,20 +149,22 @@ while IFS= read -r pin; do
     continue
   fi
 
-  # Any build-relevant commit on this checkout's HEAD since the pinned image was built?
-  # The path set must match the auto-deploy push trigger EXACTLY — including version.txt:
-  # a release-please commit touches only version.txt, and the push path rebuilds+deploys on
-  # it ("that release marker must rebuild/deploy the component"). When this probe omitted
-  # version.txt, a release-triggered deploy blocked at can-i-deploy stayed stranded FOREVER:
-  # no src/main delta, so no reconcile tick ever re-offered it — clearing-simulator ran 0.5.0
-  # for 9 days after 0.6.0 was cut (#8127). Dockerfile is in for the same reason.
-  if [ -n "$(git log --format=%H "${commit}..HEAD" -- \
-              "${svc}/src/main" "${svc}/build.gradle.kts" \
-              "${svc}/version.txt" "${svc}/Dockerfile" \
-              "${svc}/app.py" "${svc}/requirements.txt" 2>/dev/null)" ]; then
-    epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
-    lagging+=("${epoch}	$svc")
+  # Same artifact as HEAD? Exit 0 from the equivalence script means EQUIVALENT and nothing
+  # else does, so a crash or an unclassifiable path lands on "lagging" — re-offering a service
+  # to the unchanged gate is the cheap direction; silently never re-offering it is #11597.
+  if git cat-file -e "${HEAD_SHA}:${svc}/build.gradle.kts" 2>/dev/null; then
+    if bash "$EQUIV" "$svc" "$commit" "$HEAD_SHA" >/dev/null 2>&1; then
+      continue
+    fi
+  else
+    # Non-Gradle module: the push trigger's globs, including version.txt (#8127) and the
+    # Python build files. Nothing else can reach that image.
+    [ -n "$(git log --format=%H "${commit}..${HEAD_SHA}" -- \
+              "${svc}/src/main" "${svc}/version.txt" "${svc}/Dockerfile" \
+              "${svc}/app.py" "${svc}/requirements.txt" 2>/dev/null)" ] || continue
   fi
+  epoch="$(git log -1 --format=%ct "${commit}^{commit}" 2>/dev/null || echo 0)"
+  lagging+=("${epoch}	$svc")
 done < <(
   # Only YAML image fields are deployed pins. Searching arbitrary text also picks up
   # historical tags in policy comments and re-drives that service every tick (#8690).
