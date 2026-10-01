@@ -60,7 +60,7 @@ spec:
             # Ingress carrying a Critical annotation is not rejected at apply — the
             # controller silently DROPS the whole Ingress from nginx.conf and the
             # host falls back to the fake default certificate. The Kyverno policy
-            # components/kyverno/deny-nginx-snippet-annotations.yaml turns that into a
+            # deny-nginx-snippet-annotations-cel (components/kyverno/cel-validating-policies.yaml) turns that into a
             # loud admission denial (ArgoCD SyncFailed) instead.
             allow-snippet-annotations: "false"
             annotations-risk-level: "High"
@@ -164,10 +164,9 @@ spec:
             type: LoadBalancer
             # Local: the NLB delivers only to nodes running a controller replica
             # (health-checked on healthCheckNodePort) and there is no kube-proxy SNAT,
-            # so nginx sees the real client IP. Required by the per-host source
-            # allow-list on internal Ingresses (ADR-0324 mixed edge,
-            # edge-internal-host-allowlist); with Cluster every request arrived from a
-            # node IP. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
+            # so nginx sees the real client IP (rate limits, access logs); with Cluster
+            # every request arrived from a node IP. The sandbox edge is deliberately
+            # public (owner decision 2026-09-29): no source allow-list is applied. Safe only with >=2 replicas on distinct nodes (above). Cross-zone
             # stays off (inter-AZ data cost): the NLB drops an AZ with no healthy
             # target from its DNS answers. Hostnames come from external-dns, so nothing
             # pins a single NLB IP any more (the old sslip.io reason for Cluster).

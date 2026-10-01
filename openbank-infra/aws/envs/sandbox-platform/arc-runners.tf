@@ -33,6 +33,21 @@ locals {
   # spot nodes are left free to consolidate. Burst jobs that exceed warm capacity
   # fall through to spot nodes — same scheduling, lower preference weight.
   runner_node_selector = { "openbank.io/pool" = "runners" }
+
+  # Capacity is DERIVED from concurrency (never two hand-kept numbers that drift).
+  # The `runners` NodePool admits one node size (runner_node_vcpu), and every runner
+  # pod's request fits one such node (asserted by a precondition on the NodePool), so
+  # the worst case is one node per pod and the limit that can never starve ARC is
+  # sum(maxRunners) x runner_node_vcpu. Raise a maxRunners and the limit follows.
+  runner_node_vcpu = 4
+  runner_cpu_request = {
+    build  = "3"
+    deploy = "2"
+    batch  = "2"
+    dr     = "1"
+  }
+  runners_max_pods           = var.arc_max_runners + var.arc_deploy_max_runners + var.arc_batch_max_runners + var.arc_dr_max_runners
+  runners_nodepool_cpu_limit = local.runners_max_pods * local.runner_node_vcpu
   runner_tolerations = [{
     key      = "openbank.io/runner"
     operator = "Equal"
@@ -599,7 +614,14 @@ resource "kubectl_manifest" "nodepool_runners" {
             { key = "karpenter.sh/capacity-type", operator = "In", values = ["spot"] },
             { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["c", "m", "r"] },
             { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["3"] },
-            { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = ["4", "8", "16", "32"] },
+            # One node size only, so ONE runner pod == ONE node == runner_node_vcpu of
+            # NodePool limit, and the limit below can be derived rather than guessed.
+            # Was ["4","8","16","32"]: 48h to 2026-09-29, 45 % of this pool's vCPU-hours
+            # were 2xlarge nodes, and every runner node held exactly ONE runner pod
+            # (the 16Gi ephemeral-storage + 7Gi memory request stops a second one
+            # fitting), so half of each 8-vCPU node was paid-for idle and 12 pods
+            # reached the 64-vCPU cap. See local.runners_nodepool_cpu_limit.
+            { key = "karpenter.k8s.aws/instance-cpu", operator = "In", values = [tostring(local.runner_node_vcpu)] },
             # Require local NVMe (d-family: c6gd/c7gd/m6gd/m7gd/r6gd/…) so instance-store
             # RAID0 ephemeral (set on the runners EC2NodeClass) is always present. This
             # narrows the spot pool to d-families — acceptable: arm64 d-family spot in
@@ -626,10 +648,20 @@ resource "kubectl_manifest" "nodepool_runners" {
         consolidateAfter = "30m"
       }
       limits = {
-        cpu = "64"
+        # DERIVED, never hand-set: sum(maxRunners) x runner_node_vcpu. A hand-set
+        # 64 sat below the 19 pods (x 4 vCPU = 76) the four scale sets can ask for,
+        # so demand above the cap surfaced only as Karpenter "exceed limits" log lines.
+        cpu = tostring(local.runners_nodepool_cpu_limit)
       }
     }
   })
+
+  lifecycle {
+    precondition {
+      condition     = alltrue([for s, c in local.runner_cpu_request : tonumber(c) <= local.runner_node_vcpu - 0.5])
+      error_message = "Every ARC runner pod cpu request must fit one ${local.runner_node_vcpu}-vCPU runner node (<= ${local.runner_node_vcpu - 0.5} after DaemonSet overhead), or the derived NodePool limit no longer bounds demand."
+    }
+  }
 }
 
 # ---------------------------------------------------------------------------
@@ -847,7 +879,7 @@ resource "helm_release" "arc_build" {
               # here). Capping it means a runaway build now OOMKills its own container —
               # attributable, and only that job — instead of tripping node memory
               # pressure and taking a healthy neighbour's job down with it.
-              requests = { cpu = "3", memory = "6Gi", "ephemeral-storage" = "16Gi" }
+              requests = { cpu = local.runner_cpu_request.build, memory = "6Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "9Gi" }
             }
           },
@@ -907,7 +939,7 @@ resource "helm_release" "arc_deploy" {
               # needed no disk, and kubelet's DiskPressure ranking puts a pod that is always
               # over its (zero) request at the front of the eviction queue. That is the same
               # shape of bug as the dind memory request above, one resource over.
-              requests = { cpu = "2", memory = "4Gi", "ephemeral-storage" = "16Gi" }
+              requests = { cpu = local.runner_cpu_request.deploy, memory = "4Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "8Gi" }
             }
           },
@@ -1135,7 +1167,7 @@ resource "helm_release" "arc_batch" {
             env          = local.runner_docker_env
             volumeMounts = local.runner_docker_volume_mounts
             resources = {
-              requests = { cpu = "2", memory = "4Gi", "ephemeral-storage" = "16Gi" }
+              requests = { cpu = local.runner_cpu_request.batch, memory = "4Gi", "ephemeral-storage" = "16Gi" }
               limits   = { memory = "8Gi" }
             }
           },
@@ -1158,7 +1190,8 @@ resource "helm_release" "arc_batch" {
 # here). The pod SA is openbank-dr with NO IRSA/cloud role; its cluster
 # permissions come from a Role+RoleBinding scoped to the restore/verify
 # namespaces, living in gitops (components/platform/dr-runner-rbac.yaml) so
-# RBAC drift is ArgoCD-visible, and pinned by the Kyverno policy beside it.
+# RBAC drift is ArgoCD-visible, and pinned by the Kyverno ValidatingPolicy
+# openbank-dr-sa-pin-cel (components/kyverno/cel-validating-policies.yaml).
 # minRunners=0: this lane exists to run quarterly; idle spend is $0.
 # ---------------------------------------------------------------------------
 resource "kubernetes_service_account" "arc_dr" {
@@ -1203,7 +1236,7 @@ resource "helm_release" "arc_dr" {
             name  = "runner"
             image = local.runner_image
             resources = {
-              requests = { cpu = "1", memory = "1Gi", "ephemeral-storage" = "4Gi" }
+              requests = { cpu = local.runner_cpu_request.dr, memory = "1Gi", "ephemeral-storage" = "4Gi" }
               limits   = { memory = "2Gi" }
             }
           },

@@ -7,8 +7,9 @@
 // claim. Emits security-graph.json from two source-of-truth trees:
 //   - gitops/components/*/network-policies.yaml (+ temporal's)  → L3/L4 ingress
 //     coverage, per real GitOps-derived NetworkPolicies (gen-network-policies.py)
-//   - gitops/components/kyverno/verify-sbom-attestation-policy.yaml → admission / supply chain
-//     (signature + SBOM attestation in one policy since #9805; verify-images-policy.yaml is gone)
+//   - gitops/components/kyverno/cel-image-validating-sbom-attestation.yaml → admission / supply
+//     chain: the policies.kyverno.io/v1 ImageValidatingPolicy that replaced the kyverno.io/v1
+//     ClusterPolicy verify-sbom-attestation-policy.yaml (#11437; signature + SBOM in one policy)
 //
 // Honest by construction: every status flag below is read from a manifest that
 // is actually wired into ArgoCD (no ArgoCD Application or Terraform resource
@@ -39,7 +40,7 @@ const OUT = path.resolve(getArg('--out', path.resolve(__dirname, '..', 'security
 
 const INFRA = path.join(REPO, 'openbank-infra')
 const COMPONENTS_DIR = path.join(INFRA, 'gitops', 'components')
-const KYVERNO_FILE = path.join(COMPONENTS_DIR, 'kyverno', 'verify-sbom-attestation-policy.yaml')
+const KYVERNO_FILE = path.join(COMPONENTS_DIR, 'kyverno', 'cel-image-validating-sbom-attestation.yaml')
 
 // Kinds gen-network-policies.py's callers actually run pods under (ADR-0098
 // migrated ten money-path services from Deployment to Rollout; both remain).
@@ -165,19 +166,19 @@ function deriveNetwork() {
 function deriveSupplyChain() {
   const docs = parseYamlFile(KYVERNO_FILE)
   if (docs.length === 0) return { available: false }
-  const policy = docs.find(d => d?.kind === 'ClusterPolicy')
-  const rule = policy?.spec?.rules?.[0]
-  const verify = rule?.verifyImages?.[0]
-  const rekor = verify?.attestors?.[0]?.entries?.[0]?.keyless?.rekor?.url ?? null
+  const policy = docs.find(d => d?.kind === 'ImageValidatingPolicy')
+  if (!policy) return { available: false }
+  const actions = policy.spec?.validationActions ?? []
+  const rekor = policy.spec?.attestors?.[0]?.cosign?.keyless?.rekor?.url ?? null
   return {
     available: true,
     engine: 'Kyverno',
-    policy: policy?.metadata?.name ?? null,
-    mode: policy?.spec?.validationFailureAction ?? 'unknown', // "Audit" today
-    imagePattern: verify?.imageReferences?.[0] ?? null,
+    policy: policy.metadata?.name ?? null,
+    // v1's Enforce/Audit maps to the CEL validationActions: Deny blocks, Audit reports.
+    mode: actions.includes('Deny') ? 'Enforce' : actions.includes('Audit') ? 'Audit' : 'unknown',
+    imagePattern: policy.spec?.matchImageReferences?.[0]?.glob ?? null,
     rekor,
-    // Honest maturity framing: Audit-only until images are signed in CI.
-    enforced: policy?.spec?.validationFailureAction === 'Enforce',
+    enforced: actions.includes('Deny'),
   }
 }
 
@@ -196,7 +197,7 @@ const supplyChain = deriveSupplyChain()
 const out = {
   schema: 'openbank.security-posture/v1',
   source: 'derived from openbank-infra: gitops/components/*/network-policies.yaml, ' +
-    'gitops/components/kyverno/verify-sbom-attestation-policy.yaml (istio: no mesh deployed, see note)',
+    'gitops/components/kyverno/cel-image-validating-sbom-attestation.yaml (istio: no mesh deployed, see note)',
   collectedAt: new Date().toISOString(),
   istio,
   network,

@@ -11,7 +11,7 @@
 # pinned tag: ECR fetches from upstream server-side (not through our NAT).
 # All subsequent pulls: from private ECR over the VPC endpoint — zero NAT cost.
 #
-# Kyverno ClusterPolicy (gitops/components/kyverno/ecr-pull-through-rewrite.yaml)
+# Kyverno MutatingPolicy (gitops/components/kyverno/ecr-pull-through-rewrite-cel.yaml)
 # rewrites Pod image refs at admission time to inject the ECR prefix. containerd
 # hosts.toml cannot add a path prefix, so Kyverno is the correct mechanism.
 #   quay.io/foo          → 265175468565.dkr.ecr.eu-north-1.amazonaws.com/quay/foo

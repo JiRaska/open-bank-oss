@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.5](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.4...domestic-payment-v0.21.5) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
 ## [0.21.4](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.3...domestic-payment-v0.21.4) (2026-09-26)
 
 

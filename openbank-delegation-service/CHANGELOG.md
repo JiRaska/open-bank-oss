@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.1...delegation-service-v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **delegation:** add OTP-gated external disclosure boundary ([#9237](https://github.com/JiRaska/open-bank-oss/issues/9237)) ([b6288a2](https://github.com/JiRaska/open-bank-oss/commit/b6288a2985121121ba5739682db74118f9ba884a))
+
+## [0.20.1](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.0...delegation-service-v0.20.1) (2026-09-29)
+
+
+### Security
+
+* **agent:** own M2M identities for the reads that still needed ROLE_OPERATOR ([#10486](https://github.com/JiRaska/open-bank-oss/issues/10486) batch 8) ([#11454](https://github.com/JiRaska/open-bank-oss/issues/11454)) ([9d20502](https://github.com/JiRaska/open-bank-oss/commit/9d205029f5f71b15427134a8e7140201f63ec13d))
+
 ## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.19.0...delegation-service-v0.20.0) (2026-09-28)
 
 

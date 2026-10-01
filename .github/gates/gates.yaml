@@ -88,6 +88,34 @@ gates:
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
 
+  - id: fleet-scanning-test-edges
+    name: "services-ci builds tests that read other modules' trees (derived, enforced)"
+    group: lint
+    mode: enforced
+    rationale: "services-ci fans out on ^<module>/ only, so a test reading OTHER modules' sources (libs-runtime's OutboxDeadLetterAlertNamingTest) never ran when its real input changed: #10010 merged green and reddened main until #11513. The workflow derives those edges from this script; the gate keeps the detector falsifiable and fails on an empty fleet set."
+    review_after: "2027-09-30"
+    min_subjects: 1
+    budget_seconds: 10
+    selftest: python3 .github/scripts/derive-fleet-scanning-test-modules.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/derive-fleet-scanning-test-modules.py"]
+    run: |
+      python3 .github/scripts/derive-fleet-scanning-test-modules.py 2>&1
+
+  - id: lib-test-only-not-code-global
+    name: "services-ci: a library's own test sources do not rebuild the fleet (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "services-ci treated any openbank-libs* path as code-global, so a one-row edit to libs-runtime's src/test queued a ~150-job full-fleet run on every PR update (#8837 never landed behind the up-to-date rule). Test sources are not published to consumers; testFixtures stay code-global when any build script consumes them. The self-test holds both directions."
+    review_after: "2027-09-30"
+    min_subjects: 1
+    budget_seconds: 10
+    selftest: python3 .github/scripts/filter-lib-test-only-paths.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/filter-lib-test-only-paths.py"]
+    run: |
+      python3 .github/scripts/filter-lib-test-only-paths.py --census 2>&1
+
   - id: synthetic-taint-rest-client-boundaries
     name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
     group: kotlin
@@ -419,6 +447,27 @@ gates:
     review_after: "2027-02-19"
     run: |
       bash .github/scripts/supersede-deploy-prs.sh --self-test
+
+  # Deploy window: bot deploy PRs arm auto-merge at most once per window so deploy traffic
+  # stops restarting every open PR's required checks under the strict up-to-date rule.
+  - id: deploy-window-decision
+    selftest_exempt: "is-a-test-suite — the run: IS deploy-window.py --self-test"
+    name: "deploy window batches bot deploy commits without losing a deploy"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      300 of 675 first-parent commits on main over 2026-09-23..30 were bot deploy commits, each
+      one making every open PR `behind` and restarting its checks. deploy-window.py decides when
+      a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
+      it must never introduce is a built image that nothing pins, or a pin that rewinds a
+      service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
+      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
+      script only runs inside the deploy workflows against live PRs, so this is where it can go
+      red before it acts.
+    review_after: "2027-03-30"
+    budget_seconds: 15
+    run: |
+      python3 .github/scripts/deploy-window.py --self-test
 
   - id: ci-runner-pool-capacity
     name: "every ci_runners pool a job targets is actually provisioned (ADR-0053, issue #6458)"
@@ -1260,12 +1309,64 @@ gates:
       them), 25 money-path clusters derived for 25 money-path services. Self-test falsifies a
       single-instance money-path cluster, a restart-method cluster, missing anti-affinity, a
       disabled PDB and a money-path service whose workload vanished, against a compliant control.
+      2026-09-29 -- rule 6 (Temporal server in front of a platform database) run against the
+      main-branch temporal-helmrelease.yaml: FAIL with 10 findings (frontend/history/matching
+      at 1 replica with no PDB, and all four role blocks at the top level where the chart never
+      reads them); passes on the fixed manifest. Self-test falsifies a 1-replica role, a role
+      without a PDB and a top-level role block.
     min_subjects: 50   # 68 CNPG Clusters declared in gitops today (2026-09-28)
     selftest_inputs: [".github/scripts/check-cnpg-update-resilience.py"]
     selftest: python3 .github/scripts/check-cnpg-update-resilience.py --self-test
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-cnpg-update-resilience.py
+
+  # 2026-09-30 (#11608): 41 spot interruptions in 24h on the Karpenter `default` pool, and 134 of
+  # 140 CNPG pods on it -- every reclaim was ~13 Postgres failovers. Owner scope: the CNPG clusters
+  # behind money_path_services plus temporal-db go on-demand; everything else stays on spot. The
+  # guarantee is three artefacts in two trees (the on-demand `stateful` NodePool, the Kyverno
+  # routing policy with its DERIVED target list, and target Clusters that do not fight it); each
+  # is one edit away from quietly putting a money-path database back on spot.
+  - id: stateful-not-on-spot
+    name: "money-path databases and temporal-db cannot land on spot capacity (#11608, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      The policy's target list must equal the set derived from money_path_services (via the same
+      service -> cluster derivation as cnpg-update-resilience) plus temporal-db, failing closed on
+      a money-path service whose database cannot be resolved; the stateful NodePool must stay
+      on-demand-only, tainted and weighted; the policy must keep adding required on-demand
+      affinity plus the matching toleration; no target Cluster may carry its own required node
+      affinity or name spot; and the targets' declared requests must stay within the load the
+      pool's derived limit was sized from. Non-money-path clusters are explicitly NOT required.
+      Every node agent must follow the databases: a gitops toleration list that admits the
+      observability-pool taint without pinning to that pool (derived: alloy, falco) must also
+      tolerate openbank.io/stateful, or the money-path DB nodes run unlogged and unwatched.
+    review_after: "2027-03-31"
+    verified: >-
+      2026-09-30 -- run on the branch: OK, 26 targets of 69 CNPG Clusters. Negative case on the
+      real tree: deleting ledger/ledger-db from the policy's targets fails with "money-path
+      database ledger/ledger-db (openbank-ledger-service) is NOT in `targets`", and `--kyverno`
+      then reports the ledger fixture untouched (9/10). Self-test falsifies 14 mutations
+      (money-path cluster or temporal-db dropped from targets, a non-money-path cluster added,
+      an unresolvable money-path service, spot re-added, pool deleted, weight removed, policy
+      deleted, selector no longer reading targets, on-demand retyped, taint renamed without the
+      toleration, a target Cluster with required nodeAffinity, one pinned to spot, target load
+      above the measurement) and asserts a non-money-path cluster on spot is NOT flagged.
+      Behaviour: `--kyverno` (docker, Kyverno CLI v1.19.1) 10/10 fixtures.
+      Node agents: dropping alloy's stateful toleration fails with "apps/alloy.yaml: node agent
+      at Application/spec/source/helm/valuesObject/controller tolerates the observability pool
+      but not openbank.io/stateful=true:NoSchedule"; the self-test has the same case. `--live`
+      against `kubectl get ds -A -o json` derived 7 fleet-wide DaemonSets (aws-node,
+      ebs-csi-node, eks-pod-identity-agent, kube-proxy, node-exporter, alloy, falco) and
+      reported alloy + falco MISSING on the cluster as deployed before this PR.
+    min_subjects: 20   # 26 money-path clusters + temporal-db today (2026-09-30)
+    selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py", ".github/scripts/check-cnpg-update-resilience.py"]
+    selftest: python3 .github/scripts/check-stateful-not-on-spot.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-stateful-not-on-spot.py
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
@@ -1332,6 +1433,41 @@ gates:
       # their subject — the file's own "remove an entry the moment the service is built" line
       # had no enforcement behind it.
       .github/scripts/check-fleet-attestations.sh --check-placeholders
+
+  - id: no-handrolled-cosign
+    name: "workflows sign through the shared cosign library (issue #9805, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # local YAML inventory completes under one second; initial CI margin
+    # 81 workflows measured 2026-09-13; half, so the estate can shrink without a false red.
+    min_subjects: 40
+    rationale: "A workflow that signs and attests by hand emits whatever predicates its author knew about, so a new admission policy silently outruns it. That is how runner-image.yml shipped an SBOM with no SLSA provenance and deadlocked every ARC runner pool twice in two months (#9805, #887/#8847) — with the rule already written in root CLAUDE.md the whole time."
+    review_after: "2027-03-13"
+    selftest_inputs: [".github/scripts/check-no-handrolled-cosign.py"]
+    selftest: python3 .github/scripts/check-no-handrolled-cosign.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-no-handrolled-cosign.py
+
+  - id: buildx-push-single-manifest
+    name: "buildx pushes carry --provenance=false, never an OCI index (issue #11573, enforced)"
+    group: supplychain
+    mode: enforced
+    budget_seconds: 15  # text scan of ~200 files; under one second locally
+    # 10 push sites measured 2026-09-30; half, so the estate can shrink without a false red.
+    min_subjects: 5
+    rationale: "A buildx push without --provenance=false becomes an OCI index under the docker-container driver, which the Deny+Fail Kyverno SBOM ImageValidatingPolicy resolves as linux/amd64 and so blocks every Pod of an arm64-only image (admin-ui, #11437). This is the early warning; the decisive control is assert_single_image_manifest in cosign-attest.sh, which the self-test also exercises."
+    review_after: "2027-03-30"
+    selftest_inputs:
+      - ".github/scripts/check-buildx-push-single-manifest.py"
+      - ".github/scripts/test-cosign-attest-single-manifest.sh"
+      - "openbank-infra/scripts/lib/cosign-attest.sh"
+    selftest: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py --self-test
+      bash .github/scripts/test-cosign-attest-single-manifest.sh
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-buildx-push-single-manifest.py
 
   - id: license-header-consistency
     name: "License header consistency (issue #2280, enforced)"
@@ -2459,6 +2595,26 @@ gates:
     run: |
       python3 .github/scripts/check-merged-past-red-check.py --check-declaration
 
+  # Strict required-status-checks policy + auto-merge = an armed, green PR waits `behind` forever,
+  # because auto-merge never updates a branch. auto-update-armed-prs.yml updates exactly those
+  # PRs. This gate holds its wiring: the update is driven by the GitHub App token (a GITHUB_TOKEN
+  # push triggers no workflows, so CI would never re-run and the PR would wedge), it sends
+  # expected_head_sha, and it reads the required contexts live from the branch rules.
+  - id: auto-update-armed-prs-declaration
+    name: "auto-update-armed-prs keeps its App token, live required contexts and triggers (enforced)"
+    group: registry
+    mode: enforced
+    rationale: "An armed PR behind a strict main never merges without an update; a regression to GITHUB_TOKEN or a hard-coded context list would make the updater silently inert or unsafe."
+    review_after: "2027-03-30"
+    budget_seconds: 5
+    min_subjects: 10   # 7 workflow + 3 script declarations, 2026-09-30
+    selftest: |
+      python3 .github/scripts/auto-update-armed-prs.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/auto-update-armed-prs.py"]
+    run: |
+      python3 .github/scripts/auto-update-armed-prs.py --check-declaration
+
   - id: opa-sidecar-bundle-shape
     name: "OPA sidecar data mounts match its .manifest roots (#2872, enforced)"
     group: gitops
@@ -2975,6 +3131,26 @@ gates:
     selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
     run: |
       python3 .github/scripts/check-money-rounding-inline.py --root .
+  # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
+  # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
+  # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
+  # HttpClient.newBuilder()/newHttpClient() in a service's src/main fails; the 29 sites measured on
+  # 2026-09-26 are baselined per file (count, so a second site in a baselined file still fails),
+  # and a healed entry is reported stale. Advisory per ADR-0320 until P1 has a migrated consumer.
+  - id: raw-http-client-ratchet
+    name: "raw java.net.http.HttpClient construction in services does not grow (ADR-0320 P1, advisory)"
+    group: kotlin
+    mode: advisory
+    verified: "2026-09-26 — measured 29 raw sites in 29 service files; advisory until SafeHttpClient has one migrated consumer (ADR-0320)"
+    budget_seconds: 20   # 0.4s locally; generous for a slower runner
+    rationale: "Every raw HttpClient is an outbound path with no SSRF allowlist or resolved-address check; this forbids new ones while the existing 29 migrate to SafeHttpClient."
+    review_after: "2027-03-31"
+    min_subjects: 1000   # 2319 service src/main files scanned 2026-09-26; findings may reach zero
+    selftest: python3 .github/scripts/check-raw-http-client.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-raw-http-client.py", ".github/scripts/raw-http-client-baseline.txt"]
+    run: |
+      python3 .github/scripts/check-raw-http-client.py --root .
 
   # #10997: RESTEasy Reactive's UriInfo.getPath() returns the path WITH a leading slash, so a
   # prefix check written without one (`path.startsWith("v1/")`) is always false and the gate it
@@ -4356,7 +4532,10 @@ gates:
   # routed only to GoAlert/ntfy/Holmes — all cluster-internal with no Ingress
   # (ADR-0056) — while warning escaped to Slack, so the most severe alerts were the
   # least likely to be seen. Config-inspection alone hides this (the critical path
-  # looks MORE careful), which is why it is a gate. ENFORCED.
+  # looks MORE careful), which is why it is a gate. Also enforces GoAlert dedup-key
+  # stability (#11136): GoAlert dedups on the alert summary, so a goalert route must group by
+  # ['...'] and a critical summary must not interpolate $value, or orphaned alerts pile up to
+  # the 200-unacked limit and every page is rejected with HTTP 400. ENFORCED.
   - id: critical-alert-egress
     name: "critical-alert egress (rules.yaml: alerting, enforced)"
     group: security
@@ -4781,6 +4960,22 @@ gates:
     selftest_inputs: [".github/scripts/check-oidc-client-configured.py"]
     run: |
       python3 .github/scripts/check-oidc-client-configured.py
+  # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
+  # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
+  # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  - id: oidc-tls-verification-profile-scoped
+    name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
+    group: security
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A top-level `tls.verification: none` silently switches off certificate validation in production the moment any environment moves the Keycloak leg to https; it spreads by copying a template application.yaml, so only a gate stops the next service reintroducing it."
+    review_after: "2027-03-25"
+    min_subjects: 400   # 884 files today (application yaml/properties + gitops manifests, 2026-09-25)
+    selftest: python3 .github/scripts/check-oidc-tls-verification-profile.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-oidc-tls-verification-profile.py"]
+    run: |
+      python3 .github/scripts/check-oidc-tls-verification-profile.py
   - id: pr-build-cloud-credentials
     name: "reusable PR build lane carries no cloud credentials (enforced)"
     group: security
@@ -4819,6 +5014,22 @@ gates:
     selftest_inputs: [".github/scripts/check-realm-template-importable.py"]
     run: |
       python3 .github/scripts/check-realm-template-importable.py
+
+  # Importability alone does not reject an operator client with a password grant,
+  # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
+  - id: ops-cli-client-contract
+    name: "Operator CLI client stays loopback-only and PKCE-gated (issue #10905)"
+    group: security
+    mode: enforced
+    rationale: "Realm import accepts insecure grants and redirects; this gate rejects an operator CLI client that weakens loopback, PKCE, token or scope restrictions."
+    review_after: "2027-03-29"
+    budget_seconds: 5
+    min_subjects: 1  # exactly one named operator client must be present
+    selftest_inputs: ["openbank-infra/e2e/ops_cli_client.test.py"]
+    selftest: python3 openbank-infra/e2e/ops_cli_client.test.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/e2e/ops_cli_client.test.py
 
   # Keycloak docker-dev / CI realm JSONs vs the deployed gitops template (issue #2540 gate-scope
   # follow-up). The four checks above — this one included until now — all glob only
@@ -4934,6 +5145,27 @@ gates:
       # not only a fixture — it exits 1 on origin/main's network module + substrate env and
       # 0 with the pin in place.
       python3 .github/scripts/check-nat-ami-pinned.py --enforce
+  - id: container-listen-port-collisions
+    name: "no two listeners on one port in a container (issue #11524, enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      A container that binds one port twice crashloops on `bind: address already in use`, while
+      ArgoCD reports Synced and sibling Deployments in the same file keep running. quay-cache set
+      REGISTRY_HTTP_ADDR=:5001, which collides with the :5001 debug server that distribution v3's
+      bundled config starts. The colliding listener was an image default that no manifest names.
+      The gate requires every distribution container to declare REGISTRY_HTTP_DEBUG_ADDR and every
+      *_ADDR/*_PORT env port in one container to be unique. Falsified against origin/main's
+      registry-cache.yaml before wiring: exit 1 with the quay-cache collision named, exit 0 after the fix.
+    review_after: '2027-03-29'
+    verified: "2026-09-29 — 208 containers scanned on the branch, 0 findings; the pre-fix registry-cache.yaml gives 4 findings, exit 1"
+    budget_seconds: 20
+    min_subjects: 100   # 208 containers measured 2026-09-29
+    selftest: python3 .github/scripts/check-container-listen-port-collisions.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-container-listen-port-collisions.py"]
+    run: |
+      python3 .github/scripts/check-container-listen-port-collisions.py --root .
   - id: enforcement-reachability
     name: "a declared enforcement function has a production caller (ADR-0232, issue #3615)"
     group: kotlin

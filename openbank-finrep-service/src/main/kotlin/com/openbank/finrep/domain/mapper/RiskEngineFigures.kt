@@ -4,6 +4,7 @@
 
 package com.openbank.finrep.domain.mapper
 
+import com.openbank.finrep.application.port.out.RiskLiquidityResult
 import java.math.BigDecimal
 
 /**
@@ -42,6 +43,28 @@ object RiskEngineFigures {
                 "'$EU_LIQUIDITY_PARAMETER_SET', so this 2015/61 value cannot be stated."
         }
 
+    /**
+     * The prefix every EU CRR (post-CRR3) capital parameter set id starts with, e.g. `eu-crr3-sa`
+     * (risk-engine default as of PR #11496; BCBS `bcbs-d424-sa` remains selectable). COREP C 02.00
+     * reports Pillar 1 own funds requirements under EU CRR, so any set whose id does not start with
+     * this prefix — BCBS or a future non-EU set — is a data gap, never presented as an EU CRR figure.
+     * A prefix, not an exact match, because a later EU CRR set version (`eu-crr4-sa`, …) must also be
+     * accepted without a code change here.
+     */
+    const val EU_CRR_CAPITAL_PARAMETER_SET_PREFIX = "eu-crr"
+
+    /** The EU CRR capital parameter set id currently returned by risk-engine (used only in gap text). */
+    private const val EU_CRR_CAPITAL_PARAMETER_SET_EXAMPLE = "eu-crr3-sa"
+
+    /** The gap reason for a COREP capital value when the run used a non-EU-CRR parameter set, else null. */
+    fun capitalParameterSetGap(parameterSetId: String, runId: String): String? =
+        if (parameterSetId.startsWith(EU_CRR_CAPITAL_PARAMETER_SET_PREFIX)) {
+            null
+        } else {
+            "Risk-engine snapshot $runId was computed under parameter set '$parameterSetId', not the EU CRR set " +
+                "'$EU_CRR_CAPITAL_PARAMETER_SET_EXAMPLE'; COREP C 02.00 reports under EU CRR."
+        }
+
     /** The stable machine code the risk engine prefixes the pledged-collateral note with (#11096). */
     private const val PLEDGED_COLLATERAL_NOTE_CODE = "PLEDGED_COLLATERAL_NOT_MODELLED"
 
@@ -67,6 +90,30 @@ object RiskEngineFigures {
         if (note.startsWith(PLEDGED_COLLATERAL_NOTE_CODE)) return true
         return note.contains("pledged", ignoreCase = true) && note.contains("HQLA", ignoreCase = true)
     }
+
+    /**
+     * The whole-template gap from the engine's combined view, else null. COREP C 72.00-76.00 report all
+     * currencies combined in the reporting currency (Delegated Regulation (EU) 2015/61 Art. 4(5)), which
+     * the risk engine states as its `total` in CZK at the ČNB fixing (risk-engine API 1.13.0) — so a
+     * multi-currency book is reported from it. It is a gap when the book is empty, when the engine
+     * states no combined total (its `totalNotStated` reason is carried, e.g. a missing fixing), when
+     * the total is in any currency other than CZK (never relabelled), or when [stated] says the figure
+     * this template reads ([figure]) is absent from it.
+     */
+    fun combinedViewGap(result: RiskLiquidityResult, figure: String, stated: Boolean): String? = when {
+        result.currencyCount == 0 -> emptyBookReason(result.runId)
+        result.currency == null ->
+            "The risk engine states no combined $REPORTING_CURRENCY total for snapshot ${result.runId}: " +
+                (result.totalNotStated ?: "no reason given") + "."
+        result.currency != REPORTING_CURRENCY ->
+            "The risk engine's combined total for snapshot ${result.runId} is in ${result.currency}, not the " +
+                "reporting currency $REPORTING_CURRENCY."
+        !stated -> "The risk engine's combined total for snapshot ${result.runId} states no $figure."
+        else -> null
+    }
+
+    /** The reporting currency every COREP template is stated in (the same one C 02.00 reads). */
+    const val REPORTING_CURRENCY = C0200Mapper.REPORTING_CURRENCY
 
     /** The gap reason when the engine's book holds no currency at all (not a multi-currency book). */
     fun emptyBookReason(runId: String): String =

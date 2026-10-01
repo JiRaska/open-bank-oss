@@ -28,6 +28,19 @@ spec:
         # single replica. Unmatched alerts fall through to a no-op receiver and
         # stay visible in the Alertmanager UI + Grafana alert list; `warning`
         # and `critical` both egress to Slack (see the routing tree below).
+        # KubeJobFailed (kubernetes-mixin) fires on `kube_job_failed > 0`, i.e. on the
+        # EXISTENCE of a failed Job object. A CronJob keeps its last failed Jobs
+        # (failedJobsHistoryLimit) next to the successful runs that followed, so the
+        # alert stays lit for days after the cron recovered. Measured 2026-09-30:
+        # seven KubeJobFailed firing, six of them for crons whose next run had
+        # succeeded (arc-stuck-runner-reaper, journey-*, argocd-sync-verifier,
+        # keycloak-realm-drift, sbom-drift-scanner); the one real failure
+        # (cloud-finops-collector) was indistinguishable from the six. Replaced by
+        # CronJobLatestRunFailed + JobFailed in prometheus-rules-jobs.yaml, which
+        # alert on the LATEST run of each CronJob and on Jobs no CronJob owns.
+        defaultRules:
+          disabled:
+            KubeJobFailed: true
         alertmanager:
           enabled: true
           # Single replica -> minAvailable:1 blocks ANY voluntary eviction (Karpenter
@@ -88,6 +101,27 @@ spec:
               group_interval: 5m
               repeat_interval: 4h
               routes:
+                # DEAD-MAN SWITCH. `Watchdog` is the always-firing alert kube-prometheus-
+                # stack ships precisely so that its ABSENCE can be noticed. Until
+                # 2026-09-30 it carried severity=none, matched no route below and fell
+                # into the root `null` receiver — so if Prometheus, Alertmanager or the
+                # whole observability pool died, the one signal designed to say so went
+                # nowhere. Route it, first and unconditionally, to a GoAlert heartbeat
+                # monitor: GoAlert pages (via ntfy + the on-call policy) when the beat
+                # stops. The heartbeat URL is key `heartbeat_url` of the `goalert-webhook-url`
+                # Secret, written by the ops step that creates the monitor (see
+                # es-goalert-webhook.yaml for why it is not an ExternalSecret key).
+                # While that key is missing, this receiver's url_file does not exist,
+                # every send fails and AlertmanagerFailedToSendAlerts reaches Slack via the
+                # route just below — which is the correct, visible state for "the dead-man
+                # is not wired yet", never a silent one.
+                - matchers:
+                    - alertname = "Watchdog"
+                  receiver: 'deadman'
+                  group_by: ['...']   # check-critical-alert-egress treats any GoAlert-bound route alike
+                  group_wait: 0s
+                  group_interval: 1m
+                  repeat_interval: 1m
                 # Notification-DELIVERY meta-alerts must never depend on the very
                 # receiver they are reporting as broken (#11136): GoAlert's webhook
                 # integration was rejecting ~98% of notifications with HTTP 400
@@ -138,6 +172,19 @@ spec:
                     - severity = "critical"
                   receiver: 'goalert'   # ADR-0088 §D1: page on-call via GoAlert — escalation,
                   # ack and dedup — which fans out to ntfy. In-perimeter paging.
+                  # ONE ALERT PER NOTIFICATION GROUP (#11136). GoAlert's Alertmanager
+                  # integration dedups on the SUMMARY: CommonAnnotations.summary, else
+                  # "alertname <instance>,<instance>,...". Under the inherited
+                  # ['alertname','service'] grouping that string followed group membership,
+                  # so each membership change opened a NEW GoAlert alert and the final
+                  # `resolved` carried yet another summary and closed nothing. The orphans
+                  # (send_resolved was never the problem) piled up to GoAlert's
+                  # unacked_alerts_per_service limit of 200, after which it answered EVERY
+                  # page with HTTP 400 and Alertmanager, treating 4xx as unrecoverable,
+                  # dropped it. '...' makes the summary the alert's own, so the resolve
+                  # matches it. Enforced by check-critical-alert-egress.py, together with
+                  # "no $value in a critical summary" (the same drift, over time).
+                  group_by: ['...']
                 - matchers:
                     - severity = "warning"
                   receiver: 'slack-alerts'   # ADR-0077 Phase 4: non-paging visibility.
@@ -149,6 +196,14 @@ spec:
                   # alert into a HolmesGPT investigation and posts the RCA to Slack + Loki.
                   # Not paging; failures here never affect the GoAlert path.
                   - url: http://holmes-rca.observability.svc:8080/alert
+                    send_resolved: false
+              - name: 'deadman'
+                webhook_configs:
+                  # GoAlert heartbeat endpoint (POST /api/v2/heartbeat/<key>); any body is
+                  # accepted, so Alertmanager's webhook payload is fine. One beat a minute,
+                  # heartbeat timeout set to 5m in GoAlert. send_resolved is meaningless
+                  # for a signal whose value is that it never resolves.
+                  - url_file: /etc/alertmanager/secrets/goalert-webhook-url/heartbeat_url
                     send_resolved: false
               - name: 'goalert'
                 webhook_configs:

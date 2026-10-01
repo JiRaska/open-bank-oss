@@ -56,7 +56,10 @@ class CapitalServiceTest {
 
     private class Snapshots(val asOf: LocalDate, val positions: List<Position>) : SnapshotUseCase {
         override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = emptyList()
-        override suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome = error("unused")
+
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+            error("unused")
+        override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome = error("unused")
         override suspend fun getRun(id: UUID) =
             SnapshotRun(id, asOf, Instant.EPOCH, "h", Provenance.SYNTHETIC, TieOutStatus.TIED_OUT, 1, emptyList())
         override suspend fun getPositions(id: UUID) = positions

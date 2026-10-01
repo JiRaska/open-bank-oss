@@ -19,6 +19,9 @@ is now stated in the row rather than implied away.
 - Enforcement integrity of the whole platform: every product service's delegation
   projection trusts this service's event stream.
 - SCA ceremony integrity (grant + acceptance).
+- `ExternalDisclosure` evidence — a short-lived, bounded release of one sealed document to an
+  external recipient. It holds only recipient label, document/delegation ids, state timestamps and
+  domain-separated SHA-256 hashes of the link secret and OTP; it never stores either raw secret.
 
 ## Lifecycle approval execution
 
@@ -59,6 +62,11 @@ and require a human operator plus OPA; client applications do not receive a bank
    after a single-use release claim. Outbound on the same boundary: live mandate reads from
    party-service and approval-linked SCA consumes at sca-service; lifecycle events on
    `openbank.delegation.approval-events` (notification-service, audit-service).
+9. External recipient → customer-edge → delegation-service disclosure endpoint. The public edge
+   owns anonymous ingress and its per-IP ingress rate limit; it authenticates upstream using only
+   its M2M identity. OPA permits precisely `delegation.disclosure.verify` and
+   `delegation.disclosure.release` for that identity, never the shared backend client. Every
+   unavailable state is a uniform 404 and the only successful payload is a sealed PDF derivative.
 
 ## Threats and mitigations
 
@@ -97,6 +105,11 @@ and require a human operator plus OPA; client applications do not receive a bank
 | T32 | Device key bound to the ENTITY signs for it (#10281 item 1) | A signer is always a natural person's party id from the edge's token and must hold a live mandate over the entity; the entity itself is never eligible (it holds no mandate over itself). The enrolment refusal and the purge of entity-bound credentials live in sca-service (#10281). |
 | T33 | Trust or policy widened without the full round | PAYEE_ADD / PAYEE_REMOVE / POLICY_CHANGE use the STRICTEST rule of the current policy, never a trusted-payee shortcut, and take effect only in the transaction that records the last signature. A trusted payee is written by no other code path. A POLICY_CHANGE prepared against an older version is refused as `SUPERSEDED` rather than applied over a newer policy; signer-group edits move the version. Trusted payees lower the signature COUNT to one — they are not the RTS Article 13 exemption; the initiator's SCA is always required. |
 | T34 | Only the edge may drive signing | `delegation_rest_ext.rego` grants the twelve `delegation.signing.*` actions to `service-account-openbank-edge` only and `prohibited` vetoes the whole family for every other principal — including the shared backend identity that base `operator-read-any` would otherwise admit, and staff operators. |
+| T35 | A leaked external-link token becomes an unbounded, permanent document download | Each disclosure has a per-record SHA-256 link-secret hash, hard expiry, revocable state and a positive maximum view count. The row and its immutable view timestamps are locked and transitioned in one database transaction, so replicas cannot both consume the last allowed view. Raw secrets never persist. customer-edge maps every 4xx to the same unavailable response and is behind its per-IP ingress limit. |
+| T36 | A link alone releases a confidential document | The model requires a separate OTP hash before any view may be consumed. Invalid attempts are persisted and permanently lock the disclosure at five failures; OTP verification, revocation, expiry and view-limit denial occur before document bytes are requested. The raw OTP is generated only at issuance and never persists. Residual: an out-of-band delivery adapter remains a rollout dependency, not an API fallback. |
+| T37 | A concurrent view and revocation allow a post-revocation release | Issuance, OTP verification, view consumption and revocation are expressed as transitions on one disclosure aggregate. The repository takes `SELECT … FOR UPDATE` on the exact disclosure before executing a transition, records at most one append-only view timestamp and updates the count in that transaction. A request that locks after revocation sees unavailable and cannot issue bytes. The exporter is called before the final CAS so an outage cannot burn a view; only the CAS winner receives a derived sealed artifact, never document-service's internal original `/content`. |
+| T38 | A customer shares a document they are not entitled to disclose, or shares a broad live API | The intended issuer path will re-read the linked grant, require `ACTIVE`, require the authenticated grantor and require `DOCUMENT` + `OBJECT_READ`; D7 is an immutable single-object emission rather than a new product-service authorization path. Residual: this command/API is not yet implemented, so no production control should claim these checks have run. |
+| T39 | Disclosure evidence exposes unnecessary recipient or device data | The storage schema deliberately retains one human recipient label and the event time required for grantor transparency, but not recipient account identity, IP address, user-agent, raw link or raw OTP. View rows are append-only so a later counter update cannot erase earlier access evidence. Residual: retention, data-subject access and audit-envelope routing must be specified with the sealed-export integration before external exposure. |
 
 ## Outbound authentication (added 2026-08-06)
 
@@ -129,6 +142,10 @@ gap closes only with a consumer pact or a run against a deployed stack.
 
 ## Out of scope (tracked as follow-ups)
 
+- D7b sealed-document exporter: redaction/watermark rendering, institutional PAdES seal, OTP
+  delivery/attempt throttling, recipient-facing rate limit and audit-envelope routing. The
+  disclosure persistence boundary is implemented, but **no external ingress is enabled** until
+  this export path and its controls ship together.
 - Exposure-shaped object disclosure (D7b): **fail closed.** New non-null `exposure` is refused
   with `EXPOSURE_UNSUPPORTED`, before SCA or persistence. Historical rows remain readable for
   audit but are excluded from the authorization decision and shared-document list. This stays the
@@ -266,6 +283,8 @@ consumes SCA, writes a grant or publishes an event. `offer` repeats every check 
 cannot become authorization. The response contains only `valid: true`: returning counterparty
 attributes for an arbitrary UUID would turn the pre-SCA endpoint into a party-directory oracle.
 - **2026-09-21** — **Party-eligibility and card-ownership reads move to the service's own machine identity (#10486 batch 6).** `PidServiceRestClient` (`GET /api/v1/parties/{id}`) and `CardIssuanceRestClient` (`GET /api/v1/cards/{id}`) now mint their bearer from a NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only). pid-service grants it `party.read` by identity; that endpoint gained `@Authorize` in the same change and pid enforces OPA. card-issuance grants `card.read` by identity, plus a Kotlin named-caller check while it runs OPA advisory. **STRIDE-S:** a new credential at Vault KV `keycloak/delegation-service`, projected by `delegation-service-m2m-oidc`, env ref `optional: false`; compromise reaches those two reads only. The account-ownership client stays on the shared client, where its `account.read` is already identity-granted. Rollback: revert the commit.
+
+- **2026-09-29** — **Grantor mandate reads move to the service's own machine identity (#10486 batch 8).** `PartyMandateRestClient` and `PartyAuthorityRestClient` (`GET /api/v1/parties/{id}`, `/{id}/mandates`, `/{id}/acting-for`) now mint their bearer from the existing NAMED oidc-client `m2m`, Keycloak client `openbank-delegation` (`ROLE_API` only), instead of the shared `openbank-services` principal, whose `ROLE_OPERATOR` was the only thing granting `party.mandate.read`. party-service grants it `party.mandate.read` by identity (`service-delegation-mandate-read` in `party_rest_ext.rego`); `GET /api/v1/parties/{id}` is RBAC-only and admits `ROLE_API`. **STRIDE-E:** no new credential; the grant is one read verb, never `party.update` or a mandate write (`party_rest_ext_test.rego`). Rollback: revert the commit, and the clients return to the shared principal, which keeps `ROLE_OPERATOR` until the follow-up removes it.
 
 - **2026-09-26** — **Idempotency-Key bound to a request fingerprint, reworked onto the final
   atomic reserve/save/release API (#10959, v2).** `DelegationPortfolioResource.kt` and

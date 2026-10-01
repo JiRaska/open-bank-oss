@@ -112,7 +112,7 @@ class EodSnapshotScheduler(
      */
     internal suspend fun runOnce() {
         val asOf = ZonedDateTime.now(clock).withZoneSameInstant(PRAGUE_ZONE).toLocalDate()
-        val outcome = snapshotUseCase.createSnapshot(asOf)
+        val outcome = snapshotUseCase.createSnapshot(asOf, requestedBy = REQUESTED_BY)
         if (outcome.replayed) {
             replayedCounter?.increment()
             log.infof(
@@ -134,6 +134,9 @@ class EodSnapshotScheduler(
     private companion object {
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "risk-engine-eod-snapshot"
+
+        /** [SnapshotUseCase.createSnapshot]'s `requestedBy` for this scheduler's own ticks. */
+        const val REQUESTED_BY = "system:risk-engine-eod-snapshot"
 
         const val RUNS_COUNTER = "openbank.risk.eod_snapshot.runs"
 

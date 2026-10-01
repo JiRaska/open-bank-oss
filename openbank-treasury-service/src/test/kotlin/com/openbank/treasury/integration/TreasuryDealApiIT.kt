@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -120,6 +121,7 @@ class TreasuryDealApiIT {
     fun `3 - an AI agent principal can never approve or settle, whatever roles it carries`() {
         action(dealId, "approve").then().statusCode(403).body("error", equalTo("ACTOR_NOT_PERMITTED"))
         action(dealId, "settle").then().statusCode(403)
+        action(dealId, "confirm").then().statusCode(403)
         assertThat(state(dealId)).isEqualTo("PENDING_APPROVAL")
         assertThat(ledger.calls).isEmpty()
     }
@@ -141,10 +143,14 @@ class TreasuryDealApiIT {
     @Test
     @Order(5)
     @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
-    fun `5 - a ledger response lost after commit - the deal stays BOOKED, the retry yields ONE journal`() {
+    fun `5 - a ledger response lost after commit - the deal stays CONFIRMED, the retry yields ONE journal`() {
+        // ADR-0315 D2: a BOOKED deal does not settle until the counterparty's confirmation is recorded.
+        action(dealId, "settle").then().statusCode(409).body("error", equalTo("INVALID_STATE"))
+        action(dealId, "confirm").then().statusCode(200).body("state", equalTo("CONFIRMED"))
+        assertThat(ledger.journals).describedAs("confirmation posts nothing").isEmpty()
         ledger.loseNextResponse = true
         action(dealId, "settle").then().statusCode(500)
-        assertThat(state(dealId)).isEqualTo("BOOKED")
+        assertThat(state(dealId)).isEqualTo("CONFIRMED")
         assertThat(ledger.journals).hasSize(1)
 
         action(dealId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
@@ -157,7 +163,7 @@ class TreasuryDealApiIT {
         val stored = journalIds(UUID.fromString(dealId))
         assertThat(stored).containsExactly(ledger.journals.getValue(key).first)
         assertThat(outboxTypes(UUID.fromString(dealId)))
-            .containsExactly("treasury.deal.booked.v1", "treasury.deal.settled.v1")
+            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
     }
 
     @Test
@@ -193,7 +199,14 @@ class TreasuryDealApiIT {
         given().`when`().get("/api/v1/treasury/deals/$dealId").then().statusCode(200)
             .body(
                 "history.to",
-                org.hamcrest.Matchers.contains("DRAFT", "PENDING_APPROVAL", "BOOKED", "SETTLED", "REVERSED"),
+                org.hamcrest.Matchers.contains(
+                    "DRAFT",
+                    "PENDING_APPROVAL",
+                    "BOOKED",
+                    "CONFIRMED",
+                    "SETTLED",
+                    "REVERSED",
+                ),
             )
         given().`when`().get("/api/v1/treasury/counterparties").then().statusCode(200)
             .body("find { it.counterpartyId == 'CNB' }.kind", equalTo("CENTRAL_BANK"))
@@ -295,12 +308,144 @@ class TreasuryDealApiIT {
     @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
     fun `14 - four-eyes books the lombard, settlement credits Borrowings from CNB 2320`() {
         action(lombardId, "approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        action(lombardId, "confirm").then().statusCode(200).body("state", equalTo("CONFIRMED"))
         action(lombardId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
         val settled = ledger.journals.getValue("treasury:$lombardId:settled").second
         assertThat(settled.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
             .containsExactly("DEBIT 1001 2500000.00 CZK", "CREDIT 2320 2500000.00 CZK")
         assertThat(outboxTypes(UUID.fromString(lombardId)))
-            .containsExactly("treasury.deal.booked.v1", "treasury.deal.settled.v1")
+            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
+    }
+
+    // --- #10896: FX spot ---
+
+    /** The latest weekday on or before today: a valid FX trade AND value date the test can settle now. */
+    private val businessDay: LocalDate = generateSequence(today) { it.minusDays(1) }.first { !DayCount.isWeekend(it) }
+
+    private fun fxBody(buy: String = "EUR", sell: String = "CZK", extra: String = "") = """
+        {"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"$buy","sellCurrency":"$sell",
+         "principal":1000.00,"rate":25.1$extra}
+    """.trimIndent()
+
+    @Test
+    @Order(13)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `13 - a dealer drafts an FX spot, T+2 by default, limited on the CZK equivalent - bad shapes are 400`() {
+        val defaulted = given().contentType("application/json").header("Idempotency-Key", UUID.randomUUID().toString())
+            .body(fxBody(extra = ",\"tradeDate\":\"$businessDay\""))
+            .`when`().post("/api/v1/treasury/deals")
+            .then().statusCode(201)
+            .body("product", equalTo("FX_SPOT"))
+            .body("currency", equalTo("EUR"))
+            .body("valueDate", equalTo(DayCount.spotDate(businessDay).toString()))
+            .body("fx.side", equalTo("BUY"))
+            .body("fx.sellCurrency", equalTo("CZK"))
+            .body("fx.sellAmount", equalTo(25100.00f))
+            .body("fx.rateFlag", org.hamcrest.Matchers.nullValue())
+            .extract().path<String>("dealId")
+        action(defaulted, "cancel").then().statusCode(200)
+
+        fxId = draft(fxBody(extra = ",\"tradeDate\":\"$businessDay\",\"valueDate\":\"$businessDay\""))
+        action(fxId, "submit").then().statusCode(200)
+            .body("state", equalTo("PENDING_APPROVAL"))
+            .body("limitCheck.currency", equalTo("CZK"))
+            .body("limitCheck.exposureAfter", org.hamcrest.Matchers.greaterThanOrEqualTo(25100.0f))
+
+        fun bad(body: String) = given().contentType("application/json")
+            .header("Idempotency-Key", UUID.randomUUID().toString()).body(body)
+            .`when`().post("/api/v1/treasury/deals").then().statusCode(400)
+        bad(fxBody(buy = "CZK", sell = "CZK"))
+        bad(fxBody(buy = "EUR", sell = "EUR"))
+        bad("""{"product":"FX_SPOT","counterpartyId":"SIMBK-A","principal":1,"rate":25}""")
+        bad(fxBody(extra = ",\"currency\":\"CZK\""))
+        bad(fxBody(extra = ",\"tradeDate\":\"$businessDay\",\"valueDate\":\"${businessDay.plusDays(7)}\""))
+        bad(draftBody("10.00").replace("}", ",\"buyCurrency\":\"EUR\"}"))
+        bad("""{"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK","principal":1,"rate":1}""")
+        // #11041 review fix: a rate the store's NUMERIC(9,6) column can't hold 500s at flush without this.
+        bad(
+            """{"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"EUR","sellCurrency":"CZK",
+               "principal":1000.00,"rate":25000,"tradeDate":"$businessDay"}""",
+        )
+        // #11041 review fix: principal x rate rounding to 0.00 CZK violates fx_counter_amount > 0 at flush.
+        bad(
+            """{"product":"FX_SPOT","counterpartyId":"SIMBK-A","buyCurrency":"EUR","sellCurrency":"CZK",
+               "principal":0.01,"rate":0.1,"tradeDate":"$businessDay"}""",
+        )
+    }
+
+    @Test
+    @Order(14)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `14 - a second person books the FX spot, settlement posts both legs once, it never matures`() {
+        ledger.reset()
+        action(fxId, "approve").then().statusCode(200).body("state", equalTo("BOOKED"))
+        assertThat(ledger.calls).isEmpty()
+        action(fxId, "confirm").then().statusCode(200).body("state", equalTo("CONFIRMED"))
+        action(fxId, "settle").then().statusCode(200).body("state", equalTo("SETTLED"))
+            .body("journals[0].idempotencyKey", equalTo("treasury:$fxId:settled"))
+        val settlement = ledger.journals.getValue("treasury:$fxId:settled").second
+        assertThat(settlement.lines.map { "${it.side} ${it.glCode} ${it.amount.toPlainString()} ${it.currency}" })
+            .containsExactly(
+                "DEBIT 1002 1000.00 EUR",
+                "CREDIT 1991 1000.00 EUR",
+                "DEBIT 1990 25100.00 CZK",
+                "CREDIT 1001 25100.00 CZK",
+            )
+        action(fxId, "mature").then().statusCode(409)
+        assertThat(ledger.calls).containsExactly("treasury:$fxId:settled")
+        assertThat(outboxTypes(UUID.fromString(fxId)))
+            .containsExactly("treasury.deal.booked.v1", "treasury.deal.confirmed.v1", "treasury.deal.settled.v1")
+        // Read back from the row: proves V9's columns and the mapping.
+        given().`when`().get("/api/v1/treasury/deals/$fxId").then().statusCode(200)
+            .body("fx.buyAmount", equalTo(1000.00f))
+            .body("maturityDate", equalTo(businessDay.toString()))
+    }
+
+    @Test
+    @Order(15)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `15 - reversing the settled FX spot posts the flipped legs under its own key`() {
+        action(fxId, "reverse", """{"reason":"booked the wrong side"}""").then().statusCode(200)
+            .body("state", equalTo("REVERSED"))
+        val settled = ledger.journals.getValue("treasury:$fxId:settled").second.lines
+        val reversed = ledger.journals.getValue("treasury:$fxId:reversed").second.lines
+        assertThat(reversed.map { it.glCode to it.side.name }).isEqualTo(
+            settled.map { it.glCode to (if (it.side.name == "DEBIT") "CREDIT" else "DEBIT") },
+        )
+        val payload = jdbc { c ->
+            c.prepareStatement(
+                "select payload from treasury_outbox where aggregate_id = ? and event_type = 'treasury.deal.reversed.v1'",
+            ).use { ps ->
+                ps.setObject(1, UUID.fromString(fxId))
+                ps.executeQuery().use { rs ->
+                    rs.next()
+                    rs.getString(1)
+                }
+            }
+        }
+        assertThat(payload).contains("\"product\":\"FX_SPOT\"").contains("\"fxSide\":\"BUY\"")
+    }
+
+    @Test
+    @Order(16)
+    fun `16 - the database refuses FX terms on a money-market row`() {
+        val refused = runCatching {
+            jdbc { c ->
+                c.prepareStatement("update deals set fx_side = 'BUY', fx_counter_amount = 1 where deal_id = ?").use {
+                    it.setObject(1, UUID.fromString(dealId))
+                    it.executeUpdate()
+                }
+            }
+        }
+        assertThat(refused.exceptionOrNull()).hasMessageContaining("deals_fx_terms")
+    }
+
+    @Test
+    @Order(17)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `17 - with the simulated market off there are no quotes (409), never an invented price`() {
+        given().`when`().get("/api/v1/treasury/quotes?product=MM_PLACEMENT&currency=CZK&tenorDays=30")
+            .then().statusCode(409).body("error", equalTo("INVALID_STATE"))
     }
 
     private fun state(id: String): String = jdbc { c ->
@@ -343,5 +488,6 @@ class TreasuryDealApiIT {
         lateinit var breachId: String
         lateinit var selfId: String
         lateinit var lombardId: String
+        lateinit var fxId: String
     }
 }

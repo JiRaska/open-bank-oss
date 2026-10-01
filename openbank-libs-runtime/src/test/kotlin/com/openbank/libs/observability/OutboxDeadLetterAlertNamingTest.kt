@@ -52,6 +52,7 @@ class OutboxDeadLetterAlertNamingTest {
     private val alertRules = mapOf(
         "card-issuance" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "billing" to File("../openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"),
+        "referral" to File("../openbank-infra/gitops/components/referral/prometheus-rules-referral.yaml"),
     )
 
     @Test
@@ -82,7 +83,11 @@ class OutboxDeadLetterAlertNamingTest {
                         "really produces — a selector naming a label the metric does not carry " +
                         "fires never, and reads exactly like 'no problem'",
                 )
-                .contains("expr: $selector > 0")
+                .containsAnyOf(
+                    "expr: $selector > 0",
+                    // Aggregated across pods so a restart does not reset `for:` (billing, #9690).
+                    "expr: max by (service) ($selector) > 0",
+                )
         }
     }
 

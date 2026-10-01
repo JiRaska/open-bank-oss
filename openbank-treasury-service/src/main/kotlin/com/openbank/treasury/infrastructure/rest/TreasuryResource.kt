@@ -10,6 +10,8 @@ import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.DealState
+import com.openbank.treasury.domain.model.FxTerms
+import com.openbank.treasury.domain.model.ProductType
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
@@ -30,9 +32,9 @@ import java.util.UUID
 
 /**
  * Money-market deals (ADR-0315). Roles are literal realm names (#10618), like risk-engine's
- * ROLE_RISK: ROLE_TREASURY_DEALER drafts, submits and cancels; ROLE_TREASURY_APPROVER approves,
- * rejects, settles, matures and reverses. RBAC here, OPA (`treasury_rest_ext.rego`, human-only)
- * behind it, and the domain's four-eyes / non-human checks behind both — the domain is the one
+ * ROLE_RISK: ROLE_TREASURY_DEALER drafts, submits and cancels; ROLE_TREASURY_APPROVER (the
+ * back office) approves, rejects, confirms, settles, matures and reverses. RBAC here, OPA
+ * (`treasury_rest_ext.rego`, human-only) behind it, and the domain's four-eyes / non-human checks behind both — the domain is the one
  * that holds when `AUTHZ_ENFORCE` is off.
  *
  * NOTE the annotation order: `@Path` sits immediately above `class` (#3371).
@@ -72,20 +74,44 @@ class TreasuryResource {
     @POST
     @Path("/deals")
     @RolesAllowed(DEALER)
-    @Operation(summary = "Draft a deal (DRAFT); nothing posts")
+    @Operation(
+        summary = "Draft a deal (DRAFT); nothing posts and no limit is consumed. An AI agent " +
+            "(ADR-0315 D10) must send rationale and inputs; only a human dealer can submit it.",
+    )
     @Authorize(action = "treasury.deal.draft")
     suspend fun draft(@HeaderParam("Idempotency-Key") key: String?, request: DraftDealRequest): Response {
+        val product = requireNotNull(request.product) { "product is required" }
+        val fx = if (product == ProductType.FX_SPOT) {
+            FxTerms.fromCurrencies(
+                requireNotNull(request.buyCurrency) { "buyCurrency is required for FX_SPOT" },
+                requireNotNull(request.sellCurrency) { "sellCurrency is required for FX_SPOT" },
+            ).also { (foreign, _) ->
+                require(request.currency == null || request.currency == foreign) {
+                    "currency, when given for FX_SPOT, is the foreign currency $foreign"
+                }
+            }
+        } else {
+            require(request.buyCurrency == null && request.sellCurrency == null) {
+                "buyCurrency/sellCurrency apply to FX_SPOT only"
+            }
+            null
+        }
         val deal = deals.draft(
             DraftDealCommand(
-                product = requireNotNull(request.product) { "product is required" },
+                product = product,
                 counterpartyId = requireNotNull(request.counterpartyId) { "counterpartyId is required" },
-                currency = requireNotNull(request.currency) { "currency is required" },
+                currency = fx?.first ?: requireNotNull(request.currency) { "currency is required" },
                 principal = requireNotNull(request.principal) { "principal is required" },
                 rate = requireNotNull(request.rate) { "rate is required" },
                 tradeDate = request.tradeDate,
-                valueDate = requireNotNull(request.valueDate) { "valueDate is required" },
+                valueDate = request.valueDate,
                 maturityDate = request.maturityDate,
                 rationale = request.rationale,
+                inputs = request.inputs?.let { node ->
+                    require(node.isObject) { "inputs must be a JSON object" }
+                    node.toString()
+                },
+                fxSide = fx?.second,
             ),
             actor(),
             requireKey(key),
@@ -156,9 +182,26 @@ class TreasuryResource {
     )
 
     @POST
+    @Path("/deals/{id}/confirm")
+    @RolesAllowed(APPROVER)
+    @Operation(
+        summary = "Record the counterparty's confirmation of a BOOKED deal (CONFIRMED, ADR-0315 D2); posts " +
+            "nothing. Never the deal's creator or submitter, never an AI agent.",
+    )
+    @Authorize(action = "treasury.deal.confirm", resource = "#id")
+    suspend fun confirm(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ConfirmRequest?,
+    ): DealResponse = DealResponse.from(deals.confirm(id, request?.reference, actor(), requireKey(key)))
+
+    @POST
     @Path("/deals/{id}/settle")
     @RolesAllowed(APPROVER)
-    @Operation(summary = "Settle a BOOKED deal on or after its value date; posts the settlement journal")
+    @Operation(
+        summary = "Settle a CONFIRMED deal on or after its value date (BOOKED too only when " +
+            "openbank.treasury.confirmation.required is false); posts the settlement journal",
+    )
     @Authorize(action = "treasury.deal.settle", resource = "#id")
     suspend fun settle(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         deals.settle(id, actor(), requireKey(key)).let { view(id) }
@@ -174,7 +217,7 @@ class TreasuryResource {
     @POST
     @Path("/deals/{id}/reverse")
     @RolesAllowed(APPROVER)
-    @Operation(summary = "Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal")
+    @Operation(summary = "Reverse a BOOKED, CONFIRMED or SETTLED deal; a settled one gets an offsetting journal")
     @Authorize(action = "treasury.deal.reverse", resource = "#id")
     suspend fun reverse(
         @PathParam("id") id: UUID,

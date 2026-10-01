@@ -71,8 +71,12 @@ class SnapshotServiceTest {
                 it.status.name,
                 it.positionCount,
                 it.mismatches.size,
+                it.requestedBy,
             )
         }
+
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate) =
+            error("not used by SnapshotService tests")
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)
@@ -102,6 +106,31 @@ class SnapshotServiceTest {
         assertThat(second.replayed).isTrue()
         assertThat(second.run.id).isEqualTo(first.run.id)
         assertThat(repository.runs).hasSize(1)
+    }
+
+    @Test
+    fun `the requester is stored on the run and returned`(): Unit = runBlocking {
+        val outcome = service.createSnapshot(Fixtures.AS_OF, requestedBy = "alice")
+
+        assertThat(outcome.run.requestedBy).isEqualTo("alice")
+        assertThat(service.getRun(outcome.run.id).requestedBy).isEqualTo("alice")
+    }
+
+    @Test
+    fun `a replay keeps the original requester, not the replaying caller's`(): Unit = runBlocking {
+        val first = service.createSnapshot(Fixtures.AS_OF, requestedBy = "alice")
+        val second = service.createSnapshot(Fixtures.AS_OF, requestedBy = "bob")
+
+        assertThat(second.replayed).isTrue()
+        assertThat(second.run.id).isEqualTo(first.run.id)
+        assertThat(second.run.requestedBy).isEqualTo("alice")
+    }
+
+    @Test
+    fun `no requester is a null, historic-row-compatible requestedBy`(): Unit = runBlocking {
+        val outcome = service.createSnapshot(Fixtures.AS_OF)
+
+        assertThat(outcome.run.requestedBy).isNull()
     }
 
     @Test

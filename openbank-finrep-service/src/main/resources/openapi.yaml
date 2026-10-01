@@ -24,7 +24,7 @@ info:
     fails closed with `UNCLASSIFIED_GL_ACCOUNT` when a new active code has no mapping. Zero-only
     official facts are not emitted by this structured preview. COREP derives its subtotals from
     explicit capital source accounts; missing source data remains a flagged zero (`isDataGap`).
-  version: 1.11.0
+  version: 1.14.0
 tags:
   - name: FINREP
   - name: COREP
@@ -149,15 +149,32 @@ paths:
         read from the risk engine's LCR result of the same TIED_OUT snapshot; `evidence` does not
         apply to it. Coins and banknotes (r0040) and withdrawable central bank reserves (r0050) are
         always `isDataGap: true` (the engine does not split them), every value row is a gap with its
-        reason when no tied snapshot exists, the read is not enabled, the book is multi-currency or
-        balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
+        reason when no tied snapshot exists, the read is not enabled, the engine states no combined
+        view (every currency in CZK at the ČNB fixing, Delegated Regulation (EU) 2015/61 Art. 4(5) —
+        a multi-currency book is reported from it; the engine's `totalNotStated` reason is carried)
+        or states it in a currency other than CZK, or balances are unclassified, and rows whose code is not yet verified against the EBA DPM carry
         `[row code UNVERIFIED]` in their label. `C_73.00` (LCR outflows, Delegated Regulation (EU)
         2015/61; columns c0010 amount and c0060 outflow) is read from the same LCR result; retail
         deposits subject to higher outflows (r0060) and non-operational deposits (r0250) are always
         `isDataGap: true` (the engine models neither), the outflow column of a component whose
         engine run-off factor is not the 2015/61 rate is a gap, every row is a gap under the same
         conditions as `C_72.00`, and rows whose code is not yet verified against the EBA DPM carry
-        `[row code UNVERIFIED]` in their label. Any other template id is rejected.
+        `[row code UNVERIFIED]` in their label. `C_74.00` (LCR inflows, Delegated Regulation (EU)
+        2015/61 Arts. 32-34; columns c0010 amount and c0140 inflow subject to the 75 % cap, the
+        latter labelled `[column code UNVERIFIED]`) is read from the same LCR result; r0010 is the
+        engine's uncapped total inflows (the inflows after the Art. 33(1) cap belong to C 76.00 and
+        are not emitted; a capped figure that is not min(uncapped, cap) fails the render); secured lending (r0260) and central
+        bank claims (r0200) are always `isDataGap: true`, the inflow column of a component whose
+        engine factor is not the 2015/61 rate is a gap, every row is a gap under the same conditions
+        as `C_72.00`, and unverified row codes carry `[row code UNVERIFIED]`. `C_76.00` (LCR
+        calculation, Delegated Regulation (EU) 2015/61 Arts. 4, 17 and 33; column c0010) is read from
+        the same LCR result: the liquidity buffer after haircuts and the Level 2 caps (a gap when the
+        engine does not report it after the caps), net liquidity outflows, the LCR in percent (unit
+        `%`, 2 dp; a gap when net outflows are not positive), total outflows, inflows subject to the
+        75 % cap and the capped reduction; fully exempt and 90 %-cap rows are always `isDataGap: true`.
+        The render fails when buffer, net outflows, ratio or the capped inflows do not tie to the
+        engine's own figures. Every row code is unverified and labelled `[row code UNVERIFIED]`. Any
+        other template id is rejected.
 
         The mapper derives CET1, Tier 1 and own funds from explicit ledger accounts 6000-6060; it
         never plugs capital as assets minus liabilities. With no recognised capital source every
@@ -171,7 +188,7 @@ paths:
           in: path
           required: true
           description: EBA COREP template identifier
-          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00, C_73.00] }
+          schema: { type: string, enum: [C_01.00, C_02.00, C_72.00, C_73.00, C_74.00, C_76.00] }
         - name: asOf
           in: query
           required: false
@@ -375,6 +392,19 @@ components:
           description: >-
             Derived — true when at least one cell has `isDataGap`. A template with data gaps is
             still fully rendered, never silently truncated.
+        sourceRunId:
+          type: string
+          nullable: true
+          description: >-
+            The risk-engine snapshot run the figures were read from (C_02.00, C_72.00-C_76.00);
+            null for a template not built from a run, or when no run was found.
+        provenance:
+          type: string
+          nullable: true
+          description: >-
+            That run's provenance, `synthetic` or `production` (ADR-0313 D13). `synthetic` means
+            the figures come from a synthetic book and must be presented as such; null when
+            `sourceRunId` is.
 
     ApiError:
       type: object

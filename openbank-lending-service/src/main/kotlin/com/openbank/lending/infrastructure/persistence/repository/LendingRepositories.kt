@@ -55,6 +55,15 @@ class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: LendingMapper,
 ) : LoanApplicationRepository {
+    override fun <T> withLocked(id: LoanApplicationId, operation: (LoanApplication?) -> Uni<T>): Uni<T> =
+        sf.withTransaction { session ->
+            session.createQuery("FROM LoanApplicationEntity WHERE id = :id", LoanApplicationEntity::class.java)
+                .setParameter("id", id.value)
+                .setLockMode(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+                .singleResultOrNull
+                .flatMap { entity -> operation(entity?.let(mapper::toDomain)) }
+        }
+
     @WithTransaction override fun save(application: LoanApplication): Uni<LoanApplication> {
         val e = mapper.toEntity(application)
         return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }

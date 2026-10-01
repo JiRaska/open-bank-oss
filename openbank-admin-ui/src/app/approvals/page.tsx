@@ -15,7 +15,7 @@ import * as Dialog from '@radix-ui/react-dialog'
 import Link from 'next/link'
 import { useSingleFlight, wasSkipped } from '@/lib/mutations/singleFlight'
 import { useSession } from 'next-auth/react'
-import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, AlertTriangle, Bot, UserRound, ExternalLink, Search } from 'lucide-react'
+import { CheckCircle2, XCircle, Clock, ClipboardCheck, RefreshCw, ShieldCheck, ShieldQuestion, AlertTriangle, Bot, ExternalLink, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AgentIdentityBadge } from '@/components/approvals/AgentIdentityBadge'
@@ -137,6 +137,8 @@ export default function ApprovalsPage() {
       const res = await fetch('/api/agent/proposals', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        // Legacy BFF versions still require decidedBy. New BFF/provider versions bind
+        // audit identity to the authenticated session/token and ignore this client value.
         body: JSON.stringify({ proposalId: p.id, approve, decidedBy, reason }),
       })
       if (!res.ok) {
@@ -173,7 +175,7 @@ export default function ApprovalsPage() {
   // Sources that answered anything other than 200 — a 403 here is ordinary (lending's list is
   // desk-role gated while this page is not), and it must never look like an empty queue.
   const unavailableSources = useMemo(
-    () => Object.entries(domainSources).filter(([, v]) => v === 'unavailable' || v === 'forbidden').map(([k]) => k),
+    () => Object.entries(domainSources).filter(([, v]) => v === 'unavailable' || v === 'forbidden'),
     [domainSources],
   )
   const notConfiguredSources = useMemo(
@@ -199,8 +201,8 @@ export default function ApprovalsPage() {
       <PageHeader
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Schvalování', 'Approvals')}</span></div>}
         icon={<ClipboardCheck size={18} aria-hidden="true" />}
-        title={t('Fronta schvalování (AI agent)', 'Approval queue (AI agent)')}
-        subtitle={t('Agent navrhuje, governance rozhoduje (ADR-0031 D4). Návrhy nemají žádný efekt, dokud je člověk neschválí. Schválení musí udělat někdo jiný než autor.', 'Agents propose, governance disposes (ADR-0031 D4). Proposals have no effect until a human approves them. The approver must differ from the author.')}
+        title={t('Fronta schvalování', 'Approval inbox')}
+        subtitle={t('Doménové žádosti kontrolujte zde a rozhodněte v příslušné službě. Návrhy AI agentů vyžadují schválení člověkem odlišným od autora.', 'Review domain requests here and decide them in their governed service. AI agent proposals require approval by a human other than the author.')}
         actions={<button type="button" onClick={load} disabled={loading} aria-busy={loading}
           aria-label={t('Obnovit schvalovací frontu', 'Refresh approval queue')} className="btn btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
           <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} /> {t('Obnovit', 'Refresh')}
@@ -216,7 +218,7 @@ export default function ApprovalsPage() {
       {/* ADR-0227 D2/D4: domain maker-checker queues, federated. Read-only here — disposal
           belongs to the governed per-domain flows (money-path adds SCA). */}
       <div style={{ fontSize: 12, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-secondary)', margin: '4px 0 10px' }}>
-        {t('Doménová schvalování (money-path)', 'Domain approvals (money-path)')} ({domainApprovalItems.length})
+        {t('Doménová schvalování', 'Domain approvals')} ({domainApprovalItems.length})
       </div>
       {domainLoadFailed && (
         <div className="card" role="alert" style={{
@@ -235,8 +237,8 @@ export default function ApprovalsPage() {
           color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
-            `Fronta není úplná — nepodařilo se načíst: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
-            `This queue is incomplete — could not read: ${unavailableSources.join(', ')}. An empty list does not mean nothing is pending.`,
+            `Fronta není úplná — nepodařilo se ověřit úplnost zdrojů: ${unavailableSources.map(([name, state]) => `${name} (${state === 'forbidden' ? 'přístup odepřen' : 'požadavek selhal'})`).join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
+            `This queue is incomplete — could not verify completeness of: ${unavailableSources.map(([name, state]) => `${name} (${state === 'forbidden' ? 'access denied' : 'request failed'})`).join(', ')}. An empty list does not mean nothing is pending.`,
           )}
         </div>
       )}
@@ -302,9 +304,9 @@ export default function ApprovalsPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }}>{item.action}</div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 2 }}>
-                {item.resourceId && <span style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
-                {item.maker && <span>{t('navrhl', 'by')} {item.maker}</span>}
-                {item.proposedAt && <span> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</span>}
+                {item.resourceId && <span data-testid="approval-resource" style={{ fontFamily: 'var(--font-mono)' }}>{item.resourceId} · </span>}
+                {item.maker && <span data-testid="approval-maker">{t('navrhl', 'by')} {item.maker}</span>}
+                {item.proposedAt && <time dateTime={item.proposedAt}> · {new Date(item.proposedAt).toLocaleString(dateLocale)}</time>}
               </div>
             </div>
             <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', padding: '2px 7px', borderRadius: 20, textTransform: 'uppercase', flexShrink: 0 }}>
@@ -352,16 +354,17 @@ export default function ApprovalsPage() {
           // means we could not read agents.yaml and must not claim either way (#5904).
           const identity = resolveAgentIdentity(p.proposedBy, registry)
           const chartered = identity.status === 'chartered'
-          // The ADR-0080 caution stands whenever AI authorship is established OR cannot be
-          // ruled out. Only a positively unchartered actor drops it.
-          const cautionAi = identity.status !== 'unresolved'
-          const aiGenerated = p.agent ? p.agent.icon === 'bot' : /assistant|agent|\bai\b/i.test(p.proposedBy)
-          const ProposerIcon = aiGenerated ? Bot : UserRound
+          // The provider exposes proposedBy but no authenticated human-provenance field.
+          // A legacy `agent.icon=user` decoration does not establish a human author.
+          const proposerKind = chartered ? 'agent' : 'unverified'
+          // Caution is still required when AI authorship cannot be ruled out, but the copy
+          // must not assert that an unverified actor definitely was an AI agent.
+          const ProposerIcon = proposerKind === 'agent' ? Bot : ShieldQuestion
           return (
             <div key={p.id} className="card" style={{ padding: 18, borderLeft: `3px solid ${chartered ? 'var(--warning-text)' : m.color}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10, marginBottom: 8 }}>
                 <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span aria-hidden="true" style={{ width: 28, height: 28, borderRadius: 8, background: aiGenerated ? 'var(--warning-bg)' : 'var(--surface-2)', color: aiGenerated ? 'var(--warning-text)' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
+                  <span aria-hidden="true" data-proposer-kind={proposerKind} style={{ width: 28, height: 28, borderRadius: 8, background: proposerKind === 'agent' ? 'var(--warning-bg)' : 'var(--surface-2)', color: proposerKind === 'agent' ? 'var(--warning-text)' : 'var(--text-secondary)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}><ProposerIcon size={15} /></span>
                   {p.title}
                   <AgentIdentityBadge identity={identity} loading={registryLoading} lang={language} />
                 </div>
@@ -369,13 +372,18 @@ export default function ApprovalsPage() {
                   <m.Icon size={11} /> {t(m.cs, m.en)}
                 </span>
               </div>
-              {cautionAi && !registryLoading && (
+              {!registryLoading && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 8 }}>
                   <AlertTriangle size={14} style={{ flexShrink: 0 }} />
-                  {t(
-                    'Tento návrh vytvořila AI. Nezakládá žádnou autoritu — než schválíš, nezávisle ověř, že je legitimní a žádaný (ADR-0080).',
-                    'This proposal was generated by AI. It carries no authority on its own — independently verify it is legitimate and intended before approving (ADR-0080).',
-                  )}
+                  {proposerKind === 'agent'
+                    ? t(
+                      'Tento návrh vytvořila AI. Nezakládá žádnou autoritu — než schválíš, nezávisle ověř, že je legitimní a žádaný (ADR-0080).',
+                      'This proposal was generated by AI. It carries no authority on its own — independently verify it is legitimate and intended before approving (ADR-0080).',
+                    )
+                    : t(
+                      'Původ tohoto návrhu nelze ověřit. Než schválíš, nezávisle ověř jeho legitimitu a záměr (ADR-0080).',
+                      'This proposal’s authorship cannot be verified. Independently check its legitimacy and intent before approving (ADR-0080).',
+                    )}
                 </div>
               )}
               <div style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.5, marginBottom: 8 }}>{p.rationale}</div>
@@ -383,8 +391,8 @@ export default function ApprovalsPage() {
                 <span style={{ fontWeight: 700 }}>{t('Navrhovaná akce: ', 'Suggested action: ')}</span>{p.suggestedAction}
               </div>
               <div style={{ fontSize: 11, color: 'var(--text-tertiary)', marginBottom: 10 }}>
-                {t('Navrhl', 'Proposed by')} <b>{p.agent?.displayName ?? p.proposedBy}</b>
-                <span className="mono"> · {p.agent?.id ?? p.proposedBy}</span>
+                {t('Navrhl', 'Proposed by')} <b>{chartered ? p.agent?.displayName ?? p.proposedBy : p.proposedBy}</b>
+                <span className="mono"> · {p.proposedBy}</span>
                 {p.modelId ? <span className="mono"> · {p.modelId}</span> : null} · {new Date(p.proposedAt).toLocaleString(dateLocale)}
               </div>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

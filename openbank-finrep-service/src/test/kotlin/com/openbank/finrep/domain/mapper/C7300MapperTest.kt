@@ -38,10 +38,13 @@ class C7300MapperTest {
         currencies: Int = 1,
         unclassified: Int = 0,
         parameterSet: String = RiskEngineFigures.EU_LIQUIDITY_PARAMETER_SET,
+        currency: String? = "CZK",
+        totalNotStated: String? = null,
     ) = RiskLiquidityResult(
-        "run-7", asOf, parameterSet, "2", "CZK", emptyList(),
+        "run-7", asOf, parameterSet, "2", currency, emptyList(),
         BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, currencies, unclassified,
         outflows = lines, totalOutflows = total?.let(::BigDecimal),
+        totalNotStated = totalNotStated,
     )
 
     private fun CorepTemplate.at(row: String, col: String) = cells.single { it.rowRef == row && it.colRef == col }
@@ -154,10 +157,25 @@ class C7300MapperTest {
     }
 
     @Test
-    fun `unavailable, multi-currency and unclassified results make every row a gap`() {
+    fun `a multi-currency book is reported from the engine's combined CZK view`() {
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result(currencies = 2)), asOf)
+        assertThat(t.at("r0010", "c0060").isDataGap).isFalse()
+        assertThat(t.at("r0010", "c0060").value).isEqualByComparingTo("550")
+    }
+
+    @Test
+    fun `unavailable, no combined view, a non-CZK total and unclassified results make every row a gap`() {
         val cases = listOf(
             RiskLiquidityLookup.unavailable("read disabled") to "read disabled",
-            RiskLiquidityLookup.found(result(currencies = 2, total = null)) to "multi-currency",
+            RiskLiquidityLookup.found(
+                result(
+                    currencies = 2,
+                    total = null,
+                    currency = null,
+                    totalNotStated = "no ČNB fixing in effect on 2026-09-30 for EUR: no partial total",
+                ),
+            ) to "no ČNB fixing in effect on 2026-09-30 for EUR",
+            RiskLiquidityLookup.found(result(currency = "EUR")) to "not the reporting currency CZK",
             RiskLiquidityLookup.found(result(unclassified = 3)) to "3 balance(s) are unclassified",
             RiskLiquidityLookup.found(result(lines = emptyList(), currencies = 0, total = null)) to "empty book",
         )
@@ -195,5 +213,15 @@ class C7300MapperTest {
         t.cells.forEach { c ->
             assertThat(c.label.endsWith("[row code UNVERIFIED]")).isEqualTo(c.rowRef in C7300Mapper.UNVERIFIED_ROWS)
         }
+    }
+
+    @Test
+    fun `the template carries the source run's id and provenance, and none when there is no run`() {
+        val t = C7300Mapper.map(RiskLiquidityLookup.found(result().copy(provenance = "synthetic")), asOf)
+        assertThat(t.sourceRunId).isEqualTo("run-7")
+        assertThat(t.provenance).isEqualTo("synthetic")
+        val gap = C7300Mapper.map(RiskLiquidityLookup.unavailable("no run"), asOf)
+        assertThat(gap.sourceRunId).isNull()
+        assertThat(gap.provenance).isNull()
     }
 }

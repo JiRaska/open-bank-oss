@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.21.0...risk-engine-v0.22.0) (2026-09-30)
+
+
+### Features
+
+* **risk-engine:** record model versions and cut-off in the snapshot manifest ([#11539](https://github.com/JiRaska/open-bank-oss/issues/11539)) ([58bf6aa](https://github.com/JiRaska/open-bank-oss/commit/58bf6aaa557aa72f792517db47ac39caa6dca58e))
+* **treasury:** simulated counterparties quote off the risk engine's curve set ([#11555](https://github.com/JiRaska/open-bank-oss/issues/11555)) ([6933a2b](https://github.com/JiRaska/open-bank-oss/commit/6933a2b9da6ae25cff16ab11c2fe548764fa68b2))
+
+## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.20.0...risk-engine-v0.21.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** compute Pillar 1 credit risk under EU CRR by default ([#11496](https://github.com/JiRaska/open-bank-oss/issues/11496)) ([c6a02ac](https://github.com/JiRaska/open-bank-oss/commit/c6a02ac30783ac45aa92566ff2a34d515016c978))
+
+
+### Bug Fixes
+
+* **risk-engine:** count eligible maturing placements in LCR ([#11102](https://github.com/JiRaska/open-bank-oss/issues/11102)) ([a2c0d90](https://github.com/JiRaska/open-bank-oss/commit/a2c0d9035819ed69bdb15792818d78bce6b0f53e))
+
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.19.0...risk-engine-v0.20.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** forecast the liquidity survival horizon from a snapshot ([#11040](https://github.com/JiRaska/open-bank-oss/issues/11040)) ([44cbf58](https://github.com/JiRaska/open-bank-oss/commit/44cbf58b03a562ad31fd0ae6e1697a80f8c9b6f1))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.18.1...risk-engine-v0.19.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** classify clearing, allowance and FX position accounts conservatively ([#11481](https://github.com/JiRaska/open-bank-oss/issues/11481)) ([41cf055](https://github.com/JiRaska/open-bank-oss/commit/41cf05533de16bb565967218c5289378e22f0492))
+
+## [0.18.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.18.0...risk-engine-v0.18.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.17.0...risk-engine-v0.18.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** record who requested each snapshot run ([#11016](https://github.com/JiRaska/open-bank-oss/issues/11016)) ([5acdd48](https://github.com/JiRaska/open-bank-oss/commit/5acdd4825c61fdc729eacf50126970f17adc187d))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.16.0...risk-engine-v0.17.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** state the liquidity figures in CZK at the ČNB fixing ([#11431](https://github.com/JiRaska/open-bank-oss/issues/11431)) ([4c55abf](https://github.com/JiRaska/open-bank-oss/commit/4c55abf1b048f2f1ff1d4666f2ae9ad0589de04d)), closes [#10896](https://github.com/JiRaska/open-bank-oss/issues/10896)
+
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.15.0...risk-engine-v0.16.0) (2026-09-29)
+
+
+### Features
+
+* **risk-engine:** compute the ČNB minimum reserve requirement ([#11015](https://github.com/JiRaska/open-bank-oss/issues/11015)) ([7a0b9eb](https://github.com/JiRaska/open-bank-oss/commit/7a0b9ebd5e81c531794b2aff4c93ab820524b317))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.14.0...risk-engine-v0.15.0) (2026-09-27)
 
 

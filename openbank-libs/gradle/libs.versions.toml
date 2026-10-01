@@ -3,12 +3,12 @@ kotlin = "2.4.10"
 quarkus = "3.38.0"
 quarkus-plugin = "3.38.0"
 coroutines = "1.8.1"
-# 2.22.1 (Dependabot #75 follow-up): 2.22.0 itself carries a GHSA fixed in 2.22.1 — same
+# 2.22.3 (Dependabot #158-#160; was 2.22.1 per #75): 2.22.0/2.22.1 carry GHSAs fixed by 2.22.2 — same
 # patch series Quarkus 3.37.2's BOM resolves jackson-databind/jackson-core to
 # (enforcedPlatform); this floors the modules that declare Jackson directly (libs-domain)
 # on the same version, closing GHSA-hgj6-7826-r7m5 / GHSA-j3rv-43j4-c7qm /
 # GHSA-rmj7-2vxq-3g9f / etc.
-jackson = "2.22.1"
+jackson = "2.22.3"
 # WebAuthn RP verification (ADR-0066 F2, customer-edge native passkey). Pinned to 0.28.x —
 # 0.31.x switched ObjectConverter to the Jackson 3 "tools.jackson" fork, which conflicts
 # with Quarkus 3.37's Jackson 2.x (jackson-databind/jackson-core, pinned above); 0.28.5

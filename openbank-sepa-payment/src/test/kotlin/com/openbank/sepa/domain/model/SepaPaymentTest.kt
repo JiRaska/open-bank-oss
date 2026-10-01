@@ -23,8 +23,11 @@ class SepaPaymentTest {
     @Test
     fun `completed transition sets submitted and completed timestamps`() {
         val now = Instant.parse("2026-01-02T00:00:00Z")
+        val transactionId = UUID.randomUUID()
 
-        val transitioned = payment(status = SepaPaymentStatus.PROCESSING).transitionTo(
+        val transitioned = payment(status = SepaPaymentStatus.PROCESSING).copy(
+            transactionId = transactionId,
+        ).transitionTo(
             targetStatus = SepaPaymentStatus.COMPLETED,
             clock = Clock.fixed(now, ZoneOffset.UTC),
         )
@@ -33,6 +36,7 @@ class SepaPaymentTest {
         assertThat(transitioned.submittedAt).isEqualTo(now)
         assertThat(transitioned.completedAt).isEqualTo(now)
         assertThat(transitioned.revision).isEqualTo(1)
+        assertThat(transitioned.transactionId).isEqualTo(transactionId)
     }
 
     private fun payment(status: SepaPaymentStatus = SepaPaymentStatus.RECEIVED) = SepaPayment(

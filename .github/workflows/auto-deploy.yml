@@ -45,12 +45,16 @@ on:
       - "openbank-libs-domain/build.gradle.kts"
       - "openbank-libs-runtime/build.gradle.kts"
       - "openbank-libs-lending/build.gradle.kts"
+      - "openbank-libs-iso20022/build.gradle.kts"
       - "build-logic/**"
       # Release-please bumps version.txt, yet a release-only commit touches nothing
       # under src/main/**. That left the new version with no image built, causing
       # immediate deploy drift (issue #3597 et al.). Treat a version bump as a
       # release marker that must deploy like a source change.
       - "openbank-*/version.txt"
+      # Self-built images (SELF_BUILT_SERVICES below) have no src/main; these are their inputs.
+      - "openbank-document-renderer/app.py"
+      - "openbank-document-renderer/requirements.txt"
   # Self-heal reconcile (issue #2020). The per-push run is ONE-SHOT: a service that built
   # and pushed its image but was then blocked at the can-i-deploy contract gate by a
   # TRANSIENT verification lag (its build wave republished its consumer pact; the provider
@@ -126,7 +130,7 @@ permissions:
 # (#1226). `Docker push` and `Attest image SBOMs` are ~180 lines apart in that job, and a
 # cancel between them leaves the image in ECR with no attestation, forever — the superseding
 # run builds its OWN commit's tag and never comes back for the dead run's images. Since
-# verify-openbank-image-sbom-attestation is Enforce, such an image is admitted never, and the
+# verify-openbank-image-sbom-attestation-cel denies (Deny), such an image is admitted never, and the
 # deny surfaces whenever the workload next reschedules — days later, far from the cause.
 # Concurrent `build-push` runs are safe: image tags are immutable and per-SHA, so two builds
 # cannot collide. Do not re-add a workflow-level cancel.
@@ -223,7 +227,7 @@ jobs:
             # see it either, because its subject set was release-please's released components and
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
-            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service'
+            ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-document-renderer'
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -258,7 +262,7 @@ jobs:
           for svc in $ALL_SERVICES; do
             # Keep this aligned with the push trigger: release-please changes only
             # version.txt, and that release marker must rebuild/deploy the component.
-            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile)" <<< "$CHANGED_FILES"; then
+            if grep -qE "^${svc}/(src/main|build\.gradle\.kts|version\.txt|Dockerfile|app\.py|requirements\.txt)" <<< "$CHANGED_FILES"; then
               DIRECT_SERVICES+=("$svc")
             fi
           done
@@ -508,6 +512,10 @@ jobs:
       # tags went stale (party/account-service stuck pre-#894). Mirrors _service-ci.yml.
       AWS_REGION: eu-north-1
       AWS_DEFAULT_REGION: eu-north-1
+      # Non-Gradle images built from their OWN multi-stage Dockerfile instead of the fast-jar
+      # template (the SELF_BUILT set in check-dockerfile-no-build-stage.py). They skip the Gradle
+      # step and share every later step: ECR push, cosign sign, CVE gate, SBOM attest, gitops PR.
+      SELF_BUILT_SERVICES: "openbank-document-renderer"
     outputs:
       # JSON map { "svc": "tag", … } written to $GITHUB_OUTPUT
       image_tags: ${{ steps.collect.outputs.image_tags }}
@@ -599,6 +607,7 @@ jobs:
           # --continue reports all failures before exiting non-zero.
           TASKS=()
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) continue ;; esac
             # cyclonedxBom alongside quarkusBuild so every service's image gets its
             # CycloneDX SBOM baked in (served live at /q/openbank/sbom by libs
             # SbomResource). Fleet-wide via this central loop — no per-service
@@ -607,7 +616,7 @@ jobs:
           done
 
           echo "==> Building ${#TASKS[@]} service(s) via single Gradle invocation (--parallel --max-workers=4)"
-          if ! ./gradlew "${TASKS[@]}" \
+          if [ "${#TASKS[@]}" -gt 0 ] && ! ./gradlew "${TASKS[@]}" \
                 -Dquarkus.package.jar.type=fast-jar \
                 --parallel --max-workers=4 \
                 --build-cache --console=plain \
@@ -633,6 +642,15 @@ jobs:
 
           push_one() {
             local svc="$1"
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*)
+              bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
+                2>&1 | sed "s/^/[${svc}] /" || return 1
+              echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
+              docker buildx build --platform linux/arm64 --provenance=false \
+                -f "${svc}/Dockerfile" -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
+                "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
+              return 0 ;;
+            esac
             local qa="${svc}/build/quarkus-app"
             [ -f "${qa}/quarkus-run.jar" ] || \
               { echo "[${svc}] quarkus-run.jar not found — skip push"; return 0; }
@@ -731,7 +749,7 @@ jobs:
             echo "::warning::docker push failed for $(cat "$RUNNER_TEMP/failed.json") — the run fails in push-failures, after the healthy services deploy"
 
       # Sign every pushed image with the AWS KMS cosign key (ADR-0029/0030). kyverno's
-      # verify-openbank-image-sbom-attestation (Enforce) also verifies the image signature
+      # verify-openbank-image-sbom-attestation-cel (Deny) also verifies the image signature
       # (folded in from verify-openbank-image-signatures, #9805), so an UNSIGNED image is rejected
       # at admission ("no signatures found") and ArgoCD stays OutOfSync — the build job
       # used to push without signing, which is the other half of why deploys never landed.
@@ -755,6 +773,8 @@ jobs:
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             img="${ECR_REGISTRY}/${svc}:${TAG}"
+            # Refuse an OCI index before it is signed (#11573) — the helper's guard.
+            assert_single_image_manifest "$img" || { echo "::error::${svc} was pushed as an OCI index"; rc=1; continue; }
             echo "==> cosign sign ${img}"
             COSIGN_YES=true "$bin" sign --key "$COSIGN_KEY" "$img" || { echo "::error::cosign sign failed for ${svc}"; rc=1; }
           done
@@ -802,7 +822,9 @@ jobs:
 
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
             # Mirror push_one's skip: no fast-jar → nothing was pushed.
-            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
             image="${ECR_REGISTRY}/${svc}:${TAG}"
 
             echo "==> [${svc}] trivy image ${image}"
@@ -855,7 +877,7 @@ jobs:
       #
       # FATAL as of 2026-07-16. The two comments this step used to carry — "kyverno enforces
       # the signature, not (yet) the attestation" and "an attest hiccup must never block a
-      # deploy" — were both false once verify-openbank-image-sbom-attestation graduated to
+      # deploy" — were both false once verify-openbank-image-sbom-attestation (now -cel) graduated to
       # Enforce on 2026-07-12. They were the entire bug: `trivy image` was missing --platform
       # (it defaults to linux/amd64 on REMOTE scans; these images are arm64-only), so the scan
       # failed with "no child with platform linux/amd64 in index" on EVERY image, the failure
@@ -882,7 +904,9 @@ jobs:
           . openbank-infra/scripts/lib/cosign-attest.sh
           rc=0
           for svc in $(echo "$SERVICES" | jq -r '.[]'); do
-            [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue
+            case " ${SELF_BUILT_SERVICES} " in *" ${svc} "*) ;; *)
+              [ -f "${svc}/build/quarkus-app/quarkus-run.jar" ] || continue ;;
+            esac
             image="${ECR_REGISTRY}/${svc}:${TAG}"
             # Per-service rc rather than an early exit: report EVERY broken image in one run,
             # so a second failure is not hidden behind the first.
@@ -904,7 +928,7 @@ jobs:
             echo "    [${svc}] attested + verified (SBOM + SLSA provenance)"
           done
           [ "$rc" -eq 0 ] || {
-            echo "::error::One or more images are UNATTESTED. kyverno (verify-openbank-image-sbom-attestation, Enforce) will DENY their pods on the next reschedule."
+            echo "::error::One or more images are UNATTESTED. kyverno (verify-openbank-image-sbom-attestation-cel, Deny) will DENY their pods on the next reschedule."
             exit 1
           }
 
@@ -1148,6 +1172,9 @@ jobs:
 
       - name: Rewrite image tags in gitops manifests
         id: rewrite
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1209,6 +1236,27 @@ jobs:
               UPDATED+=("$f")
             done
           done
+
+          # Deploy window (deploy-window.py): carry forward the pins of every open, UNARMED
+          # older gitops deploy PR, so this PR covers every pending service and
+          # supersede-deploy-prs.sh below closes the older ones. Several pushes inside one window
+          # then land as ONE commit on main instead of one each. A pin is carried only while main
+          # still holds the tag that PR replaced, so a service main has moved since is never
+          # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
+          if [ -n "${GH_TOKEN:-}" ]; then
+            OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
+            for n in $( (gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+                         --json number,headRefName,autoMergeRequest,isCrossRepository \
+                         --jq '.[] | select((.isCrossRepository | not) and .autoMergeRequest == null
+                                 and (.headRefName | startswith("chore/gitops-auto-deploy-"))) | .number') || true); do
+              carried="$(gh pr diff "$n" --repo "$GITHUB_REPOSITORY" \
+                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
+                || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
+              [ -z "$carried" ] && continue
+              echo "  carried from deferred PR #${n}:"; echo "$carried"
+              while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
+            done
+          fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
           # check-fleet-attestations.sh fails on an allowlist entry whose ref nothing under
@@ -1332,8 +1380,31 @@ jobs:
       # PR's required check runs register, which lags PR creation, so retry until it sticks.
       # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
       # re-sign land by itself, so it must happen even on the run where the guard then fails.
-      - name: Enable auto-merge
+      # Deploy window: at most one bot deploy commit reaches main per window, because each one
+      # makes every open PR `behind` under the strict up-to-date rule and restarts its checks.
+      # A manual workflow_dispatch always arms immediately; otherwise the first deploy after a
+      # quiet window arms at once and later ones stay open, unarmed, until
+      # deploy-window-flush.yml arms the oldest at the window. See deploy-window.py.
+      - name: Deploy window decision
+        id: window
         if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          d="$RUNNER_TEMP/deploy-window"
+          # Unreadable inputs arm immediately — the pre-window behaviour, never a stranded PR.
+          if ! bash .github/scripts/deploy-window-inputs.sh "$d"; then
+            echo "::warning::deploy window inputs unreadable — arming immediately"
+            echo "decision=ARM" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          armed="$(jq 'any(.[]; .armed)' "$d/prs.json")"
+          python3 .github/scripts/deploy-window.py decide --event "$EVENT_NAME" \
+            --armed-open "$armed" --commits-json "$d/commits.json" --now "$(date -u +%s)" >> "$GITHUB_OUTPUT"
+      - name: Enable auto-merge
+        if: steps.gitops_pr.outputs.pull-request-number != '' && steps.window.outputs.decision == 'ARM'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}

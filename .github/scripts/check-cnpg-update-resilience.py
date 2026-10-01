@@ -27,6 +27,10 @@ WHAT THIS ENFORCES
 2. EVERY money-path cluster has `instances >= 2`, required hostname anti-affinity, and does not
    disable its PodDisruptionBudget. Without a second instance on a second node, neither
    switchover nor failover has a target, and a stuck node is a stuck database.
+3. EVERY cluster runs a standby (rule 4 below) and EVERY cluster with a standby pins it to a
+   different node (required hostname anti-affinity, rule 5). `preferred` is a hint the scheduler
+   drops under pressure -- exactly during the node churn a standby exists for -- so a two-instance
+   cluster whose instances share a node pays for HA and gets none of it.
 
 The money-path cluster set is DERIVED, never listed: for each service in
 `rules.yaml: money_path_services`, find the workload whose container image is that service and
@@ -44,6 +48,15 @@ apicurio-db (messaging) and the databases of every non-money-path peer -- 9 clus
 2026-09-28, most of them wrong. So the set is an explicit list with a reason per entry, and the
 derivation is used to keep it honest instead: an entry whose cluster does not exist, whose
 namespace no money-path workload calls, or that the service derivation already covers, is stale.
+
+THE CONSUMER OF A PLATFORM DATABASE (rule 6, 2026-09-29)
+An HA temporal-db buys nothing if the Temporal server in front of it is one pod per role: every
+roll of that pod empties the membership ring for its role, and every caller gets "Not enough
+hosts to serve the request" until the successor joins. So every Temporal Helm Application whose
+persistence points at a money-path platform database runs frontend, history and matching with
+`replicaCount >= 2` and a `podDisruptionBudget` -- read from `server.<role>`, where the chart
+looks. A role block written at the TOP level of the values is inert (the chart never reads it;
+the sandbox ran that way for months), so that placement is itself a finding.
 
 Usage:
     check-cnpg-update-resilience.py              # gate (exit 1 on any finding)
@@ -74,8 +87,8 @@ IMAGE_RX = re.compile(r'"image":\s*"([^"]+)"')
 # instances; applying it in the same sync that raises instances 1 -> 2 rolls the only primary in
 # place before the new standby exists. A cluster whose standby is being added carries this
 # annotation (with a reason) and is excused the affinity checks ONLY -- never instances >= 2 or
-# switchover. It is stale the moment the affinity is present, and meaningless on a cluster that
-# is not money-path; both are findings, so the excuse cannot outlive the wave that removes it.
+# switchover. It is stale the moment the affinity is present, so the excuse cannot outlive the
+# wave that removes it. Valid on any cluster since rule 5 extended the affinity fleet-wide.
 PENDING_ANN = "openbank.io/affinity-rollout-pending"
 
 # Money-path services that genuinely own no database. Reason required; an entry for a service
@@ -97,6 +110,35 @@ def _ns_from_kustomization(path: Path) -> str | None:
 
 def _image_name(ref: str) -> str:
     return ref.split("@", 1)[0].rsplit("/", 1)[-1].split(":", 1)[0]
+
+
+TEMPORAL_HA_ROLES = ("frontend", "history", "matching")
+TEMPORAL_ROLES = TEMPORAL_HA_ROLES + ("worker", "internal-frontend")
+
+
+def temporal_apps() -> list[tuple[str, dict]]:
+    """(path, parsed helm values) for every ArgoCD Application installing the Temporal chart."""
+    out = []
+    for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
+        try:
+            docs = gatelib.load_yaml_all(path, errors="replace")
+        except yaml.YAMLError:
+            continue  # scan() already reports unparseable files
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "Application":
+                continue
+            src = (doc.get("spec") or {}).get("source") or {}
+            if src.get("chart") != "temporal":
+                continue
+            helm = src.get("helm") or {}
+            values = helm.get("valuesObject")
+            if values is None:
+                try:
+                    values = yaml.safe_load(helm.get("values") or "") or {}
+                except yaml.YAMLError as exc:
+                    values = {"__error__": str(exc)}
+            out.append((str(path.relative_to(REPO)), values if isinstance(values, dict) else {}))
+    return out
 
 
 def scan() -> tuple[dict[str, dict], dict[str, set], list[str], dict[str, set]]:
@@ -207,17 +249,8 @@ def check() -> tuple[list[str], int]:
         mp_clusters[key] = "platform dependency"
 
     # 3. money-path: a second instance, on a second node, with its PDB
-    for key, c in sorted(clusters.items()):
-        if c["pending"] and key not in mp_clusters:
-            findings.append(f"{c['path']}: Cluster {key} carries {PENDING_ANN} but is not a money-path cluster -- stale")
-    for key, svc in sorted(mp_clusters.items()):
-        c = clusters[key]
-        spec = c["spec"]
-        where = f"{c['path']}: money-path Cluster {key} ({svc})"
-        inst = spec.get("instances", 1)
-        if not isinstance(inst, int) or inst < 2:
-            findings.append(f"{where} has instances={inst}; ADR-0159 requires >= 2 (primary + standby)")
-        aff = spec.get("affinity") or {}
+    def affinity(c: dict, where: str) -> None:
+        aff = c["spec"].get("affinity") or {}
         aff_gaps = []
         if aff.get("enablePodAntiAffinity") is not True:
             aff_gaps.append("lacks affinity.enablePodAntiAffinity: true")
@@ -231,7 +264,16 @@ def check() -> tuple[list[str], int]:
             else:
                 print(f"::notice::{where}: affinity deferred to a staged wave ({c['pending']})")
         else:
-            findings += [f"{where} {g}" for g in aff_gaps]
+            findings.extend(f"{where} {g}" for g in aff_gaps)
+
+    for key, svc in sorted(mp_clusters.items()):
+        c = clusters[key]
+        spec = c["spec"]
+        where = f"{c['path']}: money-path Cluster {key} ({svc})"
+        inst = spec.get("instances", 1)
+        if not isinstance(inst, int) or inst < 2:
+            findings.append(f"{where} has instances={inst}; ADR-0159 requires >= 2 (primary + standby)")
+        affinity(c, where)
         if spec.get("enablePDB") is False:
             findings.append(f"{where} disables its PodDisruptionBudget (enablePDB: false)")
 
@@ -263,6 +305,43 @@ def check() -> tuple[list[str], int]:
                 f"{c['path']}: Cluster {key} has instances={inst}; every CNPG cluster needs >= 2 "
                 f"(a standby survives node loss) or a reasoned entry in cnpg_single_instance_exceptions"
             )
+
+    # 5. EVERY cluster with a standby keeps it on another node (required hostname anti-affinity).
+    #    A single-instance exception has nothing to separate, so it is not checked here.
+    for key, c in sorted(clusters.items()):
+        if key in mp_clusters:
+            continue
+        inst = c["spec"].get("instances", 1)
+        if isinstance(inst, int) and inst >= 2:
+            affinity(c, f"{c['path']}: Cluster {key} (instances={inst})")
+
+    # 6. the Temporal server in front of a money-path platform database is itself HA
+    for path, values in temporal_apps():
+        if "__error__" in values:
+            findings.append(f"{path}: Temporal helm values do not parse ({values['__error__']})")
+            continue
+        text = json.dumps(values)
+        backs = sorted({f"{n}/{c}" for c, n in SVC_RX.findall(text)} & set(mp_clusters))
+        if not backs:
+            continue
+        where = f"{path}: Temporal server on money-path platform database {', '.join(backs)}"
+        for role in TEMPORAL_ROLES:
+            if role in values:
+                findings.append(
+                    f"{where} declares `{role}:` at the top level of its values -- the chart reads "
+                    f"only `server.{role}`, so that block is inert"
+                )
+        server = values.get("server") or {}
+        for role in TEMPORAL_HA_ROLES:
+            rv = server.get(role) or {}
+            reps = rv.get("replicaCount", server.get("replicaCount", 1))
+            if not isinstance(reps, int) or reps < 2:
+                findings.append(
+                    f"{where}: server.{role}.replicaCount={reps}; a single pod empties the "
+                    f"membership ring on every roll (Not enough hosts) -- needs >= 2"
+                )
+            if not rv.get("podDisruptionBudget"):
+                findings.append(f"{where}: server.{role} has no podDisruptionBudget")
 
     gatelib.subjects(len(clusters), f"CNPG clusters; {len(mp_clusters)} money-path")
     return findings, len(mp_clusters)
@@ -329,6 +408,32 @@ spec:
 """
 
 
+_TEMPORAL = """apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: wf-helm
+  namespace: argocd
+spec:
+  source:
+    chart: temporal
+    helm:
+      values: |
+        server:
+          config:
+            persistence:
+              datastores:
+                default:
+                  sql:
+                    connectAddr: "wf-db-rw.wf.svc.cluster.local:5432"
+{roles}"""
+_ROLE = """          {role}:
+            replicaCount: {n}
+            podDisruptionBudget:
+              maxUnavailable: 1
+"""
+_ROLES_OK = "".join(_ROLE.format(role=r, n=2) for r in ("frontend", "history", "matching"))
+
+
 def self_test() -> int:
     ok = True
 
@@ -351,9 +456,10 @@ def self_test() -> int:
 
     good = {
         "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n"),
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra=_HA),
         "deploy.yaml": _DEPLOY,
         "wf.yaml": _WF.format(inst=2, extra=_HA),
+        "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK),
     }
     if run(good):
         print(f"SELF-TEST FAIL: a compliant corpus was reported: {run(good)}"); ok = False
@@ -383,9 +489,19 @@ def self_test() -> int:
     }
     deferred = {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
         "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)
-        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n")}
+        + "---\n" + _CLUSTER.format(name="other-db", inst=2, extra="  primaryUpdateMethod: switchover\n").replace(
+        "  namespace: st\n", "  namespace: st\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)}
     if run(deferred):
         print(f"SELF-TEST FAIL: a deferred-affinity cluster was reported: {run(deferred)}"); ok = False
+    cases["non-money-path HA cluster with only preferred anti-affinity"] = (
+        {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA) + "---\n"
+         + _CLUSTER.format(name="other-db", inst=2, extra=_HA.replace("required", "preferred"))},
+        "st/other-db (instances=2) affinity.podAntiAffinityType must be `required`")
+    cases["pending annotation on a non-money-path cluster that already has the affinity"] = (
+        {**good, "db.yaml": _CLUSTER.format(name="pay-db", inst=2, extra=_HA) + "---\n"
+         + _CLUSTER.format(name="other-db", inst=2, extra=_HA).replace(
+             "  name: other-db\n", "  name: other-db\n  annotations:\n    openbank.io/affinity-rollout-pending: wave\n", 1)},
+        "st/other-db (instances=2) carries")
     cases["single-instance platform database (the temporal-db shape)"] = (
         {**good, "wf.yaml": _WF.format(inst=1, extra=_HA)}, "wf/wf-db (platform dependency) has instances=1")
     cases["platform entry naming a namespace no money-path workload calls"] = (
@@ -411,6 +527,18 @@ def self_test() -> int:
     got = run(single_other, exc_short)
     if not any("reason of >= 20 chars" in f for f in got):
         print(f"SELF-TEST FAIL: an exception without a real reason was accepted: {got}"); ok = False
+    cases["single-replica Temporal matching in front of a platform database"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK.replace(
+            "matching:\n            replicaCount: 2", "matching:\n            replicaCount: 1"))},
+        "server.matching.replicaCount=1")
+    cases["Temporal role without a PDB"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(
+            roles=_ROLE.format(role="frontend", n=2) + _ROLE.format(role="history", n=2)
+            + "          matching:\n            replicaCount: 2\n")},
+        "server.matching has no podDisruptionBudget")
+    cases["Temporal role block at the top level (the inert sandbox shape)"] = (
+        {**good, "temporal.yaml": _TEMPORAL.format(roles=_ROLES_OK) + "        history:\n          replicaCount: 3\n"},
+        "declares `history:` at the top level")
     for label, (files, needle) in cases.items():
         got = run(files)
         if not any(needle in f for f in got):

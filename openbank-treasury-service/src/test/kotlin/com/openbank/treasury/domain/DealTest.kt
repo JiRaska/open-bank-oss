@@ -38,11 +38,14 @@ class DealTest {
         return d.submit(dealer, withinLimit(d), NOW).approve(approver, withinLimit(d), NOW)
     }
 
+    /** ADR-0315 D2: the back office records the counterparty's confirmation. */
+    private fun confirmed(): Deal = booked().confirm(approver, NOW, "CPTY-REF-1")
+
     @Nested
     inner class Lifecycle {
         @Test
         fun `the happy path walks DRAFT to MATURED and records every step`() {
-            val matured = booked()
+            val matured = confirmed()
                 .settle(approver, MONDAY, NOW)
                 .mature(Actor.SIMULATED_MARKET, LocalDate.parse("2026-10-21"), NOW)
             assertThat(matured.state).isEqualTo(DealState.MATURED)
@@ -50,6 +53,7 @@ class DealTest {
                 DealState.DRAFT,
                 DealState.PENDING_APPROVAL,
                 DealState.BOOKED,
+                DealState.CONFIRMED,
                 DealState.SETTLED,
                 DealState.MATURED,
             )
@@ -79,17 +83,19 @@ class DealTest {
                 MONDAY, FRIDAY, null, dealer, NOW,
             )
             val b = future.submit(dealer, withinLimit(future), NOW).approve(approver, withinLimit(future), NOW)
+                .confirm(approver, NOW)
             assertThatThrownBy { b.settle(approver, MONDAY, NOW) }.isInstanceOf(IllegalStateException::class.java)
-            val settled = booked().settle(approver, MONDAY, NOW)
+            val settled = confirmed().settle(approver, MONDAY, NOW)
             assertThatThrownBy { settled.mature(approver, MONDAY, NOW) }.isInstanceOf(IllegalStateException::class.java)
         }
 
         @Test
-        fun `a booked or settled deal can be reversed, a matured one cannot`() {
+        fun `a booked, confirmed or settled deal can be reversed, a matured one cannot`() {
             assertThat(booked().reverse(approver, "wrong counterparty", NOW).state).isEqualTo(DealState.REVERSED)
-            assertThat(booked().settle(approver, MONDAY, NOW).reverse(approver, "fat finger", NOW).state)
+            assertThat(confirmed().reverse(approver, "counterparty disputes", NOW).state).isEqualTo(DealState.REVERSED)
+            assertThat(confirmed().settle(approver, MONDAY, NOW).reverse(approver, "fat finger", NOW).state)
                 .isEqualTo(DealState.REVERSED)
-            val matured = booked().settle(approver, MONDAY, NOW).mature(approver, LocalDate.parse("2026-10-21"), NOW)
+            val matured = confirmed().settle(approver, MONDAY, NOW).mature(approver, LocalDate.parse("2026-10-21"), NOW)
             assertThatThrownBy {
                 matured.reverse(approver, "too late", NOW)
             }.isInstanceOf(IllegalStateException::class.java)
@@ -101,6 +107,99 @@ class DealTest {
             assertThatThrownBy {
                 d.approve(approver, withinLimit(d), NOW)
             }.isInstanceOf(IllegalStateException::class.java)
+        }
+    }
+
+    /** ADR-0315 D2: BOOKED -> CONFIRMED -> SETTLED, and every way to get it wrong. */
+    @Nested
+    inner class Confirmation {
+        @Test
+        fun `a back-office person confirms a BOOKED deal, posting nothing, with the reference on the timeline`() {
+            val c = confirmed()
+            assertThat(c.state).isEqualTo(DealState.CONFIRMED)
+            assertThat(c.history.last().from).isEqualTo(DealState.BOOKED)
+            assertThat(c.history.last().actor).isEqualTo(approver)
+            assertThat(c.history.last().note).isEqualTo("counterparty confirmation received: CPTY-REF-1")
+            assertThat(c.consumesLimit).describedAs("still unsettled placement: still on the limit").isTrue()
+        }
+
+        @Test
+        fun `the simulated counterparty confirms as SYSTEM`() {
+            assertThat(booked().confirm(Actor.SIMULATED_MARKET, NOW).state).isEqualTo(DealState.CONFIRMED)
+        }
+
+        @Test
+        fun `only a BOOKED deal can be confirmed`() {
+            val d = placement()
+            val pending = d.submit(dealer, withinLimit(d), NOW)
+            listOf(d, pending, confirmed(), confirmed().settle(approver, MONDAY, NOW), d.cancel(dealer, NOW)).forEach {
+                assertThatThrownBy { it.confirm(approver, NOW) }
+                    .describedAs("confirm from ${it.state}")
+                    .isInstanceOf(IllegalStateException::class.java)
+            }
+        }
+
+        @Test
+        fun `the dealer who created or submitted the deal may not confirm it`() {
+            assertThatThrownBy { booked().confirm(dealer, NOW) }
+                .isInstanceOf(FourEyesViolationException::class.java)
+                .hasMessageContaining("creator")
+            val d = placement()
+            val submittedByOther = d.submit(Actor("sara.dealer", ActorType.HUMAN), withinLimit(d), NOW)
+                .approve(approver, withinLimit(d), NOW)
+            assertThatThrownBy { submittedByOther.confirm(Actor("sara.dealer", ActorType.HUMAN), NOW) }
+                .isInstanceOf(FourEyesViolationException::class.java)
+                .hasMessageContaining("submitter")
+        }
+
+        @Test
+        fun `an AI agent or a service account can never confirm`() {
+            assertThatThrownBy { booked().confirm(agent, NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
+            assertThatThrownBy { booked().confirm(serviceAccount, NOW) }
+                .isInstanceOf(ActorNotPermittedException::class.java)
+        }
+
+        @Test
+        fun `settlement requires CONFIRMED by default - a BOOKED deal is refused and says why`() {
+            assertThatThrownBy { booked().settle(approver, MONDAY, NOW) }
+                .isInstanceOf(IllegalStateException::class.java)
+                .hasMessageContaining("confirmation is required")
+            assertThatThrownBy { booked().settle(Actor.SIMULATED_MARKET, MONDAY, NOW, confirmationRequired = true) }
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+
+        @Test
+        fun `with confirmation not required a legacy BOOKED deal still settles, and a CONFIRMED one too`() {
+            val settled = booked().settle(approver, MONDAY, NOW, confirmationRequired = false)
+            assertThat(settled.state).isEqualTo(DealState.SETTLED)
+            assertThat(settled.history.map { it.to }).doesNotContain(DealState.CONFIRMED)
+            assertThat(confirmed().settle(approver, MONDAY, NOW, confirmationRequired = false).state)
+                .isEqualTo(DealState.SETTLED)
+        }
+
+        @Test
+        fun `the relaxed flag opens BOOKED only - nothing earlier settles either way`() {
+            val d = placement()
+            listOf(d, d.submit(dealer, withinLimit(d), NOW)).forEach { early ->
+                listOf(true, false).forEach { required ->
+                    assertThatThrownBy { early.settle(approver, MONDAY, NOW, required) }
+                        .isInstanceOf(IllegalStateException::class.java)
+                }
+            }
+            assertThat(Deal.settleableStates(true)).containsExactly(DealState.CONFIRMED)
+            assertThat(Deal.settleableStates(false)).containsExactlyInAnyOrder(DealState.BOOKED, DealState.CONFIRMED)
+        }
+
+        @Test
+        fun `a confirmed placement is on the limit - the single on-book set includes CONFIRMED`() {
+            assertThat(Deal.LIMIT_CONSUMING_STATES).contains(DealState.CONFIRMED)
+            assertThat(Deal.FX_LIMIT_CONSUMING_STATES).contains(DealState.CONFIRMED)
+        }
+
+        @Test
+        fun `a confirmation reference longer than 200 characters is refused`() {
+            assertThatThrownBy { booked().confirm(approver, NOW, "x".repeat(201)) }
+                .isInstanceOf(IllegalArgumentException::class.java)
         }
     }
 
@@ -147,9 +246,26 @@ class DealTest {
             assertThatThrownBy {
                 Deal.draft(
                     placement().id, ProductType.MM_PLACEMENT, "SIMBK-A", "CZK", BigDecimal.TEN, BigDecimal.ONE,
-                    MONDAY, MONDAY, null, agent, NOW, rationale = null,
+                    MONDAY, MONDAY, null, agent, NOW, rationale = null, inputs = """{"quote":"4.10"}""",
                 )
-            }.isInstanceOf(IllegalArgumentException::class.java)
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("rationale")
+        }
+
+        @Test
+        fun `an AI agent draft without its inputs is refused`() {
+            assertThatThrownBy {
+                Deal.draft(
+                    placement().id, ProductType.MM_PLACEMENT, "SIMBK-A", "CZK", BigDecimal.TEN, BigDecimal.ONE,
+                    MONDAY, MONDAY, null, agent, NOW, rationale = "curve says so", inputs = null,
+                )
+            }.isInstanceOf(IllegalArgumentException::class.java).hasMessageContaining("inputs")
+        }
+
+        @Test
+        fun `an AI agent draft keeps its inputs and consumes no limit`() {
+            val d = placement(by = agent)
+            assertThat(d.inputs).isEqualTo("""{"quote":"4.10"}""")
+            assertThat(d.consumesLimit).isFalse()
         }
 
         @Test
@@ -166,7 +282,7 @@ class DealTest {
             assertThatThrownBy {
                 d.submit(agent, withinLimit(d), NOW)
             }.isInstanceOf(ActorNotPermittedException::class.java)
-            val b = booked()
+            val b = confirmed()
             assertThatThrownBy { b.settle(agent, MONDAY, NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
             assertThatThrownBy { b.reverse(agent, "x", NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
             val s = b.settle(approver, MONDAY, NOW)

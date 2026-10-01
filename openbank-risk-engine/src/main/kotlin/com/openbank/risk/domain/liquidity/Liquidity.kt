@@ -4,8 +4,10 @@
 
 package com.openbank.risk.domain.liquidity
 
+import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Instrument
+import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.LoanExtension
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
@@ -112,14 +114,17 @@ data class UnclassifiedBalance(
 )
 
 data class LiquidityResult(
+    /** Per currency, each in its own currency — unchanged by the reporting-currency view. */
     val currencies: List<CurrencyLiquidity>,
-    /** The single book currency, when there is exactly one; else null and no total is reported. */
-    val totalCurrency: String?,
+    /** All currencies combined in CZK at the ČNB fixing ([LiquidityReportingTotal]); null with [totalNotStated]. */
+    val total: CurrencyLiquidity?,
+    /** Every rate [total] was converted with; empty for an all-CZK book. */
+    val fxRates: List<FxRateUsed>,
+    /** Why [total] is null; null when it is stated. */
+    val totalNotStated: String?,
     val unclassified: List<UnclassifiedBalance>,
     val notes: List<String>,
-) {
-    val total: CurrencyLiquidity? get() = totalCurrency?.let { c -> currencies.single { it.currency == c } }
-}
+)
 
 private const val RATIO_SCALE = 6
 private const val LCR_HORIZON_DAYS = 30L
@@ -128,14 +133,17 @@ private const val STAGE_3 = "STAGE_3"
 
 /**
  * LCR and NSFR of a tied-out snapshot under the configured parameter set — BCBS d238 / d295, or the
- * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency; a total only for a single-currency
- * book (the engine has no reporting-currency conversion yet — the same rule as IRRBB).
+ * EU Delegated Regulation (EU) 2015/61 / CRR2 set ([LiquidityRegime]). Per currency, plus all currencies
+ * combined in CZK at the ČNB fixing ([LiquidityReportingTotal], EU 2015/61 Art. 4(5)).
  */
 object Liquidity {
 
     const val AGGREGATION_NOTE =
-        "Computed per currency. A total across currencies needs conversion to one reporting currency, which " +
-            "the engine does not do yet, so the total is reported only for a single-currency book."
+        "Computed per currency, each in its own currency. The total combines all currencies in CZK " +
+            "(EU 2015/61 Art. 4(5)): every amount of each other currency's lines is converted at the ČNB fixing " +
+            "in effect on the as-of date (listed in fxRates), and the HQLA caps, the inflow cap and both ratios " +
+            "are recomputed on the converted lines, never summed or averaged from the per-currency results. " +
+            "If any needed fixing is missing no total is stated (never a partial one)."
 
     /**
      * Stable machine-readable prefix for [PLEDGED_COLLATERAL_NOTE], so a downstream consumer (e.g. the
@@ -161,6 +169,7 @@ object Liquidity {
         instruments: List<Instrument>,
         asOf: LocalDate,
         params: LiquidityParameters,
+        fixings: Map<String, FxRateUsed> = emptyMap(),
     ): LiquidityResult {
         val byId = instruments.associateBy { it.id }
         val unclassified = mutableListOf<UnclassifiedBalance>()
@@ -190,6 +199,9 @@ object Liquidity {
                                 centralBankSecuredFunding = true
                             }
                             acc.glAccount(p, cls)
+                            if (p.kind == PositionKind.TREASURY_DEAL) {
+                                acc.placementInflow(p, cls, p.instrumentId?.let(byId::get), asOf)
+                            }
                         }
                     }
                 }
@@ -197,9 +209,12 @@ object Liquidity {
             acc.finishDeposits()
             CurrencyLiquidity(ccy, acc.lcr(), NsfrResult(acc.asf, acc.rsf))
         }
+        val reporting = LiquidityReportingTotal.of(currencies, fixings, asOf, params)
         return LiquidityResult(
             currencies = currencies,
-            totalCurrency = currencies.singleOrNull()?.currency,
+            total = reporting.total,
+            fxRates = reporting.fxRates,
+            totalNotStated = reporting.notStated,
             unclassified = unclassified,
             notes = listOfNotNull(
                 AGGREGATION_NOTE.takeIf { currencies.size > 1 },
@@ -207,6 +222,18 @@ object Liquidity {
             ),
         )
     }
+
+    /**
+     * Ids of the contract-level instruments whose position [compute] counts in the HQLA stock — a
+     * money-market deal on an account the parameter set classifies as HQLA (1510 ČNB deposit
+     * facility, Level 1). Read off the same [LiquidityClassification.classOf] call [compute] makes,
+     * so there is one classification, not a second list of "HQLA accounts" to drift from it.
+     */
+    fun hqlaInstrumentIds(positions: List<Position>, params: LiquidityParameters): Set<String> = positions.asSequence()
+        .filter { it.kind == PositionKind.TREASURY_DEAL && it.instrumentId != null }
+        .filter { params.classification.classOf(it.glAccountCode, it.glAccountType)?.isHqla == true }
+        .mapNotNull { it.instrumentId }
+        .toSet()
 
     /** d238 Annex 1 ¶5, with the 2/3, 15/85 and 15/60 ratios derived from the two configured caps. */
     fun hqlaStock(lines: List<HqlaLine>, level2Cap: BigDecimal, level2bCap: BigDecimal): HqlaStock {
@@ -417,6 +444,25 @@ object Liquidity {
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
             }
+        }
+
+        /**
+         * A contract-level money-market placement (a claim on a financial customer) maturing within
+         * the 30-day horizon is an inflow of its outstanding principal (d238 ¶154, EU 2015/61 Art.
+         * 32(2)(a)); beyond it, none. Accrued interest stays GL-level, as for a bullet loan. An HQLA
+         * deal (the ČNB deposit facility, 1510) is already in the stock and is never also an inflow
+         * (EU 2015/61 Art. 32(6), d238 ¶142-143 — points UNVERIFIED). Its GL class keeps deciding the RSF.
+         */
+        fun placementInflow(p: Position, c: GlClass, instrument: Instrument?, asOf: LocalDate) {
+            if (c.isHqla || instrument?.kind != InstrumentKind.MONEY_MARKET_DEAL || p.amount.signum() <= 0) return
+            val maturity = instrument.maturityDate ?: return
+            if (maturity < asOf || maturity > asOf.plusDays(LCR_HORIZON_DAYS)) return
+            inflows += line(
+                "Money-market placement ${instrument.id}: principal due $maturity (≤ 30 days)",
+                p.glAccountCode,
+                p.amount,
+                LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D,
+            )
         }
 
         /** An HQLA account: its level and haircut (d238 ¶49-54) and its RSF (d295 ¶36-40). */

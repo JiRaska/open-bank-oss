@@ -21,7 +21,28 @@ spec:
     targetRevision: 0.123.1
     helm:
       valuesObject:
+        # This operator OWNS its CRDs: the Instrumentation in `accounts` (and any future
+        # OpenTelemetryCollector) needs them, and the chart installed them. Pinned explicitly
+        # (it matches the chart default) so nobody turns it off on the assumption that
+        # the plain otel-collector Deployment makes them unnecessary. That Deployment is
+        # the trace/metric pipeline, and this operator only injects agents into it. A
+        # startup log saying "OpenTelemetryCollector CRDs are not present" together with
+        # "failed to autodetect ... i/o timeout" does NOT mean the CRDs are missing. Autodetect
+        # could not reach the API server (see operator.networkpolicy below) and reported
+        # every CRD group as absent.
+        crds:
+          create: true
         manager:
+          # The operator's self-managed NetworkPolicy pins egress to the API server's endpoint
+          # IPs as it saw them at startup. EKS rotates its control-plane ENIs, and after a
+          # rotation (2026-09-29) the operator could no longer reach 172.20.0.1:443, never became
+          # Ready, so its webhook had no endpoints and every Argo app with an Instrumentation
+          # (accounts, payments) failed to diff. It cannot heal itself: without the API it cannot
+          # rewrite the policy. The namespace has no default-deny, so without this policy egress
+          # is simply open, like every other observability workload. operand.networkpolicy (for
+          # collectors) is unaffected.
+          featureGatesMap:
+            operator.networkpolicy: false
           # The default collector image the operator stamps into injected
           # workloads; pin to the contrib agent line used elsewhere in the stack.
           collectorImage:
