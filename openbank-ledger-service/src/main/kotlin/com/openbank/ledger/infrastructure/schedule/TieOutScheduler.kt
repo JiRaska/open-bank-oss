@@ -170,7 +170,13 @@ class TieOutScheduler(
         return gap.take(maxCatchUpDays)
     }
 
-    private suspend fun runTieOutFor(asOf: LocalDate) {
+    /**
+     * Run the tie-out control for one business date and record the run. Called by the daily
+     * cron above and by [AccountingDayScheduler] to re-check a CUTOFF day whose only verdict
+     * predates its cutoff (a day cut off late never gets a post-cutoff run from the daily
+     * catch-up, which only moves forward). Idempotent: each call records one more run.
+     */
+    suspend fun runTieOutFor(asOf: LocalDate) {
         log.infof("Sub-ledger tie-out check for %s", asOf)
         // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
         // the accumulation is the same, but it reads as one expression and CodeQL can actually

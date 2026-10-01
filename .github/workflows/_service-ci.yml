@@ -286,6 +286,9 @@ jobs:
       # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
+      # Consume the enforcing build's coverage, never produce a second test run here.
+      # Different invocation properties can invalidate `test` and overwrite the verified
+      # test.ic before this advisory report, even when both Gradle invocations succeed.
       - name: Generate Kover XML report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
@@ -293,7 +296,8 @@ jobs:
         # hold a fleet runner after the enforcing build has already completed (#6734).
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain -x test
+        # Test execution belongs to the enforcing build above; this step only renders it.
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -765,7 +769,7 @@ jobs:
           printf '%s' "$body" > "$body_file"
           code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
             "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
-            'application/json')"
+            'application/hal+json, application/json')"
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
           echo "Pact publication accepted (HTTP $code)."
 

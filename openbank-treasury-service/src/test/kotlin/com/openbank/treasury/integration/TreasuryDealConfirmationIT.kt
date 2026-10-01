@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -17,8 +18,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
+import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -34,7 +35,7 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TreasuryDealConfirmationIT {
 
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun action(id: String, verb: String, body: String? = null, key: String = UUID.randomUUID().toString()) =
         given()

@@ -186,6 +186,14 @@ def write_policies(out: str, policies: list[dict], *, dump=yaml.dump) -> None:
 
 
 
+def job_pod_template(doc: dict) -> dict:
+    """Pod template of a CronJob (spec.jobTemplate.spec.template) or a Job (spec.template)."""
+    spec = doc.get("spec", {}) or {}
+    if doc.get("kind") == "CronJob":
+        spec = ((spec.get("jobTemplate", {}) or {}).get("spec", {}) or {})
+    return spec.get("template", {}) or {}
+
+
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
 
@@ -211,6 +219,15 @@ def self_test() -> int:
     def case(label, got, want):
         if got != want:
             fails.append(f"{label}: expected {want}, got {got}")
+
+    # Batch workloads: the pod template sits one level deeper in a CronJob than in a Job.
+    cj = {"kind": "CronJob", "spec": {"jobTemplate": {"spec": {"template": {"spec": {
+        "containers": [{"env": [{"value": "http://keycloak.iam.svc:8080"}]}]}}}}}}
+    jb = {"kind": "Job", "spec": {"template": {"spec": {
+        "containers": [{"env": [{"value": "http://keycloak.iam.svc:8080"}]}]}}}}
+    for label, d in (("cronjob template", cj), ("job template", jb)):
+        env = job_pod_template(d)["spec"]["containers"][0]["env"][0]["value"]
+        case(label, urls(env), [("keycloak", "iam", "8080")])
 
     # The everyday shape: an in-cluster service URL with an explicit port.
     case("an http svc URL with a port is extracted",
@@ -297,7 +314,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction and atomic policy publication (17 cases)")
+    print("self-test ok: dependency extraction and atomic policy publication (19 cases)")
     return 0
 
 def main():
@@ -363,6 +380,33 @@ def main():
             for svc, callee_ns, port in URL_RE.findall(blob):
                 if callee_ns == ns:
                     continue  # same-namespace is allowed wholesale
+                edges[(callee_ns, svc)].add(ns)
+                if port:
+                    edge_ports[(callee_ns, svc)].add(int(port))
+            for _, kns, kport in KAFKA_RE.findall(blob):
+                if kns == MESSAGING_NS:
+                    kafka_client_ports[ns].add(int(kport))
+
+        elif kind in ("CronJob", "Job") and ns:
+            # A batch workload CALLS services exactly like a Deployment does, but it was
+            # invisible here: only Deployment/StatefulSet/Rollout env was scanned. Measured
+            # 2026-10-01: vault/secret-rotator calls http://keycloak.iam.svc:8080, no
+            # vault -> iam edge was ever generated, keycloak's derived ingress allow-list
+            # dropped the packets, and the ADR-0099 client-secret rotation had never once
+            # succeeded (openbao-config Degraded). Only the CALLER side is taken from a batch
+            # workload — it serves nothing, so it registers no workload/ports of its own.
+            tpl = job_pod_template(doc)
+            blob = "\n".join(
+                e["value"]
+                for c in ((tpl.get("spec", {}) or {}).get("containers", []) or [])
+                + ((tpl.get("spec", {}) or {}).get("initContainers", []) or [])
+                for e in (c.get("env", []) or [])
+                if isinstance(e.get("value"), str)
+            )
+            ns_dir.setdefault(ns, os.path.dirname(path))
+            for svc, callee_ns, port in URL_RE.findall(blob):
+                if callee_ns == ns:
+                    continue
                 edges[(callee_ns, svc)].add(ns)
                 if port:
                     edge_ports[(callee_ns, svc)].add(int(port))

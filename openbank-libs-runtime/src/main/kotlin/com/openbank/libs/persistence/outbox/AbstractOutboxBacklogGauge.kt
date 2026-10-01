@@ -5,7 +5,9 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
+import org.jboss.logging.Logger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Shared outbox **backlog** gauge (ADR-0049 consolidation; ADR-0077 / ADR-0079 metrics).
@@ -78,6 +80,29 @@ abstract class AbstractOutboxBacklogGauge {
      * `@Scheduled` `suspend` method so the reactive query runs on the right context.
      */
     protected suspend fun refreshBacklog() {
-        cached.set(currentBacklog())
+        val value = try {
+            currentBacklog()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            // A metrics refresh must never throw out of the scheduler: during a DB restart every
+            // tick would otherwise log a scheduler ERROR with a full stack trace. Keep the last
+            // good value and count the failure — the counter is the staleness signal.
+            metrics.outboxGaugeRefreshFailed(service, "backlog")
+            LOG.warnf(
+                "outbox %s gauge refresh failed for service=%s, keeping last value: %s",
+                "backlog",
+                service,
+                e.toString(),
+            )
+            return
+        }
+        cached.set(value)
+    }
+
+    private companion object {
+        val LOG: Logger = Logger.getLogger(AbstractOutboxBacklogGauge::class.java)
     }
 }
