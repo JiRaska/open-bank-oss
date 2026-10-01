@@ -129,4 +129,50 @@ class ApiVersionResponseFilterTest {
         makeFilter(apiVersion = apiVersion).filter(req, resp)
         return headers
     }
+
+    private fun echoedIds(
+        correlationProperty: Any?,
+        requestProperty: Any?,
+        correlationHeader: String?,
+        requestHeader: String?,
+    ): MultivaluedHashMap<String, Any> {
+        val headers = MultivaluedHashMap<String, Any>()
+        val uriInfo = mockk<UriInfo> { every { path } returns "/api/v1/accounts" }
+        val req = mockk<ContainerRequestContext>(relaxed = true)
+        every { req.uriInfo } returns uriInfo
+        // Explicit receiver: inside a `mockk {}` block a bare `getProperty(name)` resolves to
+        // MockK's own dynamic-property accessor, not to the JAX-RS method being stubbed.
+        every { req.getProperty(ApiVersionResponseFilter.CORRELATION_ID_KEY) } returns correlationProperty
+        every { req.getProperty(MDC_REQUEST_ID) } returns requestProperty
+        every { req.getHeaderString(HEADER_CORRELATION_ID) } returns correlationHeader
+        every { req.getHeaderString(HEADER_REQUEST_ID) } returns requestHeader
+        val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
+        makeFilter().filter(req, resp)
+        return headers
+    }
+
+    @Test
+    fun `echoes the ids the request filter settled on, not the raw request headers`() {
+        val headers = echoedIds(
+            correlationProperty = "corr-settled",
+            requestProperty = "req-settled",
+            correlationHeader = "corr \"raw\"\nvalue",
+            requestHeader = "req \"raw\"\nvalue",
+        )
+
+        assertThat(headers.getFirst("X-Correlation-ID")).isEqualTo("corr-settled")
+        assertThat(headers.getFirst("X-Request-ID")).isEqualTo("req-settled")
+    }
+
+    @Test
+    fun `without the request filter a well-formed header is echoed and a malformed one is replaced`() {
+        val wellFormed = echoedIds(null, null, correlationHeader = "corr-1", requestHeader = "req-1")
+        assertThat(wellFormed.getFirst("X-Correlation-ID")).isEqualTo("corr-1")
+        assertThat(wellFormed.getFirst("X-Request-ID")).isEqualTo("req-1")
+
+        val malformed = "x".repeat(MAX_INBOUND_ID_LENGTH + 1)
+        val replaced = echoedIds(null, null, correlationHeader = "a\r\nb", requestHeader = malformed)
+        assertThat(replaced.getFirst("X-Correlation-ID") as String).isNotEqualTo("a\r\nb").matches("[0-9a-f-]{36}")
+        assertThat(replaced.getFirst("X-Request-ID") as String).isNotEqualTo(malformed).matches("[0-9a-f-]{36}")
+    }
 }

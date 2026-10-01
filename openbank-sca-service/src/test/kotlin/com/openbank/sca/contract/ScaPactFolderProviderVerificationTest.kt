@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.sca.application.port.out.ScaChallengeRepository
 import com.openbank.sca.domain.model.ScaChallenge
@@ -80,6 +81,9 @@ import java.util.concurrent.TimeUnit
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-sca-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by ScaNegativeAuthProviderVerificationTest, which boots
+// without @TestSecurity; under this class's identity they would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class ScaPactFolderProviderVerificationTest {
 
@@ -88,6 +92,10 @@ class ScaPactFolderProviderVerificationTest {
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
         private val DELEGATION_PARTY_ID = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+        // Must match SavingsWithdrawScaPactConsumerTest (openbank-account-service).
+        private val SAVINGS_CHALLENGE_ID = UUID.fromString("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a")
+        private val SAVINGS_PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
@@ -167,6 +175,30 @@ class ScaPactFolderProviderVerificationTest {
      * `ScaService.consume` authorises an unlinked challenge exactly when the consume states none —
      * which is why the consumer's request body carries only `partyId`.
      */
+    /**
+     * State for account-service's `SavingsWithdrawScaPactConsumerTest` (#8345): the owner-approval
+     * leg of a savings withdrawal proposal reads the challenge, checks its purpose and party, and
+     * consumes it. Seeded COMPLETED with `consumedAt = null`, the same shape the delegation state
+     * uses, so the consume interaction has something to spend.
+     */
+    @State("a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists")
+    fun stateCompletedSavingsWithdrawChallengeExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = SAVINGS_CHALLENGE_ID,
+                partyId = SAVINGS_PARTY_ID,
+                purpose = ScaPurpose.SAVINGS_WITHDRAW_APPROVAL,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
     @State("a COMPLETED DELEGATION_GRANT SCA challenge exists")
     fun stateCompletedDelegationGrantChallengeExists() = runOnVertxContext {
         challengeRepo.save(

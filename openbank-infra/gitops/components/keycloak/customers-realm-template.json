@@ -1,5 +1,10 @@
 {
   "realm": "openbank-customers",
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
   "displayName": "OpenBank",
   "displayNameHtml": "OpenBank",
   "enabled": true,
