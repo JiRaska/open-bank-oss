@@ -141,6 +141,15 @@ export const irrbbSchema = z.object({
   }),
   shockNotConfigured: z.array(z.string()),
   unpriced: z.array(z.string()),
+  // risk-engine openapi 1.19.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.
+  // Optional+nullable so an older engine (and a single-currency book) both parse.
+  reportingAggregate: z.object({
+    currency: z.string(),
+    scenarios: z.array(z.object({ scenario: z.enum(SCENARIOS), loss: money })),
+    worstScenario: z.enum(SCENARIOS).nullable().optional(), worstLoss: nullableMoney.optional(),
+    fxRates: z.array(z.object({ currency: z.string(), rate: money, fixingDate: z.string(), source: z.string() })),
+    notStated: z.string().nullable().optional(),
+  }).nullable().optional(),
   assumptions: z.object({
     model: z.object({ id: z.string(), version: z.string() }).passthrough(),
     shockSizes: z.array(z.object({ currency: z.string(), parallelBp: money, shortBp: money, longBp: money })),
