@@ -1,0 +1,25 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+package com.openbank.casecoordinator.integration
+
+import com.openbank.casecoordinator.infrastructure.persistence.CaseOutboxEntity
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
+
+/**
+ * Production writes `case_outbox` with a native INSERT inside the workflow activity
+ * (`CaseActivitiesImpl`); the conformance kits need a PENDING row per [OutboxMessage], so the
+ * tests map one onto the entity and persist it through Panache instead.
+ */
+internal fun OutboxMessage.toCaseOutboxEntity() = CaseOutboxEntity().also {
+    it.eventId = eventId
+    it.synthetic = synthetic
+    it.aggregateId = aggregateId
+    it.eventType = eventType
+    it.payload = payload
+    it.status = OutboxStatus.PENDING.name
+    it.attemptCount = 0
+    it.createdAt = createdAt
+    it.updatedAt = createdAt
+}
