@@ -889,3 +889,11 @@ historical eligible population or implement a reviewed closure operation. Direct
 run row would defeat the control; operational access to the database remains privileged and the
 reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
 period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
+
+**Accepted residual risk (owner decision, 2026-10-01):** this slice is accepted as DETECTOR-ONLY.
+It records `RUNNING`/`INCOMPLETE`/`MISSED` evidence, verifies current-date coverage and withholds
+workflow success until zero eligible exposures are missing; it posts no journal for any date other
+than the current reporting date and never replays a past date from current inputs. Until #10275
+delivers historical-input-backed recovery or a reviewed reconciliation operation, a detected
+prior-date gap stays open and is closed only by a controlled manual correction. The
+historical-replay / reconciliation policy is tracked in #10275.
