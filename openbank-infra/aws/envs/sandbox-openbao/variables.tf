@@ -31,10 +31,16 @@ variable "iam_server_id_header" {
   default     = "openbao.sandbox.open-bank"
 }
 
-variable "sso_writer_subjects" {
+variable "sso_writer_subject" {
   description = <<-EOT
-    Keycloak user ids (the `sub` claim) allowed to obtain an openbank-sso-writer token through the
-    oidc mount. Supplied at apply time (TF_VAR_sso_writer_subjects='["<uuid>"]'), never committed.
+    Keycloak user id (the `sub` claim) allowed to obtain an openbank-sso-writer token through the
+    oidc mount. OpenBao binds a role to one subject; a second operator gets a second role.
+    Supplied at apply time (TF_VAR_sso_writer_subject=<uuid>), never committed.
   EOT
-  type        = list(string)
+  type        = string
+
+  validation {
+    condition     = can(regex("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", var.sso_writer_subject))
+    error_message = "sso_writer_subject must be a Keycloak user id (UUID), not a username."
+  }
 }
