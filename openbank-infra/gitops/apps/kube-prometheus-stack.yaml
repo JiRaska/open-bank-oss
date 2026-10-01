@@ -1,6 +1,6 @@
 # Metrics plane: Prometheus + Grafana + kube-state-metrics + node-exporter +
 # alertmanager (enabled, with the routing tree configured below). Lean FinOps
-# sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
+# sizing per ADR-0027: single Prometheus replica, 30d retention (ADR-0088 D3), gp3 PVC.
 # serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
 # picked up regardless of release labels. Grafana still has no Ingress of its
 # own: it is reached at https://admin.open-bank.tech/tools/grafana, a sub-path of
@@ -263,7 +263,21 @@ spec:
             # rendered config Secret's storage.tsdb.retention.time). A retention change
             # only takes effect once the Prometheus pod reloads/restarts. Do NOT "fix"
             # the apparent 15d by bumping this value or forcing the CLI flag back.
-            retention: 12h
+            #
+            # 12h -> 30d (2026-09-30). 12h was FinOps-right for a sandbox and wrong for
+            # everything built on top of it since: 20 Pyrra SLOs declare `window: 30d`,
+            # prometheus-rules-forecast/-capacity extrapolate trends, and 418
+            # `:increase30d` recording series existed — all evaluated over a store whose
+            # oldest sample was 13 hours old (measured: prometheus_tsdb_lowest_timestamp
+            # = 0.55d). An error budget over 30d computed from 12h of data is a number
+            # with no meaning, and ADR-0088 D3 names >=30d as the audit window for
+            # SLO evidence. Sizing, measured live: 2.29 GiB of blocks + 0.77 GiB WAL at
+            # 12h, 789k head series, 22.3k samples/s -> ~4.6 GiB/day -> ~85 GiB at
+            # 30d before compaction gains. gp3 at that size is ~$8/month.
+            # `retentionSize` is the hard ceiling below the PVC so a cardinality
+            # regression evicts old blocks instead of filling the disk.
+            retention: 30d
+            retentionSize: 85GB
             # Pin to the on-demand observability node pool (ADR-0082): spot
             # reclamation was killing Prometheus mid-WAL-replay every ~15-30 min.
             nodeSelector:
@@ -313,7 +327,12 @@ spec:
                     requests:
                       # FinOps 2026-06-05: 10Gi → 5Gi; with 12h retention
                       # the sandbox Prometheus never fills more than ~2Gi.
-                      storage: 5Gi
+                      # 2026-09-30: 100Gi for the 30d retention above (85GB
+                      # retentionSize + WAL + compaction headroom). The operator does
+                      # not resize a live PVC: after merge, patch it once —
+                      #   kubectl -n observability patch pvc prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0 -p '{"spec":{"resources":{"requests":{"storage":"100Gi"}}}}'
+                      # gp3 allowVolumeExpansion is true; the filesystem grows online.
+                      storage: 100Gi
         grafana:
           enabled: true
           # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.

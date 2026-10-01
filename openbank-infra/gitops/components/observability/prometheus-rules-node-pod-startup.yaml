@@ -1,0 +1,127 @@
+# Node-scoped pod-startup failure (2026-09-30 incident, the class runbook 0026 covers).
+#
+# WHY THIS EXISTS. A Karpenter node joined at 13:17Z with two of its four ENIs stuck in EC2
+# attachment state `attaching`. The VPC CNI therefore had half the pod IPs it expected; once
+# those were used (~14:14Z) every further pod scheduled there sat in ContainerCreating with
+# `FailedCreatePodSandBox ... failed to assign an IP address to container`. Seven pods, up to
+# 55 minutes, money-path among them. The node stayed Ready throughout, so KubeNodeNotReady
+# never fired; each pod was a separate, quiet KubePodNotReady (warning, per pod, no node
+# label), and nothing said "this NODE cannot start pods". Fixed by deleting the NodeClaim at
+# ~15:25Z. Earlier that week an EBS volume stuck `attaching` took two DB-backed services down
+# the same way: a device hot-attach hangs, the node reports healthy, the pods on it never start.
+#
+# Both rules are keyed BY NODE because that is the unit the fix acts on (replace the
+# NodeClaim), and because the per-pod view is what hid this: seven warnings look like seven
+# unrelated deploy problems, one alert naming the node looks like a broken node.
+#
+# Measured against the live Prometheus on 2026-09-30 (12h retention, so the incident and the
+# quiet hours around it are the whole available history):
+#   - NodePodsStuckStarting's expression was 0 series at 17:25Z (quiet now); over 12:30-17:25Z
+#     it was non-empty ONLY for the incident node, 14:25-15:25Z, peaking at 7 pods.
+#   - NodePodSandboxCreationFailing's expression was empty at 17:25Z; over the same range it
+#     was > 0 ONLY for the incident node, 14:15-15:35Z, 0.02-0.55 errors/s. Three other nodes
+#     carry a lifetime counter of 1-3 sandbox errors and never produced a non-zero 10m rate.
+#   Both would have fired well inside the incident window: the sandbox rule at ~14:25Z (10m
+#   after the first error, ~60 min before the manual fix), the stuck-pods rule at ~15:00Z.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-node-pod-startup-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.platform.node-pod-startup
+      rules:
+        # The kubelet counts every failed RunPodSandbox call (CNI IP exhaustion, a hung
+        # containerd, a broken runtime) in kubelet_runtime_operations_errors_total, and retries
+        # with backoff for as long as the pod is scheduled there — so a node that cannot start
+        # pods shows a CONTINUOUS non-zero error rate, while a healthy node's counter moves by
+        # one or two over its whole life (a transient at join). `> 0` sustained for 10 minutes is
+        # therefore the threshold: it needs no assumption about how many pods happen to be
+        # scheduled on the node. This is the earliest signal of the class; it fires ~10 minutes
+        # after the first failure, before any pod has been waiting long enough to look stuck.
+        - alert: NodePodSandboxCreationFailing
+          expr: |
+            sum by (node) (
+              rate(kubelet_runtime_operations_errors_total{operation_type="run_podsandbox"}[10m])
+            ) > 0
+          for: 10m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            # Subject: the kubelet's own sandbox-creation retry loop, which runs continuously
+            # for every pod scheduled on the node — there is no invocation period to span.
+            subject_period: continuous
+            summary: "Node {{ $labels.node }} is failing to create pod sandboxes"
+            description: >-
+              The kubelet on {{ $labels.node }} has been failing RunPodSandbox for 10+ minutes
+              ({{ $value | printf "%.2f" }} errors/s over 10m). Pods scheduled here sit in
+              ContainerCreating with FailedCreatePodSandBox while the node reports Ready. The
+              usual cause on this cluster is the VPC CNI running out of pod IPs because an ENI
+              is stuck in EC2 attachment state `attaching`; restarting aws-node does not help,
+              replacing the NodeClaim does. Diagnose with `kubectl get pods -A -o wide` filtered
+              on the node and `aws ec2 describe-network-interfaces` on its instance — see the
+              runbook.
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
+
+        # The confirmation from the pod side, and the rule that also covers a hang the kubelet
+        # does not count as a sandbox error (an EBS attach that never completes leaves the pod
+        # in ContainerCreating with FailedAttachVolume, no runtime operation involved).
+        #
+        # "Stuck" is decided per POD inside the expression, not by the `for:` clause: a pod is
+        # stuck when it is waiting on ContainerCreating/PodInitializing now AND the same pod
+        # (same uid) was waiting on it 10 minutes ago. Counting merely-waiting pods per node
+        # and putting `for: 10m` on the count would be wrong — a busy node always has SOME pod
+        # starting, so the count never reaches zero and the alert fires on churn. The 10-minute
+        # dwell is well above a cold start with a large image (measured: startup bursts of
+        # 15-33 waiting pods at node join clear within 2-3 minutes) and well below the 55
+        # minutes the incident's pods waited.
+        #
+        # `>= 2` distinct pods stuck on one node: one stuck pod is a pod problem (a missing
+        # Secret, an image that does not exist) and KubePodNotReady already names it after 15m;
+        # two or more on the same node is a node problem. kube-state-metrics emits the waiting
+        # reason series only while the reason holds (value 1), and the init-container series is
+        # OR-ed in because a pod with init containers reports PodInitializing there rather than
+        # on its app containers.
+        - alert: NodePodsStuckStarting
+          expr: |
+            count by (node) (
+              (
+                (
+                  max by (namespace, pod, uid) (
+                    kube_pod_container_status_waiting_reason{reason=~"ContainerCreating|PodInitializing"}
+                      or kube_pod_init_container_status_waiting_reason{reason=~"ContainerCreating|PodInitializing"}
+                  ) == 1
+                )
+                and on (namespace, pod, uid)
+                (
+                  max by (namespace, pod, uid) (
+                    kube_pod_container_status_waiting_reason{reason=~"ContainerCreating|PodInitializing"} offset 10m
+                      or kube_pod_init_container_status_waiting_reason{reason=~"ContainerCreating|PodInitializing"} offset 10m
+                  ) == 1
+                )
+              )
+              * on (namespace, pod, uid) group_left (node)
+              max by (namespace, pod, uid, node) (kube_pod_info{node!=""})
+            ) >= 2
+          for: 5m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Pods are stuck starting on node {{ $labels.node }} for over 10m"
+            description: >-
+              {{ $value }} distinct pods on {{ $labels.node }} have each been in
+              ContainerCreating/PodInitializing for more than 10 minutes. Several pods stuck on
+              ONE node while the node is Ready means the node cannot start pods — a CNI with no
+              free IPs (an ENI stuck attaching), an EBS volume stuck attaching, or a hung
+              container runtime. List them with `kubectl get pods -A -o wide --field-selector
+              spec.nodeName={{ $labels.node }}` and read one pod's events; if the events say
+              FailedCreatePodSandBox or FailedAttachVolume, check the instance's ENI/volume
+              attachment states in EC2 and replace the NodeClaim — see the runbook.
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
