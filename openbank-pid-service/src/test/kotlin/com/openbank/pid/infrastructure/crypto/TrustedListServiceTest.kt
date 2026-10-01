@@ -4,11 +4,11 @@
 
 package com.openbank.pid.infrastructure.crypto
 
-import com.openbank.libs.security.EgressResolver
-import com.sun.net.httpserver.HttpServer
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.libs.security.EgressResolver
+import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -23,11 +23,11 @@ import org.junit.jupiter.api.Test
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.security.PrivateKey
-import java.util.concurrent.atomic.AtomicInteger
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicInteger
 
 class TrustedListServiceTest {
 

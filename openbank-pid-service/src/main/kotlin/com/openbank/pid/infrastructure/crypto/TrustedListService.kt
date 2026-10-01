@@ -6,11 +6,11 @@ package com.openbank.pid.infrastructure.crypto
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.security.EgressPolicy
 import com.openbank.libs.security.EgressRequest
 import com.openbank.libs.security.EgressResolver
 import com.openbank.libs.security.SafeHttpClient
-import com.openbank.libs.observability.WorkflowLivenessRecorder
 import io.quarkus.logging.Log
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
