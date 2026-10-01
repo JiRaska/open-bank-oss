@@ -6,8 +6,10 @@ package com.openbank.ledger.infrastructure.schedule
 
 import com.openbank.ledger.application.port.`in`.GetControlAccountTieOutQuery
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
+import com.openbank.ledger.application.port.out.AccountingDayRepository
 import com.openbank.ledger.application.port.out.GlAccountRepository
 import com.openbank.ledger.application.port.out.TieOutRunRepository
+import com.openbank.ledger.domain.model.AccountingDayStatus
 import com.openbank.ledger.domain.model.GlAccount
 import com.openbank.ledger.domain.model.TieOutRunRecord
 import com.openbank.ledger.domain.model.TieOutRunStatus
@@ -21,6 +23,7 @@ import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
@@ -62,6 +65,18 @@ import java.time.ZoneId
  * transaction-scoped advisory lock so only one pod's tick actually executes; the losing pod's
  * tick is a no-op — not a missed day, since the winning pod still covers the full catch-up gap
  * above.
+ *
+ * **CUTOFF re-check (#11680).** The forward cursor above only ever moves forward, so a day
+ * *behind* it is never checked again — and [AccountingDayScheduler] advances a CUTOFF day only on
+ * an OK run recorded AFTER the day's cutoff. A day that reaches CUTOFF after its tie-out already
+ * ran (measured live: 2026-07-31 was opened weeks late, cut off on 2026-08-27, and its only run is
+ * from 2026-08-01) therefore sat in CUTOFF forever, and its permanent stuck alert masked any other
+ * day that got stuck. So every run additionally re-checks each CUTOFF day up to [through] that
+ * has no run recorded at or after its cutoff — oldest first, bounded by the same catch-up cap,
+ * and never a date the forward catch-up just checked. Idempotent by construction: the re-check
+ * writes a run with `runAt` after the cutoff, so the day stops qualifying whatever the verdict.
+ * An OK verdict lets [AccountingDayScheduler] advance the day through its normal transition; a
+ * BREAK or ERROR leaves it in CUTOFF, reported exactly as today.
  */
 @ApplicationScoped
 class TieOutScheduler(
@@ -82,6 +97,11 @@ class TieOutScheduler(
     // because its observability wiring was not initialised. `lateinit` turns a missed StartupEvent
     // into an UninitializedPropertyAccessException thrown from the middle of the run.
     private var liveness: WorkflowLivenessRecorder? = null
+
+    // Field-injected: the constructor already carries eight parameters and detekt's
+    // LongParameterList fires AT nine (same shape as AccountingDayScheduler's metrics wiring).
+    @Inject
+    lateinit var accountingDayRepository: AccountingDayRepository
 
     // ADR-0160 mechanism 3. Registered once at startup (CDI beans are singletons), not per-run —
     // matches DomainMetrics.registerOutboxBacklog's "call once" contract and the one pre-existing
@@ -130,6 +150,14 @@ class TieOutScheduler(
                 log.infof("Sub-ledger tie-out: already checked through %s — nothing to do", through)
             }
             dates.forEach { asOf -> runTieOutFor(asOf) }
+            recheckDates(through, alreadyChecked = dates.toSet()).forEach { asOf ->
+                log.infof(
+                    "Sub-ledger tie-out: re-checking %s — accounting day is CUTOFF with no run " +
+                        "recorded after its cutoff",
+                    asOf,
+                )
+                runTieOutFor(asOf)
+            }
         }
         if (ran == null) {
             log.infof("Sub-ledger tie-out: another pod already holds this tick's lock — skipping")
@@ -168,6 +196,28 @@ class TieOutScheduler(
             )
         }
         return gap.take(maxCatchUpDays)
+    }
+
+    /**
+     * CUTOFF days up to [through] whose newest run predates their cutoff (or that have no run at
+     * all), oldest first, excluding [alreadyChecked], capped at [maxCatchUpDays]. A failure to
+     * read the calendar is contained: the forward catch-up has already run, and the re-check is
+     * retried on the next run.
+     */
+    @Suppress("TooGenericExceptionCaught") // scheduler must survive any infra failure
+    private suspend fun recheckDates(through: LocalDate, alreadyChecked: Set<LocalDate>): List<LocalDate> = try {
+        val due = mutableListOf<LocalDate>()
+        for (day in accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF)) {
+            if (due.size >= maxCatchUpDays) break
+            val cutoffAt = day.cutoffAt ?: continue
+            if (day.businessDate > through || day.businessDate in alreadyChecked) continue
+            val latest = runRepository.findLatestFor(day.businessDate)
+            if (latest == null || latest.runAt.isBefore(cutoffAt)) due += day.businessDate
+        }
+        due
+    } catch (ex: Exception) {
+        log.errorf(ex, "Sub-ledger tie-out: CUTOFF re-check lookup failed: %s", ex.message)
+        emptyList()
     }
 
     private suspend fun runTieOutFor(asOf: LocalDate) {
