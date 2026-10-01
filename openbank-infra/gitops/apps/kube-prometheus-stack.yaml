@@ -95,9 +95,10 @@ spec:
                 # whole observability pool died, the one signal designed to say so went
                 # nowhere. Route it, first and unconditionally, to a GoAlert heartbeat
                 # monitor: GoAlert pages (via ntfy + the on-call policy) when the beat
-                # stops. The heartbeat URL lives next to the integration URL in the
-                # `goalert` Vault entry (property `heartbeat_url`; es-goalert-webhook.yaml).
-                # While that property is missing, this receiver's url_file does not exist,
+                # stops. The heartbeat URL is key `heartbeat_url` of the `goalert-webhook-url`
+                # Secret, written by the ops step that creates the monitor (see
+                # es-goalert-webhook.yaml for why it is not an ExternalSecret key).
+                # While that key is missing, this receiver's url_file does not exist,
                 # every send fails and AlertmanagerFailedToSendAlerts reaches Slack via the
                 # route just below — which is the correct, visible state for "the dead-man
                 # is not wired yet", never a silent one.
