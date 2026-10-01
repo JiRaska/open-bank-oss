@@ -154,11 +154,11 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0142](0142-credit-decisioning-engine.md) | Credit decisioning engine on the ML decisioning platform | Proposed | Planned | lending,ml,compliance | — |
 | [0143](0143-runtime-product-fee-posting-via-a-dedicated-billing-service.md) | Runtime product fee posting via a dedicated billing service | Accepted | Partial | fees-billing,ledger,architecture | — |
 | [0144](0144-gate-graduation-advisory-rules-carry-an-enforcement-deadline.md) | Gate graduation — advisory rules carry an enforcement deadline | Accepted | Shipped | governance,ci | — |
-| [0145](0145-api-deprecation-and-sunset-policy.md) | API deprecation and sunset policy | Accepted | Planned | api-contract,psd2-api,governance | — |
+| [0145](0145-api-deprecation-and-sunset-policy.md) | API deprecation and sunset policy | Accepted | Partial | api-contract,psd2-api,governance | — |
 | [0146](0146-incident-response-and-security-operations-framework.md) | Incident response and security-operations framework | Accepted | Partial | security-ops,resilience,compliance | — |
 | [0147](0147-cross-repo-governance-delivery-status-beyond-the-monorepo.md) | Cross-repo governance — delivery status beyond the monorepo | Accepted | Shipped | governance,docs | — |
 | [0148](0148-ai-assurance-prompt-registry-evals-gate-and-eu-ai-act-mapping.md) | AI assurance — prompt registry, evals gate, and EU AI Act mapping | Accepted | Partial | ai-agents,governance,compliance | — |
-| [0149](0149-digital-accessibility-standard-wcag-2-2-aa-en-301-549.md) | Digital accessibility standard (WCAG 2.2 AA / EN 301 549) | Accepted | Planned | i18n-a11y,compliance,admin-ui | — |
+| [0149](0149-digital-accessibility-standard-wcag-2-2-aa-en-301-549.md) | Digital accessibility standard (WCAG 2.2 AA / EN 301 549) | Accepted | Partial | i18n-a11y,compliance,admin-ui | — |
 | [0150](0150-internationalization-and-language-support-strategy.md) | Internationalization and language-support strategy | Accepted | Planned | i18n-a11y,admin-ui | — |
 | [0151](0151-chaos-engineering-and-infrastructure-failure-injection-policy.md) | Chaos engineering and infrastructure failure-injection policy | Accepted | Planned | resilience,testing,kubernetes | — |
 | [0152](0152-single-tenancy-boundary-statement.md) | Single-tenancy boundary statement | Accepted | N/A | architecture,governance | — |
@@ -245,7 +245,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0234](0234-identity-aware-edge-gate-for-internal-tool-uis.md) | Identity-aware edge gate for internal tool UIs | Accepted | Partial | authn,networking,observability,admin-ui | — |
 | [0235](0235-continuous-ai-assurance.md) | Continuous AI assurance — adversarial gate, conformity-as-code, and beyond-phase-5 roadmap | Proposed | Planned | ai-agents,governance,compliance | — |
 | [0236](0236-deployed-main-drift-watch.md) | Deployed == main drift watch | Accepted | Shipped | gitops,observability,ci | — |
-| [0237](0237-scheduler-feed-liveness-heartbeat.md) | Scheduler and external-feed liveness heartbeat | Proposed | Shipped | observability,ci,governance | — |
+| [0237](0237-scheduler-feed-liveness-heartbeat.md) | Scheduler and external-feed liveness heartbeat | Accepted | Shipped | observability,ci,governance | — |
 | [0238](0238-copilot-conversation-memory-two-tiers-explicit-only.md) | Copilot conversation memory: two tiers, explicit only | Proposed | Planned | ai-agents,privacy-gdpr,database | — |
 | [0239](0239-delivery-outcome-events-for-notification-requests.md) | Delivery-outcome events for notification requests | Proposed | Partial | notifications,kafka,api-contract,privacy-gdpr | — |
 | [0240](0240-campaign-conversion-attribution-product-event.md) | Campaign conversion attribution: a product event correlated to the goal | Proposed | Planned | notifications,analytics,privacy-gdpr | — |
@@ -286,8 +286,8 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0277](0277-cluster-capable-runner.md) | Cluster-capable runner: provision the declared batch scale set and a DR lane | Proposed | Planned | ci,gitops,finops,resilience | — |
 | [0278](0278-cyber-resilience-act-readiness-secure-sdlc-sbom-and-vulnerability-reporting-duties.md) | Cyber Resilience Act readiness — secure SDLC, SBOM and vulnerability-reporting duties | Proposed | Planned | security,compliance,supply-chain,ci | — |
 | [0279](0279-security-excellence-roadmap-offensive-testing-security-observability.md) | Security Excellence roadmap — offensive testing, security observability and shared security primitives | Proposed | Partial | security,testing,observability,compliance | — |
-| [0280](0280-four-eyes-service-account-exemptions-for-automated-sca-callers.md) | Four-eyes service-account exemptions for automated SCA callers | Proposed | Shipped | security,authz,sca,governance | — |
-| [0281](0281-net-settlement-ledger-leg.md) | Net-settlement ledger leg for cleared batches | Proposed | Shipped | ledger,kafka | — |
+| [0280](0280-four-eyes-service-account-exemptions-for-automated-sca-callers.md) | Four-eyes service-account exemptions for automated SCA callers | Accepted | Shipped | security,authz,sca,governance | — |
+| [0281](0281-net-settlement-ledger-leg.md) | Net-settlement ledger leg for cleared batches | Accepted | Shipped | ledger,kafka | — |
 | [0282](0282-lipa-loyalty-ecosystem-financial-health-rewards-personal-offerings.md) | Lípa: a financial-health loyalty ecosystem tying rewards, micro-segments, personal offerings and Customer 360 together | Proposed | Planned | product-catalog,analytics,fees-billing,mobile-app | openbank-app |
 | [0283](0283-card-platform-scheme-agnostic-capability-ports.md) | Card platform: scheme-agnostic capability ports and card-processing as a bounded context | Accepted | Partial | cards,architecture,payments,ai-agents | — |
 | [0284](0284-legal-entity-onboarding-representation-mandates-and-profile-switching-kyb.md) | Legal-entity onboarding, representation mandates and profile switching (KYB) | Proposed | Partial | onboarding,kyc,authz,mobile-app | openbank-app |
@@ -321,12 +321,12 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0314](0314-risk-engine-balance-sheet-snapshot-and-cash-flow-model.md) | Risk engine: balance-sheet snapshot and cash-flow data model | Accepted | Partial | architecture,analytics,database,regulatory-reporting | — |
 | [0315](0315-treasury-service-domain.md) | Treasury service domain: deals, GL posting, nostro and minimum reserves | Accepted | Partial | architecture,ledger,accounting-close,ai-agents | — |
 | [0316](0316-cloud-finops-dashboard-from-in-cluster-infracost-cost-explorer.md) | Cloud FinOps dashboard from in-cluster Infracost + Cost Explorer | Accepted | Partial | finops,observability,analytics | — |
-| [0317](0317-split-openbank-libs-domain-into-a-platform-core-and-per-bounded-context-libs-modules.md) | Split openbank-libs-domain into a platform core and per-bounded-context libs modules | Proposed | Planned | libs,architecture,ci | — |
-| [0318](0318-money-allocation-and-rounding-policy-registry.md) | Money allocation and rounding policy registry | Proposed | Planned | libs,interest,fx,fees-billing | — |
-| [0319](0319-generated-contract-bound-inter-service-rest-clients.md) | Generated, contract-bound inter-service REST clients | Proposed | Planned | api-contract,testing,libs,architecture | — |
-| [0320](0320-openbank-libs-security-shared-egress-sender-constrained-tokens-and-data-protection-primitives.md) | openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives | Proposed | Planned | security,libs,authn,privacy-gdpr | — |
-| [0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md) | Shared resilience policy profiles for inter-service calls | Proposed | Planned | resilience,libs,testing,compliance | — |
-| [0322](0322-structured-decision-log-envelope-for-automated-decisions.md) | Structured decision-log envelope for automated decisions | Proposed | Planned | audit,ai-agents,authz,compliance | — |
+| [0317](0317-split-openbank-libs-domain-into-a-platform-core-and-per-bounded-context-libs-modules.md) | Split openbank-libs-domain into a platform core and per-bounded-context libs modules | Proposed | Partial | libs,architecture,ci | — |
+| [0318](0318-money-allocation-and-rounding-policy-registry.md) | Money allocation and rounding policy registry | Proposed | Partial | libs,interest,fx,fees-billing | — |
+| [0319](0319-generated-contract-bound-inter-service-rest-clients.md) | Generated, contract-bound inter-service REST clients | Proposed | Partial | api-contract,testing,libs,architecture | — |
+| [0320](0320-openbank-libs-security-shared-egress-sender-constrained-tokens-and-data-protection-primitives.md) | openbank-libs-security: shared egress, sender-constrained tokens and data-protection primitives | Proposed | Partial | security,libs,authn,privacy-gdpr | — |
+| [0321](0321-shared-resilience-policy-profiles-for-inter-service-calls.md) | Shared resilience policy profiles for inter-service calls | Proposed | Partial | resilience,libs,testing,compliance | — |
+| [0322](0322-structured-decision-log-envelope-for-automated-decisions.md) | Structured decision-log envelope for automated decisions | Proposed | Partial | audit,ai-agents,authz,compliance | — |
 | [0323](0323-producer-side-hash-linked-audit-envelope-via-outbox.md) | Producer-side hash-linked audit envelope via outbox | Proposed | Partial | audit,libs,compliance,kafka | — |
 | [0324](0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md) | Replace retired ingress-nginx with Gateway API on Envoy Gateway | Proposed | Planned | networking,kubernetes,security,gitops | — |
 | [0325](0325-cnpg-update-and-node-drain-resilience.md) | CNPG update and node-drain resilience | Accepted | Partial | database,resilience,kubernetes,capacity | — |
