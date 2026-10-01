@@ -74,6 +74,8 @@ data class LoanBookEntryResponse(
     val maturityDate: LocalDate?,
     val ifrs9Stage: String?,
     val remainingInstallments: List<RemainingInstallmentResponse>,
+    /** Lending's human contract number (#11107); optional — absent from an older lending. */
+    val contractNumber: String? = null,
 )
 
 data class LoanBookResponse(val asOf: LocalDate, val loans: List<LoanBookEntryResponse>)
@@ -111,6 +113,7 @@ class LendingAdapter(@RestClient private val client: LendingRestClient) : Lendin
             remainingInstallments = it.remainingInstallments.map { i ->
                 ScheduledInstallment(i.number, i.dueDate, i.principal, i.interest)
             },
+            contractNumber = it.contractNumber,
         )
     }
 }

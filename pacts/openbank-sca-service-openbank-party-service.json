@@ -1,0 +1,54 @@
+{
+  "consumer": {
+    "name": "openbank-sca-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the party whose type decides the SCA method",
+      "providerStates": [
+        {
+          "name": "a party exists with both a legal name and a trading name"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/b1b1b1b1-c2c2-4d4d-8e8e-f9f9f9f9f9f9"
+      },
+      "response": {
+        "body": {
+          "partyType": "COMPANY"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a party id the bank does not hold, before an SCA challenge",
+      "providerStates": [
+        {
+          "name": "no party exists for the id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/parties/00000000-0000-4000-8000-000000000001"
+      },
+      "response": {
+        "status": 404
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-party-service"
+  }
+}
