@@ -45,8 +45,27 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  # ADR-0325 fleet wave: required anti-affinity + zone spread. Changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: goalert-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 2Gi
@@ -130,6 +149,13 @@ spec:
           env:
             - name: GOALERT_LISTEN
               value: ":8080"
+            # Prometheus metrics on a separate listener (goalert_*: notification
+            # sends, failures, queue depth, heartbeat state). Scraped by
+            # servicemonitor-observability-stack.yaml. Until 2026-09-30 GoAlert's
+            # delivery health was known only from Alertmanager's side of the
+            # webhook — which is how the 98%-rejected episode (#11136) ran unseen.
+            - name: GOALERT_LISTEN_PROMETHEUS
+              value: ":8081"
             # Keycloak OIDC SSO (set in the DB via `goalert set-config`) builds its
             # callback from PUBLIC_URL, so it must be the browser-reachable URL.
             # GoAlert has no ingress (ADR-0056) → accessed via port-forward:
@@ -152,6 +178,8 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+            - name: metrics
+              containerPort: 8081
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -195,3 +223,6 @@ spec:
     - name: http
       port: 8080
       targetPort: http
+    - name: metrics
+      port: 8081
+      targetPort: metrics

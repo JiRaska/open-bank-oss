@@ -7,6 +7,10 @@ package com.openbank.sepa.infrastructure.rest
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyStore
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprints
+import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.actorName
 import com.openbank.libs.security.actorType
 import com.openbank.libs.web.ApiVersionResponseFilter
@@ -34,10 +38,16 @@ import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.core.SecurityContext
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import org.jboss.logging.Logger
 import java.net.URI
 import java.util.UUID
+
+private const val CREATE_PATH = "/api/v1/sepa-payments"
+private val log = Logger.getLogger(SepaPaymentResource::class.java)
 
 @Path("/api/v1/sepa-payments")
 @Produces(MediaType.APPLICATION_JSON)
@@ -65,17 +75,40 @@ class SepaPaymentResource(
         // answered 500 in exactly the case it was written for. A blank header was always a 400.
         require(!idempotencyKey.isNullOrBlank()) { "Idempotency-Key header is required" }
 
-        idempotencyStore.get(idempotencyKey)?.let { cached ->
-            return Response.status(cached.statusCode)
-                .entity(cached.responseBody)
+        // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
+        // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
+        // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
+        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+            is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
+                .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
                 .header("X-Idempotency-Replayed", "true")
                 .build()
+            ReserveResult.Mismatch -> throw IdempotencyKeyReusedException()
+            ReserveResult.InFlight -> throw IdempotencyRequestInProgressException()
+            ReserveResult.Reserved -> Unit
         }
 
-        val payment = paymentUseCase.createPayment(request.toCommand(idempotencyKey))
+        var created = false
+        val payment = try {
+            paymentUseCase.createPayment(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+        } finally {
+            // Any failure (the exception propagates unchanged) frees the in-flight marker so a
+            // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
+            // The release itself runs shielded from cancellation and never rethrows — a failure to
+            // release must not mask the original exception that made release necessary, and a
+            // cancelled caller must not abandon the release mid-flight and leave the key stuck
+            // IN_PROGRESS for its full TTL.
+            if (!created) {
+                withContext(NonCancellable) {
+                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                        .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
+                }
+            }
+        }
         val responseBody = payment.toResponse()
-        idempotencyStore.save(idempotencyKey, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))
 
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)

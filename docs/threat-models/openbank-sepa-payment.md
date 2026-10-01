@@ -51,6 +51,7 @@ value transfer — a primary fraud target; clears via batch/clearing rather than
 | **S**poofing | Forged initiation | OIDC + role; mTLS for service callers |
 | **S**poofing | Forged `pacs.002` ACSC from clearing-simulator (ADR-0104 D3) | clearing-simulator is cluster-internal only; OIDC CC verifies identity; `Pacs002Reader` validates XML schema before parsing; scheme accept moves payment to PROCESSING (money does not leave until settlement) |
 | **T**ampering | Alter amount/IBAN in flight | Server-validated, immutable once accepted; audit |
+| **T**ampering | Reuse an `Idempotency-Key` with a different payment body so the first payment's response is replayed for the second (#10916) | Key bound to a request fingerprint (method + path + canonical body, `RequestFingerprints`) and claimed atomically in Redis before the use case runs; mismatch refused 409 `IDEMPOTENCY_KEY_REUSED`, concurrent duplicate 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, nothing created. Durable second check: `sepa_payments.request_hash` (V12) refuses a reused key after the Redis record expired. Rows/records written before this change carry no fingerprint and still replay by key alone |
 | **R**epudiation | Deny initiating a transfer | AuditEvent + SCA evidence + correlation id |
 | **I**nfo disclosure | Payment history harvesting | AuthZ scoping; `ROLE_VIEWER` owner-scoped read |
 | **I**nfo disclosure | Domain metrics leak PII / enable per-payment inference via high-cardinality labels | `DomainMetrics` low-cardinality contract (ADR-0077): the `openbank.outbox.backlog` gauge is tagged only by `service` (`"sepa-payment"`) — never a payment id, debtor/creditor IBAN, amount, or any PII. The gauge exposes only a read-only **count** of processable (PENDING + FAILED) outbox rows, cached and refreshed off the scrape thread (no DB query on the Prometheus worker thread). `/q/metrics` is cluster-internal |
@@ -141,6 +142,29 @@ unreachable document-service fails only the download, never a payment transition
 simply stops existing).
 
 ## 6. Change log
+
+- **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
+  checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
+  delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
+  issue #10915/#11031). Paths, status codes, JSON field names and `openapi.yaml` are unchanged,
+  and the intentionally asymmetric role sets stay exactly as before — `listPending` stays
+  `ROLE_OPERATOR`/`ROLE_ADMIN` only, `decide` additionally admits `ROLE_PAYMENTS` — only the
+  `@Path`/`@RolesAllowed`/`@Authorize`/`@Tag` annotations remain per-service, and
+  `checkerId(identity)` is resolved AFTER the null-body check (same ordering `decide` documents in
+  libs-runtime, fixed in #11033/#11047).
+
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
 
 - **2026-09-14** — Return-evidence source revision (ADR-0306): SEPA lifecycle transitions increment
   persisted `aggregate_revision` under a row lock, and created, status and return outbox bodies
@@ -405,4 +429,36 @@ simply stops existing).
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 5 restamps the transaction-service policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding a transaction read rule for party-service. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No boundary change for this service** (shared-manifest attribution). #10486 batch 6 restamps the card-issuance policy checksum in `openbank-infra/gitops/components/payments/payments-services.yaml` after adding two card read rules. sepa-payment's Rollout, identity, rest-clients and OPA grants are unchanged. Nothing to roll back here.
 - **2026-09-21** — **No grant for mcp-service's payment confirmation (#10486 batch 7), plus shared-manifest attribution.** mcp-service's `SepaPaymentServiceClient` now presents `service-account-openbank-mcp` (`ROLE_API` only) instead of the shared client. sepa-payment deliberately grants it nothing and its RBAC is unchanged: the MCP tool behind it (`get_payment_confirmation`, `query.payment_confirmation.readonly`) is held by no charter, so the call was already refused at the MCP gate. The same PR restamps the sepa-instant and transaction policy checksums in `payments-services.yaml`. sepa-payment's own Rollout, identity and OPA grants are unchanged. Nothing to roll back here.
-- **2026-09-25** — **Source-owned workflow observations for incident investigation (#10868, staged).** The write is **disabled by default** until a stable 1×/10× payment-control measurement approves activation. When enabled, each new payment creation or status transition writes an append-only row with its payment UUID, revision, status, source outbox event UUID/type, SHA-256 payload digest, observation time and synthetic flag in the same database transaction as the payment and outbox event. Additive V11 records the explicit environment and workflow start time on new rows; older rows retain null scope rather than acquiring invented history, and cannot be reported as complete. Activation without a valid environment fails at startup. The row establishes the workflow outcome only; it does not assert that an ICT incident caused it. **STRIDE-I/R:** the event link, unique revision and PostgreSQL transaction identity make the source claim traceable and replay-resistant; a mutation trigger rejects updates/deletes by the application role. **STRIDE-I/D:** payment UUIDs remain sensitive source-local identifiers; this stage adds no endpoint, Kafka subscription, Context feed, broader role or cross-service disclosure. Existing payments and payments while the write is disabled have no observation history and must be reported as unknown, not complete. Rollback before writes: drop the table after reverting code; after writes, retain records through the evidence-retention period and retire readers first.
+- **2026-09-25** — **Source-owned workflow observations for incident investigation (#10868, staged).** The write is **disabled by default** until a stable 1×/10× payment-control measurement approves activation. When enabled, each new payment creation or status transition writes an append-only row with its payment UUID, revision, status, source outbox event UUID/type, SHA-256 payload digest, observation time and synthetic flag in the same database transaction as the payment and outbox event. Additive V14 records the explicit environment and workflow start time on new rows; older rows retain null scope rather than acquiring invented history, and cannot be reported as complete. Activation without a valid environment fails at startup. The row establishes the workflow outcome only; it does not assert that an ICT incident caused it. **STRIDE-I/R:** the event link, unique revision and PostgreSQL transaction identity make the source claim traceable and replay-resistant; a mutation trigger rejects updates/deletes by the application role. **STRIDE-I/D:** payment UUIDs remain sensitive source-local identifiers; this stage adds no endpoint, Kafka subscription, Context feed, broader role or cross-service disclosure. Existing payments and payments while the write is disabled have no observation history and must be reported as unknown, not complete. Rollback before writes: drop the table after reverting code; after writes, retain records through the evidence-retention period and retire readers first. Migrations are V13/V14 (renumbered above main's V12 so Flyway applies them in order).
+- **2026-09-26** — **Idempotency-Key bound to a request fingerprint on `POST /api/v1/sepa-payments` (#10945).** **Tampering / repudiation:** previously the same `Idempotency-Key` with a DIFFERENT body replayed the first request's response, so a second, different payment was answered as the first and silently never happened. Now the resource fingerprints method + path + the canonicalised DTO (`RequestFingerprints`, libs #10922) and claims the key ATOMICALLY (`IdempotencyStore.reserve`) before the use case runs: a different request under the key answers **409 `IDEMPOTENCY_KEY_REUSED`**, the same request still in flight **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and a failed create releases the claim so a retry can run. Because the Redis record expires (24 h) while the UNIQUE `idempotency_key` row does not, migration V12 adds nullable `sepa_payments.request_hash`, written on create; `SepaPaymentService` refuses a key whose stored hash differs (409), so the check survives Redis expiry or eviction. **Residual window:** Redis records and payment rows written before this deploy have no fingerprint and keep replaying by key alone (Redis for one TTL; legacy rows indefinitely). No new endpoint, caller, privilege or event. Rollback: revert the code, then `ALTER TABLE sepa_payments DROP COLUMN request_hash` (see V12 header).
+- **2026-09-27** — **Exception-mapper consolidation (#10911/#11059 phase 3, money-path), no wire
+  change.** SepaPaymentNotFoundMapper/InvalidSepaPaymentStateTransitionMapper — deleted: no
+  declaration remains (both names still appear in comments elsewhere, e.g.
+  `SepaPaymentService.kt`, which document the deletion rather than contradict it).
+  `SepaPaymentNotFoundException`/`InvalidSepaPaymentStateTransitionException` now extend
+  `com.openbank.libs.domain.error.ResourceNotFoundException`/`ResourceConflictException`, handled
+  by libs-runtime's `ResourceNotFoundExceptionMapper`/`ResourceConflictExceptionMapper` (added,
+  unused, by #10923). Both already used the base's default codes (`NOT_FOUND`/`CONFLICT`), so
+  status, `code` and `message` are byte-identical to the deleted mappers' output — verified by
+  `SepaPaymentExceptionMapperEquivalenceTest`. Only `traceId`'s source changes (`Ids.randomId()` →
+  the correlation MDC), which #10911 phase 1 established is not part of the wire contract. No
+  other mapper in this file (`PaymentNotCompletedMapper`, `DocumentTemplateUnavailableMapper`)
+  is touched. **Risk class:** none — response-plumbing de-duplication only; the payment workflow,
+  reversal port and Temporal orchestration are untouched. Rollback: restore the deleted mapper
+  classes and revert the exception base classes.
+
+- **2026-09-28** — **`ApprovalEndpointSupport.decide()` now resolves the checker identity lazily,
+  after the null-body check (#11047/#11061).** The prior parameter was a bare `SecurityIdentity`,
+  which looked like it deferred `checkerId()` resolution past `requireNotNull(request)` but did
+  not: Kotlin evaluates a call's argument expressions before the function body runs, so passing a
+  caller's `lateinit var identity` as that argument threw UninitializedPropertyAccessException at
+  the call site whenever the body was null — before `decide()` ever reached its own null-body
+  guard, inverting the documented and tested "null body rejected before any identity is resolved"
+  contract (`ApprovalNullBodyTest`, #3029). `decide()` now takes an
+  `identityProvider: () -> SecurityIdentity` supplier; this service's call site (stranded on the
+  older `support.decide(id, request, identity)` form by #11079 merging just ahead of this fix) is
+  migrated to `support.decide(id, request) { identity }`, and the supplier is invoked only after
+  `requireNotNull(request)` returns. **Risk class:** none — fixes an incorrect 500
+  (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
+  authorization, self-approval or wire-shape change. Rollback: revert to the eager
+  `SecurityIdentity` parameter.

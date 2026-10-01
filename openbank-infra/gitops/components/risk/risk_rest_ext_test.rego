@@ -154,3 +154,43 @@ test_treasury_roles_grant_nothing_in_risk if {
 			with data.rules as dept_rules
 	}
 }
+
+finrep_m2m := {"type": "HUMAN", "id": "service-account-openbank-finrep", "roles": ["ROLE_API"]}
+
+test_finrep_m2m_may_read_a_snapshot if {
+	rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.read"}
+}
+
+test_finrep_m2m_is_denied_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.snapshot.create"}
+}
+
+test_finrep_m2m_is_denied_curve_set_create if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.curve-set.create"}
+}
+
+# Same ROLE_API, different machine: the grant is by identity, not by role.
+test_other_api_service_account_is_denied_read if {
+	not rest.allow with input as {
+		"principal": {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]},
+		"action": "risk.snapshot.read",
+	}
+}
+
+# ADR-0315 D9: treasury's own identity reads curve sets for the simulated quotes — and nothing else.
+treasury_m2m := {"type": "HUMAN", "id": "service-account-openbank-treasury", "roles": ["ROLE_API"]}
+
+test_treasury_m2m_may_read_curve_sets if {
+	rest.allow with input as {"principal": treasury_m2m, "action": "risk.curve-set.read"}
+}
+
+test_treasury_m2m_is_denied_everything_but_the_curve_read if {
+	every a in {"risk.curve-set.create", "risk.snapshot.create", "risk.snapshot.read"} {
+		not rest.allow with input as {"principal": treasury_m2m, "action": a}
+	}
+}
+
+# Same ROLE_API, different machine (finrep): the curve grant is by identity, not by role.
+test_other_api_service_account_is_denied_curve_read if {
+	not rest.allow with input as {"principal": finrep_m2m, "action": "risk.curve-set.read"}
+}

@@ -9,7 +9,7 @@
 #
 # Fix (creds-free — the build pool deliberately has ZERO cloud creds because it
 # runs untrusted PR code, so an ECR pull-through cache that needs auth is out):
-# run an in-cluster registry:2 in pull-through (proxy) mode against Docker Hub.
+# run an in-cluster registry (distribution v3) in pull-through (proxy) mode against Docker Hub.
 # dind points `--registry-mirror` at this Service, so docker.io pulls are served
 # from the in-cluster cache (PVC) over the pod network — OFF the NAT. Only the
 # first pull of each image/tag fetches from Docker Hub (once, through NAT), which
@@ -80,7 +80,15 @@ spec:
       containers:
         - name: registry
           # Pinned tag (Docker Hub official). One-time kubelet pull at rollout.
-          image: docker.io/library/registry:2.8.3
+          # distribution v3: config is env-only here, and every REGISTRY_* key
+          # below is unchanged in v3 (the image's config file moved to
+          # /etc/distribution/config.yml, which env overrides make irrelevant).
+          # Verified locally 2026-09-28 before the 2.8.3 -> 3.1.2 bump: v3 serves
+          # a cache directory written by 2.8.3 (filesystem layout compatible, so
+          # the PVCs need no migration) and proxies docker.io, quay.io and ghcr.io
+          # as uid 1000. Like 2.8.3, it exits at startup if the upstream is
+          # unreachable (auth-challenge ping); kubelet restarts it with backoff.
+          image: docker.io/library/registry:3.1.2
           ports:
             - containerPort: 5000
           env:
@@ -92,6 +100,14 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5000"
+            # distribution v3's bundled config also starts a debug/metrics server on
+            # :5001 (http.debug.addr). quay-cache serves on :5001 and crashlooped on
+            # "listen tcp :5001: bind: address already in use". Pin the debug server
+            # explicitly on every cache, outside the 5000-5002 serving range, so the
+            # image default can never collide with a serving port again. Not exposed
+            # (nothing scrapes it). Enforced by check-container-listen-port-collisions.py.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
             # In-memory blob descriptor cache: manifest lookups resolve from RAM
             # instead of re-reading the gp3 blob index on every HEAD/GET.
             # Without this, parallel dind pulls (max-parallel=8) can each issue a
@@ -200,7 +216,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: registry
-          image: docker.io/library/registry:2.8.3
+          image: docker.io/library/registry:3.1.2
           ports:
             - containerPort: 5001
           env:
@@ -210,6 +226,9 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5001"
+            # See registry-cache above: debug server pinned off the serving port.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry
@@ -300,7 +319,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: registry
-          image: docker.io/library/registry:2.8.3
+          image: docker.io/library/registry:3.1.2
           ports:
             - containerPort: 5002
           env:
@@ -310,6 +329,9 @@ spec:
               value: "/var/lib/registry"
             - name: REGISTRY_HTTP_ADDR
               value: ":5002"
+            # See registry-cache above: debug server pinned off the serving port.
+            - name: REGISTRY_HTTP_DEBUG_ADDR
+              value: ":5100"
           volumeMounts:
             - name: data
               mountPath: /var/lib/registry

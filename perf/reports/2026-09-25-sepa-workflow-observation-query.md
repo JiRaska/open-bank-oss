@@ -5,7 +5,7 @@ This probe checks the database access path added for source-owned incident evide
 ## Setup
 
 - Disposable, port-unpublished `postgres:16.3-alpine` container on Docker 29.4.0.
-- The branch's exact `V10__payment_workflow_observations.sql` migration, after a minimal `sepa_payments(payment_id UUID PRIMARY KEY)` parent table.
+- The branch's exact `V13__payment_workflow_observations.sql` migration (originally drafted as V10), after a minimal `sepa_payments(payment_id UUID PRIMARY KEY)` parent table.
 - One synthetic payment UUID. First 100,000 contiguous observation revisions, then 1,000,000; these are deliberately extreme degrees for one payment, not a claimed production distribution.
 - `ANALYZE` after each load. One `EXPLAIN (ANALYZE, BUFFERS)` sample at each size, plus one warm-cache repeat at 1,000,000. The query selects the seven fields returned by `SepaWorkflowObservationSource`, applies `payment_id` and upper revision filters, orders by revision descending and limits to 101 rows.
 - No network port was published. The container and synthetic data were removed after the probe.

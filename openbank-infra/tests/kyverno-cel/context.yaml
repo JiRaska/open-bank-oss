@@ -1,0 +1,8 @@
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Context
+metadata: {name: context}
+spec:
+  resources:
+    - apiVersion: argoproj.io/v1alpha1
+      kind: Rollout
+      metadata: {name: ledger-service, namespace: ledger}

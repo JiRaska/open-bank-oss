@@ -2,6 +2,20 @@
 
 All notable changes to this service are documented here.
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.4.1...referral-service-v0.5.0) (2026-09-29)
+
+
+### Features
+
+* **referral:** qualify invites from account-opened facts at event or attribution time ([#10010](https://github.com/JiRaska/open-bank-oss/issues/10010)) ([a93812b](https://github.com/JiRaska/open-bank-oss/commit/a93812ba1895362b910ad6e3aa6446deab55e501))
+
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.4.0...referral-service-v0.4.1) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.3.0...referral-service-v0.4.0) (2026-09-13)
 
 

@@ -191,6 +191,16 @@ const PERSONAS: Record<string, PersonaDefinition> = {
     talents: [{ cs: 'Firemní zůstatky', en: 'Business balances' }, { cs: 'Návrh platby', en: 'Payment proposals' }, { cs: 'Kontext mandátu', en: 'Mandate context' }],
     accent: '#c2410c', glow: '#fed7aa', shell: '#fff7ed', variant: 'guide', icon: Scale,
   },
+  // ADR-0315 D10 (#10896). Reads deals, counterparties and positions and may draft a deal, but
+  // can never submit, approve, book, settle, mature, reverse or override a limit — that stays a
+  // second human. The persona exists so this charter does not render as "Nový kolega".
+  'treasury-dealing-assistant': {
+    name: { cs: 'Tesa', en: 'Tesa' }, role: { cs: 'Asistentka treasury dealera', en: 'Treasury dealing assistant' },
+    purpose: { cs: 'Čte pozice, protistrany a limity a připraví návrh obchodu i s podklady, na kterých stojí.', en: 'Reads positions, counterparties and limits and drafts a deal along with the inputs it relied on.' },
+    value: { cs: 'Zrychluje přípravu obchodu, ale nikdy ho sama nepodá, neschválí ani nezaúčtuje.', en: 'Speeds up deal preparation without ever submitting, approving or booking it itself.' },
+    talents: [{ cs: 'Čtení pozic', en: 'Position reading' }, { cs: 'Kontrola limitu', en: 'Limit checks' }, { cs: 'Návrh obchodu', en: 'Deal drafting' }],
+    accent: '#0e7490', glow: '#a5f3fc', shell: '#ecfeff', variant: 'lens', icon: ChartNoAxesCombined,
+  },
 }
 
 const FALLBACK: PersonaDefinition = {

@@ -171,6 +171,12 @@ resource "aws_eks_node_group" "bootstrap" {
   capacity_type   = "ON_DEMAND"
   instance_types  = var.node_instance_types
 
+  # Track the control plane. Without this the node group keeps whatever
+  # version it was created with, so a control-plane bump leaves nodes behind.
+  # Reading it off the cluster (not the variable) orders the node rolling
+  # update after the control-plane upgrade within one apply.
+  version = aws_eks_cluster.this.version
+
   scaling_config {
     desired_size = var.node_desired_size
     min_size     = var.node_min_size
@@ -218,7 +224,7 @@ resource "aws_eks_node_group" "bootstrap" {
 # node group.
 # ---------------------------------------------------------------------------
 data "aws_eks_addon_version" "this" {
-  for_each           = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"])
+  for_each           = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver", "eks-node-monitoring-agent"])
   addon_name         = each.value
   kubernetes_version = aws_eks_cluster.this.version
 }
@@ -287,6 +293,62 @@ resource "aws_eks_addon" "pod_identity" {
 }
 
 # ---------------------------------------------------------------------------
+# EKS node monitoring agent (2026-09-30). A DaemonSet that reads node logs and
+# surfaces node-level faults as NodeConditions (NetworkingReady, StorageReady,
+# KernelReady, ContainerRuntimeReady, AcceleratedHardwareReady) and node Events.
+# Without it a node exposes only the four kubelet conditions, and a node whose
+# CNI has no free IPs, whose interface is down, or whose runtime cannot progress
+# a pod reads `Ready=True` — which is exactly how a node with an ENI stuck
+# `attaching` blackholed seven pods for up to 55 min on 2026-09-30.
+#
+# What it buys, honestly (docs.aws.amazon.com/eks/latest/userguide/node-health-nma.html,
+# read 2026-09-30): the out-of-IPs case is `IPAMDNoIPs`, an EVENT, not a
+# condition — the agent makes it visible in `kubectl describe node` but triggers
+# no repair; and an EBS volume stuck attaching is not in its detection list at
+# all. So neither of this week's two incidents would have been auto-repaired by
+# installing this; the alerts in components/observability/prometheus-rules-
+# node-pod-startup.yaml are the control for those. What the agent DOES turn into
+# conditions is a dead IPAMD (IPAMDNotRunning/IPAMDNotReady), an interface down
+# (InterfaceNotUp/InterfaceNotRunning), a lost loopback, a node out of PIDs
+# (ForkFailedOutOfPIDs) and a pod stuck terminating on CRI errors
+# (PodStuckTerminating) — each a node whose pods are already broken.
+#
+# INTERACTION WITH KARPENTER NODE REPAIR — read before touching either side.
+# The platform root already runs Karpenter with `featureGates.nodeRepair=true`
+# (#809, the no-swap livelock backstop), which today acts only on
+# Ready=False/Unknown after 30m. With this agent installed Karpenter also acts on
+# the five agent conditions above (30m toleration each, 10m for accelerated
+# hardware — karpenter.sh/docs/concepts/disruption, Node Repair). That action is
+# FORCEFUL: "Karpenter will forcefully terminate the node and its corresponding
+# NodeClaim, bypassing the standard drain and grace period procedures" — it
+# ignores PDBs and `karpenter.sh/do-not-disrupt`. The guard is that "Karpenter
+# will not perform repairs if more than 20% of nodes in a NodePool are unhealthy".
+# On this cluster a forced termination of a node holding a single-instance CNPG
+# primary is a database outage (ADR-0325; money-path clusters are HA per
+# ADR-0159, the rest are not). That is accepted here for the condition set above
+# because every one of them describes a node on which that primary is already
+# not serving, and the 30m toleration leaves NodeDegradedWhileReady
+# (prometheus-rules-node-health.yaml, fires at 5m) 25 minutes to page a human
+# first. Do NOT lower the toleration, and do not add agent conditions to a
+# NodePool budget expecting them to be honoured — repair is not a budgeted
+# disruption. Managed-node-group auto repair (node_repair_config above) also
+# consumes these conditions, for the bootstrap pool only.
+#
+# Cost: requests 10m CPU / 30Mi per node (chart defaults), tolerates every taint,
+# system-node-critical. At today's 24 nodes that is 0.24 vCPU / 0.7Gi reserved
+# against 86 vCPU / 378Gi allocatable (0.3% / 0.2%); it never provisions a node.
+# The DCGM server component schedules only on NVIDIA instance types (none here).
+# ---------------------------------------------------------------------------
+resource "aws_eks_addon" "node_monitoring_agent" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "eks-node-monitoring-agent"
+  addon_version               = data.aws_eks_addon_version.this["eks-node-monitoring-agent"].version
+  resolve_conflicts_on_update = "OVERWRITE"
+  tags                        = var.tags
+  depends_on                  = [aws_eks_node_group.bootstrap]
+}
+
+# ---------------------------------------------------------------------------
 # EBS CSI driver — the in-tree kubernetes.io/aws-ebs provisioner is removed in
 # EKS 1.31, so persistent volumes (CNPG Postgres, etc.) need this addon. Auth is
 # EKS Pod Identity (preferred over IRSA): the addon's controller SA assumes a
@@ -320,6 +382,22 @@ resource "aws_eks_addon" "ebs_csi" {
   addon_version               = data.aws_eks_addon_version.this["aws-ebs-csi-driver"].version
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
+
+  # Nitro instances share one attachment budget between EBS volumes, ENIs and NVMe
+  # instance store. The driver's heuristic counts the ENIs present when ebs-csi-node
+  # STARTS; VPC CNI attaches more ENIs later as pods land, so CSINode keeps advertising
+  # slots that no longer exist. The scheduler then places a volume pod the node cannot
+  # take and it sits in Init with "ResourceExhausted: Attachment limit exceeded".
+  # Measured 2026-09-28 on m6g.2xlarge: CSINode allocatable 26, EC2 refused at 24; four
+  # single-instance databases lost their primary to it after a spot interruption.
+  # Reserve the fleet's worst case (Graviton xlarge/2xlarge): root (1) + max ENIs (4) +
+  # instance store on *gd variants (1) = 6. Costs a few volume slots per node; buys a
+  # scheduler that never overcommits EBS.
+  configuration_values = jsonencode({
+    node = {
+      reservedVolumeAttachments = 6
+    }
+  })
 
   pod_identity_association {
     role_arn        = aws_iam_role.ebs_csi.arn

@@ -195,7 +195,7 @@ class SepaPaymentOutboxAtomicityIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
-    fun `a pre-V11 observation keeps its missing environment unknown`() {
+    fun `a pre-V14 observation keeps its missing environment unknown`() {
         val paymentId = createPayment()
         val legacyEventId = UUID.randomUUID()
         dataSource.connection.use { connection ->

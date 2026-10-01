@@ -16,7 +16,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-collector
-    targetRevision: 0.158.0
+    targetRevision: 0.173.1
     helm:
       valuesObject:
         fullnameOverride: otel-collector
@@ -38,6 +38,18 @@ spec:
         presets:
           kubernetesAttributes:
             enabled: true
+        # The header above has claimed "scraped via the chart's ServiceMonitor"
+        # since the app was written; neither key was set, so it never was
+        # (measured 2026-09-30: 0 otelcol_* series). Expose 8888 and let the
+        # chart create the monitor. Note the fleet exports OTLP straight to
+        # tempo:4317 (QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT in every component),
+        # so this collector currently sees no spans; the metrics make that
+        # visible instead of inferred.
+        ports:
+          metrics:
+            enabled: true
+        serviceMonitor:
+          enabled: true
         config:
           receivers:
             otlp:
@@ -58,7 +70,7 @@ spec:
               send_batch_max_size: 2048
               timeout: 5s
           exporters:
-            otlp/tempo:
+            otlp_grpc/tempo:
               endpoint: tempo.observability.svc:4317
               tls:
                 insecure: true
@@ -85,7 +97,7 @@ spec:
               traces:
                 receivers: [otlp]
                 processors: [memory_limiter, batch]
-                exporters: [otlp/tempo]
+                exporters: [otlp_grpc/tempo]
   destination:
     server: https://kubernetes.default.svc
     namespace: observability

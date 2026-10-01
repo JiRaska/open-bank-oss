@@ -210,6 +210,26 @@ allowed_reasons contains "service-settlement-ledger-post" if {
 	input.action in {"ledger.create", "ledger.read"}
 }
 
+# ADR-0315 — treasury-service on its own identity (named oidc-client `m2m`, Keycloak client
+# `openbank-treasury`, ROLE_API only). It posts the settlement, maturity and reversal journals of a
+# money-market deal -> ledger.create: a reversal is an offsetting journal it posts itself
+# (idempotency key treasury:<dealId>:reversed), so it never needs ledger.reverse.
+allowed_reasons contains "service-treasury-ledger-post" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-treasury"
+	input.action == "ledger.create"
+}
+
+# Nostro reconciliation (ADR-0315, #10896): treasury reads the journals of one statement date
+# (GET /api/v1/journals -> ledger.list) and the trial balance (GET /api/v1/journals/trial-balance
+# -> ledger.read) to compare the nostro GL against the correspondent's camt.053. Read-only; it
+# never posts a reconciling entry.
+allowed_reasons contains "service-treasury-ledger-read" if {
+	input.principal.type == "HUMAN"
+	input.principal.id == "service-account-openbank-treasury"
+	input.action in {"ledger.list", "ledger.read"}
+}
+
 # Only transaction-service's client exposes a reverseJournal call. lending-service and
 # settlement-service have NO reverseJournal method on their ledger RestClients — granting
 # ledger.reverse to every caller sharing the openbank-services identity would open the one

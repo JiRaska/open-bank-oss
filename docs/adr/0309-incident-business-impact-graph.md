@@ -100,7 +100,7 @@ SEPA can record a source-owned payment workflow observation in the same transact
 aggregate revision and outbox event. The new write is **off by default** until a stable,
 production-like 1×/10× payment-control comparison approves activation. Its source-local row
 holds the payment UUID, event UUID/type, revision, status, payload digest, observation and
-recording times, plus synthetic provenance. Additive V11 stores the explicit environment and
+recording times, plus synthetic provenance. Additive V14 stores the explicit environment and
 workflow start time for new observations; earlier rows remain nullable and are not backfilled
 with invented scope. The bounded internal reader reports `COMPLETE`, `PARTIAL` or `UNKNOWN`,
 marking gaps, absent scope, cross-environment revisions and backwards-time observations unknown.

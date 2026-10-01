@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.infrastructure.rest
 
+import com.openbank.ledger.application.port.`in`.GetAccountCurrencyBalanceQuery
 import com.openbank.ledger.application.port.`in`.GetJournalQuery
 import com.openbank.ledger.application.port.`in`.GetJournalsByTransactionQuery
 import com.openbank.ledger.application.port.`in`.GetSubLedgerBalancesQuery
@@ -16,6 +17,7 @@ import com.openbank.ledger.application.port.`in`.ReplayBookedChangesCommand
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesResult
 import com.openbank.ledger.application.port.`in`.ReplayBookedChangesUseCase
 import com.openbank.ledger.application.port.`in`.ReverseJournalCommand
+import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
@@ -103,6 +105,36 @@ class LedgerResource(
     }
 
     @GET
+    @Path("/accounts/{code}/balance")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "")
+    @Operation(
+        summary = "A GL account's balance in one transaction currency (native amounts, #11107)",
+        description = "Sums the native amount of booked lines in `currency` up to and including " +
+            "`asOf`; base-only CZK lines (FX revaluation) never move a foreign-currency balance.",
+    )
+    suspend fun accountCurrencyBalance(
+        @PathParam("code") code: String,
+        @QueryParam("asOf") asOf: String?,
+        @QueryParam("currency") currency: String?,
+        @QueryParam("scope") scope: String?,
+    ): Response {
+        requireNotNull(asOf) { "query parameter 'asOf' is required" }
+        requireNotNull(currency) { "query parameter 'currency' is required" }
+        require(CURRENCY_CODE.matches(currency)) { "query parameter 'currency' must be an ISO 4217 code" }
+        val date = try {
+            LocalDate.parse(asOf)
+        } catch (e: java.time.format.DateTimeParseException) {
+            throw IllegalArgumentException("query parameter 'asOf' must be YYYY-MM-DD", e)
+        }
+        val ledgerScope = LedgerScope.parse(scope)
+        val balance = ledgerUseCase.getAccountCurrencyBalance(
+            GetAccountCurrencyBalanceQuery(code, currency, date, ledgerScope),
+        )
+        return Response.ok(balance.toResponse(ledgerScope.name)).build()
+    }
+
+    @GET
     @Path("/sub-ledger-balances")
     @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "ledger.read", resource = "")
@@ -169,10 +201,14 @@ class LedgerResource(
             // principal. Never accept a caller-supplied header or coroutine MDC as synthetic.
             synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
         )
-        val entry = ledgerUseCase.postJournal(command)
+        val outcome = ledgerUseCase.postJournalWithOutcome(command)
+        val entry = outcome.entry
         return Response.created(URI.create("/api/v1/journals/${entry.id}"))
             .entity(entry.toResponse())
             .type(MediaType.APPLICATION_JSON)
+            // #10904: a replayed idempotency key answers with the same 201 and the same body as the
+            // original posting. This header is the only thing telling the caller nothing was posted.
+            .header(IDEMPOTENT_REPLAYED_HEADER, outcome.replayed.toString())
             .build()
     }
 
@@ -348,6 +384,28 @@ data class SubLedgerBalanceResponse(
     val net: BigDecimal,
 )
 
+data class AccountCurrencyBalanceResponse(
+    val code: String,
+    val currency: String,
+    val asOf: String,
+    val scope: String,
+    val debit: BigDecimal,
+    val credit: BigDecimal,
+    val net: BigDecimal,
+)
+
+private val CURRENCY_CODE = Regex("^[A-Z]{3}$")
+
+private fun AccountCurrencyBalance.toResponse(scope: String) = AccountCurrencyBalanceResponse(
+    code = code,
+    currency = currency,
+    asOf = asOf.toString(),
+    scope = scope,
+    debit = totalDebit,
+    credit = totalCredit,
+    net = net,
+)
+
 data class SubLedgerBalancesResponse(val asOf: String, val balances: List<SubLedgerBalanceResponse>)
 
 private fun SubLedgerBalance.toResponse() = SubLedgerBalanceResponse(
@@ -399,3 +457,9 @@ private fun ReplayBookedChangesResult.toResponse() = ReplayBookedChangesResponse
     accountsTouched = accountsTouched,
     netDeltaByCurrency = netDeltaByCurrency,
 )
+
+/**
+ * Response header on `POST /api/v1/journals`: `true` when the idempotency key had already been posted
+ * and the call only replayed it, `false` when this call posted the journal (#10904).
+ */
+const val IDEMPOTENT_REPLAYED_HEADER = "Idempotent-Replayed"

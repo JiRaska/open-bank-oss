@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: risk-engine
     app.kubernetes.io/part-of: risk
   annotations:
-    openbank.tech/policy-checksum: "2fb347d57a7cd34e"
+    openbank.tech/policy-checksum: "5f73c904e07d4f88"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -589,10 +598,11 @@ data:
     #   risk.snapshot.read    — GET  /snapshots/{id}, GET /snapshots/{id}/positions
     #                           (granted by base rest.rego `operator-read-any`, ROLE_OPERATOR/ADMIN)
     #   risk.snapshot.create  — POST /snapshots
-    #   risk.curve-set.read   — GET  /curve-sets/{id}, and cash flows ride on risk.snapshot.read
-    #                           (both granted by base rest.rego `operator-read-any`, and to
-    #                           ROLE_RISK / ROLE_FINANCE through rules.yaml role_action_matrix —
-    #                           reads only, #10618)
+    #   risk.curve-set.read   — GET  /curve-sets, /curve-sets/{id}, and cash flows ride on
+    #                           risk.snapshot.read (both granted by base rest.rego
+    #                           `operator-read-any`, and to ROLE_RISK / ROLE_FINANCE through rules.yaml
+    #                           role_action_matrix — reads only, #10618); also to treasury's own m2m
+    #                           identity for the simulated quotes (ADR-0315 D9, below)
     #   risk.curve-set.create — POST /curve-sets: the market data every PV and projection is computed
     #                           from. Same rule as a snapshot: real staff only, never the shared
     #                           service-account, because a curve set is an INPUT to risk figures and
@@ -629,6 +639,24 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_RISK"}
     	role in input.principal.roles
     	input.action == "risk.curve-set.create"
+    }
+
+    # finrep-service reads the Pillar 1 capital result for COREP C 02.00 (ADR-0313 D6) as its OWN
+    # Keycloak client, openbank-finrep (ROLE_API only). Keyed by principal id, never by role, so the
+    # grant reaches this one machine and nothing that happens to share a role; reads only.
+    allowed_reasons contains "finrep-m2m-risk-snapshot-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-finrep"
+    	input.action == "risk.snapshot.read"
+    }
+
+    # treasury-service's simulated counterparties quote off the latest curve set (ADR-0315 D9) as its
+    # OWN Keycloak client, openbank-treasury (ROLE_API only — the same identity that posts to the
+    # ledger). Keyed by principal id, never by role; curve-set reads only — no snapshot, no create.
+    allowed_reasons contains "treasury-m2m-risk-curve-set-read" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-treasury"
+    	input.action == "risk.curve-set.read"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -963,6 +991,29 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.quote.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.confirm
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1314,6 +1365,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1639,6 +1700,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
@@ -1755,8 +1817,10 @@ data:
         # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
         # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
         # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
-        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER are realm
-        # roles with NO entry here: no treasury service exists yet, so they grant nothing.
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
         ROLE_RISK:
           grant:
             - risk.snapshot.read

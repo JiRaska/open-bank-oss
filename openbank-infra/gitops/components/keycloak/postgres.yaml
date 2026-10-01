@@ -1,6 +1,6 @@
 # Single-owner Postgres for Keycloak, reconciled by the cluster-wide CNPG
-# operator. Sandbox runs one instance for FinOps; prod should raise instances
-# to 3 for HA. CNPG generates the `keycloak-db-app` secret (keys: username,
+# operator. Primary + hot standby (ADR-0325: a money-path platform database);
+# prod may raise to 3. CNPG generates the `keycloak-db-app` secret (keys: username,
 # password) for the `keycloak` owner and a read-write Service `keycloak-db-rw`
 # — both consumed by the Keycloak Deployment.
 apiVersion: postgresql.cnpg.io/v1
@@ -33,8 +33,33 @@ spec:
         action: drop
       - regex: __tmp_cnpg_keep
         action: labeldrop
-  instances: 1
-  imageName: ghcr.io/cloudnative-pg/postgresql:18.1
+  # HA (ADR-0159, ADR-0325): a platform database money-path services depend on
+  # (rules.yaml: money_path_platform_databases). Keycloak cannot mint tokens without it, and every money-path
+  # call is authenticated by a Keycloak-issued JWT, so it gets
+  # the money-path shape: primary + hot standby on DIFFERENT nodes (required
+  # hostname anti-affinity, applied in a staged ADR-0325 wave), soft AZ spread, and
+  # switchover-first updates.
+  instances: 2
+  # ADR-0325: an update (image bump, config change) promotes the already-updated
+  # standby first and only then restarts the old primary. CNPG's default,
+  # `restart`, restarts the primary IN PLACE; on a single-instance cluster the
+  # operator has no standby and restarts either way, so this is free there.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  # ADR-0325 wave: required anti-affinity + zone spread. This changes the pod spec, so CNPG
+  # rolls the standby first and then performs ONE switchover (a write pause of seconds).
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          cnpg.io/cluster: keycloak-db
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
   storage:
     storageClass: gp3
     size: 5Gi

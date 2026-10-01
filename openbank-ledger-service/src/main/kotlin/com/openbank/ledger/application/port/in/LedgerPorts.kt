@@ -4,6 +4,7 @@
 
 package com.openbank.ledger.application.port.`in`
 
+import com.openbank.ledger.domain.model.AccountCurrencyBalance
 import com.openbank.ledger.domain.model.ControlAccountTieOut
 import com.openbank.ledger.domain.model.JournalEntry
 import com.openbank.ledger.domain.model.JournalSide
@@ -79,15 +80,33 @@ data class GetTrialBalanceQuery(val asOf: LocalDate, val scope: LedgerScope = Le
  */
 data class GetSubLedgerBalancesQuery(val asOf: LocalDate, val subAccountId: UUID? = null)
 
+/** A GL account's balance in one transaction currency as of a date (#11107). */
+data class GetAccountCurrencyBalanceQuery(
+    val code: String,
+    val currency: String,
+    val asOf: LocalDate,
+    val scope: LedgerScope = LedgerScope.REAL_ONLY,
+)
+
 data class GetControlAccountTieOutQuery(val controlAccountId: UUID, val asOf: LocalDate)
+
+/**
+ * A posted journal plus whether THIS call created it or replayed an existing idempotency key (#10904).
+ * Both answer with the same entry, so without the flag a caller cannot tell a posting from a no-op.
+ */
+data class PostJournalOutcome(val entry: JournalEntry, val replayed: Boolean)
 
 interface LedgerUseCase {
     suspend fun postJournal(command: PostJournalCommand): JournalEntry
+
+    /** [postJournal], also saying whether the idempotency key was already posted (#10904). */
+    suspend fun postJournalWithOutcome(command: PostJournalCommand): PostJournalOutcome
     suspend fun reverseJournal(command: ReverseJournalCommand): JournalEntry
     suspend fun getJournal(query: GetJournalQuery): JournalEntry
     suspend fun getJournalsByTransaction(query: GetJournalsByTransactionQuery): List<JournalEntry>
     suspend fun listJournals(query: ListJournalsQuery): CursorPage<JournalEntry>
     suspend fun getTrialBalance(query: GetTrialBalanceQuery): TrialBalance
     suspend fun getSubLedgerBalances(query: GetSubLedgerBalancesQuery): List<SubLedgerBalance>
+    suspend fun getAccountCurrencyBalance(query: GetAccountCurrencyBalanceQuery): AccountCurrencyBalance
     suspend fun getControlAccountTieOut(query: GetControlAccountTieOutQuery): List<ControlAccountTieOut>
 }

@@ -191,6 +191,9 @@ spec:
               kubernetes.io/metadata.name: tpp-registry
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: treasury
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: wealth
         - namespaceSelector:
             matchLabels:

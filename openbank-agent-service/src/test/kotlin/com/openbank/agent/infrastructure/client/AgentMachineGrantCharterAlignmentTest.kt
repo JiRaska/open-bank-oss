@@ -37,13 +37,25 @@ class AgentMachineGrantCharterAlignmentTest {
     private val registry = McpToolRegistry()
 
     @Test
-    fun `the transaction and SCT Inst tools map to capabilities some charter holds`() {
+    fun `the transaction, SCT Inst, compliance and dispute tools map to capabilities some charter holds`() {
         listOf(
             "list_transactions",
             "get_transaction",
             "sepa_instant_list",
             "sepa_instant_get",
             "sepa_instant_list_by_debtor",
+            // #10486 batch 8: aml / sanctions / dispute reads (query.compliance.readonly,
+            // query.disputes.readonly) are granted by aml_rest_ext.rego, the sanctions bundle generator
+            // and dispute_rest_ext.rego because a charter holds them.
+            "aml_list_cases",
+            "aml_get_case",
+            "sanctions_list_checks",
+            "sanctions_get_check",
+            "sanctions_list_pending",
+            "dispute_list",
+            "dispute_get",
+            "dispute_list_by_account",
+            "dispute_get_timeline",
         ).forEach { tool ->
             assertThat(registry.capabilityOf(tool)).describedAs(tool).isIn(allowedByAnyCharter)
         }

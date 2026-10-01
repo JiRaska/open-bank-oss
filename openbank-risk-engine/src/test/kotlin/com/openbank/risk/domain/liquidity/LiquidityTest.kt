@@ -6,6 +6,7 @@ package com.openbank.risk.domain.liquidity
 
 import com.openbank.libs.lending.AmortizationMethod
 import com.openbank.risk.domain.Fixtures
+import com.openbank.risk.domain.capital.FxRateUsed
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.InstrumentKind
@@ -14,9 +15,13 @@ import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionBuilder
 import com.openbank.risk.domain.model.PositionKind
 import com.openbank.risk.domain.model.ScheduledInstallment
+import com.openbank.risk.domain.model.TreasuryDeal
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * LCR / NSFR on hand-computed fixtures, with the SHIPPED parameter set. Each cap test states the
@@ -122,9 +127,9 @@ class LiquidityTest {
     @Test
     fun `an unmapped GL balance is listed as not classified and counted nowhere`() {
         val base = run(PositionBuilder.build(Fixtures.tiedOut())).total!!
-        val withStray = run(PositionBuilder.build(Fixtures.tiedOut()) + gl("1002", "ASSET", "500"))
+        val withStray = run(PositionBuilder.build(Fixtures.tiedOut()) + gl("1003", "ASSET", "500"))
         assertThat(withStray.unclassified.map { it.glAccountCode to it.amount }).containsExactly(
-            "1002" to BigDecimal("500"),
+            "1003" to BigDecimal("500"),
         )
         val t = withStray.total!!
         assertThat(t.nsfr.totalRsf).isEqualByComparingTo(base.nsfr.totalRsf)
@@ -132,9 +137,9 @@ class LiquidityTest {
         assertThat(t.lcr.totalInflows).isEqualByComparingTo(base.lcr.totalInflows)
         assertThat(
             t.nsfr.rsf.none {
-                it.glAccountCode == "1002"
+                it.glAccountCode == "1003"
             } &&
-                t.lcr.inflows.none { it.glAccountCode == "1002" },
+                t.lcr.inflows.none { it.glAccountCode == "1003" },
         ).isTrue()
     }
 
@@ -191,11 +196,169 @@ class LiquidityTest {
         assertThat(r.nsfr.totalRsf).isEqualByComparingTo("1000")
     }
 
+    private val eur25 = FxRateUsed("EUR", BigDecimal("25"), LocalDate.parse("2026-01-30"), "CNB")
+
     @Test
-    fun `a two-currency book has per-currency results and no total`() {
+    fun `a EUR and CZK book is combined in CZK at the fixing, with the ratio recomputed on converted figures`() {
+        // CZK: 1000 retail deposits -> outflow 100, no HQLA: CZK LCR 0.
+        // EUR: 40 at the ČNB (L1) against 40 other liability (100% outflow): EUR LCR 1.
+        val positions = listOf(deposit("1000"), gl("1510", "ASSET", "40", "EUR"), gl("2300", "LIABILITY", "-40", "EUR"))
+        val r = Liquidity.compute(positions, emptyList(), asOf, shipped, mapOf("EUR" to eur25))
+
+        val eur = r.currencies.single { it.currency == "EUR" }
+        assertThat(eur.lcr.hqla.stock).isEqualByComparingTo("40") // per-currency result stays in EUR
+        assertThat(eur.lcr.ratio).isEqualByComparingTo("1")
+        assertThat(r.currencies.single { it.currency == "CZK" }.lcr.ratio).isEqualByComparingTo("0")
+
+        val t = r.total!!
+        assertThat(t.currency).isEqualTo("CZK")
+        assertThat(t.lcr.hqla.lines.single().marketValue).isEqualByComparingTo("1000") // 40 × 25
+        assertThat(t.lcr.hqla.stock).isEqualByComparingTo("1000")
+        assertThat(t.lcr.totalOutflows).isEqualByComparingTo("1100") // 100 + 40 × 25 × 100%
+        // 1000 / 1100 — not the 0.5 average of the per-currency ratios, nor 40 / 140 unconverted.
+        assertThat(t.lcr.ratio).isEqualByComparingTo("0.909091")
+        assertThat(t.lcr.outflows.single { it.glAccountCode == "2300" }.label).contains("EUR at CNB 2026-01-30")
+        assertThat(t.nsfr.totalAsf).isEqualByComparingTo("900") // 1000 × 90% + 1000 × 0%
+        assertThat(r.fxRates).containsExactly(eur25)
+        assertThat(r.totalNotStated).isNull()
+        assertThat(r.notes.single()).isEqualTo(Liquidity.AGGREGATION_NOTE)
+    }
+
+    @Test
+    fun `the HQLA caps are recomputed on the combined stock, not summed from the per-currency caps`() {
+        val p = mapped("9002" to GlClass.HQLA_L2A)
+        // CZK: L1 100. EUR: L2A 10 (8.5 after the 15% haircut) and no L1, so on its own fully capped.
+        val positions = listOf(gl("1510", "ASSET", "100"), gl("9002", "ASSET", "10", "EUR"))
+        val r = Liquidity.compute(positions, emptyList(), asOf, p, mapOf("EUR" to eur25))
+        assertThat(r.currencies.single { it.currency == "EUR" }.lcr.hqla.stock).isEqualByComparingTo("0")
+        // Sum of per-currency stocks would be 100. Combined: L1 100 + L2A 212.5, capped at 2/3 × 100.
+        val hqla = r.total!!.lcr.hqla
+        assertThat(hqla.level2a).isEqualByComparingTo("212.5")
+        assertThat(hqla.stock.setScale(2, java.math.RoundingMode.HALF_EVEN)).isEqualByComparingTo("166.67")
+        assertThat(hqla.level2CapBinding).isTrue()
+    }
+
+    @Test
+    fun `a missing fixing states no combined total and says why, keeping the per-currency results`() {
         val r = run(listOf(deposit("100", "CZK"), deposit("100", "EUR")))
         assertThat(r.currencies.map { it.currency }).containsExactly("CZK", "EUR")
         assertThat(r.total).isNull()
+        assertThat(r.fxRates).isEmpty()
+        assertThat(r.totalNotStated).contains("EUR").contains(asOf.toString())
         assertThat(r.notes.single()).isEqualTo(Liquidity.AGGREGATION_NOTE)
+    }
+
+    @Test
+    fun `an all-CZK book needs no fixing and its total equals the CZK result`() {
+        val r = run(PositionBuilder.build(Fixtures.tiedOut()))
+        assertThat(r.fxRates).isEmpty()
+        assertThat(r.totalNotStated).isNull()
+        assertThat(r.total!!.lcr.totalOutflows).isEqualByComparingTo(r.currencies.single().lcr.totalOutflows)
+        assertThat(r.total!!.nsfr.ratio).isEqualByComparingTo(r.currencies.single().nsfr.ratio)
+    }
+
+    @Test
+    fun `a CNB lombard balance on 2320 is classified at 0 percent outflow and ASF, and carries the collateral note`() {
+        val r = run(listOf(gl("2320", "LIABILITY", "-1000"), gl("1510", "ASSET", "1000")))
+        assertThat(r.unclassified).isEmpty()
+        val out = r.total!!.lcr.outflows.single { it.glAccountCode == "2320" }
+        assertThat(out.factorKey).isEqualTo("lcr-central-bank-secured-outflow")
+        assertThat(out.amount).isEqualByComparingTo("1000")
+        assertThat(out.weighted).isEqualByComparingTo("0")
+        assertThat(out.citation).contains("Art. 28(3)(a)")
+        val asf = r.total!!.nsfr.asf.single { it.glAccountCode == "2320" }
+        assertThat(asf.factorKey).isEqualTo("nsfr-asf-central-bank-under-6m")
+        assertThat(asf.weighted).isEqualByComparingTo("0")
+        assertThat(r.notes).contains(Liquidity.PLEDGED_COLLATERAL_NOTE)
+        assertThat(Liquidity.PLEDGED_COLLATERAL_NOTE).startsWith("${Liquidity.PLEDGED_COLLATERAL_NOTE_CODE}: ")
+        assertThat(r.notes.single { it.startsWith(Liquidity.PLEDGED_COLLATERAL_NOTE_CODE) })
+            .isEqualTo(Liquidity.PLEDGED_COLLATERAL_NOTE)
+    }
+
+    @Test
+    fun `no collateral note without a lombard balance, nor for a zero one`() {
+        assertThat(run(listOf(gl("1510", "ASSET", "1000"))).notes).doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
+        assertThat(run(listOf(gl("2320", "LIABILITY", "0"), gl("1510", "ASSET", "1000"))).notes)
+            .doesNotContain(Liquidity.PLEDGED_COLLATERAL_NOTE)
+    }
+
+    private fun deal(product: String, principal: String, maturityInDays: Long, ccy: String = "CZK"): Instrument =
+        TreasuryInstrumentMapper.toInstrument(
+            TreasuryDeal(
+                dealId = UUID.randomUUID(),
+                product = product,
+                counterpartyId = "BANK-A",
+                currency = ccy,
+                principal = BigDecimal(principal),
+                rate = BigDecimal("3.00"),
+                valueDate = asOf.minusDays(5),
+                maturityDate = asOf.plusDays(maturityInDays),
+                state = TreasuryDeal.SETTLED,
+            ),
+        )
+
+    private fun dealPosition(i: Instrument) =
+        Position(PositionKind.TREASURY_DEAL, i.glAccountCode, "ASSET", i.currency, null, i.outstanding, i.id)
+
+    private fun placementInflows(vararg deals: Instrument, extra: List<Position> = emptyList()) =
+        run(deals.map(::dealPosition) + extra, instruments = deals.toList()).total!!.lcr
+
+    private fun LcrResult.placementLines() =
+        inflows.filter { it.factorKey == LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D.key }
+
+    @Test
+    fun `a money-market placement maturing within 30 days is a 100 percent inflow of its principal`() {
+        val lcr = placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 10))
+        assertThat(lcr.placementLines()).hasSize(1)
+        assertThat(lcr.placementLines().single().glAccountCode).isEqualTo("1500")
+        assertThat(lcr.totalInflows).isEqualByComparingTo("2000")
+    }
+
+    @Test
+    fun `a placement maturing exactly on day 30 is inside the horizon, day 31 is not`() {
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 30)).totalInflows)
+            .isEqualByComparingTo("2000")
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", 31)).placementLines()).isEmpty()
+    }
+
+    @Test
+    fun `a past-due placement is not counted as a future inflow`() {
+        assertThat(placementInflows(deal(TreasuryDeal.MM_PLACEMENT, "2000", -1)).placementLines()).isEmpty()
+    }
+
+    @Test
+    fun `a placement maturing beyond 30 days gives no inflow and keeps its RSF`() {
+        val placement = deal(TreasuryDeal.MM_PLACEMENT, "1000", 90)
+        val r = run(
+            listOf(dealPosition(placement)),
+            instruments = listOf(placement),
+        ).total!!
+        assertThat(r.lcr.inflows).isEmpty()
+        assertThat(r.nsfr.totalRsf).isEqualByComparingTo("1000")
+    }
+
+    @Test
+    fun `the CNB deposit facility is HQLA Level 1 and never also an inflow`() {
+        val lcr = placementInflows(deal(TreasuryDeal.CNB_DEPOSIT_FACILITY, "4000", 1))
+        assertThat(lcr.hqla.level1).isEqualByComparingTo("4000")
+        assertThat(lcr.inflows).isEmpty()
+    }
+
+    @Test
+    fun `a GL-level placement balance with no contract data gives no inflow`() {
+        assertThat(run(listOf(gl("1500", "ASSET", "2000"))).total!!.lcr.inflows).isEmpty()
+    }
+
+    @Test
+    fun `placement inflows are still capped at 75 percent of outflows`() {
+        // Outflow 1000 (2310, 100%); placement inflow 2000 uncapped would net to −1000.
+        val lcr = placementInflows(
+            deal(TreasuryDeal.MM_PLACEMENT, "2000", 7),
+            extra = listOf(gl("2310", "LIABILITY", "-1000")),
+        )
+        assertThat(lcr.totalInflows).isEqualByComparingTo("2000")
+        assertThat(lcr.inflowCapBinding).isTrue()
+        assertThat(lcr.cappedInflows).isEqualByComparingTo("750")
+        assertThat(lcr.netOutflows).isEqualByComparingTo("250")
     }
 }

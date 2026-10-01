@@ -39,23 +39,25 @@ import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 
 /**
- * The SHIPPED parameter set, read from application.yaml through the same config mapping the
+ * The SHIPPED BCBS parameter set (still declared and selectable), read from application.yaml through the same config mapping the
  * service uses ([LiquidityTestParameters.shipped]), holds the value its citation names. One test per
  * factor family; a changed value without a changed citation (and a version bump) goes red here.
  */
 class LiquidityParametersTest {
 
-    private val p = LiquidityTestParameters.shipped()
+    private val p = LiquidityTestParameters.shipped(LiquidityTestParameters.BCBS_SET)
 
     private fun assertFactors(vararg expected: Pair<LiquidityFactor, String>) = expected.forEach { (f, v) ->
-        assertThat(p[f]).describedAs("${f.key} (${f.citation})").isEqualByComparingTo(v)
+        assertThat(p[f]).describedAs("${f.key} (${p.citation(f)})").isEqualByComparingTo(v)
     }
 
     @Test
     fun `the parameter set is identified and versioned`() {
         assertThat(p.id).isEqualTo("bcbs-d238-d295")
-        assertThat(p.version).isEqualTo("1")
+        assertThat(p.version).isEqualTo("4")
         assertThat(p.source).contains("d238").contains("d295").contains("2015/61 deviations not applied")
+        assertThat(p.regime).isEqualTo(LiquidityRegime.BCBS)
+        assertThat(LiquidityFactor.entries.map { p.citation(it) }).allMatch { it.startsWith("BCBS d2") }
     }
 
     @Test
@@ -80,6 +82,7 @@ class LiquidityParametersTest {
     fun `inflow rates and the cap are d238 153, 154, 156 and 144`() = assertFactors(
         LCR_RETAIL_LOAN_INFLOW to "0.50",
         LCR_FI_INFLOW to "1.00",
+        LiquidityFactor.LCR_FI_PLACEMENT_INFLOW_30D to "1.00",
         LCR_OPERATIONAL_DEPOSIT_INFLOW to "0",
         LCR_INFLOW_CAP to "0.75",
     )
@@ -108,13 +111,37 @@ class LiquidityParametersTest {
     )
 
     @Test
+    fun `d238 114-115 - secured funding with the central bank runs off at 0 percent`() {
+        assertFactors(LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW to "0")
+        assertThat(p.citation(LiquidityFactor.LCR_CENTRAL_BANK_SECURED_OUTFLOW)).contains("d238 ¶114-115")
+    }
+
+    @Test
+    fun `d295 25 - central-bank funding under 6 months gets 0 percent ASF, sub-paragraph unverified`() {
+        assertFactors(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M to "0")
+        assertThat(
+            p.citation(LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M),
+        ).contains("d295 ¶25").contains("UNVERIFIED")
+    }
+
+    @Test
+    fun `2320 CNB lombard is central-bank secured funding`() {
+        assertThat(p.classification.glAccounts["2320"]).isEqualTo(GlClass.CENTRAL_BANK_SECURED_FUNDING)
+    }
+
+    @Test
     fun `the shipped classification is the conservative one`() {
         val c = p.classification
         assertThat(c.retailStableShare).isEqualByComparingTo("0")
         assertThat(c.operationalDepositShare).isEqualByComparingTo("0")
         assertThat(c.tier2OverOneYearShare).isEqualByComparingTo("0")
         assertThat(c.loansQualifyForLowRiskWeight).isFalse()
-        assertThat(c.glAccounts.values.none { it.isHqla }).describedAs("nothing is HQLA until mapped").isTrue()
+        assertThat(c.glAccounts.filterValues { it.isHqla }.keys)
+            .describedAs("the only HQLA is the ČNB overnight deposit facility (ADR-0315)")
+            .containsExactly("1510")
+        assertThat(c.glAccounts["1510"]).isEqualTo(GlClass.HQLA_L1_CASH_OR_RESERVES)
+        assertThat(c.glAccounts["1500"]).describedAs("placements: maturity-blind, so conservative")
+            .isEqualTo(GlClass.OTHER_ASSET)
         assertThat(c.glAccounts["1001"]).isEqualTo(GlClass.DEPOSIT_AT_FI_OPERATIONAL)
         assertThat(c.glAccounts).doesNotContainKey("1000")
     }
@@ -123,10 +150,17 @@ class LiquidityParametersTest {
     fun `a missing, unknown or out-of-range factor is refused, never defaulted`() {
         val keys = p.factors.mapKeys { it.key.key }
         assertThatThrownBy {
-            LiquidityParameters.fromKeys("x", "1", "s", keys - LCR_INFLOW_CAP.key, p.classification)
+            LiquidityParameters.fromKeys("x", "1", "s", keys - LCR_INFLOW_CAP.key, p.classification, p.regime)
         }.hasMessageContaining("missing factors").hasMessageContaining("lcr-inflow-cap")
         assertThatThrownBy {
-            LiquidityParameters.fromKeys("x", "1", "s", keys + ("lcr-made-up" to BigDecimal.ONE), p.classification)
+            LiquidityParameters.fromKeys(
+                "x",
+                "1",
+                "s",
+                keys + ("lcr-made-up" to BigDecimal.ONE),
+                p.classification,
+                p.regime,
+            )
         }.hasMessageContaining("unknown liquidity factor keys")
         assertThatThrownBy {
             LiquidityParameters.fromKeys(
@@ -135,6 +169,7 @@ class LiquidityParametersTest {
                 "s",
                 keys + (LCR_INFLOW_CAP.key to BigDecimal("1.5")),
                 p.classification,
+                p.regime,
             )
         }.hasMessageContaining("[0, 1]")
     }

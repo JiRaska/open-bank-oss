@@ -40,9 +40,9 @@ quarkus:
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
     tls:
-      # `none` is correct for the in-cluster plain-http Keycloak leg; a real https deploy
-      # overrides it to `required` via OIDC_TLS_VERIFICATION to enforce certificate validation.
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      # `required` in every profile but %dev (gate oidc-tls-verification-profile-scoped);
+      # OIDC_TLS_VERIFICATION remains the explicit per-environment override.
+      verification: ${OIDC_TLS_VERIFICATION:required}
 
   # Outbound service-to-service auth (client-credentials). The MCP tool REST clients
   # (ServiceClients, @RegisterProvider OidcClientRequestReactiveFilter) use this default
@@ -57,7 +57,7 @@ quarkus:
     grant:
       type: client
     tls:
-      verification: ${OIDC_TLS_VERIFICATION:none}
+      verification: ${OIDC_TLS_VERIFICATION:required}
     # #10486 batch 7: the agent read tools whose upstream grant depended on the shared client's
     # ROLE_OPERATOR (transactions, SCT Inst payments, interest accruals) mint from this NAMED client
     # instead, so the upstream sees service-account-openbank-agent (ROLE_API only) and grants it only
@@ -155,7 +155,12 @@ quarkus:
 
 "%dev":
   quarkus:
+    oidc-client:
+      tls:
+        verification: none
     oidc:
+      tls:
+        verification: none
       enabled: false
     log:
       level: DEBUG

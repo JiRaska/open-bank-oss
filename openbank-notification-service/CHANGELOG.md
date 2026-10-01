@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.34.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.34.1...notification-service-v0.34.2) (2026-09-29)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev and gate it ([#10870](https://github.com/JiRaska/open-bank-oss/issues/10870)) ([cf7aa55](https://github.com/JiRaska/open-bank-oss/commit/cf7aa5528809917ccb7e4a94d80f25b2d136c7b4))
+
+## [0.34.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.34.0...notification-service-v0.34.1) (2026-09-27)
+
+
+### Bug Fixes
+
+* **libs:** resolve checker identity after the approval null-body check ([#11047](https://github.com/JiRaska/open-bank-oss/issues/11047)) ([a2840ad](https://github.com/JiRaska/open-bank-oss/commit/a2840ad8c1f5e7c6083e66468f8e3b365240a38f))
+
+## [0.34.0](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.1...notification-service-v0.34.0) (2026-09-26)
+
+
+### Features
+
+* **customer-edge:** business multi-signature for standing orders and SDD mandates ([#10543](https://github.com/JiRaska/open-bank-oss/issues/10543)) ([734e515](https://github.com/JiRaska/open-bank-oss/commit/734e515459cc82666bfbed6d46bdc225eef3bf59))
+
 ## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.33.0...notification-service-v0.33.1) (2026-09-19)
 
 

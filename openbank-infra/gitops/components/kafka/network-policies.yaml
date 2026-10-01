@@ -140,6 +140,9 @@ spec:
               kubernetes.io/metadata.name: psd2
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: referral
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: risk
         - namespaceSelector:
             matchLabels:
@@ -159,6 +162,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: tpp-registry
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: wealth

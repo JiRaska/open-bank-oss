@@ -11,7 +11,7 @@
 # exactly one Keycloak confidential client (`openbank-services`), so this reads the SAME
 # `account-service`/`OIDC_CLIENT_SECRET` KV entry every other projection does, not a copilot-owned
 # secret that does not exist.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: copilot-service-secrets

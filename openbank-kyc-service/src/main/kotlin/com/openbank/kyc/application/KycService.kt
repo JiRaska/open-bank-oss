@@ -14,6 +14,8 @@ import com.openbank.kyc.domain.model.KycCheck
 import com.openbank.kyc.domain.model.KycEvents
 import com.openbank.kyc.domain.model.RiskLevel
 import com.openbank.kyc.domain.model.SubjectType
+import com.openbank.libs.domain.error.ResourceConflictException
+import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.observability.DomainMetrics
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -21,15 +23,21 @@ import java.time.Clock
 import java.time.Instant
 import java.util.UUID
 
-class KycCaseNotFoundException(id: UUID) : RuntimeException("KYC case not found: $id")
+// #10911 phase 2: extends the libs-domain base so libs-runtime's ResourceNotFoundExceptionMapper
+// handles the 404 (default code "NOT_FOUND", matching the deleted local KycNotFoundMapper's
+// ErrorCode.NOT_FOUND.code byte for byte). See KycExceptionMapperEquivalenceTest.
+class KycCaseNotFoundException(id: UUID) : ResourceNotFoundException("KYC case not found: $id")
 
 /**
  * A party already has an in-flight (non-terminal) KYC case. Raised by the operator-facing
  * [KycService.openCase]; mapped to HTTP 409 Conflict. The event-driven [KycService.openCaseForParty]
  * stays idempotent and never throws this.
+ *
+ * #10911 phase 2: extends the libs-domain base, mapped by ResourceConflictExceptionMapper (default
+ * code "CONFLICT", matching the deleted local KycConflictMapper's ErrorCode.CONFLICT.code).
  */
 class KycCaseConflictException(val partyId: UUID, val existingCaseId: UUID) :
-    RuntimeException("Party $partyId already has an active KYC case: $existingCaseId")
+    ResourceConflictException("Party $partyId already has an active KYC case: $existingCaseId")
 
 /**
  * Raised when the approval/rejection reason is too short to meet the regulatory audit trail
