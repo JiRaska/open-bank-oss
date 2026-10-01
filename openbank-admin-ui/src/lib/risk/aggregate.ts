@@ -8,6 +8,8 @@
 // Sums are of the engine's own figures — nothing is recomputed, so a category total always
 // reconciles to the engine's total line.
 
+import { formatMoneyExact } from '@/lib/format/money'
+
 export type LiquidityLineLike = {
   label: string
   glAccountCode?: string | null
@@ -112,10 +114,9 @@ export function groupExposures<L extends ExposureLineLike>(lines: L[]): Exposure
   return [...groups.values()].sort((a, b) => b.rwa - a.rwa || b.ead - a.ead)
 }
 
-/** One money format for every finance page: grouped, two decimals, currency code after. */
+/** Exact money for the regulatory tables (reuses the shared `formatMoneyExact`); no currency → bare number. */
 export function formatMoney(v: number, locale: string, currency?: string | null): string {
-  const n = v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  return currency ? `${n} ${currency}` : n
+  return currency ? formatMoneyExact(v, currency, locale) : v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function formatPercent(v: number, locale: string): string {

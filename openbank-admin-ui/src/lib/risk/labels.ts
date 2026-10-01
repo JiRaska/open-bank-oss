@@ -12,6 +12,7 @@
 // value is visible rather than silently dropped.
 
 import type { CountUnit } from './aggregate'
+import { czechPlural } from '@/lib/i18n/plural'
 
 export type Bilingual = { cs: string; en: string }
 type Lang = 'cs' | 'en'
@@ -122,8 +123,7 @@ export function plainCitation(citation: string, lang: Lang): PlainCitation {
 
 /** "44 úvěrů" / "1 úvěr" / "3 úvěry" — Czech plural agreement for counts shown next to a category. */
 export function czCount(n: number, one: string, few: string, many: string): string {
-  const word = n === 1 ? one : n >= 2 && n <= 4 ? few : many
-  return `${n.toLocaleString('cs-CZ')} ${word}`
+  return `${n.toLocaleString('cs-CZ')} ${czechPlural(n, one, few, many)}`
 }
 
 /** "44 úvěrů" / "62 klientských účtů" — what a category row is made of. */

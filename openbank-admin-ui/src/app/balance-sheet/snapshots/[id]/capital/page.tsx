@@ -27,7 +27,8 @@ import Link from 'next/link'
 import { ArrowLeft, Landmark } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { HumanReference, PageHeader, StatusBadge } from '@/components/ui'
+import { PageHeader, StatusBadge } from '@/components/ui'
+import { ItemLabel } from '@/components/balance-sheet/ItemLabel'
 import { CategoryTable } from '@/components/balance-sheet/CategoryTable'
 import { loanLabel, useSnapshotInstruments } from '@/components/balance-sheet/instrumentLabels'
 import type { Instrument } from '@/components/balance-sheet/contracts'
@@ -295,7 +296,7 @@ function CurrencySection({ c, locale, single, instruments }: { c: CurrencyCapita
                     : { label: l.glAccountCode ? t(`Účet ${l.glAccountCode}`, `Account ${l.glAccountCode}`) : exposureClassLabel(l.exposureClass, lang) }
                   return {
                     key: `${l.instrumentId ?? l.glAccountCode ?? ''}-${i}`,
-                    label: <HumanReference label={named.label} sublabel={named.sublabel} reference={l.instrumentId} />,
+                    label: <ItemLabel label={named.label} sublabel={named.sublabel} reference={l.instrumentId} />,
                     values: [money(l.ead), formatPercent(l.riskWeight, locale), money(l.rwa)],
                   }
                 })

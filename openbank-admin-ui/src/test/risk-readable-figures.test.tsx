@@ -62,7 +62,7 @@ describe('shared risk labels', () => {
   })
 
   it('formats money with grouping, two decimals and the currency', () => {
-    expect(formatMoney(582088.6, 'cs-CZ', 'CZK')).toMatch(/^582\s088,60 CZK$/)
+    expect(formatMoney(582088.6, 'cs-CZ', 'CZK')).toMatch(/^582\s088,60\sKč$/)
   })
 })
 
@@ -150,7 +150,7 @@ describe('Liquidity page reads like a report, not a dump', () => {
     expect(row.textContent).toContain('Splátky úvěrů nefinančním klientům splatné do 30 dní')
     expect(row.textContent).toContain('3 úvěry')
     expect(row.textContent).toContain('čl. 32 odst. 3 písm. a) nařízení 2015/61')
-    expect(row.textContent).toMatch(/600,00 CZK/)
+    expect(row.textContent).toMatch(/600,00\sKč/)
     expect(document.querySelectorAll('tr[data-item-of]').length).toBe(0)
     expect(document.querySelector('tr[data-category="lcr-retail-less-stable-runoff"]')!.textContent).toContain('62 klientských účtů')
     expect(document.body.textContent).not.toMatch(UUID)
@@ -161,7 +161,7 @@ describe('Liquidity page reads like a report, not a dump', () => {
     expect(items.length).toBe(3)
     expect(items[0].textContent).toMatch(/Anuitní úvěr, splatnost/)
     // The id is still on the page — shortened and copyable, never as the label.
-    expect(items[0].querySelector('[data-reference]')!.getAttribute('data-reference')).toMatch(UUID)
+    expect(items[0].querySelector('span.mono[title]')!.getAttribute('title')).toMatch(UUID)
     expect(document.body.textContent).not.toMatch(UUID)
   })
 })
