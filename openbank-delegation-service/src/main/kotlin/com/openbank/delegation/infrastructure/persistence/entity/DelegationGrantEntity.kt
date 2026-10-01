@@ -12,6 +12,7 @@ import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.domain.money.Money
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.CollectionTable
@@ -25,7 +26,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.Table
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -188,7 +188,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
     private fun toMoney(amount: BigDecimal?, currency: String?): Money? {
         if (amount == null || currency == null) return null
         val code = CurrencyCode.of(currency.trim())
-        return Money(amount.setScale(code.defaultFractionDigits, RoundingMode.HALF_EVEN), code)
+        return Money(RoundingPolicy.MONEY_SCALE.round(amount, code), code)
     }
 
     private fun toExposure(): Exposure? {
