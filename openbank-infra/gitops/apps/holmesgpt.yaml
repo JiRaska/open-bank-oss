@@ -2,18 +2,21 @@
 # OSS can't close with infra alone is Dynatrace's causal AI (Davis); HolmesGPT
 # is the closest analogue — an LLM that, given an alert, pulls Prometheus
 # metrics + Kubernetes state (READ-ONLY) and proposes a root cause. It fits the
-# bank's AI-governance posture (ADR-0031 model gateway / ADR-0089): model-
-# agnostic via litellm, uses the same NVIDIA NIM endpoint as copilot-service
-# (meta/llama-3.1-70b-instruct on integrate.api.nvidia.com/v1), reuses the
-# copilot-service NIM key — no new credential.
+# bank's AI-governance posture (ADR-0031 model gateway / ADR-0089). Its model
+# calls go through the in-cluster LiteLLM gateway (ADR-0174/0175) on its own
+# virtual key (alias `holmesgpt`), like every other LLM caller: a daily budget,
+# a Langfuse trace and per-key spend attribution. It used to call NVIDIA NIM
+# directly with the copilot-service NIM key, so cluster state and alert context
+# left the cluster outside the egress gateway with none of those three.
 #
 # SCOPE: this deploys the HolmesGPT *server* (investigation API). Auto-on-alert
 # RCA IS wired: Alertmanager fans critical alerts to the holmes-rca relay
 # (components/observability/holmes-rca.yaml), which calls /api/chat here and posts
 # the root-cause to Slack + Loki — alongside the unchanged Alertmanager→GoAlert→ntfy
 # paging path. Per-fingerprint dedup (12h) caps re-investigation of the same alert.
-# DAILY_BUDGET is set generously (50) — NVIDIA NIM has no strict daily token cap
-# like Groq's free tier; it degrades to a Grafana pointer only on genuine outages.
+# DAILY_BUDGET (50) is the relay's own investigation count cap; the dollar ceiling
+# is the `holmesgpt` key's 2 USD/day in LiteLLM, and the relay degrades to a
+# Grafana pointer when the gateway refuses.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -33,24 +36,31 @@ spec:
         # `registry: robustadev` is a bare docker.io ref that bypasses the Kyverno
         # rewrite-docker-hub rule (matches `^docker\.io/` only) and pulls via NAT.
         registry: docker.io/robustadev
-        # NVIDIA NIM (OpenAI-compatible) via litellm. Key projected from the
-        # holmes-llm-secrets ExternalSecret (components/external-secrets/
-        # es-holmes-llm.yaml) which reuses the copilot-service NIM key.
-        # litellm resolves OPENAI_API_KEY + OPENAI_API_BASE for `openai/` models.
+        # Model calls go to the in-cluster LiteLLM gateway (OpenAI-compatible), never to
+        # a provider. Holmes itself uses the litellm SDK, which resolves OPENAI_API_KEY +
+        # OPENAI_API_BASE for `openai/` models; the key is Holmes's own LiteLLM virtual key
+        # (external-secrets/es-holmes-llm.yaml), not a provider key. The observability
+        # namespace reaches litellm:4000 through the derived allow-list rule that
+        # servicemonitor-litellm.yaml creates.
+        #
+        # Model: DeepSeek-V3.2, the route the ops agents already use and that this
+        # gateway prices and budgets. It replaces llama-3.1-8b, which is too small to do
+        # multi-step root-cause reasoning over tool output. `openai/<model_name>` means
+        # "OpenAI wire protocol, this gateway model name" — the gateway picks the provider.
         additionalEnvVars:
           - name: OPENAI_API_KEY
             valueFrom:
               secretKeyRef:
                 name: holmes-llm-secrets
-                key: NVIDIA_API_KEY
+                key: LITELLM_API_KEY
           - name: OPENAI_API_BASE
-            value: https://integrate.api.nvidia.com/v1
+            value: http://litellm.ai-platform.svc:4000
           - name: MODEL
-            value: openai/meta/llama-3.1-8b-instruct
+            value: openai/deepseek-ai/DeepSeek-V3.2
         modelList:
-          nvidia-llama-3.1-8b:
-            model: openai/meta/llama-3.1-8b-instruct
-            api_base: https://integrate.api.nvidia.com/v1
+          deepseek-v3.2:
+            model: openai/deepseek-ai/DeepSeek-V3.2
+            api_base: http://litellm.ai-platform.svc:4000
             temperature: 0
         # Read-only toolsets: cluster state + the in-cluster Prometheus. Grafana/
         # Loki/Tempo toolsets are an easy follow-on once a Grafana SA token is

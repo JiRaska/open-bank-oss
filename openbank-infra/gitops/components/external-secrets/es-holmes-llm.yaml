@@ -1,8 +1,14 @@
-# HolmesGPT LLM key from OpenBao → holmes-llm-secrets Secret. Pulls the NVIDIA
-# NIM key from vault KV path copilot/NVIDIA_API_KEY (same secret copilot-service
-# uses via copilot-nvidia-api-key ESO). HolmesGPT is the OSS "Davis-lite": an LLM
-# that reads Prometheus/k8s (read-only) to root-cause an alert; uses NVIDIA NIM
-# meta/llama-3.1-70b-instruct — no daily token cap unlike the former Groq tier.
+# HolmesGPT's LiteLLM virtual key from OpenBao -> holmes-llm-secrets Secret.
+#
+# HolmesGPT used to call NVIDIA NIM directly with the copilot-service NIM key, i.e. cluster state
+# and alert context left the cluster OUTSIDE the single egress gateway (ADR-0174/0175): no budget,
+# no Langfuse trace, and a provider key outside ai-platform. It now authenticates to the in-cluster
+# LiteLLM with its own virtual key (alias `holmesgpt`, seeded by
+# openbank-infra/scripts/seed-litellm-virtual-keys.sh), so its spend is attributed, capped per day
+# and traced like every other caller.
+#
+# Seed BEFORE this syncs: an unseeded property leaves LITELLM_API_KEY absent and the new Holmes pod
+# fails CreateContainerConfigError — loud and Degraded in ArgoCD, deliberately not `optional: true`.
 apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
@@ -17,12 +23,11 @@ spec:
     name: holmes-llm-secrets
     creationPolicy: Owner
     template:
-      mergePolicy: Merge
       metadata:
         annotations:
           argocd.argoproj.io/compare-options: IgnoreExtraneous
   data:
-    - secretKey: NVIDIA_API_KEY
+    - secretKey: LITELLM_API_KEY
       remoteRef:
-        key: copilot
-        property: NVIDIA_API_KEY
+        key: litellm
+        property: KEY_HOLMESGPT

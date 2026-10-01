@@ -210,8 +210,65 @@ data:
       # exactly the incident someone is opening it to investigate.
       success_callback: ["langfuse"]
       failure_callback: ["langfuse"]
+      # Gateway-side Prometheus metrics (/metrics on the http port, scraped by
+      # observability/servicemonitor-litellm.yaml). This is OSS, not Enterprise: the upstream page
+      # (docs.litellm.ai/docs/proxy/prometheus) gates only the managed-batch series, and
+      # litellm/integrations/prometheus.py at v1.99.4 carries no premium check. A header in
+      # prometheus-rules-ai.yaml once recorded the opposite, which is why spend was counted only
+      # client-side — and client-side counting sees exactly the Kotlin call paths that emit
+      # openbank_llm_tokens_total, never HolmesGPT or any other caller. These series are what the
+      # gateway itself measured, for every caller, including budget headroom and deployment health.
+      #
+      # /metrics stays AUTHENTICATED (the upstream default). Prometheus presents its own virtual
+      # key, `prometheus-scrape`, seeded with a near-zero budget so the credential is worth nothing
+      # as a model key — see seed-litellm-virtual-keys.sh and es-litellm-metrics-scrape.yaml.
+      callbacks: ["prometheus"]
       # Fail fast to the caller's deterministic fallback rather than hanging an agent's Temporal
       # activity; the agents already treat a null/again response as "no model".
       request_timeout: 60
       drop_params: true
       telemetry: false
+    router_settings:
+      # Retries and fallbacks. Until now one failing route meant a failed call, and this file
+      # records two routes dying under us (Groq decommissioning llama-3.3 and Llama Guard).
+      #
+      # Retry only what a retry can fix. A timeout is NOT retried: request_timeout is 60s and the
+      # callers are Temporal activities and an interactive assistant, so a retried timeout is a
+      # two-minute hang presented as resilience. Auth, bad-request and content-policy errors are
+      # deterministic and retrying them only bills the same refusal twice.
+      retry_policy:
+        RateLimitErrorRetries: 2
+        InternalServerErrorRetries: 1
+        TimeoutErrorRetries: 0
+        AuthenticationErrorRetries: 0
+        BadRequestErrorRetries: 0
+        ContentPolicyViolationErrorRetries: 0
+      # A deployment failing 3 calls in a minute is benched for 60s, so a dead route stops being
+      # tried first on every request while it is dead.
+      allowed_fails: 3
+      cooldown_time: 60
+      # Fallbacks stay INSIDE the chat routes, and two routes are deliberately absent:
+      #   - meta-llama/llama-guard-4-12b: a classifier must fail visibly. Falling back to a chat
+      #     model would return prose where the adapter parses `safe` / `unsafe\nS2`, and the
+      #     verdict would be wrong rather than unavailable.
+      #   - BAAI/bge-m3: the copilot's column is vector(1024); a different embedding model is a
+      #     different vector space, so a fallback would write silently incomparable vectors.
+      #
+      # Every target is a route already measured in this file (Czech prompt, 512 max_tokens, from
+      # inside this pod). gpt-oss-120b is a reasoning model and returns EMPTY content below a few
+      # hundred max_tokens; every caller sends >= 512 (AgentChatService / CopilotChatService
+      # MAX_OUTPUT_TOKENS, OpenAiCompatibleLlmGatewayClient 700), so it is a safe target today.
+      #
+      # Budget arithmetic, stated so nobody has to derive it: spend after a fallback lands on the
+      # TARGET route's max_budget. That keeps a runaway caller bounded, but the bound becomes the
+      # sum of the source and target ceilings rather than the source's alone — 20 + 5 USD/day for
+      # DeepSeek-V3.2. Per-key virtual-key budgets still apply on top and are unaffected.
+      #
+      # All targets are DeepInfra, so this covers a dead MODEL, not a dead PROVIDER. A
+      # cross-provider target needs a Groq model id measured live from this pod first — this file
+      # documents twice why a Groq id is a claim with a shelf life.
+      fallbacks:
+        - deepseek-ai/DeepSeek-V3.2: ["openai/gpt-oss-120b"]
+        - llama-3.3-70b-versatile: ["openai/gpt-oss-120b"]
+        - openai/gpt-oss-120b: ["llama-3.3-70b-versatile"]
+        - deepseek-ai/DeepSeek-V4-Pro: ["deepseek-ai/DeepSeek-V3.2"]

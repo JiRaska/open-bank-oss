@@ -1,0 +1,33 @@
+# Scrape the LiteLLM gateway's own Prometheus exporter (callbacks: ["prometheus"] in
+# ai-platform/litellm-config.yaml). Gateway-side series cover EVERY caller — the client-side
+# openbank_llm_* counters only cover the Kotlin paths that emit them — and they carry what the
+# client cannot see: per-key budget headroom, deployment health and fallback activity.
+#
+# Authenticated with the `prometheus-scrape` virtual key (external-secrets/es-litellm-metrics-scrape.yaml).
+# Declaring this monitor is also what admits the observability namespace to litellm:4000 in the
+# derived litellm-ingress-allow-list (gen-network-policies.py derives scrape edges from monitors);
+# HolmesGPT, which lives in the same namespace, reaches the gateway through that same rule.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: litellm
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - ai-platform
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: litellm
+  endpoints:
+    - port: http
+      path: /metrics/
+      interval: 60s
+      authorization:
+        type: Bearer
+        credentials:
+          name: litellm-metrics-scrape
+          key: token
