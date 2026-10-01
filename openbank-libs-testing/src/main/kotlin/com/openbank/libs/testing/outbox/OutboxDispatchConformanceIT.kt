@@ -197,7 +197,36 @@ abstract class OutboxDispatchConformanceIT {
         }
         assertThat(secondPassCount).describedAs("SENT row must not be re-published on replay").isEqualTo(1)
     }
+
+    @Test
+    fun `one dispatch relays a batch of distinct aggregates - the publish path admits concurrent sends`() {
+        // ADR-0327 D6: on a v2 repository the loop publishes one batch's rows (one per aggregate)
+        // concurrently, up to OutboxDispatch.SEND_CONCURRENCY. A dispatcher whose
+        // publishWithResilience still carries @Bulkhead(1) rejects the overflow with a
+        // BulkheadException, which the loop treats as transport-unavailable: the batch is
+        // abandoned and those rows sit DISPATCHING until the stale reclaim. A v1 (sequential)
+        // repository passes this trivially, which is correct — it never sends concurrently.
+        val batch = (1..CONCURRENT_BATCH).map { i ->
+            OutboxMessage(aggregateId = Ids.newId(), eventType = "test.event.batch", payload = """{"seq":$i}""")
+        }
+        batch.forEach { onEventLoop { seed(it) } }
+
+        onEventLoop { triggerDispatch() }
+
+        val ids = batch.map { it.eventId.toString() }.toSet()
+        val relayed = received().map {
+            headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID)
+        }.filter { it in ids }.toSet()
+        assertThat(relayed).describedAs("every row of one batch relayed in one dispatch").isEqualTo(ids)
+        batch.forEach { msg ->
+            assertThat(onEventLoop { findEntry(msg.eventId) }!!.status).isEqualTo(OutboxStatus.SENT)
+        }
+    }
+
     private companion object {
+        /** Above the default async bulkhead (1 running + 10 queued), at or below the batch size. */
+        const val CONCURRENT_BATCH = 20
+
         /**
          * Payload comparison in this suite is STRUCTURAL, not textual — see the relay assertions.
          * A byte-equality assertion conflated two different guarantees ("no field was lost or
