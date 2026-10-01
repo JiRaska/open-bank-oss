@@ -72,9 +72,12 @@ spec:
         # the same adapter emits: alert when fan-outs were recorded and no send was.
         # Idle environment: neither series exists, no alert. Adapter dead: fan-outs
         # increment, sends do not, alert. (ADR-0252 phase 0, #4348.)
+        # devices_bucket!="0": a fan-out to a party with no registered device ends FAILED
+        # and correctly sends nothing — measured 2026-10-01, the only fan-outs in the
+        # sandbox were exactly that, and the first version of this rule fired on them.
         - alert: PushChannelSilent
           expr: |
-            sum(increase(openbank_notification_push_fanouts_total[6h])) > 0
+            sum(increase(openbank_notification_push_fanouts_total{devices_bucket!="0"}[6h])) > 0
               unless
             sum(increase(openbank_notification_push_sends_total[6h])) > 0
           for: 30m
