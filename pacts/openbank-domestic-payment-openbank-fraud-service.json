@@ -51,6 +51,7 @@
       },
       "response": {
         "body": {
+          "ruleVersion": "rules-v1",
           "score": 10,
           "verdict": "ALLOW"
         },
@@ -59,6 +60,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.ruleVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
             "$.score": {
               "combine": "AND",
               "matchers": [

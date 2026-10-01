@@ -72,6 +72,8 @@ class FraudScorePactConsumerTest {
             newJsonBody { o ->
                 o.stringType("verdict", "ALLOW")
                 o.integerType("score", 10)
+                // The adapter copies ruleVersion into the decision record; a missing field would default silently.
+                o.stringType("ruleVersion", "rules-v1")
             }.build(),
         )
         .toPact()
