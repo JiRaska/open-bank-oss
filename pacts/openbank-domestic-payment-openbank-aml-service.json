@@ -1,0 +1,78 @@
+{
+  "consumer": {
+    "name": "openbank-domestic-payment"
+  },
+  "interactions": [
+    {
+      "description": "POST a CRITICAL TRANSACTION_MONITORING case for a sanctions-hit domestic payment",
+      "providerStates": [
+        {
+          "name": "no AML case exists for the FX conversion idempotency key"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "44444444-4444-4444-8444-444444444444",
+          "alertCode": "SANCTIONS_HIT",
+          "alertDetail": "CREDITOR 'Vladimir Putin' HIT score=1.0",
+          "customerReference": "Jan Novak / CZ6508000000192000145399",
+          "matchedEntity": "OFAC SDN entry 'Vladimir Putin'",
+          "partyId": "22222222-2222-4222-8222-222222222222",
+          "riskLevel": "CRITICAL",
+          "screeningType": "TRANSACTION_MONITORING",
+          "transactionId": "55555555-0003-4000-8000-000000000003"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "aml-55555555-0003-4000-8000-000000000003-SANCTIONS_HIT"
+        },
+        "method": "POST",
+        "path": "/api/v1/aml/cases"
+      },
+      "response": {
+        "status": 201
+      }
+    },
+    {
+      "description": "POST an AML case with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "44444444-4444-4444-8444-444444444444",
+          "alertCode": "SANCTIONS_HIT",
+          "alertDetail": "CREDITOR 'Vladimir Putin' HIT score=1.0",
+          "customerReference": "Jan Novak / CZ6508000000192000145399",
+          "matchedEntity": "OFAC SDN entry 'Vladimir Putin'",
+          "partyId": "22222222-2222-4222-8222-222222222222",
+          "riskLevel": "CRITICAL",
+          "screeningType": "TRANSACTION_MONITORING",
+          "transactionId": "55555555-0003-4000-8000-000000000003"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "aml-55555555-0003-4000-8000-000000000003-SANCTIONS_HIT"
+        },
+        "method": "POST",
+        "path": "/api/v1/aml/cases"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-aml-service"
+  }
+}
