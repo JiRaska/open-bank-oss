@@ -5,7 +5,7 @@ import com.openbank.lending.application.port.out.GraphGuaranteeIdempotencyConfli
 import com.openbank.lending.application.port.out.GraphGuaranteeRepository
 import com.openbank.lending.domain.model.GraphGuaranteeProposal
 import com.openbank.lending.domain.model.GraphGuaranteeStatus
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport

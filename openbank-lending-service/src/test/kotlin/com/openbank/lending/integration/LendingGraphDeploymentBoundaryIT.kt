@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 package com.openbank.lending.integration
 
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import jakarta.inject.Inject

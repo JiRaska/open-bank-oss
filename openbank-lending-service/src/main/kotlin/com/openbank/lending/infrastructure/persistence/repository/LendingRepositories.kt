@@ -41,6 +41,10 @@ import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
+// TooManyFunctions: every function here implements one member of the LoanApplicationRepository
+// port (main's withLocked and #10266's bounded findRecentByParty reached the threshold together);
+// splitting the adapter would split one aggregate's persistence across two beans.
+@Suppress("TooManyFunctions")
 @ApplicationScoped
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,

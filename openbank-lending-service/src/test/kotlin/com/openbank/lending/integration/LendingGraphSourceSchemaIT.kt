@@ -2,7 +2,7 @@
 package com.openbank.lending.integration
 
 import com.openbank.lending.application.port.out.GraphGuaranteeRepository
-import com.openbank.lending.it.PostgresRedisTestResource
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.vertx.VertxContextSupport
