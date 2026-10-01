@@ -110,10 +110,18 @@ export const limitUtilisationEntrySchema = z.object({
 })
 export const limitUtilisationSchema = z.object({ limits: z.array(limitUtilisationEntrySchema) })
 
+// openapi.yaml 1.14.0: basis ACTUAL (asOf <= today, settled deals) or PROJECTED (after today,
+// concluded deals added on their contracted dates). Optional so an older service still parses.
+export const positionBasisSchema = z.enum(['ACTUAL', 'PROJECTED'])
+
 export const positionsSchema = z.object({
   asOf: z.iso.date(),
+  today: z.iso.date().optional(),
+  basis: positionBasisSchema.optional(),
+  countedStates: z.array(z.string()).optional(),
   positions: z.array(z.object({
     currency: z.string(), placed: decimal, borrowed: decimal, atCnb: decimal, net: decimal,
+    dealCount: z.number().int().optional(),
   })),
 })
 
@@ -127,6 +135,7 @@ export type Deal = z.infer<typeof dealSchema>
 export type Counterparty = z.infer<typeof counterpartySchema>
 export type LimitUtilisationEntry = z.infer<typeof limitUtilisationEntrySchema>
 export type Positions = z.infer<typeof positionsSchema>
+export type PositionBasis = z.infer<typeof positionBasisSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */
 export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
