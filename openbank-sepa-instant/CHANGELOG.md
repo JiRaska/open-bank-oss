@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.4...sepa-instant-v0.10.5) (2026-09-29)
+
+
+### Bug Fixes
+
+* **admin-ui:** restore trustworthy Test Intelligence evidence ([#10276](https://github.com/JiRaska/open-bank-oss/issues/10276)) ([2c05c91](https://github.com/JiRaska/open-bank-oss/commit/2c05c9161431f3122001c701f24650333ceb4456))
+
+## [0.10.4](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.3...sepa-instant-v0.10.4) (2026-09-26)
+
+
+### Security
+
+* **fleet:** scope OIDC TLS verification=none to %dev in 23 money-path services ([#10869](https://github.com/JiRaska/open-bank-oss/issues/10869)) ([5bfbdb1](https://github.com/JiRaska/open-bank-oss/commit/5bfbdb1f53fdc9a72b2e2812548537d5840fbe68))
+
 ## [0.10.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.2...sepa-instant-v0.10.3) (2026-09-23)
 
 

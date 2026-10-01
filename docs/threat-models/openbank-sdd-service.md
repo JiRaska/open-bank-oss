@@ -74,6 +74,33 @@ instruction, but the irreversible debit lives downstream.
 
 ## 6. Change log
 
+- **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
+  #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
+  `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
+  `OpaPolicyDecisionPointProducer` (openbank-libs-runtime), gated by that build
+  property (`enableIfMissing = false`), so the wiring stays off for any service that does not set
+  it. The producer is NOT `@DefaultBean`: if this service's own `src/main` ever produces a second
+  `PolicyDecisionPoint` bean, `quarkusBuild` fails loudly on an ambiguous CDI dependency instead of
+  one silently displacing the other. Same `opa.url`/`opa.path`/`opa.timeout-ms` defaults as the deleted producer
+  (`http://localhost:8181`, `/v1/data/openbank/rest/allow`, 500 ms) and the same fail-closed
+  behaviour on OPA sidecar failure — `OpaSidecarPolicyDecisionPoint` itself is unchanged, only its
+  construction site moved from a per-service copy to the shared producer. No new caller, endpoint,
+  network edge or privilege; no new trust boundary.
+
+- **2026-09-21** — Business multi-signature on mandate creation (#10281, ADR-0312 addendum). A
+  mandate authorised under `X-Acting-For` on a legal entity's account gives a creditor a standing
+  right to debit it, so customer-edge `createSddMandate` now asks delegation-service
+  `signing/evaluate` (kind `SDD_MANDATE`) first. This service stores no per-mandate maximum, so
+  the evaluation always takes the strictest rule; a client-stated maximum is not accepted, because
+  nothing here would enforce it. When more than one signature is required the exact register body
+  (server-minted UMR included) is held as an approval request (202) and posted here once, on the
+  last co-signature, via the single-use `release-claim` with `Idempotency-Key = approvalId`; the
+  UMR is frozen with it, so a replay is refused as a duplicate mandate. No new endpoint, caller or
+  role on this service. Residual: the initiator's PAYMENT_INITIATION challenge for a mandate links
+  the creditor identifier only (there is no amount), so a challenge with no linking data at all
+  would also be accepted at consume — sca-service's rule for an amount-less consume; the payload
+  hash co-signers sign binds the whole mandate.
+
 - **2026-09-06** — Replay-safe collection authorisation (#8351, ADR-0289). `SddMandateService.authorise`
   now short-circuits when the instruction's `dueDate` equals the mandate's `lastCollectionDate`: a
   retried authorise of the same collection replays the stored policy decision with no `save` and no

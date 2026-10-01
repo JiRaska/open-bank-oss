@@ -2,7 +2,7 @@
 # Secret (keys admin-username, admin-password), consumed by the Keycloak
 # Deployment's KC_BOOTSTRAP_ADMIN_* env. creationPolicy Owner: ESO owns and
 # re-creates the Secret (see es-account-service-oidc).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   name: keycloak-bootstrap

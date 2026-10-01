@@ -52,4 +52,15 @@ class McpMachineGrantCharterAlignmentTest {
             assertThat(File(it).readText()).describedAs(it).doesNotContain("service-account-openbank-mcp\"")
         }
     }
+
+    @Test
+    fun `no charter holds the statement capability, so the mcp identity has no statement grant`() {
+        // #10486 batch 8: StatementServiceClient now mints as openbank-mcp, not the shared principal whose
+        // ROLE_OPERATOR used to reach statement.list/read. No charter holds query.statement.readonly, so
+        // get_statement is refused by the MCP gate and statement-service must not grant this identity.
+        assertThat(registrySource).contains("\"get_statement\" to \"query.statement.readonly\"")
+        assertThat(allowedByAnyCharter).doesNotContain("query.statement.readonly")
+        val rego = "../openbank-infra/gitops/components/statements/statement_rest_ext.rego"
+        assertThat(File(rego).readText()).describedAs(rego).doesNotContain("service-account-openbank-mcp\"")
+    }
 }

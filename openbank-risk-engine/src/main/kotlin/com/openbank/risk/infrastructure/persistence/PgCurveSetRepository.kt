@@ -5,6 +5,7 @@
 package com.openbank.risk.infrastructure.persistence
 
 import com.openbank.risk.application.port.out.CurveSetRepository
+import com.openbank.risk.application.port.out.CurveSetSummary
 import com.openbank.risk.domain.curve.Curve
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurvePillar
@@ -50,6 +51,18 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
         ).executeBatch(rows).replaceWithVoid()
     }
 
+    override suspend fun listRecent(limit: Int): List<CurveSetSummary> =
+        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit)).awaitSuspending().map { row ->
+            CurveSetSummary(
+                id = row.getUUID("id"),
+                asOf = row.getLocalDate("as_of"),
+                provenance = Provenance.parse(row.getString("provenance")).wire,
+                source = row.getString("source"),
+                recordedAt = row.getOffsetDateTime("recorded_at").toInstant(),
+                indices = row.getString("indices")?.split(',')?.filter { it.isNotBlank() }.orEmpty(),
+            )
+        }
+
     override suspend fun findById(id: UUID): CurveSet? {
         val row = pool.preparedQuery(SELECT_SET).execute(Tuple.of(id)).awaitSuspending().firstOrNull() ?: return null
         val asOf = row.getLocalDate("as_of")
@@ -76,6 +89,10 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
             "INSERT INTO curve_set_quote (curve_set_id, curve_index, tenor, simple_rate) VALUES ($1, $2, $3, $4)"
         const val INSERT_PILLAR =
             "INSERT INTO curve_set_pillar (curve_set_id, curve_index, pillar_date, zero_rate) VALUES ($1, $2, $3, $4)"
+        const val SELECT_RECENT =
+            "SELECT s.id, s.as_of, s.provenance, s.source, s.recorded_at, " +
+                "(SELECT string_agg(DISTINCT p.curve_index, ',' ORDER BY p.curve_index) FROM curve_set_pillar p " +
+                "WHERE p.curve_set_id = s.id) AS indices FROM curve_set s ORDER BY s.recorded_at DESC, s.id LIMIT $1"
         const val SELECT_SET = "SELECT id, as_of, provenance, source, recorded_at FROM curve_set WHERE id = $1"
         const val SELECT_PILLARS =
             "SELECT curve_index, pillar_date, zero_rate FROM curve_set_pillar WHERE curve_set_id = $1 " +

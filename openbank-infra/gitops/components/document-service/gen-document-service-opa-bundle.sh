@@ -18,8 +18,11 @@
 #
 # document-service is NOT in rules.yaml: money_path_services. It relies on rest.rego's
 # base allow reasons plus one extension, document_rest_ext.rego, which grants kyb-service
-# the business onboarding agreement actions (document.business-agreement.*) and vetoes the
-# customer edge from them.
+# the business onboarding agreement actions (document.business-agreement.*), vetoes the
+# customer edge from them, and — for external disclosure export, a high-impact document
+# boundary — names the one dedicated delegation-service subject that may request a sealed
+# artifact; base role rules must never make that capability available to the fleet-wide
+# M2M identity.
 #
 # A checksum annotation rolls the Deployment when the policy changes (subPath mounts do
 # not hot-reload). After editing any source below, re-run this script + commit.

@@ -286,9 +286,6 @@ jobs:
       # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
-      # No -D pact flags to mirror here (unlike the pre-split single job's #1009 workaround):
-      # `test` above never touched pactbroker.* either, so this is a plain up-to-date/cached
-      # second invocation of the same, single-shaped `test` task.
       - name: Generate Kover XML report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
@@ -296,7 +293,7 @@ jobs:
         # hold a fleet runner after the enforcing build has already completed (#6734).
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain -x test
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -465,6 +462,12 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: ${{ inputs.ref == '' && inputs.provider_version == '' && 1 || 0 }}
 
+      - name: Stage trusted Pact Broker retry helper
+        run: |
+          set -euo pipefail
+          cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
+          bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
+
       - name: Check out a requested provider version only after proving it is on main
         if: inputs.ref != '' || inputs.provider_version != ''
         env:
@@ -565,12 +568,12 @@ jobs:
           ECR: "265175468565.dkr.ecr.eu-north-1.amazonaws.com"
         run: |
           if [ "${{ steps.ecr_login.outcome }}" = "success" ] \
-             && docker pull "$ECR/docker-hub/library/postgres:16.3-alpine"; then
+             && docker pull "$ECR/docker-hub/library/postgres:18.6-alpine"; then
             docker pull "$ECR/docker-hub/valkey/valkey:7.2-alpine" &
             docker pull "$ECR/docker-hub/redpandadata/redpanda:v24.1.2" &
             docker pull "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final" &
             wait
-            docker tag "$ECR/docker-hub/library/postgres:16.3-alpine"                  postgres:16.3-alpine
+            docker tag "$ECR/docker-hub/library/postgres:18.6-alpine"                  postgres:18.6-alpine
             docker tag "$ECR/docker-hub/valkey/valkey:7.2-alpine"                      valkey/valkey:7.2-alpine
             docker tag "$ECR/docker-hub/redpandadata/redpanda:v24.1.2"                 redpandadata/redpanda:v24.1.2
             docker tag "$ECR/docker-hub/apicurio/apicurio-registry-mem:2.6.2.Final"   apicurio/apicurio-registry-mem:2.6.2.Final
@@ -578,7 +581,7 @@ jobs:
           elif curl -sf --connect-timeout 1 \
               http://registry-cache.registry-cache.svc.cluster.local:5000/v2/ > /dev/null 2>&1; then
             echo "::warning title=TC pre-warm::ECR unavailable — using in-cluster registry-cache"
-            docker pull postgres:16.3-alpine &
+            docker pull postgres:18.6-alpine &
             docker pull valkey/valkey:7.2-alpine &
             docker pull redpandadata/redpanda:v24.1.2 &
             docker pull apicurio/apicurio-registry-mem:2.6.2.Final &
@@ -757,12 +760,14 @@ jobs:
             --argjson contracts "$contracts" \
             '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
           echo "Publishing ${#files[@]} pact(s) for ${{ inputs.service }} @ ${GITHUB_SHA::8} (branch ${BRANCH})"
-          code="$(curl -sS -o /tmp/pact-publish.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' \
-            "${PACT_BROKER_URL%/}/contracts/publish" --data-binary "$body")"
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
+            'application/json')"
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
-          [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
+          echo "Pact publication accepted (HTTP $code)."
 
       # A full-fleet run discovers every Gradle module, including consumer-only modules such as
       # analytics-sink that intentionally do not apply openbank.quarkus-service and therefore
@@ -819,19 +824,12 @@ jobs:
           set -euo pipefail
           endpoint="${PACT_BROKER_URL%/}/pacts/provider/${SERVICE}/for-verification"
           body='{"consumerVersionSelectors":[{"mainBranch":true}],"includePendingStatus":false}'
-          http_code="$(curl -sS -o /tmp/pact-preflight.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' -H 'Accept: application/hal+json, application/json' \
-            "$endpoint" --data-binary "$body" || echo "curl_failed")"
-
-          if [ "$http_code" = "curl_failed" ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: could not reach $endpoint at all (connection/DNS/TLS failure). This is a broker-reachability problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code from $endpoint. The broker rejected or failed the selector request before verification could start — this is a broker-side problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          http_code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "$endpoint" "$body_file" /tmp/pact-preflight.json \
+            'application/hal+json, application/json')"
           if ! jq empty /tmp/pact-preflight.json 2>/dev/null; then
             byte_count="$(wc -c < /tmp/pact-preflight.json | tr -d ' ')"
             echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code but the body ($byte_count bytes) is not valid JSON. pact-jvm's HalClient cannot parse this either — expect a downstream NullPointerException in fetchConsumersWithSelectorsV2 if this preflight is bypassed. This is a broker-side malformed-response problem, not a ${SERVICE} contract regression."

@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NodeDegradedWhileReady (2026-09-30). Case 1 must fire; the controls are a node that is
+# NotReady as well (KubeNodeNotReady's job), a condition at True, and a kubelet condition
+# (MemoryPressure) that Karpenter NodeRepair does not act on and this rule must not either.
+rule_files:
+  - prometheus-rules-node-health.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "NetworkingReady=False on a Ready node pages after 5m"
+    input_series:
+      - series: 'kube_node_status_condition{node="ip-a",condition="NetworkingReady",status="false"}'
+        values: "1x10"
+      - series: 'kube_node_status_condition{node="ip-a",condition="NetworkingReady",status="true"}'
+        values: "0x10"
+      - series: 'kube_node_status_condition{node="ip-a",condition="Ready",status="true"}'
+        values: "1x10"
+      # NotReady node with the same agent condition: not this alert.
+      - series: 'kube_node_status_condition{node="ip-b",condition="StorageReady",status="false"}'
+        values: "1x10"
+      - series: 'kube_node_status_condition{node="ip-b",condition="Ready",status="true"}'
+        values: "0x10"
+      - series: 'kube_node_status_condition{node="ip-b",condition="Ready",status="false"}'
+        values: "1x10"
+      # Healthy node: agent condition True, kubelet pressure condition True.
+      - series: 'kube_node_status_condition{node="ip-c",condition="KernelReady",status="false"}'
+        values: "0x10"
+      - series: 'kube_node_status_condition{node="ip-c",condition="MemoryPressure",status="true"}'
+        values: "1x10"
+      - series: 'kube_node_status_condition{node="ip-c",condition="Ready",status="true"}'
+        values: "1x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: NodeDegradedWhileReady
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: NodeDegradedWhileReady
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+              node: ip-a
+              condition: NetworkingReady
+            exp_annotations:
+              summary: "Node ip-a reports NetworkingReady=False while Ready"
+              description: "The EKS node monitoring agent has set NetworkingReady=False on ip-a for 5+ minutes while the kubelet still reports Ready. Karpenter NodeRepair will FORCEFULLY terminate this node once the condition has held for 30 minutes (10 for AcceleratedHardwareReady) — no drain, PDBs ignored. Read the reason (`kubectl describe node ip-a` → Conditions and Events), list what runs there (`kubectl get pods -A -o wide --field-selector spec.nodeName=ip-a`), and if a single-instance CNPG primary is on it, switch it over or delete the primary pod onto another node NOW rather than letting the forced termination do it. Then cordon and replace the NodeClaim yourself — see runbook 0026 §1.4."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"

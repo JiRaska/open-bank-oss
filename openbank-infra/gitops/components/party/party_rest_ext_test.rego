@@ -99,3 +99,24 @@ test_lending_graph_without_narrow_role_is_denied if {
     no_role := {"type": "HUMAN", "id": "service-account-openbank-lending-graph", "roles": ["ROLE_API"]}
     not allow.allow with input as {"principal": no_role, "action": "party.guaranteeIdentity.verify"}
 }
+
+# #10486 batch 8
+b8deleg_sa(id) := {"type": "HUMAN", "id": id, "roles": ["ROLE_API"]}
+
+test_b8deleg_own_identity_reads if {
+	every action in {"party.mandate.read"} {
+		"service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-delegation"), "action": action}
+	}
+}
+
+test_b8deleg_own_identity_never_writes if {
+	every action in {"party.mandate.create", "party.update"} {
+		not "service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-delegation"), "action": action}
+	}
+}
+
+test_b8deleg_other_api_identity_gets_nothing if {
+	every action in {"party.mandate.read"} {
+		not "service-delegation-mandate-read" in allowed_reasons with input as {"principal": b8deleg_sa("service-account-openbank-services"), "action": action}
+	}
+}

@@ -29,6 +29,19 @@ interface BorrowerCreditPort {
     /** Idempotent per [reference] — a retried disbursement call is a no-op, not a second credit. */
     fun credit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit>
 
-    /** Idempotent per [reference]. */
-    fun debit(reference: String, borrowerAccountId: UUID, amount: Money): Uni<Unit>
+    /**
+     * Idempotent per [reference]. [description] is what the borrower sees on the booked transaction:
+     * a disbursement unwind and a scheduled repayment are both debits, but not the same event.
+     */
+    fun debit(
+        reference: String,
+        borrowerAccountId: UUID,
+        amount: Money,
+        description: String = DISBURSEMENT_UNWIND,
+    ): Uni<Unit>
+
+    companion object {
+        const val DISBURSEMENT_UNWIND = "Loan disbursement unwind"
+        const val REPAYMENT = "Loan repayment"
+    }
 }

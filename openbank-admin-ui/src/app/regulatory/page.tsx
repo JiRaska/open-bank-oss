@@ -13,6 +13,7 @@ import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { blockReasonCopy, evaluateExportReadiness, type BalanceVerdict } from '@/lib/regulatory/exportReadiness'
 import { Ban } from 'lucide-react'
 import { FileText, CheckCircle2, AlertTriangle, ExternalLink, Calendar, Check, Eye, X, Table as TableIcon, FileJson, FileSpreadsheet, RefreshCw } from 'lucide-react'
+import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 type Report = (typeof REPORTS)[number]
@@ -43,16 +44,28 @@ interface RegulatoryTemplate {
   /** Which of the two independent balance verdicts objected (finrep, issue #6011). */
   balanceVerdict?: BalanceVerdict
   hasDataGaps?: boolean
+  /** finrep 1.14.0: the risk-engine snapshot run the figures came from, and its provenance (ADR-0313 D13). */
+  sourceRunId?: string
+  provenance?: 'synthetic' | 'production'
 }
+
+// A genuine backend answer that a COREP template id is unknown or not yet implemented there —
+// distinct from `not_deployed` (the whole finrep-service is missing from this environment) and
+// from `not_found` (a real 404 for something else). `CorepService.getTemplate` on main throws
+// `IllegalArgumentException` for an id its `when` does not match, which libs-runtime maps to 400;
+// an unmatched route on an older/newer contract could equally answer a plain 404. Both mean the
+// same thing to an operator: the shape exists in this UI's catalogue, the backend side of it does
+// not exist yet.
+type TemplateNotDeployedKind = 'template_not_deployed'
 
 type PreviewData =
   | { status: 'idle' | 'loading' }
-  | { status: 'unavailable'; kind: BffFailure }
+  | { status: 'unavailable'; kind: BffFailure | TemplateNotDeployedKind }
   | { status: 'no-periods' }
   | { status: 'unsupported' }
   | { status: 'ready'; templates: RegulatoryTemplate[]; evidence: 'FROZEN' | 'LIVE_PREVIEW' }
 
-type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure }
+type TemplateLoadResult = { template: RegulatoryTemplate } | { kind: BffFailure | TemplateNotDeployedKind }
 
 const TEMPLATE_PATHS: Record<string, string[]> = {
   'cnb-finrep': [
@@ -61,7 +74,22 @@ const TEMPLATE_PATHS: Record<string, string[]> = {
     '/api/v1/finrep/templates/F01.03',
     '/api/v1/finrep/templates/F02.00',
   ],
-  'cnb-capital': ['/api/v1/corep/templates/C_01.00'],
+  // C_02.00 (Own Funds Requirements) shares the C_01.00 render/export path — same CorepCell shape
+  // (rowRef/colRef/label/value/isDataGap/gapReason).
+  'cnb-capital': ['/api/v1/corep/templates/C_01.00', '/api/v1/corep/templates/C_02.00'],
+  // LCR group (Delegated Regulation (EU) 2015/61): C_72.00 buffer assets, C_73.00 outflows,
+  // C_74.00 inflows, C_76.00 the LCR calculation itself (#11053/#11098/#11100/#11112). Same
+  // CorepCell shape as cnb-capital, with one difference: C_76.00's r0030 (the ratio) carries unit
+  // `%` in `currency` rather than an ISO code — `cellValueText` below renders that as a
+  // percentage, never as "% 123.45". Until all four finrep PRs are merged, a fetch here answers
+  // 400/404 for an unknown template id, rendered as `template_not_deployed` below rather than a
+  // generic error.
+  'cnb-lcr': [
+    '/api/v1/corep/templates/C_72.00',
+    '/api/v1/corep/templates/C_73.00',
+    '/api/v1/corep/templates/C_74.00',
+    '/api/v1/corep/templates/C_76.00',
+  ],
 }
 
 // This is the canonical environment tag already embedded in the browser bundle. Unknown
@@ -107,11 +135,60 @@ const CELL_LABELS: Record<string, string> = {
 }
 
 function cellLabel(template: RegulatoryTemplate, cell: RegulatoryCell): string {
+  // A backend-supplied label (every COREP cell carries one; FINREP falls back to CELL_LABELS
+  // above) is rendered VERBATIM — including a bracketed marker such as "[row code UNVERIFIED]".
+  // Stripping or reformatting it here would hide a caveat the backend deliberately attached to
+  // this specific row/column, which is exactly the kind of thing an operator reading a
+  // regulatory preview must see, not have filtered out.
   return cell.label ?? CELL_LABELS[`${template.templateId}:${cell.rowRef}:${cell.colRef}`] ?? `${cell.rowRef} / ${cell.colRef}`
+}
+
+// A gap cell's `value` is a flagged, non-attested zero (openapi.yaml: "MUST NOT be read as an
+// attested zero balance") — never render it as if it were a real monetary figure. Show the gap
+// badge plus its reason instead of the underlying number; `money(cell.value, ...)` is used ONLY
+// for a cell that is not a data gap.
+function cellValueText(cell: RegulatoryCell): string {
+  if (cell.isDataGap) {
+    return cell.gapReason ? `DATOVÁ MEZERA — ${cell.gapReason}` : 'DATOVÁ MEZERA'
+  }
+  // `currency` is reused by the backend as a general unit tag, not always an ISO code — COREP
+  // C 76.00's r0030 (Liquidity coverage ratio) carries `%` there (finrep openapi.yaml's
+  // `CorepCell.currency` has no enum restricting it). Render that as a percentage; everything
+  // else is money as before.
+  return cell.currency === '%' ? percent(cell.value) : money(cell.value, cell.currency)
 }
 
 function money(value: number, currency: string): string {
   return new Intl.NumberFormat('cs-CZ', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value)
+}
+
+// The backend already scales the ratio to a percentage number (e.g. 123.45 meaning 123.45 %), so
+// divide back to a fraction for Intl's `percent` style, which expects 1 = 100 %.
+function percent(value: number): string {
+  return new Intl.NumberFormat('cs-CZ', { style: 'percent', minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value / 100)
+}
+
+/**
+ * Classify a template-endpoint `Response`, distinguishing "this template id is not implemented
+ * on the backend yet" from the generic BFF failure kinds. A plain `classifyBffFailure` call
+ * cannot make that distinction: it reads 400 as `error` and a 404 with no proxy-shaped body as
+ * `not_found`, both of which render as an unexplained failure even though the operator can do
+ * nothing about either — the fix is on the backend, not in this browser tab. Only applied to the
+ * per-template fetches (never the `/periods` call, whose 404s mean something else entirely).
+ */
+async function classifyTemplateFailure(res: Response): Promise<BffFailure | TemplateNotDeployedKind> {
+  if (res.status === 400) return 'template_not_deployed'
+  if (res.status === 404) {
+    let error = ''
+    try {
+      const body = (await res.clone().json()) as { error?: unknown }
+      if (typeof body?.error === 'string') error = body.error
+    } catch {
+      // non-JSON body — fall through, this is not the proxy's "Unknown service" shape
+    }
+    if (!error.startsWith('Unknown service')) return 'template_not_deployed'
+  }
+  return classifyBffFailure(res)
 }
 
 function lastCompletedMonthEnd(): string {
@@ -143,9 +220,12 @@ function buildExportRows(report: Report, data: PreviewData): ExportRow[] {
   if (data.status === 'ready') {
     const rendered = data.templates.flatMap(template => [
       { field: `Šablona ${template.templateId}`, value: `Období ${template.period}${template.isBalanced === false ? ' · nevyvážená' : ''}${template.hasDataGaps ? ' · obsahuje datové mezery' : ''}` },
+      ...(template.provenance === 'synthetic'
+        ? [{ field: `${template.templateId} · Původ dat`, value: `SYNTETICKÁ DATA — riskový snímek ${template.sourceRunId ?? '—'}` }]
+        : []),
       ...template.cells.map((cell) => ({
         field: `${template.templateId} · ${cellLabel(template, cell)}`,
-        value: `${money(cell.value, cell.currency)}${cell.isDataGap ? ' · DATOVÁ MEZERA' : ''}`,
+        value: cellValueText(cell),
       })),
     ])
     const source = data.evidence === 'FROZEN'
@@ -238,6 +318,21 @@ const REPORTS = [
     description: 'Financial Reporting — rozvaha, výkaz zisku a ztráty, podrozvahové položky',
     sdatCode: 'FINREP',
     fields: ['Aktiva celkem', 'Závazky celkem', 'Vlastní kapitál', 'Čistý úrokový výnos', 'Provozní náklady'],
+  },
+  {
+    id: 'cnb-lcr',
+    name: 'CNB — Krytí likvidity (LCR)',
+    authority: 'CNB',
+    regulation: 'CRR/CRD IV (EU 575/2013) + nařízení v přenesené pravomoci (EU) 2015/61',
+    frequency: 'Měsíčně',
+    deadline: '30 dní po konci měsíce',
+    nextDue: '2026-10-30',
+    description: 'Liquidity Coverage Ratio — likvidní aktiva, odtoky, přítoky a výpočet ukazatele LCR',
+    sdatCode: 'LCR',
+    // Per-template Czech labels rather than field names: this report is a bundle of four COREP
+    // templates (like cnb-capital's C_01.00 + C_02.00), so "key fields" is more useful as
+    // "which template" than as a flattened field list.
+    fields: ['C 72.00 – Likvidní aktiva', 'C 73.00 – Odtoky', 'C 74.00 – Přítoky', 'C 76.00 – Výpočet LCR'],
   },
   {
     id: 'ecb-payments',
@@ -342,9 +437,9 @@ export default function RegulatoryPage() {
         })
         return response.ok
           ? { template: await response.json() as RegulatoryTemplate }
-          : { kind: await classifyBffFailure(response) }
+          : { kind: await classifyTemplateFailure(response) }
       }))
-      const failed = results.find((result): result is { kind: BffFailure } => 'kind' in result)
+      const failed = results.find((result): result is { kind: BffFailure | TemplateNotDeployedKind } => 'kind' in result)
       if (failed) {
         setPreviewData({ status: 'unavailable', kind: failed.kind })
         return
@@ -685,7 +780,43 @@ export default function RegulatoryPage() {
             {/* Visual control table */}
             <div style={{ overflowY: 'auto', padding: '0' }}>
               {previewData.status === 'unavailable' ? (
-                <DataUnavailable kind={previewData.kind} service="FINREP / COREP service" feature={t('regulatorní šablony', 'regulatory templates')} lang="cs" dense />
+                <DataUnavailable
+                  // DataUnavailable only knows the BFF failure kinds plus `no_data`; a
+                  // `template_not_deployed` result is rendered on the `not_found` base icon/copy,
+                  // then fully replaced below via the `title`/`detail` overrides.
+                  kind={previewData.kind === 'template_not_deployed' ? 'not_found' : previewData.kind}
+                  service="FINREP / COREP service"
+                  feature={t('regulatorní šablony', 'regulatory templates')}
+                  lang="cs"
+                  dense
+                  // C_02.00 has a dependency the other templates do not: finrep-service's read from
+                  // openbank-risk-engine's Pillar 1 snapshot (RISK_ENGINE_UNAVAILABLE — a real
+                  // failure of that read, distinct from the risk-engine read being disabled or
+                  // having no tied snapshot, both of which render as an ordinary isDataGap cell,
+                  // never as this unavailable state). A generic "service did not answer" message
+                  // would leave an operator debugging finrep-service itself; name the actual
+                  // dependency so they know to check the risk engine instead.
+                  //
+                  // `template_not_deployed` (cnb-lcr, until #11053/#11098/#11100/#11112 all merge):
+                  // finrep-service answers the LCR template ids with a plain 400/404, because the
+                  // route matches but nothing implements that template id yet. That reads exactly
+                  // like a generic backend error unless named — an operator would otherwise go
+                  // looking for an outage that does not exist.
+                  // Literal Czech, not `t()` — this panel is always rendered `lang="cs"` (see the
+                  // `DataUnavailable` call below), so its own copy must not silently flip to
+                  // English while the panel around it stays Czech.
+                  title={previewData.kind === 'template_not_deployed'
+                    ? 'Šablona zatím není na backendu nasazena'
+                    : undefined}
+                  detail={preview.id === 'cnb-capital' && previewData.kind === 'error'
+                    ? t(
+                        'finrep-service odpověděla chybou při načítání C 02.00 (Kapitálové požadavky) — pravděpodobně selhalo čtení z risk-engine (Pillar 1 kapitálový výpočet). Hodnoty se nezobrazí, dokud se čtení z risk-engine neobnoví; zkuste náhled načíst znovu.',
+                        'finrep-service returned an error rendering C 02.00 (Own Funds Requirements) — most likely its read from the risk engine failed (the Pillar 1 capital calculation). Values will not display until the risk-engine read recovers; try loading the preview again.',
+                      )
+                    : previewData.kind === 'template_not_deployed'
+                      ? 'finrep-service ještě neobsahuje implementaci této šablony COREP LCR — čeká na sloučení odpovídajícího finrep pull requestu. Jakmile bude nasazena, náhled se načte automaticky bez dalšího zásahu.'
+                      : undefined}
+                />
               ) : (
                 <>
                 {previewData.status === 'ready' && previewData.evidence === 'LIVE_PREVIEW' && (
@@ -694,6 +825,12 @@ export default function RegulatoryPage() {
                     {' — '}{t('období ještě není zapečetěné. Hodnoty se mohou změnit; finální regulatorní export zůstává zablokovaný.', 'the period is not sealed yet. Values may change; final regulatory export remains blocked.')}
                   </div>
                 )}
+                {previewData.status === 'ready' && previewData.templates.filter(tpl => tpl.provenance === 'synthetic').map(tpl => (
+                  <div key={tpl.templateId} role="status" data-testid={`synthetic-provenance-${tpl.templateId}`} style={{ padding: '10px 20px', display: 'flex', alignItems: 'center', gap: '10px', fontSize: '12px', color: 'var(--warning-text)', background: 'var(--warning-bg)', borderBottom: '1px solid var(--warning-border)' }}>
+                    <ProvenanceBadge provenance="synthetic" />
+                    <span>{tpl.templateId}{' — '}{t('vypočteno ze syntetického běhu rizikového enginu', 'computed from a synthetic risk-engine run')}{tpl.sourceRunId ? <> {'('}{t('běh', 'run')} <code>{tpl.sourceRunId}</code>{')'}</> : null}</span>
+                  </div>
+                ))}
                 <table className="data-table" style={{ width: '100%' }}>
                   <thead>
                     <tr>

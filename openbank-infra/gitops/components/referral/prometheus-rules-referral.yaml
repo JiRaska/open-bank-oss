@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: Apache-2.0
+# Per-service PrometheusRule for openbank-referral-service.
+#
+# ReferralOutboxDeadLetterGauge exports openbank_outbox_dead_lettered{service="referral"}: the
+# number of referral_outbox rows in terminal DEAD. The outbox dispatcher's listProcessable
+# excludes them, so each one is a referral event (an invite qualification) that will never be
+# published — downstream loyalty never earns for it. A gauge nothing reads is not a control, so
+# it gets an alert. OutboxDeadLetterAlertNamingTest pins the selector below to a real gauge
+# registration.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-referral-alerts
+  namespace: referral
+  labels:
+    app.kubernetes.io/part-of: openbank
+    app.kubernetes.io/name: referral-service
+spec:
+  groups:
+    - name: openbank.referral.outbox
+      rules:
+        - alert: ReferralOutboxDeadLettered
+          expr: openbank_outbox_dead_lettered{service="referral"} > 0
+          for: 15m
+          labels:
+            severity: warning
+            service: referral
+          annotations:
+            summary: "referral-service has dead-lettered outbox rows (referral events that will never be published)"
+            description: "openbank_outbox_dead_lettered{service=\"referral\"} is >0: one or more referral_outbox rows are in terminal DEAD and are excluded from dispatch, so the qualification they carry never reaches consumers. Read last_error on them before requeueing."

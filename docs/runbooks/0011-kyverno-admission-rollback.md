@@ -5,7 +5,7 @@ admission and you need it running now.
 
 | policy | what it requires | file |
 | --- | --- | --- |
-| `verify-openbank-image-sbom-attestation` | a valid Cosign signature **and** a `cyclonedx` attestation on the same image, both against the KMS public key — one `verifyImages` entry | `openbank-infra/gitops/components/kyverno/verify-sbom-attestation-policy.yaml` |
+| `verify-openbank-image-sbom-attestation-cel` (`ImageValidatingPolicy`) | a valid Cosign signature **and** a `cyclonedx` attestation on the same image, both against the KMS public key — one policy | `openbank-infra/gitops/components/kyverno/cel-image-validating-sbom-attestation.yaml` |
 
 **Until 2026-09-13 these were two policies** (`verify-openbank-image-signatures` held the signature
 check). They were folded into one because Kyverno v1.12.5 keeps a single verification status per
@@ -17,8 +17,9 @@ per policy (>= v1.19.0).
 
 It matches **`kind: Pod`** with `imageReferences: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-*`,
 so they select every openbank service pod in every namespace — measured 2026-08-13: **74 of 416
-running pods across 46 namespaces**. There is no namespace exclusion. `failurePolicy: Ignore`, so a
-webhook that is *down* fails open; a webhook that is *up and says no* fails closed.
+running pods across 46 namespaces**. Only `kube-system` and `kyverno` are excluded. Since stage 2 of
+#11437 it is `validationActions: [Deny]` with `failurePolicy: Fail`: a webhook that is *down or slow*
+fails closed too (the v1 policy was `Ignore`). See §4a for its break-glass.
 
 This runbook exists because issue #1915 asked for it before those policies graduated, and they
 graduated first. ADR-0030 D4 is the decision; this is the way back out.
@@ -36,8 +37,7 @@ An admission denial names the policy and the rule:
 ```
 admission webhook "validate.kyverno.svc-fail" denied the request:
   policy Pod/<ns>/<name> for resource violation:
-    verify-openbank-image-sbom-attestation:
-      verify-cyclonedx-sbom-attestation: 'failed to verify image ...: .../openbank-<svc>:<tag>: no signatures found'
+    Policy verify-openbank-image-sbom-attestation-cel failed: ... .../openbank-<svc>:<tag> ...
 ```
 
 Read the **error text** out of that message — it is one policy and one rule now, so the policy
@@ -81,7 +81,7 @@ Three failure shapes have actually happened here. They look identical at the pod
 
 ### 3a. Preferred — a scoped `PolicyException` (narrow, reversible, leaves Enforce on)
 
-Model it on `pricing-image-exception.yaml`: namespaced, matched to `kind: Pod` in that one
+Model it on `pricing-image-exception-cel.yaml` (a `policies.kyverno.io` `PolicyException`): namespaced, matched to `kind: Pod` in that one
 namespace, listing the policy/rule names. Note the cost of the fold: an exception can no longer
 waive the SBOM attestation while keeping the signature check — the rule is one rule, so excepting
 it waives both for that namespace. This is strictly better than dropping the
@@ -95,8 +95,8 @@ so from experience.
 
 Only when the blast radius is fleet-wide or the deadlock in §2 applies.
 
-Edit the policy's `spec.validationFailureAction` from `Enforce` to `Audit` in its gitops file and
-sync. **This is coarser than it used to be:** the signature and SBOM checks were deliberately
+Edit the policy's `spec.validationActions` from `[Deny]` to `[Audit]` in its gitops file and
+sync (for a v1 ClusterPolicy: `spec.validationFailureAction` `Enforce` -> `Audit`). **This is coarser than it used to be:** the signature and SBOM checks were deliberately
 separate ClusterPolicies (the #770 lesson) so that dropping one did not weaken the other, and on
 Kyverno v1.12.5 that separation made the verdict nondeterministic (#9805). Until the upgrade,
 dropping this policy to Audit drops **both** checks. Prefer §3a whenever the blast radius allows it.
@@ -185,6 +185,125 @@ Five rules, each of which this gate broke:
    verdict depends on parsing a third party's prose, keep one live case whose answer you
    already know, or the parser is only ever tested against your own memory of the wording.
 
+## 4a. CEL shadow policies (Kyverno 1.19 migration, stages 1-2)
+
+Every `kyverno.io/v1` ClusterPolicy in `gitops/components/kyverno/` not yet listed under stage 2 below has a
+`policies.kyverno.io/v1` twin named `<policy>-cel` (`ValidatingPolicy`, `ImageValidatingPolicy`,
+). They are `validationActions: [Audit]` with `failurePolicy: Ignore`,
+so **they are never the thing denying a workload** — the rollback above still targets the v1 policy.
+A `-cel` name in `KyvernoAuditPolicyFailingBeforeEnforce` is a parity gap, not an outage: compare
+with the v1 policy's verdict and fix the CEL port before stage 2. If a shadow ever does misbehave
+(admission latency, registry load), delete its file by PR; nothing depends on it yet.
+
+**Stage 2 progress (#11437), one policy per PR:** `deny-nginx-snippet-annotations` — enforcing as
+`deny-nginx-snippet-annotations-cel` (`[Deny]`, `failurePolicy: Fail`), v1 file deleted.
+`require-gated-or-declared-tool-ingress` — enforcing as `require-gated-or-declared-tool-ingress-cel`
+(`[Deny]`, `failurePolicy: Fail`), v1 file `tool-ingress-gate-policy.yaml` deleted. The v1 verdicts
+of both are pinned in the parity harness. `openbank-dr-sa-pin` — enforcing as `openbank-dr-sa-pin-cel`
+(`[Deny]`, `failurePolicy: Fail`); its v1 ClusterPolicy lived in `components/platform/dr-runner-rbac.yaml`
+(Argo app `platform`, not `kyverno-policies`), so it was removed by a separate follow-up PR after the
+flip had synced — two apps sync independently and `PruneLast` cannot order across them. The RBAC
+documents in that file stay; the ClusterPolicy document is gone. Its v1 verdicts are pinned in the harness too (reverting the
+removal PR re-creates it). For those policies the rollback targets the `-cel`
+document, and reverting the stage-2 PR re-creates the v1 original.
+`block-deployment-if-rollout-exists` — enforcing as `block-deployment-if-rollout-exists-cel`
+(`[Deny]`, `failurePolicy: Fail`), v1 file `rollout-bypass-prevention.yaml` deleted; its v1 verdicts
+were measured live and are pinned in `V1_ROLLOUT`. It is the one stage-2 policy that calls the API
+server (`resource.List` over `argoproj.io` Rollouts), so under `Fail` a List error — Rollout CRD gone,
+or the `kyverno-admission-controller` SA losing `list rollouts` — denies every Deployment CREATE/UPDATE
+in its 13 money-path namespaces (v1 had the same exposure). Symptom: Deployment applies there fail
+with a Kyverno webhook error naming that policy and a List/forbidden/not-found cause. Fix the CRD or
+RBAC; if that cannot be quick, set that document's `failurePolicy: Ignore` by PR (it then admits on
+error, keeping Deny when the List succeeds).
+`ecr-pull-through-rewrite` (the one mutating policy) — rewriting as the `MutatingPolicy`
+`ecr-pull-through-rewrite-cel` (kill-switch matchCondition removed, `failurePolicy: Ignore`, background
+off, so existing Pods are never touched), v1 file deleted; its v1 output images are pinned in
+`V1_IMAGES`. A mutation has no Audit mode, so the swap relied on idempotency instead: a rewritten ref
+starts with the ECR host, which matches no origin prefix, so either engine on the other's output is a
+no-op (the harness re-runs the CEL policy on its own output and requires zero changes). Symptom if it
+misbehaves: new Pods show an unexpected image, or pulls fail with an ECR `not found` for a
+pull-through path. Because it is `Ignore`, a webhook outage only means images pull from the origin
+registry over NAT; to stop the rewrite, delete the file by PR (Pods then pull from the origin). CNPG
+instance pods are excluded, as before. Pod controllers (Deployment, DaemonSet, Job, CronJob, ...) are rewritten too, through
+Kyverno autogen; 1.19.1 autogen rewrites `object.spec` only in matchConditions and mutations, never in
+`variables`, so a variable that reads `object.spec` errors on every controller (`no such key:
+containers` in PolicyReports, fixed 2026-09-30). The Pods those controllers create are still rewritten
+at Pod admission, so that failure shows up as report errors and unrewritten controller specs, not as
+upstream pulls. A kube-system controller keeps its `quay.io/` images; its Pods are then decided on
+their own `eks.amazonaws.com/component` label.
+`verify-openbank-image-sbom-attestation` (the image policy) — enforcing as the `ImageValidatingPolicy`
+`verify-openbank-image-sbom-attestation-cel` (`[Deny]`, `failurePolicy: Fail`, `mutateDigest: false`),
+v1 file `verify-sbom-attestation-policy.yaml` and its v2 exception `pricing-image-exception.yaml`
+deleted; `pricing-image-exception-cel.yaml` carries the pricing waiver. **Break-glass, and what each
+lever actually does** (Kyverno 1.19.1, `pkg/webhooks/resource/ivpol/handler.go`, `validationResponse`):
+for a policy whose actions include `Deny`, a result of `RuleStatusFail` **and** `RuleStatusError`
+both become an admission error — `failurePolicy` is not consulted there. So:
+- *Kyverno unreachable or timing out* (the webhook CALL fails): set `failurePolicy: Ignore` by PR.
+  That is the only case `failurePolicy` governs; the apiserver then admits without asking.
+- *ECR, KMS or the key alias failing* (Kyverno answers, but verification errors): `failurePolicy:
+  Ignore` does **nothing** — the Pod is denied with `Policy verify-openbank-image-sbom-attestation-cel
+  error: ...`. The real break-glass is `validationActions: [Audit]` by PR (§3b): without `Deny` the
+  per-policy Fail/Error branches are skipped and the verdict only lands in PolicyReports. One residue
+  even then: an error from the engine as a whole (`HandleValidating` returning `err`, before any
+  per-policy result) is still returned as an admission error by `validate`; that is not a
+  verification verdict and has not been observed here.
+- *One namespace only*: a `PolicyException` modelled on `pricing-image-exception-cel.yaml` (§3a).
+All other policies are still at stage 1.
+Parity harness: `bash openbank-infra/tests/kyverno-cel/run.sh`.
+
+## 4b. After merging ANY mutating policy change — check that ArgoCD converges
+
+A `MutatingPolicy` / `ClusterPolicy` with `mutate:` rewrites pod templates at admission. ArgoCD
+diffs desired state against a **server-side dry-run**, i.e. through the webhook as it is *now*; the
+live template of every controller admitted *before* the change was mutated by the old policy (or
+not at all). The two differ, the app is `OutOfSync`, and every self-heal sync applies a no-op —
+which never re-enters the webhook — and reports "successfully synced". Measured 2026-09-30: 13
+objects across 12 apps, ~50 minutes, until a `rollout restart` by hand.
+
+CI cannot see this — there is no manifest difference, only a difference between admission then and
+admission now. The control is the alert `ArgoCDAppOutOfSyncNotHealing`
+(`prometheus-rules-argocd.yaml`, warning after 30 minutes); this step is how the person merging the
+change gets there in 5.
+
+**Before the merge**, record the baseline:
+
+```bash
+kubectl -n argocd get applications -o json | python3 -c '
+import json,sys
+apps=json.load(sys.stdin)["items"]
+oos=[a["metadata"]["name"] for a in apps if a["status"]["sync"]["status"]!="Synced"]
+print(len(oos),"OutOfSync:",oos)'
+```
+
+**After the merge** (give the root app one reconcile, ~3 minutes), re-run it. New names in the list
+that stay there through a second run five minutes later are the drift. Then confirm the mechanism
+on ONE controller that carries an upstream image the policy rewrites (a Grafana, Loki or Tempo
+Deployment/StatefulSet is a good pick — anything not built by this repo):
+
+```bash
+NS=observability; KIND=statefulset; NAME=tempo
+kubectl -n $NS get $KIND $NAME -o jsonpath='{.spec.template.spec.containers[*].image}'; echo   # live
+kubectl -n $NS get $KIND $NAME -o yaml \
+  | kubectl apply --dry-run=server -f - -o jsonpath='{.spec.template.spec.containers[*].image}'; echo   # admitted now
+```
+
+If the two lines differ, the policy is doing what it should and the live objects simply predate it.
+Remedy is to re-admit them:
+
+```bash
+kubectl -n $NS rollout restart $KIND/$NAME
+```
+
+Do single-replica stateful workloads (Tempo, Loki, Prometheus, OpenBao, any `*-db` with
+`instances: 1`) last and one at a time — each restart is a short outage of that component (Tempo:
+46 s without trace ingestion on 2026-09-30, now visible via `TempoTraceIngestionStalled`). Each app
+returns to `Synced` within one reconcile of its restart; re-run the count to confirm it is back to
+the baseline.
+
+If the count is back to baseline without any restart, the policy did not change what admission
+produces for existing objects and there is nothing to do. If an app stays `OutOfSync` and the two
+image lines are *identical*, the cause is something else — runbook 0026 §2.3.
+
 ## 5. Related
 
 - ADR-0030 D4 (supply-chain verification), ADR-0144 (graduation criteria)
@@ -194,3 +313,5 @@ Five rules, each of which this gate broke:
 - #1915 — the issue this runbook closes out
 - #9805 item 4 — why the verify policies are folded into one on Kyverno v1.12.5, and why an Audit
   verify policy could deny
+- #11622 / runbook 0026 §2 — ArgoCD drift that self-heal reports as synced, and the alert that
+  carries it (`ArgoCDAppOutOfSyncNotHealing`)

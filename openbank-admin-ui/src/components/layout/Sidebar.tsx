@@ -10,6 +10,13 @@ import { usePathname } from 'next/navigation'
 import { useSession } from 'next-auth/react'
 import {
   Activity,
+  FilePlus,
+  FileSearch,
+  Gauge,
+  Handshake,
+  Inbox,
+  Landmark,
+  Wallet,
   AlertOctagon,
   ArrowLeftRight,
   Banknote,
@@ -69,6 +76,7 @@ import {
   Zap,
   Building2,
   Gift,
+  Undo2,
 } from 'lucide-react'
 import { hasPermission, Permission } from '@/lib/auth/roles'
 import { personaForRoles, personaLabel, workspaceFor } from '@/lib/auth/persona'
@@ -100,6 +108,27 @@ const revenueNav: NavItem[] = [
   { nameCs: 'Úvěry',        nameEn: 'Lending',      href: '/lending',      icon: TrendingUp,    permission: 'payments:view' },
   { nameCs: 'Kreditní riziko', nameEn: 'Credit risk', href: '/lending/risk', icon: ShieldAlert, permission: 'lending:risk:view' },
   { nameCs: 'Poplatky',     nameEn: 'Fees',         href: '/fees',         icon: Receipt,         permission: 'payments:view' },
+]
+
+// #10618: risk-engine snapshots/curves and the lending ledger backfill, for the risk and finance
+// departments. Each entry carries the permission of the page it opens (roles.ts).
+const balanceSheetNav: NavItem[] = [
+  { nameCs: 'Snímky rozvahy',   nameEn: 'Balance-sheet snapshots', href: '/balance-sheet/snapshots',       icon: Scale,       permission: 'balance-sheet:view' },
+  { nameCs: 'Výnosové křivky',  nameEn: 'Curve sets',              href: '/balance-sheet/curve-sets',      icon: TrendingUp,  permission: 'balance-sheet:view' },
+  { nameCs: 'Doúčtování úvěrů', nameEn: 'Ledger backfill',         href: '/balance-sheet/ledger-backfill', icon: BookOpen,    permission: 'ledger-backfill:view' },
+  { nameCs: 'Storno doúčtování', nameEn: 'Backfill void',         href: '/balance-sheet/ledger-backfill/voids', icon: Undo2, permission: 'ledger-backfill:view' },
+]
+
+// ADR-0315 / #10618: the treasury desk (openbank-treasury-service). Each entry carries the
+// permission of the page it opens (roles.ts): a dealer sees no approval inbox, an approver no form.
+const treasuryNav: NavItem[] = [
+  { nameCs: 'Obchody',          nameEn: 'Deal blotter',     href: '/treasury/deals',          icon: Landmark,  permission: 'treasury:view' },
+  { nameCs: 'Nový obchod',      nameEn: 'New deal',         href: '/treasury/deals/new',      icon: FilePlus,  permission: 'treasury:deal:create' },
+  { nameCs: 'Ke schválení',     nameEn: 'Approval inbox',   href: '/treasury/approvals',      icon: Inbox,     permission: 'treasury:deal:approve' },
+  { nameCs: 'Limity protistran', nameEn: 'Counterparty limits', href: '/treasury/counterparties', icon: Handshake, permission: 'treasury:view' },
+  { nameCs: 'Čerpání limitů',   nameEn: 'Limit utilisation', href: '/treasury/limits',         icon: Gauge,     permission: 'treasury:view' },
+  { nameCs: 'Denní pozice',     nameEn: 'Daily position',   href: '/treasury/positions',      icon: Wallet,    permission: 'treasury:view' },
+  { nameCs: 'Nostro rekonciliace', nameEn: 'Nostro reconciliation', href: '/treasury/nostro',  icon: FileSearch, permission: 'treasury:nostro:read' },
 ]
 
 const customerNav: NavItem[] = [
@@ -218,7 +247,7 @@ const sysNav: NavItem[] = [
 const SCROLL_KEY = 'ob.sidebar.scroll'
 
 const ALL_NAV: NavItem[] = [
-  ...coreNav, ...revenueNav, ...customerNav, ...paymentsNav,
+  ...coreNav, ...revenueNav, ...balanceSheetNav, ...treasuryNav, ...customerNav, ...paymentsNav,
   ...complianceNav, ...opsNav, ...docsNav, ...platformNav, ...toolsNav, ...sysNav,
 ]
 
@@ -356,6 +385,18 @@ export function Sidebar({ mobileOpen, onClose }: { mobileOpen?: boolean; onClose
         <NavSection items={filter(coreNav)} currentHref={currentHref} />
         <SectionLabel>{t('Výnosy', 'Revenue')}</SectionLabel>
         <NavSection items={filter(revenueNav)} currentHref={currentHref} />
+        {filter(balanceSheetNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Rozvaha a riziko', 'Balance sheet & risk')}</SectionLabel>
+            <NavSection items={filter(balanceSheetNav)} currentHref={currentHref} />
+          </>
+        )}
+        {filter(treasuryNav).length > 0 && (
+          <>
+            <SectionLabel>{t('Treasury', 'Treasury')}</SectionLabel>
+            <NavSection items={filter(treasuryNav)} currentHref={currentHref} />
+          </>
+        )}
         <SectionLabel>{t('Klienti', 'Customers')}</SectionLabel>
         <NavSection items={filter(customerNav)} currentHref={currentHref} />
         <SectionLabel>{t('Platby', 'Payments')}</SectionLabel>

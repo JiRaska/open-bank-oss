@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: lending-service
     app.kubernetes.io/part-of: lending
   annotations:
-    openbank.tech/policy-checksum: "b77593e6b4b25bca"
+    openbank.tech/policy-checksum: "71412cfc48a4e5e5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -162,8 +162,17 @@ data:
     # already carries the call. A role absent from the matrix yields an undefined lookup and
     # the rule simply does not fire — fail-closed by construction.
     # ---------------------------------------------------------------------------------------
+    # #3765 / ADR-0223 ("M2M identities are excluded explicitly"): the matrix is a STAFF grant.
+    # A Keycloak client_credentials token is classified HUMAN, so without this line any
+    # service-account holding a matrix role reached that role's whole write set, and no
+    # per-service rule or `prohibited` register could veto it (matrix-allows is keyed by no
+    # reason list). A machine caller is authorized only by an identity-gated rule naming its
+    # `service-account-<client>` id. check-matrix-write-grants.py and
+    # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
+    # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
     	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
     	some role in input.principal.roles
     	matrix_grants(input.action, role)
     }
@@ -603,8 +612,8 @@ data:
     #                                 differ from the registrant)
     #   lending.ledgerBackfill.*    — one-off four-eyes ledger backfill (#10746): read (dry-run),
     #                                 propose (maker), decide (checker, must differ — enforced in
-    #                                 LedgerBackfillService), execute. ROLE_ADMIN humans only; see the
-    #                                 veto at the end of this file.
+    #                                 LedgerBackfillService), execute. ROLE_FINANCE / ROLE_ADMIN humans
+    #                                 only (#10618); see the allow + veto at the end of this file.
     #
     # Base rest.rego already grants: operator-read-any (OPERATOR/ADMIN on *.read/*.list),
     # compliance-read-any (*.read), party-self-service (reads where the JWT sub equals the
@@ -784,9 +793,8 @@ data:
     	}
     }
 
-
     # #10746: the ledger backfill re-posts GL history for loans whose journals never reached the ledger.
-    # It books real journals, so it is narrower than the desk: ROLE_ADMIN humans only. `operator-lending-write`
+    # It books real journals, so it is narrower than the desk: ROLE_ADMIN (and, since #10618, ROLE_FINANCE) humans only. `operator-lending-write`
     # above would otherwise admit ROLE_OPERATOR to any `lending.*`, and base operator-read-any would admit
     # the dry-run read to any operator — including the service accounts that carry ROLE_OPERATOR (and, in
     # some realms, the shared client). The veto closes every path at once: no service account, whatever
@@ -796,65 +804,29 @@ data:
     	startswith(input.principal.id, "service-account-")
     }
 
+    #
+    # #10618: ROLE_FINANCE owns this flow (it is the department that answers for the GL). Its own allow
+    # reason below, since neither operator-lending-write nor operator-read-any names it. The veto is
+    # widened to "neither ROLE_ADMIN nor ROLE_FINANCE"; the service-account veto above is unchanged, so a
+    # service account holding ROLE_FINANCE is still refused. Execute is granted to FINANCE too: the
+    # four-eyes control is propose/approve by two different people, bound to the plan hash that
+    # LedgerBackfillService re-checks at execution — keeping execute ADMIN-only would make a platform
+    # administrator a party to every finance posting, which is the wrong segregation of duties.
+    allowed_reasons contains "finance-ledger-backfill" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	"ROLE_FINANCE" in input.principal.roles
+    	startswith(input.action, "lending.ledgerBackfill.")
+    }
+
     prohibited if {
     	startswith(input.action, "lending.ledgerBackfill.")
-    	not "ROLE_ADMIN" in input.principal.roles
+    	not backfill_role_held
     }
 
-    # Graph source detail is released only after the route rechecks the exact human's
-    # live Context assignment. This veto blocks broad base *.read grants and M2M.
-    prohibited if {
-        input.action == "lending.graph.read"
-        startswith(input.principal.id, "service-account-")
-    }
+    backfill_role_held if "ROLE_ADMIN" in input.principal.roles
 
-    prohibited if {
-        input.action == "lending.graph.read"
-        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
-    }
-
-    allowed_reasons contains "lending-graph-source-read" if {
-        input.action == "lending.graph.read"
-        input.principal.type == "HUMAN"
-        not startswith(input.principal.id, "service-account-")
-        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
-    }
-
-    # Registration is source-owned and four-eyes. These rules mirror method RBAC;
-    # broad operator/matrix grants cannot reach either graph write action.
-    prohibited if {
-        input.action in {"lending.graph.propose", "lending.graph.decide"}
-        input.principal.type != "HUMAN"
-    }
-
-    prohibited if {
-        input.action in {"lending.graph.propose", "lending.graph.decide"}
-        startswith(input.principal.id, "service-account-")
-    }
-
-    prohibited if {
-        input.action == "lending.graph.propose"
-        count({r | r := input.principal.roles[_]; r in {"ROLE_LENDING_OFFICER", "ROLE_ADMIN"}}) == 0
-    }
-
-    prohibited if {
-        input.action == "lending.graph.decide"
-        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) == 0
-    }
-
-    allowed_reasons contains "lending-graph-proposer" if {
-        input.action == "lending.graph.propose"
-        input.principal.type == "HUMAN"
-        not startswith(input.principal.id, "service-account-")
-        count({r | r := input.principal.roles[_]; r in {"ROLE_LENDING_OFFICER", "ROLE_ADMIN"}}) > 0
-    }
-
-    allowed_reasons contains "lending-graph-checker" if {
-        input.action == "lending.graph.decide"
-        input.principal.type == "HUMAN"
-        not startswith(input.principal.id, "service-account-")
-        count({r | r := input.principal.roles[_]; r in {"ROLE_CREDIT_RISK", "ROLE_ADMIN"}}) > 0
-    }
+    backfill_role_held if "ROLE_FINANCE" in input.principal.roles
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
     # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
@@ -1188,6 +1160,29 @@ data:
         - tier: execute
           resources:
           - '*'
+    - id: treasury-dealing-assistant
+      tools:
+        allow:
+        - treasury.deal.read
+        - treasury.counterparty.read
+        - treasury.position.read
+        - treasury.quote.read
+        - treasury.deal.draft
+        deny:
+        - treasury.deal.submit
+        - treasury.deal.approve
+        - treasury.deal.reject
+        - treasury.deal.cancel
+        - treasury.deal.confirm
+        - treasury.deal.settle
+        - treasury.deal.mature
+        - treasury.deal.reverse
+        - treasury.deal.override-limit
+        - treasury.nostro.*
+        - money.*
+        - '*.write'
+        - gh.pr.*
+        - secrets.read.raw
     - id: finops-agent
       tools:
         allow:
@@ -1539,6 +1534,16 @@ data:
                                                 # wired as operator verbs today. Runs AUTHZ_ENFORCE=false (advisory) —
                                                 # joins the #3679 cohort.
       - openbank-card-issuance-service         # ADR-0283 phase 0 (#8808): ships the card authorisation decision
+                                                # (POST /cards/{id}/authorizations, CardAuthorizationPolicy) and
+                                                # SCA-gated limit/control changes (ADR-0194) — it decides whether money
+                                                # may move, which is money-path for the same reason sca/consent/vop/
+                                                # delegation are. Threat model: docs/threat-models/openbank-card-issuance-service.md.
+                                                # four-eyes assessed: card.block/suspend/resume/outbox.requeue REDUCE or
+                                                # repair money movement; card.create/activate are SCA-bound customer
+                                                # ceremonies (ADR-0194). No operator endpoint raises a limit or a control
+                                                # without the cardholder's SCA today — add a verb here when one ships.
+                                                # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
+      - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1864,6 +1869,7 @@ data:
             - sepaPayment.transitionStatus
             - settlement.create
             - swift.approval.decide
+            - transaction.categorise
             - transaction.create
             - transaction.reverse
             - opsmessage.compose
@@ -1975,6 +1981,23 @@ data:
         ROLE_COMMS_APPROVER:
           grant:
             - commstyle.approval.read
+        # #10618 — department roles for the balance-sheet & risk workspace. READ actions only, on
+        # purpose: `matrix-allows` has no service-account exclusion, so every WRITE these roles hold
+        # (risk.snapshot.create, risk.curve-set.create, lending.ledgerBackfill.*) lives in the
+        # service's own *_rest_ext.rego with `not startswith(input.principal.id, "service-account-")`.
+        # The risk-engine list endpoints reuse the `.read` actions (resource ""), so there is no
+        # separate `.list` action to grant. ROLE_TREASURY_DEALER / ROLE_TREASURY_APPROVER have NO entry
+        # here on purpose: every treasury action, the reads included, is granted in
+        # treasury_rest_ext.rego with the service-account exclusion (ADR-0315), so nothing about
+        # treasury depends on this matrix.
+        ROLE_RISK:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
+        ROLE_FINANCE:
+          grant:
+            - risk.snapshot.read
+            - risk.curve-set.read
 
     shared_m2m_write_prohibition:
       # GHSA-58jq-9hq3-66jr. rest.rego denies the shared M2M identity

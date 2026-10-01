@@ -11,16 +11,20 @@ import com.openbank.risk.application.port.out.LedgerPort
 import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.SnapshotRepository
+import com.openbank.risk.application.port.out.SnapshotRunSummary
+import com.openbank.risk.application.port.out.TreasuryDealBook
 import com.openbank.risk.application.port.out.UntiedSnapshotException
 import com.openbank.risk.domain.model.InputHash
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LoanInstrumentMapper
+import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionBuilder
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOut
 import com.openbank.risk.domain.model.TieOutStatus
+import com.openbank.risk.domain.model.TreasuryInstrumentMapper
 import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
@@ -41,16 +45,26 @@ class SnapshotService(
      * Receivable stays a GL-level position exactly as before loans were modelled.
      */
     private val lending: LendingPort? = null,
+    /**
+     * The bank's money-market deals (ADR-0315 D6), or null when the read is disabled — then the
+     * treasury principal accounts stay GL-level positions exactly as before deals were modelled.
+     */
+    private val treasury: TreasuryDealBook? = null,
+    /** The versions stamped on every new run's manifest (ADR-0314 D2); null only in tests that do not care. */
+    private val modelVersions: ModelVersions? = null,
 ) : SnapshotUseCase {
 
-    override suspend fun createSnapshot(asOf: LocalDate): SnapshotOutcome {
+    override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
+        val ledgerCutOff = clock.instant()
         val inputs = ledger.read(asOf)
         val loanBook = lending?.readLoanBook(asOf)
-        val inputHash = InputHash.of(inputs, loanBook)
+        val deals = treasury?.dealsOnBook(asOf)
+        val inputHash = InputHash.of(inputs, loanBook, deals)
         repository.findByNaturalKey(asOf, inputHash)?.let { return SnapshotOutcome(it, replayed = true) }
 
         val instruments = loanBook?.map(LoanInstrumentMapper::toInstrument)
-        val positions = PositionBuilder.build(inputs, instruments)
+        val dealInstruments = deals?.map(TreasuryInstrumentMapper::toInstrument)
+        val positions = PositionBuilder.build(inputs, instruments, treasuryDeals = dealInstruments)
         val tieOut = TieOut.check(inputs.trialBalance, positions)
         val candidate = SnapshotRun(
             id = Ids.newId(),
@@ -61,10 +75,18 @@ class SnapshotService(
             status = tieOut.status,
             positionCount = positions.size,
             mismatches = tieOut.mismatches,
+            requestedBy = requestedBy,
+            modelVersions = modelVersions,
+            ledgerCutOff = ledgerCutOff,
         )
-        val stored = repository.saveIfAbsent(candidate, positions, instruments.orEmpty())
+        val stored = repository.saveIfAbsent(candidate, positions, instruments.orEmpty() + dealInstruments.orEmpty())
         return SnapshotOutcome(stored, replayed = stored.id != candidate.id)
     }
+
+    override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = repository.listRecent(limit)
+
+    override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+        repository.listTiedOutBetween(from, to)
 
     override suspend fun getRun(id: UUID): SnapshotRun = repository.findById(id) ?: throw SnapshotNotFoundException(id)
 

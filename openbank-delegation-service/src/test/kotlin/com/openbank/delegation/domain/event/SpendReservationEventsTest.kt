@@ -7,7 +7,11 @@ package com.openbank.delegation.domain.event
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.delegation.domain.model.DelegationResourceType
+import com.openbank.delegation.domain.model.SpendReservationOperationType
+import com.openbank.delegation.domain.model.SpendReservationState
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.Instant
@@ -29,6 +33,88 @@ import java.util.UUID
  * with no error, which is how the fleet reached 76% unattributed rows (#3994/#5256).
  */
 class SpendReservationEventsTest {
+
+    @Test
+    fun `compacted reservation state preserves the authorization tuple on the wire`() {
+        val event = DelegationSpendReservationStateChanged(
+            aggregateId = reservation,
+            reservationId = reservation,
+            delegationId = grant,
+            grantorPartyId = grantor,
+            granteePartyId = grantee,
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.fromString("00000000-0000-0000-0000-000000000123"),
+            amount = BigDecimal("1250.00"),
+            currency = "CZK",
+            idempotencyKeyHash = DelegationSpendReservationStateChanged.hashIdempotencyKey("payment-42"),
+            operationType = SpendReservationOperationType.DOMESTIC_PAYMENT,
+            state = SpendReservationState.CONFIRMED,
+            reservationVersion = 2,
+            createdAt = settled.minusHours(1),
+            settledAt = settled,
+            occurredAt = at,
+        )
+
+        val node = mapper.readTree(mapper.writeValueAsString(event))
+        assertThat(node["aggregateId"].asText()).isEqualTo(reservation.toString())
+        assertThat(node["reservationId"].asText()).isEqualTo(reservation.toString())
+        assertThat(node["delegationId"].asText()).isEqualTo(grant.toString())
+        assertThat(node["grantorPartyId"].asText()).isEqualTo(grantor.toString())
+        assertThat(node["granteePartyId"].asText()).isEqualTo(grantee.toString())
+        assertThat(node["resourceType"].asText()).isEqualTo("ACCOUNT")
+        assertThat(node["resourceId"].asText()).isEqualTo("00000000-0000-0000-0000-000000000123")
+        assertThat(node["amount"].decimalValue()).isEqualByComparingTo("1250.00")
+        assertThat(node["currency"].asText()).isEqualTo("CZK")
+        assertThat(node["idempotencyKeyHash"].asText()).isEqualTo(
+            "d5fcf99c283a194aff198754caa138862271e9f046af15e706ee317058ba9aad",
+        )
+        assertThat(node["operationType"].asText()).isEqualTo("DOMESTIC_PAYMENT")
+        assertThat(node["state"].asText()).isEqualTo("CONFIRMED")
+        assertThat(node["reservationVersion"].asLong()).isEqualTo(2)
+        assertThat(node["createdAt"].asText()).isEqualTo("2026-08-20T08:15:00Z")
+        assertThat(node["settledAt"].asText()).isEqualTo("2026-08-20T09:15:00Z")
+        assertThat(node["occurredAt"].asText()).isEqualTo("2026-08-20T09:15:00Z")
+        assertThat(node["sourceService"].asText()).isEqualTo("delegation-service")
+        assertThat(node["aggregateType"].asText()).isEqualTo("DelegationSpendReservation")
+        assertThat(node["eventType"].asText()).isEqualTo("DelegationSpendReservationStateChanged")
+        assertThat(node["version"].asLong()).isEqualTo(1)
+        assertThat(DelegationSpendReservationStateChanged.compactionKey(reservation, 2)).isEqualTo(
+            "$reservation:v2",
+        )
+    }
+
+    @Test
+    fun `compacted reservation state rejects invalid aggregate and revision`() {
+        val reserved = DelegationSpendReservationStateChanged(
+            aggregateId = reservation,
+            reservationId = reservation,
+            delegationId = grant,
+            grantorPartyId = grantor,
+            granteePartyId = grantee,
+            resourceType = DelegationResourceType.ACCOUNT,
+            resourceId = UUID.randomUUID(),
+            amount = BigDecimal.ONE,
+            currency = "CZK",
+            idempotencyKeyHash = "a".repeat(64),
+            operationType = SpendReservationOperationType.DOMESTIC_PAYMENT,
+            state = SpendReservationState.RESERVED,
+            reservationVersion = 1,
+            createdAt = settled,
+            settledAt = null,
+            occurredAt = at,
+        )
+        assertThatThrownBy { reserved.copy(aggregateId = UUID.randomUUID()) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { reserved.copy(reservationVersion = 2) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { DelegationSpendReservationStateChanged.compactionKey(reservation, 0) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThatThrownBy { DelegationSpendReservationStateChanged.compactionKey(reservation, 3) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        assertThat(DelegationSpendReservationStateChanged.compactionKey(reservation, 1)).isEqualTo(
+            "$reservation:v1",
+        )
+    }
 
     // WRITE_DATES_AS_TIMESTAMPS disabled to match the CDI ObjectMapper the outbox actually
     // serialises with (Quarkus disables it by default). A bare ObjectMapper would render

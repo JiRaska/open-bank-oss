@@ -4,6 +4,7 @@
 
 package com.openbank.risk.integration
 
+import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.it.PostgresTestResource
@@ -14,12 +15,17 @@ import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.emptyOrNullString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.startsWith
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -32,13 +38,17 @@ import java.util.UUID
 class RiskSnapshotApiIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
 
     @Inject
     lateinit var ledger: FakeLedgerPort
+
+    @Inject
+    lateinit var snapshots: SnapshotUseCase
 
     private fun create(asOf: String) = given()
         .contentType("application/json")
@@ -65,6 +75,69 @@ class RiskSnapshotApiIT {
             count("SELECT count(*) FROM snapshot_position WHERE run_id = ? AND valid_date = DATE '2026-01-31'", id),
         )
             .isEqualTo(3)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `the manifest records the model versions and ledger cut-off and reads them back from the store`() {
+        ledger.inputs = Fixtures.tiedOut()
+
+        val id = create("2027-03-31").then().statusCode(201).extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots/$id")
+            .then().statusCode(200)
+            .body("modelVersions.engineVersion", not(emptyOrNullString()))
+            .body("modelVersions.capitalSetId", equalTo("eu-crr3-sa"))
+            .body("modelVersions.liquiditySetId", equalTo("eu-2015-61-crr2"))
+            .body("modelVersions.minReservesSetId", equalTo("cnb-pmr"))
+            .body("modelVersions.minReservesSetVersion", equalTo("2"))
+            .body("modelVersions.irrbbShockSetVersion", startsWith("sha256:"))
+            .body("modelVersions.behaviouralModelId", equalTo("nmd-linear-core"))
+            .body("ledgerCutOff", not(emptyOrNullString()))
+        assertThat(
+            count(
+                "SELECT count(*) FROM snapshot_run WHERE id = ?::uuid AND ledger_cut_off <= recorded_at " +
+                    "AND capital_set_version IS NOT NULL AND liquidity_set_version IS NOT NULL",
+                id,
+            ),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `the caller's principal name is stored as the requester and returned on the manifest`() {
+        ledger.inputs = Fixtures.tiedOut()
+
+        val id = create("2026-04-30").then().statusCode(201)
+            .body("requestedBy", equalTo("ops"))
+            .extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots/$id")
+            .then().statusCode(200)
+            .body("requestedBy", equalTo("ops"))
+        given().`when`().get("/api/v1/risk/snapshots")
+            .then().statusCode(200)
+            .body("runs.find { it.id == '$id' }.requestedBy", equalTo("ops"))
+        assertThat(count("SELECT count(*) FROM snapshot_run WHERE id = ?::uuid AND requested_by = 'ops'", id))
+            .isEqualTo(1)
+    }
+
+    // @TestSecurity is fixed per test method, so switching caller mid-test goes through the use
+    // case directly (same CDI bean the resource calls) rather than two HTTP requests.
+    @Test
+    fun `a replay keeps the original requester, not the replaying caller's`(): Unit = runBlocking {
+        ledger.inputs = Fixtures.tiedOut()
+        // Other integration classes share Postgres and create a run for 2026-06-30.
+        val asOf = LocalDate.parse("2026-03-19")
+
+        val first = snapshots.createSnapshot(asOf, requestedBy = "alice")
+        assertThat(first.replayed).isFalse()
+        assertThat(first.run.requestedBy).isEqualTo("alice")
+
+        val second = snapshots.createSnapshot(asOf, requestedBy = "bob")
+        assertThat(second.replayed).isTrue()
+        assertThat(second.run.id).isEqualTo(first.run.id)
+        assertThat(second.run.requestedBy).isEqualTo("alice")
     }
 
     @Test
@@ -114,10 +187,73 @@ class RiskSnapshotApiIT {
         given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(404)
     }
 
+    // #10618 department roles. RBAC only (OPA is off in %test; the rego suite holds the policy half).
+    @Test
+    @TestSecurity(user = "risk-analyst", roles = ["ROLE_RISK"])
+    fun `the risk department creates a snapshot and uploads a curve set`() {
+        ledger.inputs = Fixtures.tiedOut()
+        val id = create("2026-05-31").then().statusCode(201).extract().path<String>("id")
+        given().`when`().get("/api/v1/risk/snapshots/$id").then().statusCode(200)
+        given().contentType("application/json")
+            .body(curveSetBody("2026-05-31"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201)
+    }
+
+    @Test
+    @TestSecurity(user = "fin-reader", roles = ["ROLE_FINANCE"])
+    fun `the finance department reads but cannot create a snapshot or upload a curve set`() {
+        // 404, not 403: RBAC admitted the reader and the run simply does not exist.
+        given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(404)
+        create("2026-07-31").then().statusCode(403)
+        given().contentType("application/json")
+            .body(curveSetBody("2026-07-31"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "dealer", roles = ["ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER"])
+    fun `treasury roles are declared only and reach nothing here`() {
+        given().`when`().get("/api/v1/risk/snapshots/${UUID.randomUUID()}").then().statusCode(403)
+        create("2026-08-31").then().statusCode(403)
+    }
+
+    @Test
+    @TestSecurity(user = "risk-analyst", roles = ["ROLE_RISK"])
+    fun `the run and curve-set lists are newest first, bounded, and validate their limit`() {
+        ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00")))
+        val untied = create("2026-09-30").then().statusCode(201).extract().path<String>("id")
+        val setId = given().contentType("application/json").body(curveSetBody("2026-09-30"))
+            .`when`().post("/api/v1/risk/curve-sets").then().statusCode(201).extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots?limit=1").then().statusCode(200)
+            .body("runs", hasSize<Any>(1))
+            .body("runs[0].id", equalTo(untied))
+            .body("runs[0].status", equalTo("UNTIED"))
+            .body("runs[0].mismatchCount", equalTo(1))
+            .body("runs[0].provenance", equalTo("synthetic"))
+        given().`when`().get("/api/v1/risk/curve-sets?limit=1").then().statusCode(200)
+            .body("curveSets", hasSize<Any>(1))
+            .body("curveSets[0].id", equalTo(setId))
+            .body("curveSets[0].indices[0]", equalTo("CZEONIA"))
+        given().`when`().get("/api/v1/risk/snapshots?limit=0").then().statusCode(400)
+        given().`when`().get("/api/v1/risk/curve-sets?limit=101").then().statusCode(400)
+    }
+
+    @Test
+    @TestSecurity(user = "fin-reader", roles = ["ROLE_FINANCE"])
+    fun `the finance department may list runs and curve sets`() {
+        given().`when`().get("/api/v1/risk/snapshots").then().statusCode(200)
+        given().`when`().get("/api/v1/risk/curve-sets").then().statusCode(200)
+    }
+
     @Test
     fun `an unauthenticated caller is refused`() {
         create("2026-04-30").then().statusCode(401)
     }
+
+    private fun curveSetBody(asOf: String) =
+        """{"asOf":"$asOf","provenance":"synthetic","source":"IT","curves":{"CZEONIA":""" +
+            """[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}"""
 
     private fun count(sql: String, id: String): Int {
         val config = ConfigProvider.getConfig()

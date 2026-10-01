@@ -67,10 +67,11 @@ class LedgerApiIT {
         val glAssetId = "a0000000-0000-0000-0000-000000000001"
         val glLiabilityId = "a0000000-0000-0000-0000-000000000002"
         val today = LocalDate.now().toString()
+        val idempotencyKey = UUID.randomUUID()
 
         val payload = """
             {
-              "idempotencyKey": "${UUID.randomUUID()}",
+              "idempotencyKey": "$idempotencyKey",
               "transactionId": "$transactionId",
               "entryDate": "$today",
               "valueDate": "$today",
@@ -107,10 +108,24 @@ class LedgerApiIT {
             body("id", notNullValue())
             body("status", equalTo("POSTED"))
             body("transactionId", equalTo(transactionId.toString()))
+            header("Idempotent-Replayed", "false")
         }
 
         createdJournalId = response.extract().body().jsonPath().getString("id")
         assertThat(createdJournalId).isNotNull
+
+        // #10904: the same key again answers the same 201 and the same entry. Only the header says
+        // that nothing was posted, which is how the lending backfill tells a replay from a posting.
+        Given {
+            contentType("application/json")
+            body(payload)
+        } When {
+            post("/api/v1/journals")
+        } Then {
+            statusCode(201)
+            body("id", equalTo(createdJournalId))
+            header("Idempotent-Replayed", "true")
+        }
     }
 
     @Test

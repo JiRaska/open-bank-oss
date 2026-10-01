@@ -13,7 +13,8 @@ import java.util.UUID
  *
  * Each service that uses four-eyes provides a Panache implementation backed by its own
  * approval-requests table (e.g. `kyc_approval_requests`). The table DDL is the service's
- * own Flyway migration; the column layout is documented by [PanacheApprovalRequestEntity].
+ * own Flyway migration; every current implementation extends `PanacheEntityBase` directly
+ * (see e.g. `openbank-delegation-service`'s `ApprovalRequestEntity`).
  *
  * ### Expired rows
  * [findPendingActive] must exclude rows where `ttl_expiry IS NOT NULL AND ttl_expiry < now()`.

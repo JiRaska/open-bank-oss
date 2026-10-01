@@ -64,6 +64,9 @@ on:
       # naming: it means the watch could NOT read the ruleset bypass log — a permission-shaped
       # absence, not "nothing was bypassed". Exactly the state that must not stay silent.
       - "merged past red check watch"
+      # Pushes to main unconditionally. Its red means armed PRs are no longer being kept
+      # current (App token, API) and will sit `behind` forever again under the strict policy.
+      - "Auto-update armed PRs"
       # R2: post-merge guards. Path-filtered, so they do NOT run on every commit —
       # but each is a governance verdict that only ever renders on main, which
       # makes them the LEAST likely reds to be seen and the most likely to rot.
@@ -73,6 +76,9 @@ on:
       # workflow exists to end is back, with nothing else reporting it.
       - "Derived artefact autoheal"
       - "ADR registry"
+      # Builds, signs and pushes the IdP and LLM-gateway images (#11265). A red run on main
+      # means a merged Dockerfile fix (a CVE bump) is not in the registry and not deployed.
+      - "Platform images"
       - "Agent charter registry"
       - "AI governance snapshot"
       - "API contract post-merge guard"

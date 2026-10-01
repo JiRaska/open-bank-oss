@@ -49,7 +49,7 @@ spec:
 ---
 # Keystore ExternalSecret: projects the `lending-service` Strimzi secret
 # (PKCS#12 keystore + password) from `messaging` into `lending`.
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:
@@ -71,7 +71,7 @@ spec:
 ---
 # Truststore ExternalSecret: projects the cluster-CA cert bundle
 # from `messaging` into `lending` (same source as payments namespace).
-apiVersion: external-secrets.io/v1beta1
+apiVersion: external-secrets.io/v1
 kind: ExternalSecret
 metadata:
   annotations:

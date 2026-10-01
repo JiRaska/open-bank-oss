@@ -13,6 +13,7 @@ import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.RunProvisioningCycleUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.port.out.BorrowerCreditPort
 import com.openbank.lending.application.port.out.CatalogLoanProfile
 import com.openbank.lending.application.port.out.CatalogLoanProfilePort
 import com.openbank.lending.application.port.out.CollateralRepository
@@ -589,6 +590,42 @@ class LendingService @Inject constructor(
             }
         }
 
+    /** The local half of a booking; every call joins the caller's locked transaction (#11626). */
+    private fun bookLocally(
+        loan: Loan,
+        rows: List<LoanInstallment>,
+        application: LoanApplication,
+        disbursedBy: String,
+    ): Uni<Loan> = loans.save(loan)
+        .flatMap { saved -> installments.saveAll(rows).map { saved } }
+        .flatMap { saved ->
+            when (
+                val st = machine.apply(
+                    transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
+                )
+            ) {
+                is OriginationTransitionResult.Rejected ->
+                    Uni.createFrom().failure(IllegalStateException(st.reason))
+                is OriginationTransitionResult.Applied ->
+                    // Still a claim, not a blind write, even under the lock: the predicate is the
+                    // second line of defence and costs nothing.
+                    claimTransition(application.status, application.copy(status = st.newState))
+                        .call { savedApp ->
+                            events.emit(
+                                transitionEvidence(
+                                    savedApp,
+                                    application.status.name,
+                                    st.newState,
+                                    disbursedBy,
+                                    OriginationActorKind.HUMAN,
+                                    "disbursement booked",
+                                ),
+                            )
+                        }
+                        .map { saved }
+            }
+        }
+
     @Suppress("LongMethod") // ADR-0100: clock-stamp fields push this 3 lines past threshold
     private fun bookLoan(application: LoanApplication, disbursedBy: String): Uni<Loan> {
         val now = OffsetDateTime.now(clock)
@@ -626,40 +663,28 @@ class LendingService @Inject constructor(
                 closingBalance = i.closingBalance,
             )
         }
-        return loans.save(loan)
-            .flatMap { saved -> installments.saveAll(rows).map { saved } }
-            .flatMap { saved ->
-                when (
-                    val st = machine.apply(
-                        transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
-                    )
-                ) {
-                    is OriginationTransitionResult.Rejected ->
-                        Uni.createFrom().failure(IllegalStateException(st.reason))
-                    is OriginationTransitionResult.Applied ->
-                        // Claimed, not blind-written: without the predicate two concurrent
-                        // disbursements of one READY_TO_DISBURSE application both post cash to the
-                        // ledger. The claim runs before the posting, so the loser pays nothing.
-                        // It does NOT make disbursement atomic — the loan row and its schedule are
-                        // written before the claim, so a refused racer still leaves an unreferenced
-                        // loan behind. That is pre-existing (today BOTH racers book one) and needs
-                        // its own change; see the pull request for #3850.
-                        claimTransition(application.status, application.copy(status = st.newState))
-                            .call { savedApp ->
-                                events.emit(
-                                    transitionEvidence(
-                                        savedApp,
-                                        application.status.name,
-                                        st.newState,
-                                        disbursedBy,
-                                        OriginationActorKind.HUMAN,
-                                        "disbursement booked",
-                                    ),
-                                )
-                            }
-                            .map { saved }
-                }
+        // One transaction for every LOCAL write of the booking (#11626): the loan row, its
+        // schedule, the DISBURSED claim on the application and the transition evidence commit
+        // together or not at all. Measured before this: three transaction ids for one request
+        // (loan, application, outbox), so a crash between them left a loan with a schedule that no
+        // claim and no event referenced. The application row is locked for the duration, which
+        // also serialises two concurrent disbursements of one application — the loser now finds
+        // the row no longer READY_TO_DISBURSE and rolls back its loan instead of orphaning it.
+        //
+        // The ledger posting and the borrower credit that follow are remote calls and stay
+        // OUTSIDE this transaction on purpose: a database transaction must not wait on another
+        // service, and `loan.disbursed` is emitted only once the money has actually moved.
+        return applications.withLocked(application.id) { locked ->
+            if (locked == null || locked.status != OriginationState.READY_TO_DISBURSE) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Application ${application.id} is no longer READY_TO_DISBURSE: ${locked?.status}",
+                    ),
+                )
+            } else {
+                bookLocally(loan, rows, application, disbursedBy)
             }
+        }
             .flatMap { saved ->
                 // Cash leaves the bank in two bookings, not one. The ledger journal below only ever
                 // touches internal GL accounts (Loans Receivable, Funding Clearing — see
@@ -697,7 +722,7 @@ class LendingService @Inject constructor(
                             )
                         } else {
                             borrowerCredit.credit(
-                                "loan:${saved.id.value}:disbursement-credit",
+                                LoanCashReferences.disbursementCredit(saved.id),
                                 accountId,
                                 saved.principal,
                             )
@@ -768,7 +793,7 @@ class LendingService @Inject constructor(
                     )
                 loan.status in CLOSED_EXPOSURE_STATES ->
                     Uni.createFrom().failure(IllegalStateException("Loan has no recognized exposure"))
-                else -> recordRepaymentAgainst(loanId, installmentId).call { _ ->
+                else -> recordRepaymentAgainst(loan, installmentId).call { _ ->
                     installments.findByLoan(loanId).flatMap { rows ->
                         if (rows.isNotEmpty() && rows.all { it.paid }) {
                             provisioning.releaseAllowance(loan, events, LocalDate.now(clock))
@@ -782,8 +807,9 @@ class LendingService @Inject constructor(
             }
         }
 
-    private fun recordRepaymentAgainst(loanId: LoanId, installmentId: UUID): Uni<LoanInstallment> =
-        installments.findByLoan(loanId).flatMap { schedule ->
+    private fun recordRepaymentAgainst(loan: Loan, installmentId: UUID): Uni<LoanInstallment> {
+        val loanId = loan.id
+        return installments.findByLoan(loanId).flatMap { schedule ->
             val target = schedule.firstOrNull { it.id == installmentId }
             when {
                 target == null ->
@@ -792,7 +818,15 @@ class LendingService @Inject constructor(
                     Uni.createFrom().failure(IllegalStateException("Installment already paid"))
                 else -> {
                     val paidAt = OffsetDateTime.now(clock)
-                    installments.markPaid(installmentId, paidAt)
+                    // #11487: the repayment's customer-facing leg. The ledger journal below books the
+                    // cash as RECEIVED (Dr Funding Clearing), so the borrower's own account must be
+                    // debited for the same installment, or clearing holds cash no customer ever paid.
+                    // It runs FIRST and fails loud: no current account, or a refused debit (e.g.
+                    // insufficient funds), leaves the installment unpaid and nothing posted. The
+                    // reference is per installment, so a retried call replays instead of charging twice,
+                    // and the four-eyes cash reconstruction for historic repayments uses the same key.
+                    debitBorrower(loan, target)
+                        .flatMap { installments.markPaid(installmentId, paidAt) }
                         .flatMap {
                             // Split posting: principal repayment + the interest leg. If the scheduled pass already
                             // accrued this installment's interest income, the cash only *settles* the receivable
@@ -823,6 +857,29 @@ class LendingService @Inject constructor(
                 }
             }
         }
+    }
+
+    private fun debitBorrower(loan: Loan, installment: LoanInstallment): Uni<Unit> {
+        val amount = installment.principal + installment.interest
+        if (amount.amount.signum() == 0) return Uni.createFrom().item(Unit)
+        return borrowerAccounts.findCurrentAccount(loan.partyId, amount.currency.code).flatMap { accountId ->
+            if (accountId == null) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Loan ${loan.id.value}: party ${loan.partyId} has no active CURRENT account in " +
+                            "${amount.currency.code} to debit installment ${installment.number}; repayment not recorded",
+                    ),
+                )
+            } else {
+                borrowerCredit.debit(
+                    LoanCashReferences.repaymentDebit(loan.id, installment.number),
+                    accountId,
+                    amount,
+                    BorrowerCreditPort.REPAYMENT,
+                )
+            }
+        }
+    }
 
     // --- Servicing posting loop: accrual-basis interest recognition ----------------------------------
 

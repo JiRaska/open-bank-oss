@@ -10,6 +10,28 @@ test.beforeEach(async ({ context, baseURL }) => {
 })
 
 test.describe('/devops/sdlc — interactive delivery journey', () => {
+  test('catalog reflects the manifest and exposes an exact, shareable gate detail', async ({ page }) => {
+    const response = await page.request.get('/api/devops/gate-catalog')
+    expect(response.ok()).toBe(true)
+    const manifest = await response.json()
+    await page.goto('/devops/sdlc?gate=api-contract-gate#gate-catalog')
+    const catalog = page.locator('#gate-catalog')
+    await expect(catalog.getByText(String(manifest.totals.all), { exact: true })).toBeVisible()
+    await expect(catalog.getByRole('heading', { name: /Každá skutečná CI brána|Every actual CI gate/i })).toBeVisible()
+    await expect(catalog.getByRole('complementary', { name: /Detail CI brány|CI gate detail/i })).toContainText('api-contract-gate')
+
+    await catalog.getByRole('textbox', { name: /Hledat bránu|Search gates/i }).fill('schema-compat-gate')
+    await expect(catalog.getByRole('button', { name: /schema-compat-gate/i })).toHaveCount(1)
+    await catalog.getByRole('button', { name: /schema-compat-gate/i }).click()
+    await expect(page).toHaveURL(/gate=schema-compat-gate/)
+    await expect(catalog.getByRole('link', { name: /Otevřít přesnou definici|Open exact definition/i })).toHaveAttribute('href', /gates\.yaml#L\d+/)
+
+    await page.getByRole('button', { name: /G3.*(API|data)/i }).click()
+    await page.getByRole('link', { name: /api-contract-gate/i }).click()
+    await expect(page).toHaveURL(/gate=api-contract-gate/)
+    await expect(catalog.getByRole('complementary', { name: /Detail CI brány|CI gate detail/i })).toContainText('api-contract-gate')
+  })
+
   test('explains one stage from developer, DevOps, and business perspectives', async ({ page }) => {
     await page.goto('/devops/sdlc')
     await expect(page.getByRole('heading', { level: 1, name: /Od nápadu k bezpečnému provozu|From idea to safe operation/i })).toBeVisible()

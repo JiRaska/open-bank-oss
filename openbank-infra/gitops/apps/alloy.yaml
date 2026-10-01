@@ -25,7 +25,7 @@ spec:
   source:
     repoURL: https://grafana.github.io/helm-charts
     chart: alloy
-    targetRevision: 0.10.1
+    targetRevision: 1.13.0
     helm:
       releaseName: alloy
       valuesObject:
@@ -38,7 +38,7 @@ spec:
         image:
           registry: public.ecr.aws/d7v4f3x6
           repository: alloy
-          tag: v1.5.1
+          tag: v1.20.0
         # Pin the config-reloader sidecar straight at the ECR pull-through cache rather
         # than letting Kyverno's rewrite-ghcr rule do it. That policy is a mutating
         # webhook with failurePolicy: Ignore — it FAILS OPEN, so a pod admitted while
@@ -47,13 +47,15 @@ spec:
         # un-rewritten refs, including a node-exporter pod from 00:44 that night.
         # That silent leak is what the Karpenter overnight consolidation freeze in
         # main.tf works around (~100 GB/night, $4-5) — a DaemonSet pays it on EVERY new
-        # node, so the rewrite has to be deterministic, not best-effort. Chart default
-        # is ghcr.io/jimmidyson/configmap-reload (verified: helm show values
-        # grafana/alloy --version 0.10.1). Tag stays the chart default.
+        # node, so the rewrite has to be deterministic, not best-effort. Since chart
+        # 0.12.6 the reloader is quay.io/prometheus-operator/prometheus-config-reloader
+        # (was ghcr.io/jimmidyson/configmap-reload; verified: helm show values
+        # grafana/alloy --version 1.13.0), so the repository moves to the quay
+        # pull-through prefix. Tag (digest-pinned) stays the chart default.
         configReloader:
           image:
             registry: 265175468565.dkr.ecr.eu-north-1.amazonaws.com
-            repository: ghcr/jimmidyson/configmap-reload
+            repository: quay/prometheus-operator/prometheus-config-reloader
         controller:
           type: daemonset
           # Node-level log collector: run at system-node-critical so the DaemonSet
@@ -67,10 +69,16 @@ spec:
           priorityClassName: system-node-critical
           # DaemonSet must also land on the on-demand observability nodes
           # (ADR-0082) to ship their logs — tolerate the workload taint.
+          # ...and on the on-demand `stateful` nodes that host the money-path databases
+          # (#11608): their logs must ship too. check-stateful-not-on-spot.py enforces it.
           tolerations:
             - key: workload
               operator: Equal
               value: observability
+              effect: NoSchedule
+            - key: openbank.io/stateful
+              operator: Equal
+              value: "true"
               effect: NoSchedule
         alloy:
           # Allow scheduling onto sandbox runner nodes (matches the old
@@ -185,6 +193,64 @@ spec:
                     correlationId = "mdc.correlationId",
                   }
                 }
+
+                // ---- demote KNOWN-TRANSIENT CloudNativePG errors to warn ----
+                // Measured over 48h (2026-09-27/29): 12,188 of the 13,691 level=error lines
+                // from CNPG `postgres` containers -- a third of ALL level=error lines in the
+                // fleet (36,650) -- were the built-in metrics exporter failing to reach a
+                // Postgres that was not accepting connections yet (or any more): the local
+                // socket not created, or `FATAL: the database system is starting up /
+                // shutting down / not yet accepting connections`. That is every instance
+                // start, stop and switchover, and it buried the errors that matter (a
+                // `barman-cloud-wal-archive` failure, a Vault login failure, a webhook
+                // outage) under hundreds of lines per database.
+                //
+                // Each match is deliberately narrow: the exporter/runOnServer message AND a
+                // not-running-yet cause. Anything else from the same message -- an auth
+                // failure, a missing role, a query error -- keeps level=error. The
+                // `Reconciler error` rule only takes errors whose cause is exactly
+                // `context canceled` (a reconcile interrupted by the pod or operator
+                // stopping); the other ~90% of Reconciler errors in the same window were real
+                // (webhook calls failing, Backup terminal errors, WAL-archive failures, secret
+                // refresh failures) and stay errors. A Postgres that never comes up is not
+                // hidden by this: its own FATAL/PANIC lines are untouched and
+                // PostgresInstanceDown pages on the scrape.
+                //
+                // The replacement happens on the EXTRACTED level, before stage.labels turns it
+                // into the stream label; the original value is kept as structured metadata.
+                // Demoted lines stay in Loki, carry `demoted_from=error` as structured
+                // metadata, and are found with {level="warn"} | demoted_from="error".
+                stage.match {
+                  selector = `{container="postgres"} |~ "\"level\":\"error\"" |~ "\"msg\":\"(Error collecting user query|while parsing runOnServer queries|while checking runOnServer version matches)\"" |~ "(server error: FATAL: the database system is (starting up|shutting down|not yet accepting connections)|dial unix /controller/run/\\.s\\.PGSQL\\.5432: connect: no such file or directory)"`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+                stage.match {
+                  selector = `{container="postgres"} |~ "\"level\":\"error\"" |= "\"msg\":\"Reconciler error\"" |~ "\"error\":\"[^\"]*: context canceled\""`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+                stage.match {
+                  selector = `{namespace="cnpg-system", container="manager"} |~ "\"level\":\"error\"" |= "\"msg\":\"Reconciler error\"" |~ "\"error\":\"[^\"]*: context canceled\""`
+                  stage.structured_metadata {
+                    values = { demoted_from = "level" }
+                  }
+                  stage.template {
+                    source   = "level"
+                    template = "warn"
+                  }
+                }
+
                 // Low-cardinality -> label.
                 stage.labels {
                   values = { level = "" }
