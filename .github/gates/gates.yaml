@@ -4120,6 +4120,20 @@ gates:
     run: |
       python3 .github/scripts/check-llm-price-book.py --enforce
 
+  - id: otel-endpoint-declared
+    name: "every deployed Quarkus service declares an OTLP endpoint (enforced)"
+    group: gitops
+    mode: enforced
+    min_subjects: 50   # 66 Quarkus workloads in gitops components today (2026-09-30)
+    budget_seconds: 45   # 11.7s measured on the CI runner (66 workloads x build.gradle reads), ~1s locally
+    rationale: "A service without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT exports every span to localhost:4317 in the cluster; nothing errors and Tempo cannot report a service it never heard from. customer-edge, the public entry point, shipped that way."
+    review_after: "2027-03-30"
+    selftest_inputs: [".github/scripts/check-otel-endpoint-declared.py"]
+    selftest: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --enforce
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
     group: data
@@ -5981,3 +5995,36 @@ gates:
     selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
     run: |
       python3 .github/scripts/check-field-crypto-in-libs.py --root .
+
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
+    run: python3 .github/scripts/test-dr-restore-workflow.py
+  # `quarkus.log.console.json` is read by exactly one thing, the quarkus-logging-json extension.
+  # Without it on the application's classpath the key is accepted, does nothing, and the console
+  # keeps the TEXT pattern formatter — so the config described structured logging the process did
+  # not do. The shared config and ~30 services asked for it and no module carried the extension.
+  # Decidable from the build files: a Quarkus application module that asks (own resources or a
+  # project dependency's) must declare the extension (directly, via a catalog alias, or through a
+  # convention plugin it applies). StructuredLogEncodingIT in openbank-ledger-service is the
+  # by-effect half — it boots the app and asserts the console formatter really emits JSON.
+  - id: json-logging-extension-present
+    name: "JSON console logging requested => quarkus-logging-json declared (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A config key nobody reads is invisible from the config; pairing the request with the extension that reads it is the only place the mismatch is decidable without booting every service."
+    review_after: "2027-03-30"
+    verified: "2026-09-30 — 67 Quarkus application modules examined, 0 findings; removing the convention-plugin dependency flags 66 (exit 1)"
+    budget_seconds: 10
+    min_subjects: 33   # 67 measured 2026-09-30; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-json-logging-extension.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-json-logging-extension.py"]
+    run: |
+      python3 .github/scripts/check-json-logging-extension.py --enforce

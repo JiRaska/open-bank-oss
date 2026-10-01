@@ -24,9 +24,7 @@ spec:
       remoteRef:
         key: goalert
         property: url
-    # NOT here: the dead-man `heartbeat_url` (kube-prometheus-stack.yaml route `deadman`).
-    # It is an in-cluster address with no credential value, and the template below is
-    # `mergePolicy: Merge`, so ESO leaves a key it does not own untouched. The key is
-    # written once into this Secret by the ops step that creates the GoAlert heartbeat
-    # monitor (#11666). Keeping it out of the ExternalSecret also means a missing Vault
-    # property can never fail the sync of the paging `url` above.
+    # NOT here, and not in this Secret at all: the dead-man heartbeat URL lives in
+    # Secret `alertmanager-deadman` (kube-prometheus-stack.yaml route `deadman`). ESO owns
+    # this Secret and rewrites its whole data on sync, so any key written from outside is
+    # deleted again — measured 2026-10-01.

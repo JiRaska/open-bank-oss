@@ -74,3 +74,56 @@ spec:
               this is the alert that means "the log pipeline's health is unknown", which is worse
               than knowing it is stalled.
               Check: kubectl -n observability get pods,servicemonitor -l app.kubernetes.io/name=loki
+        # A quarter of every day's log lines were being thrown away and nothing said so.
+        # Measured 2026-09-30: loki_discarded_samples_total{reason="too_far_behind"} grew by
+        # 37.2M in 24h against 144.7M lines received (25.7%), in bursts that coincide to the
+        # minute with Alloy DaemonSet pods starting on fresh Karpenter nodes (12.4M in the hour
+        # after five pods came up at 20:02). `loki.source.kubernetes` keeps no on-disk position,
+        # so a restarted tailer replays the container log from its start and Loki rejects
+        # everything older than the stream's out-of-order window — mostly duplicates, so not
+        # loss, but a REAL out-of-order defect (clock skew, a stuck stream, a misconfigured
+        # source) would hide inside the same counter and read identically. The two alerts above
+        # only see a pipeline that ingests NOTHING; this one sees a pipeline that ingests and
+        # quietly loses. Ratio, not rate: the estate's line volume changes with node count, and a
+        # fixed count would fire on scale-ups and sleep through a small tenant losing everything.
+        - alert: LokiLinesDiscardedHigh
+          expr: |
+            sum(increase(loki_discarded_samples_total[1h]))
+              /
+            sum(increase(loki_distributor_lines_received_total[1h]))
+              > 0.05
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "Loki is discarding {{ $value | humanizePercentage }} of received log lines"
+            description: >-
+              Over the last hour Loki refused more than 5% of the lines Alloy pushed. Read the
+              reason first — `sum by (reason) (increase(loki_discarded_samples_total[1h]))` —
+              then, for too_far_behind, the stream: `kubectl -n observability logs loki-0 -c loki
+              | grep 'too far behind'` names it. A burst right after Alloy pods restart is the
+              known replay (duplicates, no loss); a steady ratio with no Alloy restart is a real
+              out-of-order source or a rate/line-size limit and IS loss.
+        # The LogQL alert rules (loki-rules-*.yaml) are evaluated by Loki's ruler, not by
+        # Prometheus. If the ruler stops loading rule groups or fails to reload its config,
+        # FalcoCriticalRuntimeDetection, SchedulerMissingVertxContext, HoneyEndpointHit and the
+        # rest go dark while Prometheus shows every one of its own rules healthy. Loki exposes
+        # both facts; nothing alerted on either.
+        - alert: LokiRulerNotEvaluating
+          expr: |
+            sum(loki_ruler_managers_total) == 0
+              or
+            max(loki_ruler_config_last_reload_successful) == 0
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Loki ruler has no active rule managers or its last config reload failed"
+            description: >-
+              Every log-based alert is unevaluated while this is true. Check
+              `kubectl -n observability logs loki-0 -c loki | grep -i ruler` and the
+              loki-rules-*.yaml ConfigMaps mounted into the ruler (a YAML error in one file
+              fails the whole reload).

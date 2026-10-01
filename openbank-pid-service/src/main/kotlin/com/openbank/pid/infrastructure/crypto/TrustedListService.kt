@@ -80,10 +80,19 @@ class TrustedListService(
     @Suppress("UnusedParameter") // the StartupEvent is the CDI trigger; its value is not needed
     fun onStart(@Observes startup: StartupEvent) = refresh()
 
+    /**
+     * Liveness is registered only when a list source is configured: with neither `url` nor `inline`
+     * the refresh never runs to [WorkflowLivenessRecorder.recordSuccess], so a registered gauge would
+     * age forever and `WorkflowLivenessStale` would fire for a workflow that is deliberately off.
+     */
     @PostConstruct
     fun registerLiveness() {
+        if (!sourceConfigured()) return
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
+
+    private fun sourceConfigured(): Boolean =
+        listOf(inline, url).any { opt -> opt.map { it.isNotBlank() }.orElse(false) }
 
     @Scheduled(every = "\${openbank.pid.eudi.trusted-list.refresh:1h}", delayed = "30s")
     @Blocking
