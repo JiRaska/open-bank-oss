@@ -91,11 +91,8 @@ import gatelib  # noqa: E402
 # required check on this repository — it is not a list edit, and it belongs in a PR whose
 # body says who asked for it.
 DECLARED_BYPASS_ACTORS: dict[tuple[int, str, str], str] = {
-    (5, "RepositoryRole", "pull_request"): (
-        "the built-in `admin` repository role, on pull requests only. This is the actor "
-        "behind every row #4828 lists. `pull_request` mode does NOT permit a direct push "
-        "to main; a change of this entry to `always` would."
-    ),
+    # Empty since 2026-10-01: the owner removed the last bypass (the built-in `admin` repository
+    # role, pull requests only), so no actor may merge past main-protection's required checks.
 }
 
 TARGET_REF = "refs/heads/main"
@@ -370,9 +367,10 @@ def self_test() -> int:
 
     # The gate must be able to FAIL on the real declared set — a self-test that only ever
     # exercises the clean case cannot tell a working comparison from `return [], []`.
+    # The real DECLARED set is empty, so re-adding the admin bypass must be flagged as undeclared.
     u, s = findings([admin, a_bot], DECLARED_BYPASS_ACTORS)
-    if u != [a_bot] or s:
-        fails.append(f"against the real DECLARED set: want [{_fmt(a_bot)}] undeclared, got {u} / {s}")
+    if sorted(map(_fmt, u)) != sorted(map(_fmt, [admin, a_bot])) or s:
+        fails.append(f"against the real DECLARED set: want admin and bot undeclared, got {u} / {s}")
     u, s = findings(list(DECLARED_BYPASS_ACTORS), DECLARED_BYPASS_ACTORS)
     if u or s:
         fails.append(f"the real DECLARED set must be self-consistent, got {u} / {s}")

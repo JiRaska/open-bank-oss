@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -18,8 +19,8 @@ import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
+import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -41,7 +42,7 @@ class TreasuryConfirmationNotRequiredIT {
             mapOf("openbank.treasury.confirmation.required" to "false")
     }
 
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun action(id: String, verb: String) = given().contentType("application/json")
         .header("Idempotency-Key", UUID.randomUUID().toString())
