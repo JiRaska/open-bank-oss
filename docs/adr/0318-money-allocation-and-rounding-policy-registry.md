@@ -1,13 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [libs, interest, fx, fees-billing]
 summary: "libs Money gains a largest-remainder allocate/split and a named rounding-policy registry (MONEY_SCALE, LEDGER_POSTING HALF_UP, interest, FX, fees, tax, DISPLAY); services stop choosing RoundingMode/scale inline, ratchet-gated."
+followup: "#11604 — allocate/split and the registry landed; adoption sweep and the ratchet gate remain"
 ---
 
 # ADR-0318 — Money allocation and rounding policy registry

@@ -167,6 +167,9 @@ class CustomerCreditJourneyResourceTest {
     }
 
     private class StubRepository(private val rows: List<LoanApplication>) : LoanApplicationRepository {
+        override fun <T> withLocked(id: LoanApplicationId, operation: (LoanApplication?) -> Uni<T>): Uni<T> =
+            findById(id).flatMap(operation)
+
         override fun save(application: LoanApplication): Uni<LoanApplication> = Uni.createFrom().item(application)
 
         override fun findById(id: LoanApplicationId): Uni<LoanApplication?> =

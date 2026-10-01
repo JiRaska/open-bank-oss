@@ -24,6 +24,9 @@ data:
     # Cluster-internal, no ingress (ADR-0056) → publishing needs no token.
     auth-default-access: "read-write"
     behind-proxy: true
+    # /metrics for servicemonitor-observability-stack.yaml (ntfy_messages_published,
+    # subscribers, HTTP errors) — the last hop of every page was unmeasured.
+    enable-metrics: true
     attachment-cache-dir: ""
 ---
 apiVersion: apps/v1
