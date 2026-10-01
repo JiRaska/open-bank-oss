@@ -51,6 +51,52 @@ spec:
             description: "{{ $labels.name }} (namespace {{ $labels.dest_namespace }}) has been Degraded for >1h with sync_status={{ $labels.sync_status }}. A Synced+Degraded app means gitops applied the manifests and the workload they describe is still broken — check the app's resource tree, not its sync state. Two apps sat like this for 2 days before anything scraped ArgoCD (#1284, #1400)."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
 
+        # OutOfSync that self-heal cannot heal (2026-09-30). A mutating admission policy
+        # started rewriting controller pod templates; ArgoCD 3.x diffs desired state against a
+        # SERVER-SIDE DRY-RUN, so the desired template carried the mutation while the live one
+        # (admitted before the policy) did not. 13 objects went OutOfSync, and every self-heal
+        # sync reported "successfully synced" and changed nothing — a no-op apply never
+        # re-enters the webhook. They stayed that way for ~50 minutes until a `rollout restart`
+        # by hand. The sync-status half of `argocd_app_info` was never alerted on at all.
+        #
+        # 30m, not 5m: an auto-sync app is OutOfSync for seconds on every commit and for a few
+        # minutes on a big one. What this catches is the PERSISTENT kind, where the diff
+        # survives a "successful" sync. `autosync_enabled="true"` scopes it to apps whose
+        # OutOfSync is supposed to heal itself (every app on this cluster today — a manual-sync
+        # app being OutOfSync is its design, not a defect). `max by` collapses the controller
+        # pod/instance/operation labels so a controller restart does not reset the `for:` clock.
+        #
+        # Measured live 2026-09-30: 12 apps were OutOfSync during 14:26-15:15Z; five of them
+        # (litellm, gradle-build-cache, observability-components, registry-cache,
+        # volumeattachment-reaper) for 45+ minutes, which this rule would have reported from
+        # ~14:56Z. The `root` app-of-apps has ALSO been OutOfSync continuously for the whole
+        # 12h of retention, on a different, real cause — a `null` Helm value in the kyverno
+        # Application that the API server drops on apply, so desired and live can never agree.
+        # That is not excluded here: it is exactly the defect this rule exists to surface, and
+        # it is fixed by the companion change to gitops/apps/kyverno.yaml rather than by an
+        # exclusion that would outlive the fix.
+        - alert: ArgoCDAppOutOfSyncNotHealing
+          expr: |
+            max by (name, dest_namespace, project) (
+              argocd_app_info{sync_status="OutOfSync", autosync_enabled="true"}
+            ) == 1
+          for: 30m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "ArgoCD app {{ $labels.name }} OutOfSync for over 30m despite auto-sync"
+            description: >-
+              {{ $labels.name }} (namespace {{ $labels.dest_namespace }}) has auto-sync with
+              self-heal and has still been OutOfSync for >30m — the sync is running and not
+              converging. Two known causes: a MUTATING admission policy changed after the
+              workload was admitted (desired = server dry-run WITH the mutation, live = without;
+              fix: `kubectl rollout restart` the affected controller), or a manifest value the
+              API server drops on apply (a `null`, a defaulted field) so desired can never equal
+              live. Compare live vs `kubectl apply --dry-run=server` for one OutOfSync resource —
+              see the runbook.
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
+
         # Unknown is not Degraded and is worth its own rule: it usually means the
         # controller cannot assess the app at all (missing CRD, unreachable dest cluster,
         # a broken health check) rather than that the workload is unhealthy. It is the
