@@ -123,6 +123,24 @@ class TreasuryDealServiceTest {
     }
 
     @Test
+    fun `a deal drafted after 22 00 UTC in summer takes the Prague trade date, not UTC's`(): Unit = runBlocking {
+        // 22:30 UTC on 15 July is 00:30 CEST on 16 July: the dealer in Prague is already on the 16th.
+        assertTradeDateDefaultsToPrague(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+    }
+
+    @Test
+    fun `a deal drafted after 23 00 UTC in winter takes the Prague trade date, not UTC's`(): Unit = runBlocking {
+        // 23:30 UTC on 15 January is 00:30 CET on 16 January.
+        assertTradeDateDefaultsToPrague(java.time.Instant.parse("2026-01-15T23:30:00Z"), LocalDate.parse("2026-01-16"))
+    }
+
+    private suspend fun assertTradeDateDefaultsToPrague(at: java.time.Instant, prague: LocalDate) {
+        clock = Clock.fixed(at, ZoneOffset.UTC)
+        val c = cmd(maturity = prague.plusDays(7)).copy(tradeDate = null, valueDate = prague)
+        assertThat(service.draft(c, DealFixtures.dealer).tradeDate).isEqualTo(prague)
+    }
+
+    @Test
     fun `booking emits the booked event and posts nothing`(): Unit = runBlocking {
         val b = book()
         assertThat(b.state).isEqualTo(DealState.BOOKED)
