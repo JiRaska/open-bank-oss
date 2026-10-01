@@ -408,8 +408,10 @@ class AuthorizeInterceptor {
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {
             val approval = store.find(approvalId)
-            if (approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint)) {
-                store.markExecuted(approvalId)
+            if (
+                approval.satisfies(annotation.action, resourceId, maker, binding.fingerprint) &&
+                store.markExecuted(approvalId) != null
+            ) {
                 meters?.authzFourEyes(annotation.action, "approval_satisfied")
                 return
             }

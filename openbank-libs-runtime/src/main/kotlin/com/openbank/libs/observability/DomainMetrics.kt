@@ -375,6 +375,18 @@ class DomainMetrics {
     }
 
     /**
+     * Increment each time a scheduled outbox gauge refresh (backlog or dead-letter count) fails to
+     * read the database. The gauge keeps its last good value, so this counter is the only signal
+     * that the reading has gone stale: alert on `increase(...)`, not on the gauge.
+     *
+     * @param service service name
+     * @param gauge   which gauge failed to refresh (`backlog` or `dead_lettered`)
+     */
+    fun outboxGaugeRefreshFailed(service: String, gauge: String) {
+        counter("openbank.outbox.gauge_refresh_failed", "service", service, "gauge", gauge)
+    }
+
+    /**
      * Register the outbox backlog gauge — the single most important operational signal
      * (ADR-0077): processable (PENDING + FAILED) rows not yet relayed to the broker. A
      * rising backlog means money/events are stuck. Call **once at startup** with a supplier

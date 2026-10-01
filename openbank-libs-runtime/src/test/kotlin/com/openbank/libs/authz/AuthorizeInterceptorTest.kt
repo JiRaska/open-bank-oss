@@ -766,6 +766,27 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `an approval disappearing during consumption cannot authorize execution`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val backing = InMemoryApprovalStore()
+        val disappearing = object : ApprovalStore by backing {
+            override suspend fun markExecuted(id: String): PendingApproval? = null
+        }
+        wirePdpAndStore(disappearing)
+        // A genuinely bound, APPROVED approval for this exact call, so the only reason left to
+        // refuse is that the interceptor's own claim did not succeed.
+        val pending = issueApproved(backing, annotatedMethod)
+        assertThat(runBlocking { backing.find(pending.id) }?.status).isEqualTo(ApprovalStatus.APPROVED)
+
+        val ctx = makeCtx(annotatedMethod)
+        val thrown = catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(ctx)
+        }
+        assertThat(thrown.response.status).isEqualTo(202)
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
+
+    @Test
     fun `code review fix - decide on an already-EXECUTED approval throws instead of replaying it`() {
         // Regression test for the replay bug: decide() used to unconditionally overwrite
         // status, so re-deciding an EXECUTED approval flipped it back to APPROVED and let the
