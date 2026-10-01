@@ -22,6 +22,15 @@ private const val TAX_SCALE = 0
 /** treasury CounterpartyExposure.utilisationPercent: two decimals of a percentage. */
 private const val RATIO_PERCENT_SCALE = 2
 
+/** treasury quoted money-market rates (Quote.RATE_SCALE) and FX-deal rate deviation (Deal.DEVIATION_SCALE). */
+private const val RATE_PERCENT_SCALE = 4
+
+/** treasury amounts on its CZK chart: a literal two decimals (Deal/Postings MONEY_SCALE). */
+private const val TREASURY_AMOUNT_SCALE = 2
+
+/** treasury ACT/360 interest intermediate quotient (Deal.WORK_SCALE). */
+private const val TREASURY_INTEREST_WORK_SCALE = 12
+
 /**
  * The closed, named set of rounding rules the fleet uses (ADR-0318). Each policy is a
  * (scale, mode) pair: [fixedScale] when the rule has its own scale, otherwise the currency's
@@ -126,7 +135,46 @@ enum class RoundingPolicy(val fixedScale: Int?, val mode: RoundingMode, val rati
         RoundingMode.HALF_UP,
         "Dimensionless ratio/percentage at scale 2, HALF_UP — treasury counterparty-limit utilisation; never money.",
     ),
+
+    /**
+     * A rate or deviation expressed in PERCENT at four decimals, HALF_UP: treasury simulated
+     * counterparty quotes (Quote.midRate / bid / ask) and the FX-deal dealer-rate deviation against
+     * the fx-service mid (Deal.checkRate). Dimensionless, never money.
+     */
+    RATE_PERCENT(
+        RATE_PERCENT_SCALE,
+        RoundingMode.HALF_UP,
+        "Percent rate or rate deviation at scale 4, HALF_UP — treasury quotes and FX-deal tolerance check.",
+    ),
+
+    /**
+     * Treasury amounts at a FIXED two decimals, HALF_UP: FX-spot CZK counter-amount, ACT/360
+     * deposit interest and its daily accrual. Fixed rather than currency-scaled because that is what
+     * the sites do today; for CZK/EUR/USD it equals [LEDGER_POSTING], for a 0- or 3-digit currency
+     * it does not — moving treasury to the currency scale is a behaviour change and its own decision.
+     */
+    TREASURY_AMOUNT(
+        TREASURY_AMOUNT_SCALE,
+        RoundingMode.HALF_UP,
+        "Treasury amount at a fixed scale 2, HALF_UP — FX counter-amount, ACT/360 interest and accrual.",
+    ),
+
+    /** Intermediate ACT/360 interest quotient at scale 12, HALF_UP, before [TREASURY_AMOUNT]. */
+    TREASURY_INTEREST_WORK(
+        TREASURY_INTEREST_WORK_SCALE,
+        RoundingMode.HALF_UP,
+        "Intermediate ACT/360 interest quotient at scale 12, HALF_UP — treasury Deal.act360Interest.",
+    ),
     ;
+
+    /**
+     * Rounds [value] to this policy's [fixedScale]. Only for a policy with a fixed scale; a
+     * currency-scaled policy needs [round] with a currency.
+     */
+    fun round(value: BigDecimal): BigDecimal {
+        val scale = requireNotNull(fixedScale) { "$this has no fixed scale; it needs a currency" }
+        return value.setScale(scale, mode)
+    }
 
     /**
      * Divides [dividend] by [divisor] with a single rounding under this policy — exactly
