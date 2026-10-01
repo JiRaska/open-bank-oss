@@ -288,7 +288,7 @@ class AccountServiceTest {
      * sanctions never returns — so every one of these opened the account.
      */
     @ParameterizedTest
-    @ValueSource(strings = ["POTENTIAL_HIT", "ESCALATED", "UNKNOWN", "SOMETHING_NEW"])
+    @ValueSource(strings = ["HIT", "POTENTIAL_HIT", "ESCALATED", "UNKNOWN", "SOMETHING_NEW"])
     fun `openAccount is blocked for every screening status other than CLEAR and WHITELISTED`(status: String) {
         val command = openAccountCommand(legalName = "Fuzzy Match Person")
 
