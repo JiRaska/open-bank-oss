@@ -295,7 +295,7 @@ describe('snapshots', () => {
     await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
     // #11107: the loan with a number is referenced by it; the others fall back to the id handle.
     const numbered = await screen.findByRole('button', { name: /UV-2026-000123/ })
-    expect(numbered.getAttribute('title')).toMatch(/loan-uuid-1\. The reference is the contract number/)
+    expect(numbered.getAttribute('title')).toMatch(/The reference is the contract number/)
     const fallbacks = screen.getAllByRole('button', { name: /Loan LOAN/ })
     expect(fallbacks).toHaveLength(2)
     expect(fallbacks[0].getAttribute('title')).toMatch(/No contract number/)

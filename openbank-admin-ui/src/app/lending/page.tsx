@@ -389,7 +389,7 @@ export default function LendingPage() {
             {tab === 'portfolio' && loans.map(l => (
               <tr key={l.id} style={{ borderTop: '1px solid var(--border)' }}>
                 <td style={{ ...td, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} title={l.id} data-testid="loan-contract-number">
-                  {l.contractNumber ?? `${l.id.slice(0, 8)}…`}
+                  {l.contractNumber ?? t('bez čísla', 'no number')}
                 </td>
                 <td style={td}><EntityChip type="party" id={l.partyId} /></td>
                 <td style={{ ...td, fontWeight: 600 }}>{fmt(l.principal)}</td>

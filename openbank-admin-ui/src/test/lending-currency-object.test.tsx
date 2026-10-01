@@ -28,7 +28,7 @@ const routes: Record<string, unknown> = {
   ],
   '/loans/active': [
     { id: 'l1', contractNumber: 'UV-2026-000123', partyId: 'p2', status: 'ACTIVE', principal: { amount: 150000, currency: CZK } },
-    // An older lending without contractNumber falls back to a short id, never a blank cell.
+    // An older lending without contractNumber says so, never a blank cell or a raw id.
     { id: 'abcdef12-0000-7000-8000-000000000002', partyId: 'p3', status: 'ACTIVE', principal: { amount: 250000, currency: CZK } },
   ],
   '/applications/summary': [
@@ -73,7 +73,7 @@ describe('lending console with object-shaped currency', () => {
     expect(Array.from(document.querySelectorAll('td')).map(td => td.textContent?.replace(/\s/g, ' '))).not.toContain('ACTIVE')
     // #11107: the portfolio shows the human contract number, the UUID only as its title.
     const contracts = screen.getAllByTestId('loan-contract-number')
-    expect(contracts.map(c => c.textContent)).toEqual(['UV-2026-000123', 'abcdef12…'])
+    expect(contracts.map(c => c.textContent)).toEqual(['UV-2026-000123', 'no number'])
     expect(contracts[0].getAttribute('title')).toBe('l1')
   })
 

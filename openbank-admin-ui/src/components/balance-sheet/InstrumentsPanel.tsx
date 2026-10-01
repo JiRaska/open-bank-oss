@@ -142,8 +142,8 @@ export function InstrumentsPanel({ runId, instruments, lang }: Props) {
                     <button
                       type="button" onClick={() => setOpen(expanded ? null : i.id)} aria-expanded={expanded}
                       title={i.contractNumber
-                        ? t(`Detail nástroje ${i.id}. Reference je číslo smlouvy.`, `Instrument detail ${i.id}. The reference is the contract number.`)
-                        : t(`Detail nástroje ${i.id}. Bez čísla smlouvy, reference je zkrácené ID.`, `Instrument detail ${i.id}. No contract number; the reference is a shortened id.`)}
+                        ? t('Detail nástroje. Reference je číslo smlouvy.', 'Instrument detail. The reference is the contract number.')
+                        : t('Detail nástroje. Bez čísla smlouvy, reference je zkrácené ID.', 'Instrument detail. No contract number; the reference is a shortened id.')}
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'inherit', font: 'inherit', fontWeight: 600 }}
                     >
                       {expanded ? <ChevronDown size={14} aria-hidden="true" /> : <ChevronRight size={14} aria-hidden="true" />}
