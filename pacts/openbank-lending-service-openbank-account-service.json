@@ -1,0 +1,99 @@
+{
+  "consumer": {
+    "name": "openbank-lending-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the borrower's accounts to find the CURRENT account a loan pays into",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "50"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountType": "CURRENT",
+              "currencyCode": "CZK",
+              "id": "11111111-2222-4333-8444-555555555555",
+              "status": "ACTIVE"
+            }
+          ]
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the borrower's accounts with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts",
+        "query": {
+          "limit": [
+            "50"
+          ],
+          "partyId": [
+            "66666666-7777-4888-8999-aaaaaaaaaaaa"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}
