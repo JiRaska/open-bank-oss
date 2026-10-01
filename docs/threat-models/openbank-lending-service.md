@@ -102,7 +102,14 @@
     signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
     loan principal GL (Loans Receivable) is never touched by a provisioning entry.
   - **Batch completeness:** `findUnprovisioned` drains successive batches of every nonterminal exposure,
-    including defaulted loans. Daily immutable keys support current-date completeness checks.
+    including defaulted loans. Daily immutable keys support current-date completeness checks; the
+    scheduler records workflow success only after the missing-eligible count is zero.
+  - **Residual date-rollover recovery risk:** a process failure can interrupt a date before all
+    eligible loans receive rows. The next daily tick uses a new date; `snapshotFor` reads mutable
+    current loan, installment, collateral and risk state, so calling it with yesterday's `asOf`
+    cannot reconstruct yesterday's ECL. Do not backdate those current inputs or treat today's
+    successful pass as proof that the prior date was complete. Historical-input-backed recovery
+    or a controlled accounting reconciliation remains necessary.
   - **Crash and concurrency integrity:** provisioning and terminal transitions lock and refresh the loan.
     Snapshot/state changes and frozen allowance commands commit in one database transaction. The
     outbox retries the same amount, accounting date and ledger idempotency reference; provisioning
@@ -883,3 +890,32 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
   the sequence is gap-tolerant, not gap-free: nothing may infer a missing loan from a missing
   number. Rollback: see V24's `-- Rollback:` note. Numbers already shown to customers cannot be
   recalled.
+
+## 11. Provisioning date rollover evidence (issue #10275)
+
+**Threat:** A process stops after a subset of loan allowances commits. On the next day the scheduler
+uses a new reporting key and can mark that newer day healthy while yesterday has no complete book.
+Replaying the older key from current installments, collateral, loan status and risk parameters would
+misstate historical facts and could post a false delta to the ledger.
+
+**Control:** `provisioning_cycle_run` is committed before any loan-level posting. A crash retains
+`RUNNING`; a failed or unreadable coverage check retains `INCOMPLETE`. Days with no scheduler run
+since the last recorded date become `MISSED` on the next start. Only a zero-missing check may
+write `COMPLETE`. The scheduler queries all earlier non-complete dates before recording workflow
+success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
+contains a date and counts, not borrower identifiers. An old gap is retained for independently
+reviewed reconciliation on the actual correction date; the scheduler never backdates current facts.
+
+**Residual risk:** This change detects and preserves a prior-date gap but does not reconstruct the
+historical eligible population or implement a reviewed closure operation. Direct mutation of the
+run row would defeat the control; operational access to the database remains privileged and the
+reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
+period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
+
+**Accepted residual risk (owner decision, 2026-10-01):** this slice is accepted as DETECTOR-ONLY.
+It records `RUNNING`/`INCOMPLETE`/`MISSED` evidence, verifies current-date coverage and withholds
+workflow success until zero eligible exposures are missing; it posts no journal for any date other
+than the current reporting date and never replays a past date from current inputs. Until #10275
+delivers historical-input-backed recovery or a reviewed reconciliation operation, a detected
+prior-date gap stays open and is closed only by a controlled manual correction. The
+historical-replay / reconciliation policy is tracked in #10275.
