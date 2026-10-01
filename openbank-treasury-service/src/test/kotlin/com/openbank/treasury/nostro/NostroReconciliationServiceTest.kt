@@ -24,7 +24,7 @@ import java.util.UUID
 class NostroReconciliationServiceTest {
 
     /** In memory; [raceWinner] is committed "concurrently" the moment save is attempted. */
-    private class InMemoryStatements : NostroStatementRepository {
+    internal class InMemoryStatements : NostroStatementRepository {
         val rows = mutableListOf<StoredStatement>()
         var raceWinner: StoredStatement? = null
 
@@ -42,6 +42,9 @@ class NostroReconciliationServiceTest {
             rows += stored
             return stored
         }
+
+        override suspend fun statementIdsSince(since: LocalDate) =
+            rows.filter { !it.statement.statementDate.isBefore(since) }.map { it.id }
     }
 
     private val statements = InMemoryStatements()
