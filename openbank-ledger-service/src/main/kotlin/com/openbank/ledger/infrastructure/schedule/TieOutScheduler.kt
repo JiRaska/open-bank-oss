@@ -206,13 +206,13 @@ class TieOutScheduler(
      */
     @Suppress("TooGenericExceptionCaught") // scheduler must survive any infra failure
     private suspend fun recheckDates(through: LocalDate, alreadyChecked: Set<LocalDate>): List<LocalDate> = try {
+        val candidates = accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF)
+            .filter { it.cutoffAt != null && it.businessDate <= through && it.businessDate !in alreadyChecked }
         val due = mutableListOf<LocalDate>()
-        for (day in accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF)) {
+        for (day in candidates) {
             if (due.size >= maxCatchUpDays) break
-            val cutoffAt = day.cutoffAt ?: continue
-            if (day.businessDate > through || day.businessDate in alreadyChecked) continue
             val latest = runRepository.findLatestFor(day.businessDate)
-            if (latest == null || latest.runAt.isBefore(cutoffAt)) due += day.businessDate
+            if (latest == null || latest.runAt.isBefore(day.cutoffAt)) due += day.businessDate
         }
         due
     } catch (ex: Exception) {
