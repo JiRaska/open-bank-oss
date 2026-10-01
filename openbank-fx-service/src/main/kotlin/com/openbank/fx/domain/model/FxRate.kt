@@ -4,6 +4,7 @@
 
 package com.openbank.fx.domain.model
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
@@ -50,14 +51,9 @@ data class FxRate(
     fun inverted(): FxRate = copy(
         baseCurrency = quoteCurrency,
         quoteCurrency = baseCurrency,
-        bidRate = BigDecimal.ONE.divide(askRate, INVERSE_SCALE, RoundingMode.HALF_UP),
-        askRate = BigDecimal.ONE.divide(bidRate, INVERSE_SCALE, RoundingMode.HALF_UP),
+        bidRate = RoundingPolicy.FX_RATE.divide(BigDecimal.ONE, askRate),
+        askRate = RoundingPolicy.FX_RATE.divide(BigDecimal.ONE, bidRate),
     )
-
-    private companion object {
-        /** Matches the numeric(18,8) the rates are stored at, so a round trip does not drift. */
-        const val INVERSE_SCALE = 8
-    }
 }
 
 data class FxConversion(
