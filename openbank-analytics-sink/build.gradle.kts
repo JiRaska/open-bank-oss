@@ -32,6 +32,9 @@ repositories {
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)
+    // Structured console logging — this module applies the Quarkus plugin directly rather than
+    // openbank.quarkus-service, so it declares the extension that convention plugin supplies.
+    implementation("io.quarkus:quarkus-logging-json")
     implementation(libs.quarkus.resteasy.reactive)
     implementation(libs.quarkus.resteasy.reactive.jackson)
     implementation(libs.quarkus.smallrye.kafka)
