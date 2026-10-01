@@ -22,6 +22,7 @@ export { LoadMoreControl } from './LoadMoreControl'
 export { StatCard } from './StatCard'
 export { StatusBadge } from './StatusBadge'
 export { EmptyState } from './EmptyState'
+export { HumanReference, shortReference } from './HumanReference'
 export { Tabs, type TabItem } from './Tabs'
 export {
   BADGE_CLASS,
