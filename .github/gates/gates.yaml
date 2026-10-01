@@ -5981,6 +5981,16 @@ gates:
     run: |
       python3 .github/scripts/check-field-crypto-in-libs.py --root .
 
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
+    run: python3 .github/scripts/test-dr-restore-workflow.py
   # `quarkus.log.console.json` is read by exactly one thing, the quarkus-logging-json extension.
   # Without it on the application's classpath the key is accepted, does nothing, and the console
   # keeps the TEXT pattern formatter — so the config described structured logging the process did

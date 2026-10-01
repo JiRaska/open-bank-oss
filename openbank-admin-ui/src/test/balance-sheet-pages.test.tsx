@@ -150,6 +150,29 @@ describe('ledger backfill void — four-eyes in the console (#10969, #11487)', (
     expect(options).toEqual(['src-1'])
   })
 
+  it('reads like a finance document: no raw state enums, no truncated ids, styled table headers', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(screen.getAllByText(/Čeká na schválení|Awaiting approval/).length).toBe(2)
+    expect(screen.queryByText(/^(PROPOSED|APPROVED|EXECUTED|UNWOUND)$/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/#\d{4,}/)
+    expect(document.body.textContent).not.toContain('UNWOUND')
+    const option = screen.getAllByRole('option')[0]
+    expect(option.textContent).toMatch(/2 (úvěrů|loans), 13 (zápisů|entries)/)
+    expect(option.textContent).not.toContain('src-1')
+    const headers = screen.getAllByRole('columnheader').map(h => h.textContent)
+    expect(headers).toEqual(expect.arrayContaining([expect.stringMatching(/Průběh schválení|Approval trail/)]))
+    expect(screen.getAllByRole('table').every(tb => tb.className.includes('data-table'))).toBe(true)
+  })
+
+  it('states the dry-run as a plain summary with the total amount', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    const note = await screen.findByRole('note')
+    expect(note.textContent?.replace(/[  ]/g, ' ')).toMatch(/(Storno vrátí 1 úvěrů a vytvoří 352 protizápisů v celkové výši 1,00 Kč|reverses 1 loans and creates 352 offsetting entries totalling CZK 1\.00)/)
+  })
+
   it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
     await renderPage(<LedgerBackfillVoidPage />)
     await screen.findAllByRole('option')
