@@ -942,7 +942,10 @@ class InterestServiceTest {
         // what guarantees it. Rounding at the adapter would leave them up to 0.005 apart.
         assertThat(postingSlot.captured.gross.amount).isEqualTo(capSlot.captured.grossAmount)
         assertThat(postingSlot.captured.net.amount).isEqualTo(capSlot.captured.netAmount)
-        assertThat(postingSlot.captured.tax.amount).isEqualTo(capSlot.captured.taxAmount)
+        // The tax figure is whole-CZK by policy (scale 0 on the row); the ledger leg is Money and so
+        // carries the currency scale (15.00). Same value, and the leg's scale is what the ledger takes.
+        assertThat(postingSlot.captured.tax.amount).isEqualByComparingTo(capSlot.captured.taxAmount)
+        assertThat(postingSlot.captured.tax.amount.scale()).isEqualTo(2)
     }
 
     @Test
