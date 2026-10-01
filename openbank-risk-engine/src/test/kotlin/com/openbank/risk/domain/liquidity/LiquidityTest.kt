@@ -56,6 +56,9 @@ class LiquidityTest {
         assertThat(r.lcr.totalInflows).isEqualByComparingTo("0")
         // 1500 of deposits, all "less stable" by default (d238 ¶80): 10% run-off.
         assertThat(r.lcr.outflows.single().label).contains("less stable")
+        assertThat(r.lcr.outflows.single().itemCount).describedAs("customer accounts aggregated").isPositive()
+        assertThat(r.lcr.outflows.single().instrumentId).isNull()
+        assertThat(r.lcr.inflows.single().itemCount).describedAs("a single GL account").isNull()
         assertThat(r.lcr.totalOutflows).isEqualByComparingTo("150")
         assertThat(r.lcr.ratio).isEqualByComparingTo("0")
         // ASF 1500 × 90% = 1350; RSF nostro 1500 × 50% (d295 ¶40(d)) = 750; NSFR = 1.8.
@@ -185,6 +188,10 @@ class LiquidityTest {
         val r = run(listOf(loanPosition()), instruments = listOf(loan())).total!!
         assertThat(r.lcr.inflows.single().amount).isEqualByComparingTo("110") // 100 + 10 due on day 15
         assertThat(r.lcr.totalInflows).isEqualByComparingTo("55")
+        // Structured references so a client can group by category and name the contract itself.
+        assertThat(r.lcr.inflows.single().instrumentId).isEqualTo("L1")
+        assertThat(r.lcr.inflows.single().itemCount).isEqualTo(1)
+        assertThat(r.nsfr.rsf).allMatch { it.instrumentId == "L1" }
         // < 1y principal 200 × 50% + ≥ 1y 800 × 85% = 100 + 680
         assertThat(r.nsfr.totalRsf).isEqualByComparingTo("780")
     }

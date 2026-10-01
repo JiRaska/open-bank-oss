@@ -145,6 +145,9 @@ class NostroReconciliationApiIT {
         ledger.balances[Triple("1002", "EUR", LocalDate.parse("2026-09-25"))] = BigDecimal("57500.00")
         val id: String = upload(NostroFixtures.eurXml("SYNTH-IT-EUR-${UUID.randomUUID()}".take(40)))
             .then().statusCode(201).body("glCode", equalTo("1002")).extract().path("id")
+        // The upload already reconciled once to record breaks (ADR-0315 D7); this assertion is about
+        // what ONE reconciliation reads, so it starts from the read below.
+        ledger.queries.clear()
 
         given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
             .then().statusCode(200)
@@ -246,6 +249,80 @@ class NostroReconciliationApiIT {
             .body("outOfPeriodEntries[0].bookingDate", equalTo(NostroFixtures.DATE.plusDays(1).toString()))
             .body("unmatchedStatementEntries.sequence", org.hamcrest.Matchers.hasItem(1))
             .body("reconciled", equalTo(false))
+    }
+
+    private fun uploadMt940(text: ByteArray, key: String? = UUID.randomUUID().toString()) = given()
+        .contentType("text/plain")
+        .apply { if (key != null) header("Idempotency-Key", key) }
+        .body(text)
+        .`when`().post("/api/v1/treasury/nostro/statements/mt940")
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `MT940 upload is stored and reconciled like camt053, and its breaks are listed with age`() {
+        val ref = "SYNTH-940-${UUID.randomUUID()}".take(30)
+        val id: String = uploadMt940(NostroFixtures.mt940(ref)).then().statusCode(201)
+            .body("statementId", equalTo("$ref/00268/001"))
+            .body("glCode", equalTo("1001"))
+            .body("entryCount", equalTo(3))
+            .extract().path("id")
+
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation")
+            .then().statusCode(200)
+            .body("matches", hasSize<Any>(2))
+            .body("unmatchedStatementEntries[0].reference", equalTo("SYNTH-SVCR-0003"))
+
+        // Recorded at upload (best effort), not only at the next hourly sweep.
+        given().`when`().get("/api/v1/treasury/nostro/${NostroFixtures.IBAN}/breaks")
+            .then().statusCode(200)
+            .body("iban", equalTo(NostroFixtures.IBAN))
+            .body("alertAgeDays", equalTo(3))
+            .body("breaks.findAll { it.statementUuid == '$id' }", hasSize<Any>(2))
+            .body("breaks.find { it.statementUuid == '$id' && it.side == 'STATEMENT' }.amount", equalTo(5000.0f))
+            .body("breaks.find { it.statementUuid == '$id' && it.side == 'STATEMENT' }.ourSide", equalTo("DEBIT"))
+            .body("breaks.find { it.statementUuid == '$id' && it.side == 'LEDGER' }.amount", equalTo(42.0f))
+            .body("breaks.find { it.statementUuid == '$id' }.ageBusinessDays", equalTo(0))
+            .body("breaks.find { it.statementUuid == '$id' }.aged", equalTo(false))
+        assertThat(
+            jdbc { c ->
+                count(c, "select count(*) from nostro_breaks where statement_uuid = '$id'")
+            },
+        ).isEqualTo(2)
+
+        // Reconciling again (the sweep does exactly this) opens nothing new.
+        given().`when`().get("/api/v1/treasury/nostro/statements/$id/reconciliation").then().statusCode(200)
+        uploadMt940(NostroFixtures.mt940(ref), key = UUID.randomUUID().toString()).then().statusCode(409)
+        assertThat(
+            jdbc { c ->
+                count(c, "select count(*) from nostro_breaks where statement_uuid = '$id'")
+            },
+        ).isEqualTo(2)
+    }
+
+    @Test
+    @TestSecurity(user = "anna.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `a malformed MT940 is a 400 and an unconfigured account's breaks are a 404`() {
+        uploadMt940(":20:X\n:25:nope\n".toByteArray()).then().statusCode(400)
+        uploadMt940(
+            String(NostroFixtures.mt940()).replace(":62F:C260925CZK1155000,00", ":62F:C260925CZK1,00").toByteArray(),
+        )
+            .then().statusCode(400).body("message", containsString("does not foot"))
+        uploadMt940(NostroFixtures.mt940(), key = null).then().statusCode(400)
+        given().`when`().get("/api/v1/treasury/nostro/CZ0000000000000000000000/breaks").then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `a dealer may read breaks but not upload an MT940`() {
+        uploadMt940(NostroFixtures.mt940()).then().statusCode(403)
+        given().`when`().get("/api/v1/treasury/nostro/${NostroFixtures.IBAN}/breaks").then().statusCode(200)
+    }
+
+    private fun count(c: java.sql.Connection, sql: String): Int = c.createStatement().use { st ->
+        st.executeQuery(sql).use { rs ->
+            rs.next()
+            rs.getInt(1)
+        }
     }
 
     private fun <T> jdbc(block: (java.sql.Connection) -> T): T {

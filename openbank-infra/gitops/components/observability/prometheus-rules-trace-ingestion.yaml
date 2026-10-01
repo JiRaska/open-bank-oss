@@ -1,0 +1,73 @@
+# Trace-pipeline liveness (2026-09-30), modelled on prometheus-rules-log-ingestion.yaml.
+#
+# WHY THIS EXISTS. Tempo is single-replica, and until servicemonitor-tempo.yaml nothing scraped
+# it, so "Tempo stopped ingesting" had no signal of any kind. The derived series it
+# remote-writes (`traces_spanmetrics_*`) simply go flat when it stops, and a flat RED metric
+# is what a quiet estate also looks like — the same shape as the log pipeline before #6236,
+# where every LogQL alert evaluated over an empty window and reported healthy. Here the
+# consumers are the Pyrra money-path SLOs (pyrra-slo-money-path.yaml) and the service map:
+# an SLO computed over spans that never arrived reports no burn.
+#
+# Measured live 2026-09-30: ~12.5 spans/s steady state through the day (05:40-17:30Z, never
+# below 11.6 over any 10m window), which is what makes ZERO a threshold rather than a guess.
+# Off-hours volume was NOT measurable — the cluster Prometheus keeps 12h and finops-scaledown
+# scales services to zero at 22:00 Europe/Prague — so the stalled rule starts at `warning`
+# (Slack, no page) until a weekend has been observed; raising it to critical is the recorded
+# follow-up. The absent rule is critical from day one: a missing series is a broken scrape or
+# a dead Tempo, never a quiet night.
+#
+# Picked up automatically (ruleSelectorNilUsesHelmValues=false).
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-trace-ingestion-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.observability.trace-ingestion
+      rules:
+        # `for: 15m` on a 10m window: a pod roll (46 s on 2026-09-30) or a restart of the
+        # single replica is absorbed — the counter is reset, not zero, and rate() handles a
+        # reset — and only a stall that outlasts a restart-and-reconnect of every OTel
+        # exporter reaches Slack.
+        - alert: TempoTraceIngestionStalled
+          expr: |
+            sum(rate(tempo_distributor_spans_received_total[10m])) == 0
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            # Subject: real span traffic from every instrumented workload via the OTel
+            # collector — continuous, no invocation period to span.
+            subject_period: continuous
+            summary: "Tempo has received no spans for 10m — traces, RED metrics and span-based SLOs are blind"
+            description: >-
+              Tempo's distributor has accepted zero spans over 10 minutes, sustained for 15.
+              Every `traces_spanmetrics_*` series stops moving with it, so the service map and
+              the Pyrra money-path SLOs report nothing rather than a failure. Check the OTel
+              collector first (it forwards to tempo.observability.svc:4317), then Tempo itself:
+              kubectl -n observability get pods -l app.kubernetes.io/name=otel-collector && kubectl -n observability logs tempo-0 | tail
+        # The absence case the comparison above structurally CANNOT see: `== 0` over an absent
+        # series matches nothing, so if Tempo stops exporting — pod gone, ServiceMonitor
+        # deleted, scrape failing — the stall alert reports healthy precisely when it should
+        # not. Before servicemonitor-tempo.yaml this expression was true for the whole life of
+        # the cluster (verified: `absent(tempo_distributor_spans_received_total)` returned 1 on
+        # 2026-09-30), which is the negative case for this file: without the scrape it fires.
+        - alert: TempoMetricsAbsent
+          expr: |
+            absent(tempo_distributor_spans_received_total)
+          for: 15m
+          labels:
+            severity: critical
+            team: platform
+          annotations:
+            summary: "Tempo is not reporting ingestion metrics — trace pipeline health is unverifiable"
+            description: >-
+              No `tempo_distributor_spans_received_total` series for 15 minutes. Tempo is down,
+              or its scrape is broken (see servicemonitor-tempo.yaml). TempoTraceIngestionStalled
+              cannot fire while this is true, because a comparison over an absent series matches
+              nothing — so this is the alert that means "the trace pipeline's health is unknown".
+              Check: kubectl -n observability get pods,servicemonitor -l app.kubernetes.io/name=tempo
