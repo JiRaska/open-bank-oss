@@ -257,9 +257,24 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             .flatMap { entity -> operation(entity?.let(mapper::toDomain)) }
     }
 
+    /**
+     * Inserts a new loan. The contract number (#11107) is drawn from the database in the SAME
+     * transaction as the INSERT, so a rolled-back creation hands its number back and two concurrent
+     * creations can never share one (the per-year counter row is locked by the upsert). Drawn here
+     * rather than left to the V24 trigger so the returned domain loan carries the number it got.
+     */
     @WithTransaction override fun save(loan: Loan): Uni<Loan> {
         val e = mapper.toEntity(loan)
-        return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
+        return sf.withTransaction { s ->
+            val number: Uni<String> = e.contractNumber?.let { Uni.createFrom().item(it) }
+                ?: s.createNativeQuery("SELECT next_loan_contract_number(:year)", String::class.java)
+                    .setParameter("year", loan.createdAt.withOffsetSameInstant(java.time.ZoneOffset.UTC).year)
+                    .singleResult
+            number.flatMap { n ->
+                e.contractNumber = n
+                s.persist(e).map { mapper.toDomain(e) }
+            }
+        }
     }
 
     @WithSession override fun findById(id: LoanId): Uni<Loan?> =
