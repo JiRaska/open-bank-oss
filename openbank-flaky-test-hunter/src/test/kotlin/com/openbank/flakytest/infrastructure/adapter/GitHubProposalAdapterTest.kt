@@ -133,7 +133,7 @@ class GitHubProposalAdapterTest {
         val adapter = GitHubProposalAdapter(config)
         adapter.objectMapper = objectMapper
         // ADR-0320 P1: only the stub host is allow-listed, pinned to loopback.
-        server?.let { adapter.allowedHosts = listOf("stub.test:${it.address.port};http;private") }
+        adapter.allowedHosts = listOfNotNull(server?.let { "stub.test:${it.address.port};http;private" })
         adapter.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         return adapter
     }
