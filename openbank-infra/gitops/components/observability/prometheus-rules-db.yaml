@@ -200,9 +200,17 @@ spec:
           # without = 0 — so today's silence is a measured zero, not a join that never matches.
           #
           # Paired with PostgresBackupStale below since #5756 established the metric's semantics.
+          # Clusters that are UNBACKED BY DESIGN are declared in openbank:cnpg_backup_exempt
+          # (below), not silenced: glitchtip-pg holds 30 days of disposable crash events and its
+          # chart cannot carry a pod-identity backup role (#1444). It only became visible here
+          # once it was scraped (2026-10-01). Each exemption is a record with a reason, so the
+          # list is reviewable and a backup-less money-path cluster can never hide in it silently.
           expr: |
-            cnpg_collector_first_recoverability_point == 0
-              and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
+            (
+              label_replace(cnpg_collector_first_recoverability_point == 0, "cluster", "$1", "pod", "(.+)-[0-9]+")
+                and on (namespace, pod) cnpg_pg_replication_in_recovery == 0
+            )
+            unless on (namespace, cluster) openbank:cnpg_backup_exempt
           for: 30m
           labels:
             severity: critical
@@ -265,3 +273,13 @@ spec:
           annotations:
             summary: "Postgres cache hit ratio <90% on {{ $labels.namespace }}/{{ $labels.pod }}"
             description: "Buffer cache hit ratio below 90% for >30m — under-sized shared_buffers or a missing index causing heavy disk reads."
+    - name: openbank.postgres.backup-exemptions
+      rules:
+        # glitchtip-pg: crash-report events with a 30-day life, disposable by design; the
+        # glitchtip chart's CNPG Cluster cannot carry the backup pod-identity role (#1444).
+        - record: openbank:cnpg_backup_exempt
+          expr: vector(1)
+          labels:
+            namespace: observability
+            cluster: glitchtip-pg
+            reason: disposable-crash-events-1444
