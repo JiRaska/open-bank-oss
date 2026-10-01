@@ -24,10 +24,13 @@ info:
   #        openbank.treasury.confirmation.required is false.
   # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
   #        counterparties off the risk engine's latest curve set plus a configured spread.
-  # 1.14.0: additive — GET /positions answers basis ACTUAL | PROJECTED, the accounting day `today`
+  # 1.14.0: additive — nostro reconciliation breaks and MT940 (ADR-0315 D7): GET
+  #         /nostro/{account}/breaks (age in business days, alert threshold) and POST
+  #         /nostro/statements/mt940 (SWIFT MT940 mapped onto the camt.053 statement model).
+  # 1.15.0: additive — GET /positions answers basis ACTUAL | PROJECTED, the accounting day `today`
   #         (Europe/Prague) it was judged against, the counted deal states, and a per-currency
   #         dealCount. A date after today is a projection of concluded deals, no longer all zeros.
-  version: 1.14.0
+  version: 1.15.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -474,6 +477,88 @@ paths:
         '409':
           $ref: '#/components/responses/InvalidState'
 
+  /api/v1/treasury/nostro/statements/mt940:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: uploadNostroStatementMt940
+      summary: Upload a correspondent's SWIFT MT940 statement for a configured nostro account
+      description: |
+        ADR-0315 D7: MT940 mapped onto the same statement model as camt.053, then stored and
+        reconciled identically. Reads `:20:` `:25:` `:28C:` `:60F:` `:61:` `:86:` `:62F:`; the SWIFT
+        envelope may be present. `statementId` is `:20:` + "/" + `:28C:`. A multi-page statement
+        (`:60M:`/`:62M:`), an unsupported field, a control character, invalid UTF-8 or a body over
+        1 MiB is refused. Same Idempotency-Key contract as the camt.053 upload; nothing is posted.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+          application/x-swift-mt940:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The stored statement (or the original one on an idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroStatement'
+        '400':
+          description: Missing Idempotency-Key, malformed MT940, a statement that does not foot, an entry outside its period, or an unconfigured account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+
+  /api/v1/treasury/nostro/{account}/breaks:
+    get:
+      tags: [Nostro reconciliation]
+      operationId: listNostroBreaks
+      summary: Reconciliation breaks of a configured nostro account, with age in business days
+      description: |
+        ADR-0315 D7. Every item a reconciliation left unmatched — a statement line (`STATEMENT`) or
+        a ledger line on the nostro GL (`LEDGER`) — with the day it was first seen and its age in
+        business days (Monday–Friday, no holiday calendar). A break resolves the day a later
+        reconciliation matches it; recent statements are re-reconciled by an hourly sweep. `aged`
+        is true for an open break at least `alertAgeDays` old with an amount of at least
+        `alertMinAmount` in its own currency; such a break is announced once as
+        `treasury.nostro.break-aged.v1`. Oldest first. Nothing is ever posted.
+      parameters:
+        - name: account
+          in: path
+          required: true
+          description: The nostro IBAN (spaces ignored)
+          schema:
+            type: string
+        - name: includeResolved
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: The account's breaks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroBreakList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not a configured nostro account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/nostro/statements/{id}/reconciliation:
     get:
       tags: [Nostro reconciliation]
@@ -828,6 +913,35 @@ components:
         sha256: {type: string, description: SHA-256 of the uploaded bytes}
         uploadedBy: {type: string}
         uploadedAt: {type: string, format: date-time}
+    NostroBreak:
+      type: object
+      required: [breakId, side, ourSide, amount, currency, bookingDate, statementUuid, firstSeenOn, ageBusinessDays, aged]
+      properties:
+        breakId: {type: string, format: uuid}
+        side: {type: string, enum: [STATEMENT, LEDGER], description: Which side the unmatched item is on}
+        ourSide: {type: string, enum: [DEBIT, CREDIT], description: From the bank's side; a statement CRDT is a DEBIT}
+        amount: {type: number}
+        currency: {type: string}
+        bookingDate: {type: string, format: date}
+        reference: {type: [string, 'null']}
+        statementUuid: {type: string, format: uuid, description: The statement whose reconciliation first saw it}
+        statementSequence: {type: [integer, 'null']}
+        ledgerLineId: {type: [string, 'null'], format: uuid}
+        firstSeenOn: {type: string, format: date}
+        resolvedOn: {type: [string, 'null'], format: date}
+        ageBusinessDays: {type: integer, description: Business days from firstSeenOn to today (or to resolvedOn)}
+        aged: {type: boolean, description: Open and over both alert thresholds}
+        alertedAt: {type: [string, 'null'], format: date-time}
+    NostroBreakList:
+      type: object
+      required: [iban, alertAgeDays, alertMinAmount, breaks]
+      properties:
+        iban: {type: string}
+        alertAgeDays: {type: integer}
+        alertMinAmount: {type: number}
+        breaks:
+          type: array
+          items: {$ref: '#/components/schemas/NostroBreak'}
     NostroStatementEntry:
       type: object
       properties:

@@ -78,7 +78,7 @@ class TreasuryDealService(
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
-        val today = LocalDate.now(clock)
+        val today = bankToday()
         val tradeDate = command.tradeDate ?: today
         val valueDate = command.valueDate
             ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
@@ -184,7 +184,7 @@ class TreasuryDealService(
     override suspend fun settle(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
-        val settled = deal.settle(actor, LocalDate.now(clock), clock.instant(), confirmationRequired)
+        val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
@@ -210,7 +210,7 @@ class TreasuryDealService(
     override suspend fun mature(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
-        val matured = deal.mature(actor, LocalDate.now(clock), clock.instant())
+        val matured = deal.mature(actor, bankToday(), clock.instant())
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
@@ -244,7 +244,7 @@ class TreasuryDealService(
         val reversed = deal.reverse(actor, reason, clock.instant())
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
-            ?.let { post(it, LocalDate.now(clock), "treasury ${deal.product} reversal") }
+            ?.let { post(it, bankToday(), "treasury ${deal.product} reversal") }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -324,7 +324,7 @@ class TreasuryDealService(
      * swallowed either: it is counted and its cause returned for the scheduler to log.
      */
     override suspend fun runSimulatedMarket(): SimulatedMarketRun {
-        val today = LocalDate.now(clock)
+        val today = bankToday()
         val market = Actor.SIMULATED_MARKET
         // ADR-0315 D9: the simulated counterparty confirms BOOKED deals first (a SYNTHETIC
         // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
@@ -418,6 +418,12 @@ class TreasuryDealService(
         }
         return load(prior.dealId)
     }
+
+    /**
+     * The business day in the bank zone (Europe/Prague), never the JVM default: the pod runs UTC,
+     * so `LocalDate.now(clock)` gave yesterday for a deal struck in Prague after 22:00 UTC (summer).
+     */
+    private fun bankToday(): LocalDate = AccountingClock.bank(clock).today()
 
     private fun cmd(key: String?, action: String, dealId: UUID) = key?.let { CommandKey(it, action, dealId) }
 

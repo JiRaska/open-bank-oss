@@ -75,12 +75,16 @@ resource "aws_eks_cluster" "this" {
     resources = ["secrets"]
   }
 
-  # FinOps: audit + controllerManager + scheduler are the dominant log volume
-  # drivers (audit logs every API call — Karpenter scaling, ArgoCD syncs, ARC
-  # runner pod churn = 10+ GB/day = ~$5.80/day in CloudWatch ingest at $0.54/GB).
-  # Keep api (API server errors) + authenticator (auth failures) for debugging.
-  # Restore the full set if a compliance audit requires it.
-  enabled_cluster_log_types = ["api", "authenticator"]
+  # `audit` restored 2026-09-30. It was dropped for FinOps (audit logs every API
+  # call — Karpenter scaling, ArgoCD syncs, ARC runner churn — ~10 GB/day, ~$5.80/day
+  # ingest), which left the cluster with no record of WHO did WHAT through the API:
+  # no secret reads, no exec into a pod, no RBAC change is reconstructable, and
+  # GuardDuty EKS Audit Log Monitoring (audit-baseline) has nothing of ours to read
+  # besides its own feed. A bank's control plane without an audit trail is not a
+  # FinOps trade-off (DORA Art. 17, ADR-0279 WS2). controllerManager/scheduler stay
+  # off: they are debugging volume, not evidence. The log group's 30d retention
+  # bounds the cost.
+  enabled_cluster_log_types = ["api", "audit", "authenticator"]
 
   tags = var.tags
 

@@ -212,6 +212,37 @@ export const nostroReconciliationSchema = z.object({
   unmatchedLedgerLines: z.array(nostroLedgerLineSchema),
 })
 
+// ADR-0315 D7 (openapi.yaml 1.14.0): GET /nostro/{account}/breaks — every unmatched item with the
+// day it was first seen and its age in business days; `aged` = open and over both alert thresholds.
+export const breakSideSchema = z.enum(['STATEMENT', 'LEDGER'])
+
+export const nostroBreakSchema = z.object({
+  breakId: z.string(),
+  side: breakSideSchema,
+  ourSide: ledgerSideSchema,
+  amount: decimal,
+  currency: z.string(),
+  bookingDate: z.iso.date(),
+  reference: z.string().nullish(),
+  statementUuid: z.string(),
+  statementSequence: z.number().int().nullish(),
+  ledgerLineId: z.string().nullish(),
+  firstSeenOn: z.iso.date(),
+  resolvedOn: z.iso.date().nullish(),
+  ageBusinessDays: z.number().int(),
+  aged: z.boolean(),
+  alertedAt: timestamp.nullish(),
+})
+
+export const nostroBreakListSchema = z.object({
+  iban: z.string(),
+  alertAgeDays: z.number().int(),
+  alertMinAmount: decimal,
+  breaks: z.array(nostroBreakSchema),
+})
+
+export type NostroBreak = z.infer<typeof nostroBreakSchema>
+export type NostroBreakList = z.infer<typeof nostroBreakListSchema>
 export type NostroStatement = z.infer<typeof nostroStatementSchema>
 export type MatchType = z.infer<typeof matchTypeSchema>
 export type NostroStatementEntry = z.infer<typeof nostroStatementEntrySchema>
