@@ -1,6 +1,11 @@
 {
   "id": "openbank",
   "realm": "openbank",
+  "eventsEnabled": true,
+  "eventsListeners": ["jboss-logging"],
+  "eventsExpiration": 2592000,
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
   "displayName": "OpenBank",
   "displayNameHtml": "OpenBank Framework",
   "loginTheme": "openbank",
@@ -926,6 +931,7 @@
       "bearerOnly": false,
       "defaultClientScopes": [
         "openid",
+        "profile",
         "roles"
       ],
       "secret": "__DELEGATION_DISCLOSURE_CLIENT_SECRET__"

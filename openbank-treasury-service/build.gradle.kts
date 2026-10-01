@@ -97,3 +97,13 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.treasury.domain.*Kt")
 }
+
+tasks.withType<Test> {
+    // Gradle's default test-JVM heap is 512m. Treasury now boots Quarkus four times in one forked
+    // JVM (the shared profile plus the quotes, confirmation-not-required and nostro break-sweep
+    // @TestProfiles), alongside Testcontainers and Kover instrumentation. Measured 2026-10-01 under
+    // `build --rerun-tasks`: the heap sat at 522 of 524 MB, Kover's class transformer could no longer
+    // allocate ("can't create byte array") and the run wedged without failing. Same per-module
+    // override, and the same reasoning, as account-service.
+    maxHeapSize = "2g"
+}

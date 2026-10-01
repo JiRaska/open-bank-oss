@@ -124,3 +124,28 @@ data class DealReversed(
         const val EVENT_TYPE = "treasury.deal.reversed.v1"
     }
 }
+
+/**
+ * ADR-0315 D7: an OPEN nostro reconciliation break reached the alert threshold (age in business
+ * days AND amount). Emitted once per break. Carries no reference or narrative — a statement line's
+ * remittance text can name a customer, and this topic is read by audit-service and the risk engine.
+ */
+data class NostroBreakAged(
+    val breakId: UUID,
+    val iban: String,
+    val glCode: String,
+    val currency: String,
+    val side: BreakSide,
+    val ourSide: Side,
+    val amount: BigDecimal,
+    val bookingDate: LocalDate,
+    val firstSeenOn: LocalDate,
+    val ageBusinessDays: Int,
+    val thresholdDays: Int,
+    val occurredAt: Instant,
+    val sourceService: String = SOURCE_SERVICE,
+) {
+    companion object {
+        const val EVENT_TYPE = "treasury.nostro.break-aged.v1"
+    }
+}

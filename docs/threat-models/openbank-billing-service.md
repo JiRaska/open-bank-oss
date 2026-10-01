@@ -295,3 +295,14 @@ first departure from "every trust boundary here is OIDC+mTLS REST".
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
+
+- **2026-10-01** — **Balance read binds the field balance-service actually sends (#11650).**
+  `BalanceDto` required a `currentBalance` that `GET /api/v1/balances/{accountId}/{currency}` has
+  never serialised (it sends `Balance` verbatim: `bookedAmount`, `availableAmount`, …), so every
+  read failed to bind, the adapter's `runCatching` reported "no balance", and `WaiverEvaluator`
+  failed closed — every balance-conditioned waiver charged the fee. The DTO now binds
+  `bookedAmount`. **No trust-boundary change:** same caller, same endpoint, same M2M client, same
+  authn/authz; only the response field the client reads changes. **STRIDE-T/I:** none new — the
+  read still fails closed on a missing or unbindable body. The edge is now pinned by a consumer
+  pact replayed by balance-service's provider test, so the DTO cannot drift silently again.
+  Rollback: revert the commit (restores the always-charge behaviour).
