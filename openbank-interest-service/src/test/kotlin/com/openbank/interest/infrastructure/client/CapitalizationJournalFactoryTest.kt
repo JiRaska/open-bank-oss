@@ -208,10 +208,13 @@ class CapitalizationJournalFactoryTest {
         // Money.of(amount, currencyCode), and Money refuses scale > the currency's minor units.
         // Every money-bearing capitalization therefore 400'd at the boundary — in every currency,
         // under every treatment. CapitalizationPosting carries Money now, so the same mistake is a
-        // construction failure here instead of an opaque HTTP 400 in production.
-        assertThatThrownBy { Money.of(BigDecimal("100.0000"), "CZK") }
+        // construction failure here instead of an opaque HTTP 400 in production. Only an amount
+        // that actually CARRIES scale-4 digits is over-scaled: trailing zeros are a representation,
+        // not a value, and Money normalises them to the currency scale instead.
+        assertThatThrownBy { Money.of(BigDecimal("100.1234"), "CZK") }
             .isInstanceOf(IllegalArgumentException::class.java)
             .hasMessageContaining("Amount scale 4 exceeds currency CZK fraction digits 2")
+        assertThat(Money.of(BigDecimal("100.0000"), "CZK")).isEqualTo(Money.of("100.00", "CZK"))
     }
 
     @Test

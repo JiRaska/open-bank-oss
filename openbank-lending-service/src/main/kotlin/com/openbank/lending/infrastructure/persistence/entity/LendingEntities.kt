@@ -187,6 +187,10 @@ class LoanEntity : PanacheEntityBase() {
     @Column(columnDefinition = "uuid")
     var id: UUID = UUID.randomUUID()
 
+    /** #11107: assigned once at creation (V24 `next_loan_contract_number`), immutable at the DB. */
+    @Column(name = "contract_number", length = 32, updatable = false)
+    var contractNumber: String? = null
+
     @Column(name = "application_id", columnDefinition = "uuid")
     var applicationId: UUID = UUID.randomUUID()
 

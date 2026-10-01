@@ -45,7 +45,12 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  version: 1.17.0
+  # 1.17.0 -> 1.18.0: #11716 (liquidity and capital read by category).
+  # 1.18.0 -> 1.20.0 (#11107): additive — Instrument.contractNumber, the source contract's human
+  #        reference (a loan's UV-YYYY-NNNNNN from lending); null for other kinds and for runs
+  #        recorded before it existed. 1.18.1 and 1.19.0 are claimed by open PRs #11718, #11719
+  #        and #11549.
+  version: 1.20.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -883,6 +888,12 @@ components:
           description: Opaque party reference; identity stays in party-service.
         ifrs9Stage:
           type: [string, 'null']
+        contractNumber:
+          type: [string, 'null']
+          description: >-
+            Human reference of the source contract — for a loan, lending's contract number
+            (UV-YYYY-NNNNNN, #11107). Display only: not an identity (that is id) and not part of
+            the run's input hash. Null for other instrument kinds and for runs recorded before it.
         loan:
           type: [object, 'null']
           properties:
@@ -1302,6 +1313,8 @@ components:
         factorKey: {type: [string, 'null']}
         weighted: {type: number}
         citation: {type: string}
+        instrumentId: {type: [string, 'null'], description: Loan contract the line is about; null for an account- or aggregate-level line}
+        itemCount: {type: [integer, 'null'], description: Customer accounts or contracts the line aggregates; null for a single GL account}
 
     Hqla:
       type: object
@@ -1561,6 +1574,7 @@ components:
         rwa: {type: number}
         factorKey: {type: string}
         citation: {type: string}
+        ifrs9Stage: {type: [string, 'null'], description: IFRS 9 stage reported for a loan line (STAGE_1..STAGE_3)}
 
     CurrencyCapital:
       type: object
@@ -1706,6 +1720,10 @@ components:
                 tier1: {$ref: '#/components/schemas/CapitalRatio'}
                 total: {$ref: '#/components/schemas/CapitalRatio'}
         ratiosNotComputable: {type: [string, 'null']}
+        ratiosNotComputableCode:
+          type: [string, 'null']
+          description: Machine-readable form of ratiosNotComputable, for a client to localise
+          x-extensible-enum: [multi-currency, no-positions, no-own-funds, zero-rwa]
         unclassified:
           type: array
           items:

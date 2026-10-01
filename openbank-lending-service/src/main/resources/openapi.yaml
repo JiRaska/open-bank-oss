@@ -19,7 +19,10 @@ info:
   # .../voids/plan, .../voids, .../voids/{id}, .../voids/{id}/decide, .../voids/{id}/execute.
   # 1.28.0 -> 1.29.0 (#10916): additive — 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS
   # on both application-submit operations (key reused with a different body / still executing).
-  version: 1.29.0
+  # 1.29.0 -> 1.31.0 (#11107): additive — the loan's human contract number (UV-YYYY-NNNNNN):
+  # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
+  # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
+  version: 1.31.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -683,7 +686,13 @@ paths:
           description: Clamped server-side into 1..100.
           schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: Active loans }
+        '200':
+          description: Active loans
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans:
@@ -697,7 +706,13 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Loans for the party }
+        '200':
+          description: Loans for the party
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}:
@@ -708,7 +723,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The loan }
+        '200':
+          description: The loan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -1974,6 +1993,26 @@ components:
         remainingInstallments:
           type: array
           items: { $ref: '#/components/schemas/RemainingInstallment' }
+        contractNumber:
+          type: string
+          nullable: true
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107), e.g. UV-2026-000123 — a display reference, assigned at
+            creation and never changed. loanId stays the identity.
+    Loan:
+      type: object
+      description: >-
+        A booked loan. Only the fields this contract pins are listed; the response carries the
+        loan's other terms as well.
+      properties:
+        contractNumber:
+          type: string
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107): UV-<origination year (UTC)>-<per-year sequence,
+            zero-padded to at least six digits>. Unique, assigned at creation, immutable; the
+            sequence is gap-tolerant (a rolled-back creation may leave a hole).
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]
