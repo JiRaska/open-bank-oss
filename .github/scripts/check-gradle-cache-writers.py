@@ -181,11 +181,11 @@ DECLARED: dict[str, tuple[str, str]] = {
         "cache posture as the matrix job and pitest-authz above — a pure consumer with no "
         "reason to store a per-run entry.",
     ),
-    "pact-drift-check.yml::drift-check": (
+    "pact-drift-check.yml::gradle-pacts": (
         "read-only",
-        "Demoted from setup-java. Consumer; regenerates consumer pacts and diffs them, and "
-        "restores fleet-lint's home to do it. Runs on PRs, so unlike pitest it is exposed "
-        "to the per-run churn this budget limits.",
+        "Four isolated JVM Pact regeneration shards restore fleet-lint's home without writing "
+        "four new per-run cache entries. The aggregate drift-check job only consumes their "
+        "artifacts and does not use Gradle.",
     ),
     "services-ci.yml::verification-metadata": (
         "read-only",
