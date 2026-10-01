@@ -6,7 +6,7 @@ metadata:
   name: context-service
   namespace: context
   labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
-  annotations: { openbank.io/service-dependencies: "aml/aml-service,fraud/fraud-service" }
+  annotations: { openbank.io/service-dependencies: "aml/aml-service" }
 spec:
   replicas: 1
   strategy:
@@ -51,12 +51,9 @@ spec:
             - name: AML_CASE_SOURCE_URL
               valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
             # Fraud case source: HTTPS, CA from context-fraud-trust (%prod fraud-source TLS).
-            - name: FRAUD_CASE_SOURCE_URL
-              valueFrom: { secretKeyRef: { name: context-fraud-source-discovery, key: FRAUD_CASE_SOURCE_URL } }
-            # Lending lens stays default-off: optional until the endpoint and the
-            # %lending-graph-source mTLS profile are verified (context-lending-source-discovery).
-            - name: LENDING_GRAPH_SOURCE_URL
-              valueFrom: { secretKeyRef: { name: context-lending-source-discovery, key: LENDING_GRAPH_SOURCE_URL, optional: true } }
+            - { name: FRAUD_CASE_SOURCE_URL, value: "https://fraud-service.fraud.svc:8443" }
+            # LENDING_GRAPH_SOURCE_URL is deliberately unset: the Lending lens stays off
+            # until the lending graph source is deployed (#10266).
             - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
             - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }
