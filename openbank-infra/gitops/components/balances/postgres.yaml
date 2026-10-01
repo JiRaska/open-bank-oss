@@ -64,13 +64,17 @@ spec:
   storage:
     storageClass: gp3
     size: 2Gi
+  # Memory sized from measured working set (2026-09-30, 12h max 253Mi vs the old
+  # 256Mi request): request = ceil(max_ws x 1.3) to a 64Mi step, limit 2x request.
+  # shared_buffers stays at the Postgres default (128MB), a third of the request.
+  # CnpgWorkingSetAboveRequest (prometheus-rules-db.yaml) flags the next overrun.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 384Mi
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 768Mi
   postgresql:
     parameters:
       wal_keep_size: "64MB"
