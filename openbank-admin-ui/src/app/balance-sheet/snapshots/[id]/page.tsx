@@ -30,6 +30,7 @@ import {
   type CashFlows, type CurveSetSummary, type Instrument, type SnapshotRun,
 } from '@/components/balance-sheet/contracts'
 import { ladderRows } from '@/components/balance-sheet/model'
+import { InstrumentsPanel } from '@/components/balance-sheet/InstrumentsPanel'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // Recharts loads only once a TIED_OUT run has flows to draw; the placeholder reserves the height.
@@ -37,8 +38,6 @@ const MaturityLadder = dynamic(
   () => import('@/components/balance-sheet/charts').then(module => module.MaturityLadder),
   { ssr: false, loading: () => <div style={{ height: 280 }} aria-hidden="true" /> },
 )
-
-const INSTRUMENT_ROWS = 50
 
 export default function SnapshotDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -61,7 +60,6 @@ function SnapshotDetail({ id }: { id: string }) {
   const [curveSetId, setCurveSetId] = useState('')
   const [flows, setFlows] = useState<CashFlows | null>(null)
   const [flowsKind, setFlowsKind] = useState<UnavailableKind | null>(null)
-  const [showAll, setShowAll] = useState(false)
 
   const load = useCallback(async () => {
     const res = await getJson(riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}`), snapshotRunSchema)
@@ -96,12 +94,6 @@ function SnapshotDetail({ id }: { id: string }) {
     return () => { cancelled = true }
   }, [id, curveSetId, run?.status])
 
-  const byKind = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const i of instruments ?? []) counts.set(i.kind, (counts.get(i.kind) ?? 0) + 1)
-    return [...counts.entries()].sort()
-  }, [instruments])
-
   const back = (
     <Link href="/balance-sheet/snapshots" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
       <ArrowLeft size={14} aria-hidden="true" /> {t('Zpět na snímky', 'Back to snapshots')}
@@ -120,7 +112,6 @@ function SnapshotDetail({ id }: { id: string }) {
 
   const tied = run.status === 'TIED_OUT'
   const selectedSet = curveSets.find(s => s.id === curveSetId)
-  const visibleInstruments = showAll ? instruments ?? [] : (instruments ?? []).slice(0, INSTRUMENT_ROWS)
 
   return (
     <div>
@@ -230,52 +221,7 @@ function SnapshotDetail({ id }: { id: string }) {
             ) : instruments && instruments.length === 0 ? (
               <DataUnavailable kind="no_data" service="risk-engine" feature={t('nástroje', 'instruments')} lang={language} dense />
             ) : instruments ? (
-              <>
-                <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                  {byKind.map(([kind, n]) => `${kind}: ${n.toLocaleString(locale)}`).join(' · ')}
-                </p>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                  <thead>
-                    <tr>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Nástroj', 'Instrument')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Druh', 'Kind')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Účet', 'GL')}</th>
-                      <th scope="col" style={{ textAlign: 'right' }}>{t('Zůstatek', 'Outstanding')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Měna', 'Currency')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Splatnost', 'Maturity')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('Sazba', 'Rate')}</th>
-                      <th scope="col" style={{ textAlign: 'left' }}>{t('IFRS 9', 'IFRS 9')}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visibleInstruments.map(i => (
-                      <tr key={i.id}>
-                        {/* #11107: a loan's contract number is what a risk officer reads; the id stays
-                            available as the title so the two can never be confused. */}
-                        <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} title={i.id}>{i.contractNumber ?? i.id}</td>
-                        <td>{i.kind}</td>
-                        <td>{i.glAccountCode ?? '—'}</td>
-                        <td style={{ textAlign: 'right' }}>{money(i.outstanding)}</td>
-                        <td>{i.currency}</td>
-                        <td>{i.maturityDate ?? '—'}</td>
-                        <td>
-                          {i.rateTerms
-                            ? i.rateTerms.rateType === 'FLOATING'
-                              ? `${i.rateTerms.index ?? '—'} + ${i.rateTerms.spread ?? '—'}`
-                              : i.rateTerms.currentAnnualRate !== null ? `${(i.rateTerms.currentAnnualRate * 100).toLocaleString(locale, { maximumFractionDigits: 3 })} %` : '—'
-                            : '—'}
-                        </td>
-                        <td>{i.ifrs9Stage ?? '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!showAll && instruments.length > INSTRUMENT_ROWS && (
-                  <button type="button" className="btn btn-secondary btn-sm" style={{ marginTop: 8 }} onClick={() => setShowAll(true)}>
-                    {t(`Zobrazit všech ${instruments.length}`, `Show all ${instruments.length}`)}
-                  </button>
-                )}
-              </>
+              <InstrumentsPanel runId={id} instruments={instruments} lang={language === 'cs' ? 'cs' : 'en'} />
             ) : null}
           </div>
         </>
