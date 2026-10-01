@@ -33,9 +33,9 @@ import org.junit.jupiter.api.extension.ExtendWith
  * uses to POST a payment. No Temporal frontend is present and none is needed: create persists the
  * payment and starts the workflow off the request path, so the route answers 201 without a worker.
  *
- * The one state is deliberately empty. A create needs nothing seeded, and a replay of the same
- * `Idempotency-Key` on a warm container returns the stored 201 through the idempotency store, so
- * repeated runs stay green.
+ * The one state is deliberately empty. A create needs nothing seeded. Each run starts fresh
+ * containers, and within one JVM a second replay of the same `Idempotency-Key` (e.g. this class and
+ * the broker twin sharing the Quarkus app) returns the stored 201 through the idempotency store.
  */
 @QuarkusTest
 @QuarkusTestResource(SepaPaymentPactProviderVerificationTest.NoDispatchInMemoryKafkaResource::class)
