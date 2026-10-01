@@ -85,6 +85,9 @@ class LendingServiceTest {
         every { loans.withLocked<Any>(any(), any()) } answers {
             loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
         }
+        every { applications.withLocked<Any>(any(), any()) } answers {
+            applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<Any>>())
+        }
         every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
 
         every { events.emit(any<LendingOutboxMessage>()) } answers {
