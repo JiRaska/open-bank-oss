@@ -39,7 +39,7 @@ class RestAccountContextPort(
             ?: return null
         val balance = runCatching { balances.getBalance(accountId, currency).awaitSuspending() }.getOrNull()
         val context = FeeContext(
-            balance = balance?.currentBalance,
+            balance = balance?.bookedAmount,
             monthlyTurnover = null,
             aggregatePocketBalance = null,
             segment = null,
