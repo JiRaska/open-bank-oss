@@ -86,7 +86,10 @@ class EodSnapshotSchedulerVertxContextIT {
     @Test
     fun `the scheduled EOD snapshot records a run for today's Prague business date`() {
         ledger.inputs = Fixtures.tiedOut()
-        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
 
         val recorded = await {
             onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf }
@@ -113,7 +116,10 @@ class EodSnapshotSchedulerVertxContextIT {
     @Test
     fun `a second tick after the first replays instead of duplicating`() {
         ledger.inputs = Fixtures.tiedOut()
-        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
 
         // Let at least two ticks (every 2s) pass.
         await { onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf } }

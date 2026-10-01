@@ -45,7 +45,10 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  version: 1.17.0
+  # 1.17.0 -> 1.18.1: behaviour/description only — POST /snapshots answers 400 for an `asOf` after
+  #        the current business date (Europe/Prague); no schema change. 1.18.0 is held by open
+  #        PR #11549, so this takes 1.18.1 on top of it.
+  version: 1.18.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -134,7 +137,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SnapshotRun'
         '400':
-          description: Missing or malformed `asOf`
+          description: Missing or malformed `asOf`, or `asOf` after the current business date (Europe/Prague) — a future day cannot be tied out with the general ledger
         '401':
           description: Unauthenticated
         '403':
