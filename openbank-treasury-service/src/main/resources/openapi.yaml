@@ -24,7 +24,7 @@ info:
   #        openbank.treasury.confirmation.required is false.
   # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
   #        counterparties off the risk engine's latest curve set plus a configured spread.
-  version: 1.13.0
+  version: 1.14.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -681,10 +681,22 @@ components:
         actorType: { type: string, enum: [HUMAN, AI_AGENT, SERVICE, SYSTEM] }
         at: { type: string, format: date-time }
         note: { type: [string, 'null'] }
+        limitSnapshot:
+          description: >
+            The limit-check figures when `note` is a limit note (submit/approve), else null. Added
+            in 1.14.0 so clients render the figures instead of parsing `note`, which stays as is.
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                limit: { type: number }
+                currency: { type: string }
+                exposureAfter: { type: number }
+                headroomAfter: { type: number }
     JournalRef:
       type: object
       properties:
-        event: { type: string, enum: [settled, matured, reversed] }
+        event: { type: string, enum: [settled, accrued, matured, reversed] }
         idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
         journalId: { type: string, format: uuid }
         postedAt: { type: string, format: date-time }
