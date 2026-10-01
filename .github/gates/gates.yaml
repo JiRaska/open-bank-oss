@@ -5989,10 +5989,5 @@ gates:
     review_after: "2027-03-13"
     budget_seconds: 45
     min_subjects: 1
-    selftest_expect: pass
-    selftest_inputs:
-      - ".github/workflows/dr-restore-verify.yml"
-      - ".github/scripts/test-dr-restore-workflow.py"
-      - "openbank-infra/gitops/dr-restore-templates"
-    selftest: python3 .github/scripts/test-dr-restore-workflow.py
+    selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
     run: python3 .github/scripts/test-dr-restore-workflow.py
