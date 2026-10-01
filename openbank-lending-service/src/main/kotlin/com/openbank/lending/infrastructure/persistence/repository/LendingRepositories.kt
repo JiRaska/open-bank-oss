@@ -41,6 +41,11 @@ import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
+private fun mapStatusFilter(status: String): OriginationState =
+    OriginationState.entries.firstOrNull { it.name == status }
+        ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+        ?: throw IllegalArgumentException("Unknown application status: $status")
+
 @ApplicationScoped
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
@@ -99,11 +104,6 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             Array<Any?>::class.java,
         ).resultList
     }.map { rows -> foldApplicationSummaries(rows) }
-
-    private fun mapStatusFilter(status: String): OriginationState =
-        OriginationState.entries.firstOrNull { it.name == status }
-            ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
-            ?: throw IllegalArgumentException("Unknown application status: $status")
 
     @WithSession
     override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
