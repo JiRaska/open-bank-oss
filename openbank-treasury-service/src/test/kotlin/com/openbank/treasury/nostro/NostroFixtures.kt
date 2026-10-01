@@ -37,6 +37,12 @@ object NostroFixtures {
         description,
     )
 
+    /** The SWIFT MT940 twin of [xml] (#11107 follow-up): same account, balances and movements. */
+    fun mt940(statementId: String = "SYNTH-940-0925"): ByteArray =
+        String(requireNotNull(javaClass.getResourceAsStream("/mt940/nostro-czk-2026-09-25.txt")).readAllBytes())
+            .replace("SYNTH-940-0925", statementId)
+            .toByteArray()
+
     const val EUR_IBAN = "CZ8299990000000000001002"
 
     /** Two booking days (2026-09-24 and -25), EUR, DtTm on the closing balance and one entry. */
