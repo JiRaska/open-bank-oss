@@ -56,6 +56,10 @@ VAULT_TOKEN="$(bao print token)" tofu apply
 
 Nobody types an OpenBao token. The admin token comes from SSO and expires in 15 minutes.
 
+**The admin cannot change itself.** The `openbao-config-admin` policy and OIDC role are read-only
+to the admin token, so the token cannot widen its own grant. A change to either one is a
+bootstrap-class change: review the PR, then apply with the privileged identity, as in Bootstrap.
+
 ## Verify by effect
 
 ```sh
