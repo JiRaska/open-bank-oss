@@ -1,0 +1,115 @@
+{
+  "consumer": {
+    "name": "openbank-psd2-service"
+  },
+  "interactions": [
+    {
+      "description": "GET an ACTIVE consent by id for an XS2A request",
+      "providerStates": [
+        {
+          "name": "an ACTIVE AISP consent covers the pact account for the pact grantee"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/consents/c1c1c1c1-d2d2-4e4e-8f8f-a9a9a9a9a9a9"
+      },
+      "response": {
+        "body": {
+          "id": "c1c1c1c1-d2d2-4e4e-8f8f-a9a9a9a9a9a9",
+          "partyId": "c2c2c2c2-d3d3-4e4e-8f8f-a8a8a8a8a8a8",
+          "status": "ACTIVE"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST validate an ACTIVE AISP consent for its grantee, scope and account",
+      "providerStates": [
+        {
+          "name": "an ACTIVE AISP consent covers the pact account for the pact grantee"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountIban": "CZ6508000000192000145399",
+          "granteeId": "agent:pact-verify-mcp",
+          "requiredScope": "ACCOUNTS_READ"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/consents/c1c1c1c1-d2d2-4e4e-8f8f-a9a9a9a9a9a9/validate"
+      },
+      "response": {
+        "body": {
+          "valid": true
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a consent id nobody holds",
+      "providerStates": [
+        {
+          "name": "no consent exists with the pact unknown-consent id"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/consents/00000000-0000-4000-8000-0000000c0de0"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "POST validate a consent id nobody holds",
+      "providerStates": [
+        {
+          "name": "no consent exists with the pact unknown-consent id"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountIban": "CZ6508000000192000145399",
+          "granteeId": "agent:pact-verify-mcp",
+          "requiredScope": "ACCOUNTS_READ"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/consents/00000000-0000-4000-8000-0000000c0de0/validate"
+      },
+      "response": {
+        "body": {
+          "code": "CONSENT_NOT_FOUND",
+          "valid": false
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-consent-service"
+  }
+}

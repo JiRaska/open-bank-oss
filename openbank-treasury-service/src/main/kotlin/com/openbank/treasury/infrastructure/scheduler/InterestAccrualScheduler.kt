@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.scheduler
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
@@ -15,7 +16,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
-import java.time.LocalDate
 
 /**
  * Daily interest accrual for SETTLED deals (ADR-0315 D5). Runs hourly rather than once a day on
@@ -50,7 +50,7 @@ class InterestAccrualScheduler(
     )
     suspend fun run() {
         if (!enabled) return
-        runCatching { deals.accrueInterest(LocalDate.now(clock)) }
+        runCatching { deals.accrueInterest(AccountingClock.bank(clock).today()) }
             .onSuccess { r ->
                 r.failures.forEach { log.error("interest accrual could not accrue a deal", it) }
                 if (r.failures.isEmpty()) liveness?.recordSuccess()

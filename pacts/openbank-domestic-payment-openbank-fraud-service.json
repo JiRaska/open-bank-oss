@@ -1,0 +1,104 @@
+{
+  "consumer": {
+    "name": "openbank-domestic-payment"
+  },
+  "interactions": [
+    {
+      "description": "POST a fraud score with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+          "amount": 1500.00,
+          "counterpartyId": null,
+          "currency": "CZK",
+          "rail": "DOMESTIC"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "POST a fraud score for a domestic payment",
+      "providerStates": [
+        {
+          "name": "the fraud scoring engine is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1",
+          "amount": 1500.00,
+          "counterpartyId": null,
+          "currency": "CZK",
+          "rail": "DOMESTIC"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "body": {
+          "ruleVersion": "rules-v1",
+          "score": 10,
+          "verdict": "ALLOW"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.ruleVersion": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.score": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.verdict": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fraud-service"
+  }
+}
