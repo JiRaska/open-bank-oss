@@ -1,14 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [resilience, libs, testing, compliance]
 summary: "Inter-service calls use one of four named resilience profiles from openbank-libs; money-sync retries only keyed calls (keyed-only retryOn exception); fault hook needs ADR-0252 trusted-principal taint (empty by default)."
-followup: "none — decision-only until the profile catalogue and the resilience-profile gate land; delivery tracked by the linked issue"
+followup: "#11604 — profile catalogue landed in libs-runtime; fleet adoption and gate enforcement remain"
 ---
 
 # ADR-0321 — Shared resilience policy profiles for inter-service calls
