@@ -24,13 +24,28 @@ on:
     types: [closed]
     paths:
       - "openbank-infra/gitops/components/**"
+  # Re-record what gitops ALREADY pins, without a new deploy. A `none` below records nothing and
+  # leaves the broker's PREVIOUS record for that service current, so every consumer's
+  # can-i-deploy keeps asking about a version that is no longer running. Publishing the deployed
+  # tree (verify-provider.yml with ref=<deployed sha>) is the remedy the `none` warning names, but
+  # until this input existed nothing could record the result short of another deploy of that
+  # service: on 2026-10-01 risk-engine ran sandbox-05030b12 while the broker still said 58bf6aaa,
+  # and verify-provider had published 05030b12 hours earlier. The pin is read from gitops on
+  # `main` — the same source of truth the merge path reads from a PR diff — so this can only
+  # record what is actually deployed, never choose a version.
+  workflow_dispatch:
+    inputs:
+      services:
+        description: "Space-separated pacticipants to re-record from their current gitops pin on main, e.g. 'openbank-risk-engine'"
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
   # Serialise per source-sha so two overlapping gitops merges can't interleave their records.
-  group: record-deployment-${{ github.event.pull_request.head.ref }}
+  group: record-deployment-${{ github.event.pull_request.head.ref || 'redispatch' }}
   cancel-in-progress: false
 
 jobs:
@@ -43,7 +58,9 @@ jobs:
     # derives (service, sha) pairs from the PR's own diff, so a PR that touches gitops without
     # changing an image pin records nothing. `pull_request` (not `_target`) keeps same-repo
     # secrets; a fork PR gets no secrets and would fail loudly rather than record garbage.
-    if: github.event.pull_request.merged == true
+    if: >-
+      github.event.pull_request.merged == true
+      || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
@@ -55,6 +72,7 @@ jobs:
       # the ref is bot-generated but we validate it to a 40-hex sha before use anyway.
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
+      DISPATCH_SERVICES: ${{ inputs.services }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       # `gh pr diff` shells out to git and needs either a checkout or an explicit repo. Everything
       # here is API-only, so without --repo it dies "not a git repository", returns nothing, and
@@ -85,12 +103,30 @@ jobs:
           # built image (#1727). So take the short sha from each image tag and resolve it to the
           # full 40-hex sha via the commits API, validating the result — a hand-crafted tag can
           # never inject a shell token or a bogus pacticipant version.
-          mapfile -t PAIRS < <(
-            gh pr diff "$PR_NUMBER" --repo "$GH_REPO" \
-              | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
-              | grep -oE "openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
-              | sort -u
-          )
+          if [ -n "$PR_NUMBER" ]; then
+            mapfile -t PAIRS < <(
+              gh pr diff "$PR_NUMBER" --repo "$GH_REPO" \
+                | grep -E "^\+.*openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
+                | grep -oE "openbank-[a-z0-9-]+:sandbox-[0-9a-f]{7,40}" \
+                | sort -u
+            )
+          else
+            # workflow_dispatch: the CURRENT pin on main's gitops, exactly one per service.
+            PAIRS=()
+            for svc in $DISPATCH_SERVICES; do
+              printf '%s' "$svc" | grep -qE '^openbank-[a-z0-9-]+$' \
+                || { echo "::error::'${svc}' is not a pacticipant name"; exit 1; }
+              mapfile -t pins < <(
+                grep -rhoE "/${svc}:sandbox-[0-9a-f]{7,40}" openbank-infra/gitops/components \
+                  | sed 's|^/||' | sort -u
+              )
+              if [ "${#pins[@]}" -ne 1 ]; then
+                echo "::error::${svc}: expected exactly one sandbox pin in gitops on main, found ${#pins[@]} (${pins[*]:-none}) — refusing to guess"
+                exit 1
+              fi
+              PAIRS+=("${pins[0]}")
+            done
+          fi
           if [ "${#PAIRS[@]}" -eq 0 ]; then
             echo "No openbank-*:sandbox-<sha> image changes in PR #${PR_NUMBER} — nothing to record."
             exit 0
@@ -164,7 +200,7 @@ jobs:
               exact:*)      REC_VER="${sel#exact:}" ;;
               equivalent:*) REC_VER="${sel#equivalent:}"
                             echo "  no version for ${SHA:0:8}; ${REC_VER:0:8} is byte-identical in every recorded source — recording that (#3223, #3432)" ;;
-              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state. If that service's own src/test changed since its latest published version, that is the #9898 case: the deployed tree needs publishing, and it is NOT a provider defect."
+              *)            echo "::warning::${svc}: no published version for ${SHA:0:8} and none provably equivalent — recording NOTHING rather than a version nothing can verify (#3223). can-i-deploy for its consumers will report no deployed version, which is the honest state. If that service's own src/test changed since its latest published version, that is the #9898 case: the deployed tree needs publishing, and it is NOT a provider defect. NOTE the broker's PREVIOUS record for ${svc} stays current until something replaces it: publish the deployed tree (verify-provider.yml ref=${SHA}), then re-run this workflow by workflow_dispatch with services=${svc}."
                             continue ;;
             esac
             ok=0
