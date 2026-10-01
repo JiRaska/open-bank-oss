@@ -45,9 +45,10 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  # 1.17.0 -> 1.18.1: behaviour/description only — POST /snapshots answers 400 for an `asOf` after
-  #        the current business date (Europe/Prague); no schema change. 1.18.0 is held by open
-  #        PR #11549, so this takes 1.18.1 on top of it.
+  # 1.17.0 -> 1.18.0: (#11716) liquidity and capital are read by category, not by raw loan id.
+  # 1.18.0 -> 1.18.1: behaviour/description only — POST /snapshots answers 400 for an `asOf` after
+  #        the current business date (Europe/Prague); no schema change. A patch on the live
+  #        1.18.0; the open PRs claiming 1.19.0 (#11549, #11719) and 1.20.0 (#11722) are unaffected.
   version: 1.18.1
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
@@ -1305,6 +1306,8 @@ components:
         factorKey: {type: [string, 'null']}
         weighted: {type: number}
         citation: {type: string}
+        instrumentId: {type: [string, 'null'], description: Loan contract the line is about; null for an account- or aggregate-level line}
+        itemCount: {type: [integer, 'null'], description: Customer accounts or contracts the line aggregates; null for a single GL account}
 
     Hqla:
       type: object
@@ -1564,6 +1567,7 @@ components:
         rwa: {type: number}
         factorKey: {type: string}
         citation: {type: string}
+        ifrs9Stage: {type: [string, 'null'], description: IFRS 9 stage reported for a loan line (STAGE_1..STAGE_3)}
 
     CurrencyCapital:
       type: object
@@ -1709,6 +1713,10 @@ components:
                 tier1: {$ref: '#/components/schemas/CapitalRatio'}
                 total: {$ref: '#/components/schemas/CapitalRatio'}
         ratiosNotComputable: {type: [string, 'null']}
+        ratiosNotComputableCode:
+          type: [string, 'null']
+          description: Machine-readable form of ratiosNotComputable, for a client to localise
+          x-extensible-enum: [multi-currency, no-positions, no-own-funds, zero-rwa]
         unclassified:
           type: array
           items:

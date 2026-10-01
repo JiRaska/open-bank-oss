@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# ArgoCDAppOutOfSyncNotHealing (2026-09-30 mutating-policy drift). Case 1 must fire; the
+# controls are a normal post-commit OutOfSync of a few minutes, a manual-sync app (OutOfSync by
+# design), and a controller restart mid-drift, which changes the pod/instance labels and must
+# NOT reset the 30m clock.
+rule_files:
+  - prometheus-rules-argocd.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "an auto-sync app OutOfSync for >30m fires once, across a controller restart"
+    input_series:
+      # Controller pod A reports the app OutOfSync for 20m, then pod B takes over.
+      - series: 'argocd_app_info{name="litellm",dest_namespace="ai-platform",project="default",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="true",pod="ctl-a",instance="10.0.0.1:8082"}'
+        values: "1x20 _x30"
+      - series: 'argocd_app_info{name="litellm",dest_namespace="ai-platform",project="default",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="true",pod="ctl-b",instance="10.0.0.2:8082"}'
+        values: "_x20 1x30"
+      # A commit-sized OutOfSync of 4 minutes.
+      - series: 'argocd_app_info{name="ledger",dest_namespace="ledger",project="default",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="true",pod="ctl-a",instance="10.0.0.1:8082"}'
+        values: "1x4 _x46"
+      - series: 'argocd_app_info{name="ledger",dest_namespace="ledger",project="default",sync_status="Synced",health_status="Healthy",autosync_enabled="true",pod="ctl-a",instance="10.0.0.1:8082"}'
+        values: "_x4 1x46"
+      # A manual-sync app is OutOfSync by design.
+      - series: 'argocd_app_info{name="manual-thing",dest_namespace="tools",project="default",sync_status="OutOfSync",health_status="Healthy",autosync_enabled="false",pod="ctl-a",instance="10.0.0.1:8082"}'
+        values: "1x50"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ArgoCDAppOutOfSyncNotHealing
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: ArgoCDAppOutOfSyncNotHealing
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              name: litellm
+              dest_namespace: ai-platform
+              project: default
+            exp_annotations:
+              summary: "ArgoCD app litellm OutOfSync for over 30m despite auto-sync"
+              description: "litellm (namespace ai-platform) has auto-sync with self-heal and has still been OutOfSync for >30m — the sync is running and not converging. Two known causes: a MUTATING admission policy changed after the workload was admitted (desired = server dry-run WITH the mutation, live = without; fix: `kubectl rollout restart` the affected controller), or a manifest value the API server drops on apply (a `null`, a defaulted field) so desired can never equal live. Compare live vs `kubectl apply --dry-run=server` for one OutOfSync resource — see the runbook."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
