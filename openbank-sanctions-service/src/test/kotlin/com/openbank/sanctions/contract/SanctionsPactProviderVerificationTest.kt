@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.sanctions.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -69,6 +70,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-sanctions-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by SanctionsNegativeAuthProviderVerificationTest,
+// which boots without @TestSecurity; under this class's identity they would answer 201 and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class SanctionsPactProviderVerificationTest {
 
