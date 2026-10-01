@@ -168,6 +168,7 @@ jobs:
               # the Pact graph.
               #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
               #     service's compile/test inputs may change).
+              #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
               #   - pacts/<consumer>-<provider>.json changed -> build BOTH: the consumer republishes
               #     the pact, the provider re-verifies against it (the exact completeness reason
               #     main-push used to full-fleet for). Delimiter is the single '-openbank-'.
@@ -176,7 +177,7 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -249,17 +250,12 @@ jobs:
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
             # Code-global inputs every module compiles/tests against -> rebuild all.
+            # Except a lib's own test sources (filter-lib-test-only-paths.py header).
             # (openbank-libs*, version catalog, root build, gradle.properties,
             # build-logic.) A change here can alter any service's compile or test
             # inputs, so the whole fleet must rebuild.
-            # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`.
-            # Under `set -o pipefail`, `grep -q` exits on first match and closes
-            # the pipe, so the upstream `echo` gets SIGPIPE (exit 141) and the
-            # pipeline returns 141 -> the `if` mis-reads a successful match as
-            # FALSE. Whether it fires depends racily on how far down the (sorted)
-            # file list the match sits, so early-sorting modules (account-service,
-            # openbank-libs) were silently dropped from the matrix. A here-string
-            # has no pipe and no SIGPIPE, so the test is deterministic.
+            # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`: under
+            # pipefail the SIGPIPE (141) racily reads a match as FALSE and drops modules.
             # Governance catalogs (openbank-libs/governance/) are data for CI
             # checks + admin-ui, not a compile/test input of any module — an
             # ADR/control-catalog edit must not cost a 28-module fleet run.
@@ -294,7 +290,7 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_CODE"; then
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else

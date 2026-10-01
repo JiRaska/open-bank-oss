@@ -118,7 +118,8 @@ survives in it.
    ```sh
    ADMINUI_CLIENT_SECRET=... ARGOCD_CLIENT_SECRET=... EDGE_CLIENT_SECRET=... \
    GLITCHTIP_CLIENT_SECRET=... GOALERT_CLIENT_SECRET=... MCP_OBO_CLIENT_SECRET=... \
-   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
+   OPENBAO_CLIENT_SECRET=... SERVICES_CLIENT_SECRET=... DELEGATION_DISCLOSURE_CLIENT_SECRET=... \
+   INTEREST_CLIENT_SECRET=... ADMIN_USER_PASSWORD=... \
    ACCOUNT_CLIENT_SECRET=... SDD_CLIENT_SECRET=... STANDING_ORDER_CLIENT_SECRET=... \
    SEPA_PAYMENT_CLIENT_SECRET=... LENDING_CLIENT_SECRET=... CLEARING_CLIENT_SECRET=... \
    DOMESTIC_PAYMENT_CLIENT_SECRET=... SEPA_INSTANT_CLIENT_SECRET=... SWIFT_CLIENT_SECRET=... \
@@ -357,6 +358,21 @@ Its whole upstream grant is `service-treasury-ledger-post` in `ledger_rest_ext.r
 and nothing else. Treasury reverses a settled deal by posting an offsetting journal, so it never needs
 `ledger.reverse`. Provision BEFORE the treasury component first syncs: the env ref is
 `optional: false`, so a missing KV entry holds the pod in `CreateContainerConfigError`.
+
+### Delegation external disclosure (#9237)
+
+Same recipe, one client, one difference: the Vault entry is **not** `keycloak/<service>`. The
+consumer is the existing `delegation-service-oidc` ExternalSecret, which reads property
+`OIDC_CLIENT_SECRET` of KV key `delegation-disclosure-service` into `DISCLOSURE_OIDC_CLIENT_SECRET`.
+
+| Keycloak client | Vault KV (`openbank/`) | ExternalSecret (namespace) | Render-script variable |
+|---|---|---|---|
+| `openbank-delegation-disclosure` | `delegation-disclosure-service` (`OIDC_CLIENT_SECRET`) | `delegation-service-oidc` (delegation) | `DELEGATION_DISCLOSURE_CLIENT_SECRET` |
+
+document-service admits this caller only by `input.principal.id ==
+"service-account-openbank-delegation-disclosure"`, so the client needs the `profile` scope like
+every other per-service client. Without it the token has no `preferred_username` and the export
+is denied with a 403.
 
 ### Synthetic journey identity: Product Catalog read (#7324)
 
