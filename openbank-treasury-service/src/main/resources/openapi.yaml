@@ -696,7 +696,7 @@ components:
     JournalRef:
       type: object
       properties:
-        event: { type: string, enum: [settled, accrued, matured, reversed] }
+        event: { type: string, enum: [settled, matured, reversed] }
         idempotencyKey: { type: string, examples: ['treasury:0191c0de-0000-7000-8000-000000000001:settled'] }
         journalId: { type: string, format: uuid }
         postedAt: { type: string, format: date-time }
