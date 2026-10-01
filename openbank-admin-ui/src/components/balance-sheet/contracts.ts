@@ -157,6 +157,8 @@ export type Irrbb = z.infer<typeof irrbbSchema>
 export const liquidityLineSchema = z.object({
   label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money,
   factor: money.nullable().optional(), factorKey: z.string().nullable().optional(), weighted: money, citation: z.string(),
+  // risk-engine openapi 1.18.0: the loan a line is about, and how many accounts/contracts it aggregates.
+  instrumentId: z.string().nullable().optional(), itemCount: z.number().int().nullable().optional(),
 })
 export const hqlaSchema = z.object({
   lines: z.array(z.object({
@@ -229,7 +231,7 @@ export type LiquidityForecast = z.infer<typeof liquidityForecastSchema>
 export const exposureLineSchema = z.object({
   exposureClass: z.string(), label: z.string(), glAccountCode: z.string().nullable().optional(),
   instrumentId: z.string().nullable().optional(), ead: money, riskWeight: money, rwa: money,
-  factorKey: z.string(), citation: z.string(),
+  factorKey: z.string(), citation: z.string(), ifrs9Stage: z.string().nullable().optional(),
 })
 const ownFundsSchema = z.object({
   lines: z.array(z.object({ glAccountCode: z.string(), glClass: z.string(), contribution: money })),
@@ -250,6 +252,7 @@ export const capitalSchema = z.object({
   ownFundsRequirement: money.nullable().optional(),
   ratios: z.object({ cet1: capitalRatioSchema, tier1: capitalRatioSchema, total: capitalRatioSchema }).nullable().optional(),
   ratiosNotComputable: z.string().nullable().optional(),
+  ratiosNotComputableCode: z.string().nullable().optional(),
   unclassified: z.array(z.object({
     glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
     currency: z.string(), amount: money, reason: z.string(),

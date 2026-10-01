@@ -45,10 +45,11 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  # 1.17.0 -> 1.18.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
+  # 1.17.0 -> 1.18.0: (#11716) liquidity and capital are read by category, not by raw loan id.
+  # 1.18.0 -> 1.19.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
   #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input. (This PR
-  #        originally claimed 1.16.0; #11539 and #11546 take 1.16.0 and 1.17.0, so this takes 1.18.0.)
-  version: 1.18.0
+  #        originally claimed 1.16.0; #11539 and #11546 take 1.16.0 and 1.17.0, and #11716 took 1.18.0, so this takes 1.19.0.)
+  version: 1.19.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -1342,6 +1343,8 @@ components:
         factorKey: {type: [string, 'null']}
         weighted: {type: number}
         citation: {type: string}
+        instrumentId: {type: [string, 'null'], description: Loan contract the line is about; null for an account- or aggregate-level line}
+        itemCount: {type: [integer, 'null'], description: Customer accounts or contracts the line aggregates; null for a single GL account}
 
     Hqla:
       type: object
@@ -1601,6 +1604,7 @@ components:
         rwa: {type: number}
         factorKey: {type: string}
         citation: {type: string}
+        ifrs9Stage: {type: [string, 'null'], description: IFRS 9 stage reported for a loan line (STAGE_1..STAGE_3)}
 
     CurrencyCapital:
       type: object
@@ -1746,6 +1750,10 @@ components:
                 tier1: {$ref: '#/components/schemas/CapitalRatio'}
                 total: {$ref: '#/components/schemas/CapitalRatio'}
         ratiosNotComputable: {type: [string, 'null']}
+        ratiosNotComputableCode:
+          type: [string, 'null']
+          description: Machine-readable form of ratiosNotComputable, for a client to localise
+          x-extensible-enum: [multi-currency, no-positions, no-own-funds, zero-rwa]
         unclassified:
           type: array
           items:

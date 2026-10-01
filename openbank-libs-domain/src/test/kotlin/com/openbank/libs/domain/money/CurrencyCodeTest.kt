@@ -21,15 +21,58 @@ class CurrencyCodeTest {
     }
 
     @Test
-    fun `rejects invalid currency code`() {
-        assertThatThrownBy { CurrencyCode.of("QQQ") }
-            .isInstanceOf(IllegalArgumentException::class.java)
+    fun `the constructor form normalises case exactly like of`() {
+        assertThat(CurrencyCode("eur")).isEqualTo(CurrencyCode.EUR)
+        assertThat(CurrencyCode("eur").code).isEqualTo("EUR")
+        assertThat(CurrencyCode("Eur").hashCode()).isEqualTo(CurrencyCode.EUR.hashCode())
     }
 
     @Test
-    fun `rejects wrong length`() {
-        assertThatThrownBy { CurrencyCode("AB") }
+    fun `an unknown code says it is not ISO 4217`() {
+        assertThatThrownBy { CurrencyCode.of("QQQ") }
             .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessage("Unknown ISO 4217 currency code: QQQ")
+        assertThatThrownBy { CurrencyCode("qqq") }.hasMessage("Unknown ISO 4217 currency code: QQQ")
+    }
+
+    @Test
+    fun `a code that is not three letters says so`() {
+        listOf("AB", "EURO", "", "E1R", "€UR", "eu ").forEach { bad ->
+            assertThatThrownBy { CurrencyCode(bad) }
+                .describedAs("'$bad'")
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessage("Currency code must be 3 letters (ISO 4217): '$bad'")
+            assertThatThrownBy { CurrencyCode.of(bad) }.hasMessageStartingWith("Currency code must be 3 letters")
+        }
+    }
+
+    @Test
+    fun `an overlong input is not echoed back whole`() {
+        assertThatThrownBy { CurrencyCode.of("X".repeat(10_000)) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .matches { it.message!!.length < 100 }
+    }
+
+    @Test
+    fun `a currency without a minor unit is rejected at every entry point`() {
+        listOf("XAU", "XAG", "XDR", "XXX").forEach { code ->
+            assertThatThrownBy { CurrencyCode.of(code) }
+                .describedAs(code)
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("has no minor unit")
+            assertThatThrownBy { Money.zero(code) }.hasMessageContaining("has no minor unit")
+            assertThatThrownBy { Money.of("1", code) }.hasMessageContaining("has no minor unit")
+        }
+    }
+
+    @Test
+    fun `fraction digits are never negative for any accepted code`() {
+        java.util.Currency.getAvailableCurrencies().forEach { c ->
+            runCatching { CurrencyCode.of(c.currencyCode) }.onSuccess {
+                assertThat(it.defaultFractionDigits).describedAs(c.currencyCode).isGreaterThanOrEqualTo(0)
+            }
+        }
+        assertThat(CurrencyCode.of("KWD").defaultFractionDigits).isEqualTo(3)
     }
 
     @Test

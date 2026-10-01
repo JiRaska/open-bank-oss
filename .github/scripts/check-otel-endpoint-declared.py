@@ -54,9 +54,18 @@ def containers(doc: dict):
 
 def evaluate(components_dir: Path, repo_root: Path):
     subjects, findings = [], []
+    # Pure-Python PyYAML is the whole cost of this gate, and most files under components/ are
+    # OPA bundles, policies and ConfigMaps that cannot hold a workload. Parse only files whose
+    # text declares one of WORKLOAD_KINDS; a quoted or spaced `kind:` still matches.
+    kind_re = re.compile(
+        r"^\s*kind:\s*[\"']?(" + "|".join(map(re.escape, sorted(WORKLOAD_KINDS))) + r")[\"']?\s*$", re.M
+    )
     for path in sorted(components_dir.rglob("*.yaml")):
+        text = path.read_text()
+        if not kind_re.search(text):
+            continue
         try:
-            docs = list(yaml.safe_load_all(path.read_text()))
+            docs = list(yaml.safe_load_all(text))
         except yaml.YAMLError:
             continue
         for doc in docs:
