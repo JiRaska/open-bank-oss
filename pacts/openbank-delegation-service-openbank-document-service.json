@@ -1,0 +1,67 @@
+{
+  "consumer": {
+    "name": "openbank-delegation-service"
+  },
+  "interactions": [
+    {
+      "description": "POST export a sealed, watermarked copy of a document for an external recipient",
+      "providerStates": [
+        {
+          "name": "a sealed PDF document exists for the pact disclosure"
+        }
+      ],
+      "request": {
+        "body": {
+          "disclosureId": "d15c105e-0000-4000-8000-000000000001",
+          "issuedAt": "2026-01-15T10:00:00Z",
+          "recipientLabel": "Pact Verify Landlord s.r.o."
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/documents/d0c0d0c0-0000-4000-8000-000000000001/external-disclosures/export"
+      },
+      "response": {
+        "headers": {
+          "Content-Type": "application/pdf"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a disclosure export with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "disclosureId": "d15c105e-0000-4000-8000-000000000001",
+          "issuedAt": "2026-01-15T10:00:00Z",
+          "recipientLabel": "Pact Verify Landlord s.r.o."
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/documents/d0c0d0c0-0000-4000-8000-000000000001/external-disclosures/export"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-document-service"
+  }
+}
