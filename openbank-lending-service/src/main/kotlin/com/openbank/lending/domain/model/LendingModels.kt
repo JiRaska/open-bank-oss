@@ -176,6 +176,11 @@ data class Loan(
     val noticeEndsOn: LocalDate? = null,
     val terminatedBy: String? = null,
     val terminatedAt: OffsetDateTime? = null,
+    /**
+     * Human contract number ([LoanContractNumber], #11107). Null only on a loan not yet persisted —
+     * the repository assigns it at creation and it never changes afterwards.
+     */
+    val contractNumber: String? = null,
 )
 
 /**
