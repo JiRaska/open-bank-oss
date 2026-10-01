@@ -5991,3 +5991,25 @@ gates:
     min_subjects: 1
     selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
     run: python3 .github/scripts/test-dr-restore-workflow.py
+  # `quarkus.log.console.json` is read by exactly one thing, the quarkus-logging-json extension.
+  # Without it on the application's classpath the key is accepted, does nothing, and the console
+  # keeps the TEXT pattern formatter — so the config described structured logging the process did
+  # not do. The shared config and ~30 services asked for it and no module carried the extension.
+  # Decidable from the build files: a Quarkus application module that asks (own resources or a
+  # project dependency's) must declare the extension (directly, via a catalog alias, or through a
+  # convention plugin it applies). StructuredLogEncodingIT in openbank-ledger-service is the
+  # by-effect half — it boots the app and asserts the console formatter really emits JSON.
+  - id: json-logging-extension-present
+    name: "JSON console logging requested => quarkus-logging-json declared (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A config key nobody reads is invisible from the config; pairing the request with the extension that reads it is the only place the mismatch is decidable without booting every service."
+    review_after: "2027-03-30"
+    verified: "2026-09-30 — 67 Quarkus application modules examined, 0 findings; removing the convention-plugin dependency flags 66 (exit 1)"
+    budget_seconds: 10
+    min_subjects: 33   # 67 measured 2026-09-30; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-json-logging-extension.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-json-logging-extension.py"]
+    run: |
+      python3 .github/scripts/check-json-logging-extension.py --enforce

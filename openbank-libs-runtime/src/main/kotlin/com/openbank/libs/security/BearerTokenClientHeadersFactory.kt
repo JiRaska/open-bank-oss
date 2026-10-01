@@ -4,6 +4,11 @@
 
 package com.openbank.libs.security
 
+import com.openbank.libs.web.HEADER_CORRELATION_ID
+import com.openbank.libs.web.HEADER_REQUEST_ID
+import com.openbank.libs.web.MDC_CORRELATION_ID
+import com.openbank.libs.web.MDC_REQUEST_ID
+import com.openbank.libs.web.acceptedInboundId
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
@@ -11,6 +16,7 @@ import jakarta.ws.rs.core.MultivaluedHashMap
 import jakarta.ws.rs.core.MultivaluedMap
 import org.eclipse.microprofile.rest.client.ext.ClientHeadersFactory
 import org.jboss.logging.Logger
+import org.jboss.logging.MDC
 
 /**
  * Adds `Authorization: Bearer <service-token>` to every outbound REST client call that
@@ -56,8 +62,16 @@ class BearerTokenClientHeadersFactory : ClientHeadersFactory {
             merged.putSingle("Authorization", authHeader)
         }
 
-        listOf("X-Correlation-ID", "X-Request-ID").forEach { header ->
-            incoming.getFirst(header)?.let { if (!merged.containsKey(header)) merged.putSingle(header, it) }
+        // Propagate the correlation ids so the downstream audit trail joins to ours — but only
+        // values with the accepted id shape. When the inbound header does not have it, forward the
+        // id this request is actually logged under (the MDC value CorrelationIdRequestFilter
+        // settled on) instead of the caller's original text.
+        listOf(
+            HEADER_CORRELATION_ID to MDC_CORRELATION_ID,
+            HEADER_REQUEST_ID to MDC_REQUEST_ID,
+        ).forEach { (header, mdcKey) ->
+            val id = acceptedInboundId(incoming.getFirst(header)) ?: acceptedInboundId(MDC.get(mdcKey) as? String)
+            if (id != null && !merged.containsKey(header)) merged.putSingle(header, id)
         }
 
         return merged
