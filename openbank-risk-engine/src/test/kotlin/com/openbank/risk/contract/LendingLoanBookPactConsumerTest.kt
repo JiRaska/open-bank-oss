@@ -90,6 +90,8 @@ class LendingLoanBookPactConsumerTest {
                     l.date("disbursedOn", "yyyy-MM-dd")
                     l.date("maturityDate", "yyyy-MM-dd")
                     l.nullValue("ifrs9Stage")
+                    // #11107: the human contract number — shape, not value (the provider assigns it).
+                    l.stringMatcher("contractNumber", "^UV-[0-9]{4}-[0-9]{6,}$", "UV-2020-000001")
                     l.minArrayLike("remainingInstallments", 1, 1) { i ->
                         i.integerType("number", 2)
                         i.date("dueDate", "yyyy-MM-dd")
@@ -142,6 +144,7 @@ class LendingLoanBookPactConsumerTest {
         assertThat(contract.glAccountCode).isEqualTo("1200")
         assertThat(contract.rateType).isEqualTo("FIXED")
         assertThat(contract.remainingInstallments).isNotEmpty()
+        assertThat(contract.contractNumber).isEqualTo("UV-2020-000001")
         // The mock's example sums consistently only by accident of its values; the kind and
         // parse are what this asserts — the outstanding/schedule rule is LoanInstrumentTest's.
         val instrument = LoanInstrumentMapper.toInstrument(
