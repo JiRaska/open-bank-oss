@@ -32,15 +32,14 @@ object BoundedBodyHandlers {
         return HttpResponse.BodyHandler { info -> CappedStringSubscriber(maxBytes, charsetOf(info.headers())) }
     }
 
-    private fun charsetOf(headers: java.net.http.HttpHeaders): Charset =
-        headers.firstValue("content-type").orElse("")
-            .split(';')
-            .map { it.trim() }
-            .firstOrNull { it.startsWith("charset=", ignoreCase = true) }
-            ?.substringAfter('=')
-            ?.trim('"')
-            ?.let { runCatching { Charset.forName(it) }.getOrNull() }
-            ?: Charsets.UTF_8
+    private fun charsetOf(headers: java.net.http.HttpHeaders): Charset = headers.firstValue("content-type").orElse("")
+        .split(';')
+        .map { it.trim() }
+        .firstOrNull { it.startsWith("charset=", ignoreCase = true) }
+        ?.substringAfter('=')
+        ?.trim('"')
+        ?.let { runCatching { Charset.forName(it) }.getOrNull() }
+        ?: Charsets.UTF_8
 
     private class CappedStringSubscriber(private val maxBytes: Int, private val charset: Charset) :
         HttpResponse.BodySubscriber<String> {
