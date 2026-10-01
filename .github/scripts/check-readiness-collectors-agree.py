@@ -83,8 +83,15 @@ def compare(repo: Path, count: list[int] | None = None) -> list[str]:
     as the gate's subject count even on the failure path.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        py = {s["service"]: s for s in run_python(repo, Path(tmp) / "py.json")}
-        node = {s["service"]: s for s in run_node(repo, Path(tmp) / "node.json")}
+        return diff_results(run_python(repo, Path(tmp) / "py.json"),
+                            run_node(repo, Path(tmp) / "node.json"), count)
+
+
+def diff_results(py_services: list[dict], node_services: list[dict],
+                 count: list[int] | None = None) -> list[str]:
+    """-> differences between one Python and one Node collector result."""
+    py = {s["service"]: s for s in py_services}
+    node = {s["service"]: s for s in node_services}
 
     diffs: list[str] = []
     for only_in, missing in (("python", set(py) - set(node)), ("node", set(node) - set(py))):
@@ -135,11 +142,28 @@ def self_test() -> int:
                                 ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
         shutil.copytree(REPO / "openbank-infra" / "gitops", work / "openbank-infra" / "gitops")
 
-        clean = compare(work)
+        # Each collector run costs tens of seconds, so every result below is reused: two
+        # runs establish agreement, two prove a build copy changes nothing, and one more
+        # (Node only — Python is untouched) proves the comparison can fail.
+        before_py = run_python(work, Path(tmp) / "before-py.json")
+        before_node = run_node(work, Path(tmp) / "before-node.json")
+        clean = diff_results(before_py, before_node)
         if clean:
             print("SELF-TEST FAILED: the untouched copy already diverges:", file=sys.stderr)
             for d in clean:
                 print(f"  {d}", file=sys.stderr)
+            return 1
+
+        # A local build must not alter either score or evidence. Comparing only the two
+        # implementations misses the case where both count the same generated copies.
+        migration = next(work.glob("openbank-*-service/src/main/resources/db/migration/V*.sql"))
+        service = migration.relative_to(work).parts[0]
+        generated = work / service / "build/resources/main/db/migration" / migration.name
+        generated.parent.mkdir(parents=True)
+        shutil.copyfile(migration, generated)
+        after_py = run_python(work, Path(tmp) / "after-py.json")
+        if after_py != before_py or run_node(work, Path(tmp) / "after-node.json") != before_node:
+            print("SELF-TEST FAILED: build outputs changed readiness scores or evidence", file=sys.stderr)
             return 1
 
         node = work / "openbank-admin-ui" / "scripts" / "collect-prod-readiness.mjs"
@@ -149,7 +173,7 @@ def self_test() -> int:
         node.write_text(text.replace(
             marker, marker + "\n  return { score: 0, evidence: 'self-test perturbation' }", 1))
 
-        broken = compare(work)
+        broken = diff_results(after_py, run_node(work, Path(tmp) / "broken-node.json"))
         if not broken:
             print("SELF-TEST FAILED: a deliberately broken C6 scorer produced NO divergence — "
                   "the comparison is not reaching the collectors", file=sys.stderr)
