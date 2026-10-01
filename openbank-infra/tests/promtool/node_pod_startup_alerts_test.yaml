@@ -1,0 +1,115 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# NodePodSandboxCreationFailing / NodePodsStuckStarting (2026-09-30 stuck-ENI node). Each
+# rule has one case that MUST fire and controls that keep it from passing vacuously: a healthy
+# node's one-off sandbox error, a busy node where pods churn through ContainerCreating without
+# any single pod staying there, and a single stuck pod (a pod problem, not a node problem).
+rule_files:
+  - prometheus-rules-node-pod-startup.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a node whose kubelet keeps failing RunPodSandbox pages after 10m"
+    input_series:
+      # Counter climbing steadily: ~0.5 errors/s, the incident node's measured rate.
+      - series: 'kubelet_runtime_operations_errors_total{node="ip-bad",operation_type="run_podsandbox",instance="10.0.0.1:10250"}'
+        values: "0+30x40"
+      # A healthy node: one error at join, then flat forever.
+      - series: 'kubelet_runtime_operations_errors_total{node="ip-good",operation_type="run_podsandbox",instance="10.0.0.2:10250"}'
+        values: "1x40"
+      # Same node, a different operation type must not count.
+      - series: 'kubelet_runtime_operations_errors_total{node="ip-good",operation_type="container_status",instance="10.0.0.2:10250"}'
+        values: "0+30x40"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NodePodSandboxCreationFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+              node: ip-bad
+            exp_annotations:
+              subject_period: continuous
+              summary: "Node ip-bad is failing to create pod sandboxes"
+              description: "The kubelet on ip-bad has been failing RunPodSandbox for 10+ minutes (0.50 errors/s over 10m). Pods scheduled here sit in ContainerCreating with FailedCreatePodSandBox while the node reports Ready. The usual cause on this cluster is the VPC CNI running out of pod IPs because an ENI is stuck in EC2 attachment state `attaching`; restarting aws-node does not help, replacing the NodeClaim does. Diagnose with `kubectl get pods -A -o wide` filtered on the node and `aws ec2 describe-network-interfaces` on its instance — see the runbook."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
+
+  - interval: 1m
+    name: "a one-off sandbox error at node join stays silent"
+    input_series:
+      - series: 'kubelet_runtime_operations_errors_total{node="ip-join",operation_type="run_podsandbox",instance="10.0.0.3:10250"}'
+        values: "0 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: NodePodSandboxCreationFailing
+        exp_alerts: []
+
+  - interval: 1m
+    name: "two pods stuck ContainerCreating on one node for >10m pages, naming the node"
+    input_series:
+      # Two pods (one via its init container) waiting the whole time on the bad node.
+      - series: 'kube_pod_container_status_waiting_reason{namespace="ledger",pod="ledger-a",uid="u1",container="app",reason="ContainerCreating"}'
+        values: "1x40"
+      - series: 'kube_pod_init_container_status_waiting_reason{namespace="billing",pod="billing-b",uid="u2",container="init",reason="PodInitializing"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="ledger",pod="ledger-a",uid="u1",node="ip-bad"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="billing",pod="billing-b",uid="u2",node="ip-bad"}'
+        values: "1x40"
+      # A busy healthy node: a fresh pod every 3 minutes, each waiting 2 minutes, so the node
+      # ALWAYS has a pod in ContainerCreating and no pod is ever in it for 10 minutes.
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p1",uid="c1",container="app",reason="ContainerCreating"}'
+        values: "1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p2",uid="c2",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p3",uid="c3",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p4",uid="c4",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p5",uid="c5",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ _ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p6",uid="c6",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p7",uid="c7",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_container_status_waiting_reason{namespace="x",pod="p8",uid="c8",container="app",reason="ContainerCreating"}'
+        values: "_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 1 1 _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _"
+      - series: 'kube_pod_info{namespace="x",pod="p1",uid="c1",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p2",uid="c2",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p3",uid="c3",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p4",uid="c4",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p5",uid="c5",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p6",uid="c6",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p7",uid="c7",node="ip-busy"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="x",pod="p8",uid="c8",node="ip-busy"}'
+        values: "1x40"
+      # A single pod stuck on an otherwise fine node: a pod problem, KubePodNotReady's job.
+      - series: 'kube_pod_container_status_waiting_reason{namespace="y",pod="lonely",uid="l1",container="app",reason="ContainerCreating"}'
+        values: "1x40"
+      - series: 'kube_pod_info{namespace="y",pod="lonely",uid="l1",node="ip-one"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: NodePodsStuckStarting
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+              node: ip-bad
+            exp_annotations:
+              summary: "Pods are stuck starting on node ip-bad for over 10m"
+              description: "2 distinct pods on ip-bad have each been in ContainerCreating/PodInitializing for more than 10 minutes. Several pods stuck on ONE node while the node is Ready means the node cannot start pods — a CNI with no free IPs (an ENI stuck attaching), an EBS volume stuck attaching, or a hung container runtime. List them with `kubectl get pods -A -o wide --field-selector spec.nodeName=ip-bad` and read one pod's events; if the events say FailedCreatePodSandBox or FailedAttachVolume, check the instance's ENI/volume attachment states in EC2 and replace the NodeClaim — see the runbook."
+              runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
+      # Before the 10m dwell + 5m for: has elapsed the same input must be silent.
+      - eval_time: 12m
+        alertname: NodePodsStuckStarting
+        exp_alerts: []
