@@ -57,3 +57,7 @@ yarn.lock           linguist-generated=true
 # Exclude vendor / generated from language stats
 node_modules/**     linguist-vendored=true
 **/build/**         linguist-generated=true
+
+# YAML block indentation must precede Rego's tabs so the generated policy retains
+# exactly the source bytes after YAML decoding.
+openbank-infra/gitops/components/pricing/pricing-opa-bundle.yaml whitespace=-space-before-tab

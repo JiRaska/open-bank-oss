@@ -109,9 +109,13 @@ spec:
             ingestion_burst_size_mb: 32
             per_stream_rate_limit: 8MB
             per_stream_rate_limit_burst: 16MB
-            # FinOps (ADR-0054): sandbox 7d retention (ADR-0088 D3). S3 lifecycle on the
-            # bucket also expires objects at 7d (belt-and-suspenders).
-            retention_period: 168h
+            # ADR-0088 D3 names >=90d of logs as the audit window (DORA Art. 17 incident
+            # reconstruction); 7d was the FinOps interim. Measured 2026-09-30: 7 days of
+            # chunks = 2.67 GB in S3, so 90d is ~35 GB (~$0.80/month). The bucket's S3
+            # lifecycle rule must agree (today it is `expire-7d`; it has to be raised to 90d by hand —
+            # S3 expiry runs on object age and does not consult Loki, so a shorter
+            # lifecycle silently truncates what this value promises).
+            retention_period: 2160h
           compactor:
             retention_enabled: true
             delete_request_store: s3
