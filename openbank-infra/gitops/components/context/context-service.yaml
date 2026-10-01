@@ -52,8 +52,11 @@ spec:
               valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
             # Fraud case source: HTTPS, CA from context-fraud-trust (%prod fraud-source TLS).
             - { name: FRAUD_CASE_SOURCE_URL, value: "https://fraud-service.fraud.svc:8443" }
-            # LENDING_GRAPH_SOURCE_URL is deliberately unset: the Lending lens stays off
-            # until the lending graph source is deployed (#10266).
+            # Lending graph source (#10266) over lending-service's private-CA mTLS listener.
+            # Declared now so the edge exists; the Lending lens itself stays OFF until
+            # openbank.context.lending-source-read-enabled is turned on.
+            - name: LENDING_GRAPH_SOURCE_URL
+              value: https://lending-service.lending.svc:8443
             - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
             - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }
