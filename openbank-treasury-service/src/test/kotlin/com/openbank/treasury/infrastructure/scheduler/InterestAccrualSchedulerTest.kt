@@ -21,7 +21,7 @@ class InterestAccrualSchedulerTest {
 
     private val deals = mockk<TreasuryDealUseCase>()
 
-    private fun accruesThrough(at: String, expected: String) = runBlocking {
+    private fun accruesThrough(at: String, expected: String): Unit = runBlocking {
         coEvery { deals.accrueInterest(any()) } returns AccrualRun(0, emptyList())
         val clock = Clock.fixed(Instant.parse(at), ZoneOffset.UTC)
         InterestAccrualScheduler(deals, DomainMetrics(), clock, true).run()
