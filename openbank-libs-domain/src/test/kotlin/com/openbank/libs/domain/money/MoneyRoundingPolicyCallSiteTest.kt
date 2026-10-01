@@ -168,6 +168,42 @@ class MoneyRoundingPolicyCallSiteTest {
     }
 
     @Test
+    fun `treasury fixed-scale policies reproduce the pre-ADR-0318 inline treasury expressions`() {
+        val tiesTwo = tiesAt(2)
+        // openbank-treasury-service Deal.counterAmountOf / Postings.accruedThrough before ADR-0318
+        tiesTwo.forEach {
+            assertThat(RoundingPolicy.TREASURY_AMOUNT.round(it)).isEqualTo(it.setScale(2, RoundingMode.HALF_UP))
+        }
+        // Quote.midRate / bid / ask and Deal.checkRate deviation (scale 4)
+        tiesAt(4).forEach {
+            assertThat(RoundingPolicy.RATE_PERCENT.round(it)).isEqualTo(it.setScale(4, RoundingMode.HALF_UP))
+        }
+        // DayCount.act360Interest: divide at 12, then 2 dp
+        val principal = BigDecimal("1000000.00")
+        listOf("3.1234", "0.0001", "12.5").map(::BigDecimal).forEach { rate ->
+            val days = BigDecimal(7)
+            val site = principal.multiply(rate).multiply(days)
+                .divide(BigDecimal(36000), 12, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP)
+            val policy = RoundingPolicy.TREASURY_AMOUNT.round(
+                RoundingPolicy.TREASURY_INTEREST_WORK.divide(
+                    principal.multiply(rate).multiply(days),
+                    BigDecimal(36000),
+                ),
+            )
+            assertThat(policy).isEqualTo(site)
+        }
+        assertThat(
+            RoundingPolicy.TREASURY_AMOUNT.divide(BigDecimal("0.05"), BigDecimal(2)),
+        ).isEqualTo(BigDecimal("0.03"))
+    }
+
+    @Test
+    fun `fixed-scale round refuses a currency-scaled policy`() {
+        assertThatThrownBy { RoundingPolicy.LEDGER_POSTING.round(BigDecimal.ONE) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
     fun `divide refuses a currency-scaled policy`() {
         assertThatThrownBy {
             RoundingPolicy.FEE.divide(BigDecimal.ONE, BigDecimal.TEN)
@@ -179,6 +215,7 @@ class MoneyRoundingPolicyCallSiteTest {
         assertThat(RoundingPolicy.entries.map { it.name }).containsExactlyInAnyOrder(
             "MONEY_SCALE", "LEDGER_POSTING", "INTEREST_DAILY_RATE", "INTEREST_ACCRUAL",
             "FX_RATE", "FX_AMOUNT", "FEE", "TAX_WITHHOLDING", "DISPLAY", "RATIO_PERCENT",
+            "RATE_PERCENT", "TREASURY_AMOUNT", "TREASURY_INTEREST_WORK",
         )
     }
 }

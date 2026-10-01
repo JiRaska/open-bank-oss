@@ -36,7 +36,6 @@ BASELINE = {
     "openbank-sca-service": 2,
     "openbank-sdd-service": 2,
     "openbank-transaction-service": 11,
-    "openbank-treasury-service": 4,
 }
 
 
