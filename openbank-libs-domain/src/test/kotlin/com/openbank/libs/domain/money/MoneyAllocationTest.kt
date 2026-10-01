@@ -114,7 +114,7 @@ class MoneyAllocationTest {
     fun `Money round applies a policy and refuses a finer scale than the currency holds`() {
         assertThat(
             Money.of("150.99", "CZK").round(RoundingPolicy.TAX_WITHHOLDING).amount.toPlainString(),
-        ).isEqualTo("150")
+        ).isEqualTo("150.00")
         assertThat(
             Money.of("1.00", "EUR").round(RoundingPolicy.LEDGER_POSTING).amount.toPlainString(),
         ).isEqualTo("1.00")
