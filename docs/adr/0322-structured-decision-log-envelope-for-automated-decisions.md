@@ -1,14 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [audit, ai-agents, authz, compliance]
 summary: "Automated decisions emit one core DecisionRecord (libs.audit.decision); state-changing ALLOWs go via the outbox transport proposed as ADR-0323 (#10926) with the business tx, AUTHZ denies via a non-transactional rate-bounded aggregated path."
-followup: "none — decision-only until DecisionRecord lands in the libs platform core and the first producers adopt it; delivery tracked by the linked issue"
+followup: "#11604 — DecisionRecord landed in libs-domain; first producers and the 0323 transport remain"
 ---
 
 # ADR-0322 — Structured decision-log envelope for automated decisions
