@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.application.port.out.CurveSetPort
 import com.openbank.treasury.domain.model.CurvePillar
 import com.openbank.treasury.domain.model.CurveSetView
@@ -13,8 +14,7 @@ import jakarta.annotation.Priority
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Alternative
 import java.math.BigDecimal
-import java.time.LocalDate
-import java.time.ZoneOffset
+import java.time.Clock
 import java.util.UUID
 
 /**
@@ -43,9 +43,9 @@ class FakeCurveSets : CurveSetPort {
     companion object {
         val ID: UUID = UUID.fromString("0191c0de-0000-7000-8000-00000000c5e7")
 
-        /** A flat CZEONIA and ESTR zero curve at [zero] (decimal), as of today (UTC). */
+        /** A flat CZEONIA and ESTR zero curve at [zero] (decimal), as of today (Prague bank day, as the service sees it). */
         fun flat(zero: String): CurveSetView {
-            val asOf = LocalDate.now(ZoneOffset.UTC)
+            val asOf = AccountingClock.bank(Clock.systemUTC()).today()
             val pillars =
                 listOf(
                     CurvePillar(asOf.plusDays(1), BigDecimal(zero)),
