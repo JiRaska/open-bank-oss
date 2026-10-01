@@ -1,13 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [api-contract, testing, libs, architecture]
 summary: "Internal REST clients are generated from each provider's openapi.yaml into one per-provider client artifact, versioned by the API-contract axis (ADR-0048) and bound to Pact consumer tests with literal paths; migration starts non-money-path."
+followup: "#11604 — product-catalog client generated; provider-by-provider migration remains"
 ---
 
 # ADR-0319 — Generated, contract-bound inter-service REST clients
