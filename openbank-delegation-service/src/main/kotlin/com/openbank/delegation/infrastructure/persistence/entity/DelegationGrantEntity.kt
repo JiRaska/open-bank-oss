@@ -12,8 +12,8 @@ import com.openbank.delegation.domain.model.DelegationResourceType
 import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.CurrencyCode
-import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column

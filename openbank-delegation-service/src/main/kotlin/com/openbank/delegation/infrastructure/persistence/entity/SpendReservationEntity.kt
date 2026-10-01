@@ -9,8 +9,8 @@ import com.openbank.delegation.domain.model.SpendReservation
 import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.libs.domain.money.CurrencyCode
-import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
