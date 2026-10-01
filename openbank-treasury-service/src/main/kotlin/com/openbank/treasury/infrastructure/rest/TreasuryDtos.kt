@@ -80,7 +80,7 @@ data class TransitionResponse(
     val actorType: String,
     val at: Instant,
     val note: String?,
-    /** The limit-check figures when [note] is a limit note; null otherwise. Additive, API 1.14.0. */
+    /** The limit-check figures when [note] is a limit note; null otherwise. Additive, API 1.16.0. */
     val limitSnapshot: LimitSnapshotResponse? = null,
 )
 
