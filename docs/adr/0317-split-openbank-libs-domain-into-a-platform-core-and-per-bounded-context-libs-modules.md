@@ -1,13 +1,14 @@
 ---
 date: 2026-09-26
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [jiri.raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [libs, architecture, ci]
 summary: "openbank-libs-domain keeps only platform primitives; business packages (lending, iso20022, llm, analytics, cards/case/payment) move to per-bounded-context libs modules, cutting a business-package change from 57 rebuilds to 1-11."
+followup: "#11604 — phase 1 (lending, iso20022) landed; phases 2 to 4 and gate enforcement remain"
 ---
 
 # ADR-0317 — Split openbank-libs-domain into a platform core and per-bounded-context libs modules

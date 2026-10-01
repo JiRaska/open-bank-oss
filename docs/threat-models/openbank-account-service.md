@@ -99,6 +99,17 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
+  only `HIT` and `REVIEW`; sanctions-service has never returned `REVIEW` (its vocabulary is
+  `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`), so a `POTENTIAL_HIT` (a 0.65+ fuzzy
+  match), an `ESCALATED` case and a response with no `status` all opened the account, and the
+  adapter mapped a missing status to `CLEAR`. **Risk class = integrity of the ADR-0032 §C gate**:
+  a deny-list against a vocabulary the other side owns fails open on every value it does not
+  name. Now `SanctionsScreenResult.permitsOpening` permits only `CLEAR` and `WHITELISTED`; a
+  missing status is `UNKNOWN` and blocks. Mitigated by `AccountServiceTest` (parameterised over
+  the blocked statuses, red against the old gate), `SanctionsScreeningAdapterTest` and the new
+  consumer pact `AccountSanctionsScreenPactConsumerTest`, which pins `CLEAR` and `HIT` as exact
+  values and is replayed by sanctions-service. No endpoint, edge or privilege changed.
 - **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
   `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
   which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**

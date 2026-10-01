@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryQuoteUseCase
@@ -15,10 +16,13 @@ import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.LedgerReadPort
+import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
+import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
+import com.openbank.treasury.domain.model.BreakAlertPolicy
 import com.openbank.treasury.infrastructure.nostro.NostroConfig
 import com.openbank.treasury.infrastructure.quote.SimulatedQuoteConfig
 import jakarta.enterprise.context.ApplicationScoped
@@ -86,4 +90,24 @@ class TreasuryServiceProducer {
         config: NostroConfig,
         clock: Clock,
     ): NostroReconciliationUseCase = NostroReconciliationService(statements, ledger, config.accounts(), clock)
+
+    /** ADR-0315 D7: breaks with age and the alert threshold (`openbank.treasury.nostro.break-alert-*`). */
+    @Produces
+    @ApplicationScoped
+    fun nostroBreakUseCase(
+        statements: NostroStatementRepository,
+        reconciliation: NostroReconciliationUseCase,
+        breaks: NostroBreakRepository,
+        config: NostroConfig,
+        objectMapper: ObjectMapper,
+        clock: Clock,
+    ): NostroBreakUseCase = NostroBreakService(
+        statements,
+        reconciliation,
+        breaks,
+        config.accounts(),
+        BreakAlertPolicy(config.breakAlertAgeDays(), config.breakAlertMinAmount()),
+        objectMapper,
+        clock,
+    )
 }
