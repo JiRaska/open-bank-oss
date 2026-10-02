@@ -36,6 +36,17 @@ repositories {
     mavenCentral()
 }
 
+dependencies {
+    // Structured console logging. `quarkus.log.console.json` is a key that ONLY this extension
+    // reads: without it on the application's classpath the key is accepted, does nothing, and
+    // the console falls back to the text pattern formatter. Declared here rather than in
+    // openbank-libs-runtime because that module applies no Quarkus BOM — every service does
+    // (`enforcedPlatform(libs.quarkus.bom)`), so the version is the platform's and cannot rot.
+    // The shared key names live in openbank-libs-runtime's microprofile-config.properties;
+    // `json-logging-extension-present` (gates.yaml) holds the two halves together.
+    "implementation"("io.quarkus:quarkus-logging-json")
+}
+
 kotlin {
     // Pin to JDK 25 (Temurin LTS) across the whole fleet. Without an explicit
     // toolchain the build falls back to the system default JDK which may differ
@@ -86,6 +97,18 @@ configurations.all {
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+    // Every Quarkus test binds EPHEMERAL ports, never the defaults (8081 HTTP, 8444 HTTPS, 9001
+    // management). A fixed test port is shared by every build on the machine, so two concurrent
+    // Gradle runs - parallel agent sessions, a second worktree, CI on a shared runner - fail each
+    // other with QuarkusBindException, and a service that cannot boot reports its tests as
+    // SKIPPED rather than failed. A system property outranks application.yaml (ordinal 400 vs
+    // 250), so this holds even where a module's own config says otherwise. Quarkus writes the
+    // bound port back into these same keys, so RestAssured, @TestHTTPResource and code reading
+    // `quarkus.http.test-port` / `quarkus.management.test-port` see the real value. Enforced by
+    // the `quarkus-test-ports-ephemeral` gate.
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.http.test-ssl-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
     // Testcontainers Docker endpoint. Inherit the ambient DOCKER_HOST (the ephemeral
     // ARC dind pod exposes the daemon on the unix socket, ADR-0053; a dev workstation
     // sets its own) and fall back to the standard unix socket. The previous hard pin

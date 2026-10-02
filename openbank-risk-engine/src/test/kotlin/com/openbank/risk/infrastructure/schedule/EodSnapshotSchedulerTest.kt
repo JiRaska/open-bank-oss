@@ -5,9 +5,17 @@
 package com.openbank.risk.infrastructure.schedule
 
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.risk.application.port.`in`.LimitAnalysis
+import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.SnapshotOutcome
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.LimitEventOutbox
 import com.openbank.risk.application.port.out.SnapshotRunSummary
+import com.openbank.risk.domain.limits.LimitDefinition
+import com.openbank.risk.domain.limits.LimitEvaluation
+import com.openbank.risk.domain.limits.LimitMetric
+import com.openbank.risk.domain.limits.LimitSet
+import com.openbank.risk.domain.limits.LimitStatus
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
 import com.openbank.risk.domain.model.TieOutStatus
@@ -19,6 +27,7 @@ import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -38,6 +47,7 @@ class EodSnapshotSchedulerTest {
 
     private class FakeSnapshotUseCase : SnapshotUseCase {
         var nextReplayed: Boolean = false
+        var nextStatus: TieOutStatus = TieOutStatus.TIED_OUT
         var lastAsOf: LocalDate? = null
         var lastRequestedBy: String? = null
         var calls: Int = 0
@@ -57,7 +67,7 @@ class EodSnapshotSchedulerTest {
                 recordedAt = Instant.EPOCH,
                 inputHash = "h",
                 provenance = Provenance.SYNTHETIC,
-                status = TieOutStatus.TIED_OUT,
+                status = nextStatus,
                 positionCount = 0,
                 mismatches = emptyList(),
             )
@@ -69,6 +79,51 @@ class EodSnapshotSchedulerTest {
         override suspend fun getPositions(id: UUID) = error("not used")
 
         override suspend fun getInstruments(id: UUID) = error("not used")
+    }
+
+    private class FakeLimits : LimitUseCase {
+        val evaluated = mutableListOf<UUID>()
+        private val set = LimitSet(
+            "test",
+            "7",
+            "test",
+            listOf(
+                LimitDefinition("lcr-min", LimitMetric.LCR, BigDecimal.ONE, BigDecimal("1.1"), "c"),
+                LimitDefinition("nsfr-min", LimitMetric.NSFR, BigDecimal.ONE, BigDecimal("1.05"), "c"),
+            ),
+        )
+
+        override suspend fun evaluate(runId: UUID): LimitAnalysis {
+            evaluated += runId
+            val run = SnapshotRun(
+                runId,
+                LocalDate.parse("2026-09-26"),
+                Instant.parse("2026-09-26T20:30:00Z"),
+                "h",
+                Provenance.SYNTHETIC,
+                TieOutStatus.TIED_OUT,
+                0,
+                emptyList(),
+            )
+            return LimitAnalysis(
+                run,
+                set,
+                listOf(
+                    LimitEvaluation(set.limits[0], LimitStatus.BREACH, BigDecimal("0.9"), "b"),
+                    LimitEvaluation(set.limits[1], LimitStatus.NOT_EVALUABLE, null, "gap"),
+                ),
+                null,
+            )
+        }
+    }
+
+    private class FakeOutbox : LimitEventOutbox {
+        val recorded = mutableListOf<LimitAnalysis>()
+
+        override suspend fun recordNonOk(analysis: LimitAnalysis, occurredAt: Instant): Int {
+            recorded += analysis
+            return 1
+        }
     }
 
     /** Same wiring as `DomainMetricsTest.withRegistry` — a resolvable registry, full instrumentation. */
@@ -83,9 +138,11 @@ class EodSnapshotSchedulerTest {
         useCase: SnapshotUseCase,
         registry: MeterRegistry = SimpleMeterRegistry(),
         clock: Clock = Clock.fixed(Instant.parse("2026-09-26T21:59:00Z"), ZoneOffset.UTC),
+        limits: LimitUseCase = FakeLimits(),
+        outbox: LimitEventOutbox = FakeOutbox(),
     ): Triple<EodSnapshotScheduler, MeterRegistry, DomainMetrics> {
         val metrics = domainMetricsOn(registry)
-        val s = EodSnapshotScheduler(useCase, clock, enabled = true)
+        val s = EodSnapshotScheduler(useCase, clock, enabled = true, limits = limits, limitOutbox = outbox)
         s.domainMetrics = metrics
         s.meterRegistry = registry
         s.onStart(mockk(relaxed = true))
@@ -141,7 +198,7 @@ class EodSnapshotSchedulerTest {
     @Test
     fun `a disabled scheduler never calls the use case`() {
         val useCase = FakeSnapshotUseCase()
-        val s = EodSnapshotScheduler(useCase, Clock.systemUTC(), enabled = false)
+        val s = EodSnapshotScheduler(useCase, Clock.systemUTC(), enabled = false, FakeLimits(), FakeOutbox())
         s.domainMetrics = domainMetricsOn(SimpleMeterRegistry())
         s.meterRegistry = SimpleMeterRegistry()
 
@@ -158,5 +215,51 @@ class EodSnapshotSchedulerTest {
         runBlocking { s.createEodSnapshot() }
 
         assertThat(useCase.calls).isEqualTo(1)
+    }
+
+    @Test
+    fun `a tied-out run has its limits evaluated, counted per status, and its non-OK limits recorded`() {
+        val useCase = FakeSnapshotUseCase()
+        val limits = FakeLimits()
+        val outbox = FakeOutbox()
+        val (s, registry, _) = scheduler(useCase, limits = limits, outbox = outbox)
+
+        runBlocking { s.runOnce() }
+
+        assertThat(limits.evaluated).hasSize(1)
+        assertThat(outbox.recorded).hasSize(1)
+        val evaluations = "openbank.risk.limit.evaluations"
+        assertThat(
+            registry.find(evaluations).tags("limit", "lcr-min", "status", "BREACH").counter()!!.count(),
+        ).isEqualTo(1.0)
+        // NOT_EVALUABLE is its own series, never folded into OK.
+        assertThat(registry.find(evaluations).tags("limit", "nsfr-min", "status", "NOT_EVALUABLE").counter()!!.count())
+            .isEqualTo(1.0)
+        assertThat(registry.find(evaluations).tag("status", "OK").counter()).isNull()
+    }
+
+    @Test
+    fun `a replayed run is re-evaluated too - the outbox is idempotent, and a lost write repairs itself`() {
+        val useCase = FakeSnapshotUseCase().apply { nextReplayed = true }
+        val outbox = FakeOutbox()
+        val (s, _, _) = scheduler(useCase, outbox = outbox)
+
+        runBlocking { s.runOnce() }
+
+        assertThat(outbox.recorded).hasSize(1)
+    }
+
+    @Test
+    fun `an untied run is never evaluated and records nothing`() {
+        val useCase = FakeSnapshotUseCase().apply { nextStatus = TieOutStatus.UNTIED }
+        val limits = FakeLimits()
+        val outbox = FakeOutbox()
+        val (s, registry, _) = scheduler(useCase, limits = limits, outbox = outbox)
+
+        runBlocking { s.runOnce() }
+
+        assertThat(limits.evaluated).isEmpty()
+        assertThat(outbox.recorded).isEmpty()
+        assertThat(registry.find("openbank.risk.limit.evaluations").counter()).isNull()
     }
 }

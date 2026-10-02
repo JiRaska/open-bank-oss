@@ -4,6 +4,7 @@
 
 package com.openbank.libs.idempotency
 
+import com.openbank.libs.util.Hex
 import java.security.MessageDigest
 
 /**
@@ -19,7 +20,7 @@ object RequestFingerprint {
     fun of(method: String, path: String, canonicalBody: String?): String {
         val digest = MessageDigest.getInstance("SHA-256")
             .digest("${method.uppercase()}\n$path\n${canonicalBody.orEmpty()}".toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
+        return Hex.lower(digest)
     }
 }
 

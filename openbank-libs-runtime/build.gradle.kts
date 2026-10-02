@@ -172,6 +172,11 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // Ephemeral Quarkus test ports - see openbank.quarkus-service.gradle.kts, which this module
+    // does not apply. Enforced by the `quarkus-test-ports-ephemeral` gate.
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.http.test-ssl-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
     jvmArgs("-Dnet.bytebuddy.experimental=true")
 
     // OutboxDeadLetterAlertNamingTest asserts that the committed PrometheusRule selector matches

@@ -13,7 +13,7 @@ export function IncidentImpactMap({ impact }: { impact: IncidentImpact }) {
   if (impact.projectionStatus === 'MISSING' || entries.length === 0) return null
   const height = Math.max(160, entries.length * 64 + 32)
   return <div style={{ overflowX: 'auto', marginTop: 16, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--surface-2)' }}>
-    <svg viewBox={`0 0 760 ${height}`} role="img" aria-label={t('Agregovaná mapa dopadu incidentu', 'Aggregate incident impact map')}
+    <svg viewBox={`0 0 760 ${height}`} role="img" aria-label={t('Agregovaná mapa hlášeného rozsahu incidentu', 'Aggregate reported incident scope map')}
       style={{ display: 'block', width: '100%', minWidth: 580 }}>
       <title>{t('Incident a počty souvisejících objektů podle typu', 'Incident and counts of related objects by type')}</title>
       <defs><ArrowMarker id={markerId} color="var(--accent)" /></defs>

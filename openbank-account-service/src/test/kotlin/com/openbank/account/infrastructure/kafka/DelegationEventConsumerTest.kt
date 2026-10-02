@@ -7,7 +7,9 @@ package com.openbank.account.infrastructure.kafka
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
+import com.openbank.account.domain.model.ApprovalGroupRevision
 import com.openbank.account.domain.model.DelegatedAccessGrant
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -21,6 +23,7 @@ import java.util.UUID
 class DelegationEventConsumerTest {
 
     private val repository: DelegationProjectionRepository = mockk(relaxed = true)
+    private val approvalGroupRepository: ApprovalGroupRevisionRepository = mockk(relaxed = true)
     private val objectMapper: ObjectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
     private lateinit var consumer: DelegationEventConsumer
 
@@ -31,7 +34,55 @@ class DelegationEventConsumerTest {
 
     @BeforeEach
     fun setUp() {
-        consumer = DelegationEventConsumer(repository, objectMapper)
+        consumer = DelegationEventConsumer(repository, approvalGroupRepository, objectMapper)
+    }
+
+    @Test
+    fun `approval group event stores its complete immutable revision`(): Unit = runBlocking {
+        val groupId = UUID.randomUUID()
+        val memberA = UUID.randomUUID()
+        val memberB = UUID.randomUUID()
+        consumer.consume(
+            objectMapper.writeValueAsString(
+                mapOf(
+                    "eventType" to "ApprovalGroupRevised",
+                    "aggregateId" to groupId,
+                    "ownerPartyId" to grantor,
+                    "name" to "Treasury approvers",
+                    "members" to listOf(memberA, memberB),
+                    "threshold" to 2,
+                    "revision" to 4,
+                    "active" to true,
+                ),
+            ),
+        )
+
+        coVerify(exactly = 1) {
+            approvalGroupRepository.store(
+                ApprovalGroupRevision(groupId, grantor, 4, "Treasury approvers", setOf(memberA, memberB), 2, true),
+            )
+        }
+    }
+
+    @Test
+    fun `approval group projection failure is retried then escapes to the DLQ`(): Unit = runBlocking {
+        coEvery { approvalGroupRepository.store(any()) } throws IllegalStateException("db blip")
+        val payload = objectMapper.writeValueAsString(
+            mapOf(
+                "eventType" to "ApprovalGroupCreated",
+                "aggregateId" to UUID.randomUUID(),
+                "ownerPartyId" to grantor,
+                "name" to "Two eyes",
+                "members" to listOf(grantee),
+                "threshold" to 1,
+                "revision" to 1,
+                "active" to true,
+            ),
+        )
+
+        assertThatThrownBy { runBlocking { consumer.consume(payload) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        coVerify(exactly = 4) { approvalGroupRepository.store(any()) }
     }
 
     private fun event(

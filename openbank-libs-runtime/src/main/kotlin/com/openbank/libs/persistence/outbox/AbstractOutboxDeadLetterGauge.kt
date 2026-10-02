@@ -6,7 +6,9 @@ package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import org.jboss.logging.Logger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Shared outbox **dead-letter** gauge (#4005), sibling of [AbstractOutboxBacklogGauge].
@@ -118,7 +120,30 @@ abstract class AbstractOutboxDeadLetterGauge {
      * `@Scheduled` **`suspend`** method so the reactive query runs on the right context.
      */
     protected suspend fun refreshDeadLettered() {
-        cached.set(currentDeadLettered())
+        val value = try {
+            currentDeadLettered()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            // A metrics refresh must never throw out of the scheduler: during a DB restart every
+            // tick would otherwise log a scheduler ERROR with a full stack trace. Keep the last
+            // good value and count the failure — the counter is the staleness signal.
+            metrics.outboxGaugeRefreshFailed(service, "dead_lettered")
+            LOG.warnf(
+                "outbox %s gauge refresh failed for service=%s, keeping last value: %s",
+                "dead_lettered",
+                service,
+                e.toString(),
+            )
+            return
+        }
+        cached.set(value)
         liveness?.recordSuccess()
+    }
+
+    private companion object {
+        val LOG: Logger = Logger.getLogger(AbstractOutboxDeadLetterGauge::class.java)
     }
 }

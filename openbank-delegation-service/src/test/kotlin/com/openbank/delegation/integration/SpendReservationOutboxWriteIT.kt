@@ -43,9 +43,10 @@ class SpendReservationOutboxWriteIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         // The dispatcher's claim UPDATE restamps an outbox row's xmin, which would race the
         // atomicity assertion below; nothing else in this class needs it running.
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out") +
-                mapOf("openbank.outbox.dispatch-enabled" to "false")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "approval-group-revisions-out",
+        ) + mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()
     }

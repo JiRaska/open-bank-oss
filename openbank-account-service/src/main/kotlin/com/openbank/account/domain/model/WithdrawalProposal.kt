@@ -32,6 +32,12 @@ data class WithdrawalProposal(
     val note: String? = null,
     val status: WithdrawalProposalStatus = WithdrawalProposalStatus.PENDING,
     val approvalId: String? = null,
+    /** Immutable authority snapshot captured when the proposal is created. */
+    val delegationGrantId: UUID? = null,
+    val approvalGroupId: UUID? = null,
+    val approvalGroupRevision: Long? = null,
+    val requiredApprovals: Int = 1,
+    val eligibleApproverIds: Set<UUID> = emptySet(),
     val decidedBy: UUID? = null,
     val decidedAt: OffsetDateTime? = null,
     val scaSessionId: UUID? = null,
@@ -42,6 +48,10 @@ data class WithdrawalProposal(
         require(amountMinor > 0) { "amountMinor must be positive" }
         require(currency.length == ISO_CURRENCY_CODE_LENGTH) { "currency must be ISO 4217" }
         require(expiresAt.isAfter(createdAt)) { "expiresAt must be after createdAt" }
+        require(requiredApprovals >= 1) { "requiredApprovals must be positive" }
+        require(eligibleApproverIds.isEmpty() || requiredApprovals <= eligibleApproverIds.size) {
+            "requiredApprovals cannot exceed the immutable eligible roster"
+        }
     }
 
     /**

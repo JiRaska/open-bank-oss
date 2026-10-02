@@ -126,20 +126,7 @@ BUILTIN_ROLES = frozenset({"offline_access", "uma_authorization", "uma_protectio
 # saying so, and the close-out PR DELETES that realm's entry rather than emptying its dimensions.
 # (An entry with empty sets is not the same statement — it would assert an empty artifact.)
 # ---------------------------------------------------------------------------
-IMPORT_BASELINE = {
-    "openbank": {
-        "roles": {"ROLE_ADMIN", "ROLE_API", "ROLE_OPERATOR", "ROLE_VIEWER"},
-        "clients": {"openbank-admin-ui", "openbank-services"},
-        "users": {"admin@openbank.local"},
-    },
-    "openbank-customers": {
-        # `defaultRoles` (the flat Keycloak <=12 spelling this artifact still uses) is not a role
-        # DECLARATION and _names does not read it; ROLE_CUSTOMER is declared under roles.realm.
-        "roles": {"ROLE_CUSTOMER"},
-        "clients": {"openbank-app"},
-        "users": set(),
-    },
-}
+IMPORT_BASELINE: dict = {}
 
 DIMENSIONS = ("roles", "clients", "users")
 

@@ -58,12 +58,21 @@ class PaymentRailProjectionConsumer(
         val paymentId = root.railText("paymentId")
         val reason = root.railText("returnReasonCode").takeIf(RETURN_REASON::matches)
         val reversal = root.path("reversalPerformed").takeIf { it.isBoolean }?.asBoolean()
+        val reversalTransactionId = root.path("reversalTransactionId")
+            .takeIf { !it.isMissingNode && !it.isNull }
+            ?.let {
+                require(it.isTextual) { "invalid reversal transaction identity" }
+                it.asText()
+            }
         val version = root.railVersion(requireStrictRevisions)
         val occurredAt = Instant.parse(root.railText("occurredAt"))
         require(railUuid(paymentId) && reversal != null && version > 0) {
             "SEPA return event misses evidence identity"
         }
-        RailProjectionEvent.sepaReturn(paymentId, reason, reversal, version, occurredAt)
+        require(reversalTransactionId == null || (reversal && railUuid(reversalTransactionId))) {
+            "SEPA return event has an unsupported reversal identity"
+        }
+        RailProjectionEvent.sepaReturn(paymentId, reason, reversal, reversalTransactionId, version, occurredAt)
     }
 
     private suspend fun consume(payload: String, stream: String, parse: (JsonNode) -> RailProjectionEvent?) {
@@ -272,11 +281,13 @@ private data class RailProjectionEvent(
             paymentId: String,
             reason: String?,
             reversalPerformed: Boolean,
+            reversalTransactionId: String?,
             version: Long,
             at: Instant,
         ): RailProjectionEvent {
             val payment = "transaction:$paymentId"
             val evidence = "return-evidence:sepa:$paymentId:$version"
+            val reversal = reversalTransactionId?.let { "reversal-transaction:$it" }
             val label = buildString {
                 append("SEPA return")
                 reason?.let { append(" · ").append(it) }
@@ -288,11 +299,25 @@ private data class RailProjectionEvent(
                 "sepa-payment",
                 version,
                 at,
-                listOf(
+                listOfNotNull(
                     RailNode(payment, "PAYMENT", "sepa-payment", paymentId, "Payment", at, version),
                     RailNode(evidence, "RETURN_EVIDENCE", "sepa-payment", paymentId, label, at, version),
+                    reversalTransactionId?.let { id ->
+                        RailNode(
+                            "reversal-transaction:$id",
+                            "REVERSAL_TRANSACTION",
+                            "sepa-payment",
+                            id,
+                            "Reversal booked",
+                            at,
+                            version,
+                        )
+                    },
                 ),
-                listOf(RailEdge(payment, evidence, "RETURNED_BY")),
+                listOfNotNull(
+                    RailEdge(payment, evidence, "RETURNED_BY"),
+                    reversal?.let { RailEdge(payment, it, "REVERSED_BY") },
+                ),
             )
         }
     }
