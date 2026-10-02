@@ -134,7 +134,7 @@ class DelegationResource(
         @HeaderParam(CUSTOMER_ACTOR_PARTY_HEADER) customerActorPartyId: UUID?,
     ): DelegationPreviewResponse {
         requireNotNull(request) { "request body is required" }
-        previewDelegation.preview(
+        val preview = previewDelegation.preview(
             PreviewDelegationCommand(
                 callerPartyId = customerPartyId,
                 actorPartyId = customerActorPartyId,
@@ -145,6 +145,7 @@ class DelegationResource(
                 capabilities = request.capabilities,
                 approvalPolicy = request.approvalPolicy,
                 requiredApprovals = request.requiredApprovals,
+                approvalGroupId = request.approvalGroupId,
                 perTransactionLimit = request.perTransactionLimit?.toDomain(),
                 dailyLimit = request.dailyLimit?.toDomain(),
                 monthlyLimit = request.monthlyLimit?.toDomain(),
@@ -153,7 +154,12 @@ class DelegationResource(
                 validTo = request.validTo,
             ),
         )
-        return DelegationPreviewResponse()
+        return DelegationPreviewResponse(
+            scaReference = preview.scaReference,
+            approvalGroupId = preview.approvalGroupId,
+            approvalGroupRevision = preview.approvalGroupRevision,
+            requiredApprovals = preview.requiredApprovals,
+        )
     }
 
     // SecurityIdentity, not @Context SecurityContext: in a Kotlin `suspend` resource method the
@@ -197,6 +203,7 @@ class DelegationResource(
                     capabilities = request.capabilities,
                     approvalPolicy = request.approvalPolicy,
                     requiredApprovals = request.requiredApprovals,
+                    approvalGroupId = request.approvalGroupId,
                     perTransactionLimit = request.perTransactionLimit?.toDomain(),
                     dailyLimit = request.dailyLimit?.toDomain(),
                     monthlyLimit = request.monthlyLimit?.toDomain(),
