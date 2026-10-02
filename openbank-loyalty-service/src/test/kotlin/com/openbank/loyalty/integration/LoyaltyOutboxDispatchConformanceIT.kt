@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.loyalty.integration
 
-import com.openbank.loyalty.infrastructure.outbox.LoyaltyOutboxDispatcher
-import com.openbank.loyalty.infrastructure.persistence.repository.LoyaltyOutboxRepositoryImpl
-import com.openbank.loyalty.it.LoyaltyPostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
+import com.openbank.loyalty.infrastructure.outbox.LoyaltyOutboxDispatcher
+import com.openbank.loyalty.infrastructure.persistence.repository.LoyaltyOutboxRepositoryImpl
+import com.openbank.loyalty.it.LoyaltyPostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(LoyaltyOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = LoyaltyOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = LoyaltyOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(LoyaltyPostgresTestResource::class)
 class LoyaltyOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 

@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.integration
 
-import com.openbank.statement.infrastructure.outbox.StatementOutboxDispatcher
-import com.openbank.statement.infrastructure.persistence.repository.StatementOutboxRepositoryImpl
-import com.openbank.statement.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
+import com.openbank.statement.infrastructure.outbox.StatementOutboxDispatcher
+import com.openbank.statement.infrastructure.persistence.repository.StatementOutboxRepositoryImpl
+import com.openbank.statement.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(StatementOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = StatementOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = StatementOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class StatementOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -41,7 +44,7 @@ class StatementOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("statement-events-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("account-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory("account-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

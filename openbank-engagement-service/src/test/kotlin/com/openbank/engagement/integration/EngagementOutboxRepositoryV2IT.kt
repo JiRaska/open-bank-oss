@@ -24,7 +24,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(EngagementOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(EngagementPostgresTestResource::class)
 class EngagementOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 

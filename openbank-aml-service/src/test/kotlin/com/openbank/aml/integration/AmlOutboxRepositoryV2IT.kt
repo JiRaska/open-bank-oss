@@ -25,7 +25,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(AmlOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = AmlOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = AmlOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class AmlOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 

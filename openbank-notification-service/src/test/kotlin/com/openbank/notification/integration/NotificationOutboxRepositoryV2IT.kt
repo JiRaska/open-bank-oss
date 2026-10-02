@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.notification.integration
 
-import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
-import com.openbank.notification.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
+import com.openbank.notification.infrastructure.persistence.repository.NotificationOutboxRepositoryImpl
+import com.openbank.notification.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -25,7 +25,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(NotificationOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = NotificationOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = NotificationOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class NotificationOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 

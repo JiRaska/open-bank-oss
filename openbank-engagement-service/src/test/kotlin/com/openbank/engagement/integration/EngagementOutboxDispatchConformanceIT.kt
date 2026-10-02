@@ -27,7 +27,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(EngagementOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = EngagementOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(EngagementPostgresTestResource::class)
 class EngagementOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -40,7 +43,13 @@ class EngagementOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("engagement-outbox-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("campaign-banner-placements-in", "dispute-events-in", "fraud-hold-events-in", "lending-events-in", "party-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory(
+                    "campaign-banner-placements-in",
+                    "dispute-events-in",
+                    "fraud-hold-events-in",
+                    "lending-events-in",
+                    "party-events-in",
+                )
 
         override fun stop() = InMemoryConnector.clear()
     }
