@@ -236,12 +236,12 @@ locals {
   # Measured 2026-09-30 on the live cluster: summed container REQUESTS of those 26
   # clusters' 52 instance pods, grouped by the AZ each pod runs in. Grouped by AZ
   # because it cannot be pooled across AZs: a CNPG instance is bound to its EBS
-  # volume, and the volume to its AZ. Total 5.80 vCPU / 14.88 GiB (memory raised by #11621);
+  # volume, and the volume to its AZ. Total 5.80 vCPU / 15.25 GiB (memory raised by #11621, sanctions-db by #11782);
   # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
   # in gitops outgrow this table, so the limit below cannot silently fall behind.
   stateful_load_by_zone = {
     "eu-north-1a" = { cpu = 0.55, memory_gib = 1.375, pods = 4 }
-    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.125, pods = 41 }
+    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.5, pods = 41 }
     "eu-north-1c" = { cpu = 1.00, memory_gib = 2.375, pods = 7 }
   }
   # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
@@ -306,7 +306,16 @@ resource "kubectl_manifest" "nodepool_stateful" {
             # capacity) cannot hold and r (8 GiB/vCPU) would pay for idle memory.
             { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["m"] },
             { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
-            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["xlarge", "2xlarge"] },
+            # `large` admitted 2026-10-02 (#11608): after #11621/#11782 no routed pod's 12h
+            # working set exceeds its request (max sanctions-db-1 540/640Mi), and the worst
+            # node packed to requests on a large (1.67 vCPU / 5.8 GiB left for DBs after
+            # DaemonSets) keeps ~40% memory free. Excluded from `default` for the mixed-
+            # workload evictions of 2026-08-02; that evidence does not apply to a tainted,
+            # databases-only pool. Adding a size does NOT drift existing xlarge nodes (they
+            # still match), so nothing restarts: new nodeclaims after an interruption or an
+            # AMI drift simply pick the cheaper fitting shape. The limit below stays sized in
+            # xlarge units, a conservative cap for a mix of both.
+            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["large", "xlarge", "2xlarge"] },
             # All three AZs: every AZ holds target volumes (4/41/7 pods, 2026-09-30).
             { key = "topology.kubernetes.io/zone", operator = "In", values = keys(local.stateful_load_by_zone) },
           ]
