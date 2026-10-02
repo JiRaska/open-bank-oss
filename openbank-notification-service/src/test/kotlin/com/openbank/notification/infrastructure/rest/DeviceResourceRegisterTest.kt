@@ -143,7 +143,7 @@ class DeviceResourceRegisterTest {
         val response = resource.list(null, null)
 
         assertThat(response.status).isEqualTo(Response.Status.BAD_REQUEST.statusCode)
-        coVerify(exactly = 0) { repo.listByParty(any(), null) }
+        coVerify(exactly = 0) { repo.listByParty(any(), any()) }
     }
 
     @Test
