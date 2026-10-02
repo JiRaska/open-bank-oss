@@ -4,6 +4,7 @@
 
 package com.openbank.libs.identity
 
+import com.openbank.libs.util.Hex
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -31,6 +32,6 @@ object BlindIndex {
         val mac = Mac.getInstance("HmacSHA256")
         mac.init(SecretKeySpec(pepper, "HmacSHA256"))
         val digest = mac.doFinal(value.toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xFF) }
+        return Hex.lower(digest)
     }
 }

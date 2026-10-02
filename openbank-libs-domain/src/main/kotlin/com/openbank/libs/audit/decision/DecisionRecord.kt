@@ -5,6 +5,7 @@
 package com.openbank.libs.audit.decision
 
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.util.Hex
 import java.security.MessageDigest
 import java.time.Instant
 import java.time.format.DateTimeParseException
@@ -144,7 +145,7 @@ data class InputDigest(val hex: String) {
                     appendLengthPrefixed(buffer, value)
                 }
             val digestBytes = MessageDigest.getInstance("SHA-256").digest(buffer.toByteArray())
-            val hex = digestBytes.joinToString(separator = "") { "%02x".format(it) }
+            val hex = Hex.lower(digestBytes)
             return InputDigest(hex)
         }
 

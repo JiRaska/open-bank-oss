@@ -62,6 +62,13 @@ import java.time.ZoneId
  * transaction-scoped advisory lock so only one pod's tick actually executes; the losing pod's
  * tick is a no-op — not a missed day, since the winning pod still covers the full catch-up gap
  * above.
+ *
+ * **Re-check of a late CUTOFF day.** The forward cursor above only ever moves forward, so a day
+ * *behind* it is never checked again by this cron. [AccountingDayScheduler] closes that gap by
+ * calling [runTieOutFor] for a CUTOFF day whose latest run predates its cutoff (#11790). Such a run
+ * is written for an OLD `as_of`, which is why [TieOutRunRepository.findLatest] orders by `as_of`
+ * and not by `runAt` — otherwise the re-check would drag this cursor back and re-walk every later
+ * day (#11680).
  */
 @ApplicationScoped
 class TieOutScheduler(
@@ -170,7 +177,13 @@ class TieOutScheduler(
         return gap.take(maxCatchUpDays)
     }
 
-    private suspend fun runTieOutFor(asOf: LocalDate) {
+    /**
+     * Run the tie-out control for one business date and record the run. Called by the daily
+     * cron above and by [AccountingDayScheduler] to re-check a CUTOFF day whose only verdict
+     * predates its cutoff (a day cut off late never gets a post-cutoff run from the daily
+     * catch-up, which only moves forward). Idempotent: each call records one more run.
+     */
+    suspend fun runTieOutFor(asOf: LocalDate) {
         log.infof("Sub-ledger tie-out check for %s", asOf)
         // Aggregate per-account outcomes rather than mutating counters inside the loop lambda:
         // the accumulation is the same, but it reads as one expression and CodeQL can actually

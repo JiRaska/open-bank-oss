@@ -469,8 +469,7 @@ data class Deal(
         }
     }
 
-    private fun limitNote(check: LimitCheck) =
-        "limit ${check.limit} ${check.currency}, exposure after ${check.exposureAfter}, headroom ${check.headroomAfter}"
+    private fun limitNote(check: LimitCheck) = LimitNote.format(check)
 
     companion object {
         const val CZK = "CZK"
