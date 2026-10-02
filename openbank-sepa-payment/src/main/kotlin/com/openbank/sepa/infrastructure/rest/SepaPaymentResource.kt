@@ -88,6 +88,10 @@ class SepaPaymentResource(
         // Keys are per service and caller: another principal reusing this key is a different key.
         val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
+        // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
+        // hold is a 400 (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
+        // record, row, outbox event or downstream call behind.
+        val command = request.toCommand(idempotencyKey, requestHash)
         when (
             val reservation = idempotencyStore.reserve(
                 scope,
@@ -108,7 +112,7 @@ class SepaPaymentResource(
 
         var created = false
         val payment = try {
-            paymentUseCase.createPayment(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+            paymentUseCase.createPayment(command).also { created = true }
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
