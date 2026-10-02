@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.rest.dto
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -40,7 +41,7 @@ class SepaPaymentDtosTest {
         assertThat(command.debtorAccountId).isEqualTo(accountId)
         assertThat(command.debtorIban).isEqualTo("DE89370400440532013000")
         assertThat(command.creditorBic).isEqualTo("DEUTDEFF")
-        assertThat(command.amount).isEqualByComparingTo(BigDecimal("205.45"))
+        assertThat(command.amount).isEqualTo(Money.of(BigDecimal("205.45"), "EUR"))
         assertThat(command.remittanceInfo).isEqualTo("Invoice 1")
         assertThat(command.endToEndId).isEqualTo("E2E-1")
     }
@@ -108,8 +109,7 @@ class SepaPaymentDtosTest {
             creditorIban = "FR7630006000011234567890189",
             creditorName = "Bob Example",
             creditorBic = "DEUTDEFF",
-            amount = BigDecimal("42.00"),
-            currency = "EUR",
+            amount = Money.of(BigDecimal("42.00"), "EUR"),
             remittanceInfo = "ref",
             endToEndId = "E2E-resp",
             rejectReason = null,

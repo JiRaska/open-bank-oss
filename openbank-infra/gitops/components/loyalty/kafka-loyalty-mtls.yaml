@@ -1,9 +1,10 @@
 # Kafka mTLS identity + ACLs for openbank-loyalty-service (ADR-0137 Tier 2).
 #
-# loyalty-service only PRODUCES openbank.loyalty.events (its outbox). It consumes nothing today,
-# so it holds no Read ACL and needs no consumer group: the ACL set is the whole statement of what
-# this identity can do. A future consumer must add its Read/group ACLs and wire its dead-letter
-# topic in the same change.
+# loyalty-service PRODUCES openbank.loyalty.events (its outbox) and, since ADR-0310 D3,
+# CONSUMES openbank.referral.qualified.v1 (group: openbank-loyalty-service, the SmallRye
+# fallback group id — the channel sets no group.id key, see #2945) to earn Lístky for a
+# qualified referral. Its DLQ topic for that channel needs its own Write ACL (#5745): without
+# it the DLQ send itself fails and the consumer wedges on the failure it was meant to park.
 #
 # Identity model (ADR-0137): one KafkaUser = one mTLS client cert = one principal for all of this
 # service's Kafka traffic. The Strimzi User Operator mints the per-user Secret of the same name in
@@ -29,3 +30,25 @@ spec:
           name: openbank.loyalty.events
           patternType: literal
         operations: [Write, Describe]
+      - resource:
+          type: topic
+          name: openbank.referral.qualified.v1
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-loyalty-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      # #5745: SmallRye dead-letter topic for the `referral-qualified-in` channel
+      # (failure-strategy: dead-letter-queue, set in the service's application.yaml). Without
+      # Write here the DLQ send itself FAILS and the consumer wedges on the very failure it
+      # was meant to park.
+      - resource:
+          type: topic
+          name: openbank.dlq.loyalty.referral-qualified-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
