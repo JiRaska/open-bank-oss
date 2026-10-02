@@ -15,7 +15,11 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.http.HttpClient
+import java.net.http.HttpHeaders
 import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.nio.ByteBuffer
+import java.util.concurrent.Flow
 
 class BoundedBodyHandlersTest {
     private lateinit var server: HttpServer
@@ -59,5 +63,32 @@ class BoundedBodyHandlersTest {
     @Test
     fun `the same body passes when the cap allows it`() {
         assertThat(http.send(get("/big"), BoundedBodyHandlers.ofString(64 * 1024)).body()).hasSize(64 * 1024)
+    }
+
+    @Test
+    fun `subscriber requests one item at a time and stops requesting after the cap`() {
+        val info = object : HttpResponse.ResponseInfo {
+            override fun statusCode() = 200
+            override fun headers(): HttpHeaders = HttpHeaders.of(emptyMap<String, List<String>>()) { _, _ -> true }
+            override fun version() = HttpClient.Version.HTTP_1_1
+        }
+        val subscriber = BoundedBodyHandlers.ofString(5).apply(info)
+        val requests = mutableListOf<Long>()
+        var cancelled = false
+        subscriber.onSubscribe(object : Flow.Subscription {
+            override fun request(n: Long) {
+                requests.add(n)
+            }
+            override fun cancel() {
+                cancelled = true
+            }
+        })
+        assertThat(requests).containsExactly(1L)
+
+        subscriber.onNext(listOf(ByteBuffer.wrap(byteArrayOf(1, 2, 3))))
+        assertThat(requests).containsExactly(1L, 1L)
+        subscriber.onNext(listOf(ByteBuffer.wrap(byteArrayOf(4, 5, 6))))
+        assertThat(cancelled).isTrue()
+        assertThat(requests).containsExactly(1L, 1L)
     }
 }

@@ -52,13 +52,13 @@ object BoundedBodyHandlers {
 
         override fun onSubscribe(subscription: Flow.Subscription) {
             this.subscription = subscription
-            subscription.request(Long.MAX_VALUE)
+            subscription.request(1)
         }
 
         override fun onNext(item: List<ByteBuffer>) {
             if (result.isDone) return
             for (bb in item) {
-                if (buffer.size() + bb.remaining() > maxBytes) {
+                if (bb.remaining() > maxBytes - buffer.size()) {
                     subscription?.cancel()
                     result.completeExceptionally(IOException("response body exceeds $maxBytes bytes"))
                     return
@@ -67,6 +67,7 @@ object BoundedBodyHandlers {
                 bb.get(bytes)
                 buffer.write(bytes)
             }
+            subscription?.request(1)
         }
 
         override fun onError(throwable: Throwable) {
