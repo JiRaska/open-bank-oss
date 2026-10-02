@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.10.0...treasury-service-v0.11.0) (2026-10-02)
+
+
+### Features
+
+* **admin-ui:** make the treasury deal detail readable for a dealer ([#11711](https://github.com/JiRaska/open-bank-oss/issues/11711)) ([b6efd39](https://github.com/JiRaska/open-bank-oss/commit/b6efd395b570f42a68ca561ecb06440e561d03a0))
+* **treasury:** age nostro reconciliation breaks, alert on aged ones, accept MT940 ([#11673](https://github.com/JiRaska/open-bank-oss/issues/11673)) ([396fff7](https://github.com/JiRaska/open-bank-oss/commit/396fff740047221b2d820d311648344ec590c65c))
+
+
+### Bug Fixes
+
+* **treasury:** actual vs projected daily position, Prague day, Czech UI ([#11708](https://github.com/JiRaska/open-bank-oss/issues/11708)) ([c5470b8](https://github.com/JiRaska/open-bank-oss/commit/c5470b871282135b61e77a23408f35fdaf3f28d4))
+* **treasury:** take deal business dates in the bank zone, not the JVM's ([#11717](https://github.com/JiRaska/open-bank-oss/issues/11717)) ([923a379](https://github.com/JiRaska/open-bank-oss/commit/923a37993edd585c1920a1e6b53cdd9eb6add788))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.9.0...treasury-service-v0.10.0) (2026-09-30)
 
 
