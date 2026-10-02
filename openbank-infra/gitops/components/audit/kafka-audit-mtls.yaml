@@ -44,6 +44,24 @@ spec:
     acls:
       - resource:
           type: topic
+          name: openbank.context.audit.commitments
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: group
+          name: audit-service-context-commitments
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.audit.context-audit-commitments-in
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.agent.audit.events
           patternType: literal
         operations: [Read, Describe]
@@ -146,6 +164,14 @@ spec:
       - resource:
           type: topic
           name: openbank.cards.events
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      # Card money path (ADR-0283 phase 1, #8809). Separate topic from the lifecycle one above;
+      # without this grant the subscription is ACL-denied as a silent retry loop, not a red pod.
+      - resource:
+          type: topic
+          name: openbank.card.processing.events
           patternType: literal
         operations: [Read, Describe]
         host: "*"

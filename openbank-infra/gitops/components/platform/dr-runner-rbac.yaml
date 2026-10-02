@@ -47,6 +47,13 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["get", "list", "watch", "create", "delete"]
+  # A Kyverno GeneratingPolicy creates the isolation policy when the namespace
+  # appears. The runner can only observe its exact name; it cannot create an
+  # additive allow rule or remove isolation.
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["networkpolicies"]
+    resourceNames: ["ledger-dr-check-isolation"]
+    verbs: ["get"]
   # CNPG: read the source clusters/backups (to pick the restore point) and
   # manage the recovery cluster in the verify namespace.
   - apiGroups: ["postgresql.cnpg.io"]

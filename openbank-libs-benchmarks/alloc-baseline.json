@@ -1,0 +1,24 @@
+{
+  "metric": "gc.alloc.rate.norm (B/op)",
+  "tolerance": "max(5%, 16 B) above baseline",
+  "regenerate": "./gradlew :openbank-libs-benchmarks:jmh && python3 .github/scripts/check-bench-alloc-baseline.py --results openbank-libs-benchmarks/build/reports/jmh/results.json --write-baseline",
+  "benchmarks": {
+    "com.openbank.libs.benchmarks.AuditChainBench.link": 12872.5,
+    "com.openbank.libs.benchmarks.AuditChainBench.verify1k": 6454959.0,
+    "com.openbank.libs.benchmarks.CanonicalJsonBench.write": 1656.0,
+    "com.openbank.libs.benchmarks.FingerprintBench.of300B": 1152.0,
+    "com.openbank.libs.benchmarks.FingerprintBench.of4KB": 8736.1,
+    "com.openbank.libs.benchmarks.FingerprintBench.ofDto": 3555.5,
+    "com.openbank.libs.benchmarks.IbanBench.isValid": 1816.0,
+    "com.openbank.libs.benchmarks.IbanBench.ofSpaced": 2072.0,
+    "com.openbank.libs.benchmarks.Iso20022Bench.buildPacs008": 63432.3,
+    "com.openbank.libs.benchmarks.Iso20022Bench.readPacs008": 132918.9,
+    "com.openbank.libs.benchmarks.Iso20022Bench.validatePacs008": 194420.8,
+    "com.openbank.libs.benchmarks.MoneyBench.of": 48.0,
+    "com.openbank.libs.benchmarks.MoneyBench.plus": 64.0,
+    "com.openbank.libs.benchmarks.MoneyBench.round": 24.0,
+    "com.openbank.libs.benchmarks.PiiMaskBench.email": 248.0,
+    "com.openbank.libs.benchmarks.PiiMaskBench.iban": 352.0,
+    "com.openbank.libs.benchmarks.PiiMaskBench.pan": 1256.0
+  }
+}

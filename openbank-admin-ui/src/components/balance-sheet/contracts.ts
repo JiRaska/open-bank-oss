@@ -36,6 +36,9 @@ export const instrumentSchema = z.object({
     resetFrequencyMonths: z.number().int().nullable(), nextResetDate: z.string().nullable(),
   }).nullable(),
   counterpartyRef: z.string().nullable(), ifrs9Stage: z.string().nullable(),
+  // risk-engine 1.20.0 (#11107): the source contract's human reference (a loan's UV-YYYY-NNNNNN).
+  // nullish: an older risk-engine omits it, and runs recorded before it carry null.
+  contractNumber: z.string().nullish(),
   loan: z.looseObject({
     method: z.string(), periodsPerYear: z.number().int(), remainingPeriods: z.number().int(), nextDueDate: z.string().nullable(),
   }).nullable(),
@@ -344,6 +347,29 @@ export type MinReservePeriod = z.infer<typeof minReservePeriodSchema>
 export type MinReserves = z.infer<typeof minReservesSchema>
 export type ReserveBase = z.infer<typeof reserveBaseSchema>
 export type ReserveLine = z.infer<typeof reserveLineSchema>
+
+// Declarative risk limits (risk-engine GET /snapshots/{id}/limits, ADR-0313 D9).
+export const limitStatus = z.enum(['OK', 'EARLY_WARNING', 'BREACH', 'NOT_EVALUABLE'])
+export const limitEvaluationSchema = z.object({
+  limitId: z.string(), metric: z.string(), metricDescription: z.string(),
+  bound: z.enum(['MIN', 'MAX']), limit: money, earlyWarning: money, status: limitStatus,
+  /** Null exactly when NOT_EVALUABLE: a gap is never drawn as a figure. */
+  value: money.nullable(),
+  basis: z.string().nullable(),
+  /** The gap in the limit's input; set only when NOT_EVALUABLE. */
+  reason: z.string().nullable(),
+  citation: z.string(),
+})
+export const limitsSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance,
+  limitSet: z.object({ id: z.string(), version: z.string(), source: z.string() }),
+  curveSetId: z.string().nullable(),
+  limits: z.array(limitEvaluationSchema),
+  summary: z.record(z.string(), z.number()),
+  notes: z.array(z.string()),
+})
+export type Limits = z.infer<typeof limitsSchema>
+export type LimitEvaluation = z.infer<typeof limitEvaluationSchema>
 
 export type Liquidity = z.infer<typeof liquiditySchema>
 export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>

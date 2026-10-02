@@ -134,6 +134,7 @@ data class InstrumentDto(
     val counterpartyRef: String?,
     val ifrs9Stage: String?,
     val loan: LoanTermsDto?,
+    val contractNumber: String? = null,
 )
 
 data class InstrumentsResponse(val runId: UUID, val asOf: String, val instruments: List<InstrumentDto>)
@@ -158,6 +159,7 @@ fun Instrument.toDto() = InstrumentDto(
     },
     counterpartyRef = counterpartyRef,
     ifrs9Stage = ifrs9Stage,
+    contractNumber = contractNumber,
     loan = (extension as? LoanExtension)?.let { ext ->
         LoanTermsDto(
             method = ext.method.name,

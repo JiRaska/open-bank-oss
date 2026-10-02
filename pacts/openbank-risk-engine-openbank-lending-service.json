@@ -47,6 +47,7 @@
           "asOf": "2020-06-30",
           "loans": [
             {
+              "contractNumber": "UV-2020-000001",
               "counterpartyRef": "0190a4c0-0000-7000-8000-000000000001",
               "currency": "CZK",
               "disbursedOn": "2000-01-31",
@@ -104,6 +105,15 @@
                 {
                   "match": "type",
                   "min": 1
+                }
+              ]
+            },
+            "$.loans[*].contractNumber": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^UV-[0-9]{4}-[0-9]{6,}$"
                 }
               ]
             },
