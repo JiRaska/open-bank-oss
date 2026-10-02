@@ -4,6 +4,8 @@
 
 package com.openbank.fx.domain.model
 
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.time.Instant
@@ -50,14 +52,9 @@ data class FxRate(
     fun inverted(): FxRate = copy(
         baseCurrency = quoteCurrency,
         quoteCurrency = baseCurrency,
-        bidRate = BigDecimal.ONE.divide(askRate, INVERSE_SCALE, RoundingMode.HALF_UP),
-        askRate = BigDecimal.ONE.divide(bidRate, INVERSE_SCALE, RoundingMode.HALF_UP),
+        bidRate = RoundingPolicy.FX_RATE.divide(BigDecimal.ONE, askRate),
+        askRate = RoundingPolicy.FX_RATE.divide(BigDecimal.ONE, bidRate),
     )
-
-    private companion object {
-        /** Matches the numeric(18,8) the rates are stored at, so a round trip does not drift. */
-        const val INVERSE_SCALE = 8
-    }
 }
 
 data class FxConversion(
@@ -87,11 +84,33 @@ enum class FxConversionStatus { PENDING, SETTLED, FAILED, REVERSED }
 object FxConversionMath {
     private val FEE_RATE = BigDecimal("0.005")
 
-    /** `fromAmount * appliedRate`, rounded HALF_UP to whole minor units. */
-    fun convertedAmountMinorUnits(fromAmountMinorUnits: Long, appliedRate: BigDecimal): Long =
-        BigDecimal(fromAmountMinorUnits).multiply(appliedRate).setScale(0, RoundingMode.HALF_UP).toLong()
+    /**
+     * Converts a source amount in SOURCE minor units into TARGET minor units:
+     * `round(fromMinor / 10^dFrom * appliedRate * 10^dTo)`, HALF_UP ([RoundingPolicy.FX_AMOUNT]).
+     *
+     * Both currencies' fraction digits are required: multiplying source minor units by the rate
+     * directly is only right when the two currencies share a minor-unit exponent — EUR(2)->JPY(0)
+     * would come out 100x too large, JPY->EUR 100x too small. [appliedRate] is target per ONE
+     * source unit (ČNB per-100 quotes are normalised at ingestion, `CnbFixingRate.ratePerUnit`).
+     */
+    fun convertedAmountMinorUnits(
+        fromAmountMinorUnits: Long,
+        fromCurrency: String,
+        toCurrency: String,
+        appliedRate: BigDecimal,
+    ): Long {
+        val from = CurrencyCode.of(fromCurrency)
+        val to = CurrencyCode.of(toCurrency)
+        val target = BigDecimal(fromAmountMinorUnits)
+            .movePointLeft(from.defaultFractionDigits)
+            .multiply(appliedRate)
+        return RoundingPolicy.FX_AMOUNT.round(target, to).movePointRight(to.defaultFractionDigits).longValueExact()
+    }
 
-    /** The bank's 0.5% margin on the source amount, rounded HALF_UP to whole minor units. */
+    /**
+     * The bank's 0.5% margin on the source amount, rounded HALF_UP to whole minor units. Stays in
+     * SOURCE minor units: no currency conversion happens here, so no fraction-digit scaling is needed.
+     */
     fun feeMinorUnits(fromAmountMinorUnits: Long): Long =
         BigDecimal(fromAmountMinorUnits).multiply(FEE_RATE).setScale(0, RoundingMode.HALF_UP).toLong()
 }

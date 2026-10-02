@@ -169,6 +169,20 @@ add('missing labels', [missing], r => {r.issue1 = {};}, 'threw');
 add('missing requested alias', [missing], r => {delete r.issue1;}, 'threw');
 add('null alias without error', null, () => {}, 'threw');
 add('ordinary security response', null, r => {r.issue0 = r.issue1;}, 'failed');
+const pricingTest = 'openbank-infra/gitops/components/pricing/pricing_rest_ext_test.rego';
+const pricingPolicy = 'openbank-infra/gitops/components/pricing/pricing_rest_ext.rego';
+add('Rego regression test from pricing security fix', null, r => {
+  r.issue0 = r.issue1;
+  r.pullRequest.files.nodes.push({path: pricingTest});
+}, 'passed');
+add('production Rego policy is not a test', null, r => {
+  r.issue0 = r.issue1;
+  r.pullRequest.files.nodes.push({path: pricingPolicy});
+}, 'failed');
+add('arbitrary Rego file is not a test', null, r => {
+  r.issue0 = r.issue1;
+  r.pullRequest.files.nodes.push({path: 'openbank-infra/opa/policies/pricing.rego'});
+}, 'failed');
 (async () => {
   for (const fixture of fixtures) {
     let result = 'passed';

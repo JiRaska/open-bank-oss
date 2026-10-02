@@ -1,0 +1,104 @@
+{
+  "consumer": {
+    "name": "openbank-settlement-service"
+  },
+  "interactions": [
+    {
+      "description": "POST the payee credit leg of a settlement",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the balance account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "currency": "CZK",
+          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 credit leg",
+          "referenceId": "settlement-credit-5e77e000-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/credit"
+      },
+      "response": {
+        "body": {
+          "accountId": "d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5",
+          "currency": "CZK"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST the payer debit leg of a settlement",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the balance account"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "currency": "CZK",
+          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
+          "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/debit"
+      },
+      "response": {
+        "body": {
+          "accountId": "d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5",
+          "currency": "CZK"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST a settlement debit leg with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "currency": "CZK",
+          "description": "Settlement 5e77e000-0000-4000-8000-000000000001 debit leg",
+          "referenceId": "settlement-debit-5e77e000-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/debit"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

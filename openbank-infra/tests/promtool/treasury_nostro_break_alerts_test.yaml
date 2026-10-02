@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: Apache-2.0
+# Behavioural tests for the ADR-0315 D7 nostro break alert: a must-FIRE case, a must-NOT-fire
+# control at 0, and a cold pod (NaN until its first sweep) that must not fire either.
+rule_files:
+  - prometheus-rules-reconciliation.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "aged breaks held for over 2h fire TreasuryNostroBreaksAged"
+    input_series:
+      - series: 'openbank_treasury_nostro_breaks_aged{pod="treasury-a"}'
+        values: "1+0x150"
+      - series: 'openbank_treasury_nostro_breaks_aged{pod="treasury-b"}'
+        values: "NaN+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryNostroBreaksAged
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Nostro reconciliation break(s) past the age threshold"
+              description: "treasury-service reports open nostro breaks older than the configured business-day threshold. A break is never auto-posted: investigate each one on the admin-ui nostro page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the correspondent or by a ledger booking through the normal deal lifecycle."
+
+  - interval: 1m
+    name: "aged breaks for less than 2h do NOT fire yet"
+    input_series:
+      - series: 'openbank_treasury_nostro_breaks_aged{pod="treasury-a"}'
+        values: "1+0x150"
+    alert_rule_test:
+      - eval_time: 100m
+        alertname: TreasuryNostroBreaksAged
+        exp_alerts: []
+
+  - interval: 1m
+    name: "no aged breaks does NOT fire"
+    input_series:
+      - series: 'openbank_treasury_nostro_breaks_aged{pod="treasury-a"}'
+        values: "0+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryNostroBreaksAged
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a cold pod reading NaN does NOT fire"
+    input_series:
+      - series: 'openbank_treasury_nostro_breaks_aged{pod="treasury-a"}'
+        values: "NaN+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryNostroBreaksAged
+        exp_alerts: []
