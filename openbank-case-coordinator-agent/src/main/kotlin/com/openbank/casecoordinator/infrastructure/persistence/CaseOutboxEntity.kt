@@ -5,15 +5,14 @@
 
 package com.openbank.casecoordinator.infrastructure.persistence
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
-import jakarta.persistence.Column
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
-import java.time.Instant
 
+/**
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V10__outbox_v2.sql`.
+ */
 @Entity
 @Table(name = "case_outbox")
-class CaseOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class CaseOutboxEntity : PanacheOutboxEntityV2()

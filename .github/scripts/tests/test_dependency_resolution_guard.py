@@ -12,18 +12,61 @@ ROOT = Path(__file__).resolve().parents[3]
 GUARD = ROOT / '.github/scripts/dependency-resolution-strict.init.gradle'
 
 
+WRAPPER_PROPERTIES = ROOT / 'gradle/wrapper/gradle-wrapper.properties'
+
+
+def pinned_archive(properties=WRAPPER_PROPERTIES):
+    url = next(line.split('=', 1)[1].strip() for line in properties.read_text().splitlines()
+               if line.startswith('distributionUrl='))
+    return url.rsplit('/', 1)[1]
+
+
+def installed_distribution(gradle_user_home, properties=WRAPPER_PROPERTIES):
+    """Return the wrapper/dists entry for the pinned distribution, or None if not installed.
+
+    The wrapper marks a finished unpack with `<zip>.ok` next to the unpacked directory; a dir
+    without it is a half-download the wrapper would redo over the network.
+    """
+    archive = pinned_archive(properties)
+    dists = Path(gradle_user_home) / 'wrapper/dists'
+    if any((dists / archive.removesuffix('.zip')).glob(f'*/{archive}.ok')):
+        return dists
+    return None
+
+
+class InstalledDistributionTests(unittest.TestCase):
+    # Must-fail half of the lookup: without it, a lookup that always answered "found" would let
+    # the fixture builds silently fall back to a network download again.
+    def test_absent_or_unfinished_distribution_is_not_found(self):
+        with tempfile.TemporaryDirectory() as home:
+            self.assertIsNone(installed_distribution(home))
+            archive = pinned_archive()
+            unpacked = Path(home) / 'wrapper/dists' / archive.removesuffix('.zip') / 'hash'
+            unpacked.mkdir(parents=True)
+            self.assertIsNone(installed_distribution(home))
+            (unpacked / f'{archive}.ok').touch()
+            self.assertEqual(installed_distribution(home), Path(home) / 'wrapper/dists')
+
+
 class BuildscriptFreeMarkerTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # setup-gradle installs graph init scripts in the runner's Gradle home.
-        # Fixture builds must exercise only our guard, while reusing the already
-        # downloaded Gradle distribution to avoid another network download.
+        # Fixture builds must exercise only our guard, so they get a temp Gradle home that
+        # reuses the already installed distribution. Missing distribution is a FAILURE, not a
+        # skip and not a download: services.gradle.org answering 504 once failed an unrelated
+        # PR here. CI provisions it before the tests (ci.yml gates shard, dependency-submission).
+        distributions = installed_distribution(
+            os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle'))
+        if distributions is None:
+            raise RuntimeError(
+                f'Gradle distribution pinned in {WRAPPER_PROPERTIES.relative_to(ROOT)} is not '
+                'installed under $GRADLE_USER_HOME/wrapper/dists; run ./gradlew --version once '
+                '(CI: .github/scripts/provision-gradle-distribution.sh) before these tests.')
         cls._home = tempfile.TemporaryDirectory()
         cls.gradle_home = Path(cls._home.name)
-        distributions = Path(os.environ.get('GRADLE_USER_HOME', Path.home() / '.gradle')) / 'wrapper/dists'
         (cls.gradle_home / 'wrapper').mkdir()
-        if distributions.is_dir():
-            (cls.gradle_home / 'wrapper/dists').symlink_to(distributions, target_is_directory=True)
+        (cls.gradle_home / 'wrapper/dists').symlink_to(distributions, target_is_directory=True)
 
     @classmethod
     def tearDownClass(cls):

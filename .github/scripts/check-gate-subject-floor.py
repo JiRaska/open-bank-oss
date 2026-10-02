@@ -70,6 +70,7 @@ NO_CORPUS = {
     "ensure-ecr-repository",
     "gate-runner-self-test",
     "pact-provider-version-proof-unit-test",
+    "pact-deployed-record-reconcile",
     "pact-version-probe-fail-closed-unit-test",
     "pact-version-tree-equivalence-unit-test",
     "record-deployment-version-resolver",

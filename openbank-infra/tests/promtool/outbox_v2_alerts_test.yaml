@@ -1,0 +1,111 @@
+# PromQL unit tests for the ADR-0327 D10 outbox rules in prometheus-rules-tier1.yaml.
+#
+# Run via openbank-infra/tests/promtool/run.sh, which unwraps `.spec` out of the SHIPPED
+# PrometheusRule CR -- these assertions run against the deployed expression, not a copy.
+# Every must-fire case is paired with a must-NOT-fire control, so a rule that fired
+# unconditionally could not pass; each was falsified by deleting the clause it covers.
+evaluation_interval: 1m
+rule_files:
+  - prometheus-rules-tier1.yaml
+
+tests:
+  # ---------------------------------------------------------------------------
+  # 1. OutboxOldestRowStale: a 6-minute-old eligible row fires after `for: 10m`;
+  #    a cold pod reading 0 (the seeded value) and a 4-minute-old row never do.
+  # ---------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'openbank_outbox_oldest_age_seconds{service="ledger"}'
+        values: "360x30"
+      - series: 'openbank_outbox_oldest_age_seconds{service="fx"}'
+        values: "0x30"
+      - series: 'openbank_outbox_oldest_age_seconds{service="party"}'
+        values: "240x30"
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: OutboxOldestRowStale
+        exp_alerts: []
+      - eval_time: 12m
+        alertname: OutboxOldestRowStale
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: ledger
+            exp_annotations:
+              summary: "Outbox oldest eligible row stale on ledger"
+              description: "ledger has had an eligible outbox row older than 5m for >10m — the dispatcher is not draining (ADR-0327 D10). Value: 6m 0s."
+
+  # ---------------------------------------------------------------------------
+  # 2. OutboxOldestRowStale control: an age that rises and is drained again
+  #    (backlog cleared inside the `for:` window) must not fire.
+  # ---------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'openbank_outbox_oldest_age_seconds{service="ledger"}'
+        values: "0 0 400 400 400 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"
+    alert_rule_test:
+      - eval_time: 19m
+        alertname: OutboxOldestRowStale
+        exp_alerts: []
+
+  # ---------------------------------------------------------------------------
+  # 3. OutboxClaimSlow: every claim landing in the 2.5s..5s bucket fires; a service
+  #    whose claims all land under 100ms does not.
+  # ---------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'openbank_outbox_claim_seconds_bucket{service="ledger",le="0.1"}'
+        values: "0x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="ledger",le="2.5"}'
+        values: "0x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="ledger",le="5"}'
+        values: "0+12x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="ledger",le="+Inf"}'
+        values: "0+12x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="fx",le="0.1"}'
+        values: "0+12x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="fx",le="2.5"}'
+        values: "0+12x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="fx",le="5"}'
+        values: "0+12x40"
+      - series: 'openbank_outbox_claim_seconds_bucket{service="fx",le="+Inf"}'
+        values: "0+12x40"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: OutboxClaimSlow
+        exp_alerts: []
+      - eval_time: 35m
+        alertname: OutboxClaimSlow
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ledger
+            exp_annotations:
+              subject_period: continuous
+              summary: "Outbox claim p99 above 1s on ledger"
+              description: "ledger outbox claimProcessable p99 has been above 1s for >15m — check the partial indexes from db/outbox-v2-template.sql exist and are valid (ADR-0327 D12 plan gate)."
+
+  # ---------------------------------------------------------------------------
+  # 4. OutboxDeadRate: a counter that advances fires at once; a flat counter (rows
+  #    that died before this hour) does not.
+  # ---------------------------------------------------------------------------
+  - interval: 1m
+    input_series:
+      - series: 'openbank_outbox_dead_total{service="ledger"}'
+        values: "3x30 4x30"
+      - series: 'openbank_outbox_dead_total{service="fx"}'
+        values: "7x60"
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: OutboxDeadRate
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: OutboxDeadRate
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: ledger
+            exp_annotations:
+              subject_period: continuous
+              summary: "Outbox rows dead-lettering on ledger"
+              description: "ledger parked outbox row(s) DEAD in the last hour — see openbank_outbox_dead_lettered for how many sit there; replay via POST …/outbox/requeue after fixing the cause (ADR-0327 D4)."

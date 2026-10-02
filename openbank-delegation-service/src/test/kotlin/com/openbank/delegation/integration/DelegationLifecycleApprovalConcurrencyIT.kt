@@ -44,8 +44,10 @@ class LifecycleApprovalEnabledProfile : QuarkusTestProfile {
 @QuarkusTestResource(PostgresTestResource::class)
 class DelegationLifecycleApprovalConcurrencyIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "approval-group-revisions-out",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }
