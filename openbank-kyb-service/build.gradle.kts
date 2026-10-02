@@ -82,3 +82,11 @@ kover {
         }
     }
 }
+
+// The two outbox-v2 ITs (KybOutboxDispatchConformanceIT, KybOutboxRepositoryV2IT) each boot their own
+// Quarkus app under a distinct test profile; at the default heap the test fork died with
+// OutOfMemoryError (Gradle Test Executor failure, measured on this branch). Per-module, as
+// account-service and case-coordinator-agent do: nothing measures test heap fleet-wide.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+}
