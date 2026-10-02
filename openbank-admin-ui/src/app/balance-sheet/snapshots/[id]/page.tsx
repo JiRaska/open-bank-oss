@@ -328,8 +328,8 @@ function LimitsPanel({ limits, locale }: { limits: Limits; locale: string }) {
           {limits.limits.map(l => (
             <tr key={l.limitId}>
               <td title={l.citation}>
-                <div style={{ fontWeight: 600 }}>{l.limitId}</div>
-                <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{l.metricDescription}</div>
+                <div style={{ fontWeight: 600 }}>{l.metricDescription}</div>
+                <code style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{l.limitId}</code>
               </td>
               <td><StatusBadge status={l.status} tone={LIMIT_TONE[l.status]} label={label[l.status]} /></td>
               <td style={{ textAlign: 'right' }}>{l.value === null ? '—' : pct(l.value)}</td>
