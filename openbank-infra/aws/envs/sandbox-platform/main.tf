@@ -683,17 +683,39 @@ resource "helm_release" "argocd" {
       name  = "configs.params.controller\\.diff\\.server\\.side"
       value = "true"
     },
-    # Keep Karpenter from consolidating the node out from under the singleton
-    # application-controller. Root cause of a ~7h ArgoCD outage (2026-07-11): the
-    # controller's node was Evicted "Underutilized" by Karpenter, went NotReady,
-    # and the StatefulSet pod (ordinal 0, at-most-one) got stuck Terminating — so
-    # no app synced for hours (deploys silently stopped updating). `do-not-disrupt`
-    # tells Karpenter not to voluntarily drain a node running this pod; the
-    # priority class keeps it from being preempted. Same footgun class as the
-    # DaemonSet/critical-pod priority note in CLAUDE.md.
+    # Run the singleton application-controller on the on-demand `stateful` pool
+    # (#11608). Root cause of a ~7h ArgoCD outage (2026-07-11): the controller's node
+    # was Evicted "Underutilized" by Karpenter, went NotReady, and the StatefulSet pod
+    # (ordinal 0, at-most-one) got stuck Terminating -- no app synced for hours. That
+    # was guarded with `karpenter.sh/do-not-disrupt`, which had a cost of its own:
+    # whichever node the pod landed on could never be consolidated or drift-replaced.
+    # 2026-10-02 it pinned an on-demand c6g.xlarge in `default` (AMIDrift pending,
+    # DisruptionBlocked, six money-path DB pods stuck on it). The `stateful` pool
+    # removes the incident class instead of freezing a node: it consolidates only
+    # WhenEmpty (never "Underutilized"), is on-demand (no spot interruption), never
+    # expires, and drift is budgeted to one node with a 1h terminationGracePeriod,
+    # which also bounds the stuck-Terminating case. The node-hang half of 07-11 is
+    # covered by the resources below. Priority class still prevents preemption.
     {
-      name  = "controller.podAnnotations.karpenter\\.sh/do-not-disrupt"
+      name  = "controller.nodeSelector.karpenter\\.sh/nodepool"
+      value = "stateful"
+    },
+    {
+      name  = "controller.tolerations[0].key"
+      value = "openbank.io/stateful"
+    },
+    {
+      name  = "controller.tolerations[0].operator"
+      value = "Equal"
+    },
+    {
+      name  = "controller.tolerations[0].value"
       value = "true"
+      type  = "string"
+    },
+    {
+      name  = "controller.tolerations[0].effect"
+      value = "NoSchedule"
     },
     {
       name  = "controller.priorityClassName"
