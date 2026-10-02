@@ -42,7 +42,7 @@ class RiskLoanInstrumentIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
-    private val loanA = lendingLoan(id = Fixtures.LOAN_A)
+    private val loanA = lendingLoan(id = Fixtures.LOAN_A).copy(contractNumber = "UV-2026-000007")
     private val loanB =
         lendingLoan(
             id = Fixtures.LOAN_B,
@@ -88,6 +88,13 @@ class RiskLoanInstrumentIT {
         )["instruments"]
         assertThat(instruments.map { it["kind"].asText() }).containsOnly("AMORTISING_LOAN")
         assertThat(instruments.map { it["loan"]["remainingPeriods"].asInt() }).containsOnly(6)
+        // #11107: the contract number survives persistence (V8) and reaches the read; B has none.
+        val numbers = instruments.associate { i ->
+            i["id"].asText() to i["contractNumber"]?.takeUnless { it.isNull }?.asText()
+        }
+        assertThat(numbers)
+            .containsEntry(Fixtures.LOAN_A.toString(), "UV-2026-000007")
+            .containsEntry(Fixtures.LOAN_B.toString(), null)
         assertThat(count("SELECT count(*) FROM snapshot_instrument WHERE run_id = ?::uuid", runId)).isEqualTo(2)
         assertThat(count("SELECT count(*) FROM snapshot_instrument_installment WHERE run_id = ?::uuid", runId))
             .isEqualTo(12)

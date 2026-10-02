@@ -171,6 +171,7 @@ class SepaPaymentReturnAuditEvidenceIT {
         assertThat(node.path("returnReasonCode").asText()).isEqualTo("AM09")
         assertThat(node.path("paymentId").asText()).isEqualTo(payment.id.toString())
         assertThat(node.path("reversalPerformed").asBoolean()).isFalse()
+        assertThat(node.path("reversalTransactionId").isNull).isTrue()
         assertThat(node.path("version").asLong())
             .describedAs("the evidence names the exact RETURNED aggregate revision")
             .isEqualTo(payment.revision + 1)
