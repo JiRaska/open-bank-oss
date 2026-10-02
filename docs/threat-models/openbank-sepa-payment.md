@@ -463,3 +463,16 @@ simply stops existing).
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-02** — **Inbound amount and currency validated as kernel `Money` before the
+  Idempotency-Key is reserved (#11813).** `POST /api/v1/sepa-payments` now builds a kernel `Money`
+  from `amount` + `currency` at the API boundary; `SepaPayment` and `CreateSepaPaymentCommand` carry
+  `Money`. **Tampering / input validation:** an amount that would need rounding to fit the
+  currency (e.g. `1.005 EUR`, `1.5 JPY`) or a currency that is not an ISO 4217 code with a minor
+  unit (`XYZ`, blank, `XAU`) was previously accepted and persisted; it now answers **400
+  `AMOUNT_SCALE_EXCEEDED`** / **`CURRENCY_UNSUPPORTED`** before any idempotency record, row, outbox
+  event or downstream call exists. The refusal body names the field, never the rejected value. Valid
+  input is persisted byte-identically; amounts read back are serialised at the currency's scale
+  (`250.00` instead of the column's `250.000000`), numerically equal. **Residual:** a legacy row
+  already holding an over-scale amount or unknown currency now fails to load (500 naming the row)
+  instead of being served; the PR body carries the SQL count to run before deploy. No new endpoint,
+  caller, privilege or event. Rollback: revert the commit.

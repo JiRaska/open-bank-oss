@@ -17,7 +17,7 @@ fun SepaPayment.toConfirmationData(): Map<String, Any?> = mapOf(
         "paymentReference" to id.toString(),
         "endToEndId" to endToEndId,
         "executedAt" to (completedAt?.toString() ?: ""),
-        "amount" to amount.toPlainString(),
+        "amount" to amount.amount.toPlainString(),
         "currency" to currency,
         "debtorIban" to debtorIban,
         "creditorIban" to creditorIban,
