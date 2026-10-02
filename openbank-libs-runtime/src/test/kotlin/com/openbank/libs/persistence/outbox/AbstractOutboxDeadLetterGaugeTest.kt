@@ -99,4 +99,27 @@ class AbstractOutboxDeadLetterGaugeTest {
 
         assertThat(callCount).isEqualTo(2)
     }
+
+    @Test
+    fun `a failing refresh does not throw, keeps the last value, counts it and records no liveness success`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val supplier = slot<() -> Number>()
+        every { metrics.registerOutboxDeadLettered("billing", capture(supplier)) } returns Unit
+        val recorder = mockk<WorkflowLivenessRecorder>(relaxed = true)
+        var fail = false
+        val gauge = TestGauge("billing", metrics) {
+            if (fail) throw java.net.ConnectException("Connection refused") else 3L
+        }
+        gauge.register()
+        gauge.bind(recorder)
+        runBlocking { gauge.refresh() }
+
+        fail = true
+        runBlocking { gauge.refresh() }
+
+        assertThat(supplier.captured().toLong()).isEqualTo(3L)
+        verify(exactly = 1) { metrics.outboxGaugeRefreshFailed("billing", "dead_lettered") }
+        // Liveness must go stale while the DB is unreachable — only the first tick succeeded.
+        verify(exactly = 1) { recorder.recordSuccess() }
+    }
 }

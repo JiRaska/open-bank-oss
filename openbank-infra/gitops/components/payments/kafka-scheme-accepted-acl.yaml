@@ -285,6 +285,31 @@ spec:
         operations: [Write, Describe]
         host: "*"
 ---
+# ── card-processing-service (ADR-0283 phase 1, #8809) ───────────────────────
+# Produces only: the card money path publishes its own events and consumes nothing today (the
+# authorisation arrives over REST from the acquirer, not over Kafka). It still needs a KafkaUser and
+# this ACL because the cluster runs allow.everyone.if.no.acl.found=false (kafka.yaml) — without mTLS
+# the producer cannot connect on tls:9093 at all.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  annotations:
+    # ADR-0137: certs must land before the Deployment rolls the pod onto mTLS.
+    argocd.argoproj.io/sync-wave: "-2"
+  name: card-processing-service
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  authentication:
+    type: tls
+  authorization:
+    type: simple
+    acls:
+      - resource: { type: topic, name: openbank.card.processing.events, patternType: literal }
+        operations: [Write, Describe]
+        host: "*"
+---
 # ── card-issuance-service (issue #686 sweep) ────────────────────────────────
 # First mTLS wiring for this service — it has never had a KafkaUser before now
 # (unlike the other five #686 services, which already had one with a wrong
@@ -460,6 +485,7 @@ rules:
     # here is now a build failure rather than a pod that will not start (#2872/#2851);
     # a grant nothing reads fails too.
     resourceNames:
+      - card-processing-service
       - transaction-service
       - sepa-payment
       - sepa-instant

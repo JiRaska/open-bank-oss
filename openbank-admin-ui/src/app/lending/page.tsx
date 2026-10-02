@@ -50,6 +50,8 @@ type StateSummary = {
 
 type Loan = {
   id: string
+  /** lending 1.31.0 (#11107): UV-YYYY-NNNNNN; absent from an older lending. */
+  contractNumber?: string
   partyId: string
   status: string
   principal?: WireMoney
@@ -356,6 +358,7 @@ export default function LendingPage() {
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
             <tr style={{ background: 'var(--surface-2)', textAlign: 'left' }}>
+              {tab === 'portfolio' && <th style={th}>{t('Smlouva', 'Contract')}</th>}
               <th style={th}>{t('Klient', 'Party')}</th>
               <th style={th}>{t('Částka', 'Amount')}</th>
               <th style={th}>{t('Stav', 'Status')}</th>
@@ -385,6 +388,9 @@ export default function LendingPage() {
             ))}
             {tab === 'portfolio' && loans.map(l => (
               <tr key={l.id} style={{ borderTop: '1px solid var(--border)' }}>
+                <td style={{ ...td, fontFamily: 'var(--font-mono, monospace)', fontSize: 12 }} title={l.id} data-testid="loan-contract-number">
+                  {l.contractNumber ?? t('bez čísla', 'no number')}
+                </td>
                 <td style={td}><EntityChip type="party" id={l.partyId} /></td>
                 <td style={{ ...td, fontWeight: 600 }}>{fmt(l.principal)}</td>
                 <td style={td}>

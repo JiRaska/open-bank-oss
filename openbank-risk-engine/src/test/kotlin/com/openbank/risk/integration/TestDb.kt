@@ -16,6 +16,15 @@ internal object TestDb {
     /** The first column of the first row of a `SELECT count(*)`. */
     fun count(sql: String): Int = connect().use { conn -> conn.createStatement().use { countOf(it, sql) } }
 
+    /** The first column of every row of [sql], as text. */
+    fun query(sql: String, row: (String) -> Unit) {
+        connect().use { conn -> conn.createStatement().use { st -> each(st, sql, row) } }
+    }
+
+    private fun each(st: java.sql.Statement, sql: String, row: (String) -> Unit) {
+        st.executeQuery(sql).use { rs -> while (rs.next()) row(rs.getString(1)) }
+    }
+
     private fun countOf(st: java.sql.Statement, sql: String): Int =
         st.executeQuery(sql).use { rs -> if (rs.next()) rs.getInt(1) else 0 }
 

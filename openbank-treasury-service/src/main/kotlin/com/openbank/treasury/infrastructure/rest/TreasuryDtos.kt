@@ -7,6 +7,8 @@ package com.openbank.treasury.infrastructure.rest
 import com.fasterxml.jackson.databind.JsonNode
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
+import com.openbank.treasury.application.port.`in`.PositionBasis
+import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.QuoteBoard
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.domain.model.CounterpartyKind
@@ -14,6 +16,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.LimitNote
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.SimulatedQuote
 import java.math.BigDecimal
@@ -79,6 +82,15 @@ data class TransitionResponse(
     val actorType: String,
     val at: Instant,
     val note: String?,
+    /** The limit-check figures when [note] is a limit note; null otherwise. Additive, API 1.16.0. */
+    val limitSnapshot: LimitSnapshotResponse? = null,
+)
+
+data class LimitSnapshotResponse(
+    val limit: BigDecimal,
+    val currency: String,
+    val exposureAfter: BigDecimal,
+    val headroomAfter: BigDecimal,
 )
 
 data class LimitOverrideResponse(
@@ -151,7 +163,17 @@ data class DealResponse(
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {
-                TransitionResponse(it.from, it.to, it.actor.id, it.actor.type.name, it.at, it.note)
+                TransitionResponse(
+                    it.from,
+                    it.to,
+                    it.actor.id,
+                    it.actor.type.name,
+                    it.at,
+                    it.note,
+                    LimitNote.parse(it.note)?.let { s ->
+                        LimitSnapshotResponse(s.limit, s.currency, s.exposureAfter, s.headroomAfter)
+                    },
+                )
             },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
         )
@@ -253,13 +275,32 @@ data class CurrencyPositionResponse(
     val borrowed: BigDecimal,
     val atCnb: BigDecimal,
     val net: BigDecimal,
+    val dealCount: Int,
 ) {
     companion object {
-        fun from(p: CurrencyPosition) = CurrencyPositionResponse(p.currency, p.placed, p.borrowed, p.atCnb, p.net)
+        fun from(p: CurrencyPosition) =
+            CurrencyPositionResponse(p.currency, p.placed, p.borrowed, p.atCnb, p.net, p.dealCount)
     }
 }
 
-data class PositionsResponse(val asOf: LocalDate, val positions: List<CurrencyPositionResponse>)
+/** [basis] ACTUAL up to [today] (the Europe/Prague accounting day), PROJECTED after it. */
+data class PositionsResponse(
+    val asOf: LocalDate,
+    val today: LocalDate,
+    val basis: PositionBasis,
+    val countedStates: List<DealState>,
+    val positions: List<CurrencyPositionResponse>,
+) {
+    companion object {
+        fun from(r: PositionReport) = PositionsResponse(
+            asOf = r.asOf,
+            today = r.today,
+            basis = r.basis,
+            countedStates = r.countedStates.sorted(),
+            positions = r.positions.map(CurrencyPositionResponse::from),
+        )
+    }
+}
 
 /**
  * `GET /quotes` (ADR-0315 D9). [synthetic] is ALWAYS true, on the board and on every quote: these

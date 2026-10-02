@@ -9,6 +9,7 @@ import com.openbank.lending.application.port.out.CreditDecisionQueryRepository
 import com.openbank.lending.application.port.out.InstallmentRepository
 import com.openbank.lending.application.port.out.LoanApplicationRepository
 import com.openbank.lending.application.port.out.LoanRepository
+import com.openbank.lending.application.port.out.ProvisioningCycleRunRepository
 import com.openbank.lending.application.port.out.ProvisioningRepository
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.Collateral
@@ -38,10 +39,25 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import org.hibernate.reactive.mutiny.Mutiny
 import java.math.BigDecimal
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
+private fun mapStatusFilter(status: String): OriginationState =
+    OriginationState.entries.firstOrNull { it.name == status }
+        ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+        ?: throw IllegalArgumentException("Unknown application status: $status")
+
+private val PROVISIONING_CLOSED_STATES = setOf(
+    com.openbank.lending.domain.model.LoanStatus.CLOSED,
+    com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
+    com.openbank.lending.domain.model.LoanStatus.UNWOUND,
+    com.openbank.lending.domain.model.LoanStatus.SETTLED,
+)
+
 @ApplicationScoped
+// One adapter method per LoanApplicationRepository port method (hexagonal), like the fleet's other *RepositoryImpl.
+@Suppress("TooManyFunctions")
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: LendingMapper,
@@ -99,11 +115,6 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             Array<Any?>::class.java,
         ).resultList
     }.map { rows -> foldApplicationSummaries(rows) }
-
-    private fun mapStatusFilter(status: String): OriginationState =
-        OriginationState.entries.firstOrNull { it.name == status }
-            ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
-            ?: throw IllegalArgumentException("Unknown application status: $status")
 
     @WithSession
     override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
@@ -265,9 +276,24 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
             .flatMap { entity -> operation(entity?.let(mapper::toDomain)) }
     }
 
+    /**
+     * Inserts a new loan. The contract number (#11107) is drawn from the database in the SAME
+     * transaction as the INSERT, so a rolled-back creation hands its number back and two concurrent
+     * creations can never share one (the per-year counter row is locked by the upsert). Drawn here
+     * rather than left to the V24 trigger so the returned domain loan carries the number it got.
+     */
     @WithTransaction override fun save(loan: Loan): Uni<Loan> {
         val e = mapper.toEntity(loan)
-        return sf.withTransaction { s -> s.persist(e).map { mapper.toDomain(e) } }
+        return sf.withTransaction { s ->
+            val number: Uni<String> = e.contractNumber?.let { Uni.createFrom().item(it) }
+                ?: s.createNativeQuery("SELECT next_loan_contract_number(:year)", String::class.java)
+                    .setParameter("year", loan.createdAt.withOffsetSameInstant(java.time.ZoneOffset.UTC).year)
+                    .singleResult
+            number.flatMap { n ->
+                e.contractNumber = n
+                s.persist(e).map { mapper.toDomain(e) }
+            }
+        }
     }
 
     @WithSession override fun findById(id: LoanId): Uni<Loan?> =
@@ -315,12 +341,7 @@ class LoanRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFacto
         )
             .setParameter(
                 "closed",
-                setOf(
-                    com.openbank.lending.domain.model.LoanStatus.CLOSED,
-                    com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
-                    com.openbank.lending.domain.model.LoanStatus.UNWOUND,
-                    com.openbank.lending.domain.model.LoanStatus.SETTLED,
-                ),
+                PROVISIONING_CLOSED_STATES,
             )
             .setParameter("period", period)
             .setMaxResults(limit)
@@ -626,4 +647,106 @@ internal fun foldLoanSummaries(rows: List<Array<Any?>>): List<LoanStateSummary> 
                 .sortedBy { it.currency },
         )
     }.sortedBy { it.status }
+}
+
+@ApplicationScoped
+class ProvisioningCoverageRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
+    com.openbank.lending.application.port.out.ProvisioningCoverageRepository {
+    @WithSession
+    override fun countEligibleForProvisioning(): Uni<Long> = sf.withSession { session ->
+        session.createQuery(
+            "SELECT COUNT(l) FROM LoanEntity l WHERE l.status NOT IN :closed",
+            java.lang.Long::class.java,
+        )
+            .setParameter("closed", PROVISIONING_CLOSED_STATES)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
+    override fun countUnprovisioned(period: String): Uni<Long> = sf.withSession { session ->
+        session.createQuery(
+            "SELECT COUNT(l) FROM LoanEntity l WHERE l.status NOT IN :closed AND NOT EXISTS " +
+                "(SELECT p.id FROM LoanProvisioningEntity p WHERE p.loanId = l.id AND p.period = :period)",
+            java.lang.Long::class.java,
+        )
+            .setParameter("closed", PROVISIONING_CLOSED_STATES)
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
+
+    @WithSession
+    override fun countForPeriod(period: String): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(p) FROM LoanProvisioningEntity p WHERE p.period = :period",
+            java.lang.Long::class.java,
+        )
+            .setParameter("period", period)
+            .singleResult
+    }.map { it.toLong() }
+}
+
+@ApplicationScoped
+class ProvisioningCycleRunRepositoryImpl @Inject constructor(private val sf: Mutiny.SessionFactory) :
+    ProvisioningCycleRunRepository {
+    override fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit> = sf.withTransaction { session ->
+        // The first observed day is the baseline. Thereafter every calendar day must have
+        // evidence, even if no pod was alive to start the scheduler on that day.
+        session.createNativeQuery<Any>(
+            """
+            INSERT INTO provisioning_cycle_run (period, status)
+            SELECT CAST(day AS date), 'MISSED'
+            FROM generate_series(
+                (SELECT max(period) + 1 FROM provisioning_cycle_run WHERE period < :period),
+                CAST(:period AS date) - 1,
+                interval '1 day'
+            ) AS day
+            ON CONFLICT (period) DO NOTHING
+            """.trimIndent(),
+        )
+            .setParameter("period", period)
+            .executeUpdate()
+            .flatMap {
+                session.createNativeQuery<Any>(
+                    """
+                    INSERT INTO provisioning_cycle_run (period, status, started_at, checked_at, missing_loans)
+                    VALUES (:period, 'RUNNING', :at, NULL, NULL)
+                    ON CONFLICT (period) DO UPDATE SET status = 'RUNNING', started_at = EXCLUDED.started_at,
+                        checked_at = NULL, missing_loans = NULL
+                    """.trimIndent(),
+                )
+                    .setParameter("period", period)
+                    .setParameter("at", at)
+                    .executeUpdate()
+                    .map { Unit }
+            }
+    }
+
+    override fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit> =
+        sf.withTransaction { session ->
+            session.createNativeQuery<Any>(
+                """
+                UPDATE provisioning_cycle_run
+                SET status = :status,
+                    checked_at = :at, missing_loans = :missing
+                WHERE period = :period AND status = 'RUNNING'
+                """.trimIndent(),
+            )
+                .setParameter("period", period)
+                .setParameter("status", if (missingLoans == 0L) "COMPLETE" else "INCOMPLETE")
+                .setParameter("missing", missingLoans)
+                .setParameter("at", at)
+                .executeUpdate()
+                .map { updated ->
+                    check(updated == 1) { "No running provisioning cycle for $period" }
+                }
+        }
+
+    override fun countUnresolvedBefore(period: LocalDate): Uni<Long> = sf.withSession { session ->
+        session.createNativeQuery<Number>(
+            "SELECT count(*) FROM provisioning_cycle_run WHERE period < :period AND status <> 'COMPLETE'",
+        )
+            .setParameter("period", period)
+            .singleResult
+            .map { it.toLong() }
+    }
 }
