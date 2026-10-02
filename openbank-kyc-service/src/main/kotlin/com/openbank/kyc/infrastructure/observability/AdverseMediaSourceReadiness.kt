@@ -50,7 +50,7 @@ class AdverseMediaSourceReadiness {
             log.warn(
                 "No adverse-media source is configured (ADR-0256 D5, issue #4459): KYC cases carry NO " +
                     "adverse-media coverage. openbank_kyc_adverse_media_source_configured=0. Any " +
-                    "adverse-media check on a case will resolve to MANUAL_REVIEW, never PASSED.",
+                    "new adverse-media check requires MANUAL_REVIEW; sandbox auto-approval is simulated evidence.",
             )
         } else {
             log.infof("Adverse-media source configured: %s", port.sourceId)

@@ -10,10 +10,15 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.libs.storage.ObjectStorePort
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.vertx.core.Vertx
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -67,11 +72,23 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-document-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by DocumentNegativeAuthProviderVerificationTest, which boots
+// without @TestSecurity; under this class's identity they would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class DocumentPactProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
+
+    @Inject
+    lateinit var documentRepository: DocumentRepositoryPort
+
+    @Inject
+    lateinit var objectStore: ObjectStorePort
+
+    @Inject
+    lateinit var vertx: Vertx
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -107,4 +124,8 @@ class DocumentPactProviderVerificationTest {
     fun statePreviewRendererAvailable() {
         // Intentionally empty — see the KDoc above.
     }
+
+    /** Delegation's external-disclosure export (#8345); see [DocumentDisclosurePactSeed]. */
+    @State(DocumentDisclosurePactSeed.STATE)
+    fun sealedPdfDocumentExists() = DocumentDisclosurePactSeed.seed(vertx, documentRepository, objectStore)
 }

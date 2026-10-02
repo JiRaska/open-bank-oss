@@ -1,0 +1,123 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0006: every Kafka topic is documented in AsyncAPI 3.0 under openbank-contracts/<service>/.
+# Everything below is DERIVED from the code that runs — the payload classes in
+# `RiskLimitEventPayloads.kt`, written to `risk_outbox` by `PgRiskOutbox` and relayed verbatim by
+# `KafkaRiskOutboxEventPublisher`.
+
+asyncapi: 3.0.0
+
+info:
+  title: OpenBank Risk Engine — risk-limit events
+  version: 1.0.0
+  description: |
+    Declarative risk limits (ADR-0313 D9) evaluated on every end-of-day balance-sheet snapshot run
+    that tied out to the ledger. One event per limit whose figure crossed its early-warning
+    threshold or the limit itself. A limit that could not be evaluated (a gap in its input) emits
+    nothing; it is visible on `GET /api/v1/risk/snapshots/{id}/limits` as NOT_EVALUABLE.
+
+    **Transactional outbox.** All events of one evaluation are written to `risk_outbox` in one
+    transaction, idempotent on (run, limit, limit-set version), and dispatched afterwards
+    (`RiskOutboxDispatcher`). Re-evaluating a run never emits a second event for the same limit.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+
+defaultContentType: application/json
+
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: "Strimzi cluster `openbank-cluster` in `messaging`; mTLS, per-service KafkaUser (`risk-engine`)."
+
+channels:
+  riskLimitEvents:
+    address: openbank.risk.limit.events
+    title: Risk-limit early warnings and breaches
+    description: |
+      `openbank-infra/gitops/components/risk/kafka-topic.yaml`. The event type is carried in the
+      Kafka header `ce-type` (outbox relay); the body is the bare payload below, with no
+      discriminator field. `ce-id` is the stable event id to dedupe on.
+
+      **Partitioning key: `aggregateId`** = the snapshot run id (`OutboxKafkaHeaders.partitionKey`).
+    messages:
+      RiskLimitEarlyWarning:
+        $ref: '#/components/messages/RiskLimitEarlyWarning'
+      RiskLimitBreach:
+        $ref: '#/components/messages/RiskLimitBreach'
+
+operations:
+  publishRiskLimitEvents:
+    action: send
+    channel:
+      $ref: '#/channels/riskLimitEvents'
+    summary: risk-engine publishes risk-limit early-warning and breach events.
+
+components:
+  messages:
+    RiskLimitEarlyWarning:
+      name: risk.limit.early-warning.v1
+      summary: "The figure crossed the early-warning threshold but is still within the limit."
+      payload:
+        $ref: '#/components/schemas/RiskLimitEarlyWarning'
+    RiskLimitBreach:
+      name: risk.limit.breach.v1
+      summary: "The figure is on the wrong side of the limit."
+      payload:
+        $ref: '#/components/schemas/RiskLimitBreach'
+
+  schemas:
+    Metric:
+      type: string
+      enum: [lcr, nsfr, total-capital-ratio, irrbb-eve-outlier, large-exposure-bank]
+    Bound:
+      type: string
+      enum: [MIN, MAX]
+      description: MIN = a floor (the figure must stay at or above the limit); MAX = a ceiling.
+    SourceService:
+      type: string
+      const: risk-engine
+
+    RiskLimitEarlyWarning:
+      type: object
+      description: "Constructor properties of `RiskLimitEarlyWarning` in `RiskLimitEventPayloads.kt`."
+      required: [runId, asOf, provenance, limitSetId, limitSetVersion, limitId, metric, bound, limit, earlyWarning, value, explanation, citation, occurredAt, sourceService]
+      properties:
+        runId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        provenance: { type: string, enum: [synthetic, production], description: 'ADR-0313 D13: which world the run describes.' }
+        limitSetId: { type: string }
+        limitSetVersion: { type: string }
+        limitId: { type: string }
+        metric: { $ref: '#/components/schemas/Metric' }
+        bound: { $ref: '#/components/schemas/Bound' }
+        limit: { type: number }
+        earlyWarning: { type: number }
+        value: { type: number, description: 'The measured figure, as a fraction (1.0 = 100 %).' }
+        explanation: { type: string, description: 'How the figure was obtained.' }
+        citation: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
+
+    RiskLimitBreach:
+      type: object
+      description: "Constructor properties of `RiskLimitBreach` in `RiskLimitEventPayloads.kt`."
+      required: [runId, asOf, provenance, limitSetId, limitSetVersion, limitId, metric, bound, limit, earlyWarning, value, explanation, citation, occurredAt, sourceService]
+      properties:
+        runId: { type: string, format: uuid }
+        asOf: { type: string, format: date }
+        provenance: { type: string, enum: [synthetic, production], description: 'ADR-0313 D13: which world the run describes.' }
+        limitSetId: { type: string }
+        limitSetVersion: { type: string }
+        limitId: { type: string }
+        metric: { $ref: '#/components/schemas/Metric' }
+        bound: { $ref: '#/components/schemas/Bound' }
+        limit: { type: number }
+        earlyWarning: { type: number }
+        value: { type: number, description: 'The measured figure, as a fraction (1.0 = 100 %).' }
+        explanation: { type: string, description: 'How the figure was obtained.' }
+        citation: { type: string }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }

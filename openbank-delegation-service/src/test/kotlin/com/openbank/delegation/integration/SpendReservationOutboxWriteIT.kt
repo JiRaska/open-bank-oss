@@ -41,8 +41,10 @@ import java.util.UUID
 class SpendReservationOutboxWriteIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "approval-group-revisions-out",
+        )
 
         override fun stop() = InMemoryConnector.clear()
     }
