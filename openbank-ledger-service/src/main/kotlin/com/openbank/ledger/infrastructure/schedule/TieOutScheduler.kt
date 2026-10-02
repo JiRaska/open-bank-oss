@@ -62,6 +62,13 @@ import java.time.ZoneId
  * transaction-scoped advisory lock so only one pod's tick actually executes; the losing pod's
  * tick is a no-op — not a missed day, since the winning pod still covers the full catch-up gap
  * above.
+ *
+ * **Re-check of a late CUTOFF day.** The forward cursor above only ever moves forward, so a day
+ * *behind* it is never checked again by this cron. [AccountingDayScheduler] closes that gap by
+ * calling [runTieOutFor] for a CUTOFF day whose latest run predates its cutoff (#11790). Such a run
+ * is written for an OLD `as_of`, which is why [TieOutRunRepository.findLatest] orders by `as_of`
+ * and not by `runAt` — otherwise the re-check would drag this cursor back and re-walk every later
+ * day (#11680).
  */
 @ApplicationScoped
 class TieOutScheduler(

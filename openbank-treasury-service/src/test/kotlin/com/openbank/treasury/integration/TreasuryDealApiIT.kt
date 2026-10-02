@@ -213,6 +213,13 @@ class TreasuryDealApiIT {
             .body("find { it.counterpartyId == 'CNB' }.kind", equalTo("CENTRAL_BANK"))
         given().`when`().get("/api/v1/treasury/positions?asOf=$today").then().statusCode(200)
             .body("positions.currency", org.hamcrest.Matchers.contains("CZK", "EUR"))
+            .body("basis", equalTo("ACTUAL"))
+            .body("countedStates", org.hamcrest.Matchers.containsInAnyOrder("MATURED", "SETTLED"))
+            .body("positions.dealCount", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.notNullValue()))
+        given().`when`().get("/api/v1/treasury/positions?asOf=${today.plusDays(30)}")
+            .then().statusCode(200)
+            .body("basis", equalTo("PROJECTED"))
+            .body("countedStates", org.hamcrest.Matchers.hasItems("BOOKED", "CONFIRMED"))
     }
 
     @Test
