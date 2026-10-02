@@ -24,8 +24,8 @@
 | `LENDING_GL_*` | (UUID defaults) | GL leaf accounts: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense, loan-loss-allowance |
 | `LENDING_ACCRUAL_EVERY` | `24h` | Interest-accrual pass interval |
 | `LENDING_ACCRUAL_BATCH_SIZE` | `500` | Installments per accrual pass |
-| `LENDING_PROVISIONING_EVERY` | `720h` (~30d) | IFRS 9 provisioning cycle interval (ADR-0028 Phase 3); a plain duration, not calendar-month-aware |
-| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | ACTIVE loans scanned per provisioning cycle (no pagination beyond this — see threat model §5) |
+| `LENDING_PROVISIONING_EVERY` | `24h` | Daily IFRS 9 provisioning interval (ADR-0028 Phase 3) |
+| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | Eligible loans per query; the cycle continues until the date's unprovisioned population is exhausted |
 
 `LENDING_LEDGER_BACKEND` is **build-time** (`@IfBuildProperty`): it selects the adapter at image build, not at runtime.
 
@@ -66,7 +66,11 @@ When `LENDING_LEDGER_BACKEND=rest`, postings go through `LedgerCallGuard` (fault
 Check the `InterestAccrualScheduler` logs ("interest accrual pass: N installments accrued"). Interval is `LENDING_ACCRUAL_EVERY` (default 24h, delayed 30s). The pass is idempotent (`interest_accrued` flag); a missed window self-heals on the next tick because it selects all due-but-unaccrued installments.
 
 ### IFRS 9 provisioning cycle not running / no delta posted
-Check the `ProvisioningCycleScheduler` logs ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval is `LENDING_PROVISIONING_EVERY` (default ~720h/30d, delayed 60s). Zero journals posted for a period with loans assessed is **expected and correct** when no loan's stage/ECL changed since the prior period — check the `loan_provisioning` table for the period's rows before assuming a failure. The pass is idempotent per `(loan_id, period)`; a missed window self-heals on the next tick, but a book larger than `LENDING_PROVISIONING_BATCH_SIZE` is only partially covered per tick (no continuation cursor yet — tracked in the threat model).
+Check the `ProvisioningCycleScheduler` logs ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). The default interval is 24h (delayed 60s), and `period` is the reporting date (`yyyy-MM-dd`). The pass scans nonterminal exposures missing that date's row in successive batches until a short batch proves exhaustion. Zero journals can be correct when ECL is unchanged; verify the `loan_provisioning` rows and `openbank_lending_provisioning_unprovisioned` gauge instead of inferring completeness from posting count. A failed pass or nonzero missing count is **not** a completed reporting date. A restart on the same date can resume idempotently. After the date changes, current loan, installment, collateral and risk state cannot be silently backdated to reconstruct an unfinished prior date; that requires controlled reconciliation or persisted historical inputs.
+
+Each pass commits a `provisioning_cycle_run` row as `RUNNING` **before** its first loan posting, then records `COMPLETE` only after a zero-missing coverage read. A crash leaves `RUNNING`; a shortfall or unreadable coverage leaves `INCOMPLETE`. At the next run, calendar days skipped since the last recorded date are inserted as `MISSED`; the first recorded date is the deployment baseline. Inspect `SELECT period, status, started_at, checked_at, missing_loans FROM provisioning_cycle_run WHERE status <> 'COMPLETE' ORDER BY period` and the `openbank_lending_provisioning_unresolved_prior_days` gauge. A successful newer date neither clears these rows nor records workflow success while an older row is unresolved; the `LendingProvisioningPriorDayUnresolved` alert pages on that condition.
+
+For an earlier-date gap, preserve the run row and compare its committed `loan_provisioning` rows and allowance outbox references with the period's independently retained loan and ledger evidence. Reconstruct neither missing rows nor journals from today's mutable loan, installment, collateral or risk state. Record the affected population, uncertainty, reviewer decision and the references of any approved **current-date** accounting adjustment in the reconciliation case. The run row remains unresolved until a reviewed reconciliation closure mechanism is implemented; do not relabel it `COMPLETE` merely to silence the alert.
 
 ### Ledger backfill (one-off, #10746)
 For loans whose GL history never reached the ledger (#6057). ROLE_FINANCE or ROLE_ADMIN (humans only), two different people (#10618). The admin console runs the whole flow under Balance sheet & risk → Ledger backfill.

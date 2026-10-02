@@ -553,6 +553,9 @@ class LendingService @Inject constructor(
 
     override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> = applications.findByParty(partyId)
 
+    override fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+        applications.findByParty(partyId, limit)
+
     override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
 
@@ -743,6 +746,8 @@ class LendingService @Inject constructor(
                                 // self-consistent naming choice this PR preserves rather than introduces).
                                 payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
                                     """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                    // #11107: optional, additive — the human contract number.
+                                    (saved.contractNumber?.let { """"contractNumber":"$it",""" } ?: "") +
                                     """"principal":"${saved.principal}",""" +
                                     // ADR-0314 D5: the rate terms, so the risk engine can tell a
                                     // fixed loan from a floating one without asking lending.
@@ -1410,7 +1415,7 @@ class LendingService @Inject constructor(
         require(period == asOf.toString() || period == java.time.YearMonth.from(asOf).toString()) {
             "Reporting key must match asOf (yyyy-MM-dd or legacy yyyy-MM)"
         }
-        return provisionBatch(period, asOf, limit, 0, 0)
+        return provisionBatch(period, asOf, limit, 0, 0, null)
     }
 
     private fun provisionBatch(
@@ -1419,7 +1424,14 @@ class LendingService @Inject constructor(
         limit: Int,
         assessed: Int,
         posted: Int,
+        previousBatchIds: Set<LoanId>?,
     ): Uni<ProvisioningRunOutcome> = loans.findUnprovisioned(period, limit).flatMap { active ->
+        val batchIds = active.map { it.id }.toSet()
+        if (active.isNotEmpty() && batchIds == previousBatchIds) {
+            return@flatMap Uni.createFrom().failure(
+                IllegalStateException("Provisioning scan made no progress for period $period"),
+            )
+        }
         Multi.createFrom().iterable(active)
             .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
             .collect().asList()
@@ -1429,7 +1441,7 @@ class LendingService @Inject constructor(
                 if (active.size < limit) {
                     Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals))
                 } else {
-                    provisionBatch(period, asOf, limit, total, journals)
+                    provisionBatch(period, asOf, limit, total, journals, batchIds)
                 }
             }
     }

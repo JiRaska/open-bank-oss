@@ -6,6 +6,10 @@ import { LanguageProvider } from '@/lib/i18n/LanguageContext'
 import { AUDIT_EVIDENCE_WINDOW } from '@/lib/audit/auditEvidence'
 import AuditPage from '@/app/audit/page'
 
+vi.mock('next-auth/react', () => ({
+  useSession: () => ({ data: { user: { roles: ['ROLE_COMPLIANCE'] } }, status: 'authenticated' }),
+}))
+
 const AGGREGATE = '11111111-1111-4111-8111-111111111111'
 
 function entry(n: number) {

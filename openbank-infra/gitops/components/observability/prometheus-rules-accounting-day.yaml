@@ -6,16 +6,19 @@
 # machine introduces — a day stuck in CUTOFF because its tie-out never delivered an OK
 # verdict blocks that day's postings once the day lock enforces — and makes DETECTING it a
 # precondition of flipping openbank.ledger.day-lock.mode to enforce. AccountingDayScheduler
-# (ledger-service) re-publishes this gauge every reconcile tick (default */15 min): the
-# count of days sitting in CUTOFF beyond the configured threshold (default 8h; normal
-# residence is ~6h — midnight cutover -> 06:00 tie-out -> next tick).
+# (ledger-service) re-publishes, every reconcile tick (default */15 min), one series per day
+# sitting in CUTOFF beyond the configured threshold (default 8h; normal residence is ~6h —
+# midnight cutover -> 06:00 tie-out -> next tick), labelled business_date, valued at the
+# seconds that day had spent in CUTOFF. The rule alerts PER DAY: it used to alert on a
+# count (`..._stuck_cutoff_days > 0`), and one permanently stuck day (2026-07-31, #11680)
+# held that count non-zero for weeks, so a second stuck day would have changed nothing the
+# rule could see. The count gauge is still published for dashboards.
 #
-# The gauge resets to zero on pod restart until the first tick re-publishes it — a stuck
-# day, if real, re-appears within minutes, which the `for:` below outlasts. Warning, not
-# critical: while the lock is in shadow a stuck day blocks nothing, and the tie-out's own
-# BREAK page (SubledgerTieOutBreak, critical) already covers the usual root cause; the
-# operator action here is to investigate the 06:00 run and drive the day forward via the
-# accounting-days API once resolved.
+# On a cold pod the series are ABSENT until the first tick re-publishes them (no sentinel
+# value): a stuck day, if real, re-appears within minutes, which the `for:` below outlasts.
+# Warning, not critical: while the lock is in shadow a stuck day blocks nothing, and the
+# tie-out's own BREAK page (SubledgerTieOutBreak, critical) already covers the usual root
+# cause.
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -28,18 +31,20 @@ spec:
     - name: openbank.ledger.accounting-day
       rules:
         - alert: AccountingDayStuckInCutoff
-          expr: openbank_ledger_accounting_day_stuck_cutoff_days > 0
+          expr: max by (business_date) (openbank_ledger_accounting_day_stuck_cutoff_age_seconds) > 0
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "An accounting day has been stuck in CUTOFF beyond the threshold"
+            summary: "Accounting day {{ $labels.business_date }} is stuck in CUTOFF beyond the threshold"
             description: >-
-              openbank_ledger_accounting_day_stuck_cutoff_days is non-zero: at least one
-              accounting day has sat in CUTOFF longer than the configured threshold
-              (openbank.ledger.accounting-day.stuck-cutoff-hours, default 8h) — its tie-out
-              has not delivered an OK verdict recorded after the cutoff (ADR-0207). Consult
-              ledger-service logs for the per-day WARN lines and the ledger_tieout_runs
-              table for the verdict; once the underlying issue is repaired, the next OK
-              tie-out run advances the day automatically, or an operator drives it forward
-              via /api/v1/ledger/accounting-days.
+              Accounting day {{ $labels.business_date }} has sat in CUTOFF longer than the
+              configured threshold (openbank.ledger.accounting-day.stuck-cutoff-hours, default
+              8h): no OK tie-out run has been recorded after its cutoff (ADR-0207). The daily
+              06:00 tie-out re-checks every such day — including days behind its forward
+              cursor — and an OK verdict advances the day within one reconcile tick, so a day
+              still stuck after that run means the re-check found a BREAK or ERROR. Consult
+              ledger_tieout_runs for that date and the ledger-service tie-out log. The
+              re-check runs once per day (it stops qualifying once a post-cutoff run exists,
+              whatever its verdict), so after repairing the break an operator drives the day
+              forward via /api/v1/ledger/accounting-days.

@@ -194,6 +194,9 @@ spec:
               kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: vault
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: wealth
         - namespaceSelector:
             matchLabels:

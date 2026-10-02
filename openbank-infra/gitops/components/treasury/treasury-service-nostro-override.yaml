@@ -1,0 +1,36 @@
+# Sandbox nostro accounts for treasury-service (ADR-0315 D7, #10896).
+#
+# application.yaml ships `openbank.treasury.nostro.accounts: {}` on purpose: an unconfigured IBAN
+# is refused, so no sample account is ever active by default. This file supplies the map for the
+# SANDBOX only, so a correspondent statement can be uploaded and reconciled end to end.
+#
+# THE ACCOUNTS ARE SYNTHETIC. Both IBANs carry a valid ISO 13616 checksum but use bank code 9999,
+# which is not in the Czech bank-code register, so no real account can be addressed. They are the
+# same two IBANs the service's own integration tests configure
+# (src/test/resources/application.properties), so a fixture statement means the same thing here.
+#   CZ12 9999 0000 0000 0000 1001  CZK  -> GL 1001 (TreasuryChart CZK nostro)
+#   CZ82 9999 0000 0000 0000 1002  EUR  -> GL 1002 (TreasuryChart EUR nostro)
+# NostroReconciliationService refuses at construction a mapping to a GL that is not a treasury
+# nostro, and refuses at upload a statement whose currency does not match its GL.
+#
+# Why a properties FILE and not env vars: the setting is a MAP keyed by IBAN. An env var name
+# cannot carry the key's case unambiguously and SmallRye can only discover env-supplied map keys
+# when the property is also known to another source, so the repo's established shape for
+# deployment-specific config (the <svc>-msg-override ConfigMaps) is used instead.
+#
+# config_ordinal=500 outranks the baked application.yaml (~254). Loaded via
+# QUARKUS_CONFIG_LOCATIONS on the Deployment; the location is optional, so an absent file warns
+# and boots — with no nostro account configured, i.e. today's behaviour.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: treasury-service-nostro-override
+  namespace: treasury
+  labels:
+    app.kubernetes.io/name: treasury-service
+    app.kubernetes.io/part-of: treasury
+data:
+  override.properties: |
+    config_ordinal=500
+    openbank.treasury.nostro.accounts.CZ1299990000000000001001=1001
+    openbank.treasury.nostro.accounts.CZ8299990000000000001002=1002
