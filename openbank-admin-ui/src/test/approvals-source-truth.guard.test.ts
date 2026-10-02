@@ -44,6 +44,18 @@ describe('approval inbox source truthfulness', () => {
     }
   })
 
+  it('connects the notification approval store to its declared Redis Service', () => {
+    const manifest = path.resolve(process.cwd(), '../openbank-infra/gitops/components/notifications/notification-service.yaml')
+    const deployment = YAML.parseAllDocuments(fs.readFileSync(manifest, 'utf8'))
+      .map(doc => doc.toJS() as { kind?: string; spec?: { template?: { spec?: { containers?: { name?: string; env?: { name: string; value?: string }[] }[] } } } })
+      .find(resource => resource.kind === 'Deployment')
+    const notification = deployment?.spec?.template?.spec?.containers?.find(container => container.name === 'notification-service')
+    const redisUrls = notification?.env?.filter(variable => variable.name === 'QUARKUS_REDIS_HOSTS') ?? []
+    expect(redisUrls).toHaveLength(1)
+    expect(redisUrls[0].value).toBe('redis://redis.notifications.svc:6379')
+    expect(deployedServiceDestinations().get('redis')?.has('notifications:6379')).toBe(true)
+  })
+
   it('does not label a wired queue as not configured', () => {
     expect(routeSource).toContain("'not-configured'")
     expect(routeSource).not.toContain("balance: 'not-configured'")
