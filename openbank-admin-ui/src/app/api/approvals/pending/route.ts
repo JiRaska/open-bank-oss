@@ -177,7 +177,7 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
 }
 
 async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
-  const res = await fetch(serverSvcUrl('transaction-service', 'transaction', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
+  const res = await fetch(serverSvcUrl('transaction-service', 'payments', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
   })
   if (!res.ok) return { items: [], state: stateFor(res.status) }
