@@ -218,6 +218,24 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
     ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  outbox_conformance_it_present:
+    detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]
+    require:
+      - "the same module carries a src/test class extending OutboxDispatchConformanceIT (openbank-libs-testing) — detected by supertype, never by file name"
+      - "no new uncovered owner; the by-name baseline of today's uncovered owners only shrinks (ADR-0327 D9)"
+    gate: outbox-conformance-it-present
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0327 Phase 4: enforce once every Phase 2/3 migration PR has added its IT
+    ci_producer: ".github/scripts/check-outbox-conformance-it.py"
+  outbox_claim_sql_ratchet:
+    detect: ["FOR UPDATE SKIP LOCKED in any openbank-*/src/main/**/*.kt outside openbank-libs-runtime, comments stripped"]
+    require:
+      - "the claim lives in openbank-libs-runtime's AbstractPanacheOutboxRepository (ADR-0327 D1/D3), not in a service"
+      - "no new site; the per-file baseline (count) only shrinks, and a healed entry is reported as stale"
+    gate: outbox-claim-sql-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0327 Phase 4: enforce once the baseline is empty
+    ci_producer: ".github/scripts/check-outbox-claim-sql.py"
   raw_http_client_construction:
     detect: ["java.net.http.HttpClient.newBuilder() / HttpClient.newHttpClient() in any openbank-*/src/main outside openbank-libs-*"]
     require:

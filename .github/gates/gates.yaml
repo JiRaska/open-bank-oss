@@ -3131,6 +3131,58 @@ gates:
     selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
     run: |
       python3 .github/scripts/check-money-rounding-inline.py --root .
+
+  # ADR-0327 D9: every module that extends AbstractOutboxDispatcher carries a test extending
+  # OutboxDispatchConformanceIT, detected by the SUPERTYPE on a non-comment line (never by file
+  # name — five services carry a local *OutboxDispatchIT that inherits nothing from the kit). The
+  # subject set is derived from the dispatcher supertype; the 37 uncovered owners measured on
+  # 2026-10-01 are baselined by name and the baseline fails in both directions. ADVISORY in
+  # Phase 1 per the ADR, enforced in Phase 4 once the baseline is empty.
+  - id: outbox-conformance-it-present
+    name: "outbox dispatcher owners carry the conformance IT (ADR-0327 D9, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      OutboxDispatchConformanceIT is the only test layer that proves a service's real
+      reactive-Panache + Kafka outbox wiring (N1 event loop, N2 aggregate key, N3 headers,
+      PENDING to SENT); 37 of 38 dispatcher owners had none, so the kernel's outbox v2 can land
+      per service with no proof the service still relays. Advisory until the Phase 2/3
+      migration PRs have each added theirs.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags an uncovered owner, a file named like the kit that inherits nothing, a stale covered entry and a stale non-owner entry; the real run flagged a wrong baseline entry (agent-service) before it was corrected"
+    budget_seconds: 30
+    min_subjects: 19   # 38 dispatcher owners measured 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-conformance-it.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-conformance-it.py"]
+    run: |
+      python3 .github/scripts/check-outbox-conformance-it.py --root .
+
+  # ADR-0327 D11: a hand-rolled `FOR UPDATE SKIP LOCKED` in any openbank-*/src/main outside
+  # openbank-libs-runtime is a finding unless baselined. Comments are stripped first — a raw
+  # grep matches 70 files, 30 of them dispatcher KDoc that merely EXPLAINS the claim (the
+  # text-matching-guard lesson in .github/CLAUDE.md). Baseline: the 40 files measured on
+  # 2026-10-01 (38 outbox repositories + agent-service's audit outbox + domestic-payment's
+  # delegated-spend binding), by file and count; it may only shrink. detekt cannot see SQL in a
+  # string template, so this is a script gate. ADVISORY in Phase 1, enforced in Phase 4.
+  - id: outbox-claim-sql-ratchet
+    name: "hand-rolled outbox claim SQL ratchet (ADR-0327 D11, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      38 copies of one claim statement share every defect (no backoff, an OR the index cannot
+      serve, per-row markSent); ADR-0327 moves it into AbstractPanacheOutboxRepository. The
+      ratchet keeps a 39th copy from appearing while the fleet migrates, and makes every
+      migration PR shrink the baseline rather than leave a stale entry behind.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags a new site, a second site in a baselined file, a stale entry, a vanished file and proves comments (nested) do not count; the real run flagged one mis-keyed baseline path in both directions before it was corrected"
+    budget_seconds: 30
+    min_subjects: 38   # 77 modules with src/main scanned 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-claim-sql.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-claim-sql.py"]
+    run: |
+      python3 .github/scripts/check-outbox-claim-sql.py --root .
   # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
   # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
   # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
