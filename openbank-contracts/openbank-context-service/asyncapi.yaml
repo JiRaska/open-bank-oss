@@ -1,0 +1,153 @@
+# SPDX-License-Identifier: Apache-2.0
+# ADR-0006 / ADR-0308: minimized, versioned Context audit commitments.
+asyncapi: 3.0.0
+info:
+  title: OpenBank Context Service — audit commitment events
+  version: 1.1.0
+  description: |
+    Context writes each restricted read-audit or disclosure row and its commitment outbox
+    entry atomically. This topic carries only a random local row ID, SHA-256
+    commitment and event time; the
+    investigator, case, root and returned evidence stay in the local bank-scoped store.
+    The stream is disabled until the compatible Context and Audit images are deployed.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+defaultContentType: application/json
+servers:
+  sandbox:
+    host: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+    protocol: kafka-secure
+    description: mTLS KafkaUser ACLs grant Context Write and Audit Read on this topic.
+channels:
+  contextAuditCommitments:
+    address: openbank.context.audit.commitments
+    title: Committed restricted-read audit evidence
+    description: |
+      Three partitions, 30-day broker retention and delete cleanup. The Kafka key is
+      eventId (the same UUID as aggregateId), so retries retain their partition. The
+      source outbox survives broker retention and the Audit hash chain is the long-term
+      evidence store. This topic is not an authorization decision source.
+    messages:
+      contextReadAuditCommitted:
+        $ref: '#/components/messages/contextReadAuditCommitted'
+      contextDisclosureCommitted:
+        $ref: '#/components/messages/contextDisclosureCommitted'
+operations:
+  publishContextAuditCommitment:
+    action: send
+    channel:
+      $ref: '#/channels/contextAuditCommitments'
+    description: |
+      Producer: openbank-context-service ContextAuditCommitmentRelay. At least once;
+      a claim is retried with the same eventId after a crash or failed send.
+    messages:
+      - $ref: '#/channels/contextAuditCommitments/messages/contextReadAuditCommitted'
+      - $ref: '#/channels/contextAuditCommitments/messages/contextDisclosureCommitted'
+  ingestContextAuditCommitment:
+    action: receive
+    channel:
+      $ref: '#/channels/contextAuditCommitments'
+    description: |
+      Consumer: openbank-audit-service ContextAuditCommitmentConsumer. It accepts only
+      the exact v1 fields and ACKs after idempotent hash-chain persistence. Invalid
+      records use its dedicated DLQ and require reconciliation; they are not evidence
+      of successful central storage.
+    messages:
+      - $ref: '#/channels/contextAuditCommitments/messages/contextReadAuditCommitted'
+      - $ref: '#/channels/contextAuditCommitments/messages/contextDisclosureCommitted'
+components:
+  messages:
+    contextReadAuditCommitted:
+      name: CONTEXT_READ_AUDIT_COMMITTED
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/contextReadAuditCommitmentV1'
+    contextDisclosureCommitted:
+      name: CONTEXT_DISCLOSURE_COMMITTED
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/contextDisclosureCommitmentV1'
+  schemas:
+    contextReadAuditCommitmentV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - eventId
+        - eventType
+        - aggregateType
+        - aggregateId
+        - sourceService
+        - occurredAt
+        - commitment
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        eventId:
+          type: string
+          format: uuid
+          description: Random ID of the local context_read_audit row and outbox entry.
+        eventType:
+          type: string
+          const: CONTEXT_READ_AUDIT_COMMITTED
+        aggregateType:
+          type: string
+          const: CONTEXT_READ_AUDIT
+        aggregateId:
+          type: string
+          format: uuid
+          description: Must equal eventId.
+        sourceService:
+          type: string
+          const: context-service
+        occurredAt:
+          type: string
+          format: date-time
+          description: Local row time normalized to PostgreSQL microsecond precision.
+        commitment:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the canonical length-delimited, schema-versioned local row.
+    contextDisclosureCommitmentV1:
+      type: object
+      additionalProperties: false
+      required:
+        - schemaVersion
+        - eventId
+        - eventType
+        - aggregateType
+        - aggregateId
+        - sourceService
+        - occurredAt
+        - commitment
+      properties:
+        schemaVersion:
+          type: integer
+          const: 1
+        eventId:
+          type: string
+          format: uuid
+          description: Random ID of the local context_disclosure_audit row and outbox entry.
+        eventType:
+          type: string
+          const: CONTEXT_DISCLOSURE_COMMITTED
+        aggregateType:
+          type: string
+          const: CONTEXT_DISCLOSURE
+        aggregateId:
+          type: string
+          format: uuid
+          description: Must equal eventId.
+        sourceService:
+          type: string
+          const: context-service
+        occurredAt:
+          type: string
+          format: date-time
+          description: Local row time normalized to PostgreSQL microsecond precision.
+        commitment:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: SHA-256 of the canonical length-delimited local disclosure row.

@@ -12,8 +12,8 @@
 //                                     counterpartyRef (an opaque party id), IFRS 9 stage, GL.
 //   GET /snapshots/{id}/capital     — one exposure line per position, carrying instrumentId,
 //                                     exposure class, risk weight, EAD and RWA.
-// lending issues no human contract number (Loan has only its UUID), so the readable reference is
-// a shortened id, and the full id stays one click away in the row detail.
+// The readable reference is the loan's contract number (UV-YYYY-NNNNNN, #11107) when risk-engine
+// carries one, otherwise a shortened id; the full id stays one click away in the row detail.
 import type { Capital, Instrument } from './contracts'
 
 export type Lang = 'cs' | 'en'
@@ -45,11 +45,13 @@ export function kindGroupLabel(kind: string, lang: Lang): string {
 const LOAN_KINDS = new Set(['AMORTISING_LOAN', 'BULLET'])
 
 /**
- * Readable reference. lending's Loan carries no contract number — only its UUID — so this is the
- * id's first block, upper-cased and prefixed by what the instrument is. It is a display handle,
- * not a business key; search also matches the full id.
+ * Readable reference: the source contract's number when risk-engine carries one (a loan's
+ * UV-YYYY-NNNNNN, #11107). Otherwise — other kinds, an older risk-engine, runs recorded before
+ * the number existed — the id's first block, upper-cased and prefixed by what the instrument is.
+ * A display handle, not a business key; search also matches the full id.
  */
-export function instrumentReference(i: Pick<Instrument, 'id' | 'kind'>, lang: Lang): string {
+export function instrumentReference(i: Pick<Instrument, 'id' | 'kind' | 'contractNumber'>, lang: Lang): string {
+  if (i.contractNumber) return i.contractNumber
   const prefix = LOAN_KINDS.has(i.kind) ? (lang === 'cs' ? 'Úvěr' : 'Loan') : (lang === 'cs' ? 'Nástroj' : 'Instr.')
   return `${prefix} ${i.id.split('-')[0].slice(0, 8).toUpperCase()}`
 }

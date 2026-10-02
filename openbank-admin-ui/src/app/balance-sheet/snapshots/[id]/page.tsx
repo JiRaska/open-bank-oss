@@ -12,6 +12,8 @@
 //     curve is still a synthetic number.
 //   - A currency without a discounting curve is listed as UNPRICED, and positions the engine could
 //     not expand are counted with the engine's own reason — neither is ever drawn as a zero.
+//   - A risk limit the engine could not evaluate is NOT_EVALUABLE with the engine's reason: no
+//     figure, and never a green badge (ADR-0313 D9).
 
 'use client'
 
@@ -22,12 +24,13 @@ import { ArrowLeft, Scale } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import type { Tone } from '@/components/ui/tone'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { RequestedByBadge } from '@/components/balance-sheet/RequestedByBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import {
-  cashFlowsSchema, curveSetListSchema, instrumentsSchema, snapshotRunSchema,
-  type CashFlows, type CurveSetSummary, type Instrument, type SnapshotRun,
+  cashFlowsSchema, curveSetListSchema, instrumentsSchema, limitsSchema, snapshotRunSchema,
+  type CashFlows, type CurveSetSummary, type Instrument, type LimitEvaluation, type Limits, type SnapshotRun,
 } from '@/components/balance-sheet/contracts'
 import { ladderRows } from '@/components/balance-sheet/model'
 import { InstrumentsPanel } from '@/components/balance-sheet/InstrumentsPanel'
@@ -60,6 +63,8 @@ function SnapshotDetail({ id }: { id: string }) {
   const [curveSetId, setCurveSetId] = useState('')
   const [flows, setFlows] = useState<CashFlows | null>(null)
   const [flowsKind, setFlowsKind] = useState<UnavailableKind | null>(null)
+  const [limits, setLimits] = useState<Limits | null>(null)
+  const [limitsKind, setLimitsKind] = useState<UnavailableKind | null>(null)
 
   const load = useCallback(async () => {
     const res = await getJson(riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}`), snapshotRunSchema)
@@ -67,11 +72,13 @@ function SnapshotDetail({ id }: { id: string }) {
     setUnavailable(null)
     setRun(res.data)
     if (res.data.status !== 'TIED_OUT') return
-    const [inst, sets] = await Promise.all([
+    const [inst, sets, lim] = await Promise.all([
       getJson(riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}/instruments`), instrumentsSchema),
       getJson(riskUrl('/api/v1/risk/curve-sets', { limit: '25' }), curveSetListSchema),
+      getJson(riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}/limits`), limitsSchema),
     ])
     if (inst.ok) { setInstruments(inst.data.instruments); setInstrumentsKind(null) } else setInstrumentsKind(inst.kind)
+    if (lim.ok) { setLimits(lim.data); setLimitsKind(null) } else { setLimits(null); setLimitsKind(lim.kind) }
     if (sets.ok) {
       setCurveSets(sets.data.curveSets)
       if (sets.data.curveSets.length > 0) setCurveSetId(prev => prev || sets.data.curveSets[0].id)
@@ -192,6 +199,15 @@ function SnapshotDetail({ id }: { id: string }) {
 
       {tied && (
         <>
+          <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{t('Rizikové limity', 'Risk limits')}</h2>
+            {limitsKind ? (
+              <DataUnavailable kind={limitsKind} service="risk-engine" feature={t('rizikové limity', 'risk limits')} lang={language} dense />
+            ) : limits ? (
+              <LimitsPanel limits={limits} locale={locale} />
+            ) : null}
+          </div>
+
           <div className="card" style={{ marginBottom: 16 }}>
             <div style={{ display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap', marginBottom: 8 }}>
               <h2 style={{ fontSize: 14, fontWeight: 600, marginRight: 'auto' }}>{t('Splatnostní žebříček peněžních toků', 'Cash-flow maturity ladder')}</h2>
@@ -272,6 +288,58 @@ function CashFlowPanel({ flows, locale, money }: { flows: CashFlows; locale: str
           <MaturityLadder rows={ladderRows(c)} locale={locale} />
         </section>
       ))}
+    </div>
+  )
+}
+
+const LIMIT_TONE: Record<LimitEvaluation['status'], Tone> = {
+  OK: 'success', EARLY_WARNING: 'warning', BREACH: 'danger', NOT_EVALUABLE: 'neutral',
+}
+
+function LimitsPanel({ limits, locale }: { limits: Limits; locale: string }) {
+  const { t } = useLanguage()
+  const pct = (v: number) => `${(v * 100).toLocaleString(locale, { maximumFractionDigits: 2 })} %`
+  const label: Record<LimitEvaluation['status'], string> = {
+    OK: t('V limitu', 'Within limit'),
+    EARLY_WARNING: t('Včasné varování', 'Early warning'),
+    BREACH: t('Překročeno', 'Breach'),
+    NOT_EVALUABLE: t('Nelze vyhodnotit', 'Not evaluable'),
+  }
+  return (
+    <div>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
+        {t(
+          `Sada limitů ${limits.limitSet.id} v${limits.limitSet.version}. Limit, jehož vstup má mezeru, se nevyhodnocuje — a není to „v limitu“.`,
+          `Limit set ${limits.limitSet.id} v${limits.limitSet.version}. A limit whose input has a gap is not evaluated — and that is not "within limit".`,
+        )}
+      </p>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr>
+            <th scope="col" style={{ textAlign: 'left' }}>{t('Limit', 'Limit')}</th>
+            <th scope="col" style={{ textAlign: 'left' }}>{t('Stav', 'Status')}</th>
+            <th scope="col" style={{ textAlign: 'right' }}>{t('Hodnota', 'Value')}</th>
+            <th scope="col" style={{ textAlign: 'right' }}>{t('Varování', 'Early warning')}</th>
+            <th scope="col" style={{ textAlign: 'right' }}>{t('Limit', 'Limit')}</th>
+            <th scope="col" style={{ textAlign: 'left' }}>{t('Podklad / důvod', 'Basis / reason')}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {limits.limits.map(l => (
+            <tr key={l.limitId}>
+              <td title={l.citation}>
+                <div style={{ fontWeight: 600 }}>{l.metricDescription}</div>
+                <code style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{l.limitId}</code>
+              </td>
+              <td><StatusBadge status={l.status} tone={LIMIT_TONE[l.status]} label={label[l.status]} /></td>
+              <td style={{ textAlign: 'right' }}>{l.value === null ? '—' : pct(l.value)}</td>
+              <td style={{ textAlign: 'right' }}>{`${l.bound === 'MIN' ? '≤' : '≥'} ${pct(l.earlyWarning)}`}</td>
+              <td style={{ textAlign: 'right' }}>{`${l.bound === 'MIN' ? '≥' : '≤'} ${pct(l.limit)}`}</td>
+              <td style={{ fontSize: 12 }}>{l.status === 'NOT_EVALUABLE' ? l.reason : l.basis}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

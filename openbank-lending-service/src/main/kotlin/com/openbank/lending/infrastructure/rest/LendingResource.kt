@@ -16,6 +16,7 @@ import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
 import com.openbank.lending.domain.model.DecisionRequest
+import com.openbank.lending.domain.model.LoanApplication
 import com.openbank.lending.domain.model.LoanApplicationRequest
 import com.openbank.lending.domain.model.LoanStateSummary
 import com.openbank.lending.domain.model.RescheduleRequest
@@ -285,8 +286,17 @@ class LendingResource(
     @Path("/applications")
     @Operation(summary = "List a party's loan applications")
     @Authorize(action = "lending.list", resource = "")
-    fun listApplications(@QueryParam("partyId") partyId: UUID?) =
-        apply.listApplications(requireNotNull(partyId) { "query parameter 'partyId' is required" })
+    fun listApplications(
+        @QueryParam("partyId") partyId: UUID?,
+        @QueryParam("limit") limit: Int?,
+    ): Uni<List<LoanApplication>> {
+        val id = requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        if (limit == null) return apply.listApplications(id)
+        require(limit in 1..MAX_APPLICATION_LIST_LIMIT) {
+            "limit must be between 1 and $MAX_APPLICATION_LIST_LIMIT"
+        }
+        return apply.listApplications(id, limit)
+    }
 
     @GET
     @Path("/applications/recent")
@@ -477,6 +487,7 @@ class LendingResource(
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
+        const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }
 

@@ -7,10 +7,12 @@ package com.openbank.libs.api.error
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.authz.PolicyDeniedException
 import com.openbank.libs.domain.error.ResourceConflictException
 import com.openbank.libs.domain.error.ResourceNotFoundException
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.security.sanitizeForLog
 import io.quarkus.security.UnauthorizedException
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.Response
@@ -52,6 +54,7 @@ class IllegalArgumentExceptionMapper : ExceptionMapper<IllegalArgumentException>
     override fun toResponse(exception: IllegalArgumentException): Response = Response.status(400)
         .entity(apiError(400, ErrorCode.VALIDATION_ERROR.code, exception.message ?: "Invalid request"))
         .build()
+        .also { ApiErrorMetrics.genericMapperFired("IllegalArgumentException", exception, it.status) }
 }
 
 @Provider
@@ -59,6 +62,7 @@ class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
     private val log = Logger.getLogger(IllegalStateExceptionMapper::class.java)
     override fun toResponse(exception: IllegalStateException): Response {
         log.warnf(exception, "business rule violation: %s", exception.message)
+        ApiErrorMetrics.genericMapperFired("IllegalStateException", exception, 422)
         return Response.status(422)
             .entity(apiError(422, "BUSINESS_RULE_VIOLATION", exception.message ?: "Business rule violation"))
             .build()
@@ -131,6 +135,7 @@ class NoSuchElementExceptionMapper : ExceptionMapper<NoSuchElementException> {
     override fun toResponse(exception: NoSuchElementException): Response = Response.status(404)
         .entity(apiError(404, ErrorCode.NOT_FOUND.code, exception.message ?: "Resource not found"))
         .build()
+        .also { ApiErrorMetrics.genericMapperFired("NoSuchElementException", exception, it.status) }
 }
 
 /**
@@ -188,18 +193,24 @@ class InvalidApprovalStateMapper : ExceptionMapper<InvalidApprovalStateException
 // type, this is immune to whatever the Kotlin suspend/coroutine bridge does to WebApplicationException
 // subtypes at the JAX-RS boundary — the reason a thrown ServiceUnavailableException (503) was
 // surfacing as 422 (issue #1797).
+//
+// The client message is a CONSTANT: the exception text carries the policy engine's response body
+// or the connection error, which is internal detail. It is logged (sanitised) instead.
 @Provider
 class PolicyDecisionExceptionMapper : ExceptionMapper<PolicyDecisionException> {
-    override fun toResponse(exception: PolicyDecisionException): Response =
-        Response.status(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus)
+    private val log = Logger.getLogger(PolicyDecisionExceptionMapper::class.java)
+    override fun toResponse(exception: PolicyDecisionException): Response {
+        log.warnf("policy decision point unavailable: %s", exception.message.sanitizeForLog())
+        return Response.status(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus)
             .entity(
                 apiError(
                     ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.httpStatus,
                     ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.code,
-                    exception.message ?: "Policy decision point unavailable",
+                    "policy decision point unavailable",
                 ),
             )
             .build()
+    }
 }
 
 // Neither jakarta.validation.ConstraintViolationException NOR the Hibernate persistence
@@ -260,8 +271,11 @@ class WebApplicationExceptionMapper : ExceptionMapper<WebApplicationException> {
             409 -> ErrorCode.CONFLICT.code
             else -> "HTTP_$status"
         }
+        // A policy deny's reason is for the log and the trace, never the caller (PolicyDecisionPoint
+        // KDoc), so that subtype gets a constant message. Every other exception keeps its own.
+        val message = if (exception is PolicyDeniedException) "Forbidden" else exception.message ?: "Request failed"
         return Response.status(status)
-            .entity(apiError(status, code, exception.message ?: "Request failed"))
+            .entity(apiError(status, code, message))
             .build()
     }
 }
