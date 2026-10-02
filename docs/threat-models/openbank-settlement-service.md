@@ -465,3 +465,20 @@ meaning of a successful posting. A timeout may overlap a slow original request, 
 retain the same settlement, hold reference and journal idempotency key. Never compensate or
 release cover based only on timeout. Already scheduled activities keep their recorded deadlines;
 legacy saga timing is unchanged.
+
+## Ledger-projection reservation identity
+
+The settlement named M2M client now additionally receives `balance.hold` through
+`service-settlement-balance-cover`. The grant requires the exact settlement service principal
+and the validated user/service-account principal type. This is necessary for payer-cover
+reservation before journal posting; the former debit/credit-only grant rejected that first step.
+Legacy debit/credit grants remain for existing workflow histories. No `balance.holdRelease`,
+initialization, overdraft, reconciliation or approval-decision permission is added. A compromised
+settlement credential can reserve funds as well as perform its existing legacy movements; it
+cannot directly release cover when a journal outcome is uncertain. Ledger projection remains
+the owner of reservation consumption.
+
+Policy tests assert reservation admission, deny other balance actions and unrelated principals,
+and reject the wrong principal type. They do not prove token issuance or the full distributed
+workflow. Roll back this grant only after disabling new ledger-projection originations and
+draining their workflows; otherwise the cover step will be denied again.
