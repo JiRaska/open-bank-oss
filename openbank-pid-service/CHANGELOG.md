@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.5...pid-service-v0.10.6) (2026-10-02)
+
+
+### Bug Fixes
+
+* **pid:** register trusted-list liveness only when a list source is configured ([#11788](https://github.com/JiRaska/open-bank-oss/issues/11788)) ([be71e1b](https://github.com/JiRaska/open-bank-oss/commit/be71e1b4d86327adb3a5541db5dfcaab93edc95c)), closes [#11666](https://github.com/JiRaska/open-bank-oss/issues/11666)
+
 ## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.4...pid-service-v0.10.5) (2026-09-29)
 
 

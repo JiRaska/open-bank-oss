@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.270.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.0...admin-ui-v0.270.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **risk-engine:** reject a snapshot as-of after the current business date ([#11718](https://github.com/JiRaska/open-bank-oss/issues/11718)) ([a56389b](https://github.com/JiRaska/open-bank-oss/commit/a56389b05fd559348f5717c3a657d6feb1e0ec6c))
+
+## [0.270.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.269.0...admin-ui-v0.270.0) (2026-10-02)
+
+
+### Features
+
+* **admin-ui:** let risk officers see obligor names ([#11702](https://github.com/JiRaska/open-bank-oss/issues/11702)) ([f33def2](https://github.com/JiRaska/open-bank-oss/commit/f33def290221af3fe33127f1964440585f263eef))
+* **admin-ui:** make the treasury deal detail readable for a dealer ([#11711](https://github.com/JiRaska/open-bank-oss/issues/11711)) ([b6efd39](https://github.com/JiRaska/open-bank-oss/commit/b6efd395b570f42a68ca561ecb06440e561d03a0))
+* **admin-ui:** readable snapshot instruments for risk officers ([#11700](https://github.com/JiRaska/open-bank-oss/issues/11700)) ([e751e59](https://github.com/JiRaska/open-bank-oss/commit/e751e59b07a525c60f2f7a182b44b0f4c275f7c0)), closes [#11107](https://github.com/JiRaska/open-bank-oss/issues/11107)
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+* **lending,risk-engine,admin-ui:** immutable human loan contract number ([#11722](https://github.com/JiRaska/open-bank-oss/issues/11722)) ([f19ab46](https://github.com/JiRaska/open-bank-oss/commit/f19ab4629b01673c29c8d4c1f1f8b01a6db89915))
+* **risk-engine,admin-ui:** read liquidity and capital by category, not by raw loan id ([#11716](https://github.com/JiRaska/open-bank-oss/issues/11716)) ([e93fa1d](https://github.com/JiRaska/open-bank-oss/commit/e93fa1dffd2fe045fb638f0236361d2807cb1573))
+* **risk-engine:** average minimum-reserve holdings over the maintenance period ([#11546](https://github.com/JiRaska/open-bank-oss/issues/11546)) ([67af0c5](https://github.com/JiRaska/open-bank-oss/commit/67af0c5533ef2ea3c4e1540818e5be2fcb078498))
+* **risk-engine:** evaluate declarative risk limits on every snapshot ([#11549](https://github.com/JiRaska/open-bank-oss/issues/11549)) ([c46453f](https://github.com/JiRaska/open-bank-oss/commit/c46453fd72d565e4b9aa8e56d2caba18cb08ca00))
+* **treasury:** age nostro reconciliation breaks, alert on aged ones, accept MT940 ([#11673](https://github.com/JiRaska/open-bank-oss/issues/11673)) ([396fff7](https://github.com/JiRaska/open-bank-oss/commit/396fff740047221b2d820d311648344ec590c65c))
+
+
+### Bug Fixes
+
+* **admin-ui:** make the back-post void page readable for finance ([#11703](https://github.com/JiRaska/open-bank-oss/issues/11703)) ([314f875](https://github.com/JiRaska/open-bank-oss/commit/314f8753c5af7bb8389fb601f54e501b5e3d2380))
+* **admin-ui:** score source migrations and render coverage without rerunning tests ([#11757](https://github.com/JiRaska/open-bank-oss/issues/11757)) ([0a4d645](https://github.com/JiRaska/open-bank-oss/commit/0a4d6459dbab9e5eb308742a54766feca3b8dd0b))
+* **treasury:** actual vs projected daily position, Prague day, Czech UI ([#11708](https://github.com/JiRaska/open-bank-oss/issues/11708)) ([c5470b8](https://github.com/JiRaska/open-bank-oss/commit/c5470b871282135b61e77a23408f35fdaf3f28d4))
+
 ## [0.269.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.268.1...admin-ui-v0.269.0) (2026-09-30)
 
 

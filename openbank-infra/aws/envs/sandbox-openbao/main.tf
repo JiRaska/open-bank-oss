@@ -55,12 +55,18 @@ resource "vault_jwt_auth_backend_role" "config_admin" {
   token_max_ttl         = 900
 }
 
+# MFA (#11797). Keycloak enforces it: the `openbao` client runs the `openbao-step-up` flow
+# (password, then OTP) with minimum ACR `mfa`. OpenBao enforces it again here, so a Keycloak
+# misconfiguration that drops the step-up cannot silently hand out a writer token. The admin role
+# gets the same claim in a bootstrap-class change: the admin token cannot edit its own role.
 resource "vault_jwt_auth_backend_role" "sso_writer" {
   backend               = "oidc"
   role_name             = "openbank-sso-writer"
   role_type             = "oidc"
   user_claim            = "sub"
   bound_subject         = var.operator_subject
+  bound_claims_type     = "string"
+  bound_claims          = { acr = "mfa" }
   bound_audiences       = ["openbao"]
   oidc_scopes           = ["openid", "profile"]
   allowed_redirect_uris = local.oidc_redirect_uris
