@@ -103,7 +103,7 @@ DPD se odvozuje z existujícího splátkového kalendáře (`installment.due_dat
 
 ### Naplánovaný cyklus provisioningu a účetní zápis (ADR-0028 Fáze 3)
 
-`ProvisioningCycleScheduler` měsíčně přehodnotí stage/ECL každého ACTIVE úvěru (`lending.provisioning.cycle.every`) a zaúčtuje pouze **deltu** ECL oproti předchozímu období úvěru — nikdy celé ECL znovu — jako zápis `PROVISIONING` (MD Loan Loss Expense / DAL Loan Loss Allowance při nárůstu; obráceně při poklesu/rozpuštění). Historie se ukládá do `loan_provisioning` (jeden řádek na úvěr a období `yyyy-MM`), což slouží jako základ pro deltu i jako idempotenční pojistka proti opakování už provisionovaného období.
+`ProvisioningCycleScheduler` denně přehodnotí stage/ECL každého způsobilého neterminálního úvěru (`lending.provisioning.cycle.every`, výchozí `24h`) a zaúčtuje pouze **deltu** ECL oproti poslednímu záznamu úvěru — nikdy celé ECL znovu — jako zápis `PROVISIONING` (MD Loan Loss Expense / DAL Loan Loss Allowance při nárůstu; obráceně při poklesu/rozpuštění). Historie se ukládá do `loan_provisioning` (jeden řádek na úvěr a vykazovací datum `yyyy-MM-dd`), což je základ pro deltu i idempotenční pojistka opakovaného průchodu. Den přerušený restartem a změnou data vyžaduje odsouhlasení podložené historickými vstupy; dnešní měnitelný stav je nemůže nahradit.
 
 ### ⚠️ Explicitní omezení — zjednodušené, neprodukční PD/LGD/EAD
 

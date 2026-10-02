@@ -5,6 +5,7 @@
 package com.openbank.libs.lending.compliance
 
 import com.openbank.libs.lending.origination.OriginationState
+import com.openbank.libs.util.Hex
 import java.math.BigDecimal
 import java.security.MessageDigest
 
@@ -136,8 +137,6 @@ object CompliancePackCompiler {
                     .append(r.band ?: "-").append(';')
             }
         }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(canonical.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+        return Hex.lower(MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8)))
     }
 }

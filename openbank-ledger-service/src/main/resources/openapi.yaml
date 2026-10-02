@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.21.0
+  version: 1.21.1
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -648,7 +648,9 @@ paths:
       summary: Open an accounting day for posting
       description: >
         Creates the day in OPEN. A day is opened once — a repeat is 409, not an idempotent no-op
-        (ADR-0294). A future business date is refused (422).
+        (ADR-0294). A future business date is refused (422). Days are opened forward only: a date
+        earlier than the latest day already on the calendar is refused (409), because it would
+        enter CUTOFF after its tie-out had already run.
       operationId: openAccountingDay
       parameters:
         - $ref: '#/components/parameters/BusinessDatePath'
@@ -664,7 +666,7 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
-          description: The day is already open
+          description: The day is already open, or is earlier than the latest day on the calendar
         '422':
           description: The business date is in the future
 

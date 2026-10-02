@@ -6,6 +6,7 @@ package com.openbank.transaction.infrastructure.persistence.repository
 
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.transaction.application.port.out.TransactionRepository
 import com.openbank.transaction.application.usecase.TransactionUpdateConflictException
@@ -18,7 +19,6 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.Instant
 import java.time.LocalDate
 import java.util.UUID
@@ -208,12 +208,9 @@ private fun TransactionEntity.toDomain(): com.openbank.transaction.domain.model.
         type = TransactionType.valueOf(type),
         sourceAccountId = sourceAccountId,
         targetAccountId = targetAccountId,
-        amount = Money(amount.setScale(currency.defaultFractionDigits, RoundingMode.HALF_EVEN), currency),
+        amount = Money(RoundingPolicy.MONEY_SCALE.round(amount, currency), currency),
         fxRate = fxRate,
-        baseAmount = Money(
-            baseAmount.setScale(baseCurrency.defaultFractionDigits, RoundingMode.HALF_EVEN),
-            baseCurrency,
-        ),
+        baseAmount = Money(RoundingPolicy.MONEY_SCALE.round(baseAmount, baseCurrency), baseCurrency),
         status = TransactionStatus.valueOf(status),
         description = description,
         valueDate = valueDate,

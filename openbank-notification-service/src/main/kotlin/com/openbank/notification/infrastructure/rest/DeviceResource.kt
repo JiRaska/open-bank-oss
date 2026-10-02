@@ -25,6 +25,8 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
 import java.util.UUID
 
+private const val MAX_DEVICE_LIST_LIMIT = 200
+
 /**
  * Push device-token registry (PUSH fan-out target). Customer app → cluster traffic reaches
  * this through openbank-customer-edge, which injects the authoritative partyId from the
@@ -80,10 +82,12 @@ class DeviceResource {
     @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_API")
     @Authorize(action = "device.list", resource = "")
     @Operation(summary = "List a party's registered devices (no tokens returned)")
-    suspend fun list(@QueryParam("partyId") partyId: UUID?): Response {
+    suspend fun list(@QueryParam("partyId") partyId: UUID?, @QueryParam("limit") limit: Int?): Response {
         partyId ?: return badRequest("partyId query parameter is required")
-        val items = repo.listByParty(partyId)
-        return Response.ok(mapOf("items" to items.map { view(it) }, "total" to items.size)).build()
+        if (limit != null && limit !in 1..MAX_DEVICE_LIST_LIMIT) return badRequest("limit must be between 1 and 200")
+        val items = repo.listByParty(partyId, limit)
+        val total = if (limit == null) items.size.toLong() else repo.countByParty(partyId)
+        return Response.ok(mapOf("items" to items.map { view(it) }, "total" to total)).build()
     }
 
     @DELETE
