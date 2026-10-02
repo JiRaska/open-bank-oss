@@ -276,6 +276,61 @@ describe('snapshots', () => {
     expect(document.querySelector('a[href="/balance-sheet/snapshots/run-2/capital"]')).not.toBeNull()
   })
 
+  it('shows a badge per limit status, and a NOT_EVALUABLE limit with its reason and no figure', async () => {
+    const limit = (limitId: string, status: string, value: number | null, extra: Record<string, unknown> = {}) => ({
+      limitId, metric: limitId, metricDescription: `${limitId} description`, bound: 'MIN', limit: 1, earlyWarning: 1.1,
+      status, value, basis: value === null ? null : `${limitId} basis`, reason: value === null ? `${limitId} gap reason` : null,
+      citation: 'CRR', ...extra,
+    })
+    router = url => {
+      if (url.includes('/limits')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30', provenance: 'synthetic',
+          limitSet: { id: 'openbank-risk-appetite', version: '1', source: 'src' }, curveSetId: null,
+          limits: [
+            limit('lcr-min', 'BREACH', 0.5),
+            limit('nsfr-min', 'EARLY_WARNING', 1.02),
+            limit('total-capital-ratio-min', 'OK', 0.44),
+            limit('irrbb-eve-outlier', 'NOT_EVALUABLE', null, { bound: 'MAX', limit: 0.15, earlyWarning: 0.12 }),
+          ],
+          summary: { OK: 1, EARLY_WARNING: 1, BREACH: 1, NOT_EVALUABLE: 1 }, notes: [],
+        })
+      }
+      if (url.includes('/instruments')) return json({ runId: 'run-4', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByText('lcr-min')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-4/limits')).toBe(true)
+    const row = (id: string) => screen.getByText(id).closest('tr') as HTMLElement
+    expect(row('lcr-min').textContent).toMatch(/Breach|Překročeno/)
+    expect(row('lcr-min').querySelector('.badge-danger')).not.toBeNull()
+    expect(row('nsfr-min').querySelector('.badge-warning')).not.toBeNull()
+    expect(row('total-capital-ratio-min').querySelector('.badge-success')).not.toBeNull()
+    const gap = row('irrbb-eve-outlier')
+    expect(gap.textContent).toMatch(/Not evaluable|Nelze vyhodnotit/)
+    expect(gap.textContent).toContain('irrbb-eve-outlier gap reason')
+    expect(gap.querySelector('.badge-success')).toBeNull() // a gap is never green
+    expect(gap.textContent).not.toMatch(/0 %/)
+  })
+
+  it('a limits read that fails is shown as unavailable, never as all-clear', async () => {
+    router = url => {
+      if (url.includes('/limits')) return json({ error: 'boom' }, 500)
+      if (url.includes('/instruments')) return json({ runId: 'run-5', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-5', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-5' })} />)
+    const heading = await screen.findByText(/^(Risk limits|Rizikové limity)$/)
+    const card = heading.closest('.card') as HTMLElement
+    await vi.waitFor(() => expect(card.textContent!.length).toBeGreaterThan(heading.textContent!.length))
+    expect(card.querySelector('table')).toBeNull()
+    expect(card.querySelector('.badge-success')).toBeNull()
+    expect(screen.queryByText(/Within limit|V limitu/)).toBeNull()
+  })
+
   it('shows a loan instrument by its contract number, and an instrument without one by its id', async () => {
     const instrument = (id: string, contractNumber?: string | null) => ({
       id, kind: 'AMORTISING_LOAN', glAccountCode: '1200', currency: 'CZK', outstanding: 1000, valueDate: '2026-01-10',
