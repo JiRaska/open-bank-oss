@@ -184,13 +184,15 @@ class CreditRiskConsoleIT {
     @Order(8)
     @TestSecurity(user = "risk-it-analyst", roles = ["ROLE_CREDIT_RISK"])
     fun `whole-book summary retains defaulted exposure beyond list cap and marks stale evidence`() {
+        // The endpoint's Clock is UTC; JDBC current_date uses the session time zone.
+        val utcToday = "timezone('UTC', current_timestamp)::date"
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO loan(id, application_id, party_id, principal, currency, nominal_annual_rate,
                     term_periods, method, first_due_date, status)
                 SELECT gen_random_uuid(), ?::uuid, gen_random_uuid(), 100, 'ZAR', 0.08,
-                    12, 'ANNUITY', current_date + 30, 'DEFAULTED' FROM generate_series(1, 1001)
+                    12, 'ANNUITY', $utcToday + 30, 'DEFAULTED' FROM generate_series(1, 1001)
                 """.trimIndent(),
             ).use { statement ->
                 statement.setString(1, applicationId)

@@ -1,0 +1,20 @@
+# Risk-limit events — published by openbank-risk-engine through its transactional outbox
+# (risk_outbox, ADR-0313 D9): risk.limit.early-warning.v1 / risk.limit.breach.v1, keyed by the
+# snapshot run id so one run's limit events stay ordered on one partition. The event type travels in
+# the `ce-type` header. Contract: openbank-contracts/openbank-risk-engine/asyncapi.yaml.
+#
+# No DLQ topic for this one: it is an OUTGOING topic. The service's two consumers already have
+# theirs (kafka-dlq-topics.yaml).
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.risk.limit.events
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

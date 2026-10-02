@@ -67,11 +67,20 @@ class DelegationOrganizationAuthorityTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        service = DelegationService(
+            repository,
+            scaClient,
+            eligibilityClient,
+            authorityClient,
+            ownershipClient,
+            mockk(),
+            false,
+            clock,
+        )
         coEvery { authorityClient.authorityFor(grantor, grantor) } returns
             GrantorAuthority(GrantorAuthorityVerdict.AUTHORIZED)
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
-        coEvery { scaClient.consumeChallenge(any(), any()) } answers {
+        coEvery { scaClient.consumeChallenge(any(), any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
         }
     }
@@ -87,7 +96,7 @@ class DelegationOrganizationAuthorityTest {
         val grant = service.offer(offerCommand().copy(actorPartyId = organizationActor))
 
         assertThat(grant.grantorName).isEqualTo("Acme s.r.o.")
-        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), organizationActor) }
+        coVerify(exactly = 1) { scaClient.consumeChallenge(any(), organizationActor, any()) }
         coVerify(exactly = 0) { eligibilityClient.eligibilityOf(grantor) }
     }
 
@@ -101,7 +110,7 @@ class DelegationOrganizationAuthorityTest {
         }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
 
         coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     @Test
@@ -114,7 +123,7 @@ class DelegationOrganizationAuthorityTest {
         }.isInstanceOf(DelegationGrantorAuthorityUnavailableException::class.java)
 
         coVerify(exactly = 0) { ownershipClient.verifyOwnership(any(), any(), any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
     }
 
     private fun scaOk(partyId: UUID, purpose: String) {

@@ -51,6 +51,8 @@ private val PROVISIONING_CLOSED_STATES = setOf(
 )
 
 @ApplicationScoped
+// One adapter method per LoanApplicationRepository port method (hexagonal), like the fleet's other *RepositoryImpl.
+@Suppress("TooManyFunctions")
 class LoanApplicationRepositoryImpl @Inject constructor(
     private val sf: Mutiny.SessionFactory,
     private val mapper: LendingMapper,
@@ -78,6 +80,14 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             LoanApplicationEntity::class.java,
         )
             .setParameter("p", partyId).resultList
+    }.map { it.map(mapper::toDomain) }
+
+    @WithSession override fun findByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->
+        s.createQuery(
+            "FROM LoanApplicationEntity WHERE partyId = :p ORDER BY createdAt DESC, id DESC",
+            LoanApplicationEntity::class.java,
+        )
+            .setParameter("p", partyId).setMaxResults(limit).resultList
     }.map { it.map(mapper::toDomain) }
 
     /**

@@ -4,11 +4,18 @@
 
 package com.openbank.libs.persistence.outbox
 
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.logging.Handler
 import java.util.logging.LogRecord
 import java.util.logging.Logger as JulLogger
@@ -386,5 +393,210 @@ class OutboxDispatchTest {
         val message = records.joinToString("\n") { it.message }
         assertThat(message).contains("3 row(s) left")
         assertThat(calls).isEqualTo(2)
+    }
+
+    // ── ADR-0327 v2 path ─────────────────────────────────────────────────────────
+
+    /**
+     * In-memory [OutboxRepositoryV2]: claims are one row per aggregate (the D3 head rule) so the
+     * concurrent path's precondition holds; `markSentBatch` records batch boundaries so a test can
+     * assert one acknowledgement per batch rather than one per row.
+     */
+    private class FakeRepoV2(initial: List<OutboxEntry>) : OutboxRepositoryV2 {
+        val rows = initial.associateBy { it.eventId }.toMutableMap()
+        val sentBatches = mutableListOf<List<UUID>>()
+        val failed = mutableListOf<UUID>()
+        val claims = AtomicInteger()
+
+        override suspend fun listProcessable(limit: Int): List<OutboxEntry> = claimProcessable(limit)
+
+        override suspend fun claimProcessable(limit: Int, staleAfter: Duration): List<OutboxEntry> {
+            claims.incrementAndGet()
+            val heads = rows.values
+                .filter { it.status == OutboxStatus.PENDING || it.status == OutboxStatus.FAILED }
+                .sortedBy { it.createdAt }
+                .distinctBy { it.aggregateId }
+                .take(limit)
+            heads.forEach { rows[it.eventId] = it.copy(status = OutboxStatus.DISPATCHING) }
+            return heads
+        }
+
+        override suspend fun markSent(eventId: UUID, sentAt: Instant) = markSentBatch(listOf(eventId), sentAt)
+
+        override suspend fun markSentBatch(eventIds: Collection<UUID>, sentAt: Instant) {
+            sentBatches += eventIds.toList()
+            eventIds.forEach { id -> rows[id] = rows.getValue(id).copy(status = OutboxStatus.SENT, sentAt = sentAt) }
+        }
+
+        override suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant): OutboxStatus {
+            failed += eventId
+            val row = rows.getValue(eventId)
+            val next = OutboxFailurePolicy.statusAfterFailure(row.attemptCount + 1)
+            rows[eventId] = row.copy(status = next, attemptCount = row.attemptCount + 1, lastError = error)
+            return next
+        }
+
+        override suspend fun oldestProcessableAge(now: Instant): Duration? = null
+        override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = 0
+        override suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant): Int = 0
+    }
+
+    @Test
+    fun `v2 path publishes a batch concurrently, bounded by the semaphore, with ONE markSentBatch`() {
+        val rows = (1..40).map { entry("v2.$it") }
+        val repo = FakeRepoV2(rows)
+        val inFlight = AtomicInteger()
+        val peak = AtomicInteger()
+
+        val result = runBlocking(Dispatchers.Default) {
+            OutboxDispatch.dispatchOnce(repo, batchSize = 40) { _ ->
+                val now = inFlight.incrementAndGet()
+                peak.updateAndGet { maxOf(it, now) }
+                delay(20)
+                inFlight.decrementAndGet()
+            }
+        }
+
+        assertThat(result.outcomes).hasSize(40).allMatch { it is OutboxDispatchOutcome.Dispatched }
+        assertThat(result.claimed).isEqualTo(40)
+        assertThat(repo.sentBatches).describedAs("one acknowledgement per batch, not per row").hasSize(1)
+        assertThat(repo.sentBatches.single()).containsExactlyInAnyOrderElementsOf(rows.map { it.eventId })
+        assertThat(peak.get())
+            .describedAs("sends overlap (the point of D6) but never beyond SEND_CONCURRENCY")
+            .isGreaterThan(1)
+            .isLessThanOrEqualTo(OutboxDispatch.SEND_CONCURRENCY)
+    }
+
+    @Test
+    fun `v2 path marks each real failure individually and still acknowledges the successes`() {
+        val rows = listOf(entry("ok.1"), entry("bad.1"), entry("ok.2"))
+        val repo = FakeRepoV2(rows)
+
+        val result = runBlocking {
+            OutboxDispatch.dispatchOnce(repo, batchSize = 3) { e ->
+                if (e.eventType.startsWith("bad")) error("broker said no")
+            }
+        }
+
+        assertThat(repo.sentBatches.single()).containsExactlyInAnyOrder(rows[0].eventId, rows[2].eventId)
+        assertThat(repo.failed).containsExactly(rows[1].eventId)
+        assertThat(result.outcomes.filterIsInstance<OutboxDispatchOutcome.Failed>().single().terminal).isFalse()
+    }
+
+    @Test
+    fun `v2 path abandons the batch on a transport-unavailable signal without consuming attempts`() {
+        val rows = (1..5).map { entry("cb.$it") }
+        val repo = FakeRepoV2(rows)
+
+        val result = runBlocking {
+            OutboxDispatch.dispatchOnce(repo, batchSize = 5) { _ -> throw breakerOpen() }
+        }
+
+        assertThat(result.abandoned).isTrue()
+        assertThat(result.outcomes).isEmpty()
+        assertThat(repo.failed).describedAs("no attempt burned on an open breaker (#4005)").isEmpty()
+        assertThat(repo.sentBatches).isEmpty()
+        assertThat(repo.rows.values.map { it.status }).containsOnly(OutboxStatus.DISPATCHING)
+    }
+
+    @Test
+    fun `a CancellationException is rethrown and never recorded as a row failure — on both paths`() {
+        val v1 = FakeRepo(listOf(entry("c.1"), entry("c.2")))
+        val v2 = FakeRepoV2(listOf(entry("c.1"), entry("c.2")))
+
+        runBlocking {
+            val v1Job =
+                async { OutboxDispatch.dispatchOnce(v1) { _ -> throw CancellationException("scope cancelled") } }
+            assertThat(runCatching { v1Job.await() }.exceptionOrNull()).isInstanceOf(CancellationException::class.java)
+            val v2Job =
+                async { OutboxDispatch.dispatchOnce(v2) { _ -> throw CancellationException("scope cancelled") } }
+            assertThat(runCatching { v2Job.await() }.exceptionOrNull()).isInstanceOf(CancellationException::class.java)
+        }
+
+        assertThat(v1.failed).describedAs("v1 path must not markFailed a cancellation").isEmpty()
+        assertThat(v1.sent).isEmpty()
+        assertThat(v2.failed).describedAs("v2 path must not markFailed a cancellation").isEmpty()
+        assertThat(v2.sentBatches).isEmpty()
+    }
+
+    @Test
+    fun `drain keeps claiming until a batch comes back short`() {
+        val rows = (1..70).map { entry("d.$it") }
+        val repo = FakeRepoV2(rows)
+
+        val result = runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { _ -> yield() }
+        }
+
+        // 25 + 25 + 20 (short, but it dispatched — it may have promoted a head) + 0 → four
+        // claims, all 70 rows dispatched in one tick.
+        assertThat(repo.claims.get()).isEqualTo(4)
+        assertThat(result.claimed).isEqualTo(70)
+        assertThat(result.outcomes).hasSize(70)
+        assertThat(repo.rows.values.map { it.status }).containsOnly(OutboxStatus.SENT)
+    }
+
+    @Test
+    fun `drain sends a hot aggregate's whole backlog in one tick - a short batch that dispatched re-claims`() {
+        val agg = UUID.randomUUID()
+        val base = Instant.parse("2026-10-01T00:00:00Z")
+        val rows = (1..3).map { i -> entry("hot.$i").copy(aggregateId = agg, createdAt = base.plusMillis(i.toLong())) }
+        val repo = FakeRepoV2(rows)
+        val order = mutableListOf<String>()
+
+        runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { e -> order += e.eventType }
+        }
+
+        // Each claim sees only the aggregate's head; stopping on the first short batch sent ONE.
+        assertThat(order).containsExactly("hot.1", "hot.2", "hot.3")
+        assertThat(repo.claims.get()).isEqualTo(4)
+    }
+
+    @Test
+    fun `drain stops on a short batch that dispatched nothing - everything left is parked`() {
+        val repo = FakeRepoV2((1..3).map { entry("parked.$it") })
+
+        runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 25, budget = Duration.ofSeconds(30)) { _ -> error("rejected") }
+        }
+
+        assertThat(repo.claims.get()).describedAs("no re-claim after an all-failed short batch").isEqualTo(1)
+    }
+
+    @Test
+    fun `drain stops when the wall-clock budget is spent even while batches stay full`() {
+        val rows = (1..500).map { entry("slow.$it") }
+        val repo = FakeRepoV2(rows)
+
+        val result = runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 10, budget = Duration.ofMillis(150)) { _ -> delay(60) }
+        }
+
+        assertThat(result.claimed).describedAs("more than one batch ran").isGreaterThan(10)
+        assertThat(result.claimed).describedAs("but nowhere near the whole table").isLessThan(500)
+        assertThat(repo.claims.get()).isLessThan(50)
+    }
+
+    @Test
+    fun `drain stops after an abandoned batch instead of hammering an open breaker`() {
+        val rows = (1..50).map { entry("cb.$it") }
+        val repo = FakeRepoV2(rows)
+
+        val result = runBlocking {
+            OutboxDispatch.drain(repo, batchSize = 10, budget = Duration.ofSeconds(30)) { _ -> throw breakerOpen() }
+        }
+
+        assertThat(result.abandoned).isTrue()
+        assertThat(repo.claims.get()).isEqualTo(1)
+    }
+
+    @Test
+    fun `drain on a v1 repository is a single sequential batch per call`() {
+        val rows = (1..5).map { entry("v1.$it") }
+        val repo = FakeRepo(rows)
+        val result = runBlocking { OutboxDispatch.dispatchOnce(repo, batchSize = 2) { _ -> } }
+        assertThat(result.claimed).isEqualTo(2)
+        assertThat(repo.sent).hasSize(2)
     }
 }

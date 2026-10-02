@@ -134,6 +134,15 @@ kotlin {
 // consent-service ~10% of runs). Ratchet-only: never lower this.
 kover {
     reports {
+        // OutboxRepositoryV2ConformanceIT (ADR-0327 D9) is an abstract @Test harness that only
+        // executes inside a booted adopter service (reactive Panache needs a Vert.x context and a
+        // real outbox table); nothing in this module can run it, so counting it would lower the
+        // measured ratio without saying anything about coverage. Excluded, not the floor lowered.
+        filters {
+            excludes {
+                classes("com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT*")
+            }
+        }
         verify {
             rule {
                 bound {
