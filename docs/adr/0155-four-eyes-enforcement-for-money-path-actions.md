@@ -80,13 +80,14 @@ We will add a REST-layer, opt-in, two-phase approval flow:
      The intercepted method is **not** invoked.
    - `X-Approval-Id` present → look up the approval; it must match this
      action + resource + the ORIGINAL maker's principal id, be `APPROVED`, and
-     not already consumed. If valid, mark it `EXECUTED` (one-time use) and
-     proceed. Otherwise, re-enter the pending-approval branch (defends against
+     not already consumed. Atomically claim `EXECUTED` before proceeding. A
+     record that expires during consumption cannot authorize the method.
+     Otherwise, re-enter the pending-approval branch (defends against
      a stale/mismatched/replayed id silently proceeding).
-   - Default (`authz.four-eyes.enforce=false`, or no `ApprovalStore` bean
-     wired): unchanged behavior — proceed. This keeps the interceptor change
-     safe to ship into every service via the shared libs JAR without
-     retroactively blocking traffic anywhere that hasn't opted in.
+   - Default (`authz.four-eyes.enforce=false`): proceed for services that have
+     not opted in. With enforcement enabled, a missing `ApprovalStore` is an
+     infrastructure failure (HTTP 503); configuration cannot silently waive
+     a required second approval.
 4. **Per-service decide endpoint**: each participating service owns its own
    `POST .../approvals/{id}/decide` REST resource (own `@Authorize`,
    `@RolesAllowed`), calling the shared `ApprovalStore.decide`. Not a
@@ -189,3 +190,18 @@ We will add a REST-layer, opt-in, two-phase approval flow:
   mismatch, and extended the verb vocabulary.
 - `docs/threat-models/openbank-sepa-payment.md` — updated alongside the pilot
   PR with this flow's STRIDE analysis.
+
+
+## Atomic transition and missing-store hardening
+
+`RedisApprovalStore` compares the exact bytes read with the current value in one
+Redis script before replacing a PENDING or APPROVED record. The write keeps the
+existing encoding and decided-record TTL. A losing concurrent transition is a
+conflict; a missing key stays missing. Neither a late checker nor a late consumer
+can overwrite a winner or recreate an expired record.
+
+This supersedes the pilot's missing-store no-op when enforcement is explicitly on.
+The opt-in flag remains unchanged. All participating instances must be upgraded
+before relying on atomicity; an old writer can still issue an unconditional SET.
+Operational consequences and rollback limits are in
+[the approval-store runbook](../runbooks/atomic-four-eyes-approvals.md).

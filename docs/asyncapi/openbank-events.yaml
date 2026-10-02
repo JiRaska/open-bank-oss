@@ -1393,6 +1393,10 @@ components:
               type: [string, 'null']
               format: uuid
               description: Rail payment that caused this booking; absent for non-rail postings.
+            reversalOf:
+              type: [string, 'null']
+              format: uuid
+              description: Original transaction ID when this initiation is a reversal; absent on older events.
 
     BalanceEventPayload:
       # A plain data class, not a DomainEvent — `eventType` is declared by the class itself, which

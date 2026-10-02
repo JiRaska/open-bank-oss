@@ -54,5 +54,7 @@ export function loanLabel(
     ? `${lang === 'cs' ? 'splatnost' : 'matures'} ${new Date(instrument.maturityDate).toLocaleDateString(locale)}`
     : undefined
   const balance = `${lang === 'cs' ? 'zůstatek' : 'outstanding'} ${formatMoney(instrument.outstanding, locale, instrument.currency)}`
-  return { label: [capitalised, maturity].filter(Boolean).join(', '), sublabel: balance }
+  // #11107: lead with the contract number when risk-engine carries one.
+  const head = instrument.contractNumber ? `${instrument.contractNumber} · ${capitalised}` : capitalised
+  return { label: [head, maturity].filter(Boolean).join(', '), sublabel: balance }
 }
