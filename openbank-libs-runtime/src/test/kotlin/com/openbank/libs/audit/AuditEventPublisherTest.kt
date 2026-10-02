@@ -161,4 +161,71 @@ class AuditEventPublisherTest {
         val line = allLoggedText()
         assertThat(line).doesNotContain("990101-1234", "do-not-log-me", "nationalId")
     }
+
+    private val fieldPattern = Regex("""(\w+)=("(?:[^"\\]|\\.)*"|[^ "]+)""")
+
+    private fun fieldsOf(line: String): List<String> =
+        fieldPattern.findAll(line.removePrefix("audit event ")).map { it.groupValues[1] }.toList()
+
+    private val expectedFields =
+        listOf("eventId", "at", "actor", "actorType", "op", "resource", "resourceId", "result", "traceId")
+
+    @Test
+    fun `a line break in resourceId stays inside one line and one field`(): Unit = runBlocking {
+        publisher.publish(
+            AuditEvent(
+                actorId = "party-1",
+                actorType = "CUSTOMER",
+                operation = "account.updated",
+                resourceType = "account",
+                resourceId = "acc-1\naudit event eventId=x at=y actor=admin result=SUCCESS",
+                traceId = "t\u2028u\u0085v\u001bw",
+            ),
+        )
+
+        val line = loggedLine(captured.first())
+        assertThat(line.none { it.isISOControl() || it == '\u2028' || it == '\u2029' }).isTrue()
+        assertThat(fieldsOf(line)).containsExactlyElementsOf(expectedFields)
+    }
+
+    @Test
+    fun `spaces in a value cannot add or override a field`(): Unit = runBlocking {
+        publisher.publish(
+            AuditEvent(
+                actorId = "party-1 actorType=ADMIN",
+                actorType = "CUSTOMER",
+                operation = "account.updated result=SUCCESS",
+                resourceType = "account",
+                resourceId = "acc-1",
+                result = AuditResult.DENIED,
+            ),
+        )
+
+        val line = loggedLine(captured.first())
+        assertThat(fieldsOf(line)).containsExactlyElementsOf(expectedFields)
+        assertThat(line).contains("actor=\"party-1 actorType=ADMIN\"", "result=DENIED")
+    }
+
+    @Test
+    fun `field count is fixed for arbitrary values`(): Unit = runBlocking {
+        val alphabet = "ab =\"\\-\n\r\t\u0085\u2028\u2029\u001b\u0000é"
+        val rnd = java.util.Random(4711)
+        fun any() = (0 until rnd.nextInt(12)).map { alphabet[rnd.nextInt(alphabet.length)] }.joinToString("")
+        repeat(500) {
+            captured.clear()
+            publisher.publish(
+                AuditEvent(
+                    actorId = any(),
+                    actorType = any(),
+                    operation = any(),
+                    resourceType = any(),
+                    resourceId = any(),
+                    traceId = any(),
+                ),
+            )
+            val line = loggedLine(captured.first())
+            assertThat(line.none { it.isISOControl() || it == '\u2028' || it == '\u2029' }).describedAs(line).isTrue()
+            assertThat(fieldsOf(line)).describedAs(line).containsExactlyElementsOf(expectedFields)
+        }
+    }
 }

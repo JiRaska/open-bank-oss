@@ -78,6 +78,16 @@ class LoggingTransactionEventPublisherTest {
     }
 
     @Test
+    fun `reversal initiation carries the persisted original transaction identity`() {
+        val originalId = UUID.randomUUID()
+        val reversal = transaction().copy(type = TransactionType.REVERSAL, reversalOf = originalId, isReversal = true)
+        val node = objectMapper.readTree(publisher.initiatedPayload(reversal))
+
+        assertThat(node.get("type").asText()).isEqualTo("REVERSAL")
+        assertThat(node.get("reversalOf").asText()).isEqualTo(originalId.toString())
+    }
+
+    @Test
     fun `completedPayload carries eventType and sourceService for AuditConsumer attribution`() {
         val node = objectMapper.readTree(publisher.completedPayload(transaction()))
 

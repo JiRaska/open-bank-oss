@@ -29,13 +29,12 @@ TOKEN = re.compile(r"RoundingMode\.|setScale\(")
 BASELINE = {
     "openbank-delegation-service": 5,
     "openbank-domestic-payment": 2,
-    "openbank-fx-service": 7,
+    "openbank-fx-service": 4,
     "openbank-interest-service": 14,
     "openbank-ledger-service": 8,
     "openbank-lending-service": 1,
     "openbank-sca-service": 2,
     "openbank-sdd-service": 2,
-    "openbank-transaction-service": 11,
     "openbank-treasury-service": 4,
 }
 

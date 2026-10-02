@@ -27,9 +27,9 @@ class IncidentImpactPactFixtures {
                 statement.executeUpdate("DELETE FROM context_case_assignments WHERE principal_id = 'pact-operator'")
                 statement.executeUpdate(
                     """INSERT INTO context_case_assignments
-                        (assignment_id, bank_scope, principal_id, case_id, purpose, valid_from, valid_to, created_at)
+                        (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref, valid_from, valid_to, created_at)
                         VALUES ('${UUID.randomUUID()}', 'openbank-cz', 'pact-operator', 'case-1', 'INCIDENT_IMPACT',
-                        now() - interval '1 hour', now() + interval '1 hour', now())
+                        'incident:incident-1', now() - interval '1 hour', now() + interval '1 hour', now())
                     """.trimIndent(),
                 )
                 seedProjection(statement, services)

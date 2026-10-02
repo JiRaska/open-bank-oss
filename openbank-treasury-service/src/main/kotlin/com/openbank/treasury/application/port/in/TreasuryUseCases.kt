@@ -9,10 +9,13 @@ import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.StoredStatement
 import com.openbank.treasury.domain.model.Actor
+import com.openbank.treasury.domain.model.BreakAlertPolicy
+import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
+import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroReconciliation
 import com.openbank.treasury.domain.model.NostroStatement
 import com.openbank.treasury.domain.model.ProductType
@@ -71,15 +74,33 @@ data class CounterpartyExposure(
     }
 }
 
-/** Daily position per currency (outstanding principal of SETTLED deals as of a date). */
+/** Daily position per currency: outstanding principal on a date, and how many deals make it up. */
 data class CurrencyPosition(
     val currency: String,
     val placed: BigDecimal,
     val borrowed: BigDecimal,
     val atCnb: BigDecimal,
+    val dealCount: Int = 0,
 ) {
     val net: BigDecimal get() = placed + atCnb - borrowed
 }
+
+/**
+ * ACTUAL: the date is the bank's accounting day today or earlier, and only deals whose cash has
+ * moved (SETTLED, or since MATURED) count. PROJECTED: the date is after today, and deals already
+ * concluded but not yet settled (BOOKED, CONFIRMED) count too, on their contracted value and
+ * maturity dates. A projection holds no new deals.
+ */
+enum class PositionBasis { ACTUAL, PROJECTED }
+
+/** The daily position as of [asOf], computed against the accounting day [today] (Europe/Prague). */
+data class PositionReport(
+    val asOf: LocalDate,
+    val today: LocalDate,
+    val basis: PositionBasis,
+    val countedStates: Set<DealState>,
+    val positions: List<CurrencyPosition>,
+)
 
 /**
  * One simulated-market pass. [declined] counts BOOKED deals a simulated counterparty did NOT
@@ -128,7 +149,9 @@ interface TreasuryDealUseCase {
     suspend fun get(dealId: UUID): DealView
     suspend fun list(state: DealState?): List<Deal>
     suspend fun counterparties(): List<CounterpartyExposure>
-    suspend fun positions(asOf: LocalDate): List<CurrencyPosition>
+
+    /** The daily position on [asOf] (default: the accounting day today, Europe/Prague). */
+    suspend fun positions(asOf: LocalDate?): PositionReport
 
     /** One pass of the simulated market (ADR-0315 D9): confirm every BOOKED deal, settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun
@@ -152,4 +175,29 @@ interface NostroReconciliationUseCase {
 
     /** Compare the statement with the ledger's nostro GL for the statement date. Posts nothing. */
     suspend fun reconcile(statementId: UUID): NostroReconciliation
+}
+
+/** A break with its age evaluated for a given day (ADR-0315 D7). */
+data class NostroBreakView(val brk: NostroBreak, val ageBusinessDays: Int, val aged: Boolean)
+
+/** The outcome of one sweep: statements observed (and failed), open and aged breaks, alerts written. */
+data class NostroBreakSweep(
+    val observed: Int,
+    val failures: List<Throwable>,
+    val open: Int,
+    val aged: Int,
+    val alerted: Int,
+)
+
+interface NostroBreakUseCase {
+    /** Reconcile [statementId] and record what it leaves unmatched as breaks; resolves what now matches. */
+    suspend fun observe(statementId: UUID): BreakChanges
+
+    /** Observe every recent statement, then alert (once each) on open breaks over the threshold. */
+    suspend fun sweep(today: LocalDate): NostroBreakSweep
+
+    /** Breaks of a CONFIGURED nostro [iban], oldest first. @throws NostroAccountNotFoundException */
+    suspend fun breaks(iban: String, includeResolved: Boolean): List<NostroBreakView>
+
+    val policy: BreakAlertPolicy
 }

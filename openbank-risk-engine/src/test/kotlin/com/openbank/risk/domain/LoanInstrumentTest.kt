@@ -66,6 +66,7 @@ class LoanInstrumentTest {
             disbursedOn = LocalDate.parse("2026-01-10"),
             maturityDate = LocalDate.parse("2026-11-15"),
             ifrs9Stage = "STAGE_2",
+            contractNumber = "UV-2026-000123",
             remainingInstallments = listOf(
                 RemainingInstallmentResponse(
                     10,
@@ -92,6 +93,7 @@ class LoanInstrumentTest {
         assertThat(instrument.maturityDate).isEqualTo(LocalDate.parse("2026-11-15"))
         assertThat(instrument.counterpartyRef).isEqualTo(Fixtures.ALICE.toString())
         assertThat(instrument.ifrs9Stage).isEqualTo("STAGE_2")
+        assertThat(instrument.contractNumber).isEqualTo("UV-2026-000123") // #11107
         val rate = instrument.rateTerms!!
         assertThat(rate.rateType).isEqualTo(RateType.FLOATING)
         assertThat(rate.index).isEqualTo(CurveIndex.EURIBOR_3M)
@@ -232,6 +234,21 @@ class LoanInstrumentTest {
         assertThat(InputHash.of(inputs, listOf(changed))).isNotEqualTo(InputHash.of(inputs, listOf(a)))
         assertThat(InputHash.of(inputs, listOf(a.copy(ifrs9Stage = "STAGE_2"))))
             .isNotEqualTo(InputHash.of(inputs, listOf(a)))
+    }
+
+    @Test
+    fun `the contract number is a label - it does not change the input hash`() {
+        // #11107: a replay of a run read before lending published the number must keep its hash.
+        val inputs = tiedOutWithLoans(BigDecimal("1"))
+        val a = lendingLoan()
+        assertThat(InputHash.of(inputs, listOf(a.copy(contractNumber = "UV-2026-000001"))))
+            .isEqualTo(InputHash.of(inputs, listOf(a)))
+    }
+
+    @Test
+    fun `an older lending without contractNumber still maps, with no number`() {
+        val instrument = LoanInstrumentMapper.toInstrument(lendingLoan())
+        assertThat(instrument.contractNumber).isNull()
     }
 
     @Test
