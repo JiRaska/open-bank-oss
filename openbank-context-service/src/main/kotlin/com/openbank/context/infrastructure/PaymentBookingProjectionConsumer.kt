@@ -41,9 +41,18 @@ class PaymentBookingProjectionConsumer(
     suspend fun consumeTransaction(payload: String) = consume(payload, TRANSACTION_STREAM) { root ->
         if (root.text("eventType") != TRANSACTION_INITIATED) return@consume null
         require(root.text("sourceService") == TRANSACTION_SOURCE) { "unexpected transaction event source" }
+        val transactionId = root.text("aggregateId")
+        val reversalOf = root.text("reversalOf")
+        if (reversalOf.isNotEmpty()) {
+            require(root.text("type") == "REVERSAL" && isUuid(transactionId) && isUuid(reversalOf)) {
+                "transaction reversal event has invalid source identity"
+            }
+            val version = root.requiredVersion(requireStrictRevisions)
+            val occurredAt = Instant.parse(root.text("occurredAt"))
+            return@consume BookingProjectionEvent.reversal(reversalOf, transactionId, version, occurredAt)
+        }
         val paymentId = root.text("originatingPaymentId")
         if (paymentId.isEmpty()) return@consume null
-        val transactionId = root.text("aggregateId")
         val version = root.requiredVersion(requireStrictRevisions)
         val occurredAt = Instant.parse(root.text("occurredAt"))
         require(isUuid(paymentId) && isUuid(transactionId)) { "transaction event misses payment correlation" }
@@ -240,6 +249,33 @@ private data class BookingProjectionEvent(
     val relation: String,
 ) {
     companion object {
+        fun reversal(originalId: String, reversalId: String, version: Long, at: Instant) = BookingProjectionEvent(
+            "transaction:$reversalId:$version",
+            "booking-transaction:$reversalId",
+            "transaction-service",
+            version,
+            at,
+            BookingNode(
+                "booking-transaction:$originalId",
+                "TRANSACTION_BOOKING",
+                "transaction-service",
+                originalId,
+                "Original booking",
+                at,
+                version,
+            ),
+            BookingNode(
+                "booking-transaction:$reversalId",
+                "TRANSACTION_BOOKING",
+                "transaction-service",
+                reversalId,
+                "Reversal booking initiated",
+                at,
+                version,
+            ),
+            "REVERSED_BY",
+        )
+
         fun transaction(paymentId: String, transactionId: String, version: Long, at: Instant) = BookingProjectionEvent(
             "transaction:$transactionId:$version",
             "booking-transaction:$transactionId",

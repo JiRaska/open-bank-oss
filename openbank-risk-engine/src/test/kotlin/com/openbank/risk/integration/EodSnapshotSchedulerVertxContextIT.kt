@@ -136,6 +136,27 @@ class EodSnapshotSchedulerVertxContextIT {
             .hasSize(1)
     }
 
+    @Test
+    fun `the scheduled run's limit breach reaches the outbox exactly once, however many ticks replay it`() {
+        // Fixtures.tiedOut(): a nostro is not HQLA, so the LCR is 0 against retail outflows — lcr-min
+        // BREACHES; NSFR is OK; capital, IRRBB and large exposures are NOT_EVALUABLE (no own funds,
+        // no curve set) and so emit nothing.
+        ledger.inputs = Fixtures.tiedOut()
+        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        await { onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf } }
+        val runId = onEventLoop { snapshotRepository.listRecent(10) }.first { it.asOf == expectedAsOf }.id
+        val breachRows = "SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId' " +
+            "AND event_type = 'risk.limit.breach.v1' AND payload LIKE '%\"limitId\":\"lcr-min\"%'"
+
+        assertThat(await { TestDb.count(breachRows) == 1 })
+            .describedAs("the EOD tick must write the lcr-min breach of its own run to risk_outbox")
+            .isTrue()
+        Thread.sleep(EXTRA_SETTLE_MILLIS) // further ticks replay the run and re-evaluate it
+        assertThat(TestDb.count("SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId'"))
+            .describedAs("a replayed run is re-evaluated but writes nothing new (dedup on run, limit, set version)")
+            .isEqualTo(1)
+    }
+
     private companion object {
         /** Generous vs the 2 s cron so a slow CI runner cannot flake the wait. */
         const val BUDGET_NANOS = 60_000_000_000L

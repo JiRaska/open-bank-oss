@@ -4,6 +4,7 @@
 
 package com.openbank.libs.web
 
+import com.openbank.libs.messaging.SyntheticTaintKafkaRail
 import com.openbank.libs.synthetic.SyntheticTaint
 import io.mockk.every
 import io.mockk.mockk
@@ -12,8 +13,10 @@ import io.mockk.verify
 import io.opentelemetry.api.baggage.Baggage
 import io.opentelemetry.context.Context
 import io.opentelemetry.context.Scope
+import jakarta.ws.rs.client.ClientRequestContext
 import jakarta.ws.rs.container.ContainerRequestContext
 import jakarta.ws.rs.container.ContainerResponseContext
+import jakarta.ws.rs.core.MultivaluedHashMap
 import jakarta.ws.rs.core.SecurityContext
 import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
@@ -167,5 +170,67 @@ class SyntheticTaintFilterTest {
         )
 
         assertThat(MDC.get(MDC_SYNTHETIC)).isNull()
+    }
+
+    /** Makes an inbound W3C baggage entry current, as the OTel server instrumentation does. */
+    private fun inboundBaggage(value: String): Scope =
+        Baggage.current().toBuilder().put(SyntheticTaint.BAGGAGE_KEY, value).build()
+            .storeInContext(Context.current()).makeCurrent()
+
+    private fun outboundHeaders(): MultivaluedHashMap<String, Any> {
+        val headers = MultivaluedHashMap<String, Any>()
+        SyntheticTaintClientFilter().filter(
+            mockk<ClientRequestContext>(relaxed = true) { every { getHeaders() } returns headers },
+        )
+        return headers
+    }
+
+    @Test
+    fun `inbound baggage without the header is dropped for the request and never forwarded`() {
+        inboundBaggage("true").use {
+            val scope = slot<Scope>()
+            val req = request(header = null, principal = "some-real-customer")
+            every { req.setProperty("openbank.synthetic.baggage-scope", capture(scope)) } answers { }
+
+            filterWith("service-account-openbank-canary").filter(req)
+
+            assertThat(SyntheticTaintKafkaRail.currentlyTainted()).isFalse()
+            assertThat(outboundHeaders().getFirst(SyntheticTaint.KAFKA_HEADER)).isNull()
+            every { req.getProperty("openbank.synthetic.baggage-scope") } returns scope.captured
+            SyntheticTaintResponseFilter().filter(req, mockk<ContainerResponseContext>(relaxed = true))
+            // The response filter restores exactly the context the request arrived with.
+            assertThat(Baggage.current().getEntryValue(SyntheticTaint.BAGGAGE_KEY)).isEqualTo("true")
+        }
+    }
+
+    @Test
+    fun `inbound baggage with a header from an untrusted principal is dropped too`() {
+        inboundBaggage("true").use {
+            val scope = slot<Scope>()
+            val req = request(header = "true", principal = "some-real-customer")
+            every { req.setProperty("openbank.synthetic.baggage-scope", capture(scope)) } answers { }
+
+            filterWith("service-account-openbank-canary").filter(req)
+
+            verify { req.setProperty(SYNTHETIC_TAINT_PROPERTY, false) }
+            assertThat(SyntheticTaintKafkaRail.currentlyTainted()).isFalse()
+            assertThat(outboundHeaders().getFirst(SyntheticTaint.KAFKA_HEADER)).isNull()
+            scope.captured.close()
+        }
+    }
+
+    @Test
+    fun `the trusted path still taints when inbound baggage is present`() {
+        inboundBaggage("true").use {
+            val scope = slot<Scope>()
+            val req = request(header = "true", principal = "service-account-openbank-canary")
+            every { req.setProperty("openbank.synthetic.baggage-scope", capture(scope)) } answers { }
+
+            filterWith("service-account-openbank-canary").filter(req)
+
+            assertThat(SyntheticTaintKafkaRail.currentlyTainted()).isTrue()
+            assertThat(outboundHeaders().getFirst(SyntheticTaint.KAFKA_HEADER)).isEqualTo("true")
+            scope.captured.close()
+        }
     }
 }

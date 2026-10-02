@@ -4,8 +4,8 @@
 
 package com.openbank.fx.domain.cnb
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 
 /**
@@ -20,7 +20,7 @@ data class CnbFixingRate(val code: String, val amount: Int, val rate: BigDecimal
     }
 
     val ratePerUnit: BigDecimal
-        get() = rate.divide(BigDecimal(amount), 8, RoundingMode.HALF_UP)
+        get() = RoundingPolicy.FX_RATE.divide(rate, BigDecimal(amount))
 }
 
 /**
