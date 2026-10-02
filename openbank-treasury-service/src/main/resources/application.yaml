@@ -167,6 +167,16 @@ openbank:
       # Configure correspondent IBAN -> treasury GL code in deployment-specific configuration.
       # An unconfigured account is refused; no sample account is active in production.
       accounts: {}
+      # ADR-0315 D7: an OPEN reconciliation break alerts (outbox treasury.nostro.break-aged.v1, the
+      # openbank_treasury_nostro_breaks_aged gauge) once it is this many BUSINESS days old AND at
+      # least this amount in its own currency (0 = any amount).
+      break-alert-age-days: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_AGE_DAYS:3}
+      break-alert-min-amount: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_MIN_AMOUNT:0}
+    nostro-breaks:
+      # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
+      # its break), then age every open break and alert once on those over the threshold.
+      enabled: ${OPENBANK_TREASURY_NOSTRO_BREAKS_ENABLED:true}
+      interval: 1h
     accrual:
       # ADR-0315 D5: daily accrual of interest on SETTLED deals into the accrued-interest accounts.
       # Hourly and idempotent per day, so a missed pass is caught up by the next one.

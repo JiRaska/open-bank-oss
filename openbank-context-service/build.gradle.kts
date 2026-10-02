@@ -12,11 +12,14 @@ dependencies {
     implementation(libs.quarkus.flyway)
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.oidc)
+    implementation(libs.quarkus.rest.client.reactive)
+    implementation(libs.quarkus.rest.client.reactive.jackson)
     implementation(libs.quarkus.config.yaml)
     implementation(libs.quarkus.smallrye.openapi)
     implementation(libs.quarkus.smallrye.health)
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.smallrye.kafka)
+    implementation(libs.quarkus.scheduler)
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(project(":openbank-libs-domain"))
@@ -35,3 +38,9 @@ dependencies {
 }
 
 kover { reports { verify { rule { bound { minValue = 60 } } } } }
+
+// Context's Quarkus/PostgreSQL suite holds multiple application profiles in one test JVM.
+// The default test heap exhausted on CI before the suite completed; keep the correction local.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}

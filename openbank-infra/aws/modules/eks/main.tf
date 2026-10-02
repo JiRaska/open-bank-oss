@@ -75,12 +75,16 @@ resource "aws_eks_cluster" "this" {
     resources = ["secrets"]
   }
 
-  # FinOps: audit + controllerManager + scheduler are the dominant log volume
-  # drivers (audit logs every API call — Karpenter scaling, ArgoCD syncs, ARC
-  # runner pod churn = 10+ GB/day = ~$5.80/day in CloudWatch ingest at $0.54/GB).
-  # Keep api (API server errors) + authenticator (auth failures) for debugging.
-  # Restore the full set if a compliance audit requires it.
-  enabled_cluster_log_types = ["api", "authenticator"]
+  # `audit` restored 2026-09-30. It was dropped for FinOps (audit logs every API
+  # call — Karpenter scaling, ArgoCD syncs, ARC runner churn — ~10 GB/day, ~$5.80/day
+  # ingest), which left the cluster with no record of WHO did WHAT through the API:
+  # no secret reads, no exec into a pod, no RBAC change is reconstructable, and
+  # GuardDuty EKS Audit Log Monitoring (audit-baseline) has nothing of ours to read
+  # besides its own feed. A bank's control plane without an audit trail is not a
+  # FinOps trade-off (DORA Art. 17, ADR-0279 WS2). controllerManager/scheduler stay
+  # off: they are debugging volume, not evidence. The log group's 30d retention
+  # bounds the cost.
+  enabled_cluster_log_types = ["api", "audit", "authenticator"]
 
   tags = var.tags
 
@@ -224,7 +228,7 @@ resource "aws_eks_node_group" "bootstrap" {
 # node group.
 # ---------------------------------------------------------------------------
 data "aws_eks_addon_version" "this" {
-  for_each           = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver"])
+  for_each           = toset(["vpc-cni", "kube-proxy", "coredns", "eks-pod-identity-agent", "aws-ebs-csi-driver", "eks-node-monitoring-agent"])
   addon_name         = each.value
   kubernetes_version = aws_eks_cluster.this.version
 }
@@ -287,6 +291,62 @@ resource "aws_eks_addon" "pod_identity" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "eks-pod-identity-agent"
   addon_version               = data.aws_eks_addon_version.this["eks-pod-identity-agent"].version
+  resolve_conflicts_on_update = "OVERWRITE"
+  tags                        = var.tags
+  depends_on                  = [aws_eks_node_group.bootstrap]
+}
+
+# ---------------------------------------------------------------------------
+# EKS node monitoring agent (2026-09-30). A DaemonSet that reads node logs and
+# surfaces node-level faults as NodeConditions (NetworkingReady, StorageReady,
+# KernelReady, ContainerRuntimeReady, AcceleratedHardwareReady) and node Events.
+# Without it a node exposes only the four kubelet conditions, and a node whose
+# CNI has no free IPs, whose interface is down, or whose runtime cannot progress
+# a pod reads `Ready=True` — which is exactly how a node with an ENI stuck
+# `attaching` blackholed seven pods for up to 55 min on 2026-09-30.
+#
+# What it buys, honestly (docs.aws.amazon.com/eks/latest/userguide/node-health-nma.html,
+# read 2026-09-30): the out-of-IPs case is `IPAMDNoIPs`, an EVENT, not a
+# condition — the agent makes it visible in `kubectl describe node` but triggers
+# no repair; and an EBS volume stuck attaching is not in its detection list at
+# all. So neither of this week's two incidents would have been auto-repaired by
+# installing this; the alerts in components/observability/prometheus-rules-
+# node-pod-startup.yaml are the control for those. What the agent DOES turn into
+# conditions is a dead IPAMD (IPAMDNotRunning/IPAMDNotReady), an interface down
+# (InterfaceNotUp/InterfaceNotRunning), a lost loopback, a node out of PIDs
+# (ForkFailedOutOfPIDs) and a pod stuck terminating on CRI errors
+# (PodStuckTerminating) — each a node whose pods are already broken.
+#
+# INTERACTION WITH KARPENTER NODE REPAIR — read before touching either side.
+# The platform root already runs Karpenter with `featureGates.nodeRepair=true`
+# (#809, the no-swap livelock backstop), which today acts only on
+# Ready=False/Unknown after 30m. With this agent installed Karpenter also acts on
+# the five agent conditions above (30m toleration each, 10m for accelerated
+# hardware — karpenter.sh/docs/concepts/disruption, Node Repair). That action is
+# FORCEFUL: "Karpenter will forcefully terminate the node and its corresponding
+# NodeClaim, bypassing the standard drain and grace period procedures" — it
+# ignores PDBs and `karpenter.sh/do-not-disrupt`. The guard is that "Karpenter
+# will not perform repairs if more than 20% of nodes in a NodePool are unhealthy".
+# On this cluster a forced termination of a node holding a single-instance CNPG
+# primary is a database outage (ADR-0325; money-path clusters are HA per
+# ADR-0159, the rest are not). That is accepted here for the condition set above
+# because every one of them describes a node on which that primary is already
+# not serving, and the 30m toleration leaves NodeDegradedWhileReady
+# (prometheus-rules-node-health.yaml, fires at 5m) 25 minutes to page a human
+# first. Do NOT lower the toleration, and do not add agent conditions to a
+# NodePool budget expecting them to be honoured — repair is not a budgeted
+# disruption. Managed-node-group auto repair (node_repair_config above) also
+# consumes these conditions, for the bootstrap pool only.
+#
+# Cost: requests 10m CPU / 30Mi per node (chart defaults), tolerates every taint,
+# system-node-critical. At today's 24 nodes that is 0.24 vCPU / 0.7Gi reserved
+# against 86 vCPU / 378Gi allocatable (0.3% / 0.2%); it never provisions a node.
+# The DCGM server component schedules only on NVIDIA instance types (none here).
+# ---------------------------------------------------------------------------
+resource "aws_eks_addon" "node_monitoring_agent" {
+  cluster_name                = aws_eks_cluster.this.name
+  addon_name                  = "eks-node-monitoring-agent"
+  addon_version               = data.aws_eks_addon_version.this["eks-node-monitoring-agent"].version
   resolve_conflicts_on_update = "OVERWRITE"
   tags                        = var.tags
   depends_on                  = [aws_eks_node_group.bootstrap]

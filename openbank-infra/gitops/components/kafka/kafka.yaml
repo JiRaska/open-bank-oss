@@ -171,7 +171,16 @@ spec:
   # measures ~470Mi (topic ~210Mi + user ~260Mi) that the scheduler never saw,
   # eroding node headroom on whatever node it lands on (issue #809).
   entityOperator:
+    # Both operators log every reconciliation at INFO ("Reconciliation #N(watch)
+    # KafkaUser(...): reconciled"), ~2/s each. Measured 2026-09-30: 98 MiB/h, 40% of
+    # everything Loki ingests, from two containers that had nothing to say. WARN keeps
+    # every failure line (reconciliation errors, ACL/user conflicts, TLS renewals that
+    # did not happen) and drops the heartbeat.
     topicOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN
       resources:
         requests:
           cpu: 25m
@@ -180,6 +189,10 @@ spec:
           cpu: 250m
           memory: 384Mi
     userOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN
       resources:
         requests:
           cpu: 25m

@@ -8,8 +8,10 @@ import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.CurveSetUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
+import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
 import com.openbank.risk.application.port.out.CurveSetRepository
@@ -22,8 +24,10 @@ import com.openbank.risk.application.usecase.CapitalService
 import com.openbank.risk.application.usecase.CashFlowService
 import com.openbank.risk.application.usecase.CurveSetService
 import com.openbank.risk.application.usecase.IrrbbService
+import com.openbank.risk.application.usecase.LimitService
 import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
+import com.openbank.risk.application.usecase.MinReservesPeriodService
 import com.openbank.risk.application.usecase.MinReservesService
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
@@ -228,10 +232,42 @@ class SnapshotServiceProducer {
     fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
         MinReservesService(snapshots, config.toParameters())
 
-    /** Same reason as [validateLiquidityParameters]: a bad rate must fail the deploy, not a request. */
+    /** Maintenance-period averaging (ADR-0315 D8) under `openbank.risk.min-reserves.maintenance-calendar`. */
+    @Produces
+    @ApplicationScoped
+    fun minReservesPeriodUseCase(
+        snapshots: SnapshotUseCase,
+        config: MinReservesConfig,
+        clock: Clock,
+    ): MinReservesPeriodUseCase = MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock)
+
+    /** Same reason as [validateLiquidityParameters]: a bad rate or calendar must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call
     fun validateMinReservesParameters(@Observes event: StartupEvent, config: MinReservesConfig) {
         config.toParameters()
+        config.toCalendar()
+    }
+
+    /**
+     * Declarative risk limits (ADR-0313 D9): the versioned set in `openbank.risk.limits.*`
+     * ([LimitsConfig]), evaluated from the same reads that serve /liquidity, /capital and /irrbb.
+     */
+    @Produces
+    @ApplicationScoped
+    fun limitUseCase(
+        snapshots: SnapshotUseCase,
+        liquidity: LiquidityUseCase,
+        capital: CapitalUseCase,
+        irrbb: IrrbbUseCase,
+        curveSets: CurveSetRepository,
+        config: LimitsConfig,
+    ): LimitUseCase = LimitService(snapshots, liquidity, capital, irrbb, curveSets, config.toLimitSet())
+
+    /** Same reason as [validateCapitalParameters]: every DECLARED limit set is parsed at boot. */
+    @Suppress("UnusedParameter") // the event only schedules the call
+    fun validateLimits(@Observes event: StartupEvent, config: LimitsConfig) {
+        config.parameterSets().keys.forEach { config.toLimitSet(it) }
+        config.toLimitSet()
     }
 
     companion object {

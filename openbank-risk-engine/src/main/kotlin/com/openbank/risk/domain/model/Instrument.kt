@@ -92,4 +92,6 @@ data class Instrument(
     val counterpartyRef: String?,
     val ifrs9Stage: String?,
     val extension: InstrumentExtension?,
+    /** Human reference of the source contract (a loan's contract number, #11107); display only. */
+    val contractNumber: String? = null,
 )

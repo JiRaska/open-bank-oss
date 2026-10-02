@@ -150,6 +150,29 @@ describe('ledger backfill void — four-eyes in the console (#10969, #11487)', (
     expect(options).toEqual(['src-1'])
   })
 
+  it('reads like a finance document: no raw state enums, no truncated ids, styled table headers', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(screen.getAllByText(/Čeká na schválení|Awaiting approval/).length).toBe(2)
+    expect(screen.queryByText(/^(PROPOSED|APPROVED|EXECUTED|UNWOUND)$/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/#\d{4,}/)
+    expect(document.body.textContent).not.toContain('UNWOUND')
+    const option = screen.getAllByRole('option')[0]
+    expect(option.textContent).toMatch(/2 (úvěrů|loans), 13 (zápisů|entries)/)
+    expect(option.textContent).not.toContain('src-1')
+    const headers = screen.getAllByRole('columnheader').map(h => h.textContent)
+    expect(headers).toEqual(expect.arrayContaining([expect.stringMatching(/Průběh schválení|Approval trail/)]))
+    expect(screen.getAllByRole('table').every(tb => tb.className.includes('data-table'))).toBe(true)
+  })
+
+  it('states the dry-run as a plain summary with the total amount', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    const note = await screen.findByRole('note')
+    expect(note.textContent?.replace(/[  ]/g, ' ')).toMatch(/(Storno vrátí 1 úvěrů a vytvoří 352 protizápisů v celkové výši 1,00 Kč|reverses 1 loans and creates 352 offsetting entries totalling CZK 1\.00)/)
+  })
+
   it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
     await renderPage(<LedgerBackfillVoidPage />)
     await screen.findAllByRole('option')
@@ -251,6 +274,86 @@ describe('snapshots', () => {
     expect(screen.getByText(/GL_ACCOUNT positions carry no contract terms/)).toBeTruthy()
     expect(calls.some(c => c.url.includes('/cash-flows?curveSetId=cs-1'))).toBe(true)
     expect(document.querySelector('a[href="/balance-sheet/snapshots/run-2/capital"]')).not.toBeNull()
+  })
+
+  it('shows a badge per limit status, and a NOT_EVALUABLE limit with its reason and no figure', async () => {
+    const limit = (limitId: string, status: string, value: number | null, extra: Record<string, unknown> = {}) => ({
+      limitId, metric: limitId, metricDescription: `${limitId} description`, bound: 'MIN', limit: 1, earlyWarning: 1.1,
+      status, value, basis: value === null ? null : `${limitId} basis`, reason: value === null ? `${limitId} gap reason` : null,
+      citation: 'CRR', ...extra,
+    })
+    router = url => {
+      if (url.includes('/limits')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30', provenance: 'synthetic',
+          limitSet: { id: 'openbank-risk-appetite', version: '1', source: 'src' }, curveSetId: null,
+          limits: [
+            limit('lcr-min', 'BREACH', 0.5),
+            limit('nsfr-min', 'EARLY_WARNING', 1.02),
+            limit('total-capital-ratio-min', 'OK', 0.44),
+            limit('irrbb-eve-outlier', 'NOT_EVALUABLE', null, { bound: 'MAX', limit: 0.15, earlyWarning: 0.12 }),
+          ],
+          summary: { OK: 1, EARLY_WARNING: 1, BREACH: 1, NOT_EVALUABLE: 1 }, notes: [],
+        })
+      }
+      if (url.includes('/instruments')) return json({ runId: 'run-4', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByText('lcr-min')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-4/limits')).toBe(true)
+    const row = (id: string) => screen.getByText(id).closest('tr') as HTMLElement
+    expect(row('lcr-min').textContent).toMatch(/Breach|Překročeno/)
+    expect(row('lcr-min').querySelector('.badge-danger')).not.toBeNull()
+    expect(row('nsfr-min').querySelector('.badge-warning')).not.toBeNull()
+    expect(row('total-capital-ratio-min').querySelector('.badge-success')).not.toBeNull()
+    const gap = row('irrbb-eve-outlier')
+    expect(gap.textContent).toMatch(/Not evaluable|Nelze vyhodnotit/)
+    expect(gap.textContent).toContain('irrbb-eve-outlier gap reason')
+    expect(gap.querySelector('.badge-success')).toBeNull() // a gap is never green
+    expect(gap.textContent).not.toMatch(/0 %/)
+  })
+
+  it('a limits read that fails is shown as unavailable, never as all-clear', async () => {
+    router = url => {
+      if (url.includes('/limits')) return json({ error: 'boom' }, 500)
+      if (url.includes('/instruments')) return json({ runId: 'run-5', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-5', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-5' })} />)
+    const heading = await screen.findByText(/^(Risk limits|Rizikové limity)$/)
+    const card = heading.closest('.card') as HTMLElement
+    await vi.waitFor(() => expect(card.textContent!.length).toBeGreaterThan(heading.textContent!.length))
+    expect(card.querySelector('table')).toBeNull()
+    expect(card.querySelector('.badge-success')).toBeNull()
+    expect(screen.queryByText(/Within limit|V limitu/)).toBeNull()
+  })
+
+  it('shows a loan instrument by its contract number, and an instrument without one by its id', async () => {
+    const instrument = (id: string, contractNumber?: string | null) => ({
+      id, kind: 'AMORTISING_LOAN', glAccountCode: '1200', currency: 'CZK', outstanding: 1000, valueDate: '2026-01-10',
+      maturityDate: '2027-01-15', rateTerms: null, counterpartyRef: null, ifrs9Stage: null, loan: null,
+      ...(contractNumber === undefined ? {} : { contractNumber }),
+    })
+    router = url => {
+      if (url.includes('/instruments')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30',
+          instruments: [instrument('loan-uuid-1', 'UV-2026-000123'), instrument('loan-uuid-2', null), instrument('loan-uuid-3')],
+        })
+      }
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    // #11107: the loan with a number is referenced by it; the others fall back to the id handle.
+    const numbered = await screen.findByRole('button', { name: /UV-2026-000123/ })
+    expect(numbered.getAttribute('title')).toMatch(/The reference is the contract number/)
+    const fallbacks = screen.getAllByRole('button', { name: /Loan LOAN/ })
+    expect(fallbacks).toHaveLength(2)
+    expect(fallbacks[0].getAttribute('title')).toMatch(/No contract number/)
   })
 })
 
@@ -358,7 +461,7 @@ describe('Liquidity (LCR / NSFR)', () => {
     expect(screen.getByTestId('nsfr-CZK').textContent).toContain('180')
     expect(screen.getByText(/bcbs-d238-d295 v1/)).toBeTruthy()
     expect(screen.getAllByText(/2015\/61 deviations not applied/).length).toBeGreaterThan(0)
-    expect(screen.getByText('BCBS d238 ¶69, ¶144')).toBeTruthy()
+    expect(document.querySelector('td[title="BCBS d238 ¶69, ¶144"]')).not.toBeNull()
     expect(screen.getAllByText(/Synthetic data|Syntetická data/).length).toBeGreaterThan(0)
     expect(screen.queryByText(/Unclassified balances|Nezařazené zůstatky/)).toBeNull()
   })
@@ -434,7 +537,8 @@ describe('Capital (Pillar 1 credit risk, standardised approach)', () => {
     expect(screen.getByTestId('requirement').textContent).toMatch(/1[\s\u00a0,.]?580/)
     expect(screen.getByTestId('ratio-total').textContent).toContain('20')
     expect(document.querySelectorAll('tr[data-class]').length).toBe(3)
-    expect(screen.getAllByText(/SCRA Grade C base: 150%/).length).toBeGreaterThan(0)
+    // Citations render as a plain article reference; the engine's full citation is the cell's title.
+    expect(document.querySelector('tr[data-class="bank"] td[title*="SCRA Grade C base: 150%"]')).not.toBeNull()
     expect(screen.getByText(/bcbs-d424-sa v1/)).toBeTruthy()
     expect(screen.getAllByText(/EU CRR Part Three Title II Chapter 2 not applied/).length).toBeGreaterThan(0)
     expect(screen.getAllByText(/UPPER BOUND/).length).toBe(1)
@@ -587,7 +691,9 @@ describe('ČNB minimum reserve requirement', () => {
     router = () => json(MIN_RESERVES())
     await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
     await screen.findByTestId('total-holdings')
-    expect(calls.every(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')).toBe(true)
+    expect(calls[0].url).toBe('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')
+    // every other call is the maintenance-period read, through the same BFF path
+    expect(calls.slice(1).every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/min-reserves/periods'))).toBe(true)
     expect(screen.getByTestId('total-holdings').textContent).toMatch(/2[\s ,.]?500/)
     expect(screen.getByTestId('requirement').textContent).toMatch(/2[\s ,.]?000/)
     expect(screen.getByTestId('surplus').textContent).toMatch(/500/)
@@ -638,6 +744,64 @@ describe('ČNB minimum reserve requirement', () => {
     expect(document.querySelectorAll('tr[data-unclassified="true"]').length).toBe(1)
     expect(screen.getByRole('alert').textContent).toContain('1000')
     expect(screen.getByText(/Excluded balances|Vyloučené zůstatky/)).toBeTruthy()
+  })
+
+  const PERIOD_ID = '2026-09'
+  const CALENDAR = {
+    calendarId: 'cnb-pmr-maintenance-calendar', calendarVersion: '1', calendarStatus: 'sample-unverified',
+    calendarSource: 'SAMPLE / UNVERIFIED', notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'],
+    periods: [{ id: PERIOD_ID, start: '2026-09-01', end: '2026-09-30', baseReferenceDate: '2026-08-31' }],
+  }
+  const PERIOD = (over: Record<string, unknown> = {}) => ({
+    calendarId: CALENDAR.calendarId, calendarVersion: '1', calendarStatus: 'sample-unverified', calendarSource: 'SAMPLE / UNVERIFIED',
+    period: CALENDAR.periods[0], evaluationDate: '2026-09-30', parameterSetId: 'cnb-pmr', parameterSetVersion: '2', holdingCurrency: 'CZK',
+    baseRunId: 'run-base', requirement: 2000, requirementNotStated: null,
+    daysInPeriod: 30, daysElapsed: 3, daysRemaining: 27, daysWithData: 3, coverage: 1, missingDays: [],
+    days: [{ date: '2026-09-01', runId: 'r1', holdings: 1900 }, { date: '2026-09-02', runId: 'r2', holdings: 2000 }, { date: '2026-09-03', runId: 'r3', holdings: 2100 }],
+    averageHoldings: 2000, averageNotStated: null, remainingRequiredAverage: 2000, dailyHoldingProposal: 2000,
+    proposal: [{ date: '2026-09-04', amount: 2000 }], proposalNotStated: null, requirementMet: null,
+    notes: ['SAMPLE / UNVERIFIED maintenance-period calendar'], ...over,
+  })
+  const periodRouter = (period: unknown, calendar: unknown = CALENDAR) => (url: string) => {
+    if (url.includes(`/min-reserves/periods/${PERIOD_ID}`)) return json(period)
+    if (url.includes('/min-reserves/periods')) return json(calendar)
+    return json(MIN_RESERVES())
+  }
+
+  it('shows the maintenance period of the run date: sample badge, requirement, average, coverage and proposal', async () => {
+    router = periodRouter(PERIOD())
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-proposal')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/min-reserves/periods?asOf=2026-09-30')).toBe(true)
+    expect(calls.some(c => c.url === `/api/svc/risk-engine/api/v1/risk/min-reserves/periods/${PERIOD_ID}?asOf=2026-09-30`)).toBe(true)
+    expect(screen.getByText(/Sample, unverified calendar|Vzorový, neověřený kalendář/)).toBeTruthy()
+    expect(screen.getByTestId('period-requirement').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-average').textContent).toMatch(/2[\s ,.]?000/)
+    expect(screen.getByTestId('period-coverage').textContent).toMatch(/3 \/ 3/)
+    expect(document.querySelectorAll('tr[data-period-day="true"]').length).toBe(3)
+  })
+
+  it('a not-stated average and proposal show their reasons, never a zero figure', async () => {
+    router = periodRouter(PERIOD({
+      averageHoldings: null, averageNotStated: 'No ledger GL account is mapped as the bank current account at the ČNB',
+      remainingRequiredAverage: null, dailyHoldingProposal: null, proposal: null, proposalNotStated: 'holdings not stated',
+      days: [{ date: '2026-09-01', runId: 'r1', holdings: null }], daysWithData: 1, coverage: 0.3333, missingDays: ['2026-09-02', '2026-09-03'],
+    }))
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-average-not-stated')
+    expect(screen.getByTestId('period-average-not-stated').textContent).toContain('current account at the ČNB')
+    expect(screen.getByTestId('period-proposal-not-stated').textContent).toContain('holdings not stated')
+    expect(screen.queryByTestId('period-average')).toBeNull()
+    expect(screen.queryByTestId('period-proposal')).toBeNull()
+    expect(screen.getByTestId('period-missing-days').textContent).toContain('2026-09-02')
+    expect(screen.getByTestId('maintenance-period').textContent).not.toMatch(/\b0[.,]00\b/)
+  })
+
+  it('a run date outside the calendar says so instead of showing period figures', async () => {
+    router = periodRouter(PERIOD(), { ...CALENDAR, periods: [] })
+    await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
+    await screen.findByTestId('period-none')
+    expect(calls.some(c => c.url.includes(`/min-reserves/periods/${PERIOD_ID}`))).toBe(false)
   })
 
   it('an UNTIED run (409) is shown as unavailable, not as figures', async () => {

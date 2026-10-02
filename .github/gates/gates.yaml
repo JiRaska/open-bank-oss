@@ -102,6 +102,20 @@ gates:
     run: |
       python3 .github/scripts/derive-fleet-scanning-test-modules.py 2>&1
 
+  - id: lib-test-only-not-code-global
+    name: "services-ci: a library's own test sources do not rebuild the fleet (enforced)"
+    group: lint
+    mode: enforced
+    rationale: "services-ci treated any openbank-libs* path as code-global, so a one-row edit to libs-runtime's src/test queued a ~150-job full-fleet run on every PR update (#8837 never landed behind the up-to-date rule). Test sources are not published to consumers; testFixtures stay code-global when any build script consumes them. The self-test holds both directions."
+    review_after: "2027-09-30"
+    min_subjects: 1
+    budget_seconds: 10
+    selftest: python3 .github/scripts/filter-lib-test-only-paths.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/filter-lib-test-only-paths.py"]
+    run: |
+      python3 .github/scripts/filter-lib-test-only-paths.py --census 2>&1
+
   - id: synthetic-taint-rest-client-boundaries
     name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
     group: kotlin
@@ -1306,6 +1320,53 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-cnpg-update-resilience.py
+
+  # 2026-09-30 (#11608): 41 spot interruptions in 24h on the Karpenter `default` pool, and 134 of
+  # 140 CNPG pods on it -- every reclaim was ~13 Postgres failovers. Owner scope: the CNPG clusters
+  # behind money_path_services plus temporal-db go on-demand; everything else stays on spot. The
+  # guarantee is three artefacts in two trees (the on-demand `stateful` NodePool, the Kyverno
+  # routing policy with its DERIVED target list, and target Clusters that do not fight it); each
+  # is one edit away from quietly putting a money-path database back on spot.
+  - id: stateful-not-on-spot
+    name: "money-path databases and temporal-db cannot land on spot capacity (#11608, enforced)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 20
+    rationale: >-
+      The policy's target list must equal the set derived from money_path_services (via the same
+      service -> cluster derivation as cnpg-update-resilience) plus temporal-db, failing closed on
+      a money-path service whose database cannot be resolved; the stateful NodePool must stay
+      on-demand-only, tainted and weighted; the policy must keep adding required on-demand
+      affinity plus the matching toleration; no target Cluster may carry its own required node
+      affinity or name spot; and the targets' declared requests must stay within the load the
+      pool's derived limit was sized from. Non-money-path clusters are explicitly NOT required.
+      Every node agent must follow the databases: a gitops toleration list that admits the
+      observability-pool taint without pinning to that pool (derived: alloy, falco) must also
+      tolerate openbank.io/stateful, or the money-path DB nodes run unlogged and unwatched.
+    review_after: "2027-03-31"
+    verified: >-
+      2026-09-30 -- run on the branch: OK, 26 targets of 69 CNPG Clusters. Negative case on the
+      real tree: deleting ledger/ledger-db from the policy's targets fails with "money-path
+      database ledger/ledger-db (openbank-ledger-service) is NOT in `targets`", and `--kyverno`
+      then reports the ledger fixture untouched (9/10). Self-test falsifies 14 mutations
+      (money-path cluster or temporal-db dropped from targets, a non-money-path cluster added,
+      an unresolvable money-path service, spot re-added, pool deleted, weight removed, policy
+      deleted, selector no longer reading targets, on-demand retyped, taint renamed without the
+      toleration, a target Cluster with required nodeAffinity, one pinned to spot, target load
+      above the measurement) and asserts a non-money-path cluster on spot is NOT flagged.
+      Behaviour: `--kyverno` (docker, Kyverno CLI v1.19.1) 10/10 fixtures.
+      Node agents: dropping alloy's stateful toleration fails with "apps/alloy.yaml: node agent
+      at Application/spec/source/helm/valuesObject/controller tolerates the observability pool
+      but not openbank.io/stateful=true:NoSchedule"; the self-test has the same case. `--live`
+      against `kubectl get ds -A -o json` derived 7 fleet-wide DaemonSets (aws-node,
+      ebs-csi-node, eks-pod-identity-agent, kube-proxy, node-exporter, alloy, falco) and
+      reported alloy + falco MISSING on the cluster as deployed before this PR.
+    min_subjects: 20   # 26 money-path clusters + temporal-db today (2026-09-30)
+    selftest_inputs: [".github/scripts/check-stateful-not-on-spot.py", ".github/scripts/check-cnpg-update-resilience.py"]
+    selftest: python3 .github/scripts/check-stateful-not-on-spot.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-stateful-not-on-spot.py
 
   # A probed or scraped port must be a port the service opens (issue #2872, item 1).
   #
@@ -4044,6 +4105,20 @@ gates:
     run: |
       python3 .github/scripts/check-llm-price-book.py --enforce
 
+  - id: otel-endpoint-declared
+    name: "every deployed Quarkus service declares an OTLP endpoint (enforced)"
+    group: gitops
+    mode: enforced
+    min_subjects: 50   # 66 Quarkus workloads in gitops components today (2026-09-30)
+    budget_seconds: 45   # 11.7s measured on the CI runner (66 workloads x build.gradle reads), ~1s locally
+    rationale: "A service without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT exports every span to localhost:4317 in the cluster; nothing errors and Tempo cannot report a service it never heard from. customer-edge, the public entry point, shipped that way."
+    review_after: "2027-03-30"
+    selftest_inputs: [".github/scripts/check-otel-endpoint-declared.py"]
+    selftest: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --enforce
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
     group: data
@@ -5905,3 +5980,58 @@ gates:
     selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
     run: |
       python3 .github/scripts/check-field-crypto-in-libs.py --root .
+
+  # The shared libs had no benchmark and no performance regression signal of any kind. The JMH
+  # module (openbank-libs-benchmarks) is compared on ALLOCATION per op, which reproduces across
+  # machines; ns/op is only ever reported. This entry is the half that needs no JVM: the
+  # baseline's entries must be exactly the @Benchmark methods in the module, in both directions,
+  # so a new benchmark cannot go uncompared and a removed one cannot leave a stale number. The
+  # B/op comparison itself is the last step of .github/workflows/libs-bench.yml (needs a JMH run).
+  - id: libs-bench-alloc-baseline
+    name: "libs JMH allocation baseline covers every benchmark (advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "An allocation regression in Money, the idempotency fingerprint or the audit hash chain is paid on every request by every service and is invisible to every test; a baseline only protects the benchmarks it actually lists, so its scope is derived from the sources."
+    review_after: "2026-12-15"
+    verified: "2026-09-30 — static: 19 @Benchmark, 17 baseline entries + 2 UNSTABLE (MoneyBench.allocate/split, bimodal across forks, reported only), exit 0; --results from three local -f 1 runs all OK (worst compared spread 1.9 %, CanonicalJsonBench.write); the pre-change run against the same baseline is red on all five hex-site benchmarks (+99 % to +971 %)"
+    budget_seconds: 10
+    min_subjects: 15   # 19 @Benchmark methods 2026-09-30
+    selftest: python3 .github/scripts/check-bench-alloc-baseline.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
+    run: |
+      python3 .github/scripts/check-bench-alloc-baseline.py --root .
+
+
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
+    run: python3 .github/scripts/test-dr-restore-workflow.py
+  # `quarkus.log.console.json` is read by exactly one thing, the quarkus-logging-json extension.
+  # Without it on the application's classpath the key is accepted, does nothing, and the console
+  # keeps the TEXT pattern formatter — so the config described structured logging the process did
+  # not do. The shared config and ~30 services asked for it and no module carried the extension.
+  # Decidable from the build files: a Quarkus application module that asks (own resources or a
+  # project dependency's) must declare the extension (directly, via a catalog alias, or through a
+  # convention plugin it applies). StructuredLogEncodingIT in openbank-ledger-service is the
+  # by-effect half — it boots the app and asserts the console formatter really emits JSON.
+  - id: json-logging-extension-present
+    name: "JSON console logging requested => quarkus-logging-json declared (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A config key nobody reads is invisible from the config; pairing the request with the extension that reads it is the only place the mismatch is decidable without booting every service."
+    review_after: "2027-03-30"
+    verified: "2026-09-30 — 67 Quarkus application modules examined, 0 findings; removing the convention-plugin dependency flags 66 (exit 1)"
+    budget_seconds: 10
+    min_subjects: 33   # 67 measured 2026-09-30; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-json-logging-extension.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-json-logging-extension.py"]
+    run: |
+      python3 .github/scripts/check-json-logging-extension.py --enforce

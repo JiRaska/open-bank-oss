@@ -69,10 +69,16 @@ spec:
           priorityClassName: system-node-critical
           # DaemonSet must also land on the on-demand observability nodes
           # (ADR-0082) to ship their logs — tolerate the workload taint.
+          # ...and on the on-demand `stateful` nodes that host the money-path databases
+          # (#11608): their logs must ship too. check-stateful-not-on-spot.py enforces it.
           tolerations:
             - key: workload
               operator: Equal
               value: observability
+              effect: NoSchedule
+            - key: openbank.io/stateful
+              operator: Equal
+              value: "true"
               effect: NoSchedule
         alloy:
           # Allow scheduling onto sandbox runner nodes (matches the old
@@ -177,15 +183,46 @@ spec:
 
               // ---- parse JSON, lift correlation ids into structured metadata ----
               loki.process "parse" {
-                // Quarkus structured JSON formatter (ADR-0082 Phase 3): level is
-                // top-level; trace context + correlationId are nested under "mdc".
+                // Quarkus structured JSON formatter (ADR-0082 Phase 3): level,
+                // traceId, spanId and correlationId are ALL top-level keys.
+                //
+                // This block read `mdc.traceId` from 2026-06 to 2026-09-30 and
+                // populated NOTHING for the whole of that time: measured live on
+                // 2026-09-30, 0 of 804 lines/h carrying a 32-hex traceId reached
+                // Loki with structured metadata `trace_id` set, `correlationId`
+                // was 0 too, and not one line in the fleet contained a nested
+                // `"mdc":{` object. The formatter openbank-libs configures writes
+                // the ids as top-level fields, so the whole log<->trace leg of
+                // ADR-0087 (Grafana derived field `trace_id` -> Tempo, and
+                // Tempo tracesToLogsV2 filtering by trace_id) was dead on
+                // arrival, while every dashboard and datasource that depends on
+                // it looked configured. Nothing could see it: an empty
+                // structured-metadata value is not an error anywhere in the
+                // pipeline. Verify after deploy with
+                //   sum(count_over_time({namespace="ledger"} | trace_id != "" [1h]))
+                // which must be > 0 while the service takes traffic.
                 stage.json {
                   expressions = {
                     level         = "level",
-                    trace_id      = "mdc.traceId",
-                    span_id       = "mdc.spanId",
-                    correlationId = "mdc.correlationId",
+                    trace_id      = "traceId",
+                    span_id       = "spanId",
+                    correlationId = "correlationId",
                   }
+                }
+
+                // ---- normalise level to one lower-case vocabulary ----
+                // Quarkus emits `INFO`/`WARN`/`ERROR`, Go controllers `info`/
+                // `warn`/`error`, and a few libraries `WARNING`. Measured
+                // 2026-09-30 the `level` label carried nine spellings, so
+                // `{level="error"}` silently missed every Quarkus ERROR line.
+                // Loki's own detected_level does the same folding; doing it here
+                // makes the STREAM label the thing every LogQL rule selects on.
+                stage.template {
+                  source   = "level"
+                  // The chart renders this ConfigMap through Helm `tpl`, so the Alloy
+                  // (Go text/template) expression is wrapped in a Helm raw-string action
+                  // (double-brace, backtick) to reach Alloy verbatim.
+                  template = "{{`{{ $l := ToLower .Value }}{{ if eq $l \"warning\" }}warn{{ else }}{{ $l }}{{ end }}`}}"
                 }
 
                 // ---- demote KNOWN-TRANSIENT CloudNativePG errors to warn ----

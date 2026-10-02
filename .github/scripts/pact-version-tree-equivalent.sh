@@ -128,11 +128,17 @@ commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
 obj_at() { git rev-parse -q --verify "$1:$2" 2>/dev/null || echo ABSENT; }
 
 # Top-level directories that are Gradle modules at this commit.
+# ONE ls-tree over `<every top-level dir>/build.gradle.kts`, not a `git cat-file` per directory:
+# the per-directory loop cost ~7 s of the ~8 s per call (78 modules of ~120 dirs), which made the
+# reconcile probe — one call per pinned service — take ~9 min a tick. Same answer, measured.
 module_dirs_at() {
   local sha="$1" d
-  git ls-tree -d --name-only "$sha" 2>/dev/null | while read -r d; do
-    git cat-file -e "$sha:$d/build.gradle.kts" 2>/dev/null && printf '%s\n' "$d"
-  done
+  local specs=()
+  while IFS= read -r d; do
+    [ -n "$d" ] && specs+=("$d/build.gradle.kts")
+  done < <(git ls-tree -d --name-only "$sha" 2>/dev/null)
+  [ "${#specs[@]}" -gt 0 ] || return 0
+  git ls-tree --name-only "$sha" -- "${specs[@]}" 2>/dev/null | cut -d/ -f1
 }
 
 # `project(":x")` declarations in one module's build file, as bare module names.

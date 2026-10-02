@@ -52,6 +52,9 @@ class OutboxDeadLetterAlertNamingTest {
     private val alertRules = mapOf(
         "card-issuance" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "billing" to File("../openbank-infra/gitops/components/billing/prometheus-rules-billing.yaml"),
+        // ADR-0283 phase 1: the card money path binds the same gauge, and its DEAD rows are
+        // money that moved with nobody told. Same file as card-issuance — both are payments.
+        "card-processing" to File("../openbank-infra/gitops/components/payments/prometheus-rules.yaml"),
         "referral" to File("../openbank-infra/gitops/components/referral/prometheus-rules-referral.yaml"),
     )
 
@@ -83,7 +86,11 @@ class OutboxDeadLetterAlertNamingTest {
                         "really produces — a selector naming a label the metric does not carry " +
                         "fires never, and reads exactly like 'no problem'",
                 )
-                .contains("expr: $selector > 0")
+                .containsAnyOf(
+                    "expr: $selector > 0",
+                    // Aggregated across pods so a restart does not reset `for:` (billing, #9690).
+                    "expr: max by (service) ($selector) > 0",
+                )
         }
     }
 
