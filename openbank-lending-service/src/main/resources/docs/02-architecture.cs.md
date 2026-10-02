@@ -96,11 +96,11 @@ Emitované typy událostí: `loan.disbursed`, `loan.interest_accrued`, `loan.wri
 
 ## Cyklus IFRS 9 provisioningu (ADR-0028 Fáze 3)
 
-`ProvisioningCycleScheduler` tiká podle `lending.provisioning.cycle.every` (výchozí `720h`, ~měsíčně, delayed 60s, `concurrentExecution = SKIP`; interval je obyčejná doba trvání, nikoli kalendářní měsíc). Každý průchod spočte klíč aktuálního období (`yyyy-MM` z injektovaného `Clock`) a zavolá `runProvisioningCycle(period, asOf, batchSize)`, který pro každý `ACTIVE` úvěr (`LoanRepository.findActive`, max `batchSize`):
+`ProvisioningCycleScheduler` tiká podle `lending.provisioning.cycle.every` (výchozí `24h`, zpoždění 60s, `concurrentExecution = SKIP`). Každý průchod odvodí z injektovaného `Clock` aktuální vykazovací datum (`yyyy-MM-dd`) a volá `runProvisioningCycle(period, asOf, batchSize)`. Repozitář postupně načítá dávky neterminálních úvěrů bez řádku pro toto datum, dokud krátká dávka nepotvrdí vyčerpání. Pro každý vybraný úvěr cyklus:
 
 1. Přeskočí úvěr, pokud už má řádek `loan_provisioning` pro toto `period` (idempotentní opakování).
 2. Přepočte snímek IFRS 9 stage/ECL (stejné primitivy `Ifrs9.assess` + `Delinquency`, jaké používá `ProvisioningUseCase.assess`).
-3. Přečte ECL z posledního **dřívějšího** období úvěru (`ProvisioningRepository.findLatestBefore`), výchozí nula, pokud jde o první cyklus úvěru.
+3. Přečte poslední provisioningový záznam úvěru (`ProvisioningRepository.findLatestByLoan`), odmítne záznam novější než `asOf` a při chybějícím záznamu použije nulové ECL.
 4. Zaúčtuje **deltu** (`newEcl − priorEcl`) jako zápis `PROVISIONING` — při nulové deltě se přeskočí zcela — a v obou případech uloží nový řádek `loan_provisioning` (audit trail se zapisuje i když se nic nezaúčtuje).
 5. Emituje `loan.provisioned` pouze pokud byl zápis zaúčtován.
 
