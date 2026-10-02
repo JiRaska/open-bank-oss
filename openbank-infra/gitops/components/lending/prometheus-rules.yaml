@@ -31,6 +31,18 @@ spec:
           annotations:
             summary: "lending outbox backlog stuck"
             description: "lending-service outbox has >50 unrelayed rows for >15m — credit events (disbursement/repayment) may be delayed."
+        - alert: LendingProvisioningPriorDayUnresolved
+          expr: openbank_lending_provisioning_unresolved_prior_days{service="lending"} > 0
+          for: 5m
+          labels:
+            severity: critical
+            service: lending
+          annotations:
+            summary: "An earlier IFRS 9 reporting day remains unresolved"
+            description: >-
+              The current pass cannot certify workflow success while an earlier
+              reporting day has an incomplete or interrupted provisioning cycle.
+              Reconcile its committed rows; do not backdate current loan facts.
         - alert: LendingHighErrorRate
           expr: |
             (

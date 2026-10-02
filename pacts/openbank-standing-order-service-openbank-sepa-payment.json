@@ -1,0 +1,108 @@
+{
+  "consumer": {
+    "name": "openbank-standing-order-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a standing-order transfer with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "creditorBic": "COBADEFFXXX",
+          "creditorIban": "DE89370400440532013000",
+          "creditorName": "Berlin Utility",
+          "currency": "EUR",
+          "debtorAccountId": "50500000-0000-4000-8000-000000000001",
+          "debtorIban": "CZ6508000000192000145399",
+          "debtorName": "Alice Example",
+          "endToEndId": "standing-order-pact-00000001",
+          "remittanceInfo": "Standing order rent",
+          "type": "SCT"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "standing-order-pact-00000001"
+        },
+        "method": "POST",
+        "path": "/api/v1/sepa-payments"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "POST the SEPA credit transfer of a due standing order",
+      "providerStates": [
+        {
+          "name": "sepa-payment can accept a new credit transfer"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 250.00,
+          "creditorBic": "COBADEFFXXX",
+          "creditorIban": "DE89370400440532013000",
+          "creditorName": "Berlin Utility",
+          "currency": "EUR",
+          "debtorAccountId": "50500000-0000-4000-8000-000000000001",
+          "debtorIban": "CZ6508000000192000145399",
+          "debtorName": "Alice Example",
+          "endToEndId": "standing-order-pact-00000001",
+          "remittanceInfo": "Standing order rent",
+          "type": "SCT"
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "Idempotency-Key": "standing-order-pact-00000001"
+        },
+        "method": "POST",
+        "path": "/api/v1/sepa-payments"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sepa-payment"
+  }
+}

@@ -120,11 +120,13 @@ class KafkaSepaPaymentEventPublisherTest {
             "ROLE_OPERATOR",
             "correlation-1",
             true,
+            UUID.fromString("11111111-1111-4111-8111-111111111111"),
         )
 
         assertThat(json).contains("\"eventType\":\"sepa.payment.returned\"")
         assertThat(json).contains("\"version\":5")
         assertThat(json).contains("\"paymentId\":\"${payment.id}\"")
+        assertThat(json).contains("\"reversalTransactionId\":\"11111111-1111-4111-8111-111111111111\"")
     }
 
     @Test

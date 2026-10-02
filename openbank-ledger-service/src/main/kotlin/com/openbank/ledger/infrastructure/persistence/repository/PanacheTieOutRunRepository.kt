@@ -28,7 +28,10 @@ class PanacheTieOutRunRepository :
     }
 
     override suspend fun findLatest(): TieOutRunRecord? = Panache.withSession {
-        find("order by runAt desc").firstResult()
+        // Highest as_of first, NOT newest runAt: a CUTOFF re-check of an old day (#11680)
+        // writes a run whose runAt is the newest, and ordering by runAt alone would drag the
+        // forward catch-up cursor back to that old day and re-walk every day after it.
+        find("order by asOf desc, runAt desc").firstResult()
     }.awaitSuspending()?.toDomain()
 
     override suspend fun findLatestFor(asOf: LocalDate): TieOutRunRecord? = Panache.withSession {
