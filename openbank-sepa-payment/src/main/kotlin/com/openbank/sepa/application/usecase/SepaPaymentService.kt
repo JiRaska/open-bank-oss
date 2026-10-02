@@ -33,7 +33,6 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.util.Locale
 import java.util.UUID
 
 // #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
@@ -116,7 +115,6 @@ class SepaPaymentService(
             creditorName = command.creditorName.trim(),
             creditorBic = command.creditorBic?.trim(),
             amount = command.amount,
-            currency = command.currency.trim().uppercase(Locale.getDefault()),
             remittanceInfo = command.remittanceInfo?.trim(),
             endToEndId = command.endToEndId?.trim()?.ifBlank { null } ?: generateEndToEndId(),
             rejectReason = null,
