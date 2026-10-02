@@ -93,4 +93,33 @@ class DomesticPaymentWorkflowImplTest {
         verify(exactly = 0) { activities.validatePayment(any()) }
         verify(exactly = 0) { activities.shadowFraudScore(any()) }
     }
+
+    @Test
+    fun `settlement keeps retrying through an outage longer than the shared 10-minute policy (#11666)`() {
+        val paymentId = UUID.randomUUID()
+        every { activities.screenPayment(paymentId) } returns ScreeningDecision.CLEAR
+        every { activities.submitScheme(paymentId) } returns DomesticPaymentStatus.SENT_TO_CLEARING
+        var calls = 0
+        every { activities.settlePayment(paymentId) } answers {
+            calls++
+            check(calls > OUTAGE_FAILURES) { "transaction-service unavailable" }
+            DomesticPaymentStatus.SETTLED
+        }
+
+        val started = env.currentTimeMillis()
+        val result = workflowStub().process(paymentId)
+
+        assertThat(result).isEqualTo(DomesticPaymentStatus.SETTLED)
+        assertThat(calls).isEqualTo(OUTAGE_FAILURES + 1)
+        // The outage really outlasted the old 10-minute schedule-to-close.
+        assertThat(env.currentTimeMillis() - started).isGreaterThan(java.time.Duration.ofMinutes(10).toMillis())
+    }
+
+    @Test
+    fun `settlement retry policy is unbounded with a capped backoff`() {
+        assertThat(DomesticPaymentWorkflowImpl.SETTLEMENT_MAX_INTERVAL).isEqualTo(java.time.Duration.ofMinutes(5))
+        assertThat(DomesticPaymentWorkflowImpl.SETTLEMENT_SCHEDULE_TO_CLOSE).isEqualTo(java.time.Duration.ofDays(7))
+    }
 }
+
+private const val OUTAGE_FAILURES = 12

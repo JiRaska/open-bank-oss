@@ -4,6 +4,7 @@
 
 package com.openbank.libs.decision
 
+import com.openbank.libs.util.Hex
 import java.security.MessageDigest
 import java.time.LocalDate
 
@@ -59,9 +60,7 @@ object PolicyEvaluator {
         val canonical = attributes.entries
             .sortedBy { it.key.name }
             .joinToString("|") { "${it.key.name}=${it.value.render()}" }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(canonical.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+        return Hex.lower(MessageDigest.getInstance("SHA-256").digest(canonical.toByteArray(Charsets.UTF_8)))
     }
 
     private sealed interface TableOutcome {

@@ -1,0 +1,77 @@
+# SPDX-License-Identifier: Apache-2.0
+# Shared-libs JMH benchmarks: run them, keep the numbers, compare ALLOCATION to the baseline.
+#
+# Gated: gc.alloc.rate.norm (B/op) against openbank-libs-benchmarks/alloc-baseline.json, by
+#        .github/scripts/check-bench-alloc-baseline.py (advisory; rules.yaml:
+#        libs_bench_alloc_baseline). Allocation per op is a property of the code.
+# Never gated: ns/op. It is a property of the runner; the JSON is uploaded for reading only.
+#
+# A path-filtered workflow cannot be a required check, and this one is not meant to be: the
+# half that needs no JVM (benchmarks in source == entries in the baseline) is declared in
+# .github/gates/gates.yaml and runs on every PR. This workflow is the half that needs a JMH run.
+# It is a workflow of its own, not a job in services-ci.yml, because GitHub then does the path
+# filtering without starting a runner on PRs that touch none of these paths.
+
+name: Libs benchmarks
+
+on:
+  pull_request:
+    paths:
+      - "openbank-libs-domain/**"
+      - "openbank-libs-runtime/**"
+      - "openbank-libs-iso20022/**"
+      - "openbank-libs-benchmarks/**"
+      - "openbank-libs/gradle/libs.versions.toml"
+      - ".github/scripts/check-bench-alloc-baseline.py"
+      - ".github/workflows/libs-bench.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: libs-bench-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  jmh:
+    name: JMH allocation baseline (advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          java-version: "25"
+          distribution: temurin
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      # -f 1 -wi 3 -i 3 -prof gc -rf json, -XX:+UseSerialGC -Xmx512m: set in the module's
+      # build.gradle.kts `jmh {}` block, so a local run and this one are the same run.
+      - name: Run JMH (:openbank-libs-benchmarks:jmh)
+        run: ./gradlew :openbank-libs-benchmarks:jmh --console=plain
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Xmx2g"
+
+      - name: Upload JMH results (ns/op is report-only)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: libs-bench-jmh-${{ github.run_id }}-a${{ github.run_attempt }}
+          path: openbank-libs-benchmarks/build/reports/jmh/results.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Compare B/op to the committed baseline (advisory)
+        run: |
+          python3 .github/scripts/check-bench-alloc-baseline.py \
+            --results openbank-libs-benchmarks/build/reports/jmh/results.json

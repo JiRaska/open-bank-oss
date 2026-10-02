@@ -109,6 +109,7 @@ class LendingMapper {
         it.terminatedAt = l.terminatedAt
         it.version = l.version
         it.createdAt = l.createdAt
+        it.contractNumber = l.contractNumber
     }
 
     fun toDomain(e: LoanEntity) = Loan(
@@ -118,7 +119,7 @@ class LendingMapper {
         termPeriods = e.termPeriods, periodsPerYear = e.periodsPerYear, method = e.method,
         firstDueDate = e.firstDueDate, status = e.status, disbursedAt = e.disbursedAt,
         noticeEndsOn = e.noticeEndsOn, terminatedBy = e.terminatedBy, terminatedAt = e.terminatedAt,
-        version = e.version, createdAt = e.createdAt,
+        version = e.version, createdAt = e.createdAt, contractNumber = e.contractNumber,
     )
 
     fun toEntity(i: LoanInstallment) = InstallmentEntity().also {
