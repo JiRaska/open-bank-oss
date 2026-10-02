@@ -4,9 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  pull_request_review:
+    types: [submitted, dismissed, edited]
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
@@ -535,7 +538,7 @@ jobs:
       # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
       # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |

@@ -3698,7 +3698,9 @@ autonomous_agent_prs:
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:
-    - an agent-authored PR that touches a protected path fails the check and waits for a human
+    - protected agent PRs require two independent human writers approving the current head SHA
+    - review-policy trust-chain changes cannot use the review approval route
+    - author, bot, dismissed, stale approvals and outstanding change requests never authorize a merge
     - a machine account in neither agent_accounts nor automation_accounts fails the check — it must be classified first
     - an unreadable author, branch or file list is exit 2 (undetermined), never a pass
   gate: agent-pr-guard
