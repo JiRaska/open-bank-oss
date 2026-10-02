@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: fraud-service
     app.kubernetes.io/part-of: fraud
   annotations:
-    openbank.tech/policy-checksum: "33bc2682d9b38159"
+    openbank.tech/policy-checksum: "a75c339dfd0aa2e3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1836,10 +1836,6 @@ data:
           grant:
             - risk.snapshot.read
             - risk.curve-set.read
-            # Owner decision 2026-10-01: a risk officer reviewing large exposures must see who the
-            # obligor is, so the role may read a party (GET /api/v1/parties/{id}, pid-service). Read
-            # only; no party write is granted.
-            - party.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read

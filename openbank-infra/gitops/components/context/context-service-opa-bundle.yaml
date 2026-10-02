@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "b2f57efa10f46dc6"
+    openbank.tech/policy-checksum: "e61df595c5d96225"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1481,10 +1481,6 @@ data:
           grant:
             - risk.snapshot.read
             - risk.curve-set.read
-            # Owner decision 2026-10-01: a risk officer reviewing large exposures must see who the
-            # obligor is, so the role may read a party (GET /api/v1/parties/{id}, pid-service). Read
-            # only; no party write is granted.
-            - party.read
         ROLE_FINANCE:
           grant:
             - risk.snapshot.read
