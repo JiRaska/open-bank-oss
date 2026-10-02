@@ -142,7 +142,12 @@ class EodSnapshotSchedulerVertxContextIT {
         // BREACHES; NSFR is OK; capital, IRRBB and large exposures are NOT_EVALUABLE (no own funds,
         // no curve set) and so emit nothing.
         ledger.inputs = Fixtures.tiedOut()
-        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        // The scheduler reads the injected Clock (FixedClockForIntegrationTests in every @QuarkusTest),
+        // never the wall clock — the expected business date must come from the same source.
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
         await { onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf } }
         val runId = onEventLoop { snapshotRepository.listRecent(10) }.first { it.asOf == expectedAsOf }.id
         val breachRows = "SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId' " +
