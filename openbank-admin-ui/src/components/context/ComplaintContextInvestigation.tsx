@@ -27,7 +27,7 @@ export function ComplaintContextInvestigation() {
   const timeline = useMemo(() => (graph?.nodes ?? [])
     .filter(node => [
       'PAYMENT_STAGE', 'RAIL_EVIDENCE', 'TRANSACTION_BOOKING', 'LEDGER_BOOKING',
-      'CLEARING_ITEM', 'CLEARING_EVIDENCE', 'RETURN_EVIDENCE',
+      'CLEARING_ITEM', 'CLEARING_EVIDENCE', 'RETURN_EVIDENCE', 'REVERSAL_TRANSACTION',
     ].includes(node.type))
     .map(node => ({
       ...node,

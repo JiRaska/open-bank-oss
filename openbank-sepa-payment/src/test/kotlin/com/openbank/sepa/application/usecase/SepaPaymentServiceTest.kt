@@ -12,6 +12,7 @@ import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
 import com.openbank.sepa.application.port.`in`.HandlePaymentReturnCommand
 import com.openbank.sepa.application.port.`in`.ListSepaPaymentsQuery
 import com.openbank.sepa.application.port.`in`.TransitionSepaPaymentStatusCommand
+import com.openbank.sepa.application.port.out.ReversalOutcome
 import com.openbank.sepa.application.port.out.ReversalPort
 import com.openbank.sepa.application.port.out.SepaPaymentEventPublisher
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
@@ -76,7 +77,7 @@ class SepaPaymentServiceTest {
         every { eventPublisher.paymentCreatedPayload(any()) } returns "{\"event\":\"created\"}"
         every { eventPublisher.statusChangedPayload(any(), any()) } returns "{\"event\":\"status-changed\"}"
         every {
-            eventPublisher.returnEvidencePayload(any(), any(), any(), any(), any(), any(), any())
+            eventPublisher.returnEvidencePayload(any(), any(), any(), any(), any(), any(), any(), any())
         } returns "{\"event\":\"returned\"}"
     }
 
@@ -298,8 +299,22 @@ class SepaPaymentServiceTest {
                 // must say so: an evidence row claiming a reversal that did not happen is worse
                 // than none at all.
                 reversalPerformed = false,
+                reversalTransactionId = null,
             )
         }
+    }
+
+    @Test
+    fun `return evidence carries only the reversal identity reported by transaction service`(): Unit = runBlocking {
+        val existing = payment(status = SepaPaymentStatus.PROCESSING).copy(transactionId = UUID.randomUUID())
+        val reversalId = UUID.randomUUID()
+        coEvery { paymentRepository.findByEndToEndId(existing.endToEndId) } returns existing
+        coEvery { reversalPort.reverseTransaction(existing.transactionId!!, any(), any()) } returns
+            ReversalOutcome(reversed = true, reversalTransactionId = reversalId)
+
+        service.handlePaymentReturn(returnCommand(pacs004Xml(existing.endToEndId)))
+
+        verify { eventPublisher.returnEvidencePayload(any(), any(), any(), any(), any(), any(), true, reversalId) }
     }
 
     @Test
