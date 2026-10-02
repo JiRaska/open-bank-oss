@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.sepa.domain.model
 
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -50,8 +51,7 @@ class SepaPaymentTest {
         creditorIban = "DE89370400440532013000",
         creditorName = "Creditor",
         creditorBic = "COBADEFFXXX",
-        amount = BigDecimal("10.00"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("10.00"), "EUR"),
         remittanceInfo = null,
         endToEndId = "E2E1",
         rejectReason = null,
