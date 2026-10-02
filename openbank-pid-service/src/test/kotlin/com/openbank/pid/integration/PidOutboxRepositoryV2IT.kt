@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.pid.integration
 
-import com.openbank.pid.infrastructure.persistence.repository.PidOutboxRepositoryImpl
-import com.openbank.pid.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
+import com.openbank.pid.infrastructure.persistence.repository.PidOutboxRepositoryImpl
+import com.openbank.pid.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -25,7 +25,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(PidOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = PidOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = PidOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class PidOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 

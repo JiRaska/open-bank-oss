@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.document.infrastructure.persistence.repository
 
+import com.openbank.document.application.port.out.DocumentOutboxRepository
+import com.openbank.document.infrastructure.persistence.entity.DocumentOutboxEntity
 import com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.persistence.outbox.OutboxTableShape
-import com.openbank.document.application.port.out.DocumentOutboxRepository
-import com.openbank.document.infrastructure.persistence.entity.DocumentOutboxEntity
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped

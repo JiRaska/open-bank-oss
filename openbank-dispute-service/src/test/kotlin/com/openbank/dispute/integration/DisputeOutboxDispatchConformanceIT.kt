@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(DisputeOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = DisputeOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = DisputeOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class DisputeOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 

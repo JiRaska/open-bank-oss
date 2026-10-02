@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(DocumentOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = DocumentOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = DocumentOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresRedisTestResource::class)
 class DocumentOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -41,7 +44,7 @@ class DocumentOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("document-events-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("account-created-in", "billing-outbox-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory("account-created-in", "billing-outbox-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

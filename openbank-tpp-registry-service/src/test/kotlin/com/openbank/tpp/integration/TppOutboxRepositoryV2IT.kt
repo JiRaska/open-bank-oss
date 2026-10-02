@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.tpp.integration
 
-import com.openbank.tpp.infrastructure.persistence.repository.TppOutboxRepositoryImpl
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
+import com.openbank.tpp.infrastructure.persistence.repository.TppOutboxRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -26,7 +26,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(TppOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],

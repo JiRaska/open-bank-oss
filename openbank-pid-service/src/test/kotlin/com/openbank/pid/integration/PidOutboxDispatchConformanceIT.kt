@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.pid.integration
 
-import com.openbank.pid.infrastructure.outbox.PidOutboxDispatcher
-import com.openbank.pid.infrastructure.persistence.repository.PidOutboxRepositoryImpl
-import com.openbank.pid.it.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
+import com.openbank.pid.infrastructure.outbox.PidOutboxDispatcher
+import com.openbank.pid.infrastructure.persistence.repository.PidOutboxRepositoryImpl
+import com.openbank.pid.it.PostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(PidOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = PidOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = PidOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class PidOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -39,8 +42,7 @@ class PidOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("pid-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("pid-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

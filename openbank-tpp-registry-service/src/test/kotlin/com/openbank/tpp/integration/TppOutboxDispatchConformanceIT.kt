@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.tpp.integration
 
-import com.openbank.tpp.infrastructure.outbox.TppOutboxDispatcher
-import com.openbank.tpp.infrastructure.persistence.repository.TppOutboxRepositoryImpl
-import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
+import com.openbank.tpp.infrastructure.outbox.TppOutboxDispatcher
+import com.openbank.tpp.infrastructure.persistence.repository.TppOutboxRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -29,7 +29,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(TppOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = TppOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_tpp_registry_it")],
@@ -43,8 +46,7 @@ class TppOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("tpp-events-out")
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory("tpp-events-out")
 
         override fun stop() = InMemoryConnector.clear()
     }

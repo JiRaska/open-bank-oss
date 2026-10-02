@@ -3,12 +3,12 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.party.integration
 
-import com.openbank.party.infrastructure.persistence.repository.PartyOutboxRepositoryImpl
-import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
+import com.openbank.libs.testing.containers.PostgresRedpandaTestResource
 import com.openbank.libs.testing.outbox.OutboxRepositoryV2ConformanceIT
+import com.openbank.party.infrastructure.persistence.repository.PartyOutboxRepositoryImpl
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -26,7 +26,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(PartyOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = PartyOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = PartyOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(
     value = PostgresRedpandaTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_party_it")],
