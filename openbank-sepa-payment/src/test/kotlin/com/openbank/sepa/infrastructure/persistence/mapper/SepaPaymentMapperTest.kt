@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.persistence.mapper
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -29,8 +30,7 @@ class SepaPaymentMapperTest {
             creditorIban = "FR7630006000011234567890189",
             creditorName = "Bob Example",
             creditorBic = "DEUTDEFF",
-            amount = BigDecimal("205.450000"),
-            currency = "EUR",
+            amount = Money.of(BigDecimal("205.450000"), "EUR"),
             remittanceInfo = "Invoice 2026-01",
             endToEndId = "E2E-123",
             rejectReason = SepaRejectReason.SANCTIONS_HIT,
@@ -60,8 +60,7 @@ class SepaPaymentMapperTest {
             creditorIban = "FR7630006000011234567890189",
             creditorName = "Bob Example",
             creditorBic = null,
-            amount = BigDecimal("10.000000"),
-            currency = "EUR",
+            amount = Money.of(BigDecimal("10.000000"), "EUR"),
             remittanceInfo = null,
             endToEndId = "E2E-nulls",
             rejectReason = null,
@@ -93,8 +92,7 @@ class SepaPaymentMapperTest {
             creditorIban = "FR7630006000011234567890189",
             creditorName = "Bob Example",
             creditorBic = "DEUTDEFF",
-            amount = BigDecimal("99.000000"),
-            currency = "EUR",
+            amount = Money.of(BigDecimal("99.000000"), "EUR"),
             remittanceInfo = "ref",
             endToEndId = "E2E-entity",
             rejectReason = null,
