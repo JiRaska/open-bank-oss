@@ -11,7 +11,9 @@ for attempt in 1 2 3 4; do
     exit 0
   fi
   echo "::warning::Gradle distribution download failed (attempt ${attempt}/4)"
-  sleep $((attempt * 10))
+  if (( attempt < 4 )); then
+    sleep $((attempt * 10))
+  fi
 done
 echo "::error::could not provision the Gradle wrapper distribution after 4 attempts"
 exit 1
