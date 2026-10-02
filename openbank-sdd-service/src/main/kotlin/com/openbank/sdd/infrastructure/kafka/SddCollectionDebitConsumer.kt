@@ -5,6 +5,7 @@
 package com.openbank.sdd.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.messaging.EventRetry
 import com.openbank.sdd.infrastructure.client.InitiateTransactionRequest
 import com.openbank.sdd.infrastructure.client.TransactionServiceClient
@@ -14,7 +15,6 @@ import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.reactive.messaging.Incoming
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.RoundingMode
 
 /**
  * Books the debtor-side debit for an authorised SEPA Direct Debit collection (#1000).
@@ -124,7 +124,7 @@ class SddCollectionDebitConsumer(
             idempotencyKey = "so-sdd-$mandateId-$umr-$dueDate",
             type = "DEBIT",
             sourceAccountId = java.util.UUID.fromString(node.path("accountId").asText()),
-            amount = node.path("amount").decimalValue().setScale(fractionDigits, RoundingMode.HALF_UP),
+            amount = node.path("amount").decimalValue().setScale(fractionDigits, RoundingPolicy.LEDGER_POSTING.mode),
             currencyCode = currency,
             description = "SEPA Direct Debit ${node.path(
                 "creditorIdentifier",

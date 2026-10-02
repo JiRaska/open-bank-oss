@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.11.1...case-coordinator-agent-v0.11.2) (2026-10-02)
+
+
+### Performance
+
+* **case-coordinator,kyb,wealth,referral:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11755](https://github.com/JiRaska/open-bank-oss/issues/11755)) ([20e52ee](https://github.com/JiRaska/open-bank-oss/commit/20e52ee64073aa8519596283ae6ede81c681aea8))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/case-coordinator-agent-v0.11.0...case-coordinator-agent-v0.11.1) (2026-09-29)
 
 

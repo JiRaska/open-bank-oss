@@ -58,7 +58,7 @@ class SettlementAdapter(
             idempotencyKey = "sepa-settlement-${payment.id}",
             type = "TRANSFER",
             sourceAccountId = payment.debtorAccountId,
-            amount = payment.amount,
+            amount = payment.amount.amount,
             currencyCode = payment.currency,
             description = "SEPA ${payment.type.name}: ${payment.remittanceInfo ?: payment.endToEndId}",
             valueDate = valueDate,

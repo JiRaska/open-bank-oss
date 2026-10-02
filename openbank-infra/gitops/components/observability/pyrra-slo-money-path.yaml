@@ -11,6 +11,14 @@
 # histogram at the le="1" boundary explicitly configured in tempo.yaml's span_metrics
 # processor (Tempo's default buckets don't include a clean 1s boundary).
 #
+# SLI = CUSTOMER TRAFFIC ONLY (2026-10-02). Every indicator selects SERVER spans and drops
+# `GET /` (blackbox/synthetic probe) and `GET /api/v1/info` (admin-ui metadata). Before, the
+# selector was the bare service, so INTERNAL and CLIENT spans counted too — one failed ledger
+# journal insert was three errors (CLIENT INSERT + INTERNAL post + SERVER request) — and on an
+# idle sandbox service the only "requests" were probes: openbank-vop-service saw ~4 spans a day,
+# one slow cold `GET /api/v1/info` exhausted its budget and ErrorBudgetBurn paged critical.
+# A service with no customer traffic now has an empty SLI, which Pyrra treats as no burn.
+#
 # Targets are REFERENCE defaults (rules.yaml: slo comment) — not calibrated against real
 # production traffic. Revisit once the load-benchmark / DR-drill scope of issue #669 lands.
 #
@@ -50,9 +58,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -74,9 +82,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-ledger-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-ledger-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-ledger-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -98,9 +106,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -122,9 +130,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-transaction-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-transaction-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-transaction-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -146,9 +154,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-account-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-account-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -170,9 +178,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-account-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-account-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-account-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-account-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -194,9 +202,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-balance-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-balance-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -218,9 +226,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-balance-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-balance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-balance-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-balance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -242,9 +250,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -266,9 +274,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-payment",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -290,9 +298,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -314,9 +322,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-instant",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sepa-instant",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sepa-instant",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -338,9 +346,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment"}
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -362,9 +370,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-domestic-payment",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-domestic-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment"}
+        metric: traces_spanmetrics_calls_total{service="openbank-domestic-payment",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -386,9 +394,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -410,9 +418,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-clearing-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-clearing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-clearing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -434,9 +442,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-swift-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-swift-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -458,9 +466,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-swift-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-swift-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-swift-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-swift-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -482,9 +490,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-fx-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-fx-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -506,9 +514,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-fx-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-fx-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-fx-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fx-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -530,9 +538,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-lending-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-lending-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -554,9 +562,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-lending-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-lending-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-lending-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-lending-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -578,9 +586,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-sca-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sca-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -602,9 +610,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-sca-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sca-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sca-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sca-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -626,9 +634,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-consent-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-consent-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -650,9 +658,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-consent-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-consent-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-consent-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-consent-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -674,9 +682,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -698,9 +706,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-fraud-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-fraud-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-fraud-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -722,9 +730,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-billing-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-billing-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -746,9 +754,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-billing-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-billing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-billing-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-billing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -770,9 +778,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -794,9 +802,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-settlement-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-settlement-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-settlement-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -818,9 +826,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -842,9 +850,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-sanctions-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sanctions-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sanctions-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -871,9 +879,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-vop-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-vop-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -898,9 +906,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-vop-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-vop-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-vop-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-vop-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -922,9 +930,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -946,9 +954,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-sdd-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-sdd-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-sdd-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -970,9 +978,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-interest-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-interest-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-interest-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-interest-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -994,9 +1002,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-interest-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-interest-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-interest-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-interest-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1018,9 +1026,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1042,9 +1050,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-delegation-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-delegation-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-delegation-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1066,9 +1074,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1090,9 +1098,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-standing-order-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-standing-order-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-standing-order-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1114,9 +1122,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1138,9 +1146,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-psd2-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-psd2-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-psd2-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 ---
 apiVersion: pyrra.dev/v1alpha1
@@ -1166,9 +1174,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1193,9 +1201,9 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-card-issuance-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-card-issuance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-card-issuance-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1217,9 +1225,9 @@ spec:
   indicator:
     ratio:
       errors:
-        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service",status_code="STATUS_CODE_ERROR"}
+        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
 ---
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
@@ -1241,6 +1249,6 @@ spec:
   indicator:
     latency:
       success:
-        metric: traces_spanmetrics_latency_bucket{service="openbank-treasury-service",le="1"}
+        metric: traces_spanmetrics_latency_bucket{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
       total:
-        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service"}
+        metric: traces_spanmetrics_calls_total{service="openbank-treasury-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}

@@ -498,6 +498,21 @@ jobs:
             sudo apt-get install -y -q yamllint
           }
 
+      # governance-script-unit-tests (supplychain) runs fixture builds through ./gradlew, and
+      # the hosted image has no wrapper distribution. Left to the test, the wrapper downloaded
+      # it mid-test and a services.gradle.org 504 failed an unrelated PR (#11549). Provision it
+      # here instead: cached by the pinned wrapper properties, retried on a miss, and the test
+      # FAILS (never skips, never downloads) if it is still absent.
+      - name: Cache Gradle wrapper distribution
+        if: contains(matrix.groups, 'supplychain')
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.gradle/wrapper/dists
+          key: gradle-wrapper-dist-${{ runner.os }}-${{ hashFiles('gradle/wrapper/gradle-wrapper.properties') }}
+      - name: Provision Gradle wrapper distribution
+        if: contains(matrix.groups, 'supplychain')
+        run: bash .github/scripts/provision-gradle-distribution.sh
+
       # The merge-base as it is RIGHT NOW, not github.event.pull_request.base.sha, which is
       # frozen at PR-creation time. Two racing spec PRs both classified against their
       # creation-time base and both claimed the same openapi info.version (#481 x #524).

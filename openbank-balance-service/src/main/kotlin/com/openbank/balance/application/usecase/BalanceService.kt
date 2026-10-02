@@ -177,6 +177,7 @@ class BalanceService(
     override suspend fun releaseHold(cmd: ReleaseHoldCommand): BalanceHold {
         val hold = holdRepo.findById(cmd.holdId)
             ?: throw HoldNotFoundException("Hold ${cmd.holdId} not found")
+        if (hold.releasedAt != null) return hold
 
         val balance = balanceRepo.findByAccountIdAndCurrency(hold.accountId, hold.currency)
             ?: throw BalanceNotFoundException("Balance not found")
@@ -185,7 +186,7 @@ class BalanceService(
         val released = hold.copy(releasedAt = OffsetDateTime.now(clock))
 
         // Transactional outbox (#8510): release + balance + HOLD_RELEASED in ONE transaction.
-        holdRepo.releaseWithEvent(
+        return holdRepo.releaseWithEvent(
             released,
             updated,
             BalanceEvent(
@@ -203,8 +204,6 @@ class BalanceService(
                 sourceService = "balance-service",
             ),
         )
-
-        return released
     }
 
     override suspend fun credit(cmd: CreditAccountCommand): Balance {
