@@ -140,7 +140,7 @@ class DeviceResourceRegisterTest {
 
     @Test
     fun `list - missing partyId - 400 and the registry is never queried`(): Unit = runBlocking {
-        val response = resource.list(null)
+        val response = resource.list(null, null)
 
         assertThat(response.status).isEqualTo(Response.Status.BAD_REQUEST.statusCode)
         coVerify(exactly = 0) { repo.listByParty(any()) }
@@ -150,7 +150,7 @@ class DeviceResourceRegisterTest {
     fun `list - returns the party's devices with a total and no tokens`(): Unit = runBlocking {
         coEvery { repo.listByParty(partyId) } returns listOf(entity("t1"), entity("t2"))
 
-        val response = resource.list(partyId)
+        val response = resource.list(partyId, null)
 
         val view = body(response)
         assertThat(view["total"]).isEqualTo(2)
