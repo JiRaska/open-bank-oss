@@ -232,6 +232,94 @@
           "name": "an ACCOUNT-scoped delegation grant has been revoked"
         }
       ]
+    },
+    {
+      "contents": {
+        "active": true,
+        "aggregateId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "eventType": "ApprovalGroupRevised",
+        "members": [
+          "aaaa5555-bbbb-4ccc-8ddd-eeeeffff0004",
+          "aaaa6666-bbbb-4ccc-8ddd-eeeeffff0005"
+        ],
+        "name": "Treasury approvers",
+        "ownerPartyId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+        "revision": 4,
+        "threshold": 2
+      },
+      "description": "an ApprovalGroupRevised event with a complete roster",
+      "generators": {
+        "body": {
+          "$.aggregateId": {
+            "type": "Uuid"
+          },
+          "$.ownerPartyId": {
+            "type": "Uuid"
+          }
+        }
+      },
+      "matchingRules": {
+        "body": {
+          "$.active": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.aggregateId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.name": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "type"
+              }
+            ]
+          },
+          "$.ownerPartyId": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "regex",
+                "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+              }
+            ]
+          },
+          "$.revision": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          },
+          "$.threshold": {
+            "combine": "AND",
+            "matchers": [
+              {
+                "match": "integer"
+              }
+            ]
+          }
+        }
+      },
+      "metaData": {
+        "contentType": "application/json"
+      },
+      "providerStates": [
+        {
+          "name": "an approval group roster has been revised"
+        }
+      ]
     }
   ],
   "metadata": {

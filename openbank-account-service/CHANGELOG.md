@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.32.0...account-service-v0.32.1) (2026-10-02)
+
+
+### Security
+
+* **account:** block account opening on every screening status but CLEAR and WHITELISTED ([#11640](https://github.com/JiRaska/open-bank-oss/issues/11640)) ([6aa3e47](https://github.com/JiRaska/open-bank-oss/commit/6aa3e4700c3d721dd2aa3e39c426add082c9f081))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.5...account-service-v0.32.0) (2026-09-28)
 
 
