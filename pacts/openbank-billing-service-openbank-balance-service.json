@@ -1,0 +1,68 @@
+{
+  "consumer": {
+    "name": "openbank-billing-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the CZK balance a fee waiver is evaluated against",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the balance account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/CZK"
+      },
+      "response": {
+        "body": {
+          "accountId": "d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5",
+          "bookedAmount": 5000.0,
+          "currency": "CZK"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.bookedAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a balance for a fee waiver with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/balances/d5d5d5d5-d5d5-d5d5-d5d5-d5d5d5d5d5d5/CZK"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-balance-service"
+  }
+}

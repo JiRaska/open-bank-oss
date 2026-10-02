@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
+import com.openbank.treasury.application.port.`in`.PositionBasis
 import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.CurveSetPort
@@ -108,7 +109,9 @@ class TreasuryDealServiceTest {
         product: ProductType = ProductType.MM_PLACEMENT,
         cp: String = "SIMBK-A",
         maturity: LocalDate? = monday.plusDays(7),
-    ) = DraftDealCommand(product, cp, "CZK", BigDecimal(principal), BigDecimal("4.00"), null, monday, maturity, null)
+        value: LocalDate = monday,
+        currency: String = "CZK",
+    ) = DraftDealCommand(product, cp, currency, BigDecimal(principal), BigDecimal("4.00"), null, value, maturity, null)
 
     private suspend fun book(c: DraftDealCommand = cmd()): Deal {
         val d = service.draft(c, DealFixtures.dealer)
@@ -120,6 +123,65 @@ class TreasuryDealServiceTest {
     fun `an unknown counterparty is a bad request`(): Unit = runBlocking {
         assertThatThrownBy { runBlocking { service.draft(cmd(cp = "NOPE"), DealFixtures.dealer) } }
             .isInstanceOf(UnknownCounterpartyException::class.java)
+    }
+
+    @Test
+    fun `a deal drafted after 22 00 UTC in summer takes the Prague trade date, not UTC's`(): Unit = runBlocking {
+        // 22:30 UTC on 15 July is 00:30 CEST on 16 July: the dealer in Prague is already on the 16th.
+        assertTradeDateDefaultsToPrague(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+    }
+
+    @Test
+    fun `a deal drafted after 23 00 UTC in winter takes the Prague trade date, not UTC's`(): Unit = runBlocking {
+        // 23:30 UTC on 15 January is 00:30 CET on 16 January.
+        assertTradeDateDefaultsToPrague(java.time.Instant.parse("2026-01-15T23:30:00Z"), LocalDate.parse("2026-01-16"))
+    }
+
+    @Test
+    fun `after 22 00 UTC in summer the simulated market settles a deal valued on the Prague day`(): Unit =
+        runBlocking { assertSettlesOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), "2026-07-16") }
+
+    @Test
+    fun `after 23 00 UTC in winter the simulated market settles a deal valued on the Prague day`(): Unit =
+        runBlocking { assertSettlesOnPragueDay(java.time.Instant.parse("2026-01-15T23:30:00Z"), "2026-01-16") }
+
+    @Test
+    fun `after 22 00 UTC the simulated market matures a deal due on the Prague day`(): Unit = runBlocking {
+        val b = bookOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+        service.runSimulatedMarket()
+        // 22:30 UTC on the 22nd is the 23rd in Prague: the maturity date.
+        clock = Clock.fixed(java.time.Instant.parse("2026-07-22T22:30:00Z"), ZoneOffset.UTC)
+        service.runSimulatedMarket()
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.MATURED)
+        assertThat(ledger.entryDates["treasury:${b.id}:matured"]).isEqualTo(LocalDate.parse("2026-07-23"))
+    }
+
+    @Test
+    fun `a reversal after 22 00 UTC is entered on the Prague day`(): Unit = runBlocking {
+        val b = bookOnPragueDay(java.time.Instant.parse("2026-07-15T22:30:00Z"), LocalDate.parse("2026-07-16"))
+        service.runSimulatedMarket()
+        service.reverse(b.id, "test", DealFixtures.approver)
+        assertThat(ledger.entryDates["treasury:${b.id}:reversed"]).isEqualTo(LocalDate.parse("2026-07-16"))
+    }
+
+    private suspend fun assertSettlesOnPragueDay(at: java.time.Instant, pragueDay: String) {
+        val prague = LocalDate.parse(pragueDay)
+        val b = bookOnPragueDay(at, prague)
+        // Under the UTC date the value date is still tomorrow and the deal would stay CONFIRMED.
+        service.runSimulatedMarket()
+        assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
+        assertThat(ledger.entryDates["treasury:${b.id}:settled"]).isEqualTo(prague)
+    }
+
+    private suspend fun bookOnPragueDay(at: java.time.Instant, prague: LocalDate): Deal {
+        clock = Clock.fixed(at, ZoneOffset.UTC)
+        return book(cmd(maturity = prague.plusDays(7)).copy(tradeDate = prague, valueDate = prague))
+    }
+
+    private suspend fun assertTradeDateDefaultsToPrague(at: java.time.Instant, prague: LocalDate) {
+        clock = Clock.fixed(at, ZoneOffset.UTC)
+        val c = cmd(maturity = prague.plusDays(7)).copy(tradeDate = null, valueDate = prague)
+        assertThat(service.draft(c, DealFixtures.dealer).tradeDate).isEqualTo(prague)
     }
 
     @Test
@@ -181,15 +243,80 @@ class TreasuryDealServiceTest {
         book(cmd(principal = "100000.00"))
         book(cmd(principal = "30000.00", product = ProductType.MM_BORROWING))
         book(cmd(principal = "5000000.00", product = ProductType.CNB_DEPOSIT_FACILITY, cp = "CNB", maturity = null))
-        assertThat(service.positions(monday).first { it.currency == "CZK" }.placed).isEqualByComparingTo("0")
+        assertThat(service.positions(monday).positions.first { it.currency == "CZK" }.placed).isEqualByComparingTo("0")
         service.runSimulatedMarket()
-        val czk = service.positions(monday).first { it.currency == "CZK" }
+        val czk = service.positions(monday).positions.first { it.currency == "CZK" }
         assertThat(czk.placed).isEqualByComparingTo("100000.00")
         assertThat(czk.borrowed).isEqualByComparingTo("30000.00")
         assertThat(czk.atCnb).isEqualByComparingTo("5000000.00")
         assertThat(czk.net).isEqualByComparingTo("5070000.00")
-        assertThat(service.positions(monday.plusDays(1)).first { it.currency == "CZK" }.atCnb)
+        assertThat(czk.dealCount).isEqualTo(3)
+        assertThat(service.positions(monday.plusDays(1)).positions.first { it.currency == "CZK" }.atCnb)
             .describedAs("the overnight facility has matured by Tuesday").isEqualByComparingTo("0")
+    }
+
+    private suspend fun czkOn(d: LocalDate?) = service.positions(d).positions.first { it.currency == "CZK" }
+
+    @Test
+    fun `a date up to today is ACTUAL and counts only settled deals, a later date is PROJECTED`(): Unit = runBlocking {
+        val today = service.positions(null)
+        assertThat(today.asOf).isEqualTo(monday)
+        assertThat(today.basis).isEqualTo(PositionBasis.ACTUAL)
+        assertThat(today.countedStates).containsExactlyInAnyOrder(DealState.SETTLED, DealState.MATURED)
+        val tomorrow = service.positions(monday.plusDays(1))
+        assertThat(tomorrow.basis).isEqualTo(PositionBasis.PROJECTED)
+        assertThat(tomorrow.today).isEqualTo(monday)
+        assertThat(tomorrow.countedStates)
+            .containsExactlyInAnyOrder(DealState.SETTLED, DealState.MATURED, DealState.BOOKED, DealState.CONFIRMED)
+    }
+
+    @Test
+    fun `a concluded forward deal is projected from its value date until its maturity date`(): Unit = runBlocking {
+        // Booked today, value Wednesday, matures the Wednesday after: cash has not moved yet.
+        book(cmd(principal = "250000.00", value = monday.plusDays(2), maturity = monday.plusDays(9)))
+        assertThat(czkOn(monday).placed).describedAs("today is ACTUAL: a booked deal holds no position")
+            .isEqualByComparingTo("0")
+        assertThat(czkOn(monday.plusDays(1)).placed).describedAs("before the value date").isEqualByComparingTo("0")
+        assertThat(czkOn(monday.plusDays(2)).placed).describedAs("on the value date").isEqualByComparingTo("250000.00")
+        assertThat(czkOn(monday.plusDays(5)).placed).describedAs("between").isEqualByComparingTo("250000.00")
+        assertThat(czkOn(monday.plusDays(5)).dealCount).isEqualTo(1)
+        assertThat(czkOn(monday.plusDays(8)).placed).describedAs("the day before maturity")
+            .isEqualByComparingTo("250000.00")
+        assertThat(czkOn(monday.plusDays(9)).placed).describedAs("on the maturity date it is repaid")
+            .isEqualByComparingTo("0")
+        assertThat(czkOn(monday.plusDays(9)).dealCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `a settled deal projects forward until it matures, per currency`(): Unit = runBlocking {
+        book(cmd(principal = "100000.00"))
+        book(cmd(principal = "40000.00", product = ProductType.MM_BORROWING, currency = "EUR"))
+        service.runSimulatedMarket()
+        val future = service.positions(monday.plusDays(3))
+        assertThat(future.basis).isEqualTo(PositionBasis.PROJECTED)
+        val eur = future.positions.first { it.currency == "EUR" }
+        assertThat(eur.borrowed).isEqualByComparingTo("40000.00")
+        assertThat(eur.net).isEqualByComparingTo("-40000.00")
+        assertThat(future.positions.first { it.currency == "CZK" }.placed).isEqualByComparingTo("100000.00")
+        assertThat(service.positions(monday.plusDays(7)).positions.all { it.dealCount == 0 }).isTrue()
+    }
+
+    @Test
+    fun `an unconcluded draft or pending deal is not projected`(): Unit = runBlocking {
+        service.draft(cmd(value = monday.plusDays(2)), DealFixtures.dealer)
+        val pending = service.draft(cmd(value = monday.plusDays(2)), DealFixtures.dealer)
+        service.submit(pending.id, DealFixtures.dealer)
+        assertThat(czkOn(monday.plusDays(3)).dealCount).isEqualTo(0)
+    }
+
+    @Test
+    fun `the accounting day is Prague's, not UTC's`(): Unit = runBlocking {
+        // 22:30 UTC on Monday 21 Sep is 00:30 on Tuesday 22 Sep in Prague (CEST, UTC+2).
+        clock = Clock.fixed(monday.atTime(22, 30).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+        val report = service.positions(null)
+        assertThat(report.today).isEqualTo(monday.plusDays(1))
+        assertThat(report.asOf).isEqualTo(monday.plusDays(1))
+        assertThat(report.basis).isEqualTo(PositionBasis.ACTUAL)
     }
 
     @Test
@@ -549,10 +676,12 @@ class TreasuryDealServiceTest {
 
     private class RecordingLedger : LedgerPostingPort {
         val posted = mutableListOf<JournalSpec>()
+        val entryDates = mutableMapOf<String, LocalDate>()
         var failFor: UUID? = null
         override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
             if (spec.dealId == failFor) error("ledger unavailable")
             posted += spec
+            entryDates[spec.idempotencyKey] = entryDate
             return UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray())
         }
     }

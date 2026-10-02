@@ -59,7 +59,10 @@
 #
 # WAVE BEHAVIOUR. A single shared-library commit makes most of the fleet non-equivalent at
 # once. RECONCILE_MAX (below) is what spreads that: oldest pin first, at most N per tick, the
-# rest logged as deferred and picked up on the next tick (every 3h). Only app images move —
+# rest logged as deferred and picked up on a later tick (every 3h). The window ROTATES: a
+# fixed oldest-first top-N starved everyone else, because a service the can-i-deploy gate
+# keeps blocking stays lagging with the oldest pin and re-takes the same slot every tick
+# (2026-10-02: the same 12 selected twice, treasury deferred >24h). Only app images move —
 # the probe reads `openbank-*:sandbox-*` image fields, which exist solely in Deployment and
 # Rollout manifests; no CNPG Cluster, and so no money-path database pod, is ever rewritten.
 #
@@ -178,10 +181,20 @@ selected="$ranked"
 if [ "$RECONCILE_MAX" -gt 0 ]; then
   total="$(printf '%s\n' "$ranked" | grep -c . || true)"
   if [ "$total" -gt "$RECONCILE_MAX" ]; then
-    selected="$(printf '%s\n' "$ranked" | head -n "$RECONCILE_MAX")"
+    # FAIR CAP. Take a cyclic window of RECONCILE_MAX over the oldest-first ranking, starting
+    # at (tick * cap) mod total. Consecutive ticks advance the window by a full cap, so every
+    # lagging service is offered within ceil(total/cap) ticks whatever the gate decides —
+    # an always-blocked strand can no longer hold its slot forever. Stateless and
+    # deterministic: the tick is the 3h schedule bucket of wall-clock time (the cron cadence),
+    # overridable via RECONCILE_TICK for tests and manual re-drives.
+    tick="${RECONCILE_TICK:-$(( $(date -u +%s) / 10800 ))}"
+    [[ "$tick" =~ ^[0-9]+$ ]] || { echo "::error::RECONCILE_TICK '${tick}' is not a non-negative integer" >&2; exit 2; }
+    start=$(( (tick * RECONCILE_MAX) % total ))
+    rotated="$(printf '%s\n' "$ranked" | awk -v s="$start" 'NR>s' ; printf '%s\n' "$ranked" | awk -v s="$start" 'NR<=s')"
+    selected="$(printf '%s\n' "$rotated" | head -n "$RECONCILE_MAX")"
     # Log the deferred remainder to stderr — visible in the job log, never silent.
-    printf '%s\n' "$ranked" | tail -n +"$((RECONCILE_MAX + 1))" | cut -f2 \
-      | while IFS= read -r d; do echo "::notice::reconcile deferred (cap ${RECONCILE_MAX}) — will re-drive next tick: ${d}" >&2; done
+    printf '%s\n' "$rotated" | tail -n +"$((RECONCILE_MAX + 1))" | cut -f2 \
+      | while IFS= read -r d; do echo "::notice::reconcile deferred (cap ${RECONCILE_MAX}, tick ${tick}) — rotation reaches it within $(( (total + RECONCILE_MAX - 1) / RECONCILE_MAX )) ticks: ${d}" >&2; done
   fi
 fi
 
