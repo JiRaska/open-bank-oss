@@ -118,6 +118,11 @@ out of it (they are path-scoped, not less important — several are live-inciden
   singletons (a container OOM-kill self-heals; a dead node doesn't), and Karpenter `NodeRepair`
   as the backstop (EKS node auto repair covers only managed node groups, and consolidation cannot
   touch a node holding a `do-not-disrupt` pod).
+- **`karpenter.sh/do-not-disrupt` pins a node for its whole life, drift included.** It blocks
+  every voluntary disruption, so the node is never consolidated AND never replaced on AMI drift
+  (`DisruptionBlocked`, `Drifted=True AMIDrift` indefinitely), and anything else that lands on it
+  stays too. Protect a singleton by placing it on a pool whose disruption policy cannot hurt it
+  (e.g. `stateful`: WhenEmpty, on-demand, budgeted drift) rather than by freezing a node.
 - **Right-sizing requests can pin a NodePool at its `limits` cap.** The cap was calibrated to the
   old, understated requests; after raising them Karpenter may refuse to provision
   ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
