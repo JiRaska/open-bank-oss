@@ -210,7 +210,9 @@ class SavingsProposalServiceTest {
         )
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
-        coEvery { approvalStore.create(any(), any(), any(), any()) } returns pendingApproval(delegate)
+        coEvery {
+            approvalStore.create(any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+        } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
         val proposal = service.propose(command()).proposal
