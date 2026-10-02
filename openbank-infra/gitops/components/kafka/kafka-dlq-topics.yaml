@@ -403,6 +403,23 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-loyalty-service :: channel `referral-qualified-in` (ADR-0310 D3). Named in
+# openbank-loyalty-service/src/main/resources/application.yaml (nested form). Its KafkaUser grants
+# Write on this topic in components/loyalty/kafka-loyalty-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.loyalty.referral-qualified-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-document-service :: channel `billing-outbox-events-in`
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic

@@ -37,8 +37,7 @@ data class CreateSepaPaymentRequest(
         creditorIban = creditorIban,
         creditorName = creditorName,
         creditorBic = creditorBic,
-        amount = amount,
-        currency = currency,
+        amount = inboundMoney(amount, currency),
         remittanceInfo = remittanceInfo,
         endToEndId = endToEndId,
     )
@@ -91,7 +90,7 @@ fun SepaPayment.toResponse() = SepaPaymentResponse(
     creditorIban = creditorIban,
     creditorName = creditorName,
     creditorBic = creditorBic,
-    amount = amount,
+    amount = amount.amount,
     currency = currency,
     remittanceInfo = remittanceInfo,
     endToEndId = endToEndId,
