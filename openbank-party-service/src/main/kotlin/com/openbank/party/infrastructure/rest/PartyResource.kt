@@ -250,7 +250,9 @@ class PartyResource {
 
     @GET
     @Path("/{id}")
-    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_API")
+    // ROLE_RISK is admitted on THIS detail read only (owner decision 2026-10-02): a risk officer
+    // reviewing large exposures must see the obligor's name. Search and list stay closed to it.
+    @RolesAllowed("ROLE_VIEWER", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC", "ROLE_RISK", "ROLE_API")
     @Operation(summary = "Get party by ID")
     suspend fun getParty(@PathParam("id") id: UUID): Response =
         Response.ok(partyUseCase.getParty(id).toResponse()).build()

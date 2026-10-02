@@ -5,7 +5,9 @@
 package com.openbank.libs.persistence.outbox
 
 import com.openbank.libs.observability.DomainMetrics
+import io.micrometer.core.instrument.Timer
 import org.jboss.logging.Logger
+import java.time.Duration
 
 /**
  * Shared outbox dispatch loop (ADR-0049 D3 / ADR-0050 N1).
@@ -63,6 +65,15 @@ abstract class AbstractOutboxDispatcher {
      * override this while the fleet keeps the conservative default.
      */
     protected open val dispatchBatchSize: Int = DEFAULT_BATCH_SIZE
+
+    /**
+     * The concrete bean's `@Scheduled(every = …)` period, so the ADR-0327 D5 drain loop can bound
+     * itself at `poll-interval × 0.8` without reading the annotation reflectively (an Arc subclass
+     * carries it, the base cannot see it). Override where the service overrides the cron; the
+     * fleet default matches the fleet's `every = "5s"`. Only consulted when [outboxRepository] is
+     * an [OutboxRepositoryV2]; a v1 repository keeps the one-batch-per-tick behaviour.
+     */
+    protected open val dispatchPollInterval: Duration = DEFAULT_POLL_INTERVAL
 
     /**
      * `service` tag for [DomainMetrics.outboxDispatched] / `.outboxDead` (#5049). Defaults to a
@@ -144,8 +155,19 @@ abstract class AbstractOutboxDispatcher {
         require(dispatchBatchSize in 1..MAX_BATCH_SIZE) {
             "outbox dispatch batch size must be between 1 and $MAX_BATCH_SIZE"
         }
-        val result = OutboxDispatch.dispatchOnce(outboxRepository, dispatchBatchSize) { entry ->
-            publishWithResilience(entry)
+        val repository = outboxRepository
+        val claimTimer: Timer? = metrics.outboxClaimLatency(service)
+        val observeClaim: (Duration) -> Unit = { elapsed -> claimTimer?.record(elapsed) }
+        val result = if (repository is OutboxRepositoryV2) {
+            // ADR-0327 D5: drain until a short batch or 0.8 × the tick, so a burst clears in one
+            // tick. Legal only on the v2 contract (one row per aggregate per batch, D6).
+            OutboxDispatch.drain(repository, dispatchBatchSize, drainBudget(), observeClaim) { entry ->
+                publishWithResilience(entry)
+            }
+        } else {
+            OutboxDispatch.dispatchOnce(repository, dispatchBatchSize, observeClaim) { entry ->
+                publishWithResilience(entry)
+            }
         }
         for (outcome in result.outcomes) {
             when (outcome) {
@@ -165,10 +187,18 @@ abstract class AbstractOutboxDispatcher {
         outboxEventPublisher.publish(entry)
     }
 
+    /** `dispatchPollInterval × DRAIN_BUDGET_FRACTION`, the wall-clock bound of one drained tick. */
+    internal fun drainBudget(): Duration =
+        Duration.ofMillis((dispatchPollInterval.toMillis() * DRAIN_BUDGET_FRACTION).toLong().coerceAtLeast(1))
+
     companion object {
         val log: Logger = Logger.getLogger(AbstractOutboxDispatcher::class.java)
         const val DEFAULT_BATCH_SIZE: Int = OutboxDispatch.DEFAULT_BATCH_SIZE
         const val MAX_BATCH_SIZE: Int = 1_000
+        val DEFAULT_POLL_INTERVAL: Duration = Duration.ofSeconds(5)
+
+        /** ADR-0327 D5: a tick may spend this share of its period draining, leaving headroom before the next. */
+        const val DRAIN_BUDGET_FRACTION: Double = 0.8
 
         /**
          * `FooBarOutboxDispatcher` -> `foo-bar`. See [service] for why this exists.

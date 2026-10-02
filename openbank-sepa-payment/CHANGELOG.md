@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.15.1...sepa-payment-v0.16.0) (2026-10-02)
+
+
+### Features
+
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+
 ## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.15.0...sepa-payment-v0.15.1) (2026-09-29)
 
 

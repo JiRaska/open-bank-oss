@@ -4,6 +4,7 @@
 
 package com.openbank.account.integration
 
+import com.openbank.account.domain.model.SavingsWithdrawalScaReference
 import com.openbank.account.it.StubScaChallengeClient
 import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -269,6 +270,11 @@ class AccountOutboxAtomicityIT {
 
     private fun decide(accountId: String, proposalId: String, approve: Boolean, expectedStatus: String): UUID {
         StubScaChallengeClient.party.set(ownerParty)
+        // #9430: the decision challenge is dynamically linked to amount, currency and the
+        // per-decision reference; 150000 minor CZK is what propose() submits.
+        StubScaChallengeClient.amount.set("1500.00")
+        StubScaChallengeClient.currency.set("CZK")
+        StubScaChallengeClient.reference.set(SavingsWithdrawalScaReference.of(UUID.fromString(proposalId), approve))
         val decided = Given {
             contentType("application/json")
             header("X-Customer-Party-Id", ownerParty.toString())
