@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-951dcbab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-eba4aec0
 
           imagePullPolicy: IfNotPresent
           ports:
