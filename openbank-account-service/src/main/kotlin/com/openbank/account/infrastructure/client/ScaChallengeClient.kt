@@ -5,6 +5,7 @@
 package com.openbank.account.infrastructure.client
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
+import com.fasterxml.jackson.annotation.JsonInclude
 import com.openbank.account.application.port.out.ScaChallengeClient
 import com.openbank.account.application.port.out.ScaChallengeSnapshot
 import com.openbank.libs.web.SyntheticTaintClientFilter
@@ -38,12 +39,17 @@ data class ScaChallengeClientResponse(
     val consumedAt: String? = null,
 )
 
-/** Mirrors the operation-bound subset of sca-service's ConsumeScaRequest. */
+/**
+ * Mirrors the operation-bound subset of sca-service's ConsumeScaRequest. The operation fields are
+ * sent only when a caller binds them (N_OF_M decisions); a party-only consume (savings withdrawal)
+ * keeps the body to `partyId`, as its consumer pact records.
+ */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 data class ConsumeScaChallengeRequest(
     val partyId: UUID,
-    val amount: String?,
-    val currency: String?,
-    val reference: String?,
+    val amount: String? = null,
+    val currency: String? = null,
+    val reference: String? = null,
 )
 
 /**
