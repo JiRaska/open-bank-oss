@@ -138,9 +138,27 @@ class DayCountTest {
     fun `30-360 variants count a same-day-of-month year step as exactly one`(): Unit = runBlocking {
         val thirty = Arb.element(DayCount.THIRTY_360_BOND_BASIS, DayCount.THIRTY_360_US, DayCount.THIRTY_E_360)
         checkAll(thirty, dateArb) { dc, a ->
-            if (a.dayOfMonth <= 28) {
-                assertThat(dc.yearFraction(a, a.plusYears(1))).isEqualTo(frac(1, 1))
+            val b = a.plusYears(1)
+            // SIA 30/360 US end-of-February rule is asymmetric: a non-leap Feb 28 is the LAST day of
+            // February (D1 -> 30) but the same date one year on, in a leap year, is not (D2 stays 28),
+            // so that single step is 358/360 by definition. Bond Basis and 30E/360 have no Feb rule.
+            val nonLeapFeb28ToLeap = a.monthValue == 2 && a.dayOfMonth == 28 && !a.isLeapYear && b.isLeapYear
+            val usFebAsymmetry = dc == DayCount.THIRTY_360_US && nonLeapFeb28ToLeap
+            if (a.dayOfMonth <= 28 && !usFebAsymmetry) {
+                assertThat(dc.yearFraction(a, b)).isEqualTo(frac(1, 1))
             }
         }
+    }
+
+    @Test
+    fun `30-360 US non-leap Feb 28 to leap Feb 28 is 358 over 360 by the end-of-February rule`() {
+        val a = LocalDate.of(2027, 2, 28)
+        val b = LocalDate.of(2028, 2, 28)
+        assertThat(DayCount.THIRTY_360_US.yearFraction(a, b)).isEqualTo(frac(358, 360))
+        assertThat(DayCount.THIRTY_360_BOND_BASIS.yearFraction(a, b)).isEqualTo(frac(1, 1))
+        assertThat(DayCount.THIRTY_E_360.yearFraction(a, b)).isEqualTo(frac(1, 1))
+        // reverse direction: leap Feb 28 is not last day, non-leap Feb 28 is -> D1=28, D2=28 -> 360
+        assertThat(DayCount.THIRTY_360_US.yearFraction(LocalDate.of(2028, 2, 28), LocalDate.of(2029, 2, 28)))
+            .isEqualTo(frac(1, 1))
     }
 }
