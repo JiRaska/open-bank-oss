@@ -3,13 +3,13 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.referral.integration
 
-import com.openbank.referral.infrastructure.outbox.ReferralOutboxDispatcher
-import com.openbank.referral.domain.ReferralEvent
-import com.openbank.referral.infrastructure.persistence.repository.ReferralOutboxRepositoryImpl
-import com.openbank.referral.it.ReferralPostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
+import com.openbank.referral.domain.ReferralEvent
+import com.openbank.referral.infrastructure.outbox.ReferralOutboxDispatcher
+import com.openbank.referral.infrastructure.persistence.repository.ReferralOutboxRepositoryImpl
+import com.openbank.referral.it.ReferralPostgresTestResource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -29,7 +29,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(ReferralOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = ReferralOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = ReferralOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(ReferralPostgresTestResource::class)
 class ReferralOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -42,7 +45,7 @@ class ReferralOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("referral-qualified-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("account-created-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory("account-created-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

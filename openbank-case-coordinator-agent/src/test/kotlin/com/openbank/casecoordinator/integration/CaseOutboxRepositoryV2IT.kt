@@ -2,8 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.casecoordinator.integration
 
-import com.openbank.casecoordinator.infrastructure.persistence.CaseOutboxRepositoryImpl
 import com.openbank.casecoordinator.PostgresTestResource
+import com.openbank.casecoordinator.infrastructure.persistence.CaseOutboxRepositoryImpl
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepositoryV2
@@ -24,7 +24,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(CaseOutboxRepositoryV2IT.NoDispatchProfile::class)
-@QuarkusTestResource(value = CaseOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = CaseOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class CaseOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
 
@@ -39,7 +42,7 @@ class CaseOutboxRepositoryV2IT : OutboxRepositoryV2ConformanceIT() {
     override val repository: OutboxRepositoryV2 get() = repo
 
     override suspend fun seed(message: OutboxMessage) {
-        Panache.withTransaction { repo.persist(message.toCaseOutboxEntity()) }.awaitSuspending()
+        seedCaseOutbox(message)
     }
 
     override suspend fun findEntry(eventId: UUID): OutboxEntry? =

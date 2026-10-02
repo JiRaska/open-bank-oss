@@ -333,12 +333,14 @@ class AbstractOutboxDispatcherTest {
 
         runBlocking { dispatcher.runBatch() }
 
-        assertThat(repo.claims).describedAs("25 + 25 + 10 (short) in ONE tick").isEqualTo(3)
+        assertThat(
+            repo.claims,
+        ).describedAs("25 + 25 + 10 (short, but it dispatched) + 0 (confirms drained) in ONE tick").isEqualTo(4)
         assertThat(repo.sentBatches).hasSize(3)
         assertThat(repo.rows.values.map { it.status }).containsOnly(OutboxStatus.SENT)
         val timer = reg.find(DomainMetrics.OUTBOX_CLAIM).tag("service", "ledger").timer()
         assertThat(timer).isNotNull
-        assertThat(timer!!.count()).isEqualTo(3)
+        assertThat(timer!!.count()).isEqualTo(4)
         assertThat(
             reg.find("openbank.outbox.dispatched").tag("service", "ledger").counters().sumOf {
                 it.count()

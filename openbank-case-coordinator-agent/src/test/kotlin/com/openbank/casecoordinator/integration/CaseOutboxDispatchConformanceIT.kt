@@ -2,9 +2,9 @@
 // Copyright (c) OpenBank contributors. Licensed under the GNU Affero General Public License v3.0 only.
 package com.openbank.casecoordinator.integration
 
+import com.openbank.casecoordinator.PostgresTestResource
 import com.openbank.casecoordinator.infrastructure.outbox.CaseOutboxDispatcher
 import com.openbank.casecoordinator.infrastructure.persistence.CaseOutboxRepositoryImpl
-import com.openbank.casecoordinator.PostgresTestResource
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.outbox.OutboxDispatchConformanceIT
@@ -27,7 +27,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(CaseOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = CaseOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = CaseOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class CaseOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -40,7 +43,7 @@ class CaseOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("case-outbox-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("agent-kill-switch-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory("agent-kill-switch-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -58,7 +61,7 @@ class CaseOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     override val channelName = "case-outbox-out"
 
     override suspend fun seed(message: OutboxMessage) {
-        Panache.withTransaction { repository.persist(message.toCaseOutboxEntity()) }.awaitSuspending()
+        seedCaseOutbox(message)
     }
 
     override suspend fun triggerDispatch() {

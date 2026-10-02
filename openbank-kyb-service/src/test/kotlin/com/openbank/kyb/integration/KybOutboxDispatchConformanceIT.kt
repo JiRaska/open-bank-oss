@@ -28,7 +28,10 @@ import java.util.UUID
  */
 @QuarkusTest
 @TestProfile(KybOutboxDispatchConformanceIT.DispatchEnabledProfile::class)
-@QuarkusTestResource(value = KybOutboxDispatchConformanceIT.InMemoryKafkaResource::class, restrictToAnnotatedClass = true)
+@QuarkusTestResource(
+    value = KybOutboxDispatchConformanceIT.InMemoryKafkaResource::class,
+    restrictToAnnotatedClass = true,
+)
 @QuarkusTestResource(PostgresTestResource::class)
 class KybOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
 
@@ -41,7 +44,7 @@ class KybOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("kyb-events-out") +
-            InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
+                InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
