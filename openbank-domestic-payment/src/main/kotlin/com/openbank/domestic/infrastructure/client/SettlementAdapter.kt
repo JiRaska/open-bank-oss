@@ -10,6 +10,7 @@ import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -20,7 +21,6 @@ import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.RoundingMode
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -81,7 +81,7 @@ class SettlementAdapter(
         // SENT_TO_CLEARING. Normalise to the currency's minor units before booking.
         val fractionDigits = runCatching { Currency.getInstance(payment.currency).defaultFractionDigits }
             .getOrDefault(2).coerceAtLeast(0)
-        val settlementAmount = payment.amount.setScale(fractionDigits, RoundingMode.HALF_UP)
+        val settlementAmount = payment.amount.setScale(fractionDigits, RoundingPolicy.LEDGER_POSTING.mode)
 
         // Credit leg: for an in-house transfer (payer + payee both at our bank) resolve the payee's
         // internal accountId and send it as targetAccountId, so transaction-service books a two-sided
