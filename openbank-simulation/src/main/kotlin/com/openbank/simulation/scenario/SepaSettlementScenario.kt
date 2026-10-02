@@ -4,6 +4,7 @@
 
 package com.openbank.simulation.scenario
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -104,8 +105,7 @@ object SepaSettlementScenario {
             creditorIban = iban(creditorAccount),
             creditorName = "Simulated Creditor",
             creditorBic = CREDITOR_BIC,
-            amount = amount,
-            currency = world.currency,
+            amount = Money.of(amount, world.currency),
             remittanceInfo = null,
             endToEndId = "e2e-${random.nextUuid()}",
             rejectReason = null,

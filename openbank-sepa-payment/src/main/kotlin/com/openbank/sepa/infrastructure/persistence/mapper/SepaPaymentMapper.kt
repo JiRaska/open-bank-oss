@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.persistence.mapper
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -21,8 +22,8 @@ fun SepaPayment.toEntity() = SepaPaymentEntity().also {
     it.creditorIban = creditorIban
     it.creditorName = creditorName
     it.creditorBic = creditorBic
-    it.amount = amount
-    it.currency = currency
+    it.amount = amount.amount
+    it.currency = amount.currency.code
     it.remittanceInfo = remittanceInfo
     it.endToEndId = endToEndId
     it.rejectReason = rejectReason?.name
@@ -47,8 +48,7 @@ fun SepaPaymentEntity.toDomain() = SepaPayment(
     creditorIban = creditorIban,
     creditorName = creditorName,
     creditorBic = creditorBic,
-    amount = amount,
-    currency = currency,
+    amount = storedMoney(),
     remittanceInfo = remittanceInfo,
     endToEndId = endToEndId,
     rejectReason = rejectReason?.let(SepaRejectReason::valueOf),
@@ -61,3 +61,18 @@ fun SepaPaymentEntity.toDomain() = SepaPayment(
     updatedAt = updatedAt,
     revision = revision,
 )
+
+/**
+ * A row's amount as [Money]. Rows written since the inbound boundary builds [Money] always fit; a
+ * row an earlier release accepted with more decimals than the currency allows (or an unknown
+ * currency) cannot be represented without rounding, which [Money] never does silently — so it is
+ * an internal fault naming the row, not a 400 blamed on whoever happens to read it.
+ */
+private fun SepaPaymentEntity.storedMoney(): Money = try {
+    Money.of(amount, currency)
+} catch (unrepresentable: IllegalArgumentException) {
+    throw IllegalStateException(
+        "sepa_payments row $paymentId holds an amount/currency Money cannot represent",
+        unrepresentable,
+    )
+}
