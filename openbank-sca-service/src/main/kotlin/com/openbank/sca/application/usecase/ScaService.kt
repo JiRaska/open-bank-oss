@@ -430,7 +430,7 @@ class ScaService(
             challenge = verifyDecoupled(challenge, now)
         }
         if (challenge.status != ScaStatus.COMPLETED) throw ScaChallengeNotApprovedException(command.challengeId)
-        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command)
+        val authorised = linkingAuthorises(challenge.dynamicLinkingData, command, challenge.purpose)
         if (!authorised) throw ScaDynamicLinkingMismatchException(command.challengeId)
         if (!repository.markConsumed(command.challengeId)) {
             throw ScaChallengeAlreadyConsumedException(command.challengeId)
@@ -445,51 +445,39 @@ class ScaService(
      * operation exactly (RTS Art. 5 dynamic linking, extended to documents by ADR-0169 D2, to card
      * management, and to business approvals by #10281).
      */
-    private fun linkingAuthorises(linking: DynamicLinkingData?, command: ConsumeScaCommand): Boolean =
-        linking?.authorises(
-            command.amount,
-            command.currency,
-            command.creditor,
-            command.documentSha256,
-            command.ceremonyId,
-            command.cardId,
-            command.cardAction,
-            command.approvalRequestId,
-            command.payloadSha256,
-        ) ?: (
-            command.amount == null &&
-                command.documentSha256 == null &&
-                command.cardId == null &&
-                command.approvalRequestId == null
-            )
+    private fun linkingAuthorises(
+        linking: DynamicLinkingData?,
+        command: ConsumeScaCommand,
+        purpose: ScaPurpose,
+    ): Boolean = linking?.authorises(
+        command.amount,
+        command.currency,
+        command.creditor,
+        command.documentSha256,
+        command.ceremonyId,
+        command.cardId,
+        command.cardAction,
+        command.approvalRequestId,
+        command.payloadSha256,
+        reference = command.reference,
+        purpose = purpose,
+    ) ?: (
+        command.amount == null &&
+            command.documentSha256 == null &&
+            command.cardId == null &&
+            command.approvalRequestId == null
+        )
 
     private fun buildPushMessage(purpose: ScaPurpose, data: DynamicLinkingData?): String = when (purpose) {
         ScaPurpose.PAYMENT_INITIATION ->
             "Potvrďte platbu ${data?.amount} ${data?.currency} pro ${data?.creditorName}"
-        ScaPurpose.CONSENT_GRANT ->
-            "Potvrďte udělení přístupu k vašemu účtu"
-        ScaPurpose.LOGIN ->
-            "Potvrďte přihlášení do OpenBank"
-        ScaPurpose.AGENT_ACTION ->
-            "Potvrďte akci bankovního agenta"
-        ScaPurpose.SENSITIVE_DATA_ACCESS ->
-            "Potvrďte přístup k citlivým údajům"
-        ScaPurpose.DOCUMENT_SIGNING ->
-            "Potvrďte podpis dokumentu"
-        ScaPurpose.CARD_MANAGEMENT ->
-            "Potvrďte operaci s platební kartou"
-        ScaPurpose.DELEGATION_GRANT ->
-            "Potvrďte sdílení přístupu k vašemu produktu"
-        ScaPurpose.DELEGATION_ACCEPT ->
-            "Potvrďte přijetí sdíleného přístupu"
-        ScaPurpose.SAVINGS_WITHDRAW_APPROVAL ->
-            "Potvrďte výběr ze spořicího cíle"
         ScaPurpose.APPROVAL ->
             if (data?.amount != null) {
                 "Podepište platbu ${data.amount} ${data.currency} pro ${data.creditorName ?: data.creditorIban}"
             } else {
                 "Podepište firemní požadavek ke schválení"
             }
+        else -> checkNotNull(STATIC_PUSH_MESSAGES[purpose]) { "no push message for $purpose" }
     }
 
     /**
@@ -590,3 +578,17 @@ private fun Throwable.causedByUniqueViolation(): Boolean {
     }
     return false
 }
+
+/** Purposes whose push text carries no dynamic-linking data. */
+internal val STATIC_PUSH_MESSAGES: Map<ScaPurpose, String> = mapOf(
+    ScaPurpose.CONSENT_GRANT to "Potvrďte udělení přístupu k vašemu účtu",
+    ScaPurpose.LOGIN to "Potvrďte přihlášení do OpenBank",
+    ScaPurpose.AGENT_ACTION to "Potvrďte akci bankovního agenta",
+    ScaPurpose.SENSITIVE_DATA_ACCESS to "Potvrďte přístup k citlivým údajům",
+    ScaPurpose.DOCUMENT_SIGNING to "Potvrďte podpis dokumentu",
+    ScaPurpose.CARD_MANAGEMENT to "Potvrďte operaci s platební kartou",
+    ScaPurpose.DELEGATION_GRANT to "Potvrďte sdílení přístupu k vašemu produktu",
+    ScaPurpose.DELEGATION_ACCEPT to "Potvrďte přijetí sdíleného přístupu",
+    ScaPurpose.DELEGATION_APPROVAL_GROUP to "Potvrďte změnu skupiny schvalovatelů",
+    ScaPurpose.SAVINGS_WITHDRAW_APPROVAL to "Potvrďte výběr ze spořicího cíle",
+)
