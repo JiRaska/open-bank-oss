@@ -41,8 +41,12 @@ import java.util.UUID
 class SpendReservationOutboxWriteIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> =
-            InMemoryConnector.switchOutgoingChannelsToInMemory("delegation-events-out")
+        // The dispatcher's claim UPDATE restamps an outbox row's xmin, which would race the
+        // atomicity assertion below; nothing else in this class needs it running.
+        override fun start(): Map<String, String> = InMemoryConnector.switchOutgoingChannelsToInMemory(
+            "delegation-events-out",
+            "approval-group-revisions-out",
+        ) + mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -198,6 +202,60 @@ class SpendReservationOutboxWriteIT {
         // Atomicity in the other direction: nothing committed, so nothing was audited. If the
         // event were published outside the transaction, this row would exist.
         assertThat(outboxPayloads(grantId, "SpendReserved")).hasSize(1)
+    }
+
+    /**
+     * #8353 — presence is not atomicity. Every test above counts or reads the outbox row; a
+     * repository that committed the reservation in one transaction and the event in a second would
+     * pass them all. Postgres stamps each row version with `xmin`, the id of the transaction that
+     * wrote it. Reserve INSERTs the reservation and its event; confirm UPDATEs the reservation and
+     * INSERTs another — so the reservation row's `xmin` must equal the newest event's, and the two
+     * events' must differ.
+     */
+    @Test
+    @TestSecurity(user = "svc", roles = ["ROLE_API"])
+    fun `a reservation row and its outbox row are written by one transaction, on reserve and on confirm`() {
+        val grantId = seedGrant()
+        val reservationId = UUID.fromString(reserve(grantId, "300.00", "xmin-probe"))
+
+        val reservedRow = reservationXmin(reservationId)
+        val reservedEvent = outboxXmin(grantId, "SpendReserved")
+        assertThat(reservedRow).hasSize(1)
+        assertThat(reservedEvent).hasSize(1)
+        assertThat(reservedEvent.single())
+            .describedAs("the reservation row and SpendReserved must be written by ONE transaction")
+            .isEqualTo(reservedRow.single())
+
+        settle(grantId, reservationId.toString(), "confirm")
+
+        val confirmedEvent = outboxXmin(grantId, "SpendConfirmed")
+        assertThat(confirmedEvent).hasSize(1)
+        assertThat(confirmedEvent.single())
+            .describedAs("the rewritten reservation row and SpendConfirmed must share ONE transaction")
+            .isEqualTo(reservationXmin(reservationId).single())
+        // Known-different control: reserve and confirm were two requests, so two transactions.
+        assertThat(confirmedEvent.single())
+            .describedAs("control: reserve and confirm cannot share a writing transaction")
+            .isNotEqualTo(reservedEvent.single())
+        // And the probe can return nothing.
+        assertThat(reservationXmin(UUID.randomUUID())).isEmpty()
+    }
+
+    private fun reservationXmin(reservationId: UUID): List<String> = jdbc().use { c ->
+        c.prepareStatement("select xmin::text from delegation_spend_reservations where id = ?").use { ps ->
+            ps.setObject(1, reservationId)
+            ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
+        }
+    }
+
+    private fun outboxXmin(grantId: UUID, eventType: String): List<String> = jdbc().use { c ->
+        c.prepareStatement(
+            "select xmin::text from delegation_outbox where aggregate_id = ? and event_type = ? order by id",
+        ).use { ps ->
+            ps.setObject(1, grantId)
+            ps.setString(2, eventType)
+            ps.executeQuery().use { rs -> buildList { while (rs.next()) add(rs.getString(1)) } }
+        }
     }
 
     private companion object {

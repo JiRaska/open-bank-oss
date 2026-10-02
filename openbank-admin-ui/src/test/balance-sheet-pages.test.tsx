@@ -36,6 +36,7 @@ import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/
 import SnapshotLiquidityForecastPage from '@/app/balance-sheet/snapshots/[id]/liquidity-forecast/page'
 import SnapshotMinReservesPage from '@/app/balance-sheet/snapshots/[id]/min-reserves/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
+import { bankToday } from '@/components/balance-sheet/model'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -224,6 +225,35 @@ describe('snapshots', () => {
     router = () => json({ runs: [] })
     await renderPage(<SnapshotsPage />)
     expect(await screen.findByRole('button', { name: /Build snapshot|Sestavit snímek/ })).toBeTruthy()
+  })
+
+  it('blocks a future as-of (max = Prague today, hint, no request) and allows today', async () => {
+    session.roles = ['ROLE_RISK']
+    router = () => json({ runs: [] })
+    await renderPage(<SnapshotsPage />)
+    const input = (await screen.findByLabelText(/Datum snímku|Snapshot as-of date/)) as HTMLInputElement
+    const btn = screen.getByRole('button', { name: /Build snapshot|Sestavit snímek/ }) as HTMLButtonElement
+    const today = bankToday()
+    expect(input.max).toBe(today)
+    fireEvent.change(input, { target: { value: '9999-12-31' } })
+    expect(btn.disabled).toBe(true)
+    expect(screen.getByRole('alert').textContent).toMatch(/v budoucnosti|in the future/)
+    fireEvent.click(btn)
+    expect(calls.some(c => c.init?.method === 'POST')).toBe(false)
+    fireEvent.change(input, { target: { value: today } })
+    expect(btn.disabled).toBe(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('surfaces the server 400 message when the engine refuses the as-of', async () => {
+    session.roles = ['ROLE_RISK']
+    router = (_url, init) => init?.method === 'POST'
+      ? json({ error: "field 'asOf' must not be after the current business date (2026-10-01)" }, 400)
+      : json({ runs: [] })
+    await renderPage(<SnapshotsPage />)
+    fireEvent.change(await screen.findByLabelText(/Datum snímku|Snapshot as-of date/), { target: { value: bankToday() } })
+    fireEvent.click(screen.getByRole('button', { name: /Build snapshot|Sestavit snímek/ }))
+    expect(await screen.findByText(/must not be after the current business date/)).toBeTruthy()
   })
 
   it('shows a human requester as-is, a system: one as a scheduled-run badge, and — for a null/missing one', async () => {

@@ -61,6 +61,19 @@ class DomainMetrics {
          * two places is how a rule ends up watching a series nothing emits (#5733).
          */
         const val STUCK_PAYMENT_SAGAS = "openbank.transaction.sagas.stuck"
+
+        /**
+         * Gauge name for [registerOutboxOldestAge] (ADR-0327 D10): renders as
+         * `openbank_outbox_oldest_age_seconds`, the series `OutboxOldestRowStale` watches.
+         */
+        const val OUTBOX_OLDEST_AGE_SECONDS = "openbank.outbox.oldest_age_seconds"
+
+        /**
+         * Timer name for [outboxClaimLatency] (ADR-0327 D10). Micrometer's Prometheus registry
+         * appends the base unit, so this renders as `openbank_outbox_claim_seconds{_bucket,_count,_sum}`,
+         * the series `OutboxClaimSlow` takes its `histogram_quantile` over.
+         */
+        const val OUTBOX_CLAIM = "openbank.outbox.claim"
     }
 
     // ── Payments ─────────────────────────────────────────────────────────────
@@ -435,6 +448,38 @@ class DomainMetrics {
                 .register(r)
         }
     }
+
+    /**
+     * Register the outbox **oldest-row age** gauge (ADR-0327 D10): seconds since `created_at` of
+     * the oldest row eligible for dispatch right now, 0 when nothing is eligible. This is the
+     * signal finding 7 of that ADR lacked — a backlog of 99 rows that are three days old never
+     * trips `openbank_outbox_backlog > 100`, and does trip `OutboxOldestRowStale`.
+     *
+     * **Seed the supplier from an empty query, never from `Instant.EPOCH`.** The gauge is sampled
+     * from pod start; a supplier that derives "age" from a sentinel timestamp reads ~56 years on a
+     * cold pod and fires the alert 15 minutes after every deploy (the `WorkflowLivenessStale`
+     * lesson, #4208). [AbstractOutboxOldestAgeGauge] caches `0` until its first refresh has run
+     * and reads `oldestProcessableAge() ?: ZERO` after that, so t = 0 on a cold pod is 0.
+     *
+     * Same lifecycle contract as [registerOutboxBacklog]: once at startup, re-registration is a no-op.
+     */
+    fun registerOutboxOldestAge(service: String, ageSeconds: () -> Number) {
+        reg()?.let { r ->
+            Gauge.builder(OUTBOX_OLDEST_AGE_SECONDS, ageSeconds) { it.invoke().toDouble() }
+                .tag("service", service)
+                .strongReference(true)
+                .register(r)
+        }
+    }
+
+    /**
+     * Timer for one `claimProcessable` round trip (ADR-0327 D10) — the early signal of the
+     * finding-5 plan collapse returning (a Seq Scan over the SENT majority takes seconds, the
+     * partial-index claim takes milliseconds). `null` when no registry is resolvable, exactly like
+     * [timer]; the dispatcher records into it per claim. Histogram buckets are published so
+     * `histogram_quantile(0.99, …)` in `OutboxClaimSlow` has `_bucket` series to read.
+     */
+    fun outboxClaimLatency(service: String): Timer? = timer(OUTBOX_CLAIM, "service", service)
 
     /**
      * Register the **stuck payment saga** gauge: how many payment sagas have sat in a

@@ -26,18 +26,25 @@ class SavingsGoalDelegationGuard(
     private val clock: Clock,
 ) {
 
+    data class Authorization(val ownerPartyId: UUID, val grant: DelegatedAccessGrant?)
+
+    suspend fun authorization(accountId: UUID, partyId: UUID, intent: SavingsDelegationIntent): Authorization? {
+        val account = accountRepository.findById(accountId) ?: return null
+        if (account.partyId == partyId) return Authorization(account.partyId, null)
+        val now = OffsetDateTime.now(clock)
+        val grant = projectionRepository
+            .findActiveByAccountPartyAndType(accountId, partyId, DelegatedAccessGrant.RESOURCE_TYPE_SAVINGS_GOAL)
+            .firstOrNull { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfiesSavings(intent) }
+            ?: return null
+        return Authorization(account.partyId, grant)
+    }
+
     /**
      * A SAVINGS_GOAL grant is keyed on the OWNING ACCOUNT's id (a savings goal is account
      * metadata, ADR-0153), so a grant naming a stranger's account reaches this guard exactly as
      * it reached the account guard — and `SAVINGS_WITHDRAW` moves money. The issuer must
      * therefore own the account, same rule and same reason as AuthorizationService.
      */
-    suspend fun isAuthorized(accountId: UUID, partyId: UUID, intent: SavingsDelegationIntent): Boolean {
-        val account = accountRepository.findById(accountId) ?: return false
-        if (account.partyId == partyId) return true
-        val now = OffsetDateTime.now(clock)
-        return projectionRepository
-            .findActiveByAccountPartyAndType(accountId, partyId, DelegatedAccessGrant.RESOURCE_TYPE_SAVINGS_GOAL)
-            .any { it.issuedBy(account.partyId) && it.isActiveOn(now) && it.satisfiesSavings(intent) }
-    }
+    suspend fun isAuthorized(accountId: UUID, partyId: UUID, intent: SavingsDelegationIntent): Boolean =
+        authorization(accountId, partyId, intent) != null
 }
