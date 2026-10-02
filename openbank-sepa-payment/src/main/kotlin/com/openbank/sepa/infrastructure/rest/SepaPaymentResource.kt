@@ -6,9 +6,9 @@ package com.openbank.sepa.infrastructure.rest
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
-import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.security.actorName
@@ -79,6 +79,10 @@ class SepaPaymentResource(
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
+        // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
+        // hold is a 400 (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
+        // record, row, outbox event or downstream call behind.
+        val command = request.toCommand(idempotencyKey, requestHash)
         when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
@@ -92,7 +96,7 @@ class SepaPaymentResource(
 
         var created = false
         val payment = try {
-            paymentUseCase.createPayment(request.toCommand(idempotencyKey, requestHash)).also { created = true }
+            paymentUseCase.createPayment(command).also { created = true }
         } finally {
             // Any failure (the exception propagates unchanged) frees the in-flight marker so a
             // retry of the same request can run instead of answering IN_PROGRESS for 5 minutes.
