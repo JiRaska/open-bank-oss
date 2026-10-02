@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.1...kyc-service-v0.16.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **kyc:** record missing adverse-media coverage and bind checks to their case ([#11760](https://github.com/JiRaska/open-bank-oss/issues/11760)) ([66b0cff](https://github.com/JiRaska/open-bank-oss/commit/66b0cffe70636e119c20731554f763cf04fa59da)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) [#4459](https://github.com/JiRaska/open-bank-oss/issues/4459)
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.0...kyc-service-v0.16.1) (2026-09-29)
 
 
