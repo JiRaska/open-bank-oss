@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.1...audit-service-v0.22.0) (2026-10-02)
+
+
+### Features
+
+* **card-processing:** the card money path — authorisation, hold, clearing, ledger posting (ADR-0283 phase 1) ([#8837](https://github.com/JiRaska/open-bank-oss/issues/8837)) ([6a559c3](https://github.com/JiRaska/open-bank-oss/commit/6a559c3932537248960175c86800c64bb7542337))
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.0...audit-service-v0.21.1) (2026-09-29)
 
 
