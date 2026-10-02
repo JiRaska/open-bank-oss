@@ -16,6 +16,7 @@ import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.LimitNote
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.SimulatedQuote
 import java.math.BigDecimal
@@ -81,6 +82,15 @@ data class TransitionResponse(
     val actorType: String,
     val at: Instant,
     val note: String?,
+    /** The limit-check figures when [note] is a limit note; null otherwise. Additive, API 1.16.0. */
+    val limitSnapshot: LimitSnapshotResponse? = null,
+)
+
+data class LimitSnapshotResponse(
+    val limit: BigDecimal,
+    val currency: String,
+    val exposureAfter: BigDecimal,
+    val headroomAfter: BigDecimal,
 )
 
 data class LimitOverrideResponse(
@@ -153,7 +163,17 @@ data class DealResponse(
             createdAt = d.createdAt,
             updatedAt = d.updatedAt,
             history = d.history.map {
-                TransitionResponse(it.from, it.to, it.actor.id, it.actor.type.name, it.at, it.note)
+                TransitionResponse(
+                    it.from,
+                    it.to,
+                    it.actor.id,
+                    it.actor.type.name,
+                    it.at,
+                    it.note,
+                    LimitNote.parse(it.note)?.let { s ->
+                        LimitSnapshotResponse(s.limit, s.currency, s.exposureAfter, s.headroomAfter)
+                    },
+                )
             },
             journals = journals.map { JournalRefResponse(it.event.key, it.idempotencyKey, it.journalId, it.postedAt) },
         )

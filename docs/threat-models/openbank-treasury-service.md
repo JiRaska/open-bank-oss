@@ -34,6 +34,12 @@ Counterparties are banks and the central bank — no natural persons, no custome
    `DealRepository.exposure`, whose state/product filter derives from the single
    `Deal.LIMIT_CONSUMING_STATES` constant, so the view cannot silently diverge from what actually
    blocks booking.
+   Deal reads (`GET /deals/{id}`) gained an additive `history[].limitSnapshot` (API 1.16.0): the
+   structured figures (limit, currency, exposure after, headroom after) of the limit check a
+   submit/approve transition already recorded in its note. `LimitNote.parse` is the single reader of
+   the one format `LimitNote.format` writes and returns null for any other note, so no new data is
+   stored or exposed — the figures were already readable in the note text by the same roles under
+   the same `treasury.deal.read` gate — and no new endpoint, input or write path exists.
 2. The service posts journals to ledger-service's private-CA mTLS listener (8443, client
    certificate `treasury-internal-tls`) with its OWN machine identity: the named oidc-client `m2m`
    = Keycloak client `openbank-treasury`, ROLE_API only (`LedgerRestClient`,
