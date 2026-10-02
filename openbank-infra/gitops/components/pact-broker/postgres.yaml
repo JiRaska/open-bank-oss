@@ -77,13 +77,15 @@ spec:
     # That is also why the 18.1 above was never applied. Do not "tidy" this back down:
     # the declared size must track the volume, which can grow but never shrink.
     size: 5Gi
+  # 2026-10-02: pact-broker-db-2 measured 353Mi working set over the 256Mi request
+  # (CnpgWorkingSetAboveRequest). ceil(353 x 1.3) = 459 -> 512Mi, limit 2x.
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
+      memory: 512Mi
     limits:
       cpu: "1"
-      memory: 512Mi
+      memory: 1Gi
   postgresql:
     parameters:
       wal_keep_size: "64MB"
