@@ -119,6 +119,7 @@ describe('InstrumentsPanel', () => {
   }
 
   it('renders readable rows, Czech group counts, RWA and totals — and no party lookup without parties:view', async () => {
+    session.roles = ['ROLE_FINANCE'] // balance-sheet:view without parties:view-detail
     await renderPanel()
     expect(screen.getByTestId('instrument-kind-counts').textContent).toBe('Splátkové úvěry: 2 · Jednorázově splatné úvěry: 1')
     const rows = document.querySelectorAll('tbody tr[data-instrument-id]')
@@ -132,6 +133,14 @@ describe('InstrumentsPanel', () => {
     expect(nbsp(screen.getByTestId('instrument-total-CZK').textContent ?? '')).toContain('350 000,00 Kč')
     expect(calls.some(u => u.includes('/parties/'))).toBe(false)
     expect(screen.getByText(/Jména dlužníků vyžadují oprávnění/)).toBeTruthy()
+  })
+
+  it('looks obligor names up for ROLE_RISK (party detail only, never the directory)', async () => {
+    session.roles = ['ROLE_RISK']
+    await renderPanel()
+    expect((await screen.findAllByText('Jan Novák')).length).toBe(2)
+    expect(calls.filter(u => u.includes('/parties/')).length).toBe(2)
+    expect(calls.some(u => /\/parties(\/search)?(\?|$)/.test(u))).toBe(false)
   })
 
   it('explains every unknown value instead of drawing a zero', async () => {

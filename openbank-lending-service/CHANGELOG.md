@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.3...lending-service-v0.40.0) (2026-10-02)
+
+
+### Features
+
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+* **lending,risk-engine,admin-ui:** immutable human loan contract number ([#11722](https://github.com/JiRaska/open-bank-oss/issues/11722)) ([f19ab46](https://github.com/JiRaska/open-bank-oss/commit/f19ab4629b01673c29c8d4c1f1f8b01a6db89915))
+
+
+### Bug Fixes
+
+* **lending:** book a disbursement's local writes in one transaction ([#11631](https://github.com/JiRaska/open-bank-oss/issues/11631)) ([c45be81](https://github.com/JiRaska/open-bank-oss/commit/c45be811eaadd328ec1389af4c5c54d2c6445649)), closes [#11626](https://github.com/JiRaska/open-bank-oss/issues/11626)
+* **lending:** verify provisioning coverage without truncating the cycle ([#9903](https://github.com/JiRaska/open-bank-oss/issues/9903)) ([8bdfc4f](https://github.com/JiRaska/open-bank-oss/commit/8bdfc4fe690543498d88ea7c7a6b68d9fa2e38f1))
+* **libs:** bound amount magnitude and canonicalise Money scale and JSON form ([#11642](https://github.com/JiRaska/open-bank-oss/issues/11642)) ([66ba1af](https://github.com/JiRaska/open-bank-oss/commit/66ba1af4b1176f5bfc2675d0bddd509fb16a9f63))
+
 ## [0.39.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.2...lending-service-v0.39.3) (2026-09-30)
 
 
