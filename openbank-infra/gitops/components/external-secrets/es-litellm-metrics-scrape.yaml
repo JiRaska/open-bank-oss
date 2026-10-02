@@ -9,6 +9,9 @@ kind: ExternalSecret
 metadata:
   name: litellm-metrics-scrape
   namespace: observability
+  annotations:
+    # Review and rotate the dedicated scrape key no later than this date.
+    openbank.io/rotation-deadline: "2027-10-01"
 spec:
   refreshInterval: 1h
   secretStoreRef:
