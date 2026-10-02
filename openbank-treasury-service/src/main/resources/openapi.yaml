@@ -27,7 +27,10 @@ info:
   # 1.14.0: additive — nostro reconciliation breaks and MT940 (ADR-0315 D7): GET
   #         /nostro/{account}/breaks (age in business days, alert threshold) and POST
   #         /nostro/statements/mt940 (SWIFT MT940 mapped onto the camt.053 statement model).
-  version: 1.14.0
+  # 1.15.0: claimed by #11708 (daily position basis ACTUAL | PROJECTED).
+  # 1.16.0: additive — DealEvent.limitSnapshot carries the limit-check figures of a limit note,
+  #         so clients render them instead of parsing `note`.
+  version: 1.16.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -766,6 +769,18 @@ components:
         actorType: { type: string, enum: [HUMAN, AI_AGENT, SERVICE, SYSTEM] }
         at: { type: string, format: date-time }
         note: { type: [string, 'null'] }
+        limitSnapshot:
+          description: >
+            The limit-check figures when `note` is a limit note (submit/approve), else null. Added
+            in 1.16.0 so clients render the figures instead of parsing `note`, which stays as is.
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                limit: { type: number }
+                currency: { type: string }
+                exposureAfter: { type: number }
+                headroomAfter: { type: number }
     JournalRef:
       type: object
       properties:
