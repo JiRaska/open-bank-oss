@@ -4,6 +4,7 @@
 
 package com.openbank.libs.audit
 
+import com.openbank.libs.security.logfmtValue
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Default
 import org.jboss.logging.Logger
@@ -25,6 +26,11 @@ interface AuditEventPublisher {
  *         @Channel("audit-events-out") private val emitter: Emitter<Record<String, String>>
  *     ) : AuditEventPublisher { ... }
  *
+ * Every caller-supplied field goes through [logfmtValue]: a value outside a plain token is quoted
+ * and escaped, so no value can end the line, add a field or override one. A structured (JSON) log
+ * encoder only protects the line as a whole — this `key=value` payload is still a single
+ * `message` string, so the per-field escaping is needed either way.
+ *
  * This logging fallback exists so a missing Kafka topic doesn't silently drop audit
  * events — DORA Art. 17 requires reconstruction within 24h, so something must always
  * record the event.
@@ -42,13 +48,13 @@ class LoggingAuditEventPublisher : AuditEventPublisher {
             "audit event eventId=%s at=%s actor=%s actorType=%s op=%s resource=%s resourceId=%s result=%s traceId=%s",
             event.eventId,
             event.timestamp,
-            event.actorId,
-            event.actorType,
-            event.operation,
-            event.resourceType,
-            event.resourceId ?: "-",
+            event.actorId.logfmtValue(),
+            event.actorType.logfmtValue(),
+            event.operation.logfmtValue(),
+            event.resourceType.logfmtValue(),
+            event.resourceId.logfmtValue(),
             event.result,
-            event.traceId ?: "-",
+            event.traceId.logfmtValue(),
         )
     }
 }

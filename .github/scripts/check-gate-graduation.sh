@@ -33,6 +33,15 @@
 # the next N days and ALWAYS exits 0, including for dates already in the past: it
 # is a horizon report, never a second gate. The PR-time behaviour is untouched.
 #
+# PRE-CLIFF WARNING (enforcing mode). The horizon report above runs on a schedule
+# and files an issue; on 2026-10-01 five 2026-09-30 dates lapsed anyway while that
+# issue had been open, unassigned, for 24 days — and no PR author ever saw a word
+# of it, because the enforcing lane said nothing until the day it went red. So
+# the enforcing lane now ALSO annotates every advisory/planned rule whose date
+# falls within GATE_GRADUATION_WARN_DAYS (default 14) with a `::warning`. That
+# never changes the exit code: a lapsed date fails exactly as before, an
+# upcoming one only becomes visible on every PR for two weeks before it does.
+#
 # Usage: check-gate-graduation.sh [rules.yaml path]   (default: openbank-libs/governance/rules.yaml)
 #        check-gate-graduation.sh --warn-days 30 [rules.yaml path]
 set -euo pipefail
@@ -114,8 +123,34 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "the enforcing lane is unchanged by the existence of warn mode" \
     "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$past\"\n" 1 "has passed"
 
+  # --- pre-cliff warning in the ENFORCING lane --------------------------------------
+  # Negative case first: a date 60 days out must produce NO warning, or the warning is
+  # noise every PR learns to scroll past.
+  in3=$(date -u -v+3d +%Y-%m-%d 2>/dev/null || date -u -d '+3 days' +%Y-%m-%d)
+  in60=$(date -u -v+60d +%Y-%m-%d 2>/dev/null || date -u -d '+60 days' +%Y-%m-%d)
+  expect_no() { local label="$1" body="$2" out
+    printf '%b' "$body" > "$td/rules.yaml"
+    out=$(bash "$0" "$td/rules.yaml" 2>&1)
+    if printf '%s' "$out" | grep -qF "::warning"; then
+      echo "::error::self-test: $label — unexpected ::warning: $out" >&2; fails=$((fails+1)); fi; }
+  expect_no "a date 60 days out is NOT warned about" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in60\"\n"
+  # Positive: 3 days out warns, names the date, and still exits 0.
+  expect "a date 3 days out WARNS and still passes" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in3\"\n" 0 "::warning file=$td/rules.yaml,line=2::target_enforce_date $in3"
+  # The window is the env knob, not a constant: the same 3-day date with a 1-day window is silent.
+  out=$(printf '%b' "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$in3\"\n" > "$td/rules.yaml"; GATE_GRADUATION_WARN_DAYS=1 bash "$0" "$td/rules.yaml" 2>&1)
+  if printf '%s' "$out" | grep -qF "::warning"; then
+    echo "::error::self-test: GATE_GRADUATION_WARN_DAYS=1 must silence a 3-day date: $out" >&2; fails=$((fails+1)); fi
+  # An enforced rule with a near date is out of scope — nothing to graduate.
+  expect_no "an enforced rule with a near date is not warned about" \
+    "rule_a:\n  enforced: enforce\n  target_enforce_date: \"$in3\"\n"
+  # And a lapsed date still FAILS the enforcing lane (warning must not replace the gate).
+  expect "a lapsed date still FAILS with the warning lane present" \
+    "rule_a:\n  enforced: advisory\n  target_enforce_date: \"$past\"\n" 1 "has passed"
+
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: gate-graduation guard is falsifiable (12 cases)"
+  echo "self-test ok: gate-graduation guard is falsifiable (17 cases)"
   exit 0
 fi
 # --- arguments ------------------------------------------------------------------------
@@ -146,9 +181,15 @@ if [ -n "$warn_days" ]; then
   horizon="$(date -u -v+"${warn_days}"d +%Y-%m-%d 2>/dev/null \
     || date -u -d "+${warn_days} days" +%Y-%m-%d)"
 fi
+# Enforcing-lane pre-cliff window (see header). Advisory only: never sets fail.
+soon_days="${GATE_GRADUATION_WARN_DAYS:-14}"
+case "$soon_days" in ''|*[!0-9]*) echo "::error::check-gate-graduation: GATE_GRADUATION_WARN_DAYS must be a non-negative integer, got '$soon_days'" >&2; exit 1 ;; esac
+soon_horizon="$(date -u -v+"${soon_days}"d +%Y-%m-%d 2>/dev/null \
+  || date -u -d "+${soon_days} days" +%Y-%m-%d)"
 fail=0
 checked=0
 due=0
+upcoming=0
 
 # Walk the file; whenever a line matches `enforced: advisory` or
 # `enforced: planned`, remember its line number and scan the next few lines
@@ -208,6 +249,9 @@ while IFS=: read -r lineno date; do
   elif [[ "$date" < "$today" ]]; then
     echo "::error file=$rules,line=$lineno::target_enforce_date $date has passed and this rule is still advisory/planned (ADR-0144). Either ship the producer and flip to enforce/block, or move the date forward with a one-line reason in the commit body."
     fail=1
+  elif [[ ! "$date" > "$soon_horizon" ]]; then
+    echo "::warning file=$rules,line=$lineno::target_enforce_date $date is within ${soon_days} days and this rule is still advisory/planned. From the day after $date this gate fails EVERY open PR (ADR-0144). Graduate it to enforce/block, or move the date forward with a one-line reason — before the cliff, not after."
+    upcoming=$((upcoming + 1))
   fi
 done < /tmp/.gate-graduation-findings.$$
 rm -f /tmp/.gate-graduation-findings.$$
@@ -219,5 +263,6 @@ if [ -n "$warn_days" ]; then
   exit 0
 fi
 
+[ "$upcoming" -gt 0 ] && echo "check-gate-graduation: $upcoming rule(s) reach their target_enforce_date within ${soon_days} days (warnings above)."
 echo "check-gate-graduation: $checked advisory/planned rule(s) checked, $( [ "$fail" -eq 0 ] && echo "all carry a live target_enforce_date." || echo "VIOLATIONS above." )"
 exit "$fail"
