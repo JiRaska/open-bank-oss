@@ -43,8 +43,8 @@ object NotificationEgress {
         callTimeout = callTimeout,
     )
 
-    /** [SafeHttpClient.send] is blocking; run it on the worker pool so the reactive chain never blocks. */
-    fun send(client: SafeHttpClient, request: EgressRequest): Uni<EgressResponse> =
-        Uni.createFrom().item { client.send(request) }
+    /** Construct the client and send on a worker so configuration errors also become Uni failures. */
+    fun send(client: () -> SafeHttpClient, request: EgressRequest): Uni<EgressResponse> =
+        Uni.createFrom().item { client().send(request) }
             .runSubscriptionOn(Infrastructure.getDefaultWorkerPool())
 }

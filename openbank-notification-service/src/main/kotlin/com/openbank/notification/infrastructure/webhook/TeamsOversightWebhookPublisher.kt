@@ -73,7 +73,7 @@ class TeamsOversightWebhookPublisher : OversightWebhookPublisher {
             body = body.toByteArray(Charsets.UTF_8),
         )
 
-        return NotificationEgress.send(http, req)
+        return NotificationEgress.send({ http }, req)
             .map { resp ->
                 val ok = resp.status in HTTP_OK_RANGE
                 log.infof(

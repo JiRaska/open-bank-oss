@@ -84,6 +84,15 @@ class NotificationEgressAllowListTest {
     }
 
     @Test
+    fun `invalid slack allow-list remains a best-effort failure`() {
+        val publisher = slack("http://stub.test:${stub.port()}/slack").also {
+            it.allowedHosts = listOf("bad host")
+        }
+        assertThat(publisher.publish(signal()).await().indefinitely()).isFalse()
+        stub.verify(0, WireMock.anyRequestedFor(WireMock.anyUrl()))
+    }
+
+    @Test
     fun `teams posts to an allow-listed host`() {
         assertThat(teams("http://stub.test:${stub.port()}/teams").publish(signal()).await().indefinitely()).isTrue()
         stub.verify(1, WireMock.postRequestedFor(WireMock.urlPathEqualTo("/teams")))
@@ -92,6 +101,15 @@ class NotificationEgressAllowListTest {
     @Test
     fun `teams refuses a host that is not allow-listed and sends nothing`() {
         assertThat(teams("http://evil.test:${stub.port()}/teams").publish(signal()).await().indefinitely()).isFalse()
+        stub.verify(0, WireMock.anyRequestedFor(WireMock.anyUrl()))
+    }
+
+    @Test
+    fun `invalid teams allow-list remains a best-effort failure`() {
+        val publisher = teams("http://stub.test:${stub.port()}/teams").also {
+            it.allowedHosts = listOf("bad host")
+        }
+        assertThat(publisher.publish(signal()).await().indefinitely()).isFalse()
         stub.verify(0, WireMock.anyRequestedFor(WireMock.anyUrl()))
     }
 

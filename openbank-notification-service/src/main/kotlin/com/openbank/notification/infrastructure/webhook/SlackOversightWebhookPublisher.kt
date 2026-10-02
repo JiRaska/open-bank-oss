@@ -75,7 +75,7 @@ class SlackOversightWebhookPublisher : OversightWebhookPublisher {
             body = body.toByteArray(Charsets.UTF_8),
         )
 
-        return NotificationEgress.send(http, req)
+        return NotificationEgress.send({ http }, req)
             .map { resp ->
                 val ok = resp.status in HTTP_OK_RANGE
                 // Audit (ADR-0059 D5): template/status + masked URL only — never content.

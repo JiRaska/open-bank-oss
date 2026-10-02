@@ -108,7 +108,7 @@ class FcmPushSender {
             body = "grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=$assertion"
                 .toByteArray(Charsets.UTF_8),
         )
-        return NotificationEgress.send(http, request)
+        return NotificationEgress.send({ http }, request)
             .map { resp ->
                 check(resp.status == 200) { "FCM token endpoint returned ${resp.status}" }
                 val node = objectMapper.readTree(resp.bodyAsString())
@@ -149,7 +149,7 @@ class FcmPushSender {
             headers = mapOf("Authorization" to "Bearer $token", "Content-Type" to "application/json"),
             body = payload.toByteArray(Charsets.UTF_8),
         )
-        return NotificationEgress.send(http, request)
+        return NotificationEgress.send({ http }, request)
             .map { resp -> mapResponse(resp.status, resp.bodyAsString()) }
     }
 
