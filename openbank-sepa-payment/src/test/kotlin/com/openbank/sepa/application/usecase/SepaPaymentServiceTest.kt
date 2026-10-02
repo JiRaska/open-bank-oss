@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.iso20022.Pacs004Builder
 import com.openbank.libs.iso20022.PaymentReturn
 import com.openbank.libs.iso20022.SettlementMethod
@@ -357,8 +358,7 @@ class SepaPaymentServiceTest {
         creditorIban = "  FR7630006000011234567890189  ",
         creditorName = "  Bob Example  ",
         creditorBic = "  DEUTDEFF  ",
-        amount = BigDecimal("205.45"),
-        currency = " eur ",
+        amount = Money.of(BigDecimal("205.45"), "EUR"),
         remittanceInfo = "  Invoice 2026-01  ",
         endToEndId = "   ",
     )
@@ -374,8 +374,7 @@ class SepaPaymentServiceTest {
         creditorIban = "FR7630006000011234567890189",
         creditorName = "Bob Example",
         creditorBic = "DEUTDEFF",
-        amount = BigDecimal("205.45"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("205.45"), "EUR"),
         remittanceInfo = "Invoice 2026-01",
         endToEndId = "E2E123",
         rejectReason = null,
