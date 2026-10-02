@@ -74,3 +74,28 @@ jobs:
           ARGS=""
           if [ "${DO_DISPATCH}" = "true" ]; then ARGS="--dispatch"; fi
           python3 .github/scripts/pact-reconcile-verifications.py $ARGS
+
+      # record-deployment runs ONCE, at gitops-PR merge, and records nothing when the deployed sha
+      # has no published version yet — which after a fan-out push is the norm, because the same
+      # push's contract jobs publish later. Nothing re-asked, so the broker kept naming versions
+      # that were no longer running (2026-10-02: 14 providers deployed at 85a0be3e, a version the
+      # broker had since 06:22Z, still recorded at older shas). This re-asks the same resolver on
+      # every tick and re-records only what it can now prove; it never dispatches a build.
+      - name: Reconcile sandbox deployment records
+        # Runs even when the verification step failed: the two questions are independent, and a
+        # broker hiccup in one must not silence the other.
+        if: ${{ !cancelled() }}
+        env:
+          PACT_BROKER_URL: ${{ vars.PACT_BROKER_URL }}
+          PACT_BROKER_USERNAME: ${{ vars.PACT_BROKER_USERNAME }}
+          PACT_BROKER_PASSWORD: ${{ secrets.PACT_BROKER_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The resolver reads git trees through `gh api`.
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DO_DISPATCH: ${{ github.event_name != 'workflow_dispatch' || inputs.dispatch }}
+        run: |
+          set -euo pipefail
+          ARGS=""
+          if [ "${DO_DISPATCH}" = "true" ]; then ARGS="--dispatch"; fi
+          python3 .github/scripts/pact-reconcile-deployed-records.py $ARGS

@@ -228,4 +228,42 @@ class DomainMetricsTest {
         assertThat(timer(WorkflowRunMetrics.OUTCOME_FAILURE).totalTime(java.util.concurrent.TimeUnit.SECONDS))
             .isEqualTo(1.0)
     }
+
+    // ── ADR-0327 D10 ─────────────────────────────────────────────────────────
+
+    @Test
+    fun `registerOutboxOldestAge publishes the D10 gauge and reads 0 on a cold pod, never an epoch-derived age`() {
+        val reg = SimpleMeterRegistry()
+        val dm = withRegistry(reg)
+        var ageSeconds = 0L
+
+        dm.registerOutboxOldestAge("ledger") { ageSeconds }
+
+        val gauge = reg.find(DomainMetrics.OUTBOX_OLDEST_AGE_SECONDS).tag("service", "ledger").gauge()
+        assertThat(gauge).isNotNull
+        // t = 0: nothing eligible, nothing sampled yet — 0, not ~1.8e9 (the WorkflowLivenessStale lesson, #4208).
+        assertThat(gauge!!.value()).isEqualTo(0.0)
+        ageSeconds = 301
+        assertThat(gauge.value()).isEqualTo(301.0)
+    }
+
+    @Test
+    fun `outboxClaimLatency renders as openbank_outbox_claim_seconds with histogram buckets for OutboxClaimSlow`() {
+        val reg = io.micrometer.prometheusmetrics.PrometheusMeterRegistry(
+            io.micrometer.prometheusmetrics.PrometheusConfig.DEFAULT,
+        )
+        val dm = withRegistry(reg)
+
+        val timer = dm.outboxClaimLatency("ledger")
+        assertThat(timer).isNotNull
+        timer!!.record(java.time.Duration.ofMillis(3))
+
+        val scrape = reg.scrape()
+        // The exact series the alert rule reads: histogram_quantile(0.99, rate(openbank_outbox_claim_seconds_bucket[...])).
+        assertThat(scrape).contains("openbank_outbox_claim_seconds_bucket{")
+        assertThat(scrape).contains("openbank_outbox_claim_seconds_count{")
+        assertThat(scrape).contains("service=\"ledger\"")
+        // No registry resolvable: the same call is a no-op null, not an exception on the dispatch path.
+        assertThat(withRegistry(null).outboxClaimLatency("ledger")).isNull()
+    }
 }

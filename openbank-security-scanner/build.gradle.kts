@@ -61,7 +61,9 @@ kover {
         verify {
             rule {
                 bound {
-                    minValue = 15 // measured 20.2% (98/485) at introduction
+                    // CI measured 94.76% LINE on 2026-09-29 after the outbox change.
+                    // Keep the floor two points below the truncated measurement (was 15).
+                    minValue = 92
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
