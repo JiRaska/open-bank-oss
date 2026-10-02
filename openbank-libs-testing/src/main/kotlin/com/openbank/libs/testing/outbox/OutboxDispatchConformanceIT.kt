@@ -61,7 +61,9 @@ import java.util.UUID
  */
 // detekt's FunctionNaming excludes **/test/** by default, but these @Test methods must live in
 // src/main so testImplementation(project(":openbank-libs-testing")) can pull and inherit them.
-@Suppress("FunctionNaming")
+// TooManyFunctions: the function count IS the contract — the service hooks plus one @Test per
+// conformance case. Splitting the kit would make every adopting service inherit two classes.
+@Suppress("FunctionNaming", "TooManyFunctions")
 abstract class OutboxDispatchConformanceIT {
 
     /** The channel this service's dispatcher publishes to (e.g. `"ledger-events-out"`). */
@@ -215,7 +217,11 @@ abstract class OutboxDispatchConformanceIT {
         // abandoned and those rows sit DISPATCHING until the stale reclaim. A v1 (sequential)
         // repository passes this trivially, which is correct — it never sends concurrently.
         val batch = (1..CONCURRENT_BATCH).map { i ->
-            OutboxMessage(aggregateId = Ids.newId(), eventType = eventType("test.event.batch"), payload = """{"seq":$i}""")
+            OutboxMessage(
+                aggregateId = Ids.newId(),
+                eventType = eventType("test.event.batch"),
+                payload = """{"seq":$i}""",
+            )
         }
         batch.forEach { onEventLoop { seed(it) } }
 
