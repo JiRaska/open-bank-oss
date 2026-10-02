@@ -261,10 +261,10 @@ change_requirements:
       - "every property a request-body schema declares exists on the DTO the resource parses"
       - "every property the DTO has is declared on the request-body schema"
     gate: openapi-request-schema-conformance
-    enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-31 (#11682): findings burned down 122 -> 0 (#8828), but under
-    # --enforce a missing generated document still returns 0 as "Not a finding", so a flip
-    # would enforce a check that can silently examine nothing. Fix that, re-scan, then flip.
+    enforced: enforce
+    # Graduated after the missing-document path began failing closed under --enforce (#11682).
+    # A clean 60-service quarkusBuild on 2026-10-02 generated all 60 documents; the checker
+    # compared 156 request schemas with 0 findings and 0 missing artifacts.
     target_enforce_date: "2026-10-31"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
     # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is

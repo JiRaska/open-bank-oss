@@ -269,8 +269,8 @@ jobs:
           python3 .github/scripts/check-testcontainers-registry-failure.py \
             --service "${{ inputs.service }}"
 
-      # rules.yaml: openapi_request_schema_conformance (advisory).
-      - name: "openapi request-schema conformance (advisory)"
+      # rules.yaml: openapi_request_schema_conformance (enforced).
+      - name: "openapi request-schema conformance"
         run: |
           SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
           if [ ! -f "$SPEC" ]; then
@@ -279,7 +279,8 @@ jobs:
           fi
           python3 .github/scripts/check-openapi-request-schema-conformance.py \
             --service "${{ inputs.service }}" \
-            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml" \
+            --enforce
 
       # Coverage upload is tokenless for this public repository. It is advisory only —
       # never gates the build — and deliberately must not regain an OIDC token in this
