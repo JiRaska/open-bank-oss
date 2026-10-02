@@ -48,6 +48,8 @@ dependencies {
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(libs.testcontainers.redpanda)
+    // Consumer-driven contract for this service's outbound money-path call (issue #8345).
+    testImplementation(libs.pact.consumer)
 }
 
 kover {
@@ -70,4 +72,14 @@ kover {
             }
         }
     }
+}
+
+tasks.withType<Test> {
+    // Gradle's default 512m test heap, the same limit account-service and eight other modules
+    // raised for the same reason. clearing boots Quarkus for several @QuarkusTest classes alongside
+    // Testcontainers (Postgres + Redpanda), and adding the Pact consumer runtime (#8345) tipped the
+    // forked JVM over: OutOfMemoryError across the HTTP, Kafka and OTel threads, surfacing as a
+    // read timeout in ClearingTraceContractIT and a 45-minute CI cancellation. Measured locally:
+    // the full suite OOMs on this branch at 512m and is green on main without the Pact runtime.
+    maxHeapSize = "2g"
 }

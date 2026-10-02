@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application.port.out
 
+import com.openbank.risk.application.port.`in`.LimitAnalysis
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
@@ -148,6 +149,21 @@ interface CurveSetRepository {
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
 
     suspend fun findById(id: UUID): CurveSet?
+
+    /**
+     * The id of the most recently recorded curve set AS OF exactly [asOf], or null. The limit
+     * evaluation prices a run only on a curve set of its own date — never on a neighbouring day's.
+     */
+    suspend fun latestIdFor(asOf: LocalDate): UUID?
+}
+
+/**
+ * The transactional outbox for limit events (ADR-0313 D9). Writes one row per EARLY_WARNING or
+ * BREACH evaluation of [analysis], all in ONE transaction, idempotent on (run, limit id, limit-set
+ * version): re-evaluating the same run writes nothing new. Returns the number of rows written.
+ */
+interface LimitEventOutbox {
+    suspend fun recordNonOk(analysis: LimitAnalysis, occurredAt: Instant): Int
 }
 
 class CurveSetNotFoundException(id: UUID) : RuntimeException("curve set $id not found")

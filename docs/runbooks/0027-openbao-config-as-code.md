@@ -15,53 +15,58 @@ what, and no review happened before the change.
 
 | Object | Purpose |
 |---|---|
-| policy `openbao-config-admin` | manage ACL policies, `auth/aws/*`, `auth/oidc/role/*`; **no** secret paths, no unseal/rekey/root |
+| policy `openbao-config-admin` | manage ACL policies and `auth/oidc/role/*`; **no** secret paths, no auth-method changes, no unseal/rekey/root |
 | policy `openbank-sso-writer` | create/update/read on the realm-import DR blobs, `keycloak/*`, `delegation-disclosure-service` |
-| auth `aws`, role `openbao-config-admin` | the operator's AWS SSO AdministratorAccess role logs in; 15-minute token |
-| oidc role `openbank-sso-writer` | one Keycloak subject; 15-minute token with `openbank-sso-writer` |
+| oidc role `openbao-config-admin` | the operator's Keycloak SSO login; one subject; 15-minute token |
+| oidc role `openbank-sso-writer` | same subject; 15-minute token with `openbank-sso-writer` |
+
+The admin identity is the existing Keycloak `oidc` mount, not an `aws` auth method. OpenBao
+does not ship cloud auth plugins (`sys/auth/aws` answers `plugin not found in the catalog`),
+and Keycloak is already the operator's identity for OpenBao.
 
 Secret **values** are never managed here, because they would land in state.
 
 ## Bootstrap (one time)
 
-The `aws` auth method does not exist yet, so the first apply needs a token that can write
-policies and enable auth methods. Use the privileged identity you already have, apply with
-`bootstrap=true`, then revoke that token.
+The `openbao-config-admin` OIDC role does not exist yet, so the first apply needs a token that
+can write policies and OIDC roles:
 
 ```sh
 cd openbank-infra/aws/envs/sandbox-openbao
 kubectl -n vault port-forward svc/openbao-active 8200:8200 &
-export AWS_PROFILE=openbank
-export TF_VAR_sso_writer_subject=<your Keycloak user id>   # the `sub` claim, a UUID
-bao login -address=http://127.0.0.1:8200            # privileged identity; bao prompts
-export VAULT_TOKEN="$(bao print token)"
-tofu init
-tofu plan  -var bootstrap=true    # expect: 2 imports, aws auth + role + client + admin policy created
-tofu apply -var bootstrap=true
-unset VAULT_TOKEN
+export BAO_ADDR=http://127.0.0.1:8200 VAULT_ADDR=$BAO_ADDR AWS_PROFILE=openbank
+export TF_VAR_operator_subject=<your Keycloak user id>   # the `sub` claim, a UUID
+bao login                                                # privileged identity; bao prompts
+VAULT_TOKEN="$(bao print token)" tofu init
+VAULT_TOKEN="$(bao print token)" tofu apply
 ```
 
-Then revoke the bootstrap token. If it was a root token, revoke it the same way you created it.
+Revoke the bootstrap token afterwards if it was a one-off root token.
 
 ## Every later change
 
 ```sh
 cd openbank-infra/aws/envs/sandbox-openbao
 kubectl -n vault port-forward svc/openbao-active 8200:8200 &
-export AWS_PROFILE=openbank TF_VAR_sso_writer_subject=<uuid>
-aws sso login                      # if the session expired
-tofu plan && tofu apply            # logs in through auth/aws as openbao-config-admin
+export BAO_ADDR=http://127.0.0.1:8200 VAULT_ADDR=$BAO_ADDR AWS_PROFILE=openbank TF_VAR_operator_subject=<uuid>
+bao login -method=oidc role=openbao-config-admin         # browser SSO, 15-minute token
+VAULT_TOKEN="$(bao print token)" tofu plan
+VAULT_TOKEN="$(bao print token)" tofu apply
 ```
 
-No OpenBao token is typed, stored or printed. The provider signs an STS `GetCallerIdentity`
-request with the AWS SSO credentials, and OpenBao verifies it.
+Nobody types an OpenBao token. The admin token comes from SSO and expires in 15 minutes.
+
+**The admin cannot change itself.** The `openbao-config-admin` policy and OIDC role are read-only
+to the admin token, so the token cannot widen its own grant. A change to either one is a
+bootstrap-class change: review the PR, then apply with the privileged identity, as in Bootstrap.
 
 ## Verify by effect
 
 ```sh
-bao login -method=aws role=openbao-config-admin header_value=openbao.sandbox.open-bank
+bao login -method=oidc role=openbao-config-admin
 bao token capabilities sys/policies/acl/x                 # create, delete, list, read, update
 bao token capabilities openbank/data/keycloak/anything    # deny — no secret access
+bao token capabilities sys/auth/x                         # deny — cannot add auth methods
 bao login -method=oidc role=openbank-sso-writer
 bao token capabilities openbank/data/delegation-disclosure-service   # create, read, update
 bao token capabilities openbank/data/some-other-service              # deny
@@ -72,7 +77,7 @@ by hand. Reconcile it here, not there.
 
 ## What this does NOT cover
 
-- The existing `oidc` mount, the `openbank-sso` policy and the ESO/Kubernetes auth roles are
+- The `oidc` mount itself, the `openbank-sso` policy and the ESO/Kubernetes auth roles are
   not yet in the stack. Adopt them with `import` blocks the same way, one PR each.
 - There is no CI plan yet. OpenBao has no ingress, and a hosted runner cannot reach it. A
   scheduled in-cluster drift check is the follow-up.

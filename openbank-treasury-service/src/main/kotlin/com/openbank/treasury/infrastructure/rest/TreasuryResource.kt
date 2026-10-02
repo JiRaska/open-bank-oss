@@ -250,10 +250,8 @@ class TreasuryResource {
     @Path("/positions")
     @Operation(summary = "Daily position per currency: placed, borrowed, at ČNB, net")
     @Authorize(action = "treasury.position.read")
-    suspend fun positions(@QueryParam("asOf") asOf: LocalDate?): PositionsResponse {
-        val date = asOf ?: LocalDate.now()
-        return PositionsResponse(date, deals.positions(date).map(CurrencyPositionResponse::from))
-    }
+    suspend fun positions(@QueryParam("asOf") asOf: LocalDate?): PositionsResponse =
+        PositionsResponse.from(deals.positions(asOf))
 }
 
 /** Realm roles (#10618), literal like risk-engine's: adding them to libs Roles.ALL is fleet-wide. */

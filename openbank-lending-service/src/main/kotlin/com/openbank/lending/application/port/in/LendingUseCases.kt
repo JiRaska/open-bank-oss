@@ -35,6 +35,7 @@ interface ApplyForLoanUseCase {
     fun decide(id: LoanApplicationId, decision: DecisionRequest, decidedBy: String): Uni<LoanApplication>
     fun getApplication(id: LoanApplicationId): Uni<LoanApplication?>
     fun listApplications(partyId: UUID): Uni<List<LoanApplication>>
+    fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>>
 
     /**
      * Drive an application one step forward along the canonical origination graph
