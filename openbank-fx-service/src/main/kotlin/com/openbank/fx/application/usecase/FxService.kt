@@ -112,7 +112,12 @@ class FxService(
             ?: error("No FX rate available for ${cmd.fromCurrency}/${cmd.toCurrency}")
         require(rate.isValid(Instant.now(clock))) { "FX rate expired for ${cmd.fromCurrency}/${cmd.toCurrency}" }
 
-        val toAmount = FxConversionMath.convertedAmountMinorUnits(cmd.fromAmountMinorUnits, rate.askRate)
+        val toAmount = FxConversionMath.convertedAmountMinorUnits(
+            cmd.fromAmountMinorUnits,
+            cmd.fromCurrency,
+            cmd.toCurrency,
+            rate.askRate,
+        )
         val fee = FxConversionMath.feeMinorUnits(cmd.fromAmountMinorUnits)
 
         // ADR-0032: screen the converting party synchronously *before* the conversion is allowed to

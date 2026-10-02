@@ -49,6 +49,18 @@ class AccountingDayService(
         checkConflict(accountingDayRepository.findByDate(command.businessDate) == null) {
             "Accounting day ${command.businessDate} is already open — a day is opened once"
         }
+        // Days are opened forward only (#11680). A day earlier than the latest known
+        // day is history: opening it now creates a day whose tie-out already ran before it could
+        // ever be cut off, so it lands in CUTOFF with no admissible evidence (2026-07-31 was
+        // opened this way weeks late and sat in CUTOFF indefinitely). The scheduler only ever opens
+        // latest+1 onward, and the day lock already treats a day with no row as not-refusable,
+        // so there is no legitimate caller for a back-dated open and no override path.
+        val latest = accountingDayRepository.findLatest()
+        checkConflict(latest == null || command.businessDate > latest.businessDate) {
+            "Cannot open accounting day ${command.businessDate} — days are opened forward only and " +
+                "${latest?.businessDate} is already on the calendar; a back-dated day would enter " +
+                "CUTOFF after its tie-out already ran"
+        }
 
         val record = AccountingDayRecord.open(
             businessDate = command.businessDate,

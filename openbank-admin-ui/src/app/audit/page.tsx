@@ -5,6 +5,9 @@
 'use client'
 
 import { Fragment, useState, useCallback, useRef } from 'react'
+import { useSession } from 'next-auth/react'
+import { AuthorityHistoryInvestigation } from '@/components/context/AuthorityHistoryInvestigation'
+import { ContextAssignmentAdministration } from '@/components/context/ContextAssignmentAdministration'
 import { ScrollText, Search } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
@@ -21,6 +24,8 @@ const EVENT_COLOR: Record<string, string> = {
 }
 
 export default function AuditPage() {
+  const { data: session } = useSession()
+  const canReviewAuthority = session?.user?.roles?.some(role => ['ROLE_ADMIN', 'ROLE_COMPLIANCE'].includes(role)) ?? false
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const [entries, setEntries]   = useState<AuditEvidence[]>([])
@@ -98,6 +103,9 @@ export default function AuditPage() {
         title={t('Auditní log', 'Audit Log')}
         subtitle={t('Nejnovější ověřitelné události a jejich původ', 'Latest verifiable events and their provenance')}
       />
+
+      {canReviewAuthority && <AuthorityHistoryInvestigation />}
+      <ContextAssignmentAdministration />
 
       {/* Search */}
       <div className="card" style={{ padding: '16px', marginBottom: '16px' }}>

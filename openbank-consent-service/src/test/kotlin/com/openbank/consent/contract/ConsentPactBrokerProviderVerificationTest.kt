@@ -15,6 +15,7 @@ import com.openbank.consent.it.ConsentPostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
@@ -72,6 +73,9 @@ class ConsentPactBrokerProviderVerificationTest {
     lateinit var testPort: String
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var dataSource: DataSource
 
     @BeforeEach
@@ -84,8 +88,18 @@ class ConsentPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         // context is null on the @IgnoreNoPactsToVerify dummy invocation — skip gracefully.
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /**
@@ -161,6 +175,14 @@ class ConsentPactBrokerProviderVerificationTest {
         scope = "MARKETING_COMMS_EMAIL",
     )
 
+    @State("an ACTIVE CREDIT_OFFERS consent covers the pact lending party")
+    fun activeCreditOffersConsentExists() = insertMarketingConsent(
+        consentId = PACT_CREDIT_OFFERS_CONSENT_ID,
+        partyId = PACT_LENDING_PARTY_ID,
+        scope = "CREDIT_OFFERS",
+        granteeId = PACT_BANK_GRANTEE_ID,
+    )
+
     @State("an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party")
     fun activeInAppConsentExists() = insertMarketingConsent(
         consentId = PACT_INAPP_CONSENT_ID,
@@ -168,14 +190,19 @@ class ConsentPactBrokerProviderVerificationTest {
         scope = "MARKETING_COMMS_INAPP",
     )
 
-    private fun insertMarketingConsent(consentId: String, partyId: String, scope: String) {
+    private fun insertMarketingConsent(
+        consentId: String,
+        partyId: String,
+        scope: String,
+        granteeId: String = PACT_MARKETING_GRANTEE_ID,
+    ) {
         dataSource.connection.use { c ->
             c.autoCommit = false
             if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", consentId)) {
                 c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
                     ps.setString(1, consentId)
                     ps.setString(2, partyId)
-                    ps.setString(3, PACT_MARKETING_GRANTEE_ID)
+                    ps.setString(3, granteeId)
                     ps.executeUpdate()
                 }
                 c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
@@ -240,6 +267,9 @@ class ConsentPactBrokerProviderVerificationTest {
         const val PACT_CONSENTED_PARTY_ID = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
         const val PACT_MARKETING_CONSENT_ID = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4"
         const val PACT_MARKETING_GRANTEE_ID = "party-service:marketing-comms"
+        const val PACT_CREDIT_OFFERS_CONSENT_ID = "c5c5c5c5-c5c5-4c5c-8c5c-c5c5c5c5c5c5"
+        const val PACT_LENDING_PARTY_ID = "c6c6c6c6-c6c6-4c6c-8c6c-c6c6c6c6c6c6"
+        const val PACT_BANK_GRANTEE_ID = "openbank"
         const val PACT_INAPP_CONSENT_ID = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"
         const val PACT_ENGAGEMENT_PARTY_ID = "e1e1e1e1-e1e1-e1e1-e1e1-e1e1e1e1e1e1"
     }

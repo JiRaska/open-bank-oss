@@ -149,6 +149,12 @@
         "openbank-card-issuance-service/src/test"
       ]
     },
+    "openbank-card-processing-service": {
+      "component": "card-processing-service",
+      "exclude-paths": [
+        "openbank-card-processing-service/src/test"
+      ]
+    },
     "openbank-clearing-service": {
       "component": "clearing-service",
       "exclude-paths": [
