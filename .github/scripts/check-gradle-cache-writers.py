@@ -203,6 +203,12 @@ DECLARED: dict[str, tuple[str, str]] = {
         "Consumer; restores fleet-lint's home. Weekly advisory k6 gate (ADR-0243) — "
         "never a writer, so it costs the pool nothing.",
     ),
+    "libs-bench.yml::jmh": (
+        "read-only",
+        "JMH allocation baseline for the shared libs: resolves libs-domain/runtime/iso20022 "
+        "plus jmh-core, a small subset of what fleet-lint already restores fleet-wide. "
+        "Path-filtered to openbank-libs-*, never a required check, so it must not write.",
+    ),
 }
 
 

@@ -6,7 +6,11 @@ package com.openbank.risk.infrastructure.schedule
 
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.LimitEventOutbox
+import com.openbank.risk.domain.limits.LimitStatus
+import com.openbank.risk.domain.model.TieOutStatus
 import io.micrometer.core.instrument.Counter
 import io.micrometer.core.instrument.MeterRegistry
 import io.quarkus.runtime.StartupEvent
@@ -20,6 +24,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.ZoneId
 import java.time.ZonedDateTime
+import java.util.UUID
 
 /**
  * End-of-day balance-sheet snapshot (ADR-0314): once per business day, drives
@@ -52,6 +57,13 @@ import java.time.ZonedDateTime
  * fail at runtime. Two pods ticking together (an Argo Rollouts canary window) is still safe:
  * `SnapshotRepository.saveIfAbsent` is idempotent on `(asOf, inputHash)` and returns the run a
  * concurrent writer committed first, so the loser simply reports `replayed`.
+ *
+ * **Risk limits (ADR-0313 D9).** After every tick whose run TIED OUT — created or replayed — the
+ * declarative limit set is evaluated on it and every EARLY_WARNING / BREACH is written to the
+ * transactional outbox (`risk_outbox`), idempotent on (run, limit, limit-set version): a replay
+ * re-evaluates and writes nothing new, and a tick that died between storing the run and writing its
+ * events repairs itself on the next one. An UNTIED run is never evaluated (its figures are withheld,
+ * ADR-0314 D3). An evaluation failure propagates, so the tick withholds its liveness success.
  */
 @ApplicationScoped
 class EodSnapshotScheduler(
@@ -59,6 +71,8 @@ class EodSnapshotScheduler(
     private val clock: Clock,
     @ConfigProperty(name = "openbank.risk.eod-snapshot.enabled", defaultValue = "false")
     private val enabled: Boolean,
+    private val limits: LimitUseCase,
+    private val limitOutbox: LimitEventOutbox,
 ) {
     private val log: Logger = Logger.getLogger(EodSnapshotScheduler::class.java)
 
@@ -124,6 +138,7 @@ class EodSnapshotScheduler(
             createdCounter?.increment()
             log.infof("EOD snapshot for %s created (run %s, status %s)", asOf, outcome.run.id, outcome.run.status)
         }
+        if (outcome.run.status == TieOutStatus.TIED_OUT) evaluateLimits(outcome.run.id)
         // The tick reached its use case either way (created or replayed): both are a working
         // scheduler, so both count as liveness. Only a thrown exception — left uncaught here on
         // purpose — withholds recordSuccess() and lets the age gauge grow, exactly the fleet
@@ -131,7 +146,38 @@ class EodSnapshotScheduler(
         liveness?.recordSuccess()
     }
 
+    private suspend fun evaluateLimits(runId: UUID) {
+        val analysis = limits.evaluate(runId)
+        analysis.evaluations.forEach {
+            Counter.builder(LIMIT_EVALUATIONS)
+                .tag("limit", it.definition.id)
+                .tag("status", it.status.name)
+                .description(
+                    "Risk-limit evaluations of the EOD snapshot run (ADR-0313 D9), by limit and status. " +
+                        "NOT_EVALUABLE is its own status — a limit whose input had a gap — never counted as OK.",
+                )
+                .register(meterRegistry)
+                .increment()
+        }
+        val written = limitOutbox.recordNonOk(analysis, clock.instant())
+        val nonOk = analysis.evaluations.count {
+            it.status == LimitStatus.EARLY_WARNING ||
+                it.status == LimitStatus.BREACH
+        }
+        log.infof(
+            "Risk limits on run %s (set %s v%s): %s; %d limit event(s) written to the outbox (%d non-OK)",
+            runId,
+            analysis.set.id,
+            analysis.set.version,
+            analysis.evaluations.joinToString { "${it.definition.id}=${it.status}" },
+            written,
+            nonOk,
+        )
+    }
+
     private companion object {
+        const val LIMIT_EVALUATIONS = "openbank.risk.limit.evaluations"
+
         /** ADR-0160 mechanism 3 workflow tag — stable, low-cardinality. */
         const val WORKFLOW_NAME = "risk-engine-eod-snapshot"
 
