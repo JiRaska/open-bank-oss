@@ -550,6 +550,8 @@ change_requirements:
         reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
       - topic: "openbank.wealth.events"
         reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce."
+      - topic: "openbank.risk.limit.events"
+        reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896)."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
       - topic: "openbank.referral.qualified.v1"
@@ -3567,6 +3569,25 @@ field_protection:
   enforced: advisory
   target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
   ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
+
+libs_bench_alloc_baseline:
+  # The shared libs (libs-domain, libs-runtime, libs-iso20022) are compiled into every service,
+  # and nothing measured them. openbank-libs-benchmarks holds JMH benchmarks; what is compared is
+  # allocation per operation (gc.alloc.rate.norm, B/op), a property of the code that reproduces
+  # across machines. Wall-clock (ns/op) is a property of the runner: reported, never gated.
+  detect: ["openbank-libs-benchmarks/src/jmh/**/*.kt", "openbank-libs-benchmarks/alloc-baseline.json"]
+  require:
+    - "every @Benchmark has an entry in alloc-baseline.json and every entry has a @Benchmark (scope derived, both directions)"
+    - "B/op from a JMH run (-f 1 -wi 3 -i 3 -prof gc, SerialGC, -Xmx512m) stays within max(5 %, 16 B) above the baseline"
+    - "the baseline is written by check-bench-alloc-baseline.py --write-baseline from a run, never typed by hand"
+    - "a benchmark whose B/op is bimodal across forks (the JIT decides it) is listed in the script's UNSTABLE table with the measurement: it runs and is reported, never compared; a stale UNSTABLE entry is a finding"
+  gate: libs-bench-alloc-baseline
+  baseline: "openbank-libs-benchmarks/alloc-baseline.json"
+  # ADVISORY first: the comparison is new and its tolerance is a first setting measured on one
+  # machine; enforce once it has run on hosted runners without a false finding.
+  enforced: advisory
+  target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
 
 realm_devci_artifact_parity:
   detect: [

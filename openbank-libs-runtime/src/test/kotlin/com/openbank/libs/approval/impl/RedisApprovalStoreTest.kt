@@ -12,6 +12,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import io.quarkus.redis.datasource.value.ReactiveValueCommands
 import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.Uni
+import io.vertx.mutiny.redis.client.Response
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -59,6 +60,19 @@ class RedisApprovalStoreTest : ApprovalStoreContractTest() {
         }
         val redis = mockk<ReactiveRedisDataSource>()
         every { redis.value(String::class.java) } returns values
+        every { redis.execute("EVAL", *anyVararg()) } answers {
+            val argv = secondArg<Array<String>>()
+            val current = backing[argv[2]]
+            val outcome = when {
+                current == null -> 0
+                current != argv[3] -> -1
+                else -> {
+                    backing[argv[2]] = argv[4]
+                    1
+                }
+            }
+            Uni.createFrom().item(mockk<Response> { every { toInteger() } returns outcome })
+        }
         return RedisApprovalStore(redis, clock)
     }
 }
