@@ -54,6 +54,7 @@ class IllegalArgumentExceptionMapper : ExceptionMapper<IllegalArgumentException>
     override fun toResponse(exception: IllegalArgumentException): Response = Response.status(400)
         .entity(apiError(400, ErrorCode.VALIDATION_ERROR.code, exception.message ?: "Invalid request"))
         .build()
+        .also { ApiErrorMetrics.genericMapperFired("IllegalArgumentException", exception, it.status) }
 }
 
 @Provider
@@ -61,6 +62,7 @@ class IllegalStateExceptionMapper : ExceptionMapper<IllegalStateException> {
     private val log = Logger.getLogger(IllegalStateExceptionMapper::class.java)
     override fun toResponse(exception: IllegalStateException): Response {
         log.warnf(exception, "business rule violation: %s", exception.message)
+        ApiErrorMetrics.genericMapperFired("IllegalStateException", exception, 422)
         return Response.status(422)
             .entity(apiError(422, "BUSINESS_RULE_VIOLATION", exception.message ?: "Business rule violation"))
             .build()
@@ -133,6 +135,7 @@ class NoSuchElementExceptionMapper : ExceptionMapper<NoSuchElementException> {
     override fun toResponse(exception: NoSuchElementException): Response = Response.status(404)
         .entity(apiError(404, ErrorCode.NOT_FOUND.code, exception.message ?: "Resource not found"))
         .build()
+        .also { ApiErrorMetrics.genericMapperFired("NoSuchElementException", exception, it.status) }
 }
 
 /**
