@@ -183,6 +183,14 @@ change for every service at once.
 - **a — additive (this ADR's first slice, shipped with it).** The contract, `PlatformErrorCode`
   (12 codes), the hierarchy, `requireParam` / `requireValid`, `ProblemDetail`, the one mapper, both
   counters. No existing request is answered differently.
+  - *Addendum (kernel money failures, additive).* The kernel's own `Money` / `CurrencyCode`
+    construction failures are kernel codes, not a service's: `PlatformErrorCode` gains
+    `AMOUNT_SCALE_EXCEEDED` and `CURRENCY_UNSUPPORTED` (both `VALIDATION`), raised through
+    `InvalidMoneyException(reason: InvalidMoneyReason)`. That type stays an
+    `IllegalArgumentException`, so every existing catch and the generic 400 still apply; libs-runtime
+    adds a narrower `InvalidMoneyExceptionMapper` that renders the reason's code as a `ProblemDetail`
+    at the same status. `Money.parseInbound` is the API-boundary helper that attributes the failure to
+    its request field.
 - **b — migrate, under a ratchet.** Services move their exceptions onto the hierarchy and delete
   their mappers, `ResourceNotFoundException` / `ResourceConflictException` fold into it, and domain
   codes move out of the kernel enum. Two gates: `error-code-catalogue` (codes derived from every
