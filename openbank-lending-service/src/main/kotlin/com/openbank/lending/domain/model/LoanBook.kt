@@ -45,6 +45,8 @@ data class LoanBookEntry(
     val maturityDate: LocalDate?,
     val ifrs9Stage: String?,
     val remainingInstallments: List<RemainingInstallment>,
+    /** Human contract number (#11107); a label for people, never part of any computation. */
+    val contractNumber: String? = null,
 )
 
 data class LoanBook(val asOf: LocalDate, val loans: List<LoanBookEntry>)
@@ -110,6 +112,7 @@ object LoanBookAssembler {
                     maturityDate = schedule.lastOrNull()?.dueDate,
                     ifrs9Stage = latestStage[loan.id],
                     remainingInstallments = remaining,
+                    contractNumber = loan.contractNumber,
                 )
             }
         return LoanBook(asOf, entries)

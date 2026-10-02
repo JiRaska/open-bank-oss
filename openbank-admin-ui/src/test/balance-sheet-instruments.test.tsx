@@ -18,6 +18,7 @@ vi.mock('next-auth/react', () => ({
 }))
 
 import { InstrumentsPanel } from '@/components/balance-sheet/InstrumentsPanel'
+import { loanLabel } from '@/components/balance-sheet/instrumentLabels'
 
 const nbsp = (s: string) => s.replace(/[  ]/g, ' ')
 
@@ -64,6 +65,11 @@ describe('instrument model', () => {
   it('builds a short readable reference from the id', () => {
     expect(instrumentReference(A, 'cs')).toBe('Úvěr AAAAAAAA')
     expect(instrumentReference({ id: 'x-1', kind: 'BOND' }, 'en')).toBe('Instr. X')
+    // #11107: the loan's contract number wins over the id-derived handle when present.
+    expect(instrumentReference({ ...A, contractNumber: 'UV-2026-000123' }, 'cs')).toBe('UV-2026-000123')
+    expect(instrumentReference({ ...A, contractNumber: null }, 'cs')).toBe('Úvěr AAAAAAAA')
+    expect(loanLabel({ ...A, contractNumber: 'UV-2026-000123' }, null, 'en', 'en-GB').label).toMatch(/^UV-2026-000123 · Annuity loan/i)
+    expect(loanLabel(A, null, 'en', 'en-GB').label).not.toContain('UV-')
   })
 
   it('formats cs-CZ money with currency and fractions as percent', () => {

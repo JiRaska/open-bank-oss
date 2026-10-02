@@ -7,10 +7,14 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
+import com.openbank.context.infrastructure.AmlCaseSourceStatus
 import com.openbank.context.integration.ContextMessagingTestResource
 import com.openbank.libs.testing.containers.PostgresTestResource
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
@@ -28,13 +32,19 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestProfile(IncidentImpactPactProfile::class)
 @Provider("openbank-context-service")
 @PactFolder("../pacts")
-@TestSecurity(user = "pact-operator", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "pact-operator", roles = ["ROLE_OPERATOR", "ROLE_COMPLIANCE"])
 class ContextPactProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var port: String
 
     @BeforeEach
     fun target(context: PactVerificationContext) {
+        QuarkusMock.installMockForType(
+            mockk<AmlCaseSourceStatus> {
+                coEvery { isOpen(any()) } returns true
+            },
+            AmlCaseSourceStatus::class.java,
+        )
         context.target = HttpTestTarget("localhost", port.toInt())
     }
 
@@ -49,6 +59,15 @@ class ContextPactProviderVerificationTest {
 
     @State("an incident investigator is unauthorized for another case")
     fun unauthorizedCase() = IncidentImpactPactFixtures().seed(2)
+
+    @State("root-scoped authority history has no recorded evidence")
+    fun authorityHistory() = AuthorityHistoryPactFixtures().seed()
+
+    @State("authority history is unauthorized for another root")
+    fun unauthorizedAuthorityRoot() = AuthorityHistoryPactFixtures().seed()
+
+    @State("an assigned AML case has open source evidence")
+    fun amlEvidence() = AmlCasePactFixtures().seed()
 
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)

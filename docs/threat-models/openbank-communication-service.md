@@ -55,6 +55,13 @@ and attested.
 
 ## Residual risks
 
+- **Concurrent use of one `commstyle.publish` approval (closed, slice 5 of #10041).** This is the one
+  service whose four-eyes enforcement defaults on, so the shared store's check-then-SET race applied
+  here first: concurrent retries carrying one `X-Approval-Id` could each be authorized. The shared
+  `RedisApprovalStore` now claims `EXECUTED` by compare-and-set, so exactly one retry proceeds and the
+  rest re-enter the pending-approval branch; a missing store with enforcement on is a 503, not a
+  silent bypass. See the four-eyes STRIDE rows in `openbank-sepa-payment.md` (ADR-0155 pilot).
+
 - **Event transport not wired.** `communication.persona.published.v1` (ADR-0285 D5) has no
   Kafka producer in this slice (`UnwiredCommunicationEventPublisher`, mirroring
   `openbank-referral-service`'s identical, already-accepted pattern) — every publish is dropped
