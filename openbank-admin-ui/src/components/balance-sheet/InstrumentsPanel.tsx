@@ -37,7 +37,7 @@ export function InstrumentsPanel({ runId, instruments, lang }: Props) {
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
   const locale = lang === 'cs' ? 'cs-CZ' : 'en-GB'
   const { data: session } = useSession()
-  const canSeeNames = hasPermission(session?.user?.roles ?? [], 'parties:view')
+  const canSeeNames = hasPermission(session?.user?.roles ?? [], 'parties:view-detail')
 
   const [capital, setCapital] = useState<Map<string, InstrumentCapital> | null>(null)
   const [capitalFailed, setCapitalFailed] = useState(false)
