@@ -85,11 +85,6 @@ KNOWN_VIOLATIONS: dict[str, str] = {
         "baselining: the sandbox openbank_treasury flyway_schema_history ends at V9, so NO "
         "database has applied V11 without V10 and the next deploy applies V10 then V11 in order. "
         "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
-    "openbank-risk-engine/src/main/resources/db/migration/V7__risk_limit_outbox.sql":
-        "#11549 landed V7 after #11107 had put V8 on main (2026-10-02). Measured before "
-        "baselining: the sandbox risk-engine pod's Flyway log reports schema version 6, so NO "
-        "database has applied V8 without V7 and the next deploy applies V7 then V8 in order. "
-        "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
 }
 
 
