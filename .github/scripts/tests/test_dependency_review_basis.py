@@ -1,12 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 import fnmatch
 import os
-from pathlib import Path
 import re
 import subprocess
 import tempfile
-import unittest
 import textwrap
+import unittest
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 WORKFLOW = Path(__file__).resolve().parents[2] / "workflows" / "dependency-review.yml"
 SUBMISSION = WORKFLOW.with_name("dependency-submission.yml")
@@ -69,6 +70,15 @@ print(json.dumps(dict(check_runs=rows)))
 
 
 class BasisTests(unittest.TestCase):
+    def assert_cases_fail(self, cases):
+        # Each case owns its temporary gh shim and call log. Run independent
+        # bounded-retry failures together so the suite does not sum their waits.
+        with ThreadPoolExecutor(max_workers=3) as executor:
+            results = list(executor.map(self.run_case, cases))
+        for case, (result, _) in zip(cases, results, strict=True):
+            with self.subTest(case=case):
+                self.assertNotEqual(result.returncode, 0)
+
     def test_terminal_unsuccessful_base_is_rejected_before_snapshot_wait(self):
         for case in ["failed-submission", "cancelled-submission", "timed-out-submission", "skipped-submission"]:
             with self.subTest(case=case):
@@ -205,32 +215,26 @@ class BasisTests(unittest.TestCase):
         self.assertNotIn('"--arg"', calls)
 
     def test_api_and_compare_errors_fail_closed(self):
-        for case in [
+        self.assert_cases_fail([
             "api-failure",
             "partial-api-failure",
             "compare-failure",
             "malformed",
             "legacy-era-api-failure",
-        ]:
-            with self.subTest(case=case):
-                self.assertNotEqual(self.run_case(case)[0].returncode, 0)
+        ])
 
     def test_missing_or_unsuccessful_graphs_fail(self):
-        for case in ["missing", "missing-head", "failed-submission", "wrong-job", "legacy-base"]:
-            with self.subTest(case=case):
-                self.assertNotEqual(self.run_case(case)[0].returncode, 0)
+        self.assert_cases_fail(["missing", "missing-head", "failed-submission", "wrong-job", "legacy-base"])
 
     def test_successful_producer_does_not_hide_missing_snapshot(self):
-        for case in [
+        self.assert_cases_fail([
             "snapshot-base-zero",
             "snapshot-head-zero",
             "snapshot-malformed-warning",
             "snapshot-unknown-warning",
             "snapshot-non200",
             "snapshot-api-failure",
-        ]:
-            with self.subTest(case=case):
-                self.assertNotEqual(self.run_case(case)[0].returncode, 0)
+        ])
 
     def test_repeated_successful_snapshot_is_not_missing(self):
         result, _ = self.run_case("snapshot-both-positive")
