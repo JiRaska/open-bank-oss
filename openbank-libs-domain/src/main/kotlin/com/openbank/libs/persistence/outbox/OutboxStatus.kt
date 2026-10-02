@@ -65,4 +65,14 @@ data class OutboxEntry(
     val sentAt: Instant?,
     val lastError: String?,
     val synthetic: Boolean = false,
+    /**
+     * ADR-0327 D1 columns. Both default to `null` so every existing `toEntry()` and hand-built
+     * `OutboxEntry(...)` in the fleet stays source-compatible: a v1 entity (no `claimed_at` /
+     * `next_attempt_at` mapping) simply never fills them. `claimedAt` is when the row moved to
+     * [OutboxStatus.DISPATCHING]; `nextAttemptAt` is the earliest instant a FAILED row may be
+     * re-claimed (`null` means "eligible now", which is what a v1 dispatcher sees, so the two
+     * generations can coexist on one table — ADR-0327 migration-plan compatibility note).
+     */
+    val claimedAt: Instant? = null,
+    val nextAttemptAt: Instant? = null,
 )
