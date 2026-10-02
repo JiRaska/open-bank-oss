@@ -512,7 +512,7 @@ spec:
               whether the balance movement committed. Do not issue a blind refund or mark the
               settlement rejected. Reconcile the original movement references and preserve dual
               control for any required correction.
-            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/svc-settlement.md"
+            runbook_url: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/settlement-ledger-projection.md#legacy-direct-movement-uncertainty"
 
         - alert: SettlementReversalFailed
           # REVERSAL_FAILED is written by SettlementActivitiesImpl.compensate when a balance
@@ -704,7 +704,6 @@ spec:
             severity: critical
             service: settlement
           annotations:
-            subject_period: continuous
             summary: Settlement audit evidence has remained unsent for over five minutes
             description: >-
               The settlement outbox contains old records without broker acknowledgement,
