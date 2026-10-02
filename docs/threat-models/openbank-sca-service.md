@@ -88,6 +88,25 @@ is the **authentication assurance gate** for payments and consent — defeating 
   linking to an approval request and its payload hash. Challenge rows record the deciding party.
   No new caller or privilege; the purge of existing entity-bound credentials is a documented,
   reviewed procedure and has not been executed.
+- **2026-09-09** — Extended challenge consumption with an optional opaque `reference` for
+  approval-group management dynamic linking (ADR-0284 D3). This changes the existing inbound REST
+  trust boundary, but adds no endpoint or caller: delegation-service remains the authorised M2M
+  consumer. When supplied, the value must exactly match the reference stored on the challenge before
+  the one-shot transition to `COMPLETED`; a mismatch fails closed and leaves the challenge
+  unconsumed. The reference is a SHA-256 fingerprint over operation, owner, roster, threshold and,
+  for revisions, group id plus expected revision, so a completed ceremony cannot authorise altered
+  authority. Compatibility is deliberate, in both directions. A challenge created WITHOUT a reference is
+  legacy and binds exactly as before: a consumer that supplies one is still accepted, so today's
+  app, which creates DELEGATION_GRANT challenges without the preview `scaReference`, keeps working
+  while delegation-service starts sending it. A challenge created WITH a reference for an
+  operation-bound purpose (DELEGATION_GRANT, DELEGATION_APPROVAL_GROUP, SAVINGS_WITHDRAW_APPROVAL)
+  is strict: a differing or absent supplied reference is refused. For every other purpose the
+  field is an informational payment remittance reference that payment consumers do not restate, so
+  it is compared only when supplied. The binding therefore strengthens per challenge as clients
+  opt in, never regresses an existing one (`ScaChallengeReferenceBindingTest`).
+  Risk class = **tampering / elevation of privilege**. Verified by SCA service tests and the
+  delegation→SCA Pact contract. Rollback: revert the optional field after delegation callers stop
+  sending it; no schema or stored-data migration is involved.
 - **2026-09-07** — Idempotency contract of the two creation POSTs verified and documented
   (ADR-0296, burn-down #8351). No code change: challenge initiation already replays on
   Idempotency-Key/X-Request-ID via the idempotency store (X-Idempotency-Replayed: true, 300 s

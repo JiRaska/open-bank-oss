@@ -4977,6 +4977,23 @@ gates:
   # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
   # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
   # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  # Quarkus tests bind ephemeral ports (2026-09-30). 65 of 70 service modules ran @QuarkusTest on the
+  # fixed default 8081/9001, so two builds on one machine failed each other with QuarkusBindException
+  # all day; the fix is three system properties in the convention plugin, and this keeps them there.
+  - id: quarkus-test-ports-ephemeral
+    name: "Quarkus tests bind ephemeral HTTP, HTTPS and management ports (enforced)"
+    group: kotlin
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A fixed Quarkus test port is shared by every build on the host, so concurrent runs fail each other with QuarkusBindException and the loser's tests read as SKIPPED; one missing system property in the convention plugin, or one module that skips it, reintroduces that for every future run."
+    review_after: "2027-03-31"
+    verified: "2026-09-30 -- against main's build files: FAIL with 9 findings (the convention plugin and both libs modules missing all three keys). With 8081, 8444 and 9001 held by a listener: account-service's provider replay failed on QuarkusBindException before the fix and passed 6/6 after; finrep's management-socket test passed 1/1 after. Self-test falsifies a dropped key, a pinned plugin value, a module without the plugin, a test-profile override, System.setProperty, and yaml/properties pins, against a compliant control."
+    min_subjects: 50   # 68 modules with Quarkus tests today (2026-09-30)
+    selftest: python3 .github/scripts/check-quarkus-test-ports-ephemeral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-quarkus-test-ports-ephemeral.py"]
+    run: |
+      python3 .github/scripts/check-quarkus-test-ports-ephemeral.py
   - id: oidc-tls-verification-profile-scoped
     name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
     group: security
