@@ -191,6 +191,7 @@ class TrustedListServiceTest {
         } finally {
             srv.stop(0)
         }
+    }
 
     private fun metricsFor(inlineList: String?, listUrl: String?): DomainMetrics {
         val metrics = mockk<DomainMetrics> {
