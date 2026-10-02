@@ -591,3 +591,11 @@ not change any existing request's outcome until explicitly flipped.
   upstream payment status must continue to follow the existing settlement protocol.
   Rollback removes the settlement relay configuration while retaining its pending outbox
   rows for recovery; no payment-service schema rollback is required.
+- **2026-10-02** — **Settlement-amount rounding named as `RoundingPolicy.LEDGER_POSTING` (ADR-0318, #11771),
+  no boundary change.** `SettlementAdapter` (the outbound settlement-booking edge) normalises the
+  payment amount to the currency's minor units with `RoundingPolicy.LEDGER_POSTING.mode` instead of
+  an inline `RoundingMode.HALF_UP`; the policy's mode is HALF_UP, so the amount sent across the
+  edge is byte-identical (pinned by `SettlementAdapterTest`). Endpoint, identity, payload shape and
+  grants are unchanged. **STRIDE-T:** none new — the rounding rule is now a single named policy
+  rather than a literal, so a later change to it is one reviewed edit instead of a silent drift
+  between call sites. Rollback: revert the commit.
