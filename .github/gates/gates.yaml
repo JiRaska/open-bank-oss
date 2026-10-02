@@ -3531,6 +3531,25 @@ gates:
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
 
+  # The deployed-record reconciler re-records a sandbox deployment once the version it needed has
+  # been published (record-deployment is one-shot at gitops merge and races the fan-out's own
+  # contract jobs). Its self-test holds the measured 2026-10-02 state (85a0be3e pinned, 7ccd9bde
+  # recorded) as a known-positive; falsified five ways before wiring in (no drift detection,
+  # classify-always-current, ambiguity guessed, edge scope dropped, none-as-current) — each exits 1.
+  - id: pact-deployed-record-reconcile
+    selftest_exempt: "is-a-test-suite"
+    name: "sandbox deployment record follows the gitops pin (enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # pure classification over fixtures, measured 0.1s
+    rationale: >-
+      The reconciler is the only control that corrects a sandbox deployment record left stale by
+      the one-shot merge-time recorder; a regression in its drift or classify logic would leave
+      consumers' can-i-deploy asking about versions no longer running while every tick stays green.
+    review_after: 2027-04-02
+    run: |
+      python3 .github/scripts/pact-reconcile-deployed-records.py --self-test
+
   # The verification reconciler's decision table (pact-reconcile-verifications.py) had a
   # --self-test that NOTHING ran: the workflow invokes the script for real every ~30 minutes and
   # never with --self-test, so its classification of owed / failing / never-published / broker
