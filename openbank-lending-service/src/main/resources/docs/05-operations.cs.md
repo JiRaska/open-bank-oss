@@ -24,8 +24,8 @@
 | `LENDING_GL_*` | (UUID výchozí) | GL leaf účty: loans-receivable, funding-clearing, interest-income, interest-receivable, loan-loss-expense, loan-loss-allowance |
 | `LENDING_ACCRUAL_EVERY` | `24h` | Interval akruálního průchodu úročení |
 | `LENDING_ACCRUAL_BATCH_SIZE` | `500` | Počet splátek na akruální průchod |
-| `LENDING_PROVISIONING_EVERY` | `720h` (~30d) | Interval cyklu IFRS 9 provisioningu (ADR-0028 Fáze 3); obyčejná doba trvání, ne kalendářní měsíc |
-| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | Počet ACTIVE úvěrů zpracovaných za jeden cyklus provisioningu (bez stránkování nad tento limit — viz threat model §5) |
+| `LENDING_PROVISIONING_EVERY` | `24h` | Denní interval IFRS 9 provisioningu (ADR-0028 Fáze 3) |
+| `LENDING_PROVISIONING_BATCH_SIZE` | `500` | Počet způsobilých úvěrů v jednom dotazu; cyklus pokračuje až do vyčerpání úvěrů bez záznamu pro daný den |
 
 `LENDING_LEDGER_BACKEND` je **build-time** (`@IfBuildProperty`): vybírá adaptér při sestavení image, ne za běhu.
 
@@ -66,7 +66,11 @@ Při `LENDING_LEDGER_BACKEND=rest` jdou zápisy přes `LedgerCallGuard` (fault t
 Zkontroluj logy `InterestAccrualScheduler` ("interest accrual pass: N installments accrued"). Interval je `LENDING_ACCRUAL_EVERY` (výchozí 24h, delayed 30s). Průchod je idempotentní (příznak `interest_accrued`); zmeškané okno se samo zhojí dalším tikem, protože vybírá všechny splatné-ale-nenaběhnuté splátky.
 
 ### Cyklus IFRS 9 provisioningu neběží / nezaúčtoval deltu
-Zkontroluj logy `ProvisioningCycleScheduler` ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Interval je `LENDING_PROVISIONING_EVERY` (výchozí ~720h/30d, delayed 60s). Nula zaúčtovaných zápisů při nenulovém počtu zpracovaných úvěrů je **očekávané a správné**, pokud se stage/ECL žádného úvěru od minulého období nezměnilo — než usoudíš na chybu, zkontroluj řádky v `loan_provisioning` pro dané období. Průchod je idempotentní podle `(loan_id, period)`; zmeškané okno se samo zhojí dalším tikem, ale kniha větší než `LENDING_PROVISIONING_BATCH_SIZE` je za jeden tik pokryta jen částečně (zatím bez kurzoru pro pokračování — sledováno v threat modelu).
+Zkontroluj logy `ProvisioningCycleScheduler` ("IFRS 9 provisioning cycle {period}: N loans assessed, M provisioning journals posted"). Výchozí interval je 24h (zpoždění 60s) a `period` je vykazovací datum (`yyyy-MM-dd`). Průchod postupně načítá dávky neterminálních úvěrů bez řádku pro daný den, dokud krátká dávka nepotvrdí vyčerpání. Nula zaúčtovaných zápisů může být správná při nezměněném ECL; úplnost ověř podle řádků `loan_provisioning` a metriky `openbank_lending_provisioning_unprovisioned`, nikoli podle počtu zápisů. Selhaný průchod nebo nenulový počet chybějících úvěrů **není** dokončený vykazovací den. Restart v témže dni může idempotentně pokračovat. Po změně dne nelze dnešní stav úvěrů, splátek, zajištění a rizikových parametrů tiše zpětně přiřadit nedokončenému předchozímu dni; je nutné řízené odsouhlasení nebo uložené historické vstupy.
+
+Každý průchod nejprve trvale zapíše `provisioning_cycle_run` se stavem `RUNNING` a teprve potom účtuje jednotlivé úvěry. `COMPLETE` smí zapsat až po ověření nulového počtu chybějících úvěrů. Pád procesu ponechá `RUNNING`, neúplný nebo nečitelný výsledek kontroly ponechá `INCOMPLETE`. Při dalším běhu se kalendářní dny vynechané od posledního zaznamenaného data zapíší jako `MISSED`; první zaznamenaný den je výchozí bod nasazení. Přehled dá `SELECT period, status, started_at, checked_at, missing_loans FROM provisioning_cycle_run WHERE status <> 'COMPLETE' ORDER BY period` a metrika `openbank_lending_provisioning_unresolved_prior_days`. Úspěšný novější den starý řádek nevymaže ani nepotvrdí úspěch workflow; na tento stav upozorní `LendingProvisioningPriorDayUnresolved`.
+
+U starší mezery zachovej řádek běhu a porovnej potvrzené řádky `loan_provisioning` a reference allowance outboxu s nezávisle uchovanými důkazy o úvěrech a účetních zápisech daného dne. Chybějící řádky ani deníky nevytvářej z dnešního proměnlivého stavu. V případu odsouhlasení zaznamenej dotčenou populaci, nejistoty, rozhodnutí schvalovatele a reference případné schválené účetní korekce **k aktuálnímu datu**. Řádek běhu zůstává neuzavřený, dokud nevznikne kontrolovaný mechanismus uzavření; nepřepisuj jej na `COMPLETE` jen kvůli utišení alertu.
 
 ### Doúčtování do hlavní knihy (jednorázové, #10746)
 Pro úvěry, jejichž účetní historie se do hlavní knihy nikdy nedostala (#6057). ROLE_FINANCE nebo ROLE_ADMIN (pouze lidé), dvě různé osoby (#10618). Celý postup lze provést v administraci: Rozvaha a riziko → Doúčtování úvěrů.

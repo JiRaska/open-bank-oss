@@ -36,8 +36,11 @@ spec:
           annotations:
             eks.amazonaws.com/role-arn: arn:aws:iam::265175468565:role/openbank-observability-s3
         tempo:
-          # 7d retention (ADR-0088 D3); the S3 bucket lifecycle also expires at 7d.
-          retention: 168h
+          # ADR-0088 D3 names >=30d of traces as the audit window; 7d was the interim.
+          # Measured 2026-09-30: 7 days of blocks = 2.84 GB in S3, so 30d is ~12 GB.
+          # The bucket lifecycle rule (today `expire-7d`) has to be raised to 30d by hand — it must
+          # never be shorter than this value (see loki.yaml for why).
+          retention: 720h
           storage:
             trace:
               # Durable S3 object storage (ADR-0088 D3) — replaces the ephemeral gp3

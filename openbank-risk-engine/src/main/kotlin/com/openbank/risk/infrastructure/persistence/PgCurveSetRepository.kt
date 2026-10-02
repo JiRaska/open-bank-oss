@@ -18,6 +18,7 @@ import io.vertx.mutiny.sqlclient.Pool
 import io.vertx.mutiny.sqlclient.SqlConnection
 import io.vertx.mutiny.sqlclient.Tuple
 import jakarta.enterprise.context.ApplicationScoped
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -82,6 +83,9 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
         )
     }
 
+    override suspend fun latestIdFor(asOf: LocalDate): UUID? =
+        pool.preparedQuery(SELECT_LATEST_FOR).execute(Tuple.of(asOf)).awaitSuspending().firstOrNull()?.getUUID("id")
+
     private companion object {
         const val INSERT_SET =
             "INSERT INTO curve_set (id, as_of, provenance, source, recorded_at) VALUES ($1, $2, $3, $4, $5)"
@@ -93,6 +97,8 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
             "SELECT s.id, s.as_of, s.provenance, s.source, s.recorded_at, " +
                 "(SELECT string_agg(DISTINCT p.curve_index, ',' ORDER BY p.curve_index) FROM curve_set_pillar p " +
                 "WHERE p.curve_set_id = s.id) AS indices FROM curve_set s ORDER BY s.recorded_at DESC, s.id LIMIT $1"
+        const val SELECT_LATEST_FOR =
+            "SELECT id FROM curve_set WHERE as_of = $1 ORDER BY recorded_at DESC, id LIMIT 1"
         const val SELECT_SET = "SELECT id, as_of, provenance, source, recorded_at FROM curve_set WHERE id = $1"
         const val SELECT_PILLARS =
             "SELECT curve_index, pillar_date, zero_rate FROM curve_set_pillar WHERE curve_set_id = $1 " +

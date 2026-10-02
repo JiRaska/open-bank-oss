@@ -17,6 +17,7 @@ import com.openbank.libs.domain.identifiers.LoanApplicationId
 import com.openbank.libs.domain.identifiers.LoanId
 import com.openbank.libs.lending.origination.OriginationState
 import io.smallrye.mutiny.Uni
+import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -180,4 +181,18 @@ interface ProvisioningRepository {
 
     /** The latest persisted record per loan — one row per loan that has ever been assessed. */
     fun findLatestPerLoan(): Uni<List<LoanProvisioningRecord>>
+}
+
+/** Read-only coverage diagnostics; the population matches the provisioning scan. */
+interface ProvisioningCoverageRepository {
+    fun countEligibleForProvisioning(): Uni<Long>
+    fun countUnprovisioned(period: String): Uni<Long>
+    fun countForPeriod(period: String): Uni<Long>
+}
+
+/** Durable reporting-day evidence; an unfinished earlier day must survive a later successful pass. */
+interface ProvisioningCycleRunRepository {
+    fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit>
+    fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit>
+    fun countUnresolvedBefore(period: LocalDate): Uni<Long>
 }
