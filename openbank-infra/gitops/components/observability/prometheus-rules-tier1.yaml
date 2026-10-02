@@ -141,6 +141,55 @@ spec:
           annotations:
             summary: "Outbox backlog stuck on {{ $labels.service }}"
             description: "{{ $labels.service }} has >100 unrelayed outbox rows for >15m — money/events may be stuck."
+        # ADR-0327 D10 — the three signals finding 7 of that ADR lacked. All three read series
+        # openbank-libs-runtime emits from DomainMetrics (registerOutboxOldestAge,
+        # outboxClaimLatency, outboxDead); a service exports them once it adopts the kernel
+        # repository (Phase 2/3 of #11652), so until then each rule matches an empty vector
+        # for that service — quiet, not broken, and check-alert-metric-emitted knows the code.
+        - alert: OutboxOldestRowStale
+          # The alert OutboxBacklogStuck cannot be: a backlog of 99 rows that are three days
+          # old never crosses `> 100`. Age is measured from created_at of the oldest row that
+          # is eligible RIGHT NOW (a FAILED row waiting on its backoff is not yet eligible), so
+          # a row that is merely scheduled does not page. Re-derived at t = 0 on a cold pod:
+          # AbstractOutboxOldestAgeGauge starts at 0 and is set only from a real query — there
+          # is no timestamp sentinel in the path (the WorkflowLivenessStale lesson, #4208).
+          expr: openbank_outbox_oldest_age_seconds > 300
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            # No subject_period: a plain gauge comparison carries no range window, and the
+            # alert-window gate rejects a declaration it cannot verify.
+            summary: "Outbox oldest eligible row stale on {{ $labels.service }}"
+            description: "{{ $labels.service }} has had an eligible outbox row older than 5m for >10m — the dispatcher is not draining (ADR-0327 D10). Value: {{ $value | humanizeDuration }}."
+        - alert: OutboxClaimSlow
+          # The early signal of the finding-5 plan collapse returning: the kernel's claim over
+          # the partial indexes is milliseconds; a Seq Scan + sort over the SENT majority is
+          # seconds and longer than the tick. Bucketed timer (publishPercentileHistogram), so
+          # the quantile has _bucket series to read; 15m window over a continuous subject.
+          expr: histogram_quantile(0.99, sum by (service, le) (rate(openbank_outbox_claim_seconds_bucket[15m]))) > 1
+          for: 15m
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "Outbox claim p99 above 1s on {{ $labels.service }}"
+            description: "{{ $labels.service }} outbox claimProcessable p99 has been above 1s for >15m — check the partial indexes from db/outbox-v2-template.sql exist and are valid (ADR-0327 D12 plan gate)."
+        - alert: OutboxDeadRate
+          # DEAD is the producer-side DLQ (ADR-0327 D4): a row that could not reach the broker
+          # after 10 backed-off attempts, or a poison row. openbank_outbox_dead_lettered (gauge)
+          # says how many sit there; this says it is still HAPPENING. Micrometer creates the
+          # counter on first increment, so a pod's first DEAD row is a series appearing at 1 —
+          # increase() reads that as 0 and the SECOND row in the hour is what fires; the gauge
+          # covers the first (#4005). Per service via the counter's own label.
+          expr: increase(openbank_outbox_dead_total[1h]) > 0
+          for: 0m
+          labels:
+            severity: warning
+          annotations:
+            subject_period: continuous
+            summary: "Outbox rows dead-lettering on {{ $labels.service }}"
+            description: "{{ $labels.service }} parked outbox row(s) DEAD in the last hour — see openbank_outbox_dead_lettered for how many sit there; replay via POST …/outbox/requeue after fixing the cause (ADR-0327 D4)."
     - name: openbank.tier1.progressive_delivery
       rules:
         # BOTH ALERTS BELOW WERE STRUCTURALLY DEAD UNTIL #4584. They read `rollout_phase`,

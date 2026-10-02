@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.22.0...risk-engine-v0.23.0) (2026-10-02)
+
+
+### Features
+
+* **lending,risk-engine,admin-ui:** immutable human loan contract number ([#11722](https://github.com/JiRaska/open-bank-oss/issues/11722)) ([f19ab46](https://github.com/JiRaska/open-bank-oss/commit/f19ab4629b01673c29c8d4c1f1f8b01a6db89915))
+* **risk-engine,admin-ui:** read liquidity and capital by category, not by raw loan id ([#11716](https://github.com/JiRaska/open-bank-oss/issues/11716)) ([e93fa1d](https://github.com/JiRaska/open-bank-oss/commit/e93fa1dffd2fe045fb638f0236361d2807cb1573))
+* **risk-engine:** average minimum-reserve holdings over the maintenance period ([#11546](https://github.com/JiRaska/open-bank-oss/issues/11546)) ([67af0c5](https://github.com/JiRaska/open-bank-oss/commit/67af0c5533ef2ea3c4e1540818e5be2fcb078498))
+* **risk-engine:** evaluate declarative risk limits on every snapshot ([#11549](https://github.com/JiRaska/open-bank-oss/issues/11549)) ([c46453f](https://github.com/JiRaska/open-bank-oss/commit/c46453fd72d565e4b9aa8e56d2caba18cb08ca00))
+* **treasury:** age nostro reconciliation breaks, alert on aged ones, accept MT940 ([#11673](https://github.com/JiRaska/open-bank-oss/issues/11673)) ([396fff7](https://github.com/JiRaska/open-bank-oss/commit/396fff740047221b2d820d311648344ec590c65c))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.21.0...risk-engine-v0.22.0) (2026-09-30)
 
 

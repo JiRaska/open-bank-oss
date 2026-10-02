@@ -66,6 +66,15 @@ tasks.named<Copy>("processResources") {
     }
 }
 
+// The two outbox-v2 ITs (CaseOutboxDispatchConformanceIT, CaseOutboxRepositoryV2IT) each boot their own
+// Quarkus app under a distinct test profile, taking the module from 5 to 7 boots in one test JVM. At the
+// default heap the fork died with OutOfMemoryError after CaseOutboxDispatchConformanceIT (measured: the
+// same two ITs pass together in isolation, and origin/main passes with 5 boots). Per-module, as
+// account-service does: nothing measures test heap fleet-wide.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+}
+
 // Pact rootDir + Pact Broker property forwarding centralised into
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the

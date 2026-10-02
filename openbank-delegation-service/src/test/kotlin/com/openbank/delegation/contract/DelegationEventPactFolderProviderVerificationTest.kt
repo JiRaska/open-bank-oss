@@ -15,6 +15,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.delegation.domain.event.ApprovalGroupChanged
 import com.openbank.delegation.domain.event.DelegationActivated
 import com.openbank.delegation.domain.event.DelegationRevoked
 import com.openbank.delegation.domain.event.EventMoney
@@ -76,6 +77,15 @@ import java.util.UUID
  * disabled, which is Quarkus's default and the reason `validFrom` reaches Kafka as an ISO-8601
  * string the consumers can `OffsetDateTime.parse`. Do not let the two configurations drift — a
  * numeric timestamp would be a silent, total projection outage that this replay would then pass.
+ *
+ * ## Negative identity boundary
+ *
+ * Message Pact has no request on which an unauthorized producer could receive 401/403. The
+ * negative identity contract is therefore enforced one layer earlier by Kafka mTLS plus the exact
+ * Write ACL in `openbank-infra/gitops/components/delegation/kafka-delegation-mtls.yaml`; repository
+ * Kafka ACL gates make that boundary executable. This provider replay proves only the payload emitted
+ * after that identity check, rather than inventing an HTTP authorization interaction that production
+ * never serves.
  */
 @Provider("openbank-delegation-service")
 @PactFolder("../pacts")
@@ -144,6 +154,28 @@ class DelegationEventPactFolderProviderVerificationTest {
             resourceId = RESOURCE,
             capabilities = setOf(DelegationCapability.ACCOUNT_READ_BALANCES),
             reason = "grantor revoked",
+            occurredAt = OCCURRED_AT,
+        ),
+    )
+
+    @State("an approval group roster has been revised")
+    fun approvalGroupRevised() = Unit
+
+    @PactVerifyProvider("an ApprovalGroupRevised event with a complete roster")
+    fun produceApprovalGroupRevised(): String = objectMapper.writeValueAsString(
+        ApprovalGroupChanged(
+            aggregateId = GRANT_ID,
+            ownerPartyId = GRANTOR,
+            name = "Treasury approvers",
+            members = setOf(
+                UUID.fromString("aaaa5555-bbbb-4ccc-8ddd-eeeeffff0004"),
+                UUID.fromString("aaaa6666-bbbb-4ccc-8ddd-eeeeffff0005"),
+            ),
+            threshold = 2,
+            revision = 4,
+            active = true,
+            scaSessionId = RESOURCE,
+            eventType = "ApprovalGroupRevised",
             occurredAt = OCCURRED_AT,
         ),
     )
