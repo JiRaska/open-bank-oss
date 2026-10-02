@@ -42,6 +42,12 @@ data class LoanContract(
     val maturityDate: LocalDate?,
     val ifrs9Stage: String?,
     val remainingInstallments: List<ScheduledInstallment>,
+    /**
+     * Lending's human contract number (#11107), a LABEL for people. Deliberately not in
+     * [InputHash]: it changes no figure, and hashing it would re-key every replay of a run read
+     * before lending published it.
+     */
+    val contractNumber: String? = null,
 )
 
 /** A lending response the engine cannot interpret — a broken contract, never silently repaired. */
@@ -87,6 +93,7 @@ object LoanInstrumentMapper {
                 periodsPerYear = loan.periodsPerYear,
                 remainingInstallments = loan.remainingInstallments.sortedBy { it.number },
             ),
+            contractNumber = loan.contractNumber,
         )
     }
 

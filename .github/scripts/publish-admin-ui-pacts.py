@@ -90,7 +90,7 @@ def publish(body, env):
         raise ValueError("HTTPS broker URL and credentials are required")
     auth = base64.b64encode(f"{username}:{password}".encode()).decode()
     opener = urllib.request.build_opener(NoRedirect())
-    headers = {"Authorization": "Basic " + auth, "Accept": "application/json"}
+    headers = {"Authorization": "Basic " + auth, "Accept": "application/hal+json, application/json"}
     request = urllib.request.Request(
         url.rstrip("/") + "/contracts/publish", data=json.dumps(body).encode(),
         headers={**headers, "Content-Type": "application/json"}, method="POST",
