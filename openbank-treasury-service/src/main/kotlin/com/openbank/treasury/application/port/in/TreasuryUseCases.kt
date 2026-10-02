@@ -74,15 +74,33 @@ data class CounterpartyExposure(
     }
 }
 
-/** Daily position per currency (outstanding principal of SETTLED deals as of a date). */
+/** Daily position per currency: outstanding principal on a date, and how many deals make it up. */
 data class CurrencyPosition(
     val currency: String,
     val placed: BigDecimal,
     val borrowed: BigDecimal,
     val atCnb: BigDecimal,
+    val dealCount: Int = 0,
 ) {
     val net: BigDecimal get() = placed + atCnb - borrowed
 }
+
+/**
+ * ACTUAL: the date is the bank's accounting day today or earlier, and only deals whose cash has
+ * moved (SETTLED, or since MATURED) count. PROJECTED: the date is after today, and deals already
+ * concluded but not yet settled (BOOKED, CONFIRMED) count too, on their contracted value and
+ * maturity dates. A projection holds no new deals.
+ */
+enum class PositionBasis { ACTUAL, PROJECTED }
+
+/** The daily position as of [asOf], computed against the accounting day [today] (Europe/Prague). */
+data class PositionReport(
+    val asOf: LocalDate,
+    val today: LocalDate,
+    val basis: PositionBasis,
+    val countedStates: Set<DealState>,
+    val positions: List<CurrencyPosition>,
+)
 
 /**
  * One simulated-market pass. [declined] counts BOOKED deals a simulated counterparty did NOT
@@ -131,7 +149,9 @@ interface TreasuryDealUseCase {
     suspend fun get(dealId: UUID): DealView
     suspend fun list(state: DealState?): List<Deal>
     suspend fun counterparties(): List<CounterpartyExposure>
-    suspend fun positions(asOf: LocalDate): List<CurrencyPosition>
+
+    /** The daily position on [asOf] (default: the accounting day today, Europe/Prague). */
+    suspend fun positions(asOf: LocalDate?): PositionReport
 
     /** One pass of the simulated market (ADR-0315 D9): confirm every BOOKED deal, settle and mature everything due. */
     suspend fun runSimulatedMarket(): SimulatedMarketRun

@@ -311,7 +311,7 @@ class AuthorizeInterceptorTest {
         }
         val ctx = makeCtx(annotatedMethod)
         assertThatThrownBy { interceptor.authorize(ctx) }
-            .isInstanceOf(ForbiddenException::class.java)
+            .isInstanceOf(PolicyDeniedException::class.java)
     }
 
     @Test

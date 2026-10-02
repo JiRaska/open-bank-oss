@@ -4,6 +4,7 @@
 
 package com.openbank.libs.audit
 
+import com.openbank.libs.util.Hex
 import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
@@ -102,8 +103,10 @@ object AuditChain {
         "prevHash" to prevHash,
     )
 
-    fun sha256Hex(s: String): String = MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8))
-        .joinToString("") { "%02x".format(it) }
+    fun sha256Hex(s: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(s.toByteArray(Charsets.UTF_8))
+        return Hex.lower(digest)
+    }
 }
 
 data class AuditChainVerification(

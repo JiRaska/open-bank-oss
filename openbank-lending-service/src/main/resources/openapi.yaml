@@ -22,7 +22,8 @@ info:
   # 1.29.0 -> 1.31.0 (#11107): additive — the loan's human contract number (UV-YYYY-NNNNNN):
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
-  version: 1.31.0
+  # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
+  version: 1.32.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -88,6 +89,11 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          description: Return at most this many newest applications; omit for the legacy full list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Applications for the party

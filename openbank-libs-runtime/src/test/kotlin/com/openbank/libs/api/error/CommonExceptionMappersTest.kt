@@ -8,6 +8,8 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import com.openbank.libs.authz.PolicyDecisionException
+import com.openbank.libs.authz.PolicyDeniedException
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.WebApplicationException
 import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.MDC
@@ -134,6 +136,48 @@ class CommonExceptionMappersTest {
         assertThat(body.status).isEqualTo(503)
         assertThat(body.code).isEqualTo(ErrorCode.POLICY_DECISION_POINT_UNAVAILABLE.code)
         assertThat(body.message).contains("policy decision point unavailable")
+    }
+
+    @Test
+    fun `the 503 body carries a constant message, never the policy engine's response or error`() {
+        val opaBody = """{"result":{"allow":false,"reason":"matrix-denies ROLE_VIEWER on ledger.approve"}}"""
+        for (detail in listOf(
+            "policy decision point unavailable: OPA returned HTTP 500: $opaBody",
+            "policy decision point unavailable: OPA call failed: Connection refused: opa.internal/10.0.0.5:8181",
+        )) {
+            val body = PolicyDecisionExceptionMapper().toResponse(PolicyDecisionException(detail)).entity as ApiError
+
+            assertThat(body.message).isEqualTo("policy decision point unavailable")
+            assertThat(body.message).doesNotContain("OPA", "matrix", "ROLE_", "Connection", "8181")
+        }
+    }
+
+    @Test
+    fun `a 403 carries a constant message, never the policy decision reason`() {
+        val response = WebApplicationExceptionMapper()
+            .toResponse(PolicyDeniedException("matrix-denies: ROLE_VIEWER lacks ledger.approve"))
+        val body = response.entity as ApiError
+
+        assertThat(response.status).isEqualTo(403)
+        assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
+        assertThat(body.message).isEqualTo("Forbidden")
+    }
+
+    @Test
+    fun `a service's own ForbiddenException keeps its client-facing message`() {
+        val body = WebApplicationExceptionMapper().toResponse(
+            ForbiddenException("X-Acting-For is required"),
+        ).entity as ApiError
+        assertThat(body.code).isEqualTo(ErrorCode.FORBIDDEN.code)
+        assertThat(body.message).isEqualTo("X-Acting-For is required")
+    }
+
+    @Test
+    fun `non-403 WebApplicationException statuses keep their message`() {
+        val body = WebApplicationExceptionMapper().toResponse(
+            WebApplicationException("conflict detail", 409),
+        ).entity as ApiError
+        assertThat(body.message).isEqualTo("conflict detail")
     }
 
     @Test

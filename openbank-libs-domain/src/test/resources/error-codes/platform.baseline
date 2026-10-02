@@ -1,0 +1,18 @@
+# ADR-0326 error-code catalogue baseline — the kernel's own codes (PlatformErrorCode).
+#
+# One line per published code: CODE<TAB>CATEGORY. APPEND-ONLY. A code is a contract clients branch
+# on, so a line here is never removed, renamed or moved to another category. Adding a code to the
+# enum requires adding its line here in the same change; PlatformErrorCodeCatalogueTest fails in
+# both directions.
+VALIDATION_ERROR	VALIDATION
+UNAUTHORIZED	UNAUTHENTICATED
+FORBIDDEN	FORBIDDEN
+NOT_FOUND	NOT_FOUND
+CONFLICT	CONFLICT
+IDEMPOTENCY_KEY_REUSED	CONFLICT
+IDEMPOTENCY_REQUEST_IN_PROGRESS	CONFLICT
+BUSINESS_RULE_VIOLATION	RULE_VIOLATION
+RATE_LIMIT_EXCEEDED	RATE_LIMITED
+POLICY_DECISION_POINT_UNAVAILABLE	UNAVAILABLE
+SERVICE_UNAVAILABLE	UNAVAILABLE
+INTERNAL_ERROR	INTERNAL
