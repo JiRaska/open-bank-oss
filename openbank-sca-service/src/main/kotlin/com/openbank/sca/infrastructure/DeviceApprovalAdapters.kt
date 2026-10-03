@@ -10,6 +10,7 @@ import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.SignatureAlgorithm
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
+import io.quarkus.redis.datasource.value.SetArgs
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.security.KeyFactory
@@ -67,12 +68,14 @@ class RedisScaDecisionStore(private val redis: ReactiveRedisDataSource, private 
     ScaDecisionStore {
     private val strings = redis.value(String::class.java)
 
-    override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long) {
-        strings.setex(
+    override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean {
+        require(ttlSeconds > 0) { "Decision TTL must be positive" }
+        val previous = strings.setGet(
             "sca:decision:${decision.challengeId}",
-            ttlSeconds,
             objectMapper.writeValueAsString(decision),
+            SetArgs().nx().ex(ttlSeconds),
         ).awaitSuspending()
+        return previous == null
     }
 
     override suspend fun find(challengeId: UUID): DeviceApprovalDecision? {

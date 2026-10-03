@@ -22,9 +22,9 @@ interface ScaChallengeRepository {
     suspend fun findPendingByParty(partyId: UUID): List<ScaChallenge>
 
     /**
-     * Atomically mark the challenge consumed (single-use gate). Returns true when THIS call
-     * spent it; false when it was already consumed — the `consumed_at IS NULL` guard in the
-     * UPDATE makes concurrent double-spends impossible at the database level.
+     * Atomically spend a completed, unexpired, unconsumed challenge. Returns true only for
+     * the caller that spent it. The update increments the snapshot version, so an earlier
+     * lifecycle read cannot subsequently erase this consumption marker.
      */
     suspend fun markConsumed(id: UUID): Boolean
 }
@@ -82,7 +82,8 @@ interface EnrolledDeviceRepository {
  */
 interface ScaDecisionStore {
 
-    suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long)
+    /** Atomically retain the first decision. False means another decision already owns the challenge. */
+    suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean
 
     suspend fun find(challengeId: UUID): DeviceApprovalDecision?
 }
@@ -115,3 +116,4 @@ interface PartyTypeLookup {
      */
     suspend fun partyType(partyId: UUID): String?
 }
+class ScaConcurrentUpdateException(id: UUID) : IllegalStateException("SCA challenge $id was concurrently modified")
