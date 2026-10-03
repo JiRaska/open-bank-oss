@@ -487,6 +487,17 @@ simply stops existing).
   already holding an over-scale amount or unknown currency now fails to load (500 naming the row)
   instead of being served; the PR body carries the SQL count to run before deploy. No new endpoint,
   caller, privilege or event. Rollback: revert the commit.
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
 - **2026-10-03** — **The existing inbound `Money` check now uses the kernel parser (#11870).**
   `POST /api/v1/sepa-payments` still constructs `Money` before reserving the idempotency key;
   `Money.parseInbound` replaces the former service-local amount/currency validator and

@@ -88,7 +88,7 @@ PROSE_ALLOWLIST: dict[tuple[str, str], str] = {
 # The libs docs show adopters the MicroProfile REST Client call-site shape for
 # BearerTokenClientHeadersFactory. The annotation is third-party and no service imports it
 # yet, so source derivation cannot see it; the docs are not claiming libs implements it.
-for _f in ("01-overview", "02-architecture", "03-api"):
+for _f in ("01-overview", "03-api"):
     for _s in ("", ".en", ".cs"):
         PROSE_ALLOWLIST[(f"openbank-libs/docs/{_f}{_s}.md", "RegisterClientHeaders")] = (
             "MicroProfile REST Client annotation shown as the adopter's call-site shape"

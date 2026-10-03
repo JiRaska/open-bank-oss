@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.3...settlement-service-v0.10.0) (2026-10-03)
+
+
+### Features
+
+* **settlement:** project settlements to the ledger with a state audit outbox ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 7) ([#11860](https://github.com/JiRaska/open-bank-oss/issues/11860)) ([b46cd46](https://github.com/JiRaska/open-bank-oss/commit/b46cd46702852cb97269bf905b38e2ef478d18b8))
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.2...settlement-service-v0.9.3) (2026-09-22)
 
 

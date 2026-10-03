@@ -11,6 +11,7 @@
 #   scaChallenge.consume  — spend an approved challenge (ADR-0021 settlement gate)
 #   device.enroll         — enrol a device credential (#partyId)
 #   device.list           — list a party's device credentials (#partyId)
+#   device.revoke         — revoke a credential and cancel its unconsumed approvals (#partyId)
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for
 # *.read + *.list, party-self-service for device.list when the JWT sub equals
@@ -20,6 +21,15 @@
 package openbank.rest
 
 import rego.v1
+
+# An owner can request revocation of their own credential. The ordinary money-path
+# four-eyes obligation still applies; this grant is not an exemption from approval.
+allowed_reasons contains "device-self-revocation" if {
+	input.principal.type == "HUMAN"
+	"ROLE_CUSTOMER" in input.principal.roles
+	input.action == "device.revoke"
+	input.principal.id == input.resource.id
+}
 
 # Operators and admins may perform ANY SCA challenge lifecycle operation — the ops
 # console path (resolve a stuck challenge, service-desk credential reset per the

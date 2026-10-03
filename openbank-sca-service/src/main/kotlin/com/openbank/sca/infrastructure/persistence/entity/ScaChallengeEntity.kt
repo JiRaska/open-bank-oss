@@ -17,6 +17,10 @@ class ScaChallengeEntity : PanacheEntityBase() {
     @Id
     lateinit var id: UUID
 
+    @Version
+    @Column(name = "version", nullable = false)
+    var version: Int = 0
+
     @Column(name = "party_id", nullable = false)
     lateinit var partyId: UUID
 
@@ -136,6 +140,7 @@ class ScaChallengeEntity : PanacheEntityBase() {
         onBehalfOfPartyId = onBehalfOfPartyId,
         decidedByPartyId = decidedByPartyId,
         decidedByCredentialId = decidedByCredentialId,
+        version = version,
     )
 
     private fun hasDynamicLinkingData(): Boolean = dynamicAmount != null ||
@@ -177,6 +182,7 @@ class ScaChallengeEntity : PanacheEntityBase() {
             redirectUrl = c.redirectUrl
             consumedAt = c.consumedAt
             createdAt = c.createdAt
+            version = c.version
         }
     }
 }

@@ -1,125 +1,27 @@
 # 05 — Operations
 
-## Build
+## Modules and builds
+
+The root `openbank-libs` module is a compatibility umbrella: it re-exports `openbank-libs-domain` and `openbank-libs-runtime`. New services depend on the module they need. The domain module holds framework-free primitives; the runtime module contains Quarkus adapters and `/q/openbank/docs`.
 
 ```bash
-# Build the libs JAR (also runs Jandex + CycloneDX SBOM):
-./gradlew :openbank-libs:build
-
-# Just compile + Jandex index, skip tests:
-./gradlew :openbank-libs:jandex :openbank-libs:jar
-
-# Run tests:
-./gradlew :openbank-libs:test
+./gradlew :openbank-libs-domain:build :openbank-libs-runtime:build :openbank-libs:build
+./gradlew :openbank-libs-domain:test :openbank-libs-runtime:test
 ```
 
-Build artifacts:
+Use the root Gradle build for service integration. The source of truth for Kotlin and Quarkus versions is `openbank-libs/gradle/libs.versions.toml`; the Gradle wrapper defines its own version. Read those files for current values rather than copying a version table into this document.
 
-```
-openbank-libs/build/
-├── libs/
-│   └── openbank-libs.jar             ← consumed by services
-└── reports/
-    └── bom.json                      ← CycloneDX SBOM
-```
+## Service documentation
 
-## Version compatibility matrix
+Every runnable service using `openbank.quarkus-service` gets a generated `00-build.md` from its own `version.txt` and committed `openapi.yaml` during `processResources`. The generated page is part of the service JAR. Authored chapters belong in `<service>/src/main/resources/docs/` and are packaged alongside it. The service publishes the resulting index and Markdown at `/q/openbank/docs`; the index includes its release version, build time, and Git commit.
 
-| Component | Version | Notes |
-|---|---|---|
-| JDK | **25 LTS** (Temurin) | toolchain `kotlin { jvmToolchain(25) }` |
-| Kotlin | **2.3.20** | `libs.versions.toml` `[versions] kotlin` |
-| Quarkus | **3.33.2 LTS** | platform BOM, support until 2027-03-25 |
-| Gradle | **9.5.1** | wrapper version |
-| Jandex Gradle plugin | **2.0.0** | `org.kordamp.gradle.jandex` |
-| CycloneDX Gradle plugin | **2.3.0** | `org.cyclonedx.bom`; 3.x DSL unstable (see commit `78c2d93`) |
-| Foojay toolchain resolver | **1.0.0** | settings.gradle.kts (Gradle 9 compat) |
+The Gradle `verifyServiceDocs` task checks the packaged build facts and runs through `check` in CI. The PR gate requires an authored documentation change when production service inputs change. A generated build page proves provenance and availability; the authored chapters explain behavior and must be reviewed with code.
 
-Versions live once in `openbank-libs/gradle/libs.versions.toml` and propagate via the catalog to all 27 service builds.
+`openbank-libs` has no running endpoint of its own. Its `docs/` directory is copied into the Admin UI image. That page is therefore a snapshot of the Admin UI build, while service pages come from the running service images.
 
-## How to upgrade
+## Releases and diagnosis
 
-| Upgrade | Steps | Risk |
-|---|---|---|
-| **Kotlin patch** (2.3.20 → 2.3.21) | Edit `kotlin = "2.3.21"`, rebuild | Low |
-| **Quarkus patch** (3.33.2 → 3.33.3) | Edit `quarkus = "3.33.3"` + `quarkus-plugin`, rebuild | Low |
-| **Kotlin minor** (2.3.x → 2.4.x) | + verify compileOnly + check annotation defaults (`-Xannotation-default-target`) | Medium — Quarkus BOM must support the Kotlin minor |
-| **Quarkus minor** (3.33 → 3.34) | + go through the migration guide | Medium — Hibernate / Mutiny API changes |
-| **Quarkus major LTS** (3.33 → 4.x) | Big refactor — Hibernate ORM 7, Vert.x 5, OIDC API changes | High — see scenario B in history |
-| **JDK** (25 → 26) | Edit toolchain in every service build | High — Kotlin compatibility + ZGC settings re-tune |
-| **Gradle major** (9.x → 10.x) | Update wrapper, removes deprecated APIs | Medium |
-
-## Release
-
-libs is **not published separately** to Maven Central or an internal repo. The `0.1.0-SNAPSHOT` version is used locally via Gradle multi-project (`implementation(project(":openbank-libs"))`).
-
-If external publishing is ever needed (e.g. a partner bank wants to reuse libs):
-
-1. Define a semver policy (currently SNAPSHOT → 0.x while audit-grade not yet certified)
-2. Bump version in `openbank-libs/build.gradle.kts`
-3. `./gradlew :openbank-libs:publishToMavenLocal` for local test
-4. Set up GitHub Packages publishing in `.github/workflows/release.yml` (TODO)
-
-## Observability
-
-Services using `openbank-libs-runtime` run a best-effort startup warm-up before readiness turns UP. It exercises JSON mapping, the reactive SQL pool when present, and local public and unauthenticated protected HTTP paths. Each step logs its outcome; a failed step does not stop startup. `openbank.warmup.enabled=false` disables it. `openbank.warmup.max-duration` defaults to 20 seconds and caps the readiness delay, so a slow or failed warm-up cannot hold a pod unready indefinitely. Investigate failed steps or repeated cap warnings before treating a first-request latency regression as fixed.
-
-libs itself emits no metrics or logs beyond the instrumentation in `CorrelationIdFilter` (only MDC fill/clear). But it influences fleet observability:
-
-- **`/api/v1/info`** on every service → admin UI Tech Inventory reads the `stack` block from `BuildInfo`
-- **`/api/v1/config`** on every service → System Health "Configuration" tab reads rate-limit/CB/retry/timeout
-- **`X-Correlation-ID`** propagation via `BearerTokenClientHeadersFactory` → distributed tracing
-- **`AuditEvent`** via `AuditEventPublisher` → audit-service persists it
-
-## Dependencies
-
-Runtime classpath of the libs JAR:
-
-```mermaid
-graph LR
-  libs[openbank-libs.jar]
-  kotlin[kotlin-stdlib 2.3.20]
-  reflect[kotlin-reflect 2.3.20]
-  coroutines[kotlinx-coroutines-core 1.8.1]
-  jackson[jackson-module-kotlin 2.17.2]
-  jsr310[jackson-datatype-jsr310 2.17.2]
-
-  libs --> kotlin
-  libs --> reflect
-  libs --> coroutines
-  libs --> jackson
-  libs --> jsr310
-
-  classDef api fill:#e8f5e9,stroke:#388e3c
-  class kotlin,reflect,coroutines,jackson,jsr310 api
-```
-
-Everything else (Quarkus types, jakarta APIs, Redis client, Persistence API, MicroProfile) is `compileOnly` — services bring those through `quarkus-bom`.
-
-## CI
-
-- **`.github/workflows/ci.yml`** — `:openbank-libs:test` runs on every PR
-- **`.github/workflows/security.yml`** — `sbomAll` (per-service CycloneDX SBOM) runs on main + weekly; the libs SBOM is included
-- **CodeQL** — language `java-kotlin`, scope `openbank-libs/src/**`
-- **Trivy** — filesystem scan covers libs (as part of the whole repo)
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---|---|---|
-| `Unresolved reference 'Uni'` during a service build | Missing explicit `import io.smallrye.mutiny.Uni` in service code — libs does not transitively expose it | Add the import |
-| `UnsatisfiedResolutionException: IdempotencyStore` | Service has `@Inject IdempotencyStore` in a REST resource but no `@Produces` factory and no `quarkus-redis-client` extension | Add an `IdempotencyConfig.kt` factory + `implementation(libs.quarkus.redis.client)` |
-| Service `/api/v1/info` returns `stack: null` | Service runs an old libs JAR (pre-SBOM-2) or the image was not rebuilt | `docker compose build --no-cache <service>` + `up -d --force-recreate <service>` |
-| Build fails with `ClassNotFoundException: jakarta.validation.ConstraintViolationException` | Service lacks `quarkus-hibernate-validator` extension but libs used to auto-register ConstraintViolationExceptionMapper (deleted in `62b312b`) | Pull latest libs |
-| `Circular dependency: :classes → :compileJava → :compileKotlin → :quarkusGenerateCode → :jar → :classes` | Per-service `settings.gradle.kts` using `includeBuild("../openbank-libs")` + Quarkus 3.33 + Gradle 9 | Build from root: `./gradlew :openbank-<svc>:quarkusBuild` (commit `62b312b`) |
-| `BootstrapVerifier` fails with "looks like development defaults" — ⬜ **this symptom cannot occur** | There is no `BootstrapVerifier`, so nothing ever emits that message. The row described a check that was never shipped (#8426) | Nothing to fix here. A dev placeholder is kept out of prod by ESO/OpenBao `secretKeyRef` injection (ADR-0007) — not by a boot-time check, so the startup failure you would expect never arrives |
-
-## Audit & support
-
-- Bug reports / questions → repo issues (label `area/libs`)
-- Security issue → SECURITY.md (gpg-encrypted email)
-- Compliance question → `docs/strategy/07-compliance-matrix.md` row "openbank-libs"
-
+Services use their own `version.txt` and release-please configuration. Do not infer a service release version from the shared library module version. Inspect `/api/v1/info`, `/q/openbank/docs`, and `/q/openbank/docs/_meta` on the deployed service to identify the running version, source commit, and document digest. A document unavailable in Admin UI can mean the service is not deployed or its endpoint is unreachable; it does not prove that the source tree lacks documentation.
 
 ## Startup warm-up and readiness (#11890)
 

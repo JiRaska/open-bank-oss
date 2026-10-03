@@ -43,7 +43,7 @@
 ### Adaptéry (`com.openbank.sca.infrastructure`)
 - **REST**: `ScaResource` (`@Path("/api/v1/sca")`) — coroutine handlery, `@Authorize` na mutujících endpointech, vynucení vlastnictví per-party přes `SecurityIdentity` a sada `ExceptionMapper`ů překládajících doménové výjimky na model `ApiError`.
 - **Persistence**: Panache reactive repozitáře (`ScaChallengeRepositoryImpl`, `EnrolledDeviceRepositoryImpl`, `ScaOutboxRepositoryImpl`) + entity.
-- **Redis adaptéry** (`ScaAdapters`): `SecureOtpGenerator`, `RedisOtpStore`, `RedisScaIdempotencyStore`, `LoggingNotificationSender`. Store decoupled rozhodnutí žije v `DeviceApprovalAdapters`, JCA verifikátor podpisu v infrastrukturní vrstvě (`JcaDeviceAssertionVerifier`).
+- **Redis adaptéry** (`ScaAdapters`): `SecureOtpGenerator`, `RedisOtpStore`, `RedisScaIdempotencyStore`, `LoggingNotificationSender`. Decoupled rozhodnutí a audit se ukládají společně v `PostgresScaDecisionStore`; podpis ověřuje `JcaDeviceAssertionVerifier`. Redis nadále uchovává OTP a idempotentní požadavky.
 - **Messaging/outbox**: `ScaOutboxDispatcher` + `KafkaScaOutboxEventPublisher`.
 - **authz**: `AuthzProducer` (zapojení OPA klienta, ADR-0034).
 

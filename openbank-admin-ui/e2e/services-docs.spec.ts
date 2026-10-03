@@ -2,11 +2,11 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root for details.
 
-// ADR-0076 Layer 2 — E2E: /services page docs coverage
+// ADR-0076 Layer 2 — E2E: /services page documentation inventory
 //
 // These tests verify that the "Service Documentation" page correctly computes
-// and renders the X/Y coverage counter, and that services are correctly
-// classified as documented vs undocumented. All service HTTP calls are
+// and renders the X/Y availability counter, and that newly cataloged services
+// display documentation from their running build. All service HTTP calls are
 // intercepted via page.route() — no live services required.
 
 import { test, expect } from '@playwright/test'
@@ -126,5 +126,36 @@ test.describe('/services — Service Documentation page', () => {
     await expect(page.locator('main').getByText(/\d+\s*\/\s*\d+/)).toBeVisible({ timeout: 10_000 })
     // No raw error text leaked (graceful-state rule)
     await expect(page.getByText(/HTTP 5\d\d/)).not.toBeVisible()
+  })
+
+  test('shows a newly cataloged service with its running build provenance', async ({ page }) => {
+    await page.route('**/api/catalog/services', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        services: [{ name: 'openbank-example-service', short: 'example-service', kind: 'service', runnable: true, apiTitle: 'Example Service' }],
+      }) })
+    )
+    await page.route('**/api/services/health', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ services: [], source: 'static' }) })
+    )
+    await page.route('**/api/services/*/docs', route =>
+      route.fulfill({ status: 404, contentType: 'application/json', body: '{}' })
+    )
+    await page.route('**/api/services/example/docs', route =>
+      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+        ...DOCS_INDEX,
+        service: 'example-service',
+        source: 'live',
+        version: '3.2.1',
+        gitCommit: 'abcdef1234567890',
+      }) })
+    )
+
+    await page.goto('/services')
+    const card = page.locator('main a[href="/services/example/docs"]')
+    await expect(card).toBeVisible()
+    await expect(card).toContainText('Example Service')
+    await expect(card).toContainText('3.2.1')
+    await expect(card).toContainText('abcdef12')
+    await expect(page.getByText(/1 live from services|1 živě ze služeb/)).toBeVisible()
   })
 })
