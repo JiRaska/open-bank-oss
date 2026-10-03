@@ -22,14 +22,19 @@ import java.util.UUID
 
 class AllowancePostingDispatchTest {
     private val emitter = mockk<MutinyEmitter<String>>()
+    private val graphEmitter = mockk<MutinyEmitter<String>>()
     private val ledger = mockk<LedgerPostingPort>()
     private val publisher = KafkaLendingOutboxEventPublisher(
         emitter,
+        graphEmitter,
         ledger,
         jacksonObjectMapper().findAndRegisterModules(),
     )
     private val loanId = UUID.fromString("77777777-7777-7777-7777-777777777777")
     private val partyId = UUID.fromString("88888888-8888-8888-8888-888888888888")
+    private val graphPayload = """{"schemaVersion":1,"eventType":"lending.graph.guarantee.approved",""" +
+        """"guaranteeId":"$loanId","loanId":"$loanId","revision":1,"bankScope":"demo-bank",""" +
+        """"occurredAt":"2026-04-01T10:00:00Z"}"""
 
     private fun command() = OutboxEntry(
         eventId = UUID.fromString("66666666-6666-6666-6666-666666666666"),
@@ -87,7 +92,54 @@ class AllowancePostingDispatchTest {
         publisher.publish(command().copy(eventType = "loan.provisioned", payload = "{}"))
 
         verify(exactly = 1) { emitter.sendMessage(match { it.payload == "{}" }) }
+        verify(exactly = 0) { graphEmitter.sendMessage(any()) }
         verify(exactly = 0) { ledger.post(any()) }
+    }
+
+    @Test
+    fun `graph reference uses only the dedicated topic`(): Unit = runBlocking {
+        every { graphEmitter.sendMessage(any()) } returns Uni.createFrom().voidItem()
+        publisher.publish(command().copy(eventType = "lending.graph.guarantee.approved", payload = graphPayload))
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+        verify(exactly = 1) { graphEmitter.sendMessage(match { it.payload == graphPayload }) }
+    }
+
+    @Test
+    fun `graph reference with an extra field cannot publish`(): Unit = runBlocking {
+        val payload = graphPayload.dropLast(1) + ",\"partyId\":\"$partyId\"}"
+        val result = runCatching {
+            publisher.publish(command().copy(eventType = "lending.graph.guarantee.approved", payload = payload))
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Invalid lending graph reference schema")
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+        verify(exactly = 0) { graphEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `oversized graph reference cannot publish`(): Unit = runBlocking {
+        val result = runCatching {
+            publisher.publish(
+                command().copy(eventType = "lending.graph.guarantee.approved", payload = "x".repeat(513)),
+            )
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("payload budget")
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+        verify(exactly = 0) { graphEmitter.sendMessage(any()) }
+    }
+
+    @Test
+    fun `unknown graph event fails closed before either topic`(): Unit = runBlocking {
+        val result = runCatching {
+            publisher.publish(
+                command().copy(eventType = "lending.graph.unknown", payload = "{}"),
+            )
+        }
+        assertThat(result.exceptionOrNull()).isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("Unknown lending graph event type")
+        verify(exactly = 0) { emitter.sendMessage(any()) }
+        verify(exactly = 0) { graphEmitter.sendMessage(any()) }
     }
 
     @Test

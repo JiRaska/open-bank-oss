@@ -14,7 +14,8 @@ info:
   # 1.24.0 -> 1.25.0: additive only — GET/PUT /api/v1/parties/{id}/aml-profile (the personal AML
   # profile, AML Act §9 + FATCA/CRS self-certification) and the party detail documents the derived
   # pepFlag/pepCategory/fatcaStatus/crsStatus facts. Read off live origin/main (1.24.0).
-  version: 1.25.0
+  # 1.25.0 -> 1.26.0: additive, boolean-only Lending guarantor identity proof.
+  version: 1.26.0
   description: Legal entity and individual party management with document storage.
   license:
     name: Apache-2.0
@@ -113,6 +114,34 @@ paths:
           description: Missing or invalid credentials
         '403':
           description: Caller lacks a permitted role
+
+  /api/v1/parties/lending-guarantor-identity/verify:
+    post:
+      tags: [Parties]
+      summary: Verify a prospective guarantor's current Party identity state
+      description: >-
+        Internal boolean-only check for the dedicated openbank-lending-graph service account.
+        True means a real customer Party is active, KYC-approved and AML-cleared at read time.
+        It does not prove consent, an enforceable guarantee or the signed document; Lending
+        must verify those separately. Unknown or ineligible parties return verified=false.
+      operationId: verifyLendingGuarantorIdentity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LendingGuarantorIdentityRequest'
+      responses:
+        '200':
+          description: Boolean current-identity result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LendingGuarantorIdentityResponse'
+        '400':
+          description: Missing or invalid request
+        '403':
+          description: Caller is not the dedicated Lending graph service identity
 
   /api/v1/parties/{id}:
     get:
@@ -820,6 +849,16 @@ components:
             $ref: '#/components/schemas/ApiError'
 
   schemas:
+    LendingGuarantorIdentityRequest:
+      type: object
+      required: [partyId]
+      properties:
+        partyId: { type: string, format: uuid }
+    LendingGuarantorIdentityResponse:
+      type: object
+      required: [verified]
+      properties:
+        verified: { type: boolean }
     PartyDetail:
       type: object
       description: A party record. Only the AML-derived facts are enumerated here; other fields are unchanged.

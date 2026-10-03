@@ -127,6 +127,10 @@ object TopicProducers {
         // treasury-events-out. Its payloads also carry "sourceService": "treasury-service", so the
         // rows resolve AttributionSource.EVENT; this entry is the fallback and the coverage fact.
         "openbank.treasury.deal.events" to "treasury-service",
+        // #10266: openbank-lending-service/src/main/resources/application.yaml ->
+        // lending-graph-references-out. The bounded approved-guarantee pointer carries no
+        // "sourceService" (its field set is fixed at seven keys), so this entry IS the attribution.
+        "openbank.lending.graph.references" to "lending-service",
         // #8792: the four topics analytics-sink subscribes to that audit-service does not, added
         // when this table became the shared definition. Same rule as every row above — read off the
         // module that DECLARES the outgoing channel, not from the topic segment, which would have

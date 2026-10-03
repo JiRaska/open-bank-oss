@@ -51,7 +51,10 @@ class CreditRiskConsoleIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("lending-events-out").toMutableMap()
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "lending-events-out",
+                "lending-graph-references-out",
+            ).toMutableMap()
             props["quarkus.kafka.devservices.enabled"] = "false"
             props["openbank.outbox.dispatch-enabled"] = "false"
             return props
@@ -199,6 +202,7 @@ class CreditRiskConsoleIT {
                 statement.executeUpdate()
             }
             connection.createStatement().use { statement ->
+                // The resource uses Clock.systemUTC(); JDBC current_date follows the session time zone.
                 statement.executeUpdate(
                     """
                     INSERT INTO loan_provisioning(id, loan_id, period, as_of, outstanding_balance, currency,

@@ -4208,14 +4208,20 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/AccountServiceClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/BorrowerCreditClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/CreditOfferGateAdapters.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LendingGraphProofClients.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/LedgerRestClient.kt"
       - "src/main/kotlin/com/openbank/lending/infrastructure/client/ProductCatalogLoanProfileAdapter.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/persistence/repository/GraphGuaranteeRepositoryImpl.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingGraphWriterResource.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
       - "src/main/kotlin/**/*Kyc*.kt"
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/client/LendingGraphProofClients.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/persistence/repository/GraphGuaranteeRepositoryImpl.kt"
+      - "src/main/kotlin/com/openbank/lending/infrastructure/rest/LendingGraphWriterResource.kt"
     cardholder: []
   openbank-sanctions-service:
     auth_crypto_payment:

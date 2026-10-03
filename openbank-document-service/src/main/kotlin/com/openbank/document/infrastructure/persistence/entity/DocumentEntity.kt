@@ -51,6 +51,9 @@ class DocumentEntity {
     @field:Column(name = "case_ref")
     var caseRef: String? = null
 
+    @field:Column(name = "bank_scope")
+    var bankScope: String? = null
+
     @field:Column(name = "product_ref")
     var productRef: String? = null
 
