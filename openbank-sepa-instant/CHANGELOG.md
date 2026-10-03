@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.5...sepa-instant-v0.11.0) (2026-10-03)
+
+
+### Features
+
+* **sepa-instant:** validate SCT Inst amount and currency as kernel Money ([#11912](https://github.com/JiRaska/open-bank-oss/issues/11912)) ([5d753fa](https://github.com/JiRaska/open-bank-oss/commit/5d753fa9aaad5bd1c9e9b758e10afdb031c945c7))
+
 ## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.4...sepa-instant-v0.10.5) (2026-09-29)
 
 
