@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.1...sepa-payment-v0.17.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **sepa-payment:** refuse non-EUR submissions ([#11942](https://github.com/JiRaska/open-bank-oss/issues/11942)) ([3eeb4b4](https://github.com/JiRaska/open-bank-oss/commit/3eeb4b41f0cc2ba1073d3e250510917b67e8ac49)), closes [#11931](https://github.com/JiRaska/open-bank-oss/issues/11931)
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.0...sepa-payment-v0.17.1) (2026-10-03)
 
 

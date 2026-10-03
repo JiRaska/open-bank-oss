@@ -238,6 +238,12 @@ open class SettlementActivitiesImpl(
         audit(operation, settlement)
     }
 
+    override fun recordBalanceStateUnknown(settlementId: UUID): Unit = step(SettlementStep.RECORD_BALANCE_UNKNOWN) {
+        val settlement = settlementRepository.updateStatus(settlementId, SettlementStatus.BALANCE_STATE_UNKNOWN)
+        audit("settlement.balance-state-unknown", settlement, result = AuditResult.FAILURE)
+        log.errorf("Settlement %s requires reconciliation of its original balance movements", settlementId)
+    }
+
     override fun rejectSettlement(settlementId: UUID): Unit = step(SettlementStep.REJECT) {
         log.warnf("Rejecting settlement %s after compensation", settlementId)
         val settlement = settlementRepository.updateStatus(settlementId, SettlementStatus.REJECTED)

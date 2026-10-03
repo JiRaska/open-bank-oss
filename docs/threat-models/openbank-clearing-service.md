@@ -198,3 +198,13 @@ not change any existing request's outcome until explicitly flipped.
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
+- **2026-10-03** — Outbox moved onto the kernel outbox v2 repository (ADR-0327 phase 3, #11652):
+  `ClearingOutboxRepositoryImpl` extends `AbstractPanacheOutboxRepository`, which claims by
+  aggregate head (per-aggregate event order now holds under any replica count, including the
+  canary window), parks a failed head behind `next_attempt_at` backoff, and batches `markSent`.
+  `V11__outbox_v2.sql` is additive only (`next_attempt_at` column + two partial indexes,
+  `IF NOT EXISTS`). No new flow, surface, principal or data class: the outbox write still joins
+  `ClearingBatchRepository.settleWithEvents`'s single transaction (T on the batch/items/event
+  triple unchanged — `ClearingSettleOutboxAtomicityIT`'s same-`xmin` proof still applies), and the
+  publish bulkhead widens from 1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch.
+  Rollback: revert the commit; the additive column and indexes are inert under the v1 repository.

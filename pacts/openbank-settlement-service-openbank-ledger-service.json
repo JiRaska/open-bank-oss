@@ -39,8 +39,8 @@
           "idempotencyKey": "settlement-book-55555555-5555-5555-5555-555555555555",
           "lines": [
             {
-              "amount": 750.00,
-              "baseAmount": 750.00,
+              "amount": 7.5E+2,
+              "baseAmount": 7.5E+2,
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
               "glAccountId": "a0000000-0000-0000-0000-000000000002",
@@ -48,8 +48,8 @@
               "subAccountId": "66666666-6666-6666-6666-666666666666"
             },
             {
-              "amount": 750.00,
-              "baseAmount": 750.00,
+              "amount": 7.5E+2,
+              "baseAmount": 7.5E+2,
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
               "glAccountId": "a0000000-0000-0000-0000-000000000002",

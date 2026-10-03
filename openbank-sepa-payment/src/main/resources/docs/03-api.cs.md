@@ -130,6 +130,7 @@ Sjednoceno přes `openbank-libs` `ApiError` (`correlationId`, `status`, `code`, 
 | HTTP | code | Kdy |
 |---|---|---|
 | 400 | (bad request) | prázdný `Idempotency-Key`, neplatná hodnota enumu |
+| 400 | `CURRENCY_NOT_ALLOWED` | jen při vytvoření (#11931): `currency` je platný kód ISO 4217, ale není to `EUR`. SCT je čistě eurové schéma (ekvivalentní důvod ISO 20022: `AM03` NotAllowedCurrency), takže `USD`, `CZK`, `GBP` a každá jiná měna než EUR se odmítne po kontrole `Money` a před rezervací Idempotency-Key — nic se neuloží, nescreenuje ani neemituje a klíč zůstává volný. Položka `violations[]` jmenuje pole `currency`; odmítnutá hodnota se nevrací. `eur` se převede na `EUR`. |
 | 401 | unauthorized | chybějící / neplatný token |
 | 403 | forbidden | chybí role, nebo OPA deny (enforce mód) |
 | 404 | `NOT_FOUND` | id platby neexistuje (`SepaPaymentNotFoundMapper`) |

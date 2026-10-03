@@ -98,6 +98,7 @@ Commitnutý kontrakt deklaruje minimální `ApiError` (`{ code, message }`). Map
 | HTTP | Kdy |
 |---|---|
 | 400 | vadné tělo / neplatná hodnota enumu |
+| 400 | `CURRENCY_NOT_ALLOWED` | vytvoření/úprava (#11938): `paymentType` je `SEPA_CREDIT` a `currency` není `EUR` (bez ohledu na velikost písmen). Příkaz SEPA_CREDIT se provádí jako SCT, které je čistě eurové, proto se odmítne už při vytvoření, místo aby selhával v každém termínu splatnosti. Nic se nevytvoří ani nezruší; položka `violations[]` jmenuje pole `currency` a odmítnutá hodnota se nevrací. Příkazy `DOMESTIC` / `INTERNAL` se nemění. |
 | 401 | chybějící / neplatný token (při zapnutém OIDC) |
 | 403 | OPA odmítne akci (při `authz.enforce=true`) |
 | 404 | id příkazu neexistuje (`NotFoundException`) |
