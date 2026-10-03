@@ -10,41 +10,35 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
-import au.com.dius.pact.provider.junitsupport.loader.PactBroker
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
+import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.wealth.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.test.security.TestIdentityAssociation
-import io.quarkus.test.security.TestSecurity
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
-import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
-import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
-import javax.sql.DataSource
 
 /**
- * Broker-sourced provider verification for wealth-service: the half that publishes results, so
- * `can-i-deploy` can answer about customer-edge. Its sibling [WealthPactFolderProviderVerificationTest]
- * reads pacts off disk and publishes nothing.
+ * Replays the consumer's missing-identity interaction against wealth-service (ADR-0279 #3): a
+ * call with no M2M identity must answer 401 UNAUTHORIZED before any handler runs. That refusal is
+ * what makes customer-edge, which proves ownership, the only way a customer reaches a holding.
  *
- * Gated on `pactbroker.url`: the PR lane blanks it because the broker has no public ingress
- * (ADR-0056), so this runs on main-push. The states live in [WealthPactStates] rather than in a
- * shared superclass, because a parent and a subclass both annotated `@QuarkusTest` fail with
- * `TestInstantiationException`.
+ * A separate class because [WealthPactFolderProviderVerificationTest] carries a class-level
+ * `@TestSecurity`, so a recorded 401 could never verify there. The two classes carry disjoint
+ * `@PactFilter` state patterns, so no interaction is replayed twice and none is skipped.
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
-@QuarkusTestResource(WealthPactBrokerProviderVerificationTest.InMemoryKafkaResource::class)
-@TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
+@QuarkusTestResource(WealthNegativeAuthProviderVerificationTest.InMemoryKafkaResource::class)
 @Provider("openbank-wealth-service")
-@PactBroker(enablePendingPacts = "true")
-@EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
+@PactFolder("../pacts")
+@PactFilter(WealthPactStates.NEGATIVE_AUTH_STATE)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class WealthPactBrokerProviderVerificationTest {
+class WealthNegativeAuthProviderVerificationTest {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("wealth-events-out")
@@ -54,12 +48,6 @@ class WealthPactBrokerProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
-
-    @Inject
-    lateinit var dataSource: DataSource
-
-    @Inject
-    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
@@ -71,27 +59,12 @@ class WealthPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        // The missing-identity interaction expects 401. The class-level @TestSecurity would
-        // otherwise authenticate that replay too and answer as if signed in.
-        if (context != null &&
-            context.interaction.providerStates.any { it.name == WealthPactStates.NEGATIVE_AUTH_STATE }
-        ) {
-            testIdentityAssociation.setTestIdentity(null)
-        }
         context?.verifyInteraction()
     }
 
-    @State(WealthPactStates.ACTIVE_STATE)
-    fun activeHolding() = WealthPactStates.activeHolding(dataSource)
-
-    @State(WealthPactStates.PLEDGED_STATE)
-    fun pledgedHolding() = WealthPactStates.pledgedHolding(dataSource)
-
-    @State(WealthPactStates.NO_HOLDING_STATE)
-    fun noHolding() = WealthPactStates.noHolding(dataSource)
-
     @State(WealthPactStates.NEGATIVE_AUTH_STATE)
     fun noValidM2mIdentity() {
-        // verifyPacts clears the authenticated test identity for this interaction.
+        // Intentionally empty: the state IS the absence of an identity, which this class provides
+        // by not declaring @TestSecurity. pact-jvm fails an interaction whose state has no handler.
     }
 }

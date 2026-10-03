@@ -28,6 +28,13 @@ import javax.sql.DataSource
 object WealthPactStates {
     const val ACTIVE_STATE = "the customer party holds an active declared holding"
     const val PLEDGED_STATE = "the customer party holds a declared holding pledged as lending collateral"
+    const val NO_HOLDING_STATE = "the customer party holds no declared holding"
+
+    /** The fleet-wide state name for a consumer's missing-identity interaction (ADR-0279 #3). */
+    const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+
+    /** Every state except [NEGATIVE_AUTH_STATE]: the authenticated twins replay exactly these. */
+    const val AUTHENTICATED_STATES = "^(?!$NEGATIVE_AUTH_STATE\$).*\$"
 
     private val PARTY_ID: UUID = UUID.fromString("11111111-1111-4111-8111-111111111111")
     private val HOLDING_ID: UUID = UUID.fromString("22222222-2222-4222-8222-222222222222")
@@ -40,10 +47,39 @@ object WealthPactStates {
 
     fun activeHolding(dataSource: DataSource) = reset(dataSource, ROW_ID, HOLDING_ID, VALUATION_ROW_ID, "ACTIVE", null)
 
+    /**
+     * Removes every holding the pact party owns, so a declare starts clean and the unknown id
+     * cannot have been created by an earlier interaction.
+     */
+    fun noHolding(dataSource: DataSource) {
+        dataSource.connection.use { connection ->
+            connection.autoCommit = false
+            connection.prepareStatement(
+                "DELETE FROM declared_holding_valuations WHERE holding_id IN " +
+                    "(SELECT holding_id FROM declared_holdings WHERE owner_party_id = ?)",
+            ).use { s ->
+                s.setObject(1, PARTY_ID)
+                s.executeUpdate()
+            }
+            connection.prepareStatement("DELETE FROM declared_holdings WHERE owner_party_id = ?").use { s ->
+                s.setObject(1, PARTY_ID)
+                s.executeUpdate()
+            }
+            connection.commit()
+        }
+    }
+
     fun pledgedHolding(dataSource: DataSource) =
         reset(dataSource, PLEDGED_ROW_ID, PLEDGED_HOLDING_ID, PLEDGED_VALUATION_ROW_ID, "PLEDGED", LOAN_ID)
 
-    private fun reset(dataSource: DataSource, rowId: Long, holdingId: UUID, valuationRowId: Long, status: String, loanId: UUID?) {
+    private fun reset(
+        dataSource: DataSource,
+        rowId: Long,
+        holdingId: UUID,
+        valuationRowId: Long,
+        status: String,
+        loanId: UUID?,
+    ) {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             connection.delete("DELETE FROM declared_holding_valuations WHERE holding_id = ?", holdingId)
@@ -71,11 +107,10 @@ object WealthPactStates {
         }
     }
 
-    private fun Connection.delete(sql: String, holdingId: UUID) =
-        prepareStatement(sql).use { s ->
-            s.setObject(1, holdingId)
-            s.executeUpdate()
-        }
+    private fun Connection.delete(sql: String, holdingId: UUID) = prepareStatement(sql).use { s ->
+        s.setObject(1, holdingId)
+        s.executeUpdate()
+    }
 
     private val VALUED_AT: LocalDate = LocalDate.of(2026, 1, 15)
 

@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.wealth.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -32,6 +33,9 @@ import javax.sql.DataSource
  * Its broker twin is [WealthPactBrokerProviderVerificationTest]. Without the broker half the
  * provider would never publish a verification result, and `can-i-deploy` could not answer about
  * customer-edge at all.
+ *
+ * The class-level `@TestSecurity` would authenticate the recorded 401 too, so that one interaction
+ * is filtered out here and replayed by [WealthNegativeAuthProviderVerificationTest].
  */
 @QuarkusTest
 @QuarkusTestResource(PostgresTestResource::class)
@@ -39,6 +43,7 @@ import javax.sql.DataSource
 @TestSecurity(user = "service-account-openbank-edge", roles = ["ROLE_API"])
 @Provider("openbank-wealth-service")
 @PactFolder("../pacts")
+@PactFilter(WealthPactStates.AUTHENTICATED_STATES)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class WealthPactFolderProviderVerificationTest {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -72,4 +77,7 @@ class WealthPactFolderProviderVerificationTest {
 
     @State(WealthPactStates.PLEDGED_STATE)
     fun pledgedHolding() = WealthPactStates.pledgedHolding(dataSource)
+
+    @State(WealthPactStates.NO_HOLDING_STATE)
+    fun noHolding() = WealthPactStates.noHolding(dataSource)
 }

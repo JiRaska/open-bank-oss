@@ -86,6 +86,7 @@ class CustomerEdgeWealthPactConsumerTest {
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-wealth-service")
     fun declareHolding(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_HOLDING_STATE)
         .uponReceiving("POST a customer-declared holding for the customer party")
         .path("/api/v1/holdings")
         .method("POST")
@@ -182,12 +183,24 @@ class CustomerEdgeWealthPactConsumerTest {
 
     @Pact(consumer = "openbank-customer-edge", provider = "openbank-wealth-service")
     fun unknownHolding(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NO_HOLDING_STATE)
         .uponReceiving("GET a holding the bank does not hold")
         .path("/api/v1/holdings/$UNKNOWN_HOLDING_ID")
         .method("GET")
         .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
         .willRespondWith()
         .status(404)
+        .toPact()
+
+    @Pact(consumer = "openbank-customer-edge", provider = "openbank-wealth-service")
+    fun missingIdentity(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given(NEGATIVE_AUTH_STATE)
+        .uponReceiving("GET the declared holdings with no M2M identity")
+        .path("/api/v1/holdings")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(401)
         .toPact()
 
     @Test
@@ -260,6 +273,21 @@ class CustomerEdgeWealthPactConsumerTest {
         assertThat(resource(mockServer).get(UNKNOWN_HOLDING_ID).status).isEqualTo(404)
     }
 
+    /**
+     * The edge always sends its M2M token, so this one is driven with a bare request: the
+     * contract it records is that wealth-service refuses a caller with no identity (ADR-0279 #3),
+     * which is what makes the edge the only way a customer reaches a holding.
+     */
+    @Test
+    @PactTestFor(pactMethod = "missingIdentity")
+    fun `the provider answers 401 UNAUTHORIZED to a caller with no identity`(mockServer: MockServer) {
+        val connection = java.net.URI("${mockServer.getUrl()}/api/v1/holdings").toURL()
+            .openConnection() as java.net.HttpURLConnection
+        connection.setRequestProperty("X-Customer-Party-Id", PARTY_ID)
+
+        assertThat(connection.responseCode).isEqualTo(401)
+    }
+
     private fun resource(mockServer: MockServer): CustomerHoldingsResource {
         val upstream = UpstreamClient().apply {
             tokenEndpointBase = "http://127.0.0.1:${tokenStub.address.port}"
@@ -276,13 +304,12 @@ class CustomerEdgeWealthPactConsumerTest {
     private fun PactDslWithState.readById(id: String, status: String) =
         uponReceiving("GET the holding $id to prove the customer owns it").readById(id, status)
 
-    private fun PactDslRequestWithoutPath.readById(id: String, status: String) =
-        path("/api/v1/holdings/$id")
-            .method("GET")
-            .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
-            .willRespondWith()
-            .status(200)
-            .body(newJsonBody { h -> holding(h, status) }.build())
+    private fun PactDslRequestWithoutPath.readById(id: String, status: String) = path("/api/v1/holdings/$id")
+        .method("GET")
+        .headers(mapOf("X-Customer-Party-Id" to PARTY_ID))
+        .willRespondWith()
+        .status(200)
+        .body(newJsonBody { h -> holding(h, status) }.build())
 
     private companion object {
         const val PARTY_ID = "11111111-1111-4111-8111-111111111111"
@@ -291,6 +318,8 @@ class CustomerEdgeWealthPactConsumerTest {
         const val UNKNOWN_HOLDING_ID = "99999999-9999-4999-8999-999999999999"
         const val ACTIVE_STATE = "the customer party holds an active declared holding"
         const val PLEDGED_STATE = "the customer party holds a declared holding pledged as lending collateral"
+        const val NEGATIVE_AUTH_STATE = "no valid M2M identity is presented"
+        const val NO_HOLDING_STATE = "the customer party holds no declared holding"
         const val DATE = "\\d{4}-\\d{2}-\\d{2}"
         const val SOURCES = "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
 
