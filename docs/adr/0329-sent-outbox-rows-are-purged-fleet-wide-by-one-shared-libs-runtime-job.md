@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [libs, database, privacy-gdpr]
 summary: "SENT outbox rows are deleted after 7 days by one shared libs-runtime job over every SentOutboxRetention bean, v1 and v2 outboxes alike; an enforced gate makes opting out a reasoned exemption."
-followup: "lending, risk-engine and incentive outboxes are exempt pending their own decisions (listed in check-outbox-sent-retention.py)"
+followup: "#11900, #11901, #11902 — lending, risk-engine and incentive outboxes are exempt from SENT retention pending their own decisions"
 ---
 
 # ADR-0329 — SENT outbox rows are purged fleet-wide by one shared libs-runtime job
