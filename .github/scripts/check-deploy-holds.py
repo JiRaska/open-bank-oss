@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Block GitOps image pin changes for services under a governance deploy hold."""
 
 import argparse
@@ -7,14 +6,13 @@ import contextlib
 import io
 import json
 import os
-from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import yaml
-
 
 RULES = "openbank-libs/governance/rules.yaml"
 GITOPS = "openbank-infra/gitops/"
@@ -68,18 +66,19 @@ def holds(text, allow_absent=False):
 
 
 def git(root, *args):
-    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True)
+    result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, check=False)
     if result.returncode:
         raise InvalidHold(f"git {' '.join(args)} failed: {result.stderr.decode(errors='replace').strip()}")
     return result.stdout
 
 
 def at_base(root, base, path):
-    result = subprocess.run(["git", "-C", str(root), "show", f"{base}:{path}"], capture_output=True)
+    result = subprocess.run(["git", "-C", str(root), "show", f"{base}:{path}"],
+                            capture_output=True, check=False)
     if result.returncode:
         # A genuinely new file has no entry in the base tree.
         exists = subprocess.run(["git", "-C", str(root), "cat-file", "-e", f"{base}:{path}"],
-                                capture_output=True)
+                                capture_output=True, check=False)
         if exists.returncode:
             return ""
         raise InvalidHold(f"cannot read {path} at {base}")
@@ -200,6 +199,42 @@ def check(root, base):
     return 1 if violations else 0
 
 
+def strict_required_checks(rules):
+    """A held deploy needs GitHub to invalidate green checks after main moves."""
+    if not isinstance(rules, list):
+        raise InvalidHold("live branch rules response is not a list")
+    status_rules = [rule for rule in rules if isinstance(rule, dict)
+                    and rule.get("type") == "required_status_checks"]
+    if not status_rules:
+        raise InvalidHold("main has no live required-status-checks rule")
+    return all(isinstance(rule.get("parameters"), dict)
+               and rule["parameters"].get("strict_required_status_checks_policy") is True
+               for rule in status_rules)
+
+
+def require_live_strict(root, base, repo):
+    current = holds((root / RULES).read_text(encoding="utf-8"))
+    previous = holds(at_base(root, base, RULES), allow_absent=True) if base else {}
+    if not (current or previous):
+        print("deploy holds: none; live strict check not needed")
+        return
+    try:
+        result = subprocess.run(["gh", "api", f"repos/{repo}/rules/branches/main"],
+                                capture_output=True, text=True, timeout=30, check=False)
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise InvalidHold(f"cannot read live main protection: {error}") from error
+    if result.returncode:
+        raise InvalidHold(f"cannot read live main protection: gh api exited {result.returncode}")
+    try:
+        live_rules = json.loads(result.stdout)
+    except json.JSONDecodeError as error:
+        raise InvalidHold("live main protection response is not JSON") from error
+    if not strict_required_checks(live_rules):
+        raise InvalidHold("deploy hold requires strict up-to-date checks on main before it can merge; "
+                          "an older green auto-deploy PR would otherwise remain mergeable")
+    print("deploy hold: live main protection requires current-base checks")
+
+
 def self_test():
     # run-gates gives self-tests a scratch index for the real checkout. The
     # fixture is its own repository and must use its own index.
@@ -293,6 +328,35 @@ def self_test():
             pass
         else:
             raise AssertionError("malformed hold passed")
+        strict_rule = {"type": "required_status_checks", "parameters": {
+            "required_status_checks": [{"context": "Validate manifests"}],
+            "strict_required_status_checks_policy": True}}
+        assert strict_required_checks([strict_rule])
+        assert not strict_required_checks([{**strict_rule, "parameters": {
+            **strict_rule["parameters"], "strict_required_status_checks_policy": False}}])
+        try:
+            strict_required_checks([])
+        except InvalidHold:
+            pass
+        else:
+            raise AssertionError("missing live status-check rule passed")
+        from unittest.mock import patch
+        good = subprocess.CompletedProcess([], 0, stdout=json.dumps([strict_rule]), stderr="")
+        with patch("subprocess.run", return_value=good):
+            require_live_strict(root, None, "example/repo")
+        bad_rule = {**strict_rule, "parameters": {
+            **strict_rule["parameters"], "strict_required_status_checks_policy": False}}
+        bad = subprocess.CompletedProcess([], 0, stdout=json.dumps([bad_rule]), stderr="")
+        with patch("subprocess.run", return_value=bad):
+            try:
+                require_live_strict(root, None, "example/repo")
+            except InvalidHold:
+                pass
+            else:
+                raise AssertionError("active hold passed without live strict checks")
+        rule.write_text("deploy_holds:\n  services: {}\n")
+        with patch("subprocess.run", side_effect=AssertionError("empty hold queried GitHub")):
+            require_live_strict(root, None, "example/repo")
     print("deploy hold self-test passed")
 
 
@@ -306,6 +370,9 @@ def main():
     parser.add_argument("--list-holds", action="store_true",
                         help="emit held services for the pre-cap reconcile filter")
     parser.add_argument("--rules-ref", help="read hold policy from this Git ref (live main)")
+    parser.add_argument("--enforce-live-strict", action="store_true",
+                        help="require live strict main protection while a hold is proposed or active")
+    parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss"))
     args = parser.parse_args()
     try:
         if args.self_test:
@@ -325,9 +392,14 @@ def main():
             if os.environ.get("GITHUB_EVENT_NAME") == "push":
                 entries = holds((args.root / RULES).read_text(encoding="utf-8"))
                 print(f"deploy holds: {len(entries)} service(s); push run has no PR diff")
+                if args.enforce_live_strict:
+                    require_live_strict(args.root.resolve(), None, args.repo)
                 return 0
             raise InvalidHold("--base or PR_DIFF_BASE is required")
-        return check(args.root.resolve(), args.base)
+        result = check(args.root.resolve(), args.base)
+        if args.enforce_live_strict:
+            require_live_strict(args.root.resolve(), args.base, args.repo)
+        return result
     except (InvalidHold, OSError, UnicodeError) as error:
         print(f"::error::deploy hold check could not validate: {error}", file=sys.stderr)
         return 1
