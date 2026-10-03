@@ -86,8 +86,8 @@ allowed_reasons contains "admin-card-processing-simulate" if {
 # Reading a token list or a case is `cardprocessing.read`, already granted above and one role
 # wider: a support agent answering "why did my watch stop paying?" needs to see, not to act.
 allowed_reasons contains "operator-card-lifecycle-write" if {
-	input.principal.type == "HUMAN"
-	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-	role in input.principal.roles
-	input.action in {"cardprocessing.token", "cardprocessing.dispute"}
+    input.principal.type == "HUMAN"
+    some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    role in input.principal.roles
+    input.action in {"cardprocessing.token", "cardprocessing.dispute"}
 }

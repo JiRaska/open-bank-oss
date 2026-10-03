@@ -31,7 +31,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (subPath mounts do not hot-reload).
         # Kept in sync by gen-audit-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "d17232949c016aa4"
+        openbank.tech/policy-checksum: "49bf8fca808379dd"
     spec:
       serviceAccountName: audit-service
       securityContext:
@@ -43,7 +43,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: audit-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-951dcbab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-audit-service:sandbox-e47d51a7
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

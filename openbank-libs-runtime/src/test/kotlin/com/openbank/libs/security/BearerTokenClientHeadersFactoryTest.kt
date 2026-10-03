@@ -95,4 +95,22 @@ class BearerTokenClientHeadersFactoryTest {
 
         assertThat(result.getFirst("X-Correlation-ID")).isEqualTo("corr-outgoing")
     }
+
+    @Test
+    fun `a malformed inbound id is not forwarded - the id the request is logged under is`() {
+        val incoming = MultivaluedHashMap<String, String>().apply {
+            putSingle("X-Correlation-ID", "corr \"1\"\nnext")
+            putSingle("X-Request-ID", "r".repeat(65))
+        }
+        org.jboss.logging.MDC.put("correlationId", "corr-settled")
+        try {
+            val result = factoryWith(unresolvableProvider()).update(incoming, MultivaluedHashMap())
+
+            assertThat(result.getFirst("X-Correlation-ID")).isEqualTo("corr-settled")
+            // No settled request id on this thread: nothing is forwarded rather than the raw text.
+            assertThat(result.containsKey("X-Request-ID")).isFalse()
+        } finally {
+            org.jboss.logging.MDC.remove("correlationId")
+        }
+    }
 }

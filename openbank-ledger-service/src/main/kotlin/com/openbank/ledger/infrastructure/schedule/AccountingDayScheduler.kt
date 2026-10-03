@@ -18,6 +18,8 @@ import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.libs.persistence.lock.ClusterLock
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.MultiGauge
+import io.micrometer.core.instrument.Tags
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
 import jakarta.enterprise.context.ApplicationScoped
@@ -26,6 +28,7 @@ import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Duration
+import java.time.Instant
 import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -75,6 +78,13 @@ import java.util.concurrent.atomic.AtomicInteger
  * (`openbank-infra/gitops/components/observability/prometheus-rules-accounting-day.yaml`) alerts
  * on it being non-zero. Normal residence in CUTOFF is ~6h (midnight tick → 06:00 tie-out), so
  * the default threshold of 8h means "the 06:00 run did not deliver an OK verdict".
+ *
+ * The count alone cannot tell a SECOND stuck day from the first (#11680: 2026-07-31 held
+ * the count at 1 for weeks, so any other day that got stuck would have changed nothing a rule
+ * could see). `openbank.ledger.accounting_day.stuck_cutoff_age_seconds` therefore publishes one
+ * series per stuck day, labelled `business_date`, and the rule alerts per series. Cardinality is
+ * bounded by the stuck days themselves; a day that leaves CUTOFF drops its row on the next tick.
+ * On a cold pod the family is ABSENT (no rows) until the first tick, never a sentinel value.
  */
 @ApplicationScoped
 class AccountingDayScheduler(
@@ -98,6 +108,9 @@ class AccountingDayScheduler(
     @Inject
     lateinit var meterRegistry: MeterRegistry
 
+    @Inject
+    lateinit var tieOutScheduler: TieOutScheduler
+
     // Nullable, not `lateinit` — a money-path job must never fail because its observability
     // wiring was not initialised (same reasoning as TieOutScheduler).
     private var liveness: WorkflowLivenessRecorder? = null
@@ -109,6 +122,9 @@ class AccountingDayScheduler(
      */
     private val stuckCutoffDays = AtomicInteger(0)
 
+    /** One row per stuck day; null until startup registered it (never fails the tick). */
+    private var stuckCutoffAge: MultiGauge? = null
+
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
         Gauge.builder(STUCK_GAUGE, stuckCutoffDays) { it.get().toDouble() }
@@ -117,6 +133,12 @@ class AccountingDayScheduler(
                     "tie-out never delivered an OK verdict for them (ADR-0207). Non-zero pages.",
             )
             .strongReference(true)
+            .register(meterRegistry)
+        stuckCutoffAge = MultiGauge.builder(STUCK_AGE_GAUGE)
+            .description(
+                "Seconds each stuck accounting day (label business_date) had spent in CUTOFF at the " +
+                    "last reconcile tick — one series per day past the threshold (ADR-0207).",
+            )
             .register(meterRegistry)
     }
 
@@ -199,11 +221,16 @@ class AccountingDayScheduler(
      * produced while the day could still change is a snapshot, not evidence.
      */
     private suspend fun tieOutEligibleDays() {
+        val reRunBudget = AtomicInteger(maxCatchUpDays)
         accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF).forEach { day ->
             runStep("tie-out", day.businessDate) {
-                val run = tieOutRunRepository.findLatestFor(day.businessDate) ?: return@runStep
                 val cutoffAt = day.cutoffAt ?: return@runStep
-                if (run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
+                val run = tieOutRunRepository.findLatestFor(day.businessDate)
+                if (needsPostCutoffRun(run?.runAt, cutoffAt)) {
+                    requestTieOut(day.businessDate, cutoffAt, reRunBudget)
+                    return@runStep
+                }
+                if (run != null && run.status == TieOutRunStatus.OK && !run.runAt.isBefore(cutoffAt)) {
                     accountingDayUseCase.transition(
                         TransitionAccountingDayCommand(
                             businessDate = day.businessDate,
@@ -222,17 +249,48 @@ class AccountingDayScheduler(
         }
     }
 
+    /**
+     * A CUTOFF day has no verdict recorded at/after its cutoff. A run that PREDATES the cutoff
+     * can never be superseded by [TieOutScheduler]'s daily catch-up (it only moves forward past
+     * the latest `as_of`), so a day cut off late — e.g. opened and cut off by an operator weeks
+     * after its business date — would sit in CUTOFF forever. With no run at all, the normal
+     * 06:00 path gets the stuck-cutoff window to deliver first, so the cadence is unchanged.
+     * A post-cutoff verdict of any status (BREAK/ERROR included) stops re-requests: those stay
+     * visible through the stuck gauge, never through a re-run loop.
+     */
+    private fun needsPostCutoffRun(lastRunAt: Instant?, cutoffAt: Instant): Boolean = when {
+        lastRunAt == null -> cutoffAt.isBefore(accountingClock.instant().minus(Duration.ofHours(stuckCutoffHours)))
+        else -> lastRunAt.isBefore(cutoffAt)
+    }
+
+    /** Bounded per tick by [maxCatchUpDays]; the day transitions on the next tick that sees the verdict. */
+    private suspend fun requestTieOut(date: LocalDate, cutoffAt: Instant, budget: AtomicInteger) {
+        if (budget.getAndDecrement() <= 0) return
+        log.infof("Accounting day %s has no tie-out verdict after its cutoff %s — requesting one", date, cutoffAt)
+        tieOutScheduler.runTieOutFor(date)
+    }
+
     /** Re-publish the count of days sitting in CUTOFF longer than the threshold. */
     private suspend fun publishStuckCutoff() {
-        val threshold = accountingClock.instant().minus(Duration.ofHours(stuckCutoffHours))
+        val now = accountingClock.instant()
+        val threshold = now.minus(Duration.ofHours(stuckCutoffHours))
         val stuck = accountingDayRepository.findInStatus(AccountingDayStatus.CUTOFF)
             .filter { day -> day.cutoffAt?.isBefore(threshold) == true }
         stuckCutoffDays.set(stuck.size)
+        stuckCutoffAge?.register(
+            stuck.map { day ->
+                MultiGauge.Row.of(
+                    Tags.of(BUSINESS_DATE_TAG, day.businessDate.toString()),
+                    Duration.between(day.cutoffAt, now).seconds.toDouble(),
+                )
+            },
+            true,
+        )
         stuck.forEach { day: AccountingDayRecord ->
             log.warnf(
-                "Accounting day %s has been in CUTOFF since %s (over %dh) — its tie-out has not " +
-                    "delivered an OK verdict; investigate the 06:00 run, then drive the day " +
-                    "forward via the operator API once resolved",
+                "Accounting day %s has been in CUTOFF since %s (over %dh) — no OK tie-out run " +
+                    "recorded after its cutoff; the daily tie-out re-checks it at 06:00, so a " +
+                    "persisting WARN means that re-check found a BREAK or ERROR — investigate",
                 day.businessDate,
                 day.cutoffAt,
                 stuckCutoffHours,
@@ -261,6 +319,10 @@ class AccountingDayScheduler(
         const val WORKFLOW_NAME = "ledger-accounting-day"
 
         const val STUCK_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_days"
+
+        const val STUCK_AGE_GAUGE = "openbank.ledger.accounting_day.stuck_cutoff_age_seconds"
+
+        const val BUSINESS_DATE_TAG = "business_date"
 
         /**
          * Actor recorded on scheduler-driven transitions. Distinct from any JWT principal so an

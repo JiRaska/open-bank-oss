@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: card-processing-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "b9ea246c817752d7"
+    openbank.tech/policy-checksum: "e08782a433c25181"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -677,10 +677,10 @@ data:
     # Reading a token list or a case is `cardprocessing.read`, already granted above and one role
     # wider: a support agent answering "why did my watch stop paying?" needs to see, not to act.
     allowed_reasons contains "operator-card-lifecycle-write" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	input.action in {"cardprocessing.token", "cardprocessing.dispute"}
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        input.action in {"cardprocessing.token", "cardprocessing.dispute"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1021,12 +1021,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse

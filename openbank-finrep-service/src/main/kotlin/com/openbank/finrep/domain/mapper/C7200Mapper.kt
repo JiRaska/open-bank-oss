@@ -113,7 +113,13 @@ object C7200Mapper {
                     add(cell(row, COL_VALUE, label, null, gap ?: NOT_SPLIT_REASON))
                 }
         }
-        return CorepTemplate(TEMPLATE_ID, asOf, cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })))
+        return CorepTemplate(
+            TEMPLATE_ID,
+            asOf,
+            cells.sortedWith(compareBy({ it.rowRef }, { it.colRef })),
+            sourceRunId = result?.runId,
+            provenance = result?.provenance,
+        )
     }
 
     /**

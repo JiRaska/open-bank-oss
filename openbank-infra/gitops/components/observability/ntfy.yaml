@@ -24,6 +24,9 @@ data:
     # Cluster-internal, no ingress (ADR-0056) → publishing needs no token.
     auth-default-access: "read-write"
     behind-proxy: true
+    # /metrics for servicemonitor-observability-stack.yaml (ntfy_messages_published,
+    # subscribers, HTTP errors) — the last hop of every page was unmeasured.
+    enable-metrics: true
     attachment-cache-dir: ""
 ---
 apiVersion: apps/v1
@@ -50,6 +53,12 @@ spec:
       app.kubernetes.io/name: ntfy
   template:
     metadata:
+      annotations:
+        # ntfy reads server.yml only at start and a ConfigMap edit does not roll the pod.
+        # `enable-metrics` (#11659) therefore stayed inert: /metrics answered the web UI's
+        # HTML and the new ServiceMonitor reported TargetDown. Bump this value whenever
+        # server.yml changes.
+        openbank.io/config-revision: "2026-10-01-enable-metrics"
       labels:
         app.kubernetes.io/name: ntfy
         app.kubernetes.io/part-of: observability

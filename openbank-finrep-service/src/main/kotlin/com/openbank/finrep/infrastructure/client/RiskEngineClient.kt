@@ -77,6 +77,8 @@ data class CapitalResponse(
     val asOf: String,
     val parameterSetId: String,
     val parameterSetVersion: String,
+    /** `synthetic` | `production` (ADR-0313 D13); required by the risk engine's contract, so absence fails loudly. */
+    val provenance: String,
     val currencies: List<CurrencyCapitalResponse>,
     /** The book in CZK at the ČNB fixing (risk-engine API 1.11.0); null with [totalNotStated]. */
     val total: CurrencyCapitalResponse?,
@@ -133,6 +135,8 @@ data class LiquidityResponse(
     val asOf: String,
     val parameterSetId: String,
     val parameterSetVersion: String,
+    /** `synthetic` | `production` (ADR-0313 D13); required by the risk engine's contract, so absence fails loudly. */
+    val provenance: String,
     val currencies: List<CurrencyLiquidityResponse>,
     /** All currencies combined in CZK at the ČNB fixing (risk-engine API 1.13.0); null with [totalNotStated]. */
     val total: CurrencyLiquidityResponse?,
@@ -172,6 +176,7 @@ class RiskEngineCapitalAdapter(
                 currencyCount = c.currencies.size,
                 unclassifiedBalances = c.unclassified.size,
                 totalNotStated = c.totalNotStated,
+                provenance = c.provenance,
             ),
         )
     }
@@ -215,6 +220,7 @@ class RiskEngineCapitalAdapter(
                 hqlaStock = hqla?.stock,
                 netOutflows = lcr?.netOutflows,
                 lcrRatio = lcr?.ratio,
+                provenance = l.provenance,
             ),
         )
     }

@@ -28,7 +28,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 
 /**
  * Provider replay of finrep's snapshot-list, capital and liquidity pact (ADR-0313 D6) — the risk engine's
- * first provider contract. Reads `pacts/` (`@PactFolder`, git-pact, ADR-0063) and replays every
+ * first provider contract — and of treasury's curve-set reads for the simulated quotes (ADR-0315 D9). Reads `pacts/` (`@PactFolder`, git-pact, ADR-0063) and replays every
  * interaction whose provider is `openbank-risk-engine` against the running Quarkus test instance
  * and a real Postgres. Always runs on a PR, no broker: this is the half that catches a wrong PATH,
  * which the consumer's mock server cannot (#2269).
@@ -83,6 +83,33 @@ class RiskEnginePactProviderVerificationTest {
     /** C 72.00's liquidity interaction reads the same seeded run (the same book and report date). */
     @State(CapitalPactState.LIQUIDITY_NAME)
     fun tiedOutRunWithLiquidity(): Map<String, Any> = CapitalPactState.seed(ledger)
+
+    /** treasury's simulated quotes (ADR-0315 D9) read the newest curve set and its pillars. */
+    @State(CurveSetPactState.NAME)
+    fun curveSetWithCzeonia(): Map<String, Any> = CurveSetPactState.seed()
+}
+
+/**
+ * treasury-service's provider state: a curve set holding ONE curve, CZEONIA — the curve treasury
+ * reads by name for CZK — uploaded through the real endpoint so it is also the newest set when the
+ * list interaction asks for `limit=1`. Its id is handed to the pact's `${'$'}{curveSetId}`.
+ */
+object CurveSetPactState {
+    const val NAME = "a curve set with a CZEONIA curve exists"
+
+    fun seed(): Map<String, Any> {
+        val id: String = given().contentType("application/json")
+            .body(
+                """{"asOf":"2026-09-21","provenance":"synthetic","source":"pact provider state",
+                   "curves":{"CZEONIA":[{"tenor":"ON","rate":0.035},{"tenor":"3M","rate":0.036},{"tenor":"1Y","rate":0.038}]}}""",
+            )
+            .`when`().post("/api/v1/risk/curve-sets")
+            .then().statusCode(HTTP_CREATED)
+            .extract().path("id")
+        return mapOf("curveSetId" to id)
+    }
+
+    private const val HTTP_CREATED = 201
 }
 
 /**

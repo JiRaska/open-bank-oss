@@ -18,8 +18,11 @@ import jakarta.inject.Inject
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.emptyOrNullString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
+import org.hamcrest.Matchers.not
+import org.hamcrest.Matchers.startsWith
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.time.LocalDate
@@ -72,6 +75,32 @@ class RiskSnapshotApiIT {
             count("SELECT count(*) FROM snapshot_position WHERE run_id = ? AND valid_date = DATE '2026-01-31'", id),
         )
             .isEqualTo(3)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `the manifest records the model versions and ledger cut-off and reads them back from the store`() {
+        ledger.inputs = Fixtures.tiedOut()
+
+        val id = create("2027-03-31").then().statusCode(201).extract().path<String>("id")
+
+        given().`when`().get("/api/v1/risk/snapshots/$id")
+            .then().statusCode(200)
+            .body("modelVersions.engineVersion", not(emptyOrNullString()))
+            .body("modelVersions.capitalSetId", equalTo("eu-crr3-sa"))
+            .body("modelVersions.liquiditySetId", equalTo("eu-2015-61-crr2"))
+            .body("modelVersions.minReservesSetId", equalTo("cnb-pmr"))
+            .body("modelVersions.minReservesSetVersion", equalTo("2"))
+            .body("modelVersions.irrbbShockSetVersion", startsWith("sha256:"))
+            .body("modelVersions.behaviouralModelId", equalTo("nmd-linear-core"))
+            .body("ledgerCutOff", not(emptyOrNullString()))
+        assertThat(
+            count(
+                "SELECT count(*) FROM snapshot_run WHERE id = ?::uuid AND ledger_cut_off <= recorded_at " +
+                    "AND capital_set_version IS NOT NULL AND liquidity_set_version IS NOT NULL",
+                id,
+            ),
+        ).isEqualTo(1)
     }
 
     @Test
@@ -147,6 +176,16 @@ class RiskSnapshotApiIT {
         ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1500.00")))
         val changed = create("2026-03-31").then().statusCode(201).extract().path<String>("id")
         assertThat(changed).isNotEqualTo(first)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `an asOf after the current business date is a 400 and today is accepted`() {
+        // The IT clock is fixed at 2030-01-01 (FixedClockForIntegrationTests).
+        val body = create("2030-01-02").then().statusCode(400).extract().asString()
+        assertThat(body).contains("business date")
+        ledger.inputs = Fixtures.tiedOut()
+        create("2030-01-01").then().statusCode(201)
     }
 
     @Test

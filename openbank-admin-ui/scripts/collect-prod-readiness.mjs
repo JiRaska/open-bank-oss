@@ -401,7 +401,9 @@ function scoreC3Api(short) {
 
 function scoreC4Data(short) {
   const d = svcDir(short)
-  const migs = findFiles(d, (e, full) => /^V\d+.*\.sql$/.test(e) && full.includes(`${path.sep}db${path.sep}migration${path.sep}`))
+  // Score source migrations only; Gradle copies must not change readiness evidence.
+  const migrationDir = path.join(d, 'src', 'main', 'resources', 'db', 'migration')
+  const migs = findFiles(migrationDir, (e, full) => /^V.*\.sql$/.test(e) && path.dirname(full) === migrationDir)
   const datastore = declaredDatastore(short)
   const stateless = isStateless(datastore)
   if (stateless && migs.length === 0) {

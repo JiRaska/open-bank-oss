@@ -2,22 +2,14 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.referral.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
-import jakarta.persistence.Column
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
-import java.time.Instant
 
 /**
- * `claimed_at` backs the atomic `FOR UPDATE SKIP LOCKED` claim in
- * [com.openbank.referral.infrastructure.persistence.repository.ReferralOutboxRepositoryImpl] —
- * added straight on this entity rather than the shared [PanacheOutboxEntity] (mapped by every
- * outbox-bearing service; a shared-entity migration would need every service migrated in
- * lockstep). Mirrors `DocumentOutboxEntity`.
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V6__outbox_v2.sql`.
  */
 @Entity
 @Table(name = "referral_outbox")
-class ReferralOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class ReferralOutboxEntity : PanacheOutboxEntityV2()

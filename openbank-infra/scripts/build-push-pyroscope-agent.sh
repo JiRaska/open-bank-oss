@@ -37,7 +37,10 @@ echo "    platform: ${PLATFORM}"
 echo "==> ECR login + buildx push"
 aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$ECR_REGISTRY" >/dev/null
 # Build context is docker/ so the Dockerfile's relative paths resolve like the kong image.
-docker buildx build --platform "$PLATFORM" -f "$DOCKERFILE" -t "$IMAGE" --push openbank-infra/docker/pyroscope-agent
+# --provenance=false --sbom=false: push ONE image manifest, never an OCI index (#11573).
+# A docker-container builder otherwise attaches a provenance attestation and pushes an index,
+# which the Kyverno SBOM policy resolves as linux/amd64 and denies. cosign-attest.sh refuses it.
+docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false -f "$DOCKERFILE" -t "$IMAGE" --push openbank-infra/docker/pyroscope-agent
 echo "==> pushed ${IMAGE}"
 
 # Sign + attest with Cosign (ADR-0029/0030 supply-chain) — same trust root and same shared

@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.consent.it.ConsentPostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -70,6 +71,9 @@ import javax.sql.DataSource
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-consent-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by ConsentNegativeAuthProviderVerificationTest, which boots
+// without @TestSecurity; under this class's identity they would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class ConsentPactProviderVerificationTest {
 
@@ -211,6 +215,32 @@ class ConsentPactProviderVerificationTest {
      * a separate grant from the EMAIL scope campaign's pact pins, so seeding one would not satisfy
      * the other.
      */
+    /**
+     * State for lending-service's `CreditOffersConsentPactConsumerTest`: the bank itself
+     * (`openbank`) is the grantee of a first-party CREDIT_OFFERS consent, which is what
+     * `RestCreditOffersConsentAdapter` asks about before a credit offer is shown (#8345).
+     */
+    @State("an ACTIVE CREDIT_OFFERS consent covers the pact lending party")
+    fun activeCreditOffersConsentExists() {
+        dataSource.connection.use { c ->
+            c.autoCommit = false
+            if (!rowExists(c, "SELECT 1 FROM consents WHERE id = ?::uuid", PACT_CREDIT_OFFERS_CONSENT_ID)) {
+                c.prepareStatement(INSERT_MARKETING_CONSENT_SQL).use { ps ->
+                    ps.setString(1, PACT_CREDIT_OFFERS_CONSENT_ID)
+                    ps.setString(2, PACT_LENDING_PARTY_ID)
+                    ps.setString(3, PACT_BANK_GRANTEE_ID)
+                    ps.executeUpdate()
+                }
+                c.prepareStatement("INSERT INTO consent_scopes (consent_id, scope) VALUES (?::uuid, ?)").use { ps ->
+                    ps.setString(1, PACT_CREDIT_OFFERS_CONSENT_ID)
+                    ps.setString(2, "CREDIT_OFFERS")
+                    ps.executeUpdate()
+                }
+                c.commit()
+            }
+        }
+    }
+
     @State("an ACTIVE MARKETING_COMMS_INAPP consent covers the pact engagement party")
     fun activeInAppConsentExists() {
         dataSource.connection.use { c ->
@@ -286,6 +316,11 @@ class ConsentPactProviderVerificationTest {
         const val PACT_CONSENTED_PARTY_ID = "c2c2c2c2-c2c2-c2c2-c2c2-c2c2c2c2c2c2"
         const val PACT_MARKETING_CONSENT_ID = "c4c4c4c4-c4c4-4c4c-8c4c-c4c4c4c4c4c4"
         const val PACT_MARKETING_GRANTEE_ID = "party-service:marketing-comms"
+
+        /** Must equal the ids in openbank-lending-service's CreditOffersConsentPactConsumerTest. */
+        const val PACT_CREDIT_OFFERS_CONSENT_ID = "c5c5c5c5-c5c5-4c5c-8c5c-c5c5c5c5c5c5"
+        const val PACT_LENDING_PARTY_ID = "c6c6c6c6-c6c6-4c6c-8c6c-c6c6c6c6c6c6"
+        const val PACT_BANK_GRANTEE_ID = "openbank"
 
         /** Must equal the ids in openbank-engagement-service's EngagementToConsentPactConsumerTest. */
         const val PACT_INAPP_CONSENT_ID = "e2e2e2e2-e2e2-4e2e-8e2e-e2e2e2e2e2e2"

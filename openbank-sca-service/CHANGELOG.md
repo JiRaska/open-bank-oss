@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.17.0...sca-service-v0.18.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.3...sca-service-v0.17.0) (2026-09-28)
 
 

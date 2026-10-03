@@ -163,6 +163,49 @@ class RiskMinReservesApiIT {
     }
 
     @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `period averaging under the shipped config - holdings and requirement not stated, coverage stated`() {
+        // Shipped config maps no ČNB current account, and no run exists on the 2026-10-31 base date.
+        snapshot("2026-11-01", "TIED_OUT")
+        snapshot("2026-11-02", "TIED_OUT")
+        val body: JsonNode = json.readTree(
+            given().queryParam("asOf", "2026-11-03").`when`().get("/api/v1/risk/min-reserves/periods/2026-11")
+                .then().statusCode(200).extract().asString(),
+        )
+
+        assertThat(body["calendarStatus"].asText()).isEqualTo("sample-unverified")
+        assertThat(body["notes"].map { it.asText() }.any { it.startsWith("SAMPLE / UNVERIFIED") }).isTrue()
+        assertThat(body["requirement"].isNull).isTrue()
+        assertThat(body["requirementNotStated"].asText()).contains("2026-10-31")
+        assertThat(body["averageHoldings"].isNull).isTrue() // never a stand-in zero
+        assertThat(body["averageNotStated"].asText()).contains("current account at the ČNB")
+        assertThat(body["daysWithData"].asInt()).isEqualTo(2)
+        assertThat(body["daysElapsed"].asInt()).isEqualTo(3)
+        assertThat(body["missingDays"].map { it.asText() }).containsExactly("2026-11-03")
+        assertThat(body["proposal"].isNull).isTrue()
+
+        val listed: JsonNode = json.readTree(
+            given().queryParam("asOf", "2026-11-15").`when`().get("/api/v1/risk/min-reserves/periods")
+                .then().statusCode(200).extract().asString(),
+        )
+        assertThat(listed["periods"].map { it["id"].asText() }).containsExactly("2026-11")
+        assertThat(listed["calendarStatus"].asText()).isEqualTo("sample-unverified")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `an unknown period is 404 and a malformed asOf is 400`() {
+        given().`when`().get("/api/v1/risk/min-reserves/periods/1999-01").then().statusCode(404)
+        given().queryParam("asOf", "tomorrow").`when`().get("/api/v1/risk/min-reserves/periods/2026-11")
+            .then().statusCode(400)
+    }
+
+    @Test
+    fun `an unauthenticated caller cannot read a maintenance period`() {
+        given().`when`().get("/api/v1/risk/min-reserves/periods/2026-11").then().statusCode(401)
+    }
+
+    @Test
     fun `an unauthenticated caller cannot read min reserves`() {
         given().`when`().get("/api/v1/risk/snapshots/00000000-0000-7000-8000-000000000001/min-reserves")
             .then().statusCode(401)

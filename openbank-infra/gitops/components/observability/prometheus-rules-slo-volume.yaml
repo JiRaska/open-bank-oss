@@ -1,0 +1,40 @@
+# Burn-rate alerts need a volume floor (2026-10-03).
+#
+# Pyrra's ErrorBudgetBurn compares the error ratio over a window with the budget. On a
+# service that sees almost no customer traffic the ratio is noise: in the sandbox,
+# openbank-treasury-latency had 15 customer requests in 30 days and ONE slow `POST /deals`
+# paged critical; sanctions-latency (89 requests) paged on 2 slow reads. Measured the same
+# day: all 44 money-path SLOs had < 1000 customer events in their 30-day window.
+#
+# The floor is derived, not tuned: an SLO whose window cannot hold even ONE tolerated bad
+# event cannot be burn-alerted meaningfully. Tolerated bad events = volume x (1 - target):
+#   latency SLOs, target 99   -> need >= 100 events
+#   availability SLOs, 99.9   -> need >= 1000 events
+# (targets are uniform per kind in pyrra-slo-money-path.yaml; check-slo-registry governs them).
+#
+# SLOBelowVolumeFloor carries the `slo` label and severity none, so it routes nowhere; the
+# Alertmanager inhibit rule in apps/kube-prometheus-stack.yaml suppresses ErrorBudgetBurn for
+# the same `slo` while it holds. The burn alert stays visible in Alertmanager as inhibited —
+# it is not deleted, and it pages again the moment real volume exists.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-slo-volume-floor
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.slo.volume-floor
+      rules:
+        - alert: SLOBelowVolumeFloor
+          expr: |
+            max by (slo) (traces_spanmetrics_calls:increase30d{slo=~".*-latency"}) < 100
+              or
+            max by (slo) (traces_spanmetrics_calls:increase30d{slo=~".*-availability"}) < 1000
+          for: 5m
+          labels:
+            severity: none
+            team: platform
+          annotations:
+            summary: "{{ $labels.slo }} has {{ $value | humanize }} customer events in 30d — below the volume a burn-rate alert can judge"

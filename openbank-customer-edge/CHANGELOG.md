@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.84.0...customer-edge-v0.85.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+* **customer-edge:** publish per-capability availability for the app ([#10016](https://github.com/JiRaska/open-bank-oss/issues/10016)) ([c14cb9b](https://github.com/JiRaska/open-bank-oss/commit/c14cb9ba36a482ac8938b5883620ea30a4e993fb))
+
 ## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.83.0...customer-edge-v0.84.0) (2026-09-29)
 
 
