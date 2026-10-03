@@ -7,6 +7,7 @@ It is early-stage software, not a licensed bank and not production-ready. Use de
 ## Explore
 - [Home](https://open-bank.tech/): Project, actual product views, community and iOS TestFlight signup
 - [Platform](https://open-bank.tech/platform.html): Complete code-derived module inventory, grouped by capability, with source revision and links
+- [Labs](https://open-bank.tech/labs.html): Shared banking kernel in openbank-libs, with module links and original artwork
 - [Source](https://github.com/JiRaska/open-bank-oss): Current implementation, licenses and roadmap
 - [Admin demo](https://admin.open-bank.tech): Authenticated operator portal
 
