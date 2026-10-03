@@ -35,7 +35,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "15"
+        openbank.tech/litellm-config-revision: "16"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -120,6 +120,11 @@ spec:
                   name: langfuse-secrets
                   key: LANGFUSE_SECRET_KEY
                   optional: true
+            # Presidio PII services (presidio.yaml) for the presidio guardrail in litellm-config.yaml.
+            - name: PRESIDIO_ANALYZER_API_BASE
+              value: http://presidio-analyzer.ai-platform.svc:3000
+            - name: PRESIDIO_ANONYMIZER_API_BASE
+              value: http://presidio-anonymizer.ai-platform.svc:3000
             - name: LANGFUSE_HOST
               value: http://langfuse.ai-platform.svc:3000
             # prisma-python caches its downloaded query engine under $HOME. Without this it
