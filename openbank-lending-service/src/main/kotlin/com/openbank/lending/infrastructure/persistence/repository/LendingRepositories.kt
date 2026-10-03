@@ -43,11 +43,6 @@ import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
 
-private fun mapStatusFilter(status: String): OriginationState =
-    OriginationState.entries.firstOrNull { it.name == status }
-        ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
-        ?: throw IllegalArgumentException("Unknown application status: $status")
-
 private val PROVISIONING_CLOSED_STATES = setOf(
     com.openbank.lending.domain.model.LoanStatus.CLOSED,
     com.openbank.lending.domain.model.LoanStatus.WRITTEN_OFF,
@@ -115,6 +110,11 @@ class LoanApplicationRepositoryImpl @Inject constructor(
             Array<Any?>::class.java,
         ).resultList
     }.map { rows -> foldApplicationSummaries(rows) }
+
+    private fun mapStatusFilter(status: String): OriginationState =
+        OriginationState.entries.firstOrNull { it.name == status }
+            ?: LegacyOriginationMigration.mapLegacyStatus(status, wasSubmitted = true)
+            ?: throw IllegalArgumentException("Unknown application status: $status")
 
     @WithSession
     override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> = sf.withSession { s ->

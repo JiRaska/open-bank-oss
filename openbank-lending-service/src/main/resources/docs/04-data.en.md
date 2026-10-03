@@ -9,8 +9,6 @@
 
 ## Tables
 
-Application status filters accept current `OriginationState` names and recognized legacy statuses through `LegacyOriginationMigration`; an unknown status is rejected instead of silently broadening a query. This mapping is shared by the repository read paths, without changing stored status values.
-
 | Table | Purpose | Key columns |
 |---|---|---|
 | `loan_application` | Origination — application in the four-eyes flow | `id`, `party_id`, `requested_amount`+`currency`, `nominal_annual_rate`, `term_periods`, `method`, `status`, `proposed_by` (maker), `decided_by` (checker), `decision_reason`, `created_at`, `decided_at` |
