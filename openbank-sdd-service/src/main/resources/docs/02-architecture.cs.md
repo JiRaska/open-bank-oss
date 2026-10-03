@@ -108,7 +108,7 @@ sequenceDiagram
   R-->>C: 201 / 200
 
   loop každých 5s (concurrentExecution = SKIP)
-    D->>DB: SELECT FROM sdd_outbox WHERE status IN (PENDING, FAILED) ORDER BY created_at LIMIT 25
+    D->>DB: claim the oldest due row per aggregate (FOR UPDATE SKIP LOCKED, status=DISPATCHING)
     D->>K: publish do openbank.sdd.event (key = aggregate_id, header ce-id = event_id)
     D->>DB: UPDATE sdd_outbox SET status = SENT
   end
@@ -116,7 +116,7 @@ sequenceDiagram
 
 **Garance outboxu (ADR-0050 / ADR-0003):**
 
-- **Jediný zapisovatel (N4)** — `concurrentExecution = SKIP` brání překryvu v rámci JVM a Deployment je pinnutý na `replicas: 1`; společně garantují, že řádek nárokuje právě jeden dispatcher. Řádky se zpracovávají sekvenčně, čímž se zachovává pořadí per-agregát. `FOR UPDATE SKIP LOCKED` je evidované zlepšení pro budoucí multi-writer topologii.
+- **Kernel outbox v2 (ADR-0327, #11874)** — repozitář je sdílený `AbstractPanacheOutboxRepository`. Každý claim bere jen nejstarší splatný řádek každého agregátu (`FOR UPDATE SKIP LOCKED`, označený `DISPATCHING`), takže pořadí per-agregát platí i při více dispatcherech; různé agregáty z jednoho claimu se publikují souběžně (`@Bulkhead(OutboxDispatch.SEND_CONCURRENCY)`). Jeden tick claimuje, dokud claim nic neodešle; neúspěšné řádky čekají s backoffem a řádek, který ve stavu `DISPATCHING` zanechal spadlý pod, se po uplynutí stale-claim okna převezme znovu. `concurrentExecution = SKIP` dál brání překryvu v rámci JVM.
 - **Partition key = aggregate_id (N2)** — každá událost jednoho mandátu padne na stejnou partition, čímž se zachová pořadí per-mandát.
 - **event_id jako idempotenční klíč (N3)** — nesen jako Kafka hlavičky `ce-id` / `idempotency-key`, takže at-least-once doručení konzumenti bezpečně deduplikují.
 - **Zpracování poison zpráv (N5)** — selhání publish jednotlivého řádku jsou izolovaná (`recoverWithUni` → `markFailed`); po `MAX_ATTEMPTS` (10) řádek přejde do terminálního stavu `DEAD`, je vyloučen z dotazu a emituje WARN, na který se napojí operátorský alert.
