@@ -4,6 +4,7 @@
 
 package com.openbank.audit.it
 
+import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.apache.kafka.clients.admin.Admin
 import org.apache.kafka.clients.admin.NewTopic
@@ -19,11 +20,12 @@ class AuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
         val settings = postgres.start()
         try {
             val kafka = RedpandaContainer(
-                DockerImageName.parse("redpandadata/redpanda:v24.1.2")
+                DockerImageName.parse(REDPANDA_IMAGE)
                     .asCompatibleSubstituteFor("docker.redpanda.com/redpandadata/redpanda"),
             )
             broker = kafka
             kafka.start()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(listOf(NewTopic(INPUT_TOPIC, 1, 1), NewTopic(DLQ_TOPIC, 1, 1)))
                     .all().get(20, TimeUnit.SECONDS)
@@ -44,11 +46,16 @@ class AuditKafkaTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     override fun stop() {
-        broker?.stop()
+        broker?.let {
+            it.stop()
+            TestInfrastructureEvidence.record("redpanda", REDPANDA_IMAGE, "stopped")
+        }
+        broker = null
         postgres.stop()
     }
 
     companion object {
+        private const val REDPANDA_IMAGE = "redpandadata/redpanda:v24.1.2"
         const val INPUT_TOPIC = "openbank.audit.ingestion-test"
         const val DLQ_TOPIC = "openbank.dlq.audit.audit-events-in"
     }

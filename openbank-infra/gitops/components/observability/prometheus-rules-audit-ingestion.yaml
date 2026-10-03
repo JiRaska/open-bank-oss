@@ -25,6 +25,9 @@ spec:
             severity: critical
             service: audit-service
           annotations:
+            # Driven by Kafka consumption, not by a scheduler: there is no period to
+            # size the window against.
+            subject_period: continuous
             summary: Audit ingestion failed
             description: >-
               Audit ingestion failed within the observation window. Inspect the consumer failure
