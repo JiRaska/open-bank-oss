@@ -55,3 +55,38 @@ data class LimitCheck(
         )
     }
 }
+
+/** The figures of one limit check, as recorded on a submit/approve transition. */
+data class LimitSnapshot(
+    val limit: BigDecimal,
+    val currency: String,
+    val exposureAfter: BigDecimal,
+    val headroomAfter: BigDecimal,
+)
+
+/**
+ * The limit note a submit/approve transition carries. The note is persisted as text, so [parse] is
+ * the single reader of the format [format] writes — the API derives structured figures from it
+ * instead of every client re-parsing English prose.
+ */
+object LimitNote {
+    private val PATTERN =
+        Regex(
+            """^limit (?<limit>-?[0-9.]+) (?<ccy>[A-Z]{3}), exposure after (?<after>-?[0-9.]+), headroom (?<headroom>-?[0-9.]+)$""",
+        )
+
+    fun format(check: LimitCheck): String =
+        "limit ${check.limit} ${check.currency}, exposure after ${check.exposureAfter}, headroom ${check.headroomAfter}"
+
+    /** The figures in a note [format] wrote, or null for any other note (a reason, a reference). */
+    fun parse(note: String?): LimitSnapshot? {
+        val m = note?.let { PATTERN.matchEntire(it.trim()) } ?: return null
+        fun group(name: String) = m.groups[name]!!.value
+        return LimitSnapshot(
+            BigDecimal(group("limit")),
+            group("ccy"),
+            BigDecimal(group("after")),
+            BigDecimal(group("headroom")),
+        )
+    }
+}

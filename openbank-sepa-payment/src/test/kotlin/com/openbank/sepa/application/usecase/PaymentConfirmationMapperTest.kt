@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -30,8 +31,7 @@ class PaymentConfirmationMapperTest {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob Creditor",
         creditorBic = "BNPAFRPPXXX",
-        amount = BigDecimal("125.50"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("125.50"), "EUR"),
         remittanceInfo = remittanceInfo,
         endToEndId = "E2E-CONF-0001",
         rejectReason = null,

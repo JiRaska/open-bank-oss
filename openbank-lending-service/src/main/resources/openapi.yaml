@@ -4,7 +4,10 @@ openapi: 3.1.0
 info:
   title: Lending Service API
   # 1.22.0 -> 1.23.0: additive — GET /api/v1/lending/risk/portfolio/summary and the
-  # CreditPortfolioSummary schema.
+  # CreditPortfolioSummary schema. Classified additive by the contract gate's own oasdiff run, so
+  # MINOR is the required class. 1.22.0 is what live origin/main holds; read in the same turn and
+  # 1.23.0 confirmed unused on this file, because a taken version is textually identical to a free
+  # one and nothing in a merge can tell them apart.
   # 1.24.0 -> 1.25.0: additive — GET /api/v1/lending/loan-book and the LoanBook /
   # LoanBookEntry / RemainingInstallment schemas (ADR-0314 D4, the risk engine's instrument model).
   # 1.26.0 -> 1.26.1: description-only — the ledger-backfill operations now name their roles
@@ -16,10 +19,12 @@ info:
   # .../voids/plan, .../voids, .../voids/{id}, .../voids/{id}/decide, .../voids/{id}/execute.
   # 1.28.0 -> 1.29.0 (#10916): additive — 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS
   # on both application-submit operations (key reused with a different body / still executing).
-  # 1.29.0 -> 1.30.0 (#10266): additive — bounded party application slice for Customer 360,
-  # case-scoped approved guarantee history, disabled-by-default loan-scoped guarantee
-  # maker/checker routes, and bounded shared-guarantor candidate evidence for assigned loans.
-  version: 1.30.0
+  # 1.29.0 -> 1.31.0 (#11107): additive — the loan's human contract number (UV-YYYY-NNNNNN):
+  # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
+  # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
+  # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
+  # 1.32.0 -> 1.33.0 (#10266): additive graph guarantee writer and loan-scoped evidence reads.
+  version: 1.33.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -242,8 +247,8 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Return the newest applications only; omitted preserves the existing full-list response.
-          schema: { type: integer, minimum: 1, maximum: 100 }
+          description: Return at most this many newest applications; omit for the legacy full list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Applications for the party
@@ -844,7 +849,13 @@ paths:
           description: Clamped server-side into 1..100.
           schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: Active loans }
+        '200':
+          description: Active loans
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans:
@@ -858,7 +869,13 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Loans for the party }
+        '200':
+          description: Loans for the party
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}:
@@ -869,7 +886,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The loan }
+        '200':
+          description: The loan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -2218,6 +2239,26 @@ components:
         remainingInstallments:
           type: array
           items: { $ref: '#/components/schemas/RemainingInstallment' }
+        contractNumber:
+          type: string
+          nullable: true
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107), e.g. UV-2026-000123 — a display reference, assigned at
+            creation and never changed. loanId stays the identity.
+    Loan:
+      type: object
+      description: >-
+        A booked loan. Only the fields this contract pins are listed; the response carries the
+        loan's other terms as well.
+      properties:
+        contractNumber:
+          type: string
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107): UV-<origination year (UTC)>-<per-year sequence,
+            zero-padded to at least six digits>. Unique, assigned at creation, immutable; the
+            sequence is gap-tolerant (a rolled-back creation may leave a hole).
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]

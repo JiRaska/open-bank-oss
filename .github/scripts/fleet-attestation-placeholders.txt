@@ -33,3 +33,12 @@
 # You do not remove an entry by hand when its service first deploys: auto-deploy.yml's rewrite
 # step prunes every entry that its own tag rewrite leaves undeclared, in the same deploy PR,
 # using the gate's own enumeration. Adding one is still a human decision.
+#
+# 2026-09-05, ADR-0283 phase 1 (#8809). card-processing-service is a brand-new service: its
+# manifest has to pin a tag before any image can exist, and no image can exist until the manifest
+# merges and auto-deploy builds one. The tag names a real commit so the deploy-drift watch can
+# resolve it; the IMAGE is absent from ECR, which is the exact class this file is for.
+#
+# REMOVE THIS LINE once auto-deploy has built and pushed the service — at that point the pin
+# moves to the built tag and this entry would suppress nothing, which the gate's
+# --check-placeholders direction fails on.

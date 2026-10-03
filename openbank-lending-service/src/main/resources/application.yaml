@@ -180,6 +180,14 @@ openbank:
   authz:
     opa-pdp-producer:
       enabled: true
+  # The /api/v1 responses of this service return domain objects, so the JSON form of Money IS part
+  # of its wire: a numeric amount and a nested {code, defaultFractionDigits} currency. Readers
+  # depend on exactly that (customer-edge takes principal.currency.code, admin-ui sums amount as a
+  # number), so the written shape is pinned here and stays byte-compatible. READING accepts the
+  # canonical {"amount":"10.00","currency":"EUR"} as well, whatever this says. Move to CANONICAL
+  # only after every reader accepts both shapes and is deployed.
+  json:
+    money-wire-shape: LEGACY_OBJECT
   rate-limit:
     enabled: true
     max-concurrent-requests: 200

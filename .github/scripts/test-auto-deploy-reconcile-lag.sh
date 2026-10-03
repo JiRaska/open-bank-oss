@@ -130,8 +130,26 @@ fi
 
 # The cap: oldest pin first (placeholders sort as epoch 0), the rest deferred to later ticks.
 WANT_CAP='["openbank-foreign-svc","openbank-placeholder-svc"]'
-GOT_CAP="$(RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
+GOT_CAP="$(RECONCILE_TICK=0 RECONCILE_MAX=2 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/gitops" 2>/dev/null)"
 [ "$(sorted "$GOT_CAP")" = "$(sorted "$WANT_CAP")" ] || fail "RECONCILE_MAX cap" "$WANT_CAP" "$GOT_CAP"
+
+# FAIRNESS known-positive (2026-10-02 starvation): 15 lagging services, cap 12, and the 12
+# oldest are never deployed (the gate keeps blocking them, so they stay lagging with the same
+# pins). A fixed oldest-first top-12 selects them every tick and s13..s15 starve forever; the
+# rotating window must reach all three within ceil(15/12) = 2 consecutive ticks.
+mkdir -p "$WORK/fair"
+: > "$WORK/fair/deploy.yaml"
+for i in 01 02 03 04 05 06 07 08 09 10 11 12 13 14 15; do
+  echo "image: repo/openbank-s${i}:sandbox-pending" >> "$WORK/fair/deploy.yaml"
+done
+T0="$(RECONCILE_TICK=41 RECONCILE_MAX=12 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/fair" 2>/dev/null)"
+T1="$(RECONCILE_TICK=42 RECONCILE_MAX=12 RECONCILE_SERVICES='' bash "$PROBE" "$WORK/fair" 2>/dev/null)"
+for want in openbank-s13 openbank-s14 openbank-s15; do
+  jq -se --arg w "$want" 'add | index($w)' <<< "$T0 $T1" >/dev/null \
+    || fail "fair cap: ${want} must be selected within 2 ticks" "contains ${want}" "tick41=$T0 tick42=$T1"
+done
+[ "$(jq length <<< "$T0")" = 12 ] && [ "$(jq length <<< "$T1")" = 12 ] \
+  || fail "fair cap keeps the cap" "12 per tick" "tick41=$T0 tick42=$T1"
 
 # An allowlist (auto-deploy's ALL_SERVICES) drops manifest services the build path cannot
 # build — foreign-svc is stale but absent from the list.
@@ -155,4 +173,4 @@ if [ "$(jq -c . <<< "$GOT2")" != "[]" ]; then
   exit 1
 fi
 
-echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, allowlist, loop-stability"
+echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"

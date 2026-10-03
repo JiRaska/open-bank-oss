@@ -4,7 +4,9 @@
 
 package com.openbank.treasury.application.port.out
 
+import com.openbank.treasury.domain.model.BreakChanges
 import com.openbank.treasury.domain.model.LedgerNostroLine
+import com.openbank.treasury.domain.model.NostroBreak
 import com.openbank.treasury.domain.model.NostroStatement
 import java.math.BigDecimal
 import java.time.Instant
@@ -48,6 +50,38 @@ interface NostroStatementRepository {
 
     /** Statement row and all its entries in ONE transaction. @throws DuplicateStatementException */
     suspend fun save(stored: StoredStatement): StoredStatement
+
+    /** Ids of statements whose closing date is on or after [since], oldest first (the break sweep's scope). */
+    suspend fun statementIdsSince(since: LocalDate): List<UUID>
+}
+
+/** Raised when a break listing names an IBAN that is not a configured nostro account. Mapped to 404. */
+class NostroAccountNotFoundException(iban: String) : NoSuchElementException("nostro account $iban is not configured")
+
+/**
+ * Persisted reconciliation breaks (ADR-0315 D7). The break key is unique, so a concurrent
+ * observation of the same reconciliation cannot open an item twice.
+ */
+interface NostroBreakRepository {
+    /**
+     * Every stored break (open or resolved) on [glCode] that a reconciliation of [statementUuid]
+     * over [from]..[to] can speak about: that statement's own breaks, and ledger breaks booked in
+     * the period.
+     */
+    suspend fun inScope(glCode: String, statementUuid: UUID, from: LocalDate, to: LocalDate): List<NostroBreak>
+
+    /** Inserts the opened breaks and updates the resolution of the others, in ONE transaction. */
+    suspend fun apply(changes: BreakChanges)
+
+    suspend fun byIban(iban: String, includeResolved: Boolean): List<NostroBreak>
+
+    suspend fun open(): List<NostroBreak>
+
+    /**
+     * Stamps [alertedAt] on the break if it has none yet and, in the SAME transaction, writes the
+     * outbox event. false when another pass already alerted it — then nothing is written.
+     */
+    suspend fun markAlerted(breakId: UUID, alertedAt: Instant, eventType: String, payload: String): Boolean
 }
 
 /**

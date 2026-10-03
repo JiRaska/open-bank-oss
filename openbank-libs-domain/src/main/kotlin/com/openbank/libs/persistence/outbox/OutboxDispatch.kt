@@ -4,6 +4,15 @@
 
 package com.openbank.libs.persistence.outbox
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.cancellation.CancellationException
+
 /**
  * Shared outbox dispatch loop. Service-level dispatchers should:
  *   1. annotate their own `@Scheduled(every = "5s", ...)` method
@@ -47,7 +56,13 @@ sealed class OutboxDispatchOutcome {
  * [OutboxDispatch.isTransportUnavailable]) is simply absent — not a synthetic `Failed`, since no
  * attempt was made against it.
  */
-data class OutboxDispatchResult(val outcomes: List<OutboxDispatchOutcome> = emptyList())
+data class OutboxDispatchResult(
+    val outcomes: List<OutboxDispatchOutcome> = emptyList(),
+    /** Rows the claim returned — what [OutboxDispatch.drain] compares against `batchSize`. */
+    val claimed: Int = outcomes.size,
+    /** True when the batch was abandoned on a transport-unavailable signal (see [OutboxDispatch.dispatchOnce]). */
+    val abandoned: Boolean = false,
+)
 
 object OutboxDispatch {
     // JDK System.Logger, not org.jboss.logging.Logger — this module must stay framework-free
@@ -56,6 +71,12 @@ object OutboxDispatch {
     private val log: System.Logger = System.getLogger(OutboxDispatch::class.java.name)
 
     const val DEFAULT_BATCH_SIZE = 25
+
+    /**
+     * Sends in flight at once for one [OutboxRepositoryV2] batch (ADR-0327 D6). Legal only
+     * because such a batch holds one row per aggregate — see [OutboxRepositoryV2].
+     */
+    const val SEND_CONCURRENCY = 16
 
     /** Guards against a self-referencing or pathological `cause` chain in [isTransportUnavailable]. */
     private const val MAX_CAUSE_DEPTH = 10
@@ -119,18 +140,81 @@ object OutboxDispatch {
     suspend fun dispatchOnce(
         repository: OutboxRepository,
         batchSize: Int = DEFAULT_BATCH_SIZE,
+        claimObserver: ((Duration) -> Unit)? = null,
         publish: suspend (entry: OutboxEntry) -> Unit,
     ): OutboxDispatchResult {
+        val claimStart = System.nanoTime()
         val claimed = runCatching { repository.claimProcessable(batchSize) }
-            .onFailure { ex -> log.log(System.Logger.Level.WARNING, "outbox.claimProcessable failed", ex) }
+            .onFailure { ex ->
+                if (ex is CancellationException) throw ex
+                log.log(System.Logger.Level.WARNING, "outbox.claimProcessable failed", ex)
+            }
             .getOrNull() ?: return OutboxDispatchResult()
+        claimObserver?.invoke(Duration.ofNanos(System.nanoTime() - claimStart))
 
+        return if (repository is OutboxRepositoryV2) {
+            dispatchConcurrently(repository, claimed, publish)
+        } else {
+            dispatchSequentially(repository, claimed, publish)
+        }
+    }
+
+    /**
+     * Drain loop (ADR-0327 D5): call [dispatchOnce] until a batch comes back **short** (fewer
+     * rows than [batchSize]) **and dispatched nothing** — the table is empty or every remaining
+     * aggregate is parked; a short batch that sent something may have promoted a new head — the
+     * wall-clock [budget] is spent, or a batch was abandoned on a transport-unavailable signal
+     * (looping on an open breaker would just burn ticks). A burst of 1 000 rows therefore drains
+     * in one tick instead of forty; a service on the v1 path is unaffected because its dispatcher
+     * only calls this with a [OutboxRepositoryV2] repository (see `AbstractOutboxDispatcher`).
+     * The caller's `@Scheduled(concurrentExecution = SKIP)` keeps ticks from overlapping.
+     */
+    suspend fun drain(
+        repository: OutboxRepository,
+        batchSize: Int = DEFAULT_BATCH_SIZE,
+        budget: Duration,
+        claimObserver: ((Duration) -> Unit)? = null,
+        publish: suspend (entry: OutboxEntry) -> Unit,
+    ): OutboxDispatchResult {
+        val deadline = System.nanoTime() + budget.toNanos()
+        val outcomes = mutableListOf<OutboxDispatchOutcome>()
+        var claimed = 0
+        var abandoned = false
+        do {
+            val result = dispatchOnce(repository, batchSize, claimObserver, publish)
+            outcomes += result.outcomes
+            claimed += result.claimed
+            abandoned = result.abandoned
+            // A short batch alone does not mean "drained" under the D3 head claim: sending an
+            // aggregate's head is exactly what makes its next row claimable, and that row was
+            // invisible to the claim that just ran. Stopping on `short` capped a hot aggregate at
+            // one event per TICK, not per drain iteration as D3 promises (and failed the v1
+            // conformance kit's two-events-one-aggregate-one-tick case). So a short batch only
+            // ends the drain when it dispatched nothing — then every remaining row is parked
+            // (backoff, in flight elsewhere, or behind a failed head) and re-claiming is pointless.
+            val drained = result.claimed < batchSize &&
+                result.outcomes.none { it is OutboxDispatchOutcome.Dispatched }
+        } while (!drained && !abandoned && System.nanoTime() < deadline)
+        return OutboxDispatchResult(outcomes, claimed, abandoned)
+    }
+
+    /** The v1 loop: one row at a time, `markSent` per row. Behaviour unchanged except for D4's cancellation rethrow. */
+    private suspend fun dispatchSequentially(
+        repository: OutboxRepository,
+        claimed: List<OutboxEntry>,
+        publish: suspend (entry: OutboxEntry) -> Unit,
+    ): OutboxDispatchResult {
         val outcomes = mutableListOf<OutboxDispatchOutcome>()
         for ((index, entry) in claimed.withIndex()) {
             try {
                 publish(entry)
                 repository.markSent(entry.eventId)
                 outcomes += OutboxDispatchOutcome.Dispatched(entry)
+            } catch (ex: CancellationException) {
+                // D4: a cancelled scope must stop publishing, not record the cancellation as a
+                // row failure and carry on to the next row. `CancellationException` IS an
+                // `Exception`, so the clause below would otherwise swallow it (ADR-0327 finding 3).
+                throw ex
             } catch (ex: Exception) {
                 if (isTransportUnavailable(ex)) {
                     log.log(
@@ -139,7 +223,7 @@ object OutboxDispatch {
                             "${claimed.size - index} row(s) left for the next tick — no attempt consumed",
                         ex,
                     )
-                    return OutboxDispatchResult(outcomes)
+                    return OutboxDispatchResult(outcomes, claimed.size, abandoned = true)
                 }
                 // Read back what markFailed actually persisted rather than independently
                 // recomputing OutboxFailurePolicy.statusAfterFailure over entry.attemptCount + 1
@@ -152,6 +236,81 @@ object OutboxDispatch {
                 outcomes += OutboxDispatchOutcome.Failed(entry, terminal = persistedStatus == OutboxStatus.DEAD)
             }
         }
-        return OutboxDispatchResult(outcomes)
+        return OutboxDispatchResult(outcomes, claimed.size)
+    }
+
+    /**
+     * The v2 loop (ADR-0327 D6): every row of a [OutboxRepositoryV2] batch belongs to a different
+     * aggregate (the repository's claim contract), so the sends are independent and run under
+     * [SEND_CONCURRENCY] permits; the successes are then acknowledged with ONE
+     * [OutboxRepositoryV2.markSentBatch] and each real failure with its own `markFailed` (which
+     * applies D4's backoff). Transactions per batch: 25 → 2.
+     *
+     * A transport-unavailable signal (#4005) still abandons the batch: sends not yet started are
+     * skipped, rows that fast-failed on it get no `markFailed`, and everything left DISPATCHING is
+     * reclaimed by the stale-claim window. Rows that had already succeeded are still marked SENT —
+     * they reached the broker, and leaving them DISPATCHING would re-send them.
+     */
+    private suspend fun dispatchConcurrently(
+        repository: OutboxRepositoryV2,
+        claimed: List<OutboxEntry>,
+        publish: suspend (entry: OutboxEntry) -> Unit,
+    ): OutboxDispatchResult {
+        val permits = Semaphore(SEND_CONCURRENCY)
+        val abandoned = AtomicBoolean(false)
+        val attempts: List<SendAttempt> = coroutineScope {
+            claimed.map { entry ->
+                async {
+                    permits.withPermit {
+                        if (abandoned.get()) return@withPermit SendAttempt.Skipped(entry)
+                        try {
+                            publish(entry)
+                            SendAttempt.Sent(entry)
+                        } catch (ex: CancellationException) {
+                            throw ex
+                        } catch (ex: Exception) {
+                            if (isTransportUnavailable(ex)) {
+                                abandoned.set(true)
+                                SendAttempt.TransportUnavailable(entry, ex)
+                            } else {
+                                SendAttempt.Failed(entry, ex)
+                            }
+                        }
+                    }
+                }
+            }.awaitAll()
+        }
+
+        val outcomes = mutableListOf<OutboxDispatchOutcome>()
+        val sent = attempts.filterIsInstance<SendAttempt.Sent>()
+        if (sent.isNotEmpty()) {
+            repository.markSentBatch(sent.map { it.entry.eventId })
+            sent.forEach { outcomes += OutboxDispatchOutcome.Dispatched(it.entry) }
+        }
+        for (failure in attempts.filterIsInstance<SendAttempt.Failed>()) {
+            val ex = failure.error
+            val persistedStatus = repository.markFailed(failure.entry.eventId, ex.message ?: ex.javaClass.simpleName)
+            outcomes += OutboxDispatchOutcome.Failed(failure.entry, terminal = persistedStatus == OutboxStatus.DEAD)
+        }
+        val unavailable = attempts.filterIsInstance<SendAttempt.TransportUnavailable>()
+        if (unavailable.isNotEmpty()) {
+            val left = unavailable.size + attempts.count { it is SendAttempt.Skipped }
+            log.log(
+                System.Logger.Level.WARNING,
+                "outbox.dispatch abandoned: transport unavailable (${unavailable.first().error.javaClass.name}), " +
+                    "$left row(s) left for the stale-claim reclaim — no attempt consumed",
+                unavailable.first().error,
+            )
+        }
+        return OutboxDispatchResult(outcomes, claimed.size, abandoned = unavailable.isNotEmpty())
+    }
+
+    private sealed class SendAttempt {
+        abstract val entry: OutboxEntry
+
+        data class Sent(override val entry: OutboxEntry) : SendAttempt()
+        data class Failed(override val entry: OutboxEntry, val error: Exception) : SendAttempt()
+        data class TransportUnavailable(override val entry: OutboxEntry, val error: Exception) : SendAttempt()
+        data class Skipped(override val entry: OutboxEntry) : SendAttempt()
     }
 }

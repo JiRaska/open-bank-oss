@@ -51,6 +51,7 @@ class AccountingDaySchedulerTest {
     private val dayRepository = mockk<AccountingDayRepository>()
     private val tieOutRuns = mockk<TieOutRunRepository>()
     private val useCase = mockk<AccountingDayUseCase>(relaxed = true)
+    private val tieOutRunner = mockk<TieOutScheduler>(relaxed = true)
 
     private val scheduler = AccountingDayScheduler(
         dayRepository,
@@ -63,6 +64,7 @@ class AccountingDaySchedulerTest {
     ).apply {
         domainMetrics = noOpDomainMetrics()
         meterRegistry = SimpleMeterRegistry()
+        tieOutScheduler = tieOutRunner
     }
 
     private fun noOpDomainMetrics(): DomainMetrics {
@@ -221,6 +223,45 @@ class AccountingDaySchedulerTest {
     }
 
     @Test
+    fun `stuck age gauge publishes one series per stuck day, so a second stuck day is visible`(): Unit = runBlocking {
+        val registry = SimpleMeterRegistry()
+        scheduler.meterRegistry = registry
+        scheduler.onStart(mockk(relaxed = true))
+        // Cold pod: the family is absent, not a sentinel value (CLAUDE.md, gauge at t=0).
+        assertThat(registry.find(STUCK_AGE).gauges()).isEmpty()
+
+        val first = today.minusDays(30)
+        val second = today.minusDays(2)
+        coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.OPEN) } returns emptyList()
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.CUTOFF) } returns listOf(
+            day(first, AccountingDayStatus.CUTOFF, cutoffAt = fixedInstant.minus(Duration.ofDays(20))),
+            day(second, AccountingDayStatus.CUTOFF, cutoffAt = fixedInstant.minus(Duration.ofHours(9))),
+            day(today.minusDays(1), AccountingDayStatus.CUTOFF, cutoffAt = fixedInstant.minus(Duration.ofHours(2))),
+        )
+        coEvery { tieOutRuns.findLatestFor(any()) } returns null
+
+        scheduler.reconcile()
+
+        val byDate = registry.find(STUCK_AGE).gauges().associate { it.id.getTag("business_date") to it.value() }
+        assertThat(byDate).containsExactlyInAnyOrderEntriesOf(
+            mapOf(
+                first.toString() to Duration.ofDays(20).seconds.toDouble(),
+                second.toString() to Duration.ofHours(9).seconds.toDouble(),
+            ),
+        )
+
+        // The first day clears: its series is dropped on the next tick, the second remains.
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.CUTOFF) } returns listOf(
+            day(second, AccountingDayStatus.CUTOFF, cutoffAt = fixedInstant.minus(Duration.ofHours(9))),
+        )
+        scheduler.reconcile()
+
+        assertThat(registry.find(STUCK_AGE).gauges().map { it.id.getTag("business_date") })
+            .containsExactly(second.toString())
+    }
+
+    @Test
     fun `one failing day does not stop the rest of the tick`(): Unit = runBlocking {
         val d1 = today.minusDays(2)
         val d2 = today.minusDays(1)
@@ -242,5 +283,60 @@ class AccountingDaySchedulerTest {
                 TransitionAccountingDayCommand(d2, AccountingDayStatus.CUTOFF, "system:accounting-day-scheduler"),
             )
         }
+    }
+
+    @Test
+    fun `CUTOFF day whose only OK run predates its cutoff gets a fresh tie-out and ties out next tick`(): Unit =
+        runBlocking {
+            // The 2026-07-31 shape: opened and cut off late, its only run long before the cutoff.
+            val late = LocalDate.of(2026, 7, 31)
+            val cutoffAt = Instant.parse("2026-08-06T10:00:00Z")
+            coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
+            coEvery { dayRepository.findInStatus(AccountingDayStatus.OPEN) } returns emptyList()
+            coEvery { dayRepository.findInStatus(AccountingDayStatus.CUTOFF) } returns
+                listOf(day(late, AccountingDayStatus.CUTOFF, cutoffAt = cutoffAt))
+            coEvery { tieOutRuns.findLatestFor(late) } returnsMany listOf(
+                tieOutRun(late, TieOutRunStatus.OK, runAt = Instant.parse("2026-08-01T04:00:00Z")),
+                tieOutRun(late, TieOutRunStatus.OK, runAt = Instant.parse("2026-08-07T07:45:00Z")),
+            )
+
+            scheduler.reconcile()
+            coVerify(exactly = 1) { tieOutRunner.runTieOutFor(late) }
+            coVerify(exactly = 0) { useCase.transition(any()) }
+
+            scheduler.reconcile()
+            coVerify(exactly = 1) { tieOutRunner.runTieOutFor(late) }
+            coVerify(exactly = 1) {
+                useCase.transition(
+                    TransitionAccountingDayCommand(
+                        late,
+                        AccountingDayStatus.TIED_OUT,
+                        "system:accounting-day-scheduler",
+                    ),
+                )
+            }
+        }
+
+    @Test
+    fun `no tie-out is requested for TIED_OUT days or for a post-cutoff BREAK`(): Unit = runBlocking {
+        val d = today.minusDays(1)
+        coEvery { dayRepository.findLatest() } returns day(today, AccountingDayStatus.OPEN)
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.OPEN) } returns emptyList()
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.TIED_OUT) } returns
+            listOf(
+                day(today.minusDays(2), AccountingDayStatus.TIED_OUT, cutoffAt = Instant.parse("2026-08-05T22:00:00Z")),
+            )
+        coEvery { dayRepository.findInStatus(AccountingDayStatus.CUTOFF) } returns
+            listOf(day(d, AccountingDayStatus.CUTOFF, cutoffAt = Instant.parse("2026-08-06T22:00:00Z")))
+        coEvery { tieOutRuns.findLatestFor(d) } returns
+            tieOutRun(d, TieOutRunStatus.BREAK, runAt = Instant.parse("2026-08-07T04:00:00Z"))
+
+        scheduler.reconcile()
+
+        coVerify(exactly = 0) { tieOutRunner.runTieOutFor(any()) }
+    }
+
+    private companion object {
+        const val STUCK_AGE = "openbank.ledger.accounting_day.stuck_cutoff_age_seconds"
     }
 }

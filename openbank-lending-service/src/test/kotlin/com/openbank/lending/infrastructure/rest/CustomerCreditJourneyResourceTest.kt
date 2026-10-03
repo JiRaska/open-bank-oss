@@ -178,7 +178,7 @@ class CustomerCreditJourneyResourceTest {
         override fun findByParty(partyId: UUID): Uni<List<LoanApplication>> =
             Uni.createFrom().item(rows.filter { it.partyId == partyId })
 
-        override fun findRecentByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+        override fun findByParty(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
             Uni.createFrom().item(rows.filter { it.partyId == partyId }.take(limit))
 
         override fun findRecent(status: String?, limit: Int): Uni<List<LoanApplication>> =

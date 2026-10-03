@@ -49,8 +49,6 @@ import java.time.Clock
 import java.time.LocalDate
 import java.util.UUID
 
-private const val MAX_PARTY_APPLICATION_LIST_LIMIT = 100
-
 /**
  * Lending REST surface (ADR-0028 D5). Every endpoint is role-gated with raw string literals —
  * never `@PermitAll`. Origination decisions and collateral registration are four-eyes (enforced in
@@ -292,12 +290,12 @@ class LendingResource(
         @QueryParam("partyId") partyId: UUID?,
         @QueryParam("limit") limit: Int?,
     ): Uni<List<LoanApplication>> {
-        val requiredPartyId = requireNotNull(partyId) { "query parameter 'partyId' is required" }
-        if (limit == null) return apply.listApplications(requiredPartyId)
-        require(limit in 1..MAX_PARTY_APPLICATION_LIST_LIMIT) {
-            "limit must be between 1 and $MAX_PARTY_APPLICATION_LIST_LIMIT"
+        val id = requireNotNull(partyId) { "query parameter 'partyId' is required" }
+        if (limit == null) return apply.listApplications(id)
+        require(limit in 1..MAX_APPLICATION_LIST_LIMIT) {
+            "limit must be between 1 and $MAX_APPLICATION_LIST_LIMIT"
         }
-        return apply.listRecentApplicationsForParty(requiredPartyId, limit)
+        return apply.listApplications(id, limit)
     }
 
     @GET
@@ -489,6 +487,7 @@ class LendingResource(
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
+        const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }
 

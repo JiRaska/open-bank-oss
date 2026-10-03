@@ -5,6 +5,7 @@
 package com.openbank.libs.security
 
 import com.openbank.libs.identity.BlindIndex
+import com.openbank.libs.util.Hex
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -118,13 +119,10 @@ class BlindIndexTokenizer(pepper: ByteArray) {
         mac.init(SecretKeySpec(pepper, HMAC))
         mac.update(domain.toByteArray(Charsets.UTF_8))
         mac.update(0.toByte())
-        return mac.doFinal(value.toByteArray(Charsets.UTF_8)).joinToString("") {
-            "%02x".format(it.toInt() and BYTE_MASK)
-        }
+        return Hex.lower(mac.doFinal(value.toByteArray(Charsets.UTF_8)))
     }
 
     private companion object {
         const val HMAC = "HmacSHA256"
-        const val BYTE_MASK = 0xFF
     }
 }
