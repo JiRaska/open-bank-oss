@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [libs, database, privacy-gdpr]
 summary: "SENT outbox rows are deleted after 7 days by one shared libs-runtime job over every SentOutboxRetention bean, v1 and v2 outboxes alike; an enforced gate makes opting out a reasoned exemption."
-followup: "#11900, #11901, #11902 — lending, risk-engine and incentive outboxes are exempt from SENT retention pending their own decisions"
+followup: "#11900, #11901 — lending and risk-engine outboxes are exempt from SENT retention pending their own decisions; incentive left the exemptions in #11902"
 ---
 
 # ADR-0329 — SENT outbox rows are purged fleet-wide by one shared libs-runtime job
@@ -64,7 +64,9 @@ We will purge SENT outbox rows with **one** `@ApplicationScoped` job in `openban
   switch and logs a WARN at boot. At build time the enforced gate `outbox-sent-retention` requires
   every dispatcher-owning module to declare a `SentOutboxRetention` class, or carry a reasoned
   exemption in `check-outbox-sent-retention.py`; the exemption set may only shrink. Today it holds
-  lending, risk-engine and incentive, for the reasons in Context item 5.
+  lending, risk-engine and incentive, for the reasons in Context item 5. incentive has since left it
+  (#11902): its rows are not evidence (`incentive_audit_event` is, with the actor), and
+  `OutboxTableShape.sentAtColumn` covers its `published_at` column without a migration.
 - DEAD rows are out of scope here: they are the producer-side DLQ (ADR-0327 D4) and keep their own
   window (notification's janitor today, `purgeDead` when ADR-0327 Phase 4 wires it).
 

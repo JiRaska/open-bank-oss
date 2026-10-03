@@ -30,8 +30,10 @@ import gatelib  # noqa: E402  (path shim above must run first)
 
 DISPATCHER_SUPERTYPE = re.compile(r":\s*AbstractOutboxDispatcher\s*\(")
 # `class X(...) : A, B, C {` — the supertype list runs from the class header's colon to its body,
-# or to the first blank line for a body-less class (`class CaseOutboxRepositoryImpl(...) : Base(...), P`).
-CLASS_HEADER = re.compile(r"\bclass\s+\w+(?:(?!\n\s*\n)[^{])*", re.S)
+# or, for a body-less class (`class CaseOutboxRepositoryImpl(...) : Base(...), P`), to the next
+# UNINDENTED line, i.e. the next top-level declaration. Not "the next blank line": a comment inside
+# the supertype list is a blank line once comments are stripped (incentive's header, #11902).
+CLASS_HEADER = re.compile(r"\bclass\s+\w+(?:(?!\n(?=[^\s}]))[^{])*", re.S)
 RETENTION_SUPERTYPE = re.compile(r"\bSentOutboxRetention\b|\bAbstractPanacheOutboxRepository\s*<")
 
 # Each entry: why that outbox's SENT rows must not be purged yet. Measured 2026-10-03 (#11896).
@@ -43,10 +45,6 @@ EXEMPT: dict[str, str] = {
     "openbank-risk-engine": (
         "risk_outbox.dedup_key UNIQUE is the replay guard for limit events (PgRiskOutbox); purging SENT "
         "rows would let a replayed run re-emit them. Payload is bank limit data, no personal data (#11901)"
-    ),
-    "openbank-incentive-service": (
-        "incentive_outbox has no sent_at (published_at) and its V2 migration declares rows audit evidence; "
-        "needs an owner decision before a purge (#11902)"
     ),
 }
 
@@ -143,6 +141,13 @@ def self_test() -> int:
         # v2 opt-in via the kernel base, body-less class (case-coordinator's shape).
         write("openbank-e/src/main/kotlin/D.kt", disp)
         write("openbank-e/src/main/kotlin/R.kt", "@ApplicationScoped\nclass ERepo(c: Clock) :\n    AbstractPanacheOutboxRepository<E>(\n        S,\n        c,\n    ),\n    PanacheRepository<E>\n")
+        # v1 opt-in by delegation, with a comment block inside the supertype list (incentive's shape).
+        write("openbank-f/src/main/kotlin/D.kt", disp)
+        write(
+            "openbank-f/src/main/kotlin/R.kt",
+            "class FRepo :\n    PanacheRepository<E>,\n    OutboxRepository,\n    // why this table is odd\n"
+            "    // second line\n    SentOutboxRetention by PanacheOutboxRetention(\n        S,\n    ) {\n}\n",
+        )
         # v2 opt-in via the kernel base.
         write("openbank-b/src/main/kotlin/D.kt", disp)
         write("openbank-b/src/main/kotlin/R.kt", "class BRepo(c: Clock) : AbstractPanacheOutboxRepository<E>(S, E::class.java, c), BPort {\n}\n")
@@ -165,7 +170,7 @@ def self_test() -> int:
         ]
         for name, ex, expect in cases:
             findings, subjects = check(root, ex)
-            if bool(findings) != expect or subjects != 4:
+            if bool(findings) != expect or subjects != 5:
                 print(f"SELF-TEST FAIL: {name}: findings={findings} subjects={subjects}")
                 ok = False
     print("self-test: " + ("pass" if ok else "FAIL"))
