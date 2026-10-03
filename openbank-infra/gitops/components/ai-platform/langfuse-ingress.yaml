@@ -10,7 +10,7 @@
 # OpenBao. Before this pattern is copied to an environment with real data it needs SSO in front of
 # it, not a stronger password.
 #
-# Traces are ingested in-cluster over the Service (litellm -> langfuse.ai-platform.svc:3000); this
+# Traces are ingested in-cluster over the Service (litellm -> langfuse-web.ai-platform.svc:3000); this
 # Ingress carries the human UI only, so removing it degrades visibility, never ingestion.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -33,9 +33,10 @@ spec:
         paths:
           - path: /
             pathType: Prefix
+            # Langfuse v3 web (langfuse-v3.yaml) since ADR-0328 wave B.
             backend:
               service:
-                name: langfuse
+                name: langfuse-web
                 port:
                   number: 3000
 ---

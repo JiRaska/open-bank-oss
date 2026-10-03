@@ -19,7 +19,6 @@ import com.openbank.swift.domain.model.SwiftStatus
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -76,7 +75,7 @@ class SwiftService(
                 "paymentSagaRef" to message.transactionReference,
                 "status" to message.status.name,
                 "messageType" to message.messageType.name,
-                "amount" to BigDecimal(message.amountMinorUnits).movePointLeft(2),
+                "amount" to message.amount.amount,
                 "currency" to message.currency,
                 "occurredAt" to message.updatedAt.toString(),
             ),
@@ -90,7 +89,7 @@ class SwiftService(
             id = UUID.randomUUID(), idempotencyKey = cmd.idempotencyKey,
             messageType = cmd.messageType, senderBic = cmd.senderBic, receiverBic = cmd.receiverBic,
             transactionReference = cmd.transactionReference, relatedReference = cmd.relatedReference,
-            valueDate = cmd.valueDate, currency = cmd.currency, amountMinorUnits = cmd.amountMinorUnits,
+            valueDate = cmd.valueDate, amount = cmd.amount,
             orderingCustomerAccount = cmd.orderingCustomerAccount,
             orderingCustomerAccountId = cmd.orderingCustomerAccountId,
             orderingCustomerName = cmd.orderingCustomerName,
