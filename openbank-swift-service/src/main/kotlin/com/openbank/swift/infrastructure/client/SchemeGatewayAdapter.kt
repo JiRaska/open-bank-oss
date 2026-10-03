@@ -24,7 +24,6 @@ import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
@@ -84,7 +83,7 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
 
     /**
      * Maps SWIFT MT103 fields to a [CreditTransferInstruction]. The MT103 value date is parsed
-     * from the `YYYYMMDD` format used by SWIFT; the amount is converted from minor units.
+     * from the `YYYYMMDD` format used by SWIFT; the amount is the message's kernel `Money`.
      * SWIFT charge codes map to pacs.008 `ChrgBr`: OUR→DEBT, SHA→SHAR, BEN→CRED.
      */
     @Suppress("MagicNumber")
@@ -105,7 +104,8 @@ class SchemeGatewayAdapter(@RestClient private val client: ClearingSimulatorClie
             interbankSettlementDate = valueDate,
             endToEndId = msg.transactionReference.take(MAX_35),
             transactionId = null,
-            amount = BigDecimal.valueOf(msg.amountMinorUnits).movePointLeft(2),
+            // At the currency's own minor unit (#11604): JPY 0dp, KWD 3dp — not a fixed two.
+            amount = msg.amount.amount,
             currency = msg.currency,
             chargeBearer = chargeBearer,
             settlementMethod = SettlementMethod.COVE,

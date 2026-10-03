@@ -50,9 +50,31 @@ Odpovědi:
 | Kód | Význam |
 |---|---|
 | `201` | Přijato a zařazeno; vrací `SwiftMessage` (stav `VALIDATED`) |
-| `400` | Neplatné tělo požadavku (`ErrorResponse`) |
+| `400` | Neplatné tělo požadavku; pro částku a měnu viz [Částka a měna](#částka-a-měna) |
 | `409` | Duplicitní idempotency key s konfliktním payloadem (`ErrorResponse`) |
 | `422` | Selhání validace BIC nebo porušení business pravidla (`ValidationError`) |
+
+## Částka a měna
+
+`amountMinorUnits` + `currency` se v `SwiftResource` sestaví do kernelového `Money`
+(`Money.parseInbound`, #11604) **před** vyhledáním idempotenčního klíče. SWIFT je přeshraniční, takže
+žádný seznam povolených měn neexistuje: přijímá se každá měna ISO 4217 s definovanou minoritní
+jednotkou a `amountMinorUnits` se čte v minoritní jednotce **dané měny** — JPY má 0 desetinných míst
+(`1000` = 1000 jenů), EUR 2 (`150000` = 1500.00), KWD/BHD 3 (`1500` = 1.500). Totéž `Money` určuje
+`IntrBkSttlmAmt` v pacs.008, částku vypořádání v transaction-service, `amount` v události
+`swift.message.status-changed` i `amount` ve výpisu `/messages`; před #11604 všechny čtyři posouvaly
+každou měnu pevně o dvě místa.
+
+| Vstup | Odpověď |
+|---|---|
+| `amountMinorUnits` není celé číslo (`150.5`) | `400` `AMOUNT_SCALE_EXCEEDED`, pole `amountMinorUnits` |
+| `currency` není ISO 4217 s minoritní jednotkou (`XYZ`, `EURO`, `XAU`, prázdná) | `400` `CURRENCY_UNSUPPORTED`, pole `currency` |
+| `amountMinorUnits` mimo rozsah 64bitového celého čísla se znaménkem | `400` `VALIDATION_ERROR`, pole `amountMinorUnits` |
+| měna malými písmeny (`eur`) | přijata, uložena jako `EUR` |
+
+Odmítnutí vrací problem dokument z libs-runtime (`type`, `title`, `status`, `detail`, `code`,
+`violations[]`); odmítnutá hodnota se nikdy nevrací. Nic se neuloží ani nepublikuje a `idempotencyKey`
+se nespotřebuje — opravený požadavek se stejným klíčem zprávu vytvoří.
 
 ## Idempotence
 
