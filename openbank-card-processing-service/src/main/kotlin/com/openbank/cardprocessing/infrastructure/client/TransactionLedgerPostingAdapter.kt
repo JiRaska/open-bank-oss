@@ -17,6 +17,7 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 import java.security.MessageDigest
 import java.time.Clock
+import java.util.Base64
 import java.util.Currency
 import java.util.UUID
 
@@ -111,28 +112,28 @@ class TransactionLedgerPostingAdapter(
 object CardClearingLedgerKey {
     /** transaction-service's `transactions.idempotency_key` is VARCHAR(100). */
     const val MAX_LENGTH = 100
-    private const val DIGEST_HEX_CHARS = 32
+
+    /** `card-clearing:` (14) + authorisation UUID (36) + `:h:` (3) + base64url SHA-256 (43). */
+    const val LENGTH = 96
 
     /**
-     * The ledger idempotency key for one clearing: `card-clearing:<authorizationId>:<clearingKey>`.
+     * `card-clearing:<authorizationId>:h:<base64url(SHA-256(clearingKey))>` — ALWAYS hashed.
      *
-     * Scoped by the authorisation because the clearing key is only unique per authorisation
-     * (`card_clearings` UNIQUE (authorization_id, idempotency_key)). The unscoped
-     * `card-clearing:<key>` let two authorisations that happened to share a clearing key collide
-     * in transaction-service, which deduplicated the second posting away — a clearing recorded
-     * here and never in the books.
-     *
-     * Deterministic, so a re-driven posting presents the same key. When the verbatim form would
-     * not fit transaction-service's 100-character column (clearing keys may be 128), the clearing
-     * key is replaced by the first 128 bits of its SHA-256 — still deterministic, still scoped,
-     * and short enough to fit the column (the unscoped form already exceeded it for any clearing
-     * key over 86 characters).
+     * - Scoped by the authorisation: a clearing key is only unique per authorisation
+     *   (`card_clearings` UNIQUE (authorization_id, idempotency_key)), and the unscoped
+     *   `card-clearing:<key>` let two authorisations sharing a clearing key collide in
+     *   transaction-service, which deduplicated the second posting away.
+     * - Always hashed, never "verbatim when it fits": a mixed form shares one namespace between
+     *   raw keys and digests, so a client could choose a clearing key that spells another key's
+     *   digest and collide with it. One encoding for every key has no such overlap.
+     * - The FULL 256-bit digest, base64url without padding (43 chars), so the key is fixed at 96
+     *   characters and fits transaction-service's 100-character column; hex (64) would not.
+     * - Deterministic, so a re-driven posting presents the same key.
      */
     fun of(authorizationId: UUID, clearingKey: String): String {
-        val verbatim = "card-clearing:$authorizationId:$clearingKey"
-        if (verbatim.length <= MAX_LENGTH) return verbatim
         val digest = MessageDigest.getInstance("SHA-256").digest(clearingKey.toByteArray(Charsets.UTF_8))
-        val hex = digest.joinToString("") { "%02x".format(it) }.take(DIGEST_HEX_CHARS)
-        return "card-clearing:$authorizationId:sha256-$hex"
+        val key = "card-clearing:$authorizationId:h:" + Base64.getUrlEncoder().withoutPadding().encodeToString(digest)
+        check(key.length == LENGTH && key.length <= MAX_LENGTH) { "ledger key length ${key.length}" }
+        return key
     }
 }

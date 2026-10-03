@@ -425,6 +425,52 @@ class CardProcessingServiceTest {
     }
 
     @Test
+    fun `a reversal that loses a race to a clearing releases only what is still held`(): Unit = runBlocking {
+        val stale = authorization(AuthorizationStatus.APPROVED)
+        val cleared = stale.copy(
+            status = AuthorizationStatus.PARTIALLY_CLEARED,
+            clearedAmountMinorUnits = 4_000,
+            version = 1,
+        )
+        coEvery { repository.findById(stale.id) } returnsMany listOf(stale, cleared)
+        val events = mutableListOf<OutboxMessage>()
+        coEvery { repository.save(any(), capture(events), any()) } throws StaleAuthorizationException() andThenAnswer
+            { firstArg() }
+
+        val outcome = service().reverse(stale.id)
+
+        assertThat(outcome).isInstanceOf(PresentmentOutcome.Accepted::class.java)
+        assertThat((outcome as PresentmentOutcome.Accepted).authorization.clearedAmountMinorUnits).isEqualTo(4_000)
+        // The re-evaluated release is the 6 000 still held, not the stale snapshot's 10 000.
+        assertThat(events.last().payload).contains("\"releasedAmountMinorUnits\":6000")
+        coVerify(exactly = 1) { metrics.clearingConflict() }
+        Unit
+    }
+
+    @Test
+    fun `a reversal that loses twice answers retry-later, never a 500`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.APPROVED)
+        coEvery { repository.findById(approved.id) } returns approved
+        coEvery { repository.save(any(), any(), any()) } throws StaleAuthorizationException()
+
+        assertThatThrownBy { runBlocking { service().reverse(approved.id) } }
+            .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        Unit
+    }
+
+    @Test
+    fun `an expiry that keeps losing is skipped for the next sweep, not failed`(): Unit = runBlocking {
+        val due = authorization(AuthorizationStatus.APPROVED, expiresAt = now.minusSeconds(1))
+        coEvery { repository.findExpiredHolds(any(), any()) } returns listOf(due)
+        coEvery { repository.findById(due.id) } returns due
+        coEvery { repository.save(any(), any(), any()) } throws StaleAuthorizationException()
+
+        assertThat(service().releaseExpiredHolds(10)).isEqualTo(0)
+        coVerify(exactly = 2) { repository.save(any(), any(), any()) }
+        Unit
+    }
+
+    @Test
     fun `a refused presentment records nothing, so its retry is evaluated afresh`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved

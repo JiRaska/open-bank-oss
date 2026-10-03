@@ -146,7 +146,16 @@ questions — VoP warns, this authorises.
   remaining hold, then answers 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`; nothing applies past the
   authorised amount. (b) The ledger key `card-clearing:<key>` was not scoped per authorisation, so two
   authorisations sharing a clearing key collided in transaction-service and the second posting was
-  deduplicated away; it is now `card-clearing:<authorizationId>:<key>` (digested to fit
-  transaction-service's VARCHAR(100)). Residual: a replay does not re-attempt a `FAILED` ledger posting
+  deduplicated away; it is now `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>`. A
+  security review of the first version of that fix found the remaining holes, all closed in the same
+  PR: (c) the ledger key was verbatim when it fit and a `sha256-` digest otherwise — one namespace for
+  two encodings, so a client could pick a clearing key spelling another key's digest; now ALWAYS the
+  full 256-bit digest (fixed 96 chars, inside transaction-service's VARCHAR(100)). (d) Reversal and
+  expiry wrote through a path with no version gate, so either could overwrite a concurrent clearing
+  computed after its read; every write now carries the version, and the loser re-reads and
+  re-evaluates once (reversal then 409, expiry skipped to the next sweep) — never a 500. (e) Only a
+  `PersistenceException` was translated, so a commit-time optimistic-lock failure in another shape
+  became a 500; the cause chain is now inspected for every write failure (proven by an IT that blocks
+  the UPDATE on a row lock and moves the version underneath it). Residual: a replay does not re-attempt a `FAILED` ledger posting
   — operations re-drive it (§5, runbook). The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
   not, and is added alongside this fix.

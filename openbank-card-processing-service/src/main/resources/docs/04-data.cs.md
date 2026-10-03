@@ -23,7 +23,7 @@ Jeden řádek na autorizaci — schválenou i zamítnutou. Je to zároveň hold.
 | `network_reference` | VARCHAR(64) | reference acquirera |
 | `idempotency_key` | VARCHAR(128) | zapsán jednou při insertu |
 | `authorized_at`, `expires_at`, `updated_at` | TIMESTAMPTZ | |
-| `version` | BIGINT | optimistický zámek (V4, Hibernate `@Version`) — serializuje souběžné clearingy |
+| `version` | BIGINT | optimistický zámek (V4, Hibernate `@Version`) — serializuje každý souběžný zápis (clearing, reverzace, expirace) |
 
 Omezení a indexy:
 

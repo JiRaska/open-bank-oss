@@ -22,7 +22,7 @@ import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.OptimisticLockException
-import jakarta.persistence.PersistenceException
+import org.hibernate.StaleObjectStateException
 import org.hibernate.StaleStateException
 import java.time.Instant
 import java.util.UUID
@@ -51,20 +51,25 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         authorization: CardAuthorization,
         event: OutboxMessage,
         idempotencyKey: String,
-    ): CardAuthorization = Panache.withTransaction {
-        find("id", authorization.id).firstResult().flatMap { existing ->
-            val persisted: Uni<CardAuthorizationEntity> = if (existing != null) {
-                existing.applyFrom(authorization)
-                Uni.createFrom().item(existing)
-            } else {
-                // The command's idempotency key is what the UNIQUE index protects. It is not a
-                // field of the aggregate — the domain has no opinion about acquirer retries — so it
-                // is carried on the row, written once here and never rewritten.
-                persist(authorization.toEntity(idempotencyKey))
+    ): CardAuthorization = translatingWriteFailures {
+        Panache.withTransaction {
+            find("id", authorization.id).firstResult().flatMap { existing ->
+                val persisted: Uni<CardAuthorizationEntity> = if (existing != null) {
+                    // Same gate as saveClearing: a reversal or expiry computed from a snapshot a
+                    // concurrent clearing has since moved on must not overwrite that clearing.
+                    if (existing.version != authorization.version) throw StaleAuthorizationException()
+                    existing.applyFrom(authorization)
+                    Uni.createFrom().item(existing)
+                } else {
+                    // The command's idempotency key is what the UNIQUE index protects. It is not a
+                    // field of the aggregate — the domain has no opinion about acquirer retries — so it
+                    // is carried on the row, written once here and never rewritten.
+                    persist(authorization.toEntity(idempotencyKey))
+                }
+                persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(authorization)
             }
-            persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(authorization)
-        }
-    }.awaitSuspending()
+        }.awaitSuspending()
+    }
 
     /**
      * The authorisation update, the clearing record and the outbox row in ONE transaction.
@@ -79,7 +84,7 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         authorization: CardAuthorization,
         event: OutboxMessage,
         clearing: RecordedClearing,
-    ): CardAuthorization = try {
+    ): CardAuthorization = translatingWriteFailures {
         Panache.withTransaction {
             Panache.getSession()
                 .chain { session -> session.persist(clearing.toEntity()).chain { _ -> session.flush() } }
@@ -93,7 +98,27 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
                 }
                 .replaceWith(authorization)
         }.awaitSuspending()
-    } catch (e: PersistenceException) {
+    }
+
+    /**
+     * Translates a write's failure into the two outcomes the use case acts on, whatever shape it
+     * arrives in.
+     *
+     * Caught BROADLY on purpose: reactive Hibernate surfaces the same database event differently
+     * depending on where it happens — the pre-check's own [StaleAuthorizationException], a
+     * flush-time `PersistenceException`, or a COMMIT-time `StaleObjectStateException` /
+     * `OptimisticLockException` that need not be wrapped in a `PersistenceException` at all.
+     * Catching only one type turned the other shapes into a 500. Dispatch is on the cause chain;
+     * anything that is neither case is rethrown unchanged.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun <T> translatingWriteFailures(write: suspend () -> T): T = try {
+        write()
+    } catch (e: StaleAuthorizationException) {
+        throw e
+    } catch (e: DuplicateClearingException) {
+        throw e
+    } catch (e: RuntimeException) {
         when {
             e.isClearingKeyViolation() -> throw DuplicateClearingException(e)
             // Both read the same version; the loser's `UPDATE ... WHERE version = ?` matched no row.
@@ -241,7 +266,10 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
      * constraint and not, say, the outbox's `event_id` UNIQUE — which must stay a 500.
      */
     private fun Throwable.isStaleRow(): Boolean = generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
-        it is OptimisticLockException || it is StaleStateException
+        it is OptimisticLockException ||
+            it is StaleObjectStateException ||
+            it is StaleStateException ||
+            it is StaleAuthorizationException
     }
 
     private fun Throwable.isClearingKeyViolation(): Boolean =

@@ -140,12 +140,12 @@ sequenceDiagram
   else accepted
     S->>DB: INSERT card_clearings + UPDATE card_authorizations + INSERT card_outbox (card.cleared.v1)
     Note over S,DB: a concurrent duplicate fails ux_card_clearings_authorization_key, rolls back and replays the winner
-    S->>T: POST /api/v1/transactions (rail CARD, key card-clearing:AUTH_ID:KEY)
+    S->>T: POST /api/v1/transactions (rail CARD, key card-clearing:AUTH_ID:h:SHA256(KEY))
     S-->>A: 200 with new state
   end
 ```
 
-A clearing key is applied at most once per authorisation (see [03 — API](./03-api.md#idempotency)); a replay never reaches the ledger again. Concurrent clearings under different keys are serialised by an optimistic lock (`card_authorizations.version`): the loser is re-evaluated once against the real remaining hold, so nothing is applied past the authorised amount.
+A clearing key is applied at most once per authorisation (see [03 — API](./03-api.md#idempotency)); a replay never reaches the ledger again. Every write to an authorisation — clearing, reversal and expiry — goes through one optimistic lock (`card_authorizations.version`), so none can overwrite another computed from an older read. Concurrent clearings under different keys are serialised this way: the loser is re-evaluated once against the real remaining hold, so nothing is applied past the authorised amount.
 
 The posting runs **after** the clearing commits and is never rolled back: the acquirer has already asserted the clearing. Its outcome is three-valued — `POSTED`, `SKIPPED_DISABLED`, `FAILED` — counted in `openbank.card.processing.ledger.postings`, and a `FAILED` posting is logged as an error. Amounts are converted from minor units using the currency's own fraction digits.
 

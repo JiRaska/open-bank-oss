@@ -76,7 +76,8 @@ class TransactionLedgerPostingAdapterTest {
         // Derived from the clearing, so a retried presentment presents the same key and
         // transaction-service dedupes it instead of debiting the customer twice.
         // Scoped by the authorisation: a clearing key is only unique per authorisation.
-        assertThat(sent.captured.idempotencyKey).isEqualTo("card-clearing:${authorization.id}:clr-1")
+        assertThat(sent.captured.idempotencyKey).isEqualTo(CardClearingLedgerKey.of(authorization.id, "clr-1"))
+        assertThat(sent.captured.idempotencyKey).startsWith("card-clearing:${authorization.id}:h:")
         Unit
     }
 
@@ -91,16 +92,38 @@ class TransactionLedgerPostingAdapterTest {
     }
 
     @Test
-    fun `a long clearing key is digested to fit the ledger column, deterministically`() {
+    fun `every ledger key is a fixed-length digest that fits the ledger column, deterministically`() {
+        val id = UUID.randomUUID()
+        val keys = listOf("c", "clr-1", "k".repeat(128))
+
+        keys.forEach { clearingKey ->
+            val key = CardClearingLedgerKey.of(id, clearingKey)
+            assertThat(key).hasSize(CardClearingLedgerKey.LENGTH)
+            assertThat(key.length).isLessThanOrEqualTo(CardClearingLedgerKey.MAX_LENGTH)
+            assertThat(key).startsWith("card-clearing:$id:h:")
+            assertThat(CardClearingLedgerKey.of(id, clearingKey)).isEqualTo(key)
+        }
+        assertThat(keys.map { CardClearingLedgerKey.of(id, it) }).doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `a clearing key that spells another key's digest cannot collide with it`() {
+        // The attack on a mixed "verbatim when it fits, digest otherwise" encoding: choose a short
+        // key equal to the digest form of a long one. One encoding for every key leaves no overlap.
         val id = UUID.randomUUID()
         val longKey = "k".repeat(128)
+        val digestHex = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(longKey.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        val digestB64 = CardClearingLedgerKey.of(id, longKey).substringAfter(":h:")
 
-        val key = CardClearingLedgerKey.of(id, longKey)
-
-        assertThat(key.length).isLessThanOrEqualTo(CardClearingLedgerKey.MAX_LENGTH)
-        assertThat(key).startsWith("card-clearing:$id:sha256-")
-        assertThat(CardClearingLedgerKey.of(id, longKey)).isEqualTo(key)
-        assertThat(CardClearingLedgerKey.of(id, longKey + "x")).isNotEqualTo(key)
+        assertThat(
+            CardClearingLedgerKey.of(id, "sha256-$digestHex"),
+        ).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(
+            CardClearingLedgerKey.of(id, "sha256-" + digestHex.take(32)),
+        ).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(CardClearingLedgerKey.of(id, "h:$digestB64")).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(CardClearingLedgerKey.of(id, digestB64)).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
     }
 
     @Test

@@ -19,8 +19,8 @@
 |---|---|
 | No double hold on retry | UNIQUE `idempotency_key` |
 | No double clearing on a repeated presentment | UNIQUE `card_clearings (authorization_id, idempotency_key)` + replay / 409 `IDEMPOTENCY_KEY_REUSED` |
-| No lost or over-hold clearing under concurrency | optimistic lock `card_authorizations.version` + re-evaluation against the remaining hold |
-| One ledger posting per clearing, never shared across authorisations | ledger key `card-clearing:<authorizationId>:<key>` |
+| No lost or over-hold clearing, and no reversal/expiry overwriting one, under concurrency | optimistic lock `card_authorizations.version` on every write + re-evaluation against the remaining hold |
+| One ledger posting per clearing, never shared across authorisations | ledger key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` — scoped, always hashed |
 | No over-clearing | `AuthorizationLifecycle.clear` **and** a CHECK constraint |
 | Decline reason only on declines | CHECK constraint |
 | No silent unbound integration | `NOT_BOUND` from vendor bindings without credentials or without a contract |

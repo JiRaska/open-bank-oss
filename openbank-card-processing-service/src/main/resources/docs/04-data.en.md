@@ -23,7 +23,7 @@ One row per authorisation — approved or declined. It is also the hold.
 | `network_reference` | VARCHAR(64) | acquirer's reference |
 | `idempotency_key` | VARCHAR(128) | written once on insert |
 | `authorized_at`, `expires_at`, `updated_at` | TIMESTAMPTZ | |
-| `version` | BIGINT | optimistic lock (V4, Hibernate `@Version`) — serialises concurrent clearings |
+| `version` | BIGINT | optimistic lock (V4, Hibernate `@Version`) — serialises every concurrent write (clearing, reversal, expiry) |
 
 Constraints and indexes:
 

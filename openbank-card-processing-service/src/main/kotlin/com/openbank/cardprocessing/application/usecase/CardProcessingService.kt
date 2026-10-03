@@ -267,7 +267,7 @@ class CardProcessingService(
      * never applied past the authorised amount, and every caller gets a definite answer.
      */
     override suspend fun clear(command: PresentmentCommand): PresentmentOutcome {
-        repeat(CLEARING_ATTEMPTS) {
+        repeat(WRITE_ATTEMPTS) {
             try {
                 return clearOnce(command)
             } catch (_: StaleAuthorizationException) {
@@ -359,10 +359,23 @@ class CardProcessingService(
         "${command.amountMinorUnits}|${command.currencyCode.uppercase()}",
     )
 
+    /**
+     * Releases the remaining hold. Shares the clearing's optimistic lock: a reversal computed from
+     * a snapshot a concurrent clearing has moved on is re-read and re-evaluated once (so it releases
+     * what is ACTUALLY still held, or is refused if the clearing finished it), then answers 409
+     * `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Never a 500, never an overwrite of the clearing.
+     */
     override suspend fun reverse(authorizationId: UUID): PresentmentOutcome {
-        val existing = repository.findById(authorizationId)
-            ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
-        return releaseHold(existing, RELEASE_KIND_REVERSAL) { AuthorizationLifecycle.reverse(it, clock) }
+        repeat(WRITE_ATTEMPTS) {
+            val existing = repository.findById(authorizationId)
+                ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
+            try {
+                return releaseHold(existing, RELEASE_KIND_REVERSAL) { AuthorizationLifecycle.reverse(it, clock) }
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+            }
+        }
+        throw IdempotencyRequestInProgressException()
     }
 
     override suspend fun findById(id: UUID): CardAuthorization? = repository.findById(id)
@@ -374,12 +387,32 @@ class CardProcessingService(
         val due = repository.findExpiredHolds(Instant.now(clock), limit)
         var released = 0
         for (authorization in due) {
-            val outcome = releaseHold(authorization, RELEASE_KIND_EXPIRY) {
-                AuthorizationLifecycle.expire(it, clock)
-            }
-            if (outcome is PresentmentOutcome.Accepted) released++
+            if (expireOne(authorization) is PresentmentOutcome.Accepted) released++
         }
         return released
+    }
+
+    /**
+     * One expiry, under the same optimistic lock as clearing: a hold a concurrent clearing touched
+     * is re-read and re-evaluated once (it may now be fully cleared and have nothing to expire);
+     * losing twice SKIPS it — the next sweep picks it up — rather than failing the whole sweep.
+     */
+    private suspend fun expireOne(snapshot: CardAuthorization): PresentmentOutcome? {
+        var current: CardAuthorization? = snapshot
+        repeat(WRITE_ATTEMPTS) {
+            val authorization = current ?: return null
+            try {
+                return releaseHold(authorization, RELEASE_KIND_EXPIRY) { AuthorizationLifecycle.expire(it, clock) }
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+                current = repository.findById(snapshot.id)
+            }
+        }
+        log.warnf(
+            "hold expiry for authorization %s lost two concurrent-write races; left for the next sweep",
+            snapshot.id,
+        )
+        return null
     }
 
     private suspend fun releaseHold(
@@ -430,8 +463,8 @@ class CardProcessingService(
         const val RELEASE_KIND_REVERSAL = "REVERSAL"
         const val RELEASE_KIND_EXPIRY = "EXPIRY"
 
-        /** The first try plus one re-evaluation after losing a concurrent-clearing race. */
-        private const val CLEARING_ATTEMPTS = 2
+        /** The first try plus one re-evaluation after losing a concurrent-write race. */
+        private const val WRITE_ATTEMPTS = 2
 
         /** Card-issuance's own name for an MCC it has no category for. */
         const val UNMAPPED_CATEGORY = "UNMAPPED"
