@@ -66,3 +66,17 @@ Residual: producer authenticity and Kafka ACLs remain deployment controls. Local
 production retention, replication, authorization or completeness of all producers. All writers
 must adopt the append lock before relying on concurrent safety; rollback to
 acknowledgement-on-failure is unsafe. See `docs/runbooks/audit-ingestion-recovery.md`.
+
+### 2026-10-03 — online checkpoint verification consistency
+
+- **Tampering / Repudiation:** online anchor verification now compares the recomputed checkpoint
+  digest with the stored digest and requires the captured chain status to be INTACT before
+  counting a checkpoint as verified. Digest mismatch and a non-intact captured chain are reported
+  separately from signature failure (`anchorDigestMismatch`, `capturedChainNotIntact`): a
+  correctly signed broken checkpoint is evidence of the producer's observation, not of signature
+  forgery. This aligns operational results with the independent verifier's rejection of such
+  checkpoints. `AuditAnchorCheckpointConsistencyTest` covers both cases with a valid signature.
+
+Residual: unsigned coherent checkpoints and unavailable historical keys remain UNVERIFIED. These
+checks do not establish external custody, completeness of an export or retention guarantees;
+independent verification remains necessary.
