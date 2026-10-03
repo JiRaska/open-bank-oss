@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.270.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.0...admin-ui-v0.270.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **risk-engine:** reject a snapshot as-of after the current business date ([#11718](https://github.com/JiRaska/open-bank-oss/issues/11718)) ([a56389b](https://github.com/JiRaska/open-bank-oss/commit/a56389b05fd559348f5717c3a657d6feb1e0ec6c))
+
 ## [0.270.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.269.0...admin-ui-v0.270.0) (2026-10-02)
 
 
