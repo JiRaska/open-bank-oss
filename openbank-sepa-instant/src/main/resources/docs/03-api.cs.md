@@ -82,6 +82,14 @@ Chyby se vrací jako malý JSON objekt přes exception mappery:
 
 - `404 Not Found` — neznámé `paymentId` (`NotFoundMapper`).
 - `400 Bad Request` — neplatný přechod stavu, např. recall nezúčtované platby (`BadRequestMapper`).
+- `400 Bad Request` při odeslání — dvojici `amount` + `currency` nelze vyjádřit jako kernel `Money` (#11912).
+  Odmítne se hned na vstupu, dřív než proběhne screening, vznikne řádek, event nebo volání dál, a Idempotency-Key
+  zůstane volný. Tělo je platformní RFC 9457 `ProblemDetail` s položkou `violations[]`, která jmenuje pole:
+  - `AMOUNT_SCALE_EXCEEDED` — částka má víc desetinných míst, než měna dovoluje (např. `1.005 EUR`);
+  - `CURRENCY_UNSUPPORTED` — nejde o kód ISO 4217 s dílčí jednotkou (např. `XYZ`, `XAU`, prázdná hodnota);
+  - `VALIDATION_ERROR` — částka je mimo rozsah (víc než 19 celých číslic).
+  Měna malými písmeny nebo s mezerami (`eur`, `" EUR "`) se převede na `EUR`. Částky se vrací a posílají
+  v přesnosti měny (`10.50`, ne `10.500000`).
 
 (`openapi.yaml` deklaruje schéma `ApiError { code, message }`; nasazené mappery vydávají `{ error }`. Za autoritativní berte chování resource.)
 
