@@ -125,7 +125,8 @@ not change any existing request's outcome until explicitly flipped.
   clean score at every layer that reads the outcome. `FraudVerdict.UNKNOWN` now names that case,
   counted apart from real and synthetic outcomes (`result="unrecognised"`) with the degraded gauge
   at 0, since the scorer was reachable. **No trust boundary, edge or privilege changed**; the
-  verdict is still shadow-only, so the only behaviour change is the log line and the counter.
+  verdict is still shadow-only, so payment decisions do not change. The log line records the event;
+  the counter feeds `FraudScoringUnrecognisedVerdict`, which warns on an unreadable score.
   Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
   a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
