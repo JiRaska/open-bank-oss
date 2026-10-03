@@ -96,8 +96,8 @@ for (const mode of ['server', 'network']) test(`signup ${mode} failure permits r
   dom.window.close();
 });
 
-test('every local link, fragment and image resolves on all three pages', () => {
-  for (const page of ['index.html', 'platform.html', 'classic.html']) {
+test('every local link, fragment and image resolves on all four pages', () => {
+  for (const page of ['index.html', 'platform.html', 'labs.html', 'classic.html']) {
     const d = new JSDOM(read(page)).window.document;
     const ids = [...d.querySelectorAll('[id]')].map(el => el.id);
     assert.equal(new Set(ids).size, ids.length, `${page}: duplicate IDs`);
