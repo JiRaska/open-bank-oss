@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.0...sepa-instant-v0.11.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **sepa-instant:** refuse non-EUR submissions ([#11933](https://github.com/JiRaska/open-bank-oss/issues/11933)) ([7f8e7c1](https://github.com/JiRaska/open-bank-oss/commit/7f8e7c10b28a062a177e72e442c02eb3421cfd8c)), closes [#11913](https://github.com/JiRaska/open-bank-oss/issues/11913)
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.5...sepa-instant-v0.11.0) (2026-10-03)
 
 
