@@ -1,15 +1,20 @@
-# Open Bank Foundation
-> The open framework for banking in the AI era.
+# OpenBank
+> An open-source banking reference implementation you can explore.
 
-Open Bank Foundation is a proposal for a shared, open-source framework for banks:
-~30 production-shaped banking microservices, multi-cloud substrate (cloud-agnostic, OpenTofu + ArgoCD),
-AI-native governance with policy-gated agents and human-in-the-loop controls, and banking-grade patterns
-(ledger, SEPA, SWIFT, idempotency, outbox, audit) shared in the open.
+OpenBank includes a customer app, operator portal, banking domains and governed AI tools.
+It is early-stage software, not a licensed bank and not production-ready. Use demo data only.
 
-## Key pages
-- [Home](https://open-bank.tech/): Manifesto, framework overview, and co-founding proposal
-- [Platform](https://open-bank.tech/platform.html): Live governance (DORA/PSD2/GDPR), FinOps, BCP, AI governance, cloud architecture
+## Explore
+- [Home](https://open-bank.tech/): Project, actual product views, community and iOS TestFlight signup
+- [Platform](https://open-bank.tech/platform.html): Complete code-derived module inventory, grouped by capability, with source revision and links
+- [Source](https://github.com/JiRaska/open-bank-oss): Current implementation, licenses and roadmap
+- [Admin demo](https://admin.open-bank.tech): Authenticated operator portal
+
+## Evidence and licensing
+The public inventory is a repository snapshot, not a deployment or health report.
+Product screenshots are recorded views. Follow portal links for current operational evidence.
+The platform is Apache-2.0; AI agent components use AGPL-3.0-only plus commercial licensing.
+Consult each component's license. Open Bank Foundation is a proposal, not an incorporated organization.
 
 ## Contact
 - Email: hello@open-bank.tech
-- LinkedIn: https://www.linkedin.com/in/jiriraska

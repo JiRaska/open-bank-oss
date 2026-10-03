@@ -1,40 +1,75 @@
-# Open Bank Foundation — landing page
+# OpenBank public website
 
-Statická marketingová landing page pro vizi **Open Bank Foundation** — sdílený open-source
-framework pro banky v éře AI (microservices, multi-cloud, AI, governance-as-code).
+Static HTML/CSS/JS; no frontend framework or client-side build. The customer app and
+admin portal remain separate products. This page presents them, it does not simulate them.
 
-## Spuštění lokálně
+## Preview
 
-```bash
-cd openbank-foundation-site
-python3 -m http.server 8766
-# otevři http://localhost:8766
+From the repository root:
+
+```sh
+python3 -m http.server 8766 --bind 127.0.0.1 --directory openbank-infra/web/landing
 ```
 
-Žádný build, žádné závislosti — čisté HTML/CSS/JS.
+Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
+`platform.html` search and `classic.html` at desktop and mobile widths.
 
-## Struktura
+## Files and sources
 
-| Soubor | Účel |
-|---|---|
-| `index.html` | obsah a struktura stránky |
-| `styles.css` | vzhled (dark fintech téma, gradient, glow, responzivní) |
-| `main.js` | scroll-reveal animace + parallax loga |
-| `assets/openbank-logo.png` | logo s **transparentním pozadím** |
-| `make_logo.py` | skript, který z původního PNG (zapečený checkerboard) vytvořil průhledné logo |
+- `index.html`, `styles.css`: current design. App neutrals, Space Grotesk / Space Mono,
+  blue accent from the app's existing palette. The lions are guides; bots represent assistance.
+- `platform.html`: capability navigation and the **complete** repository module inventory.
+  The marked catalog section is generated; never edit it by hand.
+- `catalog.js`: local search only. All modules are readable without JavaScript.
+- `main.js`: existing demo modal and TestFlight integration, unchanged by the redesign.
+- `classic.html`, `classic.css`: previous homepage, visibly historical and excluded from indexing.
+  Old links to `platform.html` now reach the current platform page.
+- `assets/app-screen.png`: existing actual app screenshot, reused without changing pixels.
+- `assets/agent-control-room.webp`: lossless encoding of the supplied presentation's
+  actual admin capture (slide 13, image14.png). It is a **recorded demo view**, not telemetry.
+- `assets/ob-mark.png`: existing OB mark from the supplied presentation (image5.png).
+- `assets/agent-crew.webp`: original artwork copied from the admin portal.
+- `assets/explorers-hero.webp`: new AI-generated illustration using the supplied lion,
+  lioness and bot references. It contains no product UI.
 
-## Logo
+The presentation is `OpenBank_Bank_Accidentally_final2.pptx`. It is a visual source,
+not a source of current metrics. No third-party banking logos or presentation credentials
+are imported. Product screenshots are labelled as recorded views.
 
-Zdrojový obrázek `image_1780247453018654.png` měl checkerboard zapečený do pixelů (RGB bez
-alfa kanálu). `make_logo.py` ho převedl na skutečně transparentní PNG: flood-fill pozadí od
-okrajů, potlačení stínu, ponechání jen největší souvislé komponenty a měkký antialias okraje.
+## Refresh the public inventory
 
-## Obsah / sekce
+Install the admin UI's dependencies as documented there (the existing catalog generator
+uses Node and `yaml`), then run:
 
-1. **Hero** — claim „The open framework for banking in the AI era" + logo
-2. **Manifesto** — banky se staly software housy; sdílejme společné jádro
-3. **Framework** — 6 pilířů (hexagonal, multi-cloud, AI-native, event-driven, governance-as-code, security)
-4. **Why open source** — proč je sdílení bezpečnější a levnější
-5. **Join** — výzva k zapojení (e-mail / LinkedIn)
+```sh
+python3 openbank-infra/web/generate-public-catalog.py
+python3 openbank-infra/web/generate-public-catalog.py --check
+node --test openbank-infra/web/tests/landing.test.cjs
+```
 
-> Texty i odkazy (e-mail, LinkedIn) jsou placeholdery — uprav v `index.html`.
+The updater invokes `openbank-admin-ui/scripts/generate-catalog.mjs`; it does not create
+another inventory definition. `AREAS` in the updater is an editorial navigation mapping,
+not the governance `dataDomain` taxonomy. Every module appears once. New/unmapped modules
+remain visible in Shared libraries & delivery. The source revision and date are explicit.
+Regenerate after catalog input changes; deployment does this before contacting AWS.
+
+## TestFlight: preserve the integration
+
+The same form ID, action, method, hidden fields, required email and opt-in consent,
+honeypot, hCaptcha sitekey, AJAX handler, status text and privacy dialog are retained.
+Only the widget theme changes from dark to light. Web3Forms receives the same payload.
+Public form routing identifiers are the existing browser-visible ones, not secrets.
+
+Tests intercept the submit endpoint locally: **never send test signups to Web3Forms**.
+A real end-to-end delivery test requires a user-authorized address and CAPTCHA completion.
+The redesign does not change invitation handling or retention policy.
+
+## Publishing and rollback
+
+`../deploy.sh` uses the existing S3/CloudFront deployment. Do not deploy a branch before
+required PR review. The current design keeps the previous website link; the old page
+has a historical notice. Roll back the website commit through the normal reviewed flow.
+The app association and security discovery files are unchanged.
+
+No health, compliance percentage or cost is presented as live on the public platform
+page. Links lead to the actual admin evidence surfaces, which require sign-in.
