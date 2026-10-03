@@ -84,6 +84,14 @@ const renderPage = () => render(<LanguageProvider><BusinessOnboardingPage /></La
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('business onboarding representation review', () => {
+  it('selects the queue case for ownership investigation without a manual UUID copy', async () => {
+    vi.stubGlobal('fetch', mockFetch(unattested))
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Select case in ownership graph' }))
+    expect(screen.getByRole('textbox', { name: 'KYB case ID' })).toHaveValue(reviewCase.id)
+  })
+
   it('shows the parser as a SUGGESTION and says the confirmation is what binds', async () => {
     vi.stubGlobal('fetch', mockFetch(unattested))
     renderPage()

@@ -35,6 +35,35 @@ prohibited if {
 	count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
 }
 
+prohibited if {
+	input.action == "context.kyb-case.read"
+	object.get(input.attributes, "rootScopeVerified", false) != true
+}
+
+prohibited if {
+	input.action == "context.kyb-case.read"
+	object.get(input.attributes, "assignmentVerified", false) != true
+}
+
+prohibited if {
+	input.action == "context.kyb-case.read"
+	object.get(input.attributes, "purpose", "") != "KYB_OWNERSHIP_REVIEW"
+}
+
+prohibited if {
+	input.action == "context.kyb-case.read"
+	count({r | r := input.principal.roles[_]; r in {"ROLE_KYC", "ROLE_ADMIN"}}) == 0
+}
+
+allowed_reasons contains "context-kyb-ownership-review" if {
+	input.action == "context.kyb-case.read"
+	input.principal.type == "HUMAN"
+	object.get(input.attributes, "assignmentVerified", false) == true
+	object.get(input.attributes, "rootScopeVerified", false) == true
+	object.get(input.attributes, "purpose", "") == "KYB_OWNERSHIP_REVIEW"
+	count({r | r := input.principal.roles[_]; r in {"ROLE_KYC", "ROLE_ADMIN"}}) > 0
+}
+
 # Assignment administration changes who can see restricted banking context. Only a human
 # administrator may perform these exact lifecycle actions; the service persists an independent
 # maker/checker decision and immediately expires a revoked assignment.
