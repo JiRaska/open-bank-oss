@@ -3,6 +3,9 @@
 """Regression checks for source admission before OIDC and image building."""
 
 import importlib.util
+import os
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -112,6 +115,46 @@ class SourceValidationTest(unittest.TestCase):
         self.assertIn("steps.source.outputs.proceed == 'true'", source)
         self.assertIn("await-admin-ui-source-validation.py", source)
         self.assertIn("needs: deploy-source", workflow.split("  build-push:", 1)[1])
+
+    def test_image_pin_only_main_advance_and_duplicate_source(self):
+        guard = SCRIPT.with_name("authorize-admin-ui-deploy-source.sh")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git_env = {key: value for key, value in os.environ.items()
+                       if not key.startswith("GIT_")}
+
+            def git(*args):
+                return subprocess.check_output(("git", *args), cwd=root, env=git_env,
+                                               text=True).strip()
+
+            git("init", "-q")
+            git("config", "user.name", "Test")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "commit.gpgsign", "false")
+            ui = root / "openbank-admin-ui" / "src"
+            ui.mkdir(parents=True)
+            (ui / "example.ts").write_text("export const ready = true;\n")
+            git("add", "openbank-admin-ui/src/example.ts")
+            git("commit", "-qm", "fix(admin-ui): validated source")
+            source_sha = git("rev-parse", "HEAD")
+
+            manifest = root / "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
+            manifest.parent.mkdir(parents=True)
+            manifest.write_text("image: verified\n")
+            git("add", "openbank-infra/gitops/components/admin-ui/admin-ui.yaml")
+            git("commit", "-qm", "chore(admin-ui): deploy verified image")
+            main_sha = git("rev-parse", "HEAD")
+
+            def admit(source, duplicate):
+                result = subprocess.run(
+                    ("bash", str(guard), source, main_sha, "workflow_run", duplicate),
+                    cwd=root, env=git_env, capture_output=True, text=True, check=True,
+                )
+                return result.stdout.strip()
+
+            self.assertEqual(admit(source_sha, "false"), "true")
+            self.assertEqual(admit(source_sha, "true"), "false")
+            self.assertEqual(admit(main_sha, "false"), "false")
 
 
 if __name__ == "__main__":
