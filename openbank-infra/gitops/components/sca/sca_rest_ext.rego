@@ -100,3 +100,15 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.principal.id == "service-account-openbank-services"
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
 }
+
+# Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
+# and each record expose the action, the party id and the maker id of every parked four-eyes SCA
+# operation. Base operator-read-any is role-only, and both realm M2M clients
+# (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+# ROLE_OPERATOR in at least one realm, so without this veto both could read the queue. No M2M
+# consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
+# reading and deciding are human-operator only. Identity decides, never principal.type (#266).
+prohibited if {
+	startswith(input.principal.id, "service-account-")
+	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
+}

@@ -11,7 +11,6 @@ import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.domain.model.Settlement
 import com.openbank.settlement.domain.model.SettlementStatus
 import jakarta.annotation.security.RolesAllowed
-import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.POST
 import jakarta.ws.rs.Path
@@ -39,12 +38,20 @@ import java.util.UUID
 @Tag(name = "Settlements", description = "Interbank settlement origination")
 class SettlementResource(private val settlementUseCase: SettlementUseCase) {
 
+    /**
+     * `settlement.create` is in rules.yaml `four_eyes.actions` (#10041 slice 10). With
+     * `authz.four-eyes.enforce=true` the interceptor answers 202 with an `approvalId` before this
+     * body runs; the maker retries the IDENTICAL request with `X-Approval-Id` once a different
+     * operator approved it, and the approval is consumed exactly once. Validation therefore lives
+     * in [CreateSettlementRequest]'s constructor, which runs at deserialisation, BEFORE the
+     * interceptor: a malformed instruction never parks an approval a checker could approve.
+     */
     @POST
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
     @Authorize(action = "settlement.create", resource = "")
     @Operation(summary = "Originate a settlement and start its workflow")
-    suspend fun originate(request: CreateSettlementRequest): Response {
-        validate(request)
+    suspend fun originate(request: CreateSettlementRequest?): Response {
+        requireNotNull(request) { "a request body is required" }
         val settlement = settlementUseCase.originate(
             OriginateSettlementCommand(
                 idempotencyKey = request.idempotencyKey,
@@ -58,23 +65,6 @@ class SettlementResource(private val settlementUseCase: SettlementUseCase) {
             .entity(settlement.toResponse())
             .build()
     }
-
-    /** Reject malformed money-path input with 400 before any settlement is created. */
-    private fun validate(request: CreateSettlementRequest) {
-        val errors = buildList {
-            if (request.idempotencyKey.isBlank()) add("idempotencyKey must not be blank")
-            if (request.amount <= BigDecimal.ZERO) add("amount must be positive")
-            if (!CURRENCY_CODE.matches(request.currency)) add("currency must be an uppercase 3-letter ISO-4217 code")
-            if (request.payerAccountId == request.payeeAccountId) add("payer and payee accounts must differ")
-        }
-        if (errors.isNotEmpty()) {
-            throw BadRequestException(errors.joinToString("; "))
-        }
-    }
-
-    private companion object {
-        val CURRENCY_CODE = Regex("[A-Z]{3}")
-    }
 }
 
 data class CreateSettlementRequest(
@@ -83,7 +73,24 @@ data class CreateSettlementRequest(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-)
+) {
+    // Jackson constructs this before AuthorizeInterceptor runs, so an invalid instruction is
+    // refused (400 via libs-runtime's IllegalArgumentException mapping) before it can park or
+    // consume a four-eyes approval.
+    init {
+        val errors = buildList {
+            if (idempotencyKey.isBlank()) add("idempotencyKey must not be blank")
+            if (amount <= BigDecimal.ZERO) add("amount must be positive")
+            if (!CURRENCY_CODE.matches(currency)) add("currency must be an uppercase 3-letter ISO-4217 code")
+            if (payerAccountId == payeeAccountId) add("payer and payee accounts must differ")
+        }
+        require(errors.isEmpty()) { errors.joinToString("; ") }
+    }
+
+    private companion object {
+        val CURRENCY_CODE = Regex("[A-Z]{3}")
+    }
+}
 
 data class SettlementResponse(
     val id: UUID,
