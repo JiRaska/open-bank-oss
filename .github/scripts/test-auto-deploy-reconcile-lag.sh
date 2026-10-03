@@ -161,14 +161,16 @@ GOT_AL="$(RECONCILE_SERVICES='openbank-stale-svc openbank-placeholder-svc openba
 # A held placeholder would rank first. It must be removed BEFORE the one-service
 # cap so the healthy stale service gets this tick. Once the hold is removed, the
 # still-stale placeholder is offered again without any special recovery action.
+# Pin the rotation tick: with two candidates and cap 1, wall-clock parity otherwise
+# alternates the winner and makes this assertion fail every other three-hour bucket.
 GOT_HELD="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
-  RECONCILE_HOLDS='openbank-placeholder-svc' RECONCILE_MAX=1 bash "$PROBE" "$WORK/gitops")"
+  RECONCILE_HOLDS='openbank-placeholder-svc' RECONCILE_MAX=1 RECONCILE_TICK=0 bash "$PROBE" "$WORK/gitops")"
 if [ "$(echo "$GOT_HELD" | jq -c .)" != '["openbank-stale-svc"]' ]; then
   echo "FAIL: held service consumed the reconcile cap: $GOT_HELD"
   exit 1
 fi
 GOT_RELEASED="$(RECONCILE_SERVICES='openbank-placeholder-svc openbank-stale-svc' \
-  RECONCILE_HOLDS='' RECONCILE_MAX=1 bash "$PROBE" "$WORK/gitops")"
+  RECONCILE_HOLDS='' RECONCILE_MAX=1 RECONCILE_TICK=0 bash "$PROBE" "$WORK/gitops")"
 if [ "$(echo "$GOT_RELEASED" | jq -c .)" != '["openbank-placeholder-svc"]' ]; then
   echo "FAIL: released service was not re-offered: $GOT_RELEASED"
   exit 1
