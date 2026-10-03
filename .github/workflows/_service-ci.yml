@@ -257,7 +257,8 @@ jobs:
             wait "${docker_events_pid}" 2>/dev/null || true
           }
           trap cleanup_test_evidence EXIT
-          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+          bash .github/scripts/retry-testcontainers-ebusy.sh -- \
+            ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual

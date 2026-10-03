@@ -16,6 +16,7 @@ import sys
 import time
 
 DELAYS = (0, 60, 120, 240, 480, 600, 300)  # 30 minutes, seven probes
+FINAL_DELAYS = (0, 10, 30, 60)  # indexing can briefly regress after the first ready response
 WARNING = "x-github-dependency-graph-snapshot-warnings"
 PRODUCER = "Submit fleet dependency graph"
 
@@ -58,6 +59,12 @@ def _snapshot_state(response: str) -> str:
                 r"base SHA \((\d+)\) and the head SHA \((\d+)\)", message
             )
             if not counts:
+                missing = re.fullmatch(
+                    r"No snapshots were found for the (base|head) SHA [0-9a-f]{40}\.",
+                    message,
+                )
+                if missing:
+                    return f"missing_{missing.group(1)}"
                 raise ValueError("unknown dependency snapshot warning")
             base_count, head_count = map(int, counts.groups())
             if not base_count:
@@ -133,6 +140,10 @@ def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None)
 
 
 def main() -> int:
+    final_check = sys.argv[1:] == ["--final-check"]
+    if sys.argv[1:] and not final_check:
+        print("usage: wait_dependency_review_snapshot.py [--final-check]", file=sys.stderr)
+        return 2
     repo = os.environ["GITHUB_REPOSITORY"]
     base, head = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
     try:
@@ -146,16 +157,21 @@ def main() -> int:
         base_verdict = lambda: _base_producer_verdict(
             _gh("--paginate", f"repos/{repo}/commits/{merge_base}/check-runs?per_page=100")
         )
-        if wait_for_snapshot(query, base_verdict=base_verdict):
+        if wait_for_snapshot(
+            query,
+            delays=FINAL_DELAYS if final_check else DELAYS,
+            base_verdict=None if final_check else base_verdict,
+        ):
             print(
-                "Both dependency snapshots are indexed; running the full policy review."
+                "Both dependency snapshots are indexed; the comparison has a valid basis."
             )
             return 0
     except (KeyError, ValueError, TypeError, RuntimeError) as exc:
         print(f"::error title=Dependency basis unavailable::{exc}", file=sys.stderr)
         return 1
     print(
-        "::error title=Dependency basis unavailable::Snapshots were not indexed within 30 minutes.",
+        "::error title=Dependency basis unavailable::Snapshots were not indexed within "
+        f"{'the final 100-second check' if final_check else '30 minutes'}.",
         file=sys.stderr,
     )
     return 1

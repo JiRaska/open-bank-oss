@@ -85,18 +85,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      # Shared-library test paths build their owning module only unless a
+      # fixture is consumed elsewhere; compiled inputs still fan out.
+      # Discover Gradle modules from the tree, as settings.gradle.kts does. A
+      # hardcoded list can omit a newly added service from PR and nightly builds
+      # while all-green still passes (#1001). Admin UI and infra have no module build file.
       - id: detect
         run: |
           set -euo pipefail
-          # Canonical Gradle module list — DISCOVERED from the tree exactly like
-          # settings.gradle.kts (every `openbank-*` dir with a build.gradle.kts), NOT hardcoded.
-          # A hardcoded list silently drifts: a newly-added service is absent from it, so its
-          # build job is skipped on the PR that introduces it AND in the nightly full-fleet run,
-          # yet `all-green` passes (skipped != failed) — a branch-protection hole that let
-          # openbank-fraud-service (and anacredit-service, analytics-sink) merge unbuilt (#1001).
-          # Deriving it from the same rule as settings.gradle.kts keeps CI and the build in sync
-          # and builds a new service on its introducing PR. `openbank-admin-ui` (Next.js) and
-          # `openbank-infra` (OpenTofu) have no build.gradle.kts, so neither is picked up.
           ALL=$(for d in openbank-*/; do if [ -f "${d}build.gradle.kts" ]; then printf '%s ' "${d%/}"; fi; done)
 
           # Paths that cannot change a service compile input or Pact contract. Keep this
@@ -106,8 +102,8 @@ jobs:
             case "$1" in
               openbank-admin-ui/*|openbank-infra/*|docs/*|*/version.txt|*/CHANGELOG.md|.release-please-manifest.json|release-please-config.json)
                 return 0 ;;
-              .github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
-                # These feed the separate Pact drift/publication gate, not a service build.
+              .github/scripts/check-flyway-version-commit-order.py|.github/scripts/publish-admin-ui-pacts.py|.github/scripts/test-publish-admin-ui-pacts.py|.github/gates/workflow-write-permissions-baseline.txt)
+                # Separate governance/Pact checks own these files; service builds do not.
                 return 0 ;;
               .github/workflows/*)
                 # These two files own the service build itself. A change to either must
@@ -122,12 +118,15 @@ jobs:
           }
           is_inert_service_path ".github/workflows/security-regression-test.yml" \
             || { echo "selector self-test: unrelated workflow must be inert" >&2; exit 1; }
+          is_inert_service_path ".github/scripts/check-flyway-version-commit-order.py" \
+            || { echo "selector self-test: Flyway order gate must be inert" >&2; exit 1; }
           ! is_inert_service_path ".github/workflows/services-ci.yml" \
             || { echo "selector self-test: service CI recipe must remain relevant" >&2; exit 1; }
           ! is_inert_service_path "openbank-ledger-service/src/main/kotlin/Ledger.kt" \
             || { echo "selector self-test: service source must remain relevant" >&2; exit 1; }
           ! is_inert_service_path ".github/scripts/unknown-service-build-helper.sh" \
             || { echo "selector self-test: unknown automation must retain safe fallback" >&2; exit 1; }
+          python3 .github/scripts/coverage-floor-only-diff.py --self-test
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
@@ -137,10 +136,12 @@ jobs:
             echo "Event ${{ github.event_name }} -> build all modules (full-fleet)."
             CHANGED="$ALL"
           elif [ "${{ github.event_name }}" = "push" ]; then
-            # Scope service and Pact changes; inert release/docs/infra changes build nothing.
-            # Unknown build inputs fall back to the full fleet below. Full history makes
-            # HEAD~1 available on main (squash-merged pushes are single commits).
-            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            # Inert-only pushes cannot change service code or Pacts: skip their
+            # matrix, with all-green checking the empty-build path (ADR-0092, #846).
+            # Other paths are scoped below; unknown inputs retain full-fleet scope.
+            # fetch-depth:0 above makes HEAD~1 available for this diff.
+            DIFF_BASE=HEAD~1
+            FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
             if admin_ui_pact_changed "$FILES"; then
               echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
             fi
@@ -175,7 +176,15 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+              FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+              # A raised Kover floor changes only this module's verification. Compare
+              # both complete build scripts; any other byte keeps the fleet fallback.
+              if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" \
+                 && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+                echo "Decision: shared domain build script changes only its raised coverage floor."
+                FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+              fi
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -236,57 +245,30 @@ jobs:
             # would break merge-base once main advances past this PR's base.
             git fetch --no-tags --force origin \
               "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-              >/dev/null 2>&1 || true
+              >/dev/null 2>&1 || { echo "::error::Cannot refresh ${BASE}; build scope is unknown."; exit 1; }
             # Compute the merge-base explicitly rather than leaning on the
             # three-dot shorthand's ref resolution, then diff from it. Equivalent
             # to BASE...HEAD but observable and robust to odd ref state.
-            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null) \
+              || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
+            DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
 
-            # Code-global inputs every module compiles/tests against -> rebuild all.
-            # Except a lib's own test sources (filter-lib-test-only-paths.py header).
-            # (openbank-libs*, version catalog, root build, gradle.properties,
-            # build-logic.) A change here can alter any service's compile or test
-            # inputs, so the whole fleet must rebuild.
-            # NB: feed grep via a here-string, NOT `echo "$FILES" | grep -q`: under
-            # pipefail the SIGPIPE (141) racily reads a match as FALSE and drops modules.
-            # Governance catalogs (openbank-libs/governance/) are data for CI
-            # checks + admin-ui, not a compile/test input of any module — an
-            # ADR/control-catalog edit must not cost a 28-module fleet run.
-            #
-            # `openbank-libs/` alone is stale since ADR-0122 split the module in two
-            # (#33/#34): openbank-libs-domain and openbank-libs-runtime are compiled
-            # into EVERY service exactly like openbank-libs was, and
-            # openbank-libs-testing supplies the shared Pact/authz/outbox conformance
-            # kits every service's test source set depends on (testImplementation) —
-            # i.e. it can change *how* a provider's Pact verification test runs
-            # without touching that provider's own src/ or any pacts/*.json, and
-            # without a `pacts/` diff to catch it downstream (issue #1208 triage,
-            # gap #2). A literal `^openbank-libs/` prefix does not match any of the
-            # three split module names, so before this fix a change to any of them
-            # fell through to the per-module fan-out below and rebuilt only that
-            # module itself — a silent under-build of every other service's compile
-            # and Pact-provider-test inputs. auto-deploy.yml's analogous SHARED_CHANGED
-            # check already lists openbank-libs-domain/openbank-libs-runtime
-            # explicitly (#376); this brings services-ci.yml's PR-path trigger in
-            # line with it, plus openbank-libs-testing (auto-deploy correctly omits
-            # it — it's test-only, never shipped in a runtime image).
-            # Release-bookkeeping paths are inert here for the SAME reason the push path
-            # above already treats them as inert (the `RELEVANT` filter): version.txt,
-            # CHANGELOG.md and the release-please manifest cannot alter any module's
-            # compile inputs or any pact. Without this the PR lane fanned out per-module
-            # on `^<module>/`, so every release-please PR built the service it bumps —
-            # 194 of them in the week of 2026-07-25, each a build of a two-line diff whose
-            # post-merge push is then skipped as inert anyway. It also makes the single
-            # aggregated Release PR (separate-pull-requests: false) build NOTHING rather
-            # than full-fleet, which is what makes the aggregation affordable.
-            # The version bump is not unchecked: check-app-version-override.sh holds the
-            # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
-            # package.json one, both unconditionally in the gate job.
+            # Shared compile/test inputs fan out; the filter keeps unconsumed library
+            # tests local (#1208). Here-strings avoid grep -q SIGPIPE under pipefail.
+            # Governance and release metadata do not change compile or Pact inputs.
+            # Version invariants remain checked by the unconditional gates.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+            FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+            # Match the push selector: an exact raised-floor-only diff stays local.
+            if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" \
+               && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+              echo "Decision: shared domain build script changes only its raised coverage floor."
+              FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+            fi
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else

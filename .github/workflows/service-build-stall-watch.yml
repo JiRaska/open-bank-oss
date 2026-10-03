@@ -100,7 +100,7 @@ jobs:
             attempt=$(jq -r '.run_attempt' <<<"$run")
             run_url=$(jq -r '.html_url' <<<"$run")
             gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/jobs.json
-            candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 5)
+            candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 10)
             jq -c --arg runId "$run_id" --arg attempt "$attempt" --arg runUrl "$run_url" '.[] + {runId:$runId,attempt:$attempt,runUrl:$runUrl}' <<<"$candidates" \
               | while IFS= read -r candidate; do
                   jq --argjson candidate "$candidate" '. + [$candidate]' /tmp/stalled.json > /tmp/stalled.next && mv /tmp/stalled.next /tmp/stalled.json
@@ -108,6 +108,33 @@ jobs:
           done
           jq -c '.[]' /tmp/stalled.json | while IFS= read -r candidate; do
             run_id=$(jq -r '.runId' <<<"$candidate")
+            job_id=$(jq -r '.jobId' <<<"$candidate")
+            reason=$(jq -r '.reason' <<<"$candidate")
+            # The per-run jobs response is a snapshot. A healthy job can finish every
+            # step between that read and this mutation; #11596 was cancelled after
+            # its Build + test, Kover and artifact steps had succeeded. Re-read the
+            # individual job and require the SAME stalled shape immediately before
+            # cancelling its whole workflow run.
+            recheck() {
+              gh api "repos/${REPO}/actions/jobs/${job_id}" | jq -s '{jobs:.}' > /tmp/stall-live-job.json
+              python3 .github/scripts/check-stuck-service-build.py \
+                --jobs-json /tmp/stall-live-job.json --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+                --timeout-minutes 45 --no-step-timeout-minutes 10 \
+                | jq -e --arg id "$job_id" --arg reason "$reason" \
+                    'any(.[]; .jobId == $id and .reason == $reason)' >/dev/null
+            }
+            if ! recheck; then
+              echo "retaining job ${job_id}: live job no longer has the ${reason} stall shape"
+              continue
+            fi
+            if [ "$reason" = no-first-step ]; then
+              # A second detail read catches delayed Actions step propagation.
+              sleep 30
+              if ! recheck; then
+                echo "retaining job ${job_id}: steps appeared on the second live read"
+                continue
+              fi
+            fi
             title="CI stalled service build: $(jq -r '.job' <<<"$candidate")"
             body=$(jq -r '"<!-- service-build-stall:" + .runId + ":" + .jobId + " -->\n\n## Service CI job was cancelled after no progress\n\n| | |\n|---|---|\n| workflow run | [run " + .runId + " attempt " + .attempt + "](" + .runUrl + ") |\n| stalled job | [" + .job + "](" + .url + ") |\n| stalled step | `" + .step + "` |\n| classifier | `" + .reason + "` |\n| started | `" + .startedAt + "` |\n| observed age | `" + .ageMinutes + " minutes` |\n\nThe watchdog acts only on three bounded shapes: the mandatory `Build + test` step itself exceeding 45 minutes, every substantive step completing and a `Post Run …` action alone exceeding 45 minutes, or the job recording `started_at` while every step stays queued (no first step) for 5 minutes. It never cancels Kover, envelope creation or artifact publication while those steps are active. The cancellation preserves GitHub attempt diagnostics and does **not** create a green verdict. Inspect and rerun through the normal CI path.\n\n_Automated by Service build stall watch (issue #7477)._"' <<<"$candidate")
             if [ "$DRY_RUN" = "true" ]; then

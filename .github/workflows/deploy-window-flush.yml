@@ -2,11 +2,12 @@
 #
 # Deploy window flusher (see .github/scripts/deploy-window.py).
 #
-# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before, but arm its
-# auto-merge only when the window allows it: at most one bot deploy commit reaches main per
+# auto-deploy.yml and admin-ui-deploy.yml open their deploy PR exactly as before. This workflow
+# alone arms auto-merge when the window allows it: at most one bot deploy commit reaches main per
 # window, because each one makes every open PR `behind` under the strict up-to-date rule and
 # restarts its required checks. A deploy they DEFER stays open and unarmed — this workflow is
-# what lands it. Every tick it picks the OLDEST deferred deploy PR once the window has elapsed
+# what lands it. A workflow_run trigger handles new PRs and the schedule recovers missed runs.
+# Each run picks the OLDEST deferred deploy PR once the window has elapsed
 # and nothing else is armed, re-runs supersede-deploy-prs.sh on it (ancestry + coverage — a
 # rollback PR is refused, never armed), and arms auto-merge with the same App token the deploy
 # workflows use. A manual `workflow_dispatch` of either deploy workflow never waits for this.
@@ -14,6 +15,9 @@
 name: Deploy window flush
 
 on:
+  workflow_run:
+    workflows: ["Auto deploy", "Admin-UI deploy"]
+    types: [completed]
   schedule:
     - cron: "*/10 * * * *"
   workflow_dispatch:

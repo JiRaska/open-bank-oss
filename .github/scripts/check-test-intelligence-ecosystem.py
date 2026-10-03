@@ -337,6 +337,7 @@ def mutation_projection_errors(
     producer: str,
     collector: str,
     quality_collector: str,
+    staging_script: str,
 ) -> list[str]:
     """Keep fixed Pitest lanes attached to their report owner.
 
@@ -438,23 +439,30 @@ def mutation_projection_errors(
     pitest_stage = "\n".join(
         line for line in pitest_stage.splitlines() if not line.lstrip().startswith("#")
     )
-    artifact_selector = "if a['name'].startswith('pitest-') and not a['expired']]"
-    if artifact_selector not in pitest_stage:
+    if 'stage-pitest-artifacts.py plan' not in pitest_stage or 'stage-pitest-artifacts.py stage' not in pitest_stage:
+        errors.append("mutation staging does not preflight and isolate PIT artifacts")
+    if ('stage-pitest-artifacts.py select-run' not in pitest_stage
+            or 'status=completed&per_page=100' not in pitest_stage
+            or 'branch=main&per_page=100' not in pitest_stage):
+        errors.append("mutation staging does not cross-check PIT run inventories before selection")
+    if ("run.get(\"run_started_at\") or run.get(\"created_at\")" not in staging_script
+            or "max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))" not in staging_script):
+        errors.append("mutation projection does not select the latest completed attempt by start time")
+    if 'name.startswith("pitest-")' not in staging_script or 'artifact.get("expired")' not in staging_script:
         errors.append("mutation staging does not select every retained non-expired Pitest artifact")
-    fallback = pitest_stage.find('*) svc="${art_name#pitest-}" ;;')
-    destination = pitest_stage.find('dest="${svc}/build/reports/pitest"')
+    if 'artifact_id in ids or name in names or owner in lanes' not in staging_script:
+        errors.append("mutation staging does not reject ambiguous artifact lanes")
+    if 'os.rename(temporary, destination)' not in staging_script:
+        errors.append("mutation staging does not publish isolated report directories")
     for artifact, owner in fixed_lanes:
         if artifact == f"pitest-{owner}":
             continue
-        mapping = re.compile(
-            rf"(?m)^\s*{re.escape(artifact)}\)\s+svc=[\"']{re.escape(owner)}[\"']\s*;;\s*$"
-        ).search(pitest_stage)
-        case_end = pitest_stage.find("esac", fallback)
-        overwritten = case_end >= 0 and re.search(
-            r"(?m)^\s*svc=", pitest_stage[case_end + len("esac"):destination]
-        )
-        if mapping is None or not (mapping.start() < fallback < case_end < destination) or overwritten:
-            errors.append(f"mutation artifact {artifact} is not staged under report owner {owner}")
+        # The authz package and advisory libs-runtime lane share a Gradle module
+        # but must retain separate verdicts and separate extraction directories.
+        projected_owner = "openbank-libs-runtime-authz" if artifact == "pitest-authz" else owner
+        mapping = f'"{projected_owner}" if name == "{artifact}"'
+        if mapping not in staging_script:
+            errors.append(f"mutation artifact {artifact} is not staged under report owner {projected_owner}")
 
     mutation_components = collector.partition("function mutationComponents()")[2].partition(
         "function platformCapabilities()"
@@ -467,10 +475,10 @@ def mutation_projection_errors(
         mutation_components,
     )
     fixed_union = fixed_capture and re.search(
-        rf"return\s+new Set\(\[\.\.\.matrixComponents,\s*\.\.\.{re.escape(fixed_capture.group(1))}\]\)",
+        rf"return\s+new Set\(\[\.\.\.matrixComponents,\s*\.\.\.{re.escape(fixed_capture.group(1))},\s*\.\.\.fixedLaneComponents\]\)",
         mutation_components,
     )
-    if not fixed_union:
+    if not fixed_union or '--service\\s+["\'](openbank-[a-z0-9-]+)' not in mutation_components:
         errors.append("admin projection omits fixed Pitest report owners from its required-control denominator")
 
     projection_flow = (
@@ -851,15 +859,20 @@ def check(root: Path) -> list[str]:
                 errors.append(f"{workflow_name} does not publish specialized evidence: {needle}")
     if "pitest.yml/runs?branch=main&status=completed&per_page=100" not in deploy:
         errors.append("mutation projection does not inspect completed attempts regardless of verdict")
-    if "r.sort(key=lambda x:(x.get('run_started_at') or x.get('created_at') or '',x['id']),reverse=True)" not in deploy:
-        errors.append("mutation projection does not select the latest completed attempt by start time")
     if "pitest.yml/runs?branch=main&status=success" in deploy:
         errors.append("mutation projection hides failed attempts behind an older successful workflow")
     pitest_workflow = text(root / ".github/workflows/pitest.yml")
     quality_collector = text(root / "openbank-admin-ui/scripts/collect-quality-report.mjs")
     errors.extend(mutation_projection_errors(
-        deploy, pitest_workflow, run_collector, collector, quality_collector
+        deploy, pitest_workflow, run_collector, collector, quality_collector,
+        text(root / ".github/scripts/stage-pitest-artifacts.py")
     ))
+    staging_test = subprocess.run(
+        [sys.executable, str(root / ".github/scripts/test-stage-pitest-artifacts.py")],
+        capture_output=True, text=True, check=False,
+    )
+    if staging_test.returncode != 0:
+        errors.append(f"PIT artifact staging regression tests failed: {staging_test.stderr.strip()}")
     performance_stage = deploy.partition("Stage performance evidence from latest complete k6 run")[2].partition(
         "Collect production-readiness scorecard"
     )[0]
@@ -1193,14 +1206,22 @@ python3 "${SELECTOR}" baseline
                 return 1
         valid_mutation_deploy = """
 Stage pitest mutation results
-if a['name'].startswith('pitest-') and not a['expired']]
-case "${art_name}" in
-  pitest-authz) svc="openbank-libs-runtime" ;;
-  *) svc="${art_name#pitest-}" ;;
-esac
-dest="${svc}/build/reports/pitest"
+status=completed&per_page=100
+branch=main&per_page=100
+python3 .github/scripts/stage-pitest-artifacts.py select-run
+python3 .github/scripts/stage-pitest-artifacts.py plan
+python3 .github/scripts/stage-pitest-artifacts.py stage
 Stage performance evidence
 """
+        valid_mutation_staging = '''
+name.startswith("pitest-")
+artifact.get("expired")
+artifact_id in ids or name in names or owner in lanes
+run.get("run_started_at") or run.get("created_at")
+max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))
+return "openbank-libs-runtime-authz" if name == "pitest-authz" else name.removeprefix("pitest-")
+os.rename(temporary, destination)
+'''
         valid_fixed_pitest = """
 jobs:
   pitest-authz:
@@ -1249,7 +1270,9 @@ function mutationComponents() {
   const fixedComponents = [...workflow.matchAll(
     /--mutation-report\s+["']?(openbank-[a-z0-9-]+)\/build\/reports\/pitest\/mutations\.xml["']?/g,
   )].map(match => match[1])
-  return new Set([...matrixComponents, ...fixedComponents])
+  const fixedLaneComponents = [...workflow.matchAll(/--service\s+["'](openbank-[a-z0-9-]+)["']/g)]
+    .map(match => match[1])
+  return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])
 }
 function platformCapabilities() {
 }
@@ -1299,21 +1322,28 @@ function collectContracts() {}
 """
         valid_mutation_inputs = (
             valid_mutation_deploy, valid_fixed_pitest, valid_mutation_producer,
-            valid_mutation_collector, valid_quality_collector,
+            valid_mutation_collector, valid_quality_collector, valid_mutation_staging,
         )
         if mutation_projection_errors(*valid_mutation_inputs):
             print("self-test failed: valid fixed Pitest mutation projection was rejected")
             return 1
         broken_mutation_projections = {
-            "fixed mutation artifact loses its report owner": (0, lambda value: value.replace(
-                'pitest-authz) svc="openbank-libs-runtime" ;;\n', "")),
-            "fixed mutation artifact is excluded from staging": (0, lambda value: value.replace(
-                "if a['name'].startswith('pitest-')",
-                "if a['name'] != 'pitest-authz' and a['name'].startswith('pitest-')")),
+            "fixed mutation artifact loses its report owner": (5, lambda value: value.replace(
+                '"openbank-libs-runtime-authz" if name == "pitest-authz"',
+                '"openbank-authz" if name == "pitest-authz"')),
+            "fixed mutation artifact is excluded from staging": (5, lambda value: value.replace(
+                'name.startswith("pitest-")', 'name.startswith("pitest-openbank-")')),
             "fixed mutation upload leaves its report owner": (1, lambda value: value.replace(
                 "path: openbank-libs-runtime/build/reports/pitest/", "path: authz/build/reports/pitest/")),
-            "fixed mutation owner is overwritten after mapping": (0, lambda value: value.replace(
-                "esac\ndest=", 'esac\nsvc="openbank-authz"\ndest=')),
+            "fixed mutation stage is omitted": (0, lambda value: value.replace(
+                'stage-pitest-artifacts.py stage', 'echo stage')),
+            "PIT run selection loses its second API view": (0, lambda value: value.replace(
+                'branch=main&per_page=100', 'status=completed&per_page=100')),
+            "PIT run selection chooses oldest returned attempt": (5, lambda value: value.replace(
+                'max(filtered, key=lambda run_id: (filtered[run_id][0], run_id))',
+                'min(filtered, key=lambda run_id: (filtered[run_id][0], run_id))')),
+            "ambiguous mutation lanes are accepted": (5, lambda value: value.replace(
+                'artifact_id in ids or name in names or owner in lanes', 'artifact_id in ids')),
             "fixed mutation sidecar leaves its report owner": (1, lambda value: value.replace(
                 "--out openbank-libs-runtime/build/reports/pitest/test-intelligence-run.json",
                 "--out /tmp/test-intelligence-run.json")),
@@ -1340,7 +1370,8 @@ function collectContracts() {}
             "fixed mutation capture is not projected": (3, lambda value: value.replace(
                 ")].map(match => match[1])", ")]")),
             "fixed mutation lane leaves the denominator": (3, lambda value: value.replace(
-                "return new Set([...matrixComponents, ...fixedComponents])", "return new Set(matrixComponents)")),
+                "return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])",
+                "return new Set(matrixComponents)")),
             "enforced fixed lane disappears": (1, lambda value: value.replace(
                 "--mutation-report", "--ignored-report")),
             "fixed mutation report owner is not collected": (3, lambda value: value.replace(

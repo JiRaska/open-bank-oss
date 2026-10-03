@@ -395,6 +395,18 @@ gates:
       python3 .github/scripts/check-adr-delivery-evidence.py --root .
 
   # ==== gitops =========================================================
+  - id: deploy-hold-image-pins
+    name: "held services cannot change GitOps image pins (issue #11503)"
+    group: gitops
+    mode: enforced
+    budget_seconds: 45  # fixture creates a temporary Git repo; PR-mode gate measured 29s locally
+    rationale: "A held service keeps its GitOps image pin until release; live strict required checks prevent older green deploy PRs from merging after the hold changes main."
+    review_after: "2027-03-30"
+    selftest: python3 .github/scripts/check-deploy-holds.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-deploy-holds.py", "openbank-libs/governance/rules.yaml"]
+    run: python3 .github/scripts/check-deploy-holds.py --root . --enforce-live-strict
+
   # Issue #3345 / ADR-0237: every domain @Scheduled job registers the ADR-0160
   # mechanism-3 liveness gauge. ENFORCED as of #3931, ahead of the 2026-09-30
   # target — a baseline ratchet, not a sweep gate: the 16 files still without a
@@ -1529,6 +1541,9 @@ gates:
   # too, and a discovery root that covers only one of them is a coverage set maintained
   # separately from the artifacts it covers — the exact shape that let 16 pacts go
   # unreplayed (#2327). Adding a *_test.py beside a gate must be enough to have it run.
+  # The FreeMarker buildscript cases also run here, even on a cold runner: this shard
+  # is required while dependency-submission is not. Their wrapper-download retry keeps
+  # a transient transport reset from turning into an unrelated governance failure.
   - id: governance-script-unit-tests
     selftest_exempt: "is-a-test-suite — pytest over the governance scripts"
     name: "governance-script unit tests"

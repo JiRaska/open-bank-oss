@@ -23,6 +23,12 @@ def response(base=None, head=None):
     return f"HTTP/2.0 200 OK\n{warning}\n[]"
 
 
+def missing_response(side):
+    message = f"No snapshots were found for the {side} SHA {'a' * 40}."
+    warning = base64.b64encode(message.encode()).decode()
+    return f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+
+
 class SnapshotWaitTests(unittest.TestCase):
     def test_missing_head_waits_then_accepts_indexed_graph(self):
         replies = iter([response(1, 0), response(1, 0), response()])
@@ -31,6 +37,31 @@ class SnapshotWaitTests(unittest.TestCase):
             MODULE.wait_for_snapshot(lambda: next(replies), sleeps.append, (0, 60, 120))
         )
         self.assertEqual(sleeps, [60, 120])
+
+    def test_current_github_missing_head_warning_then_indexed(self):
+        replies = iter([missing_response("head"), response()])
+        sleeps = []
+        self.assertTrue(
+            MODULE.wait_for_snapshot(
+                lambda: next(replies), sleeps.append, MODULE.FINAL_DELAYS[:2]
+            )
+        )
+        self.assertEqual(sleeps, [10])
+
+    def test_current_github_missing_base_warning_fails_closed(self):
+        self.assertEqual(MODULE._snapshot_state(missing_response("base")), "missing_base")
+        self.assertFalse(
+            MODULE.wait_for_snapshot(
+                lambda: missing_response("base"), lambda _: None, MODULE.FINAL_DELAYS
+            )
+        )
+
+    def test_similar_unrecognised_warning_is_not_accepted(self):
+        message = f"No snapshots were found for the head SHA {'x' * 40}."
+        warning = base64.b64encode(message.encode()).decode()
+        reply = f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+        with self.assertRaisesRegex(ValueError, "unknown dependency snapshot warning"):
+            MODULE._snapshot_state(reply)
 
     def test_missing_graph_is_bounded_and_fails_closed(self):
         calls = []
