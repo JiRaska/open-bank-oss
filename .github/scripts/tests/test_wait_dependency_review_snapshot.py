@@ -23,6 +23,12 @@ def response(base=None, head=None):
     return f"HTTP/2.0 200 OK\n{warning}\n[]"
 
 
+def missing_snapshot(side):
+    message = f"No snapshots were found for the {side} SHA {'a' * 40}."
+    warning = base64.b64encode(message.encode()).decode()
+    return f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+
+
 class SnapshotWaitTests(unittest.TestCase):
     def test_missing_head_waits_then_accepts_indexed_graph(self):
         replies = iter([response(1, 0), response(1, 0), response()])
@@ -69,6 +75,10 @@ class SnapshotWaitTests(unittest.TestCase):
 
     def test_nonzero_snapshot_warning_is_not_missing_basis(self):
         self.assertTrue(MODULE._indexed(response(1, 2)))
+
+    def test_explicit_missing_side_warning_is_recognized(self):
+        self.assertEqual(MODULE._snapshot_state(missing_snapshot("head")), "missing_head")
+        self.assertEqual(MODULE._snapshot_state(missing_snapshot("base")), "missing_base")
 
     def test_terminal_base_stops_after_first_missing_comparison(self):
         calls = []
@@ -121,7 +131,35 @@ class SnapshotWaitTests(unittest.TestCase):
         )
         self.assertEqual(calls, [])
 
-    def test_base_producer_verdict_requires_success_or_all_terminal(self):
+    def test_terminal_head_stops_after_first_missing_comparison(self):
+        calls = []
+
+        def verdict():
+            calls.append(1)
+            return "terminal"
+
+        with self.assertRaises(MODULE.TerminalHeadGraphError):
+            MODULE.wait_for_snapshot(
+                lambda: missing_snapshot("head"),
+                lambda _: None,
+                (0, 60),
+                head_verdict=verdict,
+            )
+        self.assertEqual(len(calls), 1)
+
+    def test_pending_head_can_finish_during_sparse_wait(self):
+        verdicts = iter(["pending", "success"])
+        replies = iter([missing_snapshot("head"), missing_snapshot("head"), response()])
+        self.assertTrue(
+            MODULE.wait_for_snapshot(
+                lambda: next(replies),
+                lambda _: None,
+                (0, 60, 120),
+                head_verdict=lambda: next(verdicts),
+            )
+        )
+
+    def test_producer_verdict_requires_success_or_all_terminal(self):
         def page(*runs):
             return json.dumps({"check_runs": list(runs)})
 
@@ -139,13 +177,13 @@ class SnapshotWaitTests(unittest.TestCase):
         ]
         for payload, expected in cases:
             with self.subTest(expected=expected):
-                self.assertEqual(MODULE._base_producer_verdict(payload), expected)
+                self.assertEqual(MODULE._producer_verdict(payload), expected)
 
     def test_malformed_checks_response_is_not_terminal_proof(self):
         for payload in ["", "{}", '{"check_runs":null}', "not-json"]:
             with self.subTest(payload=payload):
                 with self.assertRaises(ValueError):
-                    MODULE._base_producer_verdict(payload)
+                    MODULE._producer_verdict(payload)
 
 
 if __name__ == "__main__":

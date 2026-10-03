@@ -4,7 +4,8 @@
 
 dependency-review-action polls a missing snapshot about every ten seconds. A
 30-minute wait can exhaust the installation's API quota before the snapshot is
-indexed. Keep the same fail-closed basis requirement with seven bounded probes.
+indexed. Keep the same fail-closed basis requirement with seven bounded probes,
+but stop when the missing side's producer has already failed terminally.
 """
 
 import base64
@@ -22,6 +23,10 @@ PRODUCER = "Submit fleet dependency graph"
 
 class TerminalBaseGraphError(RuntimeError):
     """The immutable comparison base has no successful graph producer."""
+
+
+class TerminalHeadGraphError(RuntimeError):
+    """The PR head has no successful graph producer left to wait for."""
 
 
 def _gh(*args: str) -> str:
@@ -58,6 +63,15 @@ def _snapshot_state(response: str) -> str:
                 r"base SHA \((\d+)\) and the head SHA \((\d+)\)", message
             )
             if not counts:
+                # GitHub also uses this wording when one side has no snapshots at all.
+                # Treating it as unknown burned the full 30-minute wait after a failed
+                # producer on #12043, even though the missing side was explicit.
+                missing = re.fullmatch(
+                    r"No snapshots were found for the (base|head) SHA [0-9a-f]{40}\.",
+                    message,
+                )
+                if missing:
+                    return f"missing_{missing.group(1)}"
                 raise ValueError("unknown dependency snapshot warning")
             base_count, head_count = map(int, counts.groups())
             if not base_count:
@@ -72,7 +86,7 @@ def _indexed(response: str) -> bool:
     return _snapshot_state(response) == "ready"
 
 
-def _base_producer_verdict(response: str) -> str:
+def _producer_verdict(response: str) -> str:
     """Classify all pages of Checks API results without mistaking absence for failure."""
     decoder = json.JSONDecoder()
     pages = []
@@ -101,7 +115,9 @@ def _base_producer_verdict(response: str) -> str:
     return "terminal" if matches else "unknown"
 
 
-def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None) -> bool:
+def wait_for_snapshot(
+    query, sleep=time.sleep, delays=DELAYS, base_verdict=None, head_verdict=None
+) -> bool:
     for delay in delays:
         if delay:
             sleep(delay)
@@ -120,7 +136,15 @@ def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None)
                 raise TerminalBaseGraphError(
                     "merge-base producer finished without a successful dependency graph"
                 )
-        except TerminalBaseGraphError:
+            if (
+                state == "missing_head"
+                and head_verdict is not None
+                and head_verdict() == "terminal"
+            ):
+                raise TerminalHeadGraphError(
+                    "PR-head producer finished without a successful dependency graph"
+                )
+        except (TerminalBaseGraphError, TerminalHeadGraphError):
             raise
         except RuntimeError as exc:
             if "quota is exhausted" in str(exc):
@@ -143,10 +167,13 @@ def main() -> int:
         query = lambda: _gh(
             "-i", f"repos/{repo}/dependency-graph/compare/{merge_base}...{head}"
         )
-        base_verdict = lambda: _base_producer_verdict(
+        base_verdict = lambda: _producer_verdict(
             _gh("--paginate", f"repos/{repo}/commits/{merge_base}/check-runs?per_page=100")
         )
-        if wait_for_snapshot(query, base_verdict=base_verdict):
+        head_verdict = lambda: _producer_verdict(
+            _gh("--paginate", f"repos/{repo}/commits/{head}/check-runs?per_page=100")
+        )
+        if wait_for_snapshot(query, base_verdict=base_verdict, head_verdict=head_verdict):
             print(
                 "Both dependency snapshots are indexed; running the full policy review."
             )
