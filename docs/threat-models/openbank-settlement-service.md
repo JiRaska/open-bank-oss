@@ -317,6 +317,29 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-10-03** — **Durable operator approvals for settlement origination (#10041 slice 10).**
+  `settlement.create` joins rules.yaml `four_eyes.actions`; with `AUTHZ_FOUR_EYES_ENFORCE=true`
+  (default false, fleet convention) an operator's `POST /api/v1/settlements` is parked with 202 and
+  a PENDING row in `settlement_operator_approvals` (V6), bound to the exact instruction by the
+  shared request fingerprint (#11675), until a DIFFERENT operator decides it at
+  `/api/v1/settlements/approvals`; the identical retry with `X-Approval-Id` executes once.
+  **STRIDE-E/T:** a checker cannot approve their own request (store-enforced, and a DB CHECK
+  `decided_by <> maker_id`); an approval cannot execute a different payer, payee, amount, currency
+  or idempotency key (fingerprint mismatch re-parks); validation moved into the request DTO so a
+  malformed instruction is refused at deserialisation, before it can park or consume an approval.
+  **STRIDE-R:** every transition commits with a `SETTLEMENT_OPERATOR_APPROVAL_CHANGED` outbox
+  event (maker, checker, claim, fingerprint) — the retained evidence once the row is purged after
+  `openbank.settlement.approval-retention-days` (1826) past expiry. `settlement_outbox` therefore
+  carries two aggregate types: the settlement FK is kept for state events through a generated
+  `settlement_ref` column, approval events have no FK by design. **STRIDE-I/E (least privilege):**
+  `settlement_rest_ext.rego` vetoes every `service-account-*` principal on `settlement.approval.*`
+  and excludes them from `operator-settlement-write`; both realm M2M clients carry ROLE_OPERATOR and
+  are classified HUMAN, and no M2M caller exists (verified by `opa eval` against the regenerated
+  bundle: must-DENY for both service accounts, must-ALLOW for a human operator). Residual risk: the
+  approval TTL (24 h) is the interceptor default; with four-eyes enforcement off the gate records
+  `required_not_enforced` and proceeds, exactly as before this change. Rollback: set
+  `AUTHZ_FOUR_EYES_ENFORCE=false`; keep the table and its outbox evidence.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
