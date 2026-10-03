@@ -1295,6 +1295,27 @@ gates:
       # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
       python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
+  - id: db-backup-prefix-scope
+    name: "CNPG backup prefix == ServiceAccount the S3 grant is scoped to (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: >-
+      Every CNPG cluster shares one barman-cloud IAM role whose object grants are scoped by the
+      Pod Identity kubernetes-service-account session tag, so a compromised database pod
+      cannot read or delete another cluster's backups. That only holds while each cluster's
+      destinationPath prefix equals its ServiceAccount (= Cluster name); a mismatch is an
+      IAM-denied WAL archive behind a Ready pod. Also fails if the role policy regresses to a
+      bucket-wide object grant, or a restore reads a foreign prefix that is not declared.
+    review_after: "2027-10-03"
+    min_subjects: 60
+    budget_seconds: 20
+    selftest_inputs: ["openbank-infra/scripts/check-db-backup-prefix-scope.py"]
+    selftest: python3 openbank-infra/scripts/check-db-backup-prefix-scope.py --self-test
+    selftest_expect: pass
+    run: |
+      # --enforce is required alongside `mode: enforced` (without it findings exit 0).
+      python3 openbank-infra/scripts/check-db-backup-prefix-scope.py --enforce
+
   # ADR-0325 (incident 2026-09-28): a fleet-wide CNPG minor bump restarted every primary IN
   # PLACE -- no Cluster set primaryUpdateMethod, and CNPG's default is `restart` -- while a
   # drifted node wedged 22 EBS volumes. card-issuance-db, money-path, was `instances: 1`
