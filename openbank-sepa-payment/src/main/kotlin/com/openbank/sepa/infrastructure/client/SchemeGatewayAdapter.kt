@@ -111,7 +111,7 @@ class SchemeGatewayAdapter(
             interbankSettlementDate = now,
             endToEndId = payment.endToEndId,
             transactionId = null,
-            amount = payment.amount,
+            amount = payment.amount.amount,
             currency = payment.currency,
             // SEPA SCT rulebook: charges shared at service level, settled via the clearing system.
             chargeBearer = ChargeBearer.SLEV,

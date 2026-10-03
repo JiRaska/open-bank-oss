@@ -12,6 +12,21 @@ summary: "Enforce four-eyes on money-path REST calls via an opt-in two-phase app
 
 # ADR-0155 — Four-eyes enforcement for money-path actions
 
+> **Delivery update (2026-10-01).** Point 3 below is tightened for any service
+> that sets `authz.four-eyes.enforce=true`:
+> - an approval is bound to the request it was issued for: a fingerprint of the
+>   intercepted endpoint and its arguments is stored with the `PendingApproval`,
+>   and the `X-Approval-Id` retry must match it. An endpoint whose arguments
+>   cannot be fingerprinted (streams, uploads) is refused with 503;
+> - `decide` and `markExecuted` are single atomic compare-and-set steps, so an
+>   approval is decided once and executed once under concurrency;
+> - approval keys are namespaced by `quarkus.application.name`, so services
+>   sharing one Redis cannot list or decide each other's approvals;
+> - enforcement with no `ApprovalStore` bean fails closed (503) instead of
+>   proceeding;
+> - one maker holds at most `openbank.approval.max-pending-per-maker-action`
+>   (default 20) open approvals per action.
+
 > **Delivery update (2026-07-12).** All 11 money-path services with a
 > `four_eyes.verbs`-matching action now have the `ApprovalStore`/decide-endpoint
 > mechanism wired (issue #413): the original sepa-payment pilot plus batch 1
@@ -80,13 +95,14 @@ We will add a REST-layer, opt-in, two-phase approval flow:
      The intercepted method is **not** invoked.
    - `X-Approval-Id` present → look up the approval; it must match this
      action + resource + the ORIGINAL maker's principal id, be `APPROVED`, and
-     not already consumed. If valid, mark it `EXECUTED` (one-time use) and
-     proceed. Otherwise, re-enter the pending-approval branch (defends against
+     not already consumed. Atomically claim `EXECUTED` before proceeding. A
+     record that expires during consumption cannot authorize the method.
+     Otherwise, re-enter the pending-approval branch (defends against
      a stale/mismatched/replayed id silently proceeding).
-   - Default (`authz.four-eyes.enforce=false`, or no `ApprovalStore` bean
-     wired): unchanged behavior — proceed. This keeps the interceptor change
-     safe to ship into every service via the shared libs JAR without
-     retroactively blocking traffic anywhere that hasn't opted in.
+   - Default (`authz.four-eyes.enforce=false`): proceed for services that have
+     not opted in. With enforcement enabled, a missing `ApprovalStore` is an
+     infrastructure failure (HTTP 503); configuration cannot silently waive
+     a required second approval.
 4. **Per-service decide endpoint**: each participating service owns its own
    `POST .../approvals/{id}/decide` REST resource (own `@Authorize`,
    `@RolesAllowed`), calling the shared `ApprovalStore.decide`. Not a
@@ -189,3 +205,18 @@ We will add a REST-layer, opt-in, two-phase approval flow:
   mismatch, and extended the verb vocabulary.
 - `docs/threat-models/openbank-sepa-payment.md` — updated alongside the pilot
   PR with this flow's STRIDE analysis.
+
+
+## Atomic transition and missing-store hardening
+
+`RedisApprovalStore` checks the record's status (and, for a decision, the maker)
+and writes the transition in one Redis script, so a PENDING or APPROVED record
+changes state exactly once. The decided-record TTL is unchanged. A losing
+concurrent transition is a conflict; a missing key stays missing. Neither a late
+checker nor a late consumer can overwrite a winner or recreate an expired record.
+
+This supersedes the pilot's missing-store no-op when enforcement is explicitly on.
+The opt-in flag remains unchanged. All participating instances must be upgraded
+before relying on atomicity; an old writer can still issue an unconditional write.
+Operational consequences and rollback limits are in
+[the approval-store runbook](../runbooks/atomic-four-eyes-approvals.md).

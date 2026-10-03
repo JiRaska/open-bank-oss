@@ -74,6 +74,53 @@ interface OutboxRepository {
     suspend fun markFailed(eventId: UUID, error: String, failedAt: Instant = Instant.now()): OutboxStatus
 }
 
+/**
+ * The kernel-owned outbox repository contract (ADR-0327 D1/D3/D6/D8/D10). Implemented by
+ * `openbank-libs-runtime`'s `AbstractPanacheOutboxRepository`; a hand-rolled repository may also
+ * implement it, but then it takes on every guarantee below.
+ *
+ * **The batch contract that makes concurrent sends legal (D6):** every list [claimProcessable]
+ * returns holds **at most one row per `aggregateId`**, and that row is the aggregate's head — no
+ * older unsent row of the same aggregate exists, and none of it is freshly DISPATCHING on any
+ * replica (D3's anti-join claim). [OutboxDispatch] relies on exactly that when it publishes a
+ * claimed batch with bounded concurrency: rows of *different* aggregates are independent (Kafka
+ * keys by aggregate, ADR-0050 N2), so nothing in a batch can be reordered against anything else
+ * in the same batch. A repository that cannot honour the one-row-per-aggregate rule must NOT
+ * implement this interface — the v1 [OutboxRepository] path stays strictly sequential.
+ *
+ * Guarantee, stated precisely: at-least-once delivery; for one aggregate, events reach the
+ * broker in `(created_at, id)` order, under any number of replicas; across aggregates no order
+ * is promised.
+ */
+interface OutboxRepositoryV2 : OutboxRepository {
+    /**
+     * One `UPDATE … WHERE event_id IN (…)` for every row in [eventIds] (D6): status SENT,
+     * `sent_at = updated_at = sentAt`, `attempt_count + 1`, `last_error` cleared. Transactions per
+     * batch: one, not one per row. An empty [eventIds] is a no-op.
+     */
+    suspend fun markSentBatch(eventIds: Collection<UUID>, sentAt: Instant = Instant.now())
+
+    /**
+     * Age of the oldest row that is eligible for dispatch **right now** (PENDING, FAILED past its
+     * `next_attempt_at`, or stale DISPATCHING), measured from its `created_at` to [now]; `null`
+     * when nothing is eligible. Backs `openbank_outbox_oldest_age_seconds` (D10) — the gauge that
+     * makes a backlog of 99 three-day-old rows visible where `openbank_outbox_backlog > 100` is
+     * not. A cold pod with an empty table reads 0, never a 1970-derived age (the ADR-0237 lesson).
+     */
+    suspend fun oldestProcessableAge(now: Instant = Instant.now()): Duration?
+
+    /**
+     * Delete up to [batch] SENT rows whose `sent_at` is older than [olderThan] (D8); returns the
+     * number deleted so the caller can loop until short. Never touches PENDING/FAILED/DISPATCHING
+     * rows, and never DEAD rows — those are [purgeDead]'s, on their own longer window, because a
+     * DEAD row is the producer-side DLQ (D4) until an operator requeues it.
+     */
+    suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
+
+    /** Delete up to [batch] DEAD rows whose `updated_at` is older than [olderThan] (D8, 30 d). */
+    suspend fun purgeDead(olderThan: Duration, batch: Int, now: Instant = Instant.now()): Int
+}
+
 interface OutboxEventPublisher {
     /**
      * Relay one outbox row to the broker. The full [OutboxEntry] — not just its payload — is

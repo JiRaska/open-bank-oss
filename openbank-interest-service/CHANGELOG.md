@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.2](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.21.1...interest-service-v0.21.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **interest:** compute ACT_ACT and THIRTY_360 accruals with a kernel DayCount; fix small-principal amortization ([#11671](https://github.com/JiRaska/open-bank-oss/issues/11671)) ([94d13bf](https://github.com/JiRaska/open-bank-oss/commit/94d13bfd023294d175a93c5b97c43b562a80e54c))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/interest-service-v0.21.0...interest-service-v0.21.1) (2026-09-26)
 
 

@@ -10,6 +10,7 @@ import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvide
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
+import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.application.port.out.HoldRepository
@@ -70,6 +71,9 @@ import java.util.concurrent.TimeUnit
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_API", "ROLE_OPERATOR"])
 @Provider("openbank-balance-service")
 @PactFolder("../pacts")
+// The missing-identity interactions (401) are replayed by BalanceNegativeAuthProviderVerificationTest, which boots
+// without @TestSecurity; under this class's identity they would be authenticated and fail.
+@PactFilter("^(?!" + NEGATIVE_AUTH_STATE + "\$).*\$")
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 class BalancePactFolderProviderVerificationTest {
 
@@ -159,10 +163,11 @@ class BalancePactFolderProviderVerificationTest {
      * verification pass needs.
      */
     private suspend fun seedBalance(balance: Balance) {
-        if (balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency) == null) {
+        val current = balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency)
+        if (current == null) {
             balanceRepo.save(balance)
         } else {
-            balanceRepo.update(balance)
+            balanceRepo.update(balance.copy(version = current.version + 1))
         }
     }
 

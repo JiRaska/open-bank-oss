@@ -85,11 +85,9 @@ class AccountService(
         accountRepository.findByIdempotencyKey(command.idempotencyKey)?.let { return replayOrRefuse(it, command) }
 
         // ADR-0032 §C: Sanctions gate — fails closed.
-        // HIT: confirmed match — hard block.
-        // REVIEW: also blocked (Sprint 1 conservative). Sprint 2 will introduce a
-        //         PENDING_COMPLIANCE account status so a flagged account can be
-        //         released once compliance clears the match manually.
-        // CLEAR: proceeds.
+        // Only CLEAR and WHITELISTED proceed (SanctionsScreenResult.permitsOpening). HIT,
+        // POTENTIAL_HIT, ESCALATED and a response with no status all block; a flagged party
+        // needs compliance to clear the match (WHITELISTED) before an account can open.
         // Unavailable: AccountScreeningUnavailableException propagates — account NOT opened.
         // legalName is non-null at compile time (OpenAccountCommand.legalName: String) —
         // no runtime require needed. The type system enforces ADR-0032 §C statically.
@@ -98,7 +96,7 @@ class AccountService(
             name = command.legalName,
             idempotencyKey = screeningKey,
         )
-        if (screening.status == "HIT" || screening.status == "REVIEW") {
+        if (!screening.permitsOpening) {
             throw AccountOpeningBlockedByScreeningException(command.partyId, screening.matchedName)
         }
 

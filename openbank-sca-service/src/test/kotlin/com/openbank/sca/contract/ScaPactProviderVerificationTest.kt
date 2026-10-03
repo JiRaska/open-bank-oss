@@ -18,6 +18,7 @@ import com.openbank.sca.domain.model.ScaPurpose
 import com.openbank.sca.domain.model.ScaStatus
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -58,10 +59,17 @@ class ScaPactProviderVerificationTest {
         private val PARTY_ID = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
         private val DELEGATION_CHALLENGE_ID = UUID.fromString("d1e2f3a4-b5c6-4d7e-8f90-1a2b3c4d5e6f")
         private val DELEGATION_PARTY_ID = UUID.fromString("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb")
+
+        // Must match SavingsWithdrawScaPactConsumerTest (openbank-account-service).
+        private val SAVINGS_CHALLENGE_ID = UUID.fromString("5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a")
+        private val SAVINGS_PARTY_ID = UUID.fromString("cccccccc-cccc-4ccc-8ccc-cccccccccccc")
     }
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
+
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @Inject
     lateinit var challengeRepo: ScaChallengeRepository
@@ -105,7 +113,17 @@ class ScaPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     @State("a PENDING SCA challenge exists")
@@ -137,6 +155,30 @@ class ScaPactProviderVerificationTest {
      * `ScaService.consume` authorises an unlinked challenge exactly when the consume states none —
      * which is why the consumer's request body carries only `partyId`.
      */
+    /**
+     * State for account-service's `SavingsWithdrawScaPactConsumerTest` (#8345): the owner-approval
+     * leg of a savings withdrawal proposal reads the challenge, checks its purpose and party, and
+     * consumes it. Seeded COMPLETED with `consumedAt = null`, the same shape the delegation state
+     * uses, so the consume interaction has something to spend.
+     */
+    @State("a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists")
+    fun stateCompletedSavingsWithdrawChallengeExists() = runOnVertxContext {
+        challengeRepo.save(
+            ScaChallenge(
+                id = SAVINGS_CHALLENGE_ID,
+                partyId = SAVINGS_PARTY_ID,
+                purpose = ScaPurpose.SAVINGS_WITHDRAW_APPROVAL,
+                method = ScaMethod.PUSH_NOTIFICATION,
+                status = ScaStatus.COMPLETED,
+                expiresAt = OffsetDateTime.now().plusMinutes(5),
+                completedAt = OffsetDateTime.now(),
+                consumedAt = null,
+                createdAt = OffsetDateTime.now(),
+            ),
+        )
+        Unit
+    }
+
     @State("a COMPLETED DELEGATION_GRANT SCA challenge exists")
     fun stateCompletedDelegationGrantChallengeExists() = runOnVertxContext {
         challengeRepo.save(

@@ -175,7 +175,7 @@ export default function ApprovalsPage() {
   // Sources that answered anything other than 200 — a 403 here is ordinary (lending's list is
   // desk-role gated while this page is not), and it must never look like an empty queue.
   const unavailableSources = useMemo(
-    () => Object.entries(domainSources).filter(([, v]) => v === 'unavailable' || v === 'forbidden').map(([k]) => k),
+    () => Object.entries(domainSources).filter(([, v]) => v === 'unavailable' || v === 'forbidden'),
     [domainSources],
   )
   const notConfiguredSources = useMemo(
@@ -237,8 +237,8 @@ export default function ApprovalsPage() {
           color: 'var(--warning-text)', background: 'var(--warning-bg)', border: '1px solid var(--warning-border)',
         }}>
           {t(
-            `Fronta není úplná — nepodařilo se ověřit úplnost zdrojů: ${unavailableSources.join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
-            `This queue is incomplete — could not verify completeness of: ${unavailableSources.join(', ')}. An empty list does not mean nothing is pending.`,
+            `Fronta není úplná — nepodařilo se ověřit úplnost zdrojů: ${unavailableSources.map(([name, state]) => `${name} (${state === 'forbidden' ? 'přístup odepřen' : 'požadavek selhal'})`).join(', ')}. Prázdný seznam neznamená, že nic nečeká.`,
+            `This queue is incomplete — could not verify completeness of: ${unavailableSources.map(([name, state]) => `${name} (${state === 'forbidden' ? 'access denied' : 'request failed'})`).join(', ')}. An empty list does not mean nothing is pending.`,
           )}
         </div>
       )}

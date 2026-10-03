@@ -36,6 +36,11 @@ import java.util.UUID
  * retried a bounded number of times and RETHROWN, and the channel's configured `failure-strategy`
  * (a per-service dead-letter topic, `application.yaml`) decides what follows.
  *
+ * A KNOWN lifecycle event that changes nothing the engine models — `treasury.deal.confirmed.v1`
+ * (ADR-0315 D2: the counterparty confirmed the booked terms; rate, dates and on-book status are
+ * unchanged) — is acked and counted `ignored`, never `malformed`: counting a legitimate event as a
+ * defect would report a producer bug on every confirmation.
+ *
  * A well-formed event for a product this engine does not model (e.g. `FX_SPOT`, #10896 — its
  * principal posts to GL-level FX position accounts that stay GL-level, never a contract-level
  * position here, see [TreasuryInstrumentMapper.SUPPORTED_PRODUCTS]) is its own outcome, distinct
@@ -61,6 +66,10 @@ class TreasuryDealConsumer {
     @Suppress("TooGenericExceptionCaught") // count the terminal outcome for ANY write failure, then rethrow
     suspend fun consume(payload: String, metadata: IncomingKafkaRecordMetadata<String, String>) {
         val type = metadata.headers?.lastHeader(OutboxKafkaHeaders.HEADER_EVENT_TYPE)?.value()?.toString(Charsets.UTF_8)
+        if (type in IGNORED_TYPES) {
+            count(OUTCOME_IGNORED)
+            return
+        }
         val event = parse(type, payload)
         if (event == null) {
             count(OUTCOME_MALFORMED)
@@ -126,8 +135,17 @@ class TreasuryDealConsumer {
         const val OUTCOME_MALFORMED = "malformed"
         const val OUTCOME_WRITE_ERROR = "write_error"
         const val OUTCOME_UNSUPPORTED_PRODUCT = "unsupported_product"
+        const val OUTCOME_IGNORED = "ignored"
 
-        /** The four types in treasury's asyncapi; anything else is malformed, never guessed. */
+        /** Known treasury types that move nothing in the book (see the class KDoc). */
+        val IGNORED_TYPES: Set<String> = setOf(
+            "treasury.deal.confirmed.v1",
+            // ADR-0315 D7: a nostro reconciliation break passed its alert threshold. Same topic,
+            // not a deal: nothing the book models, so acked as ignored rather than malformed.
+            "treasury.nostro.break-aged.v1",
+        )
+
+        /** The four state-moving types in treasury's asyncapi; anything else not ignored is malformed. */
         val STATE_BY_TYPE: Map<String, String> = mapOf(
             "treasury.deal.booked.v1" to TreasuryDeal.BOOKED,
             "treasury.deal.settled.v1" to TreasuryDeal.SETTLED,

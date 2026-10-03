@@ -76,6 +76,8 @@ data class RiskCapitalResult(
     val unclassifiedBalances: Int,
     /** The engine's own reason when it states no total (a missing ČNB fixing); null when it does. */
     val totalNotStated: String? = null,
+    /** The source run's provenance (`synthetic` | `production`, ADR-0313 D13). */
+    val provenance: String? = null,
 )
 
 /**
@@ -153,6 +155,8 @@ data class RiskLiquidityResult(
     val netOutflows: BigDecimal? = null,
     /** The engine's LCR as a fraction ([hqlaStock] / [netOutflows], 6 dp); null when net outflows ≤ 0. */
     val lcrRatio: BigDecimal? = null,
+    /** The source run's provenance (`synthetic` | `production`, ADR-0313 D13). */
+    val provenance: String? = null,
 )
 
 /**

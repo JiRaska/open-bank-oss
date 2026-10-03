@@ -132,11 +132,18 @@ spec:
         # (pkg/config/types.go: namespaceSelector + objectSelector only), so it was
         # inert: webhooks have always used each policy's failurePolicy (default Fail).
         # Under 3.9.1 the list cannot merge with the chart's map default and renders
-        # "{}". Setting it to null drops the key, so the chart renders exactly what
-        # runs today: exclude only the kyverno namespace. Failing OPEN, if wanted, is
+        # "{}", so the key is simply NOT SET here and the chart default applies — the
+        # live `kyverno` ConfigMap's `webhooks` excludes the kube-system and kyverno
+        # namespaces (read 2026-09-30). Failing OPEN, if wanted, is
         # features.forceFailurePolicyIgnore — a behaviour change, not part of this bump.
+        #
+        # Do NOT write `webhooks: null` to express "unset": the API server drops a null
+        # value from the Application on apply, so the live spec never carries it while the
+        # desired manifest does, and the `root` app-of-apps sits OutOfSync forever with
+        # every self-heal sync reporting success (measured 2026-09-30: OutOfSync for the
+        # whole 12h of Prometheus retention; the only spec difference was this key).
+        # Omitting the key renders byte-identical values — the live spec already lacked it.
         config:
-          webhooks: null
           # Context size cap (kyverno ConfigMap key `maxContextSize`). New in the
           # 1.19 line with a 2Mi default; 1.12.5 had no such cap. A verifyImages
           # attestation rule loads the DSSE statement into the policy context, and
@@ -152,7 +159,7 @@ spec:
           maxContextSize: 8Mi
         features:
           # 1.13 flipped the chart default to disabled (CVE-2024-48921). The pricing
-          # PolicyException (components/kyverno/pricing-image-exception.yaml) is
+          # PolicyException (components/kyverno/pricing-image-exception-cel.yaml) is
           # load-bearing, so keep exceptions on, from any namespace, as on 1.12.
           # Narrowing `namespace` is a separate, reviewable tightening.
           policyExceptions:

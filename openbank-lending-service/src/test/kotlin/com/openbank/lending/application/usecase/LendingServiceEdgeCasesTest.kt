@@ -80,6 +80,9 @@ class LendingServiceEdgeCasesTest {
         every { loans.withLocked<Any>(any(), any()) } answers {
             loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
         }
+        every { applications.withLocked<Any>(any(), any()) } answers {
+            applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<Any>>())
+        }
         every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
 
         every { events.emit(any<LendingOutboxMessage>()) } returns Uni.createFrom().item(Unit)
@@ -280,6 +283,8 @@ class LendingServiceEdgeCasesTest {
 
         assertThat(service.getApplication(app.id).await().indefinitely()).isEqualTo(app)
         assertThat(service.listApplications(partyId).await().indefinitely()).containsExactly(app)
+        every { applications.findByParty(partyId, 31) } returns Uni.createFrom().item(listOf(app))
+        assertThat(service.listApplications(partyId, 31).await().indefinitely()).containsExactly(app)
     }
 
     // --- Disbursement --------------------------------------------------------------------------

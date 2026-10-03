@@ -15,6 +15,38 @@ afterEach(() => {
 })
 
 describe('context assignment administration', () => {
+  it('submits the exact approved authority root', async () => {
+    const rootRef = 'delegation:44444444-4444-4444-4444-444444444444'
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      if (init?.method === 'POST') return Response.json({ id: 'proposal-1' }, { status: 201 })
+      return Response.json([])
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider initialLanguage="en"><ContextAssignmentAdministration /></LanguageProvider>)
+    fireEvent.change(screen.getByLabelText('Purpose'), { target: { value: 'AUTHORIZATION_REVIEW' } })
+    fireEvent.change(screen.getByLabelText('Principal'), { target: { value: 'analyst-1' } })
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-1' } })
+    fireEvent.change(screen.getByLabelText('Approved root'), { target: { value: rootRef } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Propose' }).closest('form')!)
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
+    const init = fetchMock.mock.calls.find(([, value]) => value?.method === 'POST')![1]!
+    expect(JSON.parse(String(init.body))).toMatchObject({ purpose: 'AUTHORIZATION_REVIEW', caseId: 'case-1', rootRef })
+  })
+
+  it('requires an explicit complaint root in a case assignment proposal', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) =>
+      init?.method === 'POST' ? Response.json({ id: 'proposal-1' }, { status: 201 }) : Response.json([]))
+    vi.stubGlobal('fetch', fetchMock)
+    render(<LanguageProvider initialLanguage="en"><ContextAssignmentAdministration /></LanguageProvider>)
+    fireEvent.change(screen.getByLabelText('Principal'), { target: { value: 'analyst-1' } })
+    fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-1' } })
+    fireEvent.change(screen.getByLabelText('Approved root'), { target: { value: 'complaint:CMP-42' } })
+    fireEvent.submit(screen.getByRole('button', { name: 'Propose' }).closest('form')!)
+    await waitFor(() => expect(fetchMock.mock.calls.some(([, init]) => init?.method === 'POST')).toBe(true))
+    const init = fetchMock.mock.calls.find(([, value]) => value?.method === 'POST')![1]!
+    expect(JSON.parse(String(init.body))).toMatchObject({ purpose: 'PAYMENT_COMPLAINT', rootRef: 'complaint:CMP-42' })
+  })
+
   it('requires an explicit second step before revoking access', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)

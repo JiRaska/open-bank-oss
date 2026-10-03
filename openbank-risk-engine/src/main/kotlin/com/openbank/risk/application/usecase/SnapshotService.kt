@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application.usecase
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.risk.application.port.`in`.SnapshotOutcome
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
@@ -17,6 +18,7 @@ import com.openbank.risk.application.port.out.UntiedSnapshotException
 import com.openbank.risk.domain.model.InputHash
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LoanInstrumentMapper
+import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionBuilder
 import com.openbank.risk.domain.model.Provenance
@@ -49,9 +51,17 @@ class SnapshotService(
      * treasury principal accounts stay GL-level positions exactly as before deals were modelled.
      */
     private val treasury: TreasuryDealBook? = null,
+    /** The versions stamped on every new run's manifest (ADR-0314 D2); null only in tests that do not care. */
+    private val modelVersions: ModelVersions? = null,
 ) : SnapshotUseCase {
 
     override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
+        // A snapshot claims tie-out with the GL as of `asOf`; a day that has not closed yet cannot
+        // be tied out. Today (Europe/Prague accounting day, ADR-0207) stays allowed — the EOD
+        // scheduler builds exactly that. IllegalArgumentException is mapped to 400 by libs-runtime.
+        val today = AccountingClock(clock).today()
+        require(!asOf.isAfter(today)) { "field 'asOf' must not be after the current business date ($today)" }
+        val ledgerCutOff = clock.instant()
         val inputs = ledger.read(asOf)
         val loanBook = lending?.readLoanBook(asOf)
         val deals = treasury?.dealsOnBook(asOf)
@@ -72,12 +82,17 @@ class SnapshotService(
             positionCount = positions.size,
             mismatches = tieOut.mismatches,
             requestedBy = requestedBy,
+            modelVersions = modelVersions,
+            ledgerCutOff = ledgerCutOff,
         )
         val stored = repository.saveIfAbsent(candidate, positions, instruments.orEmpty() + dealInstruments.orEmpty())
         return SnapshotOutcome(stored, replayed = stored.id != candidate.id)
     }
 
     override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = repository.listRecent(limit)
+
+    override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+        repository.listTiedOutBetween(from, to)
 
     override suspend fun getRun(id: UUID): SnapshotRun = repository.findById(id) ?: throw SnapshotNotFoundException(id)
 
