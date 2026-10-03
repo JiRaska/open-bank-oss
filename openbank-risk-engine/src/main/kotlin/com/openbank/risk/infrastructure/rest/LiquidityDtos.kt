@@ -27,6 +27,8 @@ data class LiquidityLineDto(
     val factorKey: String?,
     val weighted: BigDecimal,
     val citation: String,
+    val instrumentId: String?,
+    val itemCount: Int?,
 )
 
 data class HqlaLineDto(
@@ -129,8 +131,17 @@ data class LiquidityResponse(
     val assumptions: LiquidityAssumptionsDto,
 )
 
-fun LiquidityLine.toDto() =
-    LiquidityLineDto(label, glAccountCode, amount.money(), factor, factorKey, weighted.money(), citation)
+fun LiquidityLine.toDto() = LiquidityLineDto(
+    label,
+    glAccountCode,
+    amount.money(),
+    factor,
+    factorKey,
+    weighted.money(),
+    citation,
+    instrumentId,
+    itemCount,
+)
 
 fun HqlaStock.toDto() = HqlaDto(
     lines = lines.map {

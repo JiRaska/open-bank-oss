@@ -63,16 +63,32 @@ spec:
         # ratio or rate rule above can fire when the channel stops being exercised at all —
         # which is precisely how a dead push path stays invisible. This is the rule that
         # covers the silence. 6h is deliberately long: a quiet night is not an outage.
+        # `openbank_notification_push_sends_total` is a Micrometer counter registered on
+        # first increment (PushMetricsAdapter.recordSend), so in an environment where no
+        # push has ever been requested the series does not exist and `absent_over_time`
+        # fired continuously — from 2026-09-08 in the sandbox, 22 days of a warning that
+        # named a fan-out problem where there was no fan-out. The question this rule is
+        # for is "requests arrived and nothing went out", and both halves are counters
+        # the same adapter emits: alert when fan-outs were recorded and no send was.
+        # Idle environment: neither series exists, no alert. Adapter dead: fan-outs
+        # increment, sends do not, alert. (ADR-0252 phase 0, #4348.)
+        # devices_bucket!="0": a fan-out to a party with no registered device ends FAILED
+        # and correctly sends nothing — measured 2026-10-01, the only fan-outs in the
+        # sandbox were exactly that, and the first version of this rule fired on them.
         - alert: PushChannelSilent
-          expr: absent_over_time(openbank_notification_push_sends_total[6h])
+          expr: |
+            sum(increase(openbank_notification_push_fanouts_total{devices_bucket!="0"}[6h])) > 0
+              unless
+            sum(increase(openbank_notification_push_sends_total[6h])) > 0
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "No push send recorded anywhere for 6h"
+            subject_period: continuous
+            summary: "Push fan-outs recorded in the last 6h but no push send"
             description: >-
-              notification-service has emitted no push send series for 6h. Either nothing is
-              requesting PUSH notifications, or the fan-out is not running. Neither is visible
+              notification-service fanned out PUSH notifications in the last 6h and recorded
+              no send for any of them: the adapter is not running, or every send is SKIPPED. Neither is visible
               from any error signal — check openbank_notification_push_fanouts_total and the
               consumer lag on openbank.notification.requests.
         # Every fan-out ends with no registered device. Not a delivery failure — a registration

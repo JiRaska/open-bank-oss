@@ -112,7 +112,9 @@ class CapitalizationLedgerBoundaryIT {
         assertThat(deposit.subAccountId).isEqualTo(accountId)
 
         val tax = journal.credits().single { it.glAccountId == TestInterestLedgerConfig.withholdingTaxPayableCzk }
-        assertThat(tax.amount.amount).isEqualTo(cap.taxAmount)
+        // Whole-CZK tax by policy: the row holds 15 (scale 0), the ledger leg is Money and holds 15.00.
+        assertThat(tax.amount.amount).isEqualByComparingTo(cap.taxAmount)
+        assertThat(tax.amount.amount.scale()).isEqualTo(2)
 
         // gross 100.00 -> base 100, tax 15, net 85.00 (WithholdingTaxPolicy, whole-CZK DOWN).
         assertThat(cap.grossAmount).isEqualTo(BigDecimal("100.00"))

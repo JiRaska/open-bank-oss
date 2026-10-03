@@ -17,6 +17,7 @@ import com.openbank.balance.domain.model.Balance
 import com.openbank.balance.domain.model.BalanceHold
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -76,6 +77,9 @@ class BalancePactProviderVerificationTest {
     lateinit var testPort: String
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var balanceRepo: BalanceRepository
 
     @Inject
@@ -132,7 +136,17 @@ class BalancePactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /**
@@ -146,10 +160,11 @@ class BalancePactProviderVerificationTest {
      * verification pass needs.
      */
     private suspend fun seedBalance(balance: Balance) {
-        if (balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency) == null) {
+        val current = balanceRepo.findByAccountIdAndCurrency(balance.accountId, balance.currency)
+        if (current == null) {
             balanceRepo.save(balance)
         } else {
-            balanceRepo.update(balance)
+            balanceRepo.update(balance.copy(version = current.version + 1))
         }
     }
 

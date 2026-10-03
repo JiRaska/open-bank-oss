@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -81,7 +81,6 @@ object QuotePricer {
     val QUOTED_PRODUCTS: Set<ProductType> = setOf(ProductType.MM_PLACEMENT, ProductType.MM_BORROWING)
 
     private val CURVE_BY_CURRENCY = mapOf(Deal.CZK to "CZEONIA", Deal.EUR to "ESTR")
-    private const val RATE_SCALE = 4
     private const val DAYS_ACT360 = 360.0
     private const val DAYS_ACT365 = 365.0
     private const val PERCENT = 100.0
@@ -101,7 +100,7 @@ object QuotePricer {
         val z = zeroAt(curve.pillars.sortedBy { it.date }, asOf.plusDays(tenorDays.toLong()))
         val df = exp(-z * tenorDays / DAYS_ACT365)
         val simple = (1.0 / df - 1.0) * DAYS_ACT360 / tenorDays * PERCENT
-        return BigDecimal.valueOf(simple).setScale(RATE_SCALE, RoundingMode.HALF_UP)
+        return RoundingPolicy.RATE_PERCENT.round(BigDecimal.valueOf(simple))
     }
 
     /**
@@ -131,8 +130,8 @@ object QuotePricer {
             curveProvenance = set.provenance,
             mid = mid,
             spreadBp = spreadBp,
-            bid = (mid - half).max(BigDecimal.ZERO).setScale(RATE_SCALE, RoundingMode.HALF_UP),
-            ask = (mid + half).setScale(RATE_SCALE, RoundingMode.HALF_UP),
+            bid = RoundingPolicy.RATE_PERCENT.round((mid - half).max(BigDecimal.ZERO)),
+            ask = RoundingPolicy.RATE_PERCENT.round(mid + half),
         )
     }
 

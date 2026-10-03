@@ -553,6 +553,9 @@ class LendingService @Inject constructor(
 
     override fun listApplications(partyId: UUID): Uni<List<LoanApplication>> = applications.findByParty(partyId)
 
+    override fun listApplications(partyId: UUID, limit: Int): Uni<List<LoanApplication>> =
+        applications.findByParty(partyId, limit)
+
     override fun listRecentApplications(status: String?, limit: Int): Uni<List<LoanApplication>> =
         applications.findRecent(status, limit.coerceIn(1, MAX_LIST_LIMIT))
 
@@ -584,6 +587,42 @@ class LendingService @Inject constructor(
                         IllegalStateException("Segregation of duties: disburser must differ from approver"),
                     )
                 else -> bookLoan(application, disbursedBy)
+            }
+        }
+
+    /** The local half of a booking; every call joins the caller's locked transaction (#11626). */
+    private fun bookLocally(
+        loan: Loan,
+        rows: List<LoanInstallment>,
+        application: LoanApplication,
+        disbursedBy: String,
+    ): Uni<Loan> = loans.save(loan)
+        .flatMap { saved -> installments.saveAll(rows).map { saved } }
+        .flatMap { saved ->
+            when (
+                val st = machine.apply(
+                    transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
+                )
+            ) {
+                is OriginationTransitionResult.Rejected ->
+                    Uni.createFrom().failure(IllegalStateException(st.reason))
+                is OriginationTransitionResult.Applied ->
+                    // Still a claim, not a blind write, even under the lock: the predicate is the
+                    // second line of defence and costs nothing.
+                    claimTransition(application.status, application.copy(status = st.newState))
+                        .call { savedApp ->
+                            events.emit(
+                                transitionEvidence(
+                                    savedApp,
+                                    application.status.name,
+                                    st.newState,
+                                    disbursedBy,
+                                    OriginationActorKind.HUMAN,
+                                    "disbursement booked",
+                                ),
+                            )
+                        }
+                        .map { saved }
             }
         }
 
@@ -624,40 +663,28 @@ class LendingService @Inject constructor(
                 closingBalance = i.closingBalance,
             )
         }
-        return loans.save(loan)
-            .flatMap { saved -> installments.saveAll(rows).map { saved } }
-            .flatMap { saved ->
-                when (
-                    val st = machine.apply(
-                        transition(application, application.status, OriginationState.DISBURSED, disbursedBy),
-                    )
-                ) {
-                    is OriginationTransitionResult.Rejected ->
-                        Uni.createFrom().failure(IllegalStateException(st.reason))
-                    is OriginationTransitionResult.Applied ->
-                        // Claimed, not blind-written: without the predicate two concurrent
-                        // disbursements of one READY_TO_DISBURSE application both post cash to the
-                        // ledger. The claim runs before the posting, so the loser pays nothing.
-                        // It does NOT make disbursement atomic — the loan row and its schedule are
-                        // written before the claim, so a refused racer still leaves an unreferenced
-                        // loan behind. That is pre-existing (today BOTH racers book one) and needs
-                        // its own change; see the pull request for #3850.
-                        claimTransition(application.status, application.copy(status = st.newState))
-                            .call { savedApp ->
-                                events.emit(
-                                    transitionEvidence(
-                                        savedApp,
-                                        application.status.name,
-                                        st.newState,
-                                        disbursedBy,
-                                        OriginationActorKind.HUMAN,
-                                        "disbursement booked",
-                                    ),
-                                )
-                            }
-                            .map { saved }
-                }
+        // One transaction for every LOCAL write of the booking (#11626): the loan row, its
+        // schedule, the DISBURSED claim on the application and the transition evidence commit
+        // together or not at all. Measured before this: three transaction ids for one request
+        // (loan, application, outbox), so a crash between them left a loan with a schedule that no
+        // claim and no event referenced. The application row is locked for the duration, which
+        // also serialises two concurrent disbursements of one application — the loser now finds
+        // the row no longer READY_TO_DISBURSE and rolls back its loan instead of orphaning it.
+        //
+        // The ledger posting and the borrower credit that follow are remote calls and stay
+        // OUTSIDE this transaction on purpose: a database transaction must not wait on another
+        // service, and `loan.disbursed` is emitted only once the money has actually moved.
+        return applications.withLocked(application.id) { locked ->
+            if (locked == null || locked.status != OriginationState.READY_TO_DISBURSE) {
+                Uni.createFrom().failure(
+                    IllegalStateException(
+                        "Application ${application.id} is no longer READY_TO_DISBURSE: ${locked?.status}",
+                    ),
+                )
+            } else {
+                bookLocally(loan, rows, application, disbursedBy)
             }
+        }
             .flatMap { saved ->
                 // Cash leaves the bank in two bookings, not one. The ledger journal below only ever
                 // touches internal GL accounts (Loans Receivable, Funding Clearing — see
@@ -719,6 +746,8 @@ class LendingService @Inject constructor(
                                 // self-consistent naming choice this PR preserves rather than introduces).
                                 payload = """{"aggregateType":"LOAN","aggregateId":"${saved.id.value}",""" +
                                     """"loanId":"${saved.id.value}","partyId":"${saved.partyId}",""" +
+                                    // #11107: optional, additive — the human contract number.
+                                    (saved.contractNumber?.let { """"contractNumber":"$it",""" } ?: "") +
                                     """"principal":"${saved.principal}",""" +
                                     // ADR-0314 D5: the rate terms, so the risk engine can tell a
                                     // fixed loan from a floating one without asking lending.
@@ -1386,7 +1415,7 @@ class LendingService @Inject constructor(
         require(period == asOf.toString() || period == java.time.YearMonth.from(asOf).toString()) {
             "Reporting key must match asOf (yyyy-MM-dd or legacy yyyy-MM)"
         }
-        return provisionBatch(period, asOf, limit, 0, 0)
+        return provisionBatch(period, asOf, limit, 0, 0, null)
     }
 
     private fun provisionBatch(
@@ -1395,7 +1424,14 @@ class LendingService @Inject constructor(
         limit: Int,
         assessed: Int,
         posted: Int,
+        previousBatchIds: Set<LoanId>?,
     ): Uni<ProvisioningRunOutcome> = loans.findUnprovisioned(period, limit).flatMap { active ->
+        val batchIds = active.map { it.id }.toSet()
+        if (active.isNotEmpty() && batchIds == previousBatchIds) {
+            return@flatMap Uni.createFrom().failure(
+                IllegalStateException("Provisioning scan made no progress for period $period"),
+            )
+        }
         Multi.createFrom().iterable(active)
             .onItem().transformToUniAndConcatenate { loan -> provisionOne(loan, period, asOf) }
             .collect().asList()
@@ -1405,7 +1441,7 @@ class LendingService @Inject constructor(
                 if (active.size < limit) {
                     Uni.createFrom().item(ProvisioningRunOutcome(period, total, journals))
                 } else {
-                    provisionBatch(period, asOf, limit, total, journals)
+                    provisionBatch(period, asOf, limit, total, journals, batchIds)
                 }
             }
     }

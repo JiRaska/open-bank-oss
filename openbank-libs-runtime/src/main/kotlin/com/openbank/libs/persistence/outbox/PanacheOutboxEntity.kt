@@ -64,7 +64,7 @@ open class PanacheOutboxEntity : PanacheEntity() {
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
 
-    fun toEntry(): OutboxEntry = OutboxEntry(
+    open fun toEntry(): OutboxEntry = OutboxEntry(
         eventId = eventId,
         aggregateId = aggregateId,
         eventType = eventType,

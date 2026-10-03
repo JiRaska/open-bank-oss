@@ -111,6 +111,26 @@ spec:
           annotations:
             summary: "Postgres deadlocks on {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.datname }})"
             description: "Deadlocks are being detected continuously for >10m — contended write ordering, money-path correctness risk."
+        - alert: CnpgWorkingSetAboveRequest
+          # A Postgres pod using more memory than it REQUESTS is scheduled on a
+          # lie: Karpenter bin-packs by requests, so the node is over-committed
+          # and this pod is first in line for eviction under pressure. No static
+          # gate can see runtime usage, hence an alert. 2026-09-30: sanctions-db
+          # (334Mi) and accounts-db (285Mi) had run above a 256Mi request with
+          # nothing reporting it. `for: 30m` skips startup/recovery spikes (WAL
+          # replay after a switchover) and a short checkpoint burst; a pod that
+          # stays above its request for half an hour needs a bigger request.
+          # container="postgres" matches CNPG instance pods only.
+          expr: |
+            max by (namespace, pod) (container_memory_working_set_bytes{container="postgres"})
+              > on (namespace, pod)
+            max by (namespace, pod) (kube_pod_container_resource_requests{container="postgres", resource="memory"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Postgres working set above memory request on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "The postgres container's working set has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max working set x 1.3), 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
         - alert: PostgresTransactionWraparoundRisk
           # xid age climbing toward the 2^31 wraparound horizon. autovacuum
           # freezes at 200M by default; 300M means freezing is falling behind.
@@ -180,9 +200,22 @@ spec:
           # without = 0 — so today's silence is a measured zero, not a join that never matches.
           #
           # Paired with PostgresBackupStale below since #5756 established the metric's semantics.
+          # Clusters that are UNBACKED BY DESIGN are declared in openbank:cnpg_backup_exempt
+          # (below), not silenced: glitchtip-pg holds 30 days of disposable crash events and its
+          # chart cannot carry a pod-identity backup role (#1444). It only became visible here
+          # once it was scraped (2026-10-01). Each exemption is a record with a reason, so the
+          # list is reviewable and a backup-less money-path cluster can never hide in it silently.
+          # The cluster label is derived only to join the exemption list and stripped again
+          # (outer label_replace to ""), so the alert keeps the label set GoAlert dedups on.
           expr: |
-            cnpg_collector_first_recoverability_point == 0
-              and on(namespace, pod) cnpg_pg_replication_in_recovery == 0
+            label_replace(
+              (
+                label_replace(cnpg_collector_first_recoverability_point == 0, "cluster", "$1", "pod", "(.+)-[0-9]+")
+                  and on (namespace, pod) cnpg_pg_replication_in_recovery == 0
+              )
+              unless on (namespace, cluster) openbank:cnpg_backup_exempt,
+              "cluster", "", "", ""
+            )
           for: 30m
           labels:
             severity: critical
@@ -245,3 +278,13 @@ spec:
           annotations:
             summary: "Postgres cache hit ratio <90% on {{ $labels.namespace }}/{{ $labels.pod }}"
             description: "Buffer cache hit ratio below 90% for >30m — under-sized shared_buffers or a missing index causing heavy disk reads."
+    - name: openbank.postgres.backup-exemptions
+      rules:
+        # glitchtip-pg: crash-report events with a 30-day life, disposable by design; the
+        # glitchtip chart's CNPG Cluster cannot carry the backup pod-identity role (#1444).
+        - record: openbank:cnpg_backup_exempt
+          expr: vector(1)
+          labels:
+            namespace: observability
+            cluster: glitchtip-pg
+            reason: disposable-crash-events-1444

@@ -36,6 +36,9 @@ export const instrumentSchema = z.object({
     resetFrequencyMonths: z.number().int().nullable(), nextResetDate: z.string().nullable(),
   }).nullable(),
   counterpartyRef: z.string().nullable(), ifrs9Stage: z.string().nullable(),
+  // risk-engine 1.20.0 (#11107): the source contract's human reference (a loan's UV-YYYY-NNNNNN).
+  // nullish: an older risk-engine omits it, and runs recorded before it carry null.
+  contractNumber: z.string().nullish(),
   loan: z.looseObject({
     method: z.string(), periodsPerYear: z.number().int(), remainingPeriods: z.number().int(), nextDueDate: z.string().nullable(),
   }).nullable(),
@@ -141,6 +144,15 @@ export const irrbbSchema = z.object({
   }),
   shockNotConfigured: z.array(z.string()),
   unpriced: z.array(z.string()),
+  // risk-engine openapi 1.22.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.
+  // Optional+nullable so an older engine (and a single-currency book) both parse.
+  reportingAggregate: z.object({
+    currency: z.string(),
+    scenarios: z.array(z.object({ scenario: z.enum(SCENARIOS), loss: money })),
+    worstScenario: z.enum(SCENARIOS).nullable().optional(), worstLoss: nullableMoney.optional(),
+    fxRates: z.array(z.object({ currency: z.string(), rate: money, fixingDate: z.string(), source: z.string() })),
+    notStated: z.string().nullable().optional(),
+  }).nullable().optional(),
   assumptions: z.object({
     model: z.object({ id: z.string(), version: z.string() }).passthrough(),
     shockSizes: z.array(z.object({ currency: z.string(), parallelBp: money, shortBp: money, longBp: money })),
@@ -157,6 +169,8 @@ export type Irrbb = z.infer<typeof irrbbSchema>
 export const liquidityLineSchema = z.object({
   label: z.string(), glAccountCode: z.string().nullable().optional(), amount: money,
   factor: money.nullable().optional(), factorKey: z.string().nullable().optional(), weighted: money, citation: z.string(),
+  // risk-engine openapi 1.18.0: the loan a line is about, and how many accounts/contracts it aggregates.
+  instrumentId: z.string().nullable().optional(), itemCount: z.number().int().nullable().optional(),
 })
 export const hqlaSchema = z.object({
   lines: z.array(z.object({
@@ -229,7 +243,7 @@ export type LiquidityForecast = z.infer<typeof liquidityForecastSchema>
 export const exposureLineSchema = z.object({
   exposureClass: z.string(), label: z.string(), glAccountCode: z.string().nullable().optional(),
   instrumentId: z.string().nullable().optional(), ead: money, riskWeight: money, rwa: money,
-  factorKey: z.string(), citation: z.string(),
+  factorKey: z.string(), citation: z.string(), ifrs9Stage: z.string().nullable().optional(),
 })
 const ownFundsSchema = z.object({
   lines: z.array(z.object({ glAccountCode: z.string(), glClass: z.string(), contribution: money })),
@@ -250,6 +264,7 @@ export const capitalSchema = z.object({
   ownFundsRequirement: money.nullable().optional(),
   ratios: z.object({ cet1: capitalRatioSchema, tier1: capitalRatioSchema, total: capitalRatioSchema }).nullable().optional(),
   ratiosNotComputable: z.string().nullable().optional(),
+  ratiosNotComputableCode: z.string().nullable().optional(),
   unclassified: z.array(z.object({
     glAccountCode: z.string().nullable().optional(), glAccountType: z.string().nullable().optional(),
     currency: z.string(), amount: money, reason: z.string(),
@@ -341,6 +356,29 @@ export type MinReservePeriod = z.infer<typeof minReservePeriodSchema>
 export type MinReserves = z.infer<typeof minReservesSchema>
 export type ReserveBase = z.infer<typeof reserveBaseSchema>
 export type ReserveLine = z.infer<typeof reserveLineSchema>
+
+// Declarative risk limits (risk-engine GET /snapshots/{id}/limits, ADR-0313 D9).
+export const limitStatus = z.enum(['OK', 'EARLY_WARNING', 'BREACH', 'NOT_EVALUABLE'])
+export const limitEvaluationSchema = z.object({
+  limitId: z.string(), metric: z.string(), metricDescription: z.string(),
+  bound: z.enum(['MIN', 'MAX']), limit: money, earlyWarning: money, status: limitStatus,
+  /** Null exactly when NOT_EVALUABLE: a gap is never drawn as a figure. */
+  value: money.nullable(),
+  basis: z.string().nullable(),
+  /** The gap in the limit's input; set only when NOT_EVALUABLE. */
+  reason: z.string().nullable(),
+  citation: z.string(),
+})
+export const limitsSchema = z.object({
+  runId: z.string(), asOf: z.string(), provenance,
+  limitSet: z.object({ id: z.string(), version: z.string(), source: z.string() }),
+  curveSetId: z.string().nullable(),
+  limits: z.array(limitEvaluationSchema),
+  summary: z.record(z.string(), z.number()),
+  notes: z.array(z.string()),
+})
+export type Limits = z.infer<typeof limitsSchema>
+export type LimitEvaluation = z.infer<typeof limitEvaluationSchema>
 
 export type Liquidity = z.infer<typeof liquiditySchema>
 export type CurrencyLiquidity = z.infer<typeof currencyLiquiditySchema>

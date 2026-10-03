@@ -6,6 +6,7 @@ package com.openbank.aml.it
 
 import com.openbank.aml.application.port.`in`.AmlCaseUseCase
 import com.openbank.aml.application.usecase.AmlCaseService
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
@@ -170,8 +171,9 @@ class AmlCaseCreateIdempotencyFingerprintIT {
         QuarkusMock.installMockForType(failingUseCase, AmlCaseUseCase::class.java)
 
         val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
-        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
-        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        coEvery { flakyRelease.reserve(any<IdempotencyScope>(), any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any<IdempotencyScope>(), any(), any()) } throws
+            IllegalStateException("redis unavailable")
         QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
 
         // The create failure (422, from the use case's IllegalStateException) must surface — not the
@@ -209,7 +211,9 @@ class AmlCaseCreateIdempotencyFingerprintIT {
     }
 
     private fun evictRedis(key: String) {
-        redis.key().del("idempotency:$key").await().indefinitely()
+        // The record lives under the caller's scope; deleting exactly one key proves the resource wrote it there.
+        val scoped = "idempotency:" + IdempotencyScope("aml-service", "u-compliance").storeKey(key)
+        assertThat(redis.key().del(scoped).await().indefinitely()).isEqualTo(1)
     }
 
     private fun post(key: String, json: String): Response = Given {

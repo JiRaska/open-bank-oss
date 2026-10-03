@@ -17,6 +17,7 @@ import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import org.hibernate.exception.ConstraintViolationException
 import java.sql.SQLException
+import java.time.LocalDate
 import java.util.UUID
 
 @ApplicationScoped
@@ -35,6 +36,10 @@ open class NostroStatementRepositoryImpl(private val entryRepo: NostroStatementE
         Panache.withSession {
             find("iban = ?1 and statementId = ?2", iban, statementId).firstResult()
         }.awaitSuspending()?.let { withEntries(it) }
+
+    override suspend fun statementIdsSince(since: LocalDate): List<UUID> = Panache.withSession {
+        list("statementDate >= ?1 order by statementDate, id", since)
+    }.awaitSuspending().map { it.statementUuid }
 
     override suspend fun save(stored: StoredStatement): StoredStatement {
         val s = stored.statement

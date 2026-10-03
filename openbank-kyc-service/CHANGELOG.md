@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.2...kyc-service-v0.16.3) (2026-10-03)
+
+
+### Performance
+
+* **party,dispute,document,kyc,pid,tpp-registry:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11753](https://github.com/JiRaska/open-bank-oss/issues/11753)) ([51294c7](https://github.com/JiRaska/open-bank-oss/commit/51294c727517168bd6d78a0462c05e887fc0236e))
+
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.1...kyc-service-v0.16.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **kyc:** record missing adverse-media coverage and bind checks to their case ([#11760](https://github.com/JiRaska/open-bank-oss/issues/11760)) ([66b0cff](https://github.com/JiRaska/open-bank-oss/commit/66b0cffe70636e119c20731554f763cf04fa59da)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) [#4459](https://github.com/JiRaska/open-bank-oss/issues/4459)
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/kyc-service-v0.16.0...kyc-service-v0.16.1) (2026-09-29)
 
 

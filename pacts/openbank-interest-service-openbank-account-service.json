@@ -1,0 +1,198 @@
+{
+  "consumer": {
+    "name": "openbank-interest-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the booked balance of an account the accrual run is about to accrue on",
+      "providerStates": [
+        {
+          "name": "a CZK balance exists for the pact account"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555/balance"
+      },
+      "response": {
+        "body": {
+          "accountId": "11111111-2222-4333-8444-555555555555",
+          "currencyCode": "CZK",
+          "currentBalance": 0.0
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.accountId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.currentBalance": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the first page of ACTIVE accounts for the accrual run",
+      "providerStates": [
+        {
+          "name": "an account owned by a known party exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "body": {
+          "data": [
+            {
+              "accountType": "CURRENT",
+              "currencyCode": "CZK",
+              "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+              "productId": "e2490de5-5bd3-43d5-b7c4-526e33f71304"
+            }
+          ],
+          "pagination": {
+            "hasNextPage": false
+          }
+        },
+        "generators": {
+          "body": {
+            "$.data[*].id": {
+              "type": "Uuid"
+            },
+            "$.data[*].productId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.data": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$.data[*].accountType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].currencyCode": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.data[*].id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.data[*].productId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.pagination.hasNextPage": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a booked balance with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/11111111-2222-4333-8444-555555555555/balance"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "GET the ACTIVE accounts page with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/accounts/active",
+        "query": {
+          "limit": [
+            "100"
+          ]
+        }
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-account-service"
+  }
+}

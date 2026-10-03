@@ -179,7 +179,7 @@ open class SepaPaymentActivitiesImpl(
             ?: error("Payment $paymentId not found during fraud score activity")
         val outcome = fraudScoringPort.score(
             FraudScoreCommand(
-                amount = payment.amount,
+                amount = payment.amount.amount,
                 currency = payment.currency,
                 rail = "SEPA",
                 accountId = payment.debtorAccountId,
