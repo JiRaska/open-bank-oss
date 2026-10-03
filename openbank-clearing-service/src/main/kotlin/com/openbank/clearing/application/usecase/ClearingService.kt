@@ -21,7 +21,7 @@ import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.ReconciliationReport
 import com.openbank.clearing.domain.model.SettlementPosition
 import com.openbank.clearing.domain.model.SettlementType
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.faulttolerance.Retry
@@ -51,22 +51,23 @@ class ClearingService(
     ReconcileUseCase {
 
     @Retry(maxRetries = 3)
-    override fun submit(request: SubmitPaymentRequest): Uni<ClearingItem> {
+    override fun submit(command: SubmitPaymentCommand): Uni<ClearingItem> {
         val now = OffsetDateTime.now(clock)
         val item = ClearingItem(
             batchId = UUID.fromString("00000000-0000-0000-0000-000000000000"), // assigned during clearing
-            paymentId = request.paymentId,
-            paymentReference = request.paymentReference,
-            debtorIban = request.debtorIban,
-            creditorIban = request.creditorIban,
-            debtorBic = request.debtorBic,
-            creditorBic = request.creditorBic,
-            amount = request.amount,
-            currency = request.currency,
+            paymentId = command.paymentId,
+            paymentReference = command.paymentReference,
+            debtorIban = command.debtorIban,
+            creditorIban = command.creditorIban,
+            debtorBic = command.debtorBic,
+            creditorBic = command.creditorBic,
+            // Canonical currency scale and upper-case ISO code, from the boundary-built Money.
+            amount = command.amount.amount,
+            currency = command.amount.currency.code,
             status = ClearingStatus.PENDING,
-            valueDate = request.valueDate ?: LocalDate.now(clock),
-            endToEndId = request.endToEndId,
-            remittanceInfo = request.remittanceInfo,
+            valueDate = command.valueDate ?: LocalDate.now(clock),
+            endToEndId = command.endToEndId,
+            remittanceInfo = command.remittanceInfo,
             createdAt = now,
             updatedAt = now,
         )
@@ -75,11 +76,11 @@ class ClearingService(
         // a second PENDING row the clearing cycle would sweep into a batch — the same payment
         // settled twice. Check-first covers the retry window; uq_clearing_items_payment (V9) is
         // the DB backstop, and a lost race re-reads the winner rather than erroring the caller.
-        return itemRepo.findByPaymentId(request.paymentId).flatMap { existing ->
+        return itemRepo.findByPaymentId(command.paymentId).flatMap { existing ->
             existing.firstOrNull()?.let { Uni.createFrom().item(it) }
                 ?: itemRepo.save(item).onFailure(this::isPaymentUniqueViolation)
                     .recoverWithUni { _: Throwable ->
-                        itemRepo.findByPaymentId(request.paymentId)
+                        itemRepo.findByPaymentId(command.paymentId)
                             .map { winners -> winners.first() }
                     }
         }
