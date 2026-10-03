@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.3.1...loyalty-service-v0.4.0) (2026-10-02)
+
+
+### Features
+
+* **loyalty:** earn Lístky for a qualified referral, once per invite ([#10013](https://github.com/JiRaska/open-bank-oss/issues/10013)) ([2e5c44c](https://github.com/JiRaska/open-bank-oss/commit/2e5c44c6d97469c180c5ae8ce9a38191ca5be276))
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.3.0...loyalty-service-v0.3.1) (2026-09-29)
 
 
