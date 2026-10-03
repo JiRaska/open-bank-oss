@@ -254,6 +254,12 @@ mp:
       anchor:
         enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer. Without a PDP bean an
+  # enforced @Authorize request fails closed (pdp_unconfigured) and advisory mode never consults
+  # the policy at all, so the sidecar alone does not authorize anything.
+  authz:
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 200
@@ -299,3 +305,9 @@ openbank:
       # suspected incident, or widen it if the log grows enough for the walk to cost real time —
       # openbank_audit_chain_verify_duration_seconds is what tells them which.
       cron: ${AUDIT_CHAIN_VERIFY_CRON:0 0 * * * ?}
+
+# Read by the libs-runtime OpaPolicyDecisionPointProducer enabled under openbank.authz above.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
