@@ -180,6 +180,16 @@ class RiskSnapshotApiIT {
 
     @Test
     @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `an asOf after the current business date is a 400 and today is accepted`() {
+        // The IT clock is fixed at 2030-01-01 (FixedClockForIntegrationTests).
+        val body = create("2030-01-02").then().statusCode(400).extract().asString()
+        assertThat(body).contains("business date")
+        ledger.inputs = Fixtures.tiedOut()
+        create("2030-01-01").then().statusCode(201)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
     fun `a missing or malformed asOf is a 400 and an unknown run a 404`() {
         given().contentType("application/json").body("{}").`when`().post("/api/v1/risk/snapshots")
             .then().statusCode(400)

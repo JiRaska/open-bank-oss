@@ -163,7 +163,7 @@ class AmlOutboxDispatchIT {
         }
 
         // Nothing left for a subsequent tick to pick up.
-        val remaining = onVertxContext { repository.listProcessableUni(50).awaitSuspending() }
+        val remaining = onVertxContext { repository.listProcessable(50) }
         assertThat(remaining.map { it.eventId }).doesNotContain(firstId, secondId)
     }
 }

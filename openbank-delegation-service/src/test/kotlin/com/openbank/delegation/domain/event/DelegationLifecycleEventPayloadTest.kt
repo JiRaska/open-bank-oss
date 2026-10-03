@@ -33,7 +33,7 @@ class DelegationLifecycleEventPayloadTest {
     fun `offered event carries exact projection and approval terms`() {
         val event = DelegationOffered(
             grant, 3, grantor, grantee, DelegationResourceType.SAVINGS_GOAL, account,
-            capability, ApprovalPolicy.N_OF_M, 2, validFrom, validFrom.plusDays(7),
+            capability, ApprovalPolicy.N_OF_M, 2, null, null, validFrom, validFrom.plusDays(7),
             EventMoney(BigDecimal("250.00"), "CZK"), at,
         )
         val node = mapper.readTree(mapper.writeValueAsString(event))
@@ -51,7 +51,7 @@ class DelegationLifecycleEventPayloadTest {
     fun `reinstated event carries renewed projection and approval terms`() {
         val event = DelegationReinstated(
             grant, 3, grantor, grantee, DelegationResourceType.SAVINGS_GOAL, account,
-            capability, ApprovalPolicy.N_OF_M, 2, validFrom, validFrom.plusDays(7),
+            capability, ApprovalPolicy.N_OF_M, 2, null, null, validFrom, validFrom.plusDays(7),
             EventMoney(BigDecimal("250.00"), "CZK"), at,
         )
         val node = mapper.readTree(mapper.writeValueAsString(event))

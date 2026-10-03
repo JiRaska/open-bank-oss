@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -242,7 +242,7 @@ data class Deal(
         val flag = when {
             mid == null || mid.signum() <= 0 -> "fx-service mid unavailable; deal rate $rate is unvalidated"
             else -> {
-                val deviation = (rate - mid).abs().multiply(HUNDRED).divide(mid, DEVIATION_SCALE, RoundingMode.HALF_UP)
+                val deviation = RoundingPolicy.RATE_PERCENT.divide((rate - mid).abs().multiply(HUNDRED), mid)
                 if (deviation > tolerancePercent) {
                     "deal rate $rate deviates $deviation % from fx-service mid $mid (tolerance $tolerancePercent %)"
                 } else {
@@ -480,8 +480,6 @@ data class Deal(
         private val HUNDRED = BigDecimal("100")
         private const val FX_RATE_SCALE = 6
         private val FX_RATE_LIMIT = BigDecimal("1000")
-        private const val DEVIATION_SCALE = 4
-        private const val MONEY_SCALE = 2
         private const val MAX_REFERENCE_LENGTH = 200
 
         /** The states [settle] accepts: CONFIRMED, plus BOOKED only when confirmation is not required. */
@@ -499,7 +497,7 @@ data class Deal(
 
         /** The CZK leg of an FX spot: foreign amount x deal rate, half-up to 2 dp. */
         fun counterAmountOf(principal: BigDecimal, rate: BigDecimal): BigDecimal =
-            principal.multiply(rate).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+            RoundingPolicy.TREASURY_AMOUNT.round(principal.multiply(rate))
 
         /**
          * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
@@ -585,8 +583,6 @@ data class Deal(
 object DayCount {
     private const val DAYS_IN_YEAR_ACT360 = 360
     private const val PERCENT = 100
-    private const val MONEY_SCALE = 2
-    private const val WORK_SCALE = 12
 
     private const val SPOT_LAG_BUSINESS_DAYS = 2
 
@@ -605,9 +601,11 @@ object DayCount {
     /** principal × rate/100 × days/360, half-up to 2 dp. */
     fun act360Interest(principal: BigDecimal, ratePercent: BigDecimal, from: LocalDate, to: LocalDate): BigDecimal {
         val days = BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to))
-        return principal.multiply(ratePercent).multiply(days)
-            .divide(BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()), WORK_SCALE, RoundingMode.HALF_UP)
-            .setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+        val quotient = RoundingPolicy.TREASURY_INTEREST_WORK.divide(
+            principal.multiply(ratePercent).multiply(days),
+            BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()),
+        )
+        return RoundingPolicy.TREASURY_AMOUNT.round(quotient)
     }
 }
 

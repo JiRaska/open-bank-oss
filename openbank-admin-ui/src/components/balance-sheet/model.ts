@@ -187,3 +187,85 @@ export function capEffects(c: CurrencyLiquidity): { cap: 'level2' | 'level2b' | 
   if (c.lcr.inflowCapBinding) out.push({ cap: 'inflow', amount: c.lcr.totalInflows - c.lcr.cappedInflows })
   return out
 }
+
+// ── Run and curve-set descriptions (IRRBB, liquidity forecast) ────────────────────────────────
+
+type Lang = 'cs' | 'en'
+const localeOf = (lang: Lang) => (lang === 'cs' ? 'cs-CZ' : 'en-GB')
+
+/** An ISO date as the reader writes it ("30. 9. 2026"); an unparseable value is shown as-is. */
+export function formatDate(iso: string, lang: Lang): string {
+  const d = new Date(`${iso.slice(0, 10)}T00:00:00Z`)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString(localeOf(lang), { timeZone: 'UTC' })
+}
+
+/** An instant in Prague time ("30. 9. 2026 22:30"); an unparseable value is shown as-is. */
+export function formatDateTime(iso: string, lang: Lang): string {
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime())
+    ? iso
+    : d.toLocaleString(localeOf(lang), { timeZone: 'Europe/Prague', day: 'numeric', month: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+}
+
+/** Who asked for the run, in words: a `system:` requester is the scheduled end-of-day run. */
+export function runRequesterLabel(requestedBy: string | null | undefined, lang: Lang): string {
+  if (!requestedBy) return lang === 'cs' ? 'zadavatel nezaznamenán' : 'requester not recorded'
+  if (requestedBy.startsWith('system:')) return lang === 'cs' ? 'plánovaný denní běh' : 'scheduled end-of-day run'
+  return lang === 'cs' ? `vyžádal ${requestedBy}` : `requested by ${requestedBy}`
+}
+
+const INDEX_CURRENCY: Record<string, string> = {
+  CZEONIA: 'CZK', PRIBOR_1M: 'CZK', PRIBOR_3M: 'CZK', PRIBOR_6M: 'CZK', ESTR: 'EUR', EURIBOR_3M: 'EUR',
+}
+
+/** The currencies a curve set covers, from its indices (CurveIndex.kt); an unknown index is skipped. */
+export function curveSetCurrencies(indices: string[]): string[] {
+  return [...new Set(indices.map(i => INDEX_CURRENCY[i]).filter((c): c is string => !!c))].sort()
+}
+
+/** "CZK + EUR · k 30. 9. 2026 · <source> · ukázková data" — never the set's id. */
+export function curveSetLabel(
+  set: { asOf: string; source: string; provenance: 'synthetic' | 'production'; indices: string[] },
+  lang: Lang,
+): string {
+  const ccy = curveSetCurrencies(set.indices)
+  const prov = set.provenance === 'synthetic'
+    ? (lang === 'cs' ? 'ukázková data' : 'demo data')
+    : (lang === 'cs' ? 'produkční data' : 'production data')
+  const date = lang === 'cs' ? `k ${formatDate(set.asOf, lang)}` : `as of ${formatDate(set.asOf, lang)}`
+  return [ccy.length > 0 ? ccy.join(' + ') : '—', date, set.source, prov].join(' · ')
+}
+
+/** An amount with its currency ("1 234 567,00 Kč"); falls back to the plain number for a bad code. */
+export function formatMoney(amount: number, currency: string | null | undefined, lang: Lang): string {
+  const locale = localeOf(lang)
+  if (currency) {
+    try {
+      return amount.toLocaleString(locale, { style: 'currency', currency, minimumFractionDigits: 2, maximumFractionDigits: 2 })
+    } catch { /* not an ISO 4217 code — fall through */ }
+  }
+  return amount.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+/** A valid Tier 1 input re-rendered with thousands separators ("1 250 000 000"); invalid input unchanged. */
+export function formatTier1Input(raw: string, lang: Lang): string {
+  const v = parseTier1(raw)
+  if (v === null) return raw
+  const [int, frac] = v.split('.')
+  const grouped = Number(int).toLocaleString(localeOf(lang), { maximumFractionDigits: 0, useGrouping: true })
+  return frac ? `${grouped}${lang === 'cs' ? ',' : '.'}${frac}` : grouped
+}
+
+/** The supervisory outlier verdict in words, or null when no ratio was computed. */
+export function outlierVerdict(ratio: number | null, threshold: number, lang: Lang): string | null {
+  if (ratio === null) return null
+  const pct = (v: number) => `${(v * 100).toLocaleString(localeOf(lang), { maximumFractionDigits: 2 })} %`
+  if (ratio > threshold) {
+    return lang === 'cs'
+      ? `Nejhorší ztráta EVE činí ${pct(ratio)} kapitálu Tier 1, tedy NAD prahem ${pct(threshold)}: podle testu odlehlé hodnoty (EBA GL/2022/14) je banka odlehlou institucí a musí to oznámit orgánu dohledu.`
+      : `The worst EVE loss is ${pct(ratio)} of Tier 1 capital, ABOVE the ${pct(threshold)} threshold: under the supervisory outlier test (EBA GL/2022/14) the bank is an outlier and must notify its supervisor.`
+  }
+  return lang === 'cs'
+    ? `Nejhorší ztráta EVE činí ${pct(ratio)} kapitálu Tier 1, tedy pod prahem ${pct(threshold)}: test odlehlé hodnoty (EBA GL/2022/14) je splněn.`
+    : `The worst EVE loss is ${pct(ratio)} of Tier 1 capital, below the ${pct(threshold)} threshold: the supervisory outlier test (EBA GL/2022/14) is met.`
+}

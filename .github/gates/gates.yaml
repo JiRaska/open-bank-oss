@@ -135,8 +135,8 @@ gates:
     mode: enforced
     rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
     review_after: "2027-08-25"
-    # 32 shared PanacheOutboxEntity implementations on 2026-09-03 (#4348). The floor moved 20 -> 30
-    # with the corpus glob: at 20 a third of the fleet could vanish from scope and still read green.
+    # 38 shared PanacheOutboxEntity/V2 implementations across both migration batches. Keep the floor at 30:
+    # migrating a service onto V2 must not make its synthetic-origin check disappear.
     min_subjects: 30
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
     selftest_expect: pass
@@ -3131,6 +3131,58 @@ gates:
     selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
     run: |
       python3 .github/scripts/check-money-rounding-inline.py --root .
+
+  # ADR-0327 D9: every module that extends AbstractOutboxDispatcher carries a test extending
+  # OutboxDispatchConformanceIT, detected by the SUPERTYPE on a non-comment line (never by file
+  # name — five services carry a local *OutboxDispatchIT that inherits nothing from the kit). The
+  # subject set is derived from the dispatcher supertype; the 37 uncovered owners measured on
+  # 2026-10-01 are baselined by name and the baseline fails in both directions. ADVISORY in
+  # Phase 1 per the ADR, enforced in Phase 4 once the baseline is empty.
+  - id: outbox-conformance-it-present
+    name: "outbox dispatcher owners carry the conformance IT (ADR-0327 D9, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      OutboxDispatchConformanceIT is the only test layer that proves a service's real
+      reactive-Panache + Kafka outbox wiring (N1 event loop, N2 aggregate key, N3 headers,
+      PENDING to SENT); 37 of 38 dispatcher owners had none, so the kernel's outbox v2 can land
+      per service with no proof the service still relays. Advisory until the Phase 2/3
+      migration PRs have each added theirs.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags an uncovered owner, a file named like the kit that inherits nothing, a stale covered entry and a stale non-owner entry; the real run flagged a wrong baseline entry (agent-service) before it was corrected"
+    budget_seconds: 30
+    min_subjects: 19   # 38 dispatcher owners measured 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-conformance-it.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-conformance-it.py"]
+    run: |
+      python3 .github/scripts/check-outbox-conformance-it.py --root .
+
+  # ADR-0327 D11: a hand-rolled `FOR UPDATE SKIP LOCKED` in any openbank-*/src/main outside
+  # openbank-libs-runtime is a finding unless baselined. Comments are stripped first — a raw
+  # grep matches 70 files, 30 of them dispatcher KDoc that merely EXPLAINS the claim (the
+  # text-matching-guard lesson in .github/CLAUDE.md). Baseline: the 40 files measured on
+  # 2026-10-01 (38 outbox repositories + agent-service's audit outbox + domestic-payment's
+  # delegated-spend binding), by file and count; it may only shrink. detekt cannot see SQL in a
+  # string template, so this is a script gate. ADVISORY in Phase 1, enforced in Phase 4.
+  - id: outbox-claim-sql-ratchet
+    name: "hand-rolled outbox claim SQL ratchet (ADR-0327 D11, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      38 copies of one claim statement share every defect (no backoff, an OR the index cannot
+      serve, per-row markSent); ADR-0327 moves it into AbstractPanacheOutboxRepository. The
+      ratchet keeps a 39th copy from appearing while the fleet migrates, and makes every
+      migration PR shrink the baseline rather than leave a stale entry behind.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags a new site, a second site in a baselined file, a stale entry, a vanished file and proves comments (nested) do not count; the real run flagged one mis-keyed baseline path in both directions before it was corrected"
+    budget_seconds: 30
+    min_subjects: 38   # 77 modules with src/main scanned 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-claim-sql.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-claim-sql.py"]
+    run: |
+      python3 .github/scripts/check-outbox-claim-sql.py --root .
   # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
   # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
   # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
@@ -3530,6 +3582,25 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
+
+  # The deployed-record reconciler re-records a sandbox deployment once the version it needed has
+  # been published (record-deployment is one-shot at gitops merge and races the fan-out's own
+  # contract jobs). Its self-test holds the measured 2026-10-02 state (85a0be3e pinned, 7ccd9bde
+  # recorded) as a known-positive; falsified five ways before wiring in (no drift detection,
+  # classify-always-current, ambiguity guessed, edge scope dropped, none-as-current) — each exits 1.
+  - id: pact-deployed-record-reconcile
+    selftest_exempt: "is-a-test-suite"
+    name: "sandbox deployment record follows the gitops pin (enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # pure classification over fixtures, measured 0.1s
+    rationale: >-
+      The reconciler is the only control that corrects a sandbox deployment record left stale by
+      the one-shot merge-time recorder; a regression in its drift or classify logic would leave
+      consumers' can-i-deploy asking about versions no longer running while every tick stays green.
+    review_after: 2027-04-02
+    run: |
+      python3 .github/scripts/pact-reconcile-deployed-records.py --self-test
 
   # The verification reconciler's decision table (pact-reconcile-verifications.py) had a
   # --self-test that NOTHING ran: the workflow invokes the script for real every ~30 minutes and
@@ -4977,6 +5048,23 @@ gates:
   # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
   # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
   # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  # Quarkus tests bind ephemeral ports (2026-09-30). 65 of 70 service modules ran @QuarkusTest on the
+  # fixed default 8081/9001, so two builds on one machine failed each other with QuarkusBindException
+  # all day; the fix is three system properties in the convention plugin, and this keeps them there.
+  - id: quarkus-test-ports-ephemeral
+    name: "Quarkus tests bind ephemeral HTTP, HTTPS and management ports (enforced)"
+    group: kotlin
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A fixed Quarkus test port is shared by every build on the host, so concurrent runs fail each other with QuarkusBindException and the loser's tests read as SKIPPED; one missing system property in the convention plugin, or one module that skips it, reintroduces that for every future run."
+    review_after: "2027-03-31"
+    verified: "2026-09-30 -- against main's build files: FAIL with 9 findings (the convention plugin and both libs modules missing all three keys). With 8081, 8444 and 9001 held by a listener: account-service's provider replay failed on QuarkusBindException before the fix and passed 6/6 after; finrep's management-socket test passed 1/1 after. Self-test falsifies a dropped key, a pinned plugin value, a module without the plugin, a test-profile override, System.setProperty, and yaml/properties pins, against a compliant control."
+    min_subjects: 50   # 68 modules with Quarkus tests today (2026-09-30)
+    selftest: python3 .github/scripts/check-quarkus-test-ports-ephemeral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-quarkus-test-ports-ephemeral.py"]
+    run: |
+      python3 .github/scripts/check-quarkus-test-ports-ephemeral.py
   - id: oidc-tls-verification-profile-scoped
     name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
     group: security

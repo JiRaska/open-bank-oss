@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.8...party-service-v0.25.0) (2026-10-02)
+
+
+### Features
+
+* **admin-ui:** let risk officers see obligor names ([#11702](https://github.com/JiRaska/open-bank-oss/issues/11702)) ([f33def2](https://github.com/JiRaska/open-bank-oss/commit/f33def290221af3fe33127f1964440585f263eef))
+
 ## [0.24.8](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.7...party-service-v0.24.8) (2026-09-29)
 
 
