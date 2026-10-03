@@ -135,7 +135,7 @@ gates:
     mode: enforced
     rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
     review_after: "2027-08-25"
-    # 38 shared PanacheOutboxEntity/V2 implementations on this PR (#11754). Keep the floor at 30:
+    # 38 shared PanacheOutboxEntity/V2 implementations across both migration batches. Keep the floor at 30:
     # migrating a service onto V2 must not make its synthetic-origin check disappear.
     min_subjects: 30
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
