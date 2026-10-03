@@ -3165,7 +3165,6 @@ authz:
         - account.read
         - anacredit.list
         - anacredit.read
-        - audit.read
         - card.list
         - card.read
         - device.list
@@ -3298,7 +3297,7 @@ authz:
       grant:
         - account.read
         - anacredit.read
-        - audit.read
+        - audit.trail.inspect
         - card.read
         - dispatch.read
         - fx.read
@@ -3342,7 +3341,7 @@ authz:
         - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
-        - audit.read
+        - audit.trail.inspect
         - audit.verify
     ROLE_SUPERVISOR:
       grant:

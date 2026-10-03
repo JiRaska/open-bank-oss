@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: mcp-service
     app.kubernetes.io/part-of: platform
   annotations:
-    openbank.tech/policy-checksum: "d3088bd656efc882"
+    openbank.tech/policy-checksum: "60afd5e5f4ad44b5"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -384,7 +384,7 @@ data:
     # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
     # audit-service.
     #
-    # Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
+    # Deliberately a DISTINCT action from `audit.trail.inspect`, not the `audit.` family: that is the
     # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
     # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
     # behind a service account. `audit.customerRead` reaches only the metadata projection.
@@ -1512,7 +1512,6 @@ data:
             - account.read
             - anacredit.list
             - anacredit.read
-            - audit.read
             - card.list
             - card.read
             - device.list
@@ -1645,7 +1644,7 @@ data:
           grant:
             - account.read
             - anacredit.read
-            - audit.read
+            - audit.trail.inspect
             - card.read
             - dispatch.read
             - fx.read
@@ -1689,7 +1688,7 @@ data:
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
-            - audit.read
+            - audit.trail.inspect
             - audit.verify
         ROLE_SUPERVISOR:
           grant:
