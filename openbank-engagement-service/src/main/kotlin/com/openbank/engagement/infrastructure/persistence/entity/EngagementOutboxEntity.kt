@@ -4,16 +4,14 @@
 
 package com.openbank.engagement.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
-import jakarta.persistence.Column
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import jakarta.persistence.Entity
 import jakarta.persistence.Table
-import java.time.Instant
 
-/** `claimed_at` is per-service, same reasoning as `AccountOutboxEntity` (#1201). */
+/**
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V11__outbox_v2.sql`.
+ */
 @Entity
 @Table(name = "engagement_outbox")
-class EngagementOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class EngagementOutboxEntity : PanacheOutboxEntityV2()

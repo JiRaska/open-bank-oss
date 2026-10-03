@@ -8,7 +8,6 @@ import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxBacklogGauge
 import io.quarkus.runtime.Startup
 import io.quarkus.scheduler.Scheduled
-import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.annotation.PostConstruct
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -33,7 +32,7 @@ class AmlOutboxBacklogGauge : AbstractOutboxBacklogGauge {
 
     override val service: String = "aml"
 
-    override suspend fun currentBacklog(): Long = outboxRepository.countProcessableUni().awaitSuspending()
+    override suspend fun currentBacklog(): Long = outboxRepository.countProcessable()
 
     @PostConstruct
     fun register() = registerBacklogGauge()

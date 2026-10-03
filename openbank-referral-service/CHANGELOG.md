@@ -2,6 +2,13 @@
 
 All notable changes to this service are documented here.
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.5.0...referral-service-v0.5.1) (2026-10-02)
+
+
+### Performance
+
+* **case-coordinator,kyb,wealth,referral:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11755](https://github.com/JiRaska/open-bank-oss/issues/11755)) ([20e52ee](https://github.com/JiRaska/open-bank-oss/commit/20e52ee64073aa8519596283ae6ede81c681aea8))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/referral-service-v0.4.1...referral-service-v0.5.0) (2026-09-29)
 
 

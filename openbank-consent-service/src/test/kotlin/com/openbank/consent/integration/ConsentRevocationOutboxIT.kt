@@ -130,4 +130,61 @@ class ConsentRevocationOutboxIT {
         assertThat(row).describedAs("a consent_outbox row for rejected consent $id").isNotNull()
         assertThat(row!!.first).isEqualTo("ConsentRejected")
     }
+
+    /**
+     * #8353 — presence is not atomicity. The two tests above prove the outbox row EXISTS after the
+     * status change; a repository that merged the consent in one transaction and wrote the event in
+     * a second would pass both. Postgres stamps each row version with `xmin`, the id of the
+     * transaction that wrote it: the revoke UPDATEs the `consents` row and INSERTs the event, so
+     * written together they share it.
+     */
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `revoke rewrites the consent row and writes its outbox row in one transaction`() {
+        val first = revokedConsent()
+        val second = revokedConsent()
+
+        val consentXmin = xmin("SELECT xmin::text FROM consents WHERE id = ?", first)
+        val eventXmin = xmin(
+            "SELECT xmin::text FROM consent_outbox WHERE aggregate_id = ? AND event_type = 'ConsentRevoked'",
+            first,
+        )
+        assertThat(consentXmin).hasSize(1)
+        assertThat(eventXmin).describedAs("exactly one ConsentRevoked row").hasSize(1)
+        assertThat(eventXmin.single())
+            .describedAs("the revoked consents row and ConsentRevoked must be written by ONE transaction")
+            .isEqualTo(consentXmin.single())
+
+        // Known-different control: two revocations are two transactions, so the same comparison
+        // must FAIL across them — otherwise the match above would match everything.
+        assertThat(xmin("SELECT xmin::text FROM consents WHERE id = ?", second).single())
+            .describedAs("control: two separate revocations cannot share a writing transaction")
+            .isNotEqualTo(consentXmin.single())
+        // And the probe can return nothing.
+        assertThat(xmin("SELECT xmin::text FROM consents WHERE id = ?", UUID.randomUUID())).isEmpty()
+    }
+
+    private fun revokedConsent(): UUID {
+        val partyId = UUID.randomUUID()
+        val id = createConsent(partyId)
+        Given {
+            contentType("application/json")
+            queryParam("partyId", partyId.toString())
+            body("""{"reason":"atomicity probe"}""")
+        } When {
+            delete("/api/v1/consents/$id")
+        } Then {
+            statusCode(200)
+        }
+        return id
+    }
+
+    private fun xmin(sql: String, id: UUID): List<String> = dataSource.connection.use { conn ->
+        val ps = conn.prepareStatement(sql)
+        ps.setObject(1, id)
+        val rs = ps.executeQuery()
+        val out = mutableListOf<String>()
+        while (rs.next()) out += rs.getString(1)
+        out
+    }
 }

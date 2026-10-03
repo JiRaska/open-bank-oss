@@ -6,6 +6,7 @@ package com.openbank.settlement.infrastructure.persistence
 
 import com.openbank.settlement.application.port.out.SettlementRepository
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementProtocol
 import com.openbank.settlement.domain.model.SettlementStatus
 import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -104,6 +105,19 @@ class SettlementRepositoryImplIT {
     }
 
     @Test
+    fun `stored protocol survives updates and late uncertainty cannot erase a booking`() {
+        val settlement = newSettlement().copy(protocol = SettlementProtocol.LEDGER_PROJECTION)
+        onVertxContext { repository.create(settlement) }
+        onVertxContext { repository.updateStatus(settlement.id, SettlementStatus.BOOKED) }
+        val read = onVertxContext { repository.findById(settlement.id) }!!
+        assertThat(read.protocol).isEqualTo(SettlementProtocol.LEDGER_PROJECTION)
+        for (status in listOf(SettlementStatus.BALANCE_STATE_UNKNOWN, SettlementStatus.LEDGER_STATE_UNKNOWN)) {
+            assertThat(onVertxContext { repository.recordProjectionUncertainty(settlement.id, status) }.status)
+                .isEqualTo(SettlementStatus.BOOKED)
+        }
+    }
+
+    @Test
     fun `findById returns null for an unknown id`() {
         assertThat(onVertxContext { repository.findById(UUID.randomUUID()) }).isNull()
     }
@@ -117,6 +131,20 @@ class SettlementRepositoryImplIT {
 
         assertThat(updated.status).isEqualTo(SettlementStatus.BOOKED)
         assertThat(onVertxContext { repository.findById(settlement.id) }!!.status).isEqualTo(SettlementStatus.BOOKED)
+    }
+
+    @Test
+    fun `a late forward activity cannot erase an uncertain balance outcome`() {
+        for (lateStatus in listOf(SettlementStatus.DEBITED, SettlementStatus.CREDITED)) {
+            val settlement = newSettlement(SettlementStatus.BALANCE_STATE_UNKNOWN)
+            onVertxContext { repository.create(settlement) }
+
+            val updated = onVertxContext { repository.updateStatus(settlement.id, lateStatus) }
+
+            assertThat(updated.status).isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+            assertThat(onVertxContext { repository.findById(settlement.id) }!!.status)
+                .isEqualTo(SettlementStatus.BALANCE_STATE_UNKNOWN)
+        }
     }
 
     @Test

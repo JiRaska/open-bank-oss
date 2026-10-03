@@ -44,6 +44,9 @@ enum class ScaPurpose {
      * spendable as the grantee's acceptance, and purpose equality is what enforces that. */
     DELEGATION_ACCEPT,
 
+    /** Owner step-up for creating or revising a future-operation approver roster. */
+    DELEGATION_APPROVAL_GROUP,
+
     /** The account owner approving a delegate's propose-only savings withdrawal (ADR-0232 D8).
      * The delegate holds SAVINGS_PROPOSE_WITHDRAW and can never execute; this challenge IS the
      * owner's half of that maker-checker split, so it must be its own purpose — a challenge
@@ -104,8 +107,10 @@ data class ScaChallenge(
     val decidedByPartyId: UUID? = null,
     /** The credential that signed the decision; paired with [decidedByPartyId]. */
     val decidedByCredentialId: String? = null,
+    /** Version observed when this snapshot was read; guards concurrent lifecycle writes. */
+    val version: Int = 0,
 ) {
-    fun isExpired(now: OffsetDateTime): Boolean = now.isAfter(expiresAt)
+    fun isExpired(now: OffsetDateTime): Boolean = !now.isBefore(expiresAt)
     fun isCompleted(): Boolean = status == ScaStatus.COMPLETED
     fun canAttempt(now: OffsetDateTime): Boolean =
         attemptCount < maxAttempts && status == ScaStatus.PENDING && !isExpired(now)
@@ -181,10 +186,13 @@ data class DynamicLinkingData(
         cardAction: String? = null,
         approvalRequestId: String? = null,
         payloadSha256: String? = null,
+        reference: String? = null,
+        purpose: ScaPurpose? = null,
     ): Boolean {
         if (!amountEq(this.amount, amount)) return false
         if (!normEq(this.currency, currency)) return false
         if (this.creditorIban != null && !normEq(this.creditorIban, creditor)) return false
+        if (!referenceMatches(reference, purpose)) return false
         if (!normEq(this.documentSha256, documentSha256)) return false
         if (this.ceremonyId != ceremonyId) return false
         if (!normEq(this.cardId, cardId)) return false
@@ -192,6 +200,29 @@ data class DynamicLinkingData(
         if (this.approvalRequestId != approvalRequestId) return false
         if (!normEq(this.payloadSha256, payloadSha256)) return false
         return true
+    }
+
+    /**
+     * Opt-in reference binding (#9430). A challenge created WITHOUT a reference is legacy: it binds
+     * exactly as before the reference existed, so a consumer that now supplies one is accepted —
+     * today's app creates DELEGATION_GRANT challenges this way and must keep working. A challenge
+     * created WITH a reference for an operation-bound purpose is strict: a differing or absent
+     * supplied reference is refused. For other purposes `reference` is an informational payment
+     * remittance reference that payment consumers do not restate, so it is compared only when
+     * supplied.
+     */
+    private fun referenceMatches(supplied: String?, purpose: ScaPurpose?): Boolean = when {
+        this.reference == null -> true
+        purpose in REFERENCE_BOUND_PURPOSES -> supplied == this.reference
+        else -> supplied == null || supplied == this.reference
+    }
+
+    companion object {
+        val REFERENCE_BOUND_PURPOSES: Set<ScaPurpose> = setOf(
+            ScaPurpose.DELEGATION_GRANT,
+            ScaPurpose.DELEGATION_APPROVAL_GROUP,
+            ScaPurpose.SAVINGS_WITHDRAW_APPROVAL,
+        )
     }
 }
 

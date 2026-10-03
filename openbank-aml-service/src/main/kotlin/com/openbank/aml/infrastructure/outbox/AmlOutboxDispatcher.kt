@@ -7,6 +7,7 @@ import com.openbank.aml.infrastructure.kafka.KafkaAmlOutboxEventPublisher
 import com.openbank.aml.infrastructure.persistence.repository.AmlOutboxRepositoryImpl
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
+import com.openbank.libs.persistence.outbox.OutboxDispatch
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxRepository
@@ -60,7 +61,10 @@ class AmlOutboxDispatcher(
         if (dispatchEnabled) dispatchScheduledBatch()
     }
 
-    @Bulkhead(1)
+    // ADR-0327 D6: the v2 loop sends up to SEND_CONCURRENCY rows of one batch at once (each a
+    // different aggregate, D3). A per-call @Bulkhead(1) would reject the overflow with a
+    // BulkheadException, which the loop reads as transport-unavailable and abandons the batch.
+    @Bulkhead(OutboxDispatch.SEND_CONCURRENCY)
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100)
     @Timeout(3000)

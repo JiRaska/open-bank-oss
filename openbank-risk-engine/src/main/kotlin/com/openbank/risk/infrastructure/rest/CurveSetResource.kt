@@ -64,10 +64,14 @@ class CurveSetResource {
 
     /** Bounded list for the console (#10618); pillars are on the set itself. */
     @GET
-    @Operation(summary = "The most recently recorded curve sets, newest first (limit 1..100, default 25)")
+    @Operation(
+        summary = "The most recently recorded curve sets, newest first (limit 1..100, default 25); " +
+            "only those as of `asOf` when given",
+    )
     @Authorize(action = "risk.curve-set.read", resource = "")
-    suspend fun list(@QueryParam("limit") limit: Int?): Response =
-        Response.ok(CurveSetListResponse(curveSets.list(boundedLimit(limit)).map { it.toDto() })).build()
+    suspend fun list(@QueryParam("limit") limit: Int?, @QueryParam("asOf") asOf: String?): Response = Response.ok(
+        CurveSetListResponse(curveSets.list(boundedLimit(limit), asOf?.let(::parseDate)).map { it.toDto() }),
+    ).build()
 
     @GET
     @Path("/{id}")

@@ -49,7 +49,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-risk-engine to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-05030b12
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-risk-engine:sandbox-59a33fa9
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8159 and management 8085 — both read off the service's own application.yaml
@@ -134,6 +134,11 @@ spec:
             # Off by code default (openbank.risk.eod-snapshot.enabled); stated explicitly so the
             # environment states the decision rather than inheriting the default.
             - name: OPENBANK_RISK_EOD_SNAPSHOT_ENABLED
+              value: "true"
+            # ADR-0313 D4/D13: sandbox reference curve sets (illustrative demo quotes, provenance
+            # synthetic) for every recent snapshot date, so IRRBB and the liquidity forecast have a
+            # curve set to use. Refused by the engine under production provenance.
+            - name: OPENBANK_RISK_REFERENCE_CURVES_ENABLED
               value: "true"
             - name: LENDING_SERVICE_URL
               value: https://lending-service.lending.svc:8443

@@ -36,6 +36,7 @@ package com.openbank.libs.analytics
 object TopicProducers {
 
     private val TOPIC_TO_SERVICE = mapOf(
+        "openbank.settlement.events" to "settlement-service",
         "openbank.accounts.account.created" to "account-service",
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
@@ -77,6 +78,7 @@ object TopicProducers {
         "openbank.delegation.spend-reservation-state" to "delegation-service",
         // ADR-0312 business-signing lifecycle; its events also state sourceService themselves.
         "openbank.delegation.approval-events" to "delegation-service",
+        "openbank.delegation.approval-group-revisions" to "delegation-service",
         // Issue #6035: four more money-path producers were absent from all three places at once
         // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
         // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set

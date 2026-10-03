@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.18.0...sca-service-v0.19.0) (2026-10-03)
+
+
+### Features
+
+* **sca:** durable challenge and device lifecycle ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 9a) ([#11889](https://github.com/JiRaska/open-bank-oss/issues/11889)) ([76bde3c](https://github.com/JiRaska/open-bank-oss/commit/76bde3c2d99dcf16c6ec2c617e2ebcef0ffe0a19))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.17.0...sca-service-v0.18.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.3...sca-service-v0.17.0) (2026-09-28)
 
 

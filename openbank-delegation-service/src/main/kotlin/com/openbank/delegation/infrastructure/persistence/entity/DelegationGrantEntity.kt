@@ -13,6 +13,7 @@ import com.openbank.delegation.domain.model.DelegationStatus
 import com.openbank.delegation.domain.model.Exposure
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.CollectionTable
 import jakarta.persistence.Column
@@ -25,7 +26,6 @@ import jakarta.persistence.Id
 import jakarta.persistence.JoinColumn
 import jakarta.persistence.Table
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -69,6 +69,12 @@ class DelegationGrantEntity : PanacheEntityBase() {
 
     @Column(name = "required_approvals")
     var requiredApprovals: Int? = null
+
+    @Column(name = "approval_group_id")
+    var approvalGroupId: UUID? = null
+
+    @Column(name = "approval_group_revision")
+    var approvalGroupRevision: Long? = null
 
     @Column(name = "per_tx_limit_amount", precision = 20, scale = 6)
     var perTxLimitAmount: BigDecimal? = null
@@ -154,6 +160,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
         capabilities = capabilities.toSet(),
         approvalPolicy = approvalPolicy,
         requiredApprovals = requiredApprovals,
+        approvalGroupId = approvalGroupId,
+        approvalGroupRevision = approvalGroupRevision,
         perTransactionLimit = toMoney(perTxLimitAmount, perTxLimitCurrency),
         dailyLimit = toMoney(dailyLimitAmount, dailyLimitCurrency),
         monthlyLimit = toMoney(monthlyLimitAmount, monthlyLimitCurrency),
@@ -188,7 +196,7 @@ class DelegationGrantEntity : PanacheEntityBase() {
     private fun toMoney(amount: BigDecimal?, currency: String?): Money? {
         if (amount == null || currency == null) return null
         val code = CurrencyCode.of(currency.trim())
-        return Money(amount.setScale(code.defaultFractionDigits, RoundingMode.HALF_EVEN), code)
+        return Money(RoundingPolicy.MONEY_SCALE.round(amount, code), code)
     }
 
     private fun toExposure(): Exposure? {
@@ -219,6 +227,8 @@ class DelegationGrantEntity : PanacheEntityBase() {
             capabilities = g.capabilities.toMutableSet()
             approvalPolicy = g.approvalPolicy
             requiredApprovals = g.requiredApprovals
+            approvalGroupId = g.approvalGroupId
+            approvalGroupRevision = g.approvalGroupRevision
             perTxLimitAmount = g.perTransactionLimit?.amount
             perTxLimitCurrency = g.perTransactionLimit?.currency?.code
             dailyLimitAmount = g.dailyLimit?.amount

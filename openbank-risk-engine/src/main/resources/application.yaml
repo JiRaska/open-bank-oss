@@ -205,6 +205,13 @@ openbank:
       # itself (EodSnapshotScheduler) — same property-naming and Europe/Prague zone convention as
       # ledger-service's openbank.ledger.accounting-day.cron (AccountingDayScheduler). No key here
       # unless an environment needs to override it, same as that scheduler's own application.yaml.
+    reference-curves:
+      # ADR-0313 D4/D13: give every recent snapshot as-of date the sandbox reference curve set —
+      # illustrative demo quotes, provenance `synthetic`, source text "NOT market data" — so IRRBB,
+      # cash flows and the liquidity forecast have a curve set as of the run's own date. Off by
+      # default; the seeder refuses outright where openbank.risk.provenance is production.
+      # Cadence keys `every` (10m) and `delay` (30s) default in the @Scheduled annotation.
+      enabled: ${OPENBANK_RISK_REFERENCE_CURVES_ENABLED:false}
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
     # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
     # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),

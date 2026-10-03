@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.5...domestic-payment-v0.21.6) (2026-10-02)
+
+
+### Bug Fixes
+
+* **domestic-payment:** retry settlement until transaction-service recovers ([#11791](https://github.com/JiRaska/open-bank-oss/issues/11791)) ([c72f120](https://github.com/JiRaska/open-bank-oss/commit/c72f1207f769eab72e3f269673c6f76aeca8d46e)), closes [#11666](https://github.com/JiRaska/open-bank-oss/issues/11666)
+
 ## [0.21.5](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.4...domestic-payment-v0.21.5) (2026-09-29)
 
 

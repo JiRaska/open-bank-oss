@@ -463,3 +463,50 @@ simply stops existing).
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("sepa-payment", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:sepa-payment:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
+- **2026-10-02** — **Inbound amount and currency validated as kernel `Money` before the
+  Idempotency-Key is reserved (#11813).** `POST /api/v1/sepa-payments` now builds a kernel `Money`
+  from `amount` + `currency` at the API boundary; `SepaPayment` and `CreateSepaPaymentCommand` carry
+  `Money`. **Tampering / input validation:** an amount that would need rounding to fit the
+  currency (e.g. `1.005 EUR`, `1.5 JPY`) or a currency that is not an ISO 4217 code with a minor
+  unit (`XYZ`, blank, `XAU`) was previously accepted and persisted; it now answers **400
+  `AMOUNT_SCALE_EXCEEDED`** / **`CURRENCY_UNSUPPORTED`** before any idempotency record, row, outbox
+  event or downstream call exists. The refusal body names the field, never the rejected value. Valid
+  input is persisted byte-identically; amounts read back are serialised at the currency's scale
+  (`250.00` instead of the column's `250.000000`), numerically equal. **Residual:** a legacy row
+  already holding an over-scale amount or unknown currency now fails to load (500 naming the row)
+  instead of being served; the PR body carries the SQL count to run before deploy. No new endpoint,
+  caller, privilege or event. Rollback: revert the commit.
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
+- **2026-10-03** — **The existing inbound `Money` check now uses the kernel parser (#11870).**
+  `POST /api/v1/sepa-payments` still constructs `Money` before reserving the idempotency key;
+  `Money.parseInbound` replaces the former service-local amount/currency validator and
+  `InvalidMoneyExceptionMapper` replaces its `ValidationFailure` rendering. The same authenticated
+  caller, endpoint, amount/currency fields, downstream edges and persistence boundary remain.
+  **Tampering / input validation:** over-scale amounts and unsupported currencies still fail with
+  HTTP 400 and the same machine-readable codes and field names; out-of-range amounts now include
+  `VALIDATION_ERROR` on the violation as well. Error titles and messages change, but the rejected
+  value is not echoed. `SepaPaymentMoneyBoundaryIT` pins the stable problem fields for all three
+  refusals and the no-idempotency-record outcome. **Residual risk:** a client that compares human
+  error prose could observe a change despite the stable codes; no new privilege or data-flow risk
+  is introduced. Rollback: revert this parser substitution and keep the service-local validator.

@@ -38,6 +38,7 @@ wireModal('tf-modal', '[data-open-tf]', '[data-close-tf]');
 // demo modal
 const modal = wireModal('demo-modal', '[data-open-demo]', '[data-close-demo]');
 if (modal) {
+  if (window.location.hash === '#sandbox') modal.showModal();
   // copy-to-clipboard
   modal.querySelectorAll('.copy').forEach(btn => {
     btn.addEventListener('click', async () => {
