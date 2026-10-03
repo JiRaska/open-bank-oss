@@ -388,6 +388,27 @@ class DomainMetrics {
     }
 
     /**
+     * Add [count] SENT outbox rows deleted by the retention job (ADR-0327 D8). A cold pod exposes
+     * no series until the first purge; alert on the job's workflow liveness, not on this counter —
+     * zero rows purged is the healthy reading for a quiet outbox.
+     *
+     * @param service the outbox's `retentionLabel`
+     */
+    fun outboxPurged(service: String, count: Long) {
+        if (count <= 0) return
+        reg()?.let {
+            Counter.builder(
+                "openbank.outbox.purged",
+            ).tags("service", service, "status", "SENT").register(it).increment(count.toDouble())
+        }
+    }
+
+    /** Increment when one outbox's SENT-row retention run fails; the other outboxes still run. */
+    fun outboxPurgeFailed(service: String) {
+        counter("openbank.outbox.purge.failed", "service", service)
+    }
+
+    /**
      * Increment each time a scheduled outbox gauge refresh (backlog or dead-letter count) fails to
      * read the database. The gauge keeps its last good value, so this counter is the only signal
      * that the reading has gone stale: alert on `increase(...)`, not on the gauge.

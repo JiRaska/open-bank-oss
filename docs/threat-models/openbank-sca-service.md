@@ -62,6 +62,8 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sca_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. For this service the payloads at stake are `DEVICE_ENROLLED` (party id, credential id) today and, once the durable-decision slice lands, `SCA_DEVICE_DECIDED` with the signed payment payload (creditor IBAN) — which would otherwise have outlived that slice's 1 826-day retention of the durable decision record. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
 - **2026-09-26** — Challenge initiation binds its Idempotency-Key to a request fingerprint
   (#10916, #10946). The key is reserved atomically before a challenge is minted. Same key + same
   body still replays; same key + different body is now 409 `IDEMPOTENCY_KEY_REUSED` instead of a

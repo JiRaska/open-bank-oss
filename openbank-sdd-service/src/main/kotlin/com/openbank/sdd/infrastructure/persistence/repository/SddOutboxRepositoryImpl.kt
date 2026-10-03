@@ -8,6 +8,9 @@ import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.sdd.application.port.out.SddOutbox
 import com.openbank.sdd.application.port.out.SddOutboxRepository
 import com.openbank.sdd.infrastructure.persistence.entity.SddOutboxEntity
@@ -32,6 +35,7 @@ import java.util.UUID
 class SddOutboxRepositoryImpl(private val clock: Clock) :
     SddOutboxRepository,
     SddOutbox,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("sdd_outbox")),
     PanacheRepository<SddOutboxEntity> {
 
     // --- SddOutbox (application-layer write port) ---
