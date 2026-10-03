@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepainstant.application.port.out.SettlementUnavailableException
 import com.openbank.sepainstant.domain.model.SctInstPayment
 import com.openbank.sepainstant.domain.model.SctInstStatus
@@ -14,7 +15,6 @@ import jakarta.ws.rs.core.Response
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
 import java.net.URI
 import java.time.Clock
 import java.time.Instant
@@ -49,7 +49,7 @@ class SettlementAdapterTest {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob",
         creditorBic = "BNPAFRPPXXX",
-        amount = BigDecimal("99.50"),
+        amount = Money.of("99.50", "EUR"),
         remittanceInfo = "Test",
         endToEndId = "E2E-SETTLE-1",
         executionTimeoutAt = null,

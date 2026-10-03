@@ -82,6 +82,14 @@ Errors are returned as a small JSON object via the exception mappers:
 
 - `404 Not Found` — unknown `paymentId` (`NotFoundMapper`).
 - `400 Bad Request` — invalid state transition, e.g. recalling a non-settled payment (`BadRequestMapper`).
+- `400 Bad Request` on submit — the `amount` + `currency` pair cannot be a kernel `Money` (#11912). It is
+  refused at the boundary, before any screening, row, event or downstream call, and the Idempotency-Key stays
+  free. The body is the platform RFC 9457 `ProblemDetail` with a `violations[]` entry naming the field:
+  - `AMOUNT_SCALE_EXCEEDED` — the amount has more decimals than the currency allows (e.g. `1.005 EUR`);
+  - `CURRENCY_UNSUPPORTED` — not an ISO 4217 code with a minor unit (e.g. `XYZ`, `XAU`, blank);
+  - `VALIDATION_ERROR` — the amount is out of range (more than 19 integer digits).
+  A lower-case or padded currency (`eur`, `" EUR "`) is normalised to `EUR`. Amounts are returned and emitted at
+  the currency's scale (`10.50`, not `10.500000`).
 
 (The `openapi.yaml` declares an `ApiError { code, message }` schema; the deployed mappers emit `{ error }`. Treat the resource behaviour as authoritative.)
 
