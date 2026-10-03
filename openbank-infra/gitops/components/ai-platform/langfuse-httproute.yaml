@@ -5,10 +5,11 @@
 # translation of langfuse-ingress.yaml. Same security posture as that file states
 # (ADR-0031 D7): the UI only, synthetic data only; trace ingestion stays in-cluster.
 #
-# NOT YET IN DNS. external-dns skips this route while it carries the controller annotation
-# below, so the name still resolves to ingress-nginx and langfuse-ingress.yaml keeps
-# serving it. The route is reachable only on the Gateway's own NLB address until the
-# cutover (steps in components/envoy-gateway/httproute-redirect.yaml).
+# IN DNS since the cutover (2026-10-03): external-dns publishes langfuse.open-bank.tech from
+# this route, pointing at the Gateway's NLB. The nginx Ingress now carries the
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` annotation instead, so
+# external-dns ignores it; it stays in place, still serving on ingress-nginx's NLB, as the
+# rollback (swap the annotation back) until it is deleted in a later change.
 #
 # Annotation mapping from langfuse-ingress.yaml:
 #   ssl-redirect            -> the Gateway's http listener redirects every host (envoy-gateway)
@@ -17,8 +18,33 @@
 #   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
 #                           -> BackendTrafficPolicy below; Envoy otherwise has no body cap
 #                              and a 15s route timeout
-#   tls / cluster-issuer    -> the Gateway's https-langfuse listener serves the SAME
-#                              Secret, admitted by the ReferenceGrant below
+#   tls / cluster-issuer    -> the Gateway's https-langfuse listener serves its OWN
+#                              Certificate `langfuse-edge-tls` (below), admitted by the
+#                              ReferenceGrant below
+#
+# Why a separate Certificate instead of the Ingress's `langfuse-tls`: cert-manager runs with
+# --enable-certificate-owner-ref, so `langfuse-tls` is owned (via its Certificate) by the
+# Ingress. Deleting the Ingress after the cutover would garbage-collect the Secret the Gateway
+# serves. A Certificate declared here has no such owner. No key pinning exists for this host,
+# so a fresh key is harmless (rum, which IS pinned, is handled differently).
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: langfuse-edge-tls
+  namespace: ai-platform
+spec:
+  secretName: langfuse-edge-tls
+  dnsNames:
+    - langfuse.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
@@ -33,15 +59,13 @@ spec:
   to:
     - group: ""
       kind: Secret
-      name: langfuse-tls
+      name: langfuse-edge-tls
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
   name: langfuse
   namespace: ai-platform
-  annotations:
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
@@ -70,8 +94,10 @@ spec:
                 value: "noindex, nofollow"
             remove:
               - X-Powered-By
+      # Langfuse v3 web (langfuse-v3.yaml) since ADR-0328 wave B; the v2 Service `langfuse` is
+      # scaled to zero and goes in wave C.
       backendRefs:
-        - name: langfuse
+        - name: langfuse-web
           port: 3000
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1

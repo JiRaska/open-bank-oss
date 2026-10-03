@@ -35,8 +35,8 @@ All outbound calls to platform services authenticate as the service (`openbank-s
 graph TB
   subgraph "openbank-card-processing-service"
     direction TB
-    rest["REST<br/>CardProcessingResource<br/>SandboxAcquirerResource"]
-    uc["Application<br/>CardProcessingService"]
+    rest["REST<br/>CardProcessingResource, SandboxAcquirerResource<br/>CardTokenResource, CardDisputeResource"]
+    uc["Application<br/>CardProcessingService<br/>CardTokenService, CardDisputeService"]
     dom["Domain<br/>CardAuthorization, AuthorizationLifecycle<br/>SpendWindow, CardProcessingEvent"]
     persist["Persistence<br/>CardAuthorizationRepositoryImpl"]
     clients["Clients<br/>CardIssuanceAdapter, TransactionLedgerPostingAdapter<br/>FraudScoringAdapter"]
@@ -180,13 +180,44 @@ Each port has a router that reads one config key and picks a binding. An unrecog
 
 - A vendor BIN adapter with no credential configured answers `NOT_BOUND` and makes no request. For Mastercard, no signer bean is produced when the consumer key or signing key is missing.
 - Results are `SchemeResult` values carrying the `CardScheme` that answered (`VISA`, `MASTERCARD`, `SIMULATOR`) or a `SchemeFailure` (`NOT_BOUND`, `NOT_FOUND`, `UNAVAILABLE`, `UNAUTHENTICATED`, `MALFORMED`).
-- **Not yet wired to a caller:** in this service only `MerchantDataPort` is used by the authorisation flow. `BinLookupPort`, `TokenisationPort` and `DisputePort` are bound but no use case or REST endpoint consumes them yet. The capability matrix is in [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
+- **Callers:** `MerchantDataPort` is used by the authorisation flow, `TokenisationPort` by `CardTokenService` and `DisputePort` by `CardDisputeService`. `BinLookupPort` is bound but no use case or REST endpoint consumes it yet. The capability matrix is in [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
+
+## Network-token mirror (ADR-0283 phase 3)
+
+`CardTokenService` is the caller of `TokenisationPort`. The table `card_network_tokens` is the bank's **record** that a token exists; the vault belongs to the network.
+
+- **Provision** — the `Idempotency-Key` is reserved in `card_lifecycle_idempotency` first; a completed key replays the first registration, a key still in flight is 409 and never reaches the network. The card must be known to card-issuance (404 `CARD_NOT_FOUND`), card-issuance must be reachable (503 `ISSUER_UNAVAILABLE`, fail closed) and the card must be `ACTIVE` (409 `CARD_NOT_ACTIVE` — a token for a blocked card is a live credential for a card the bank stopped). On an answer from the binding, the row, `card.token.provisioned.v1` and the reservation's completion are written in one transaction. A failure after the network was asked leaves the reservation PENDING, so a retry cannot mint a second token.
+- **Change status** — `ACTIVE`, `SUSPENDED` or `DELETED`. `DELETED` is terminal, enforced on the aggregate (`TOKEN_TERMINAL`). The mirror row takes the status the network returns.
+- **List** — the network is asked first. If it answers, the response is the network's list with mirror fields (requestor label, provisioning time) merged in and `source: NETWORK`; a token the mirror has never seen is **adopted** into the mirror (insert-if-absent on `token_reference`, requestor label `not recorded by this bank`), so it keeps one stable id across reads; a mirrored token the network did not return is still listed, with `absentAtNetwork: true`. If it does not answer, the response is the mirror with `source: LOCAL_MIRROR` and a `degradedReason`. A live read never rewrites an existing mirror row.
+- Scheme failures map to refusals: `NOT_BOUND` / `UNAVAILABLE` / `UNAUTHENTICATED` ⇒ `SCHEME_UNAVAILABLE`, `NOT_FOUND` ⇒ `TOKEN_NOT_FOUND`, `MALFORMED` ⇒ `SCHEME_REFUSED`.
+
+## Dispute desk (ADR-0283 phase 3)
+
+`CardDisputeService` is the caller of `DisputePort`. A case carries two vocabularies: the bank's `status` and the network's `schemeStatus`, stored verbatim.
+
+```mermaid
+stateDiagram-v2
+  [*] --> OPEN: network assigned a case id
+  OPEN --> EVIDENCE_SUBMITTED: evidence filed
+  EVIDENCE_SUBMITTED --> EVIDENCE_SUBMITTED: further evidence
+  OPEN --> WON: refresh
+  OPEN --> LOST: refresh
+  OPEN --> WITHDRAWN: refresh
+  EVIDENCE_SUBMITTED --> WON: refresh
+  EVIDENCE_SUBMITTED --> LOST: refresh
+  EVIDENCE_SUBMITTED --> WITHDRAWN: refresh
+```
+
+- **Open** — checks, in order: idempotency key reservation (replay / 409 in progress / 409 reused); authorisation exists; something has cleared (`NOTHING_CLEARED`); the currency is the authorisation's (`CURRENCY_MISMATCH`); the amount, compared as Money, is positive and at most the cleared amount (`AMOUNT_EXCEEDS_CLEARED`); no live case (`OPEN` or `EVIDENCE_SUBMITTED`) exists for the authorisation (`ALREADY_DISPUTED`, also enforced by a partial unique index); the authorisation has a network reference (`NO_NETWORK_REFERENCE`). Only then is the network asked. **Opening fails closed**: if the binding does not answer, no row is written.
+- **Evidence** — `Idempotency-Key` required and reserved like opening, so a retry never files twice. Refused on a terminal case (`CASE_TERMINAL`); otherwise forwarded to the network, **appended** to `card_dispute_evidence` (one row per filing, never overwritten) and the case moves to `EVIDENCE_SUBMITTED` with `evidenceReference` = the latest document.
+- **Refresh** — reads the network status. `WON` / `RESOLVED_WON` / `REPRESENTED_WON` ⇒ `WON`; `LOST` / `RESOLVED_LOST` / `CHARGEBACK_ACCEPTED` ⇒ `LOST`; `WITHDRAWN` / `CANCELLED` ⇒ `WITHDRAWN`; any other value keeps the bank status. An event is written only when either status changed. A **closed** case (`WON`, `LOST`, `WITHDRAWN`) is terminal: refresh returns it unchanged; if the network now reports a different outcome, `openbank.card.dispute.terminal.mismatches` is incremented and a warning logged.
+- No money moves on any dispute transition in this service: a won or lost case posts nothing to the ledger.
 
 ## Outbox (ADR-0050)
 
 - The authorisation row and its event are written in **one transaction** (`card_authorizations` + `card_outbox`).
 - `CardProcessingOutboxDispatcher` runs every `openbank.outbox.poll-interval` (default 5s), `concurrentExecution = SKIP`, with `@Bulkhead`, `@CircuitBreaker`, `@Retry` and `@Timeout`. It is a `suspend fun`, so it has a Vert.x context.
-- Kafka key = authorisation id; `ce-id`, `idempotency-key` and `ce-type` headers are set. The `synthetic` column (ADR-0252) is carried into the transport header.
+- Kafka key = the aggregate id (authorisation, token registration or dispute case); `ce-id`, `idempotency-key` and `ce-type` headers are set. The `synthetic` column (ADR-0252) is carried into the transport header.
 - `openbank.outbox.dispatch-enabled: true` is set in `application.yaml`.
 
 ## Principles

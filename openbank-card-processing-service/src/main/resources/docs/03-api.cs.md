@@ -11,6 +11,15 @@ Kontrakt je `src/main/resources/openapi.yaml` (`info.version` 1.0.0, major v URL
 | POST | `/api/v1/card-authorizations/{id}/clearing` | stejné | `cardprocessing.clear` | `Idempotency-Key` povinný. 200 nebo 409 |
 | POST | `/api/v1/card-authorizations/{id}/reversal` | stejné | `cardprocessing.reverse` | 200 nebo 409 |
 | GET | `/api/v1/card-authorizations/card/{cardId}` | stejné | `cardprocessing.read` | od nejnovějších; `limit` výchozí 50, omezen na 1..200 |
+| POST | `/api/v1/card-tokens` | `ROLE_API`, `ROLE_OPERATOR`, `ROLE_ADMIN` | `cardprocessing.token` | `Idempotency-Key` povinný. 201, 404, 409 nebo 503 |
+| POST | `/api/v1/card-tokens/{tokenReference}/status` | stejné | `cardprocessing.token` | tělo `{ status }` — `ACTIVE`, `SUSPENDED`, `DELETED`; jiné hodnoty 400 |
+| GET | `/api/v1/card-tokens/card/{cardId}` | stejné | `cardprocessing.read` | `{ tokens, source, degradedReason, count }` |
+| POST | `/api/v1/card-disputes` | stejné | `cardprocessing.dispute` | `Idempotency-Key` povinný. 201, 400, 404 nebo 409 |
+| POST | `/api/v1/card-disputes/{id}/evidence` | stejné | `cardprocessing.dispute` | `Idempotency-Key` povinný; tělo `{ documentReference, note }`; připojí se do historie důkazů |
+| GET | `/api/v1/card-disputes/{id}/evidence` | stejné | `cardprocessing.read` | historie důkazů, od nejstaršího |
+| POST | `/api/v1/card-disputes/{id}/refresh` | stejné | `cardprocessing.dispute` | znovu načte stav ze sítě; uzavřený případ vrátí beze změny |
+| GET | `/api/v1/card-disputes/{id}` | stejné | `cardprocessing.read` | `status` i `schemeStatus` |
+| GET | `/api/v1/card-disputes/card/{cardId}` | stejné | `cardprocessing.read` | od nejnovějších; `limit` výchozí 50, omezen na 1..200 |
 | POST | `/api/v1/sandbox/acquirer/purchase` | `ROLE_ADMIN` | `cardprocessing.simulate` | **404, pokud není** `openbank.card-processing.sandbox-acquirer-enabled=true` |
 
 ## Požadavek na autorizaci
@@ -37,6 +46,17 @@ Zamítnutí je vytvořený záznam rozhodnutí, proto je to **201**, ne 4xx; odp
 
 `reason` je jedna z hodnot `NOT_HOLDING_FUNDS` (koncový stav nebo neznámé id autorizace), `AMOUNT_NOT_POSITIVE`, `EXCEEDS_AUTHORIZED_AMOUNT`, `CURRENCY_MISMATCH`, `NOT_YET_EXPIRED` (jen expirace, interní).
 
+## Odmítnutí u tokenů a reklamací
+
+Oba resource odpovídají na odmítnutí `{ reason, message }`. `CARD_NOT_FOUND`, `TOKEN_NOT_FOUND`, `AUTHORIZATION_NOT_FOUND` a `CASE_NOT_FOUND` jsou **404**; `ISSUER_UNAVAILABLE` (card-issuance nebyla dosažitelná — selhává uzavřeně, stejně jako autorizace) je **503**; všechny ostatní důvody jsou **409**.
+
+- **Token:** `CARD_NOT_FOUND` (card-issuance kartu nezná), `CARD_NOT_ACTIVE` (blokovaná, pozastavená, expirovaná, zrušená nebo s neuvedeným stavem — nikdy se netokenizuje), `ISSUER_UNAVAILABLE`, `TOKEN_NOT_FOUND`, `TOKEN_TERMINAL`, `SCHEME_UNAVAILABLE` (zahrnuje `NOT_BOUND`), `SCHEME_REFUSED`.
+- **Reklamace:** `AUTHORIZATION_NOT_FOUND`, `NO_NETWORK_REFERENCE`, `NOTHING_CLEARED`, `CURRENCY_MISMATCH` (měna reklamace není měnou autorizace; porovnává se jako Money, nikdy se nepřepočítává — neznámý kód je 400), `AMOUNT_EXCEEDS_CLEARED`, `ALREADY_DISPUTED`, `CASE_NOT_FOUND`, `CASE_TERMINAL`, `SCHEME_UNAVAILABLE`, `SCHEME_REFUSED`.
+
+Idempotence: vydání tokenu, otevření reklamace a podání důkazu **rezervují** `Idempotency-Key` v databázi (`card_lifecycle_idempotency`) ještě před voláním sítě. Ze dvou souběžných požadavků se stejným klíčem se k síti dostane právě jeden; opakování po jeho dokončení přehraje první výsledek, souběžný požadavek dostane **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`** a stejný klíč s jiným tělem je **409 `IDEMPOTENCY_KEY_REUSED`** (flotilový tvar chyby). Odmítnutí klíč uvolní. Klíč má 1–128 znaků z `[A-Za-z0-9._:-]` (jinak 400). Změny stavu a refresh klíč nepřijímají.
+
+OPA politika uděluje `cardprocessing.token` a `cardprocessing.dispute` HUMAN principálům s `ROLE_OPERATOR` nebo `ROLE_ADMIN` (důvod `operator-card-lifecycle-write`); kontrola rolí na resource navíc připouští `ROLE_API`. Dokud `AUTHZ_ENFORCE=false`, účinnou kontrolou je kontrola rolí.
+
 ## Události
 
 Publikované na `openbank.card.processing.events`, popsané v `openbank-contracts/openbank-card-processing-service/asyncapi.yaml`:
@@ -48,4 +68,10 @@ Publikované na `openbank.card.processing.events`, popsané v `openbank-contract
 | `card.cleared.v1` | přijatý clearing | `clearedAmountMinorUnits`, `cumulativeClearedMinorUnits`, `fullyCleared` |
 | `card.hold_released.v1` | reverzace nebo expirace | `releasedAmountMinorUnits`, `releaseKind` (`REVERSAL` / `EXPIRY`) |
 
-Všechny nesou `authorizationId`, `cardId`, `occurredAt` a `sourceService = card-processing-service`.
+| `card.token.provisioned.v1` | token vydán | `registrationId`, `tokenReference`, `requestorId`, `requestorLabel`, `scheme`, `status`, `expiry` |
+| `card.token.status_changed.v1` | změna stavu tokenu | `previousStatus`, `status`, `scheme` |
+| `card.dispute.opened.v1` | případ otevřen | `disputeId`, `authorizationId`, `networkCaseId`, `reasonCode`, částka, `respondByDate`, `scheme` |
+| `card.dispute.evidence_submitted.v1` | podány důkazy | `disputeId`, `networkCaseId`, `documentReference` |
+| `card.dispute.status_changed.v1` | refresh změnil stav | `previousStatus`, `status`, `schemeStatus` |
+
+Všechny nesou `cardId`, `occurredAt` a `sourceService = card-processing-service`; události autorizací a reklamací nesou i `authorizationId`.
