@@ -50,7 +50,7 @@
   "openbank-sepa-instant": "0.11.1",
   "openbank-sepa-payment": "0.17.2",
   "openbank-settlement-service": "0.11.0",
-  "openbank-standing-order-service": "0.17.1",
+  "openbank-standing-order-service": "0.17.2",
   "openbank-statement-service": "0.12.7",
   "openbank-swift-service": "0.11.7",
   "openbank-tpp-registry-service": "0.10.2",
