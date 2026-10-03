@@ -12,6 +12,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
@@ -35,6 +38,7 @@ import java.util.UUID
 @ApplicationScoped
 class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepository, private val clock: Clock) :
     OutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("billing_outbox")),
     PanacheRepository<BillingOutboxEntity> {
 
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
