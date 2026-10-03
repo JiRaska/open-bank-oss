@@ -63,3 +63,19 @@ The citation cannot be corrected. Flyway checksums the **whole migration file, c
 included**, so editing an applied migration fails startup with `checksum mismatch`. This note is
 the correction; do not "fix" the SQL. If you are reading `V8` for the AML status column, read
 ADR-0267, not ADR-0073.
+
+## Access-control change log (STRIDE: information disclosure)
+
+party-service has no full threat model yet (baselined under #9167), so access decisions on the
+PII surface are recorded here.
+
+- **2026-10-02 — `ROLE_RISK` may read the single-party detail.** `GET /api/v1/parties/{id}`
+  (`PartyResource.getParty`) admits `ROLE_RISK` so a risk officer reviewing large exposures can see
+  the obligor's name (owner decision). Search, list and every write stay closed to it.
+  - *Disclosure:* one party's detail, by id; the id comes from an instrument the officer already
+    sees, and the response is what `ROLE_VIEWER` already receives.
+  - *Narrowing:* admin-ui uses a separate `parties:view-detail` permission, so the role gets no
+    directory link. `party-rbac-alignment.guard.test.ts` pins that permission to `getParty`'s
+    `@RolesAllowed`, and `PartyApiIT` proves 200 on detail and 403 on search and list.
+  - *Residual risk:* no per-party scoping — an officer who learns another id can read that party;
+    accepted because the role is internal staff and VIEWER has the same reach.

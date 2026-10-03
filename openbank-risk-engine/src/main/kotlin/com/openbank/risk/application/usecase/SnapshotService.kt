@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application.usecase
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.risk.application.port.`in`.SnapshotOutcome
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
@@ -55,6 +56,11 @@ class SnapshotService(
 ) : SnapshotUseCase {
 
     override suspend fun createSnapshot(asOf: LocalDate, requestedBy: String?): SnapshotOutcome {
+        // A snapshot claims tie-out with the GL as of `asOf`; a day that has not closed yet cannot
+        // be tied out. Today (Europe/Prague accounting day, ADR-0207) stays allowed — the EOD
+        // scheduler builds exactly that. IllegalArgumentException is mapped to 400 by libs-runtime.
+        val today = AccountingClock(clock).today()
+        require(!asOf.isAfter(today)) { "field 'asOf' must not be after the current business date ($today)" }
         val ledgerCutOff = clock.instant()
         val inputs = ledger.read(asOf)
         val loanBook = lending?.readLoanBook(asOf)
@@ -84,6 +90,9 @@ class SnapshotService(
     }
 
     override suspend fun listRuns(limit: Int): List<SnapshotRunSummary> = repository.listRecent(limit)
+
+    override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary> =
+        repository.listTiedOutBetween(from, to)
 
     override suspend fun getRun(id: UUID): SnapshotRun = repository.findById(id) ?: throw SnapshotNotFoundException(id)
 

@@ -5,6 +5,7 @@
 package com.openbank.sepa.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.iso20022.Pacs004Builder
 import com.openbank.libs.iso20022.PaymentReturn
 import com.openbank.libs.iso20022.SettlementMethod
@@ -82,8 +83,7 @@ class SepaPaymentReturnAuditEvidenceIT {
             creditorIban = "FR1420041010050500013M02606",
             creditorName = "Bob Creditor",
             creditorBic = "BNPAFRPPXXX",
-            amount = BigDecimal("42.50"),
-            currency = "EUR",
+            amount = Money.of(BigDecimal("42.50"), "EUR"),
             remittanceInfo = "IT return evidence",
             endToEndId = "E2E-IT-RET-$id",
             rejectReason = null,
@@ -171,6 +171,7 @@ class SepaPaymentReturnAuditEvidenceIT {
         assertThat(node.path("returnReasonCode").asText()).isEqualTo("AM09")
         assertThat(node.path("paymentId").asText()).isEqualTo(payment.id.toString())
         assertThat(node.path("reversalPerformed").asBoolean()).isFalse()
+        assertThat(node.path("reversalTransactionId").isNull).isTrue()
         assertThat(node.path("version").asLong())
             .describedAs("the evidence names the exact RETURNED aggregate revision")
             .isEqualTo(payment.revision + 1)

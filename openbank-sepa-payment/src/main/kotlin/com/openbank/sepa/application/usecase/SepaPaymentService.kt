@@ -33,7 +33,6 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
-import java.util.Locale
 import java.util.UUID
 
 // #10911/#11059 phase 3 (money-path): extends the libs-domain base so libs-runtime's
@@ -116,7 +115,6 @@ class SepaPaymentService(
             creditorName = command.creditorName.trim(),
             creditorBic = command.creditorBic?.trim(),
             amount = command.amount,
-            currency = command.currency.trim().uppercase(Locale.getDefault()),
             remittanceInfo = command.remittanceInfo?.trim(),
             endToEndId = command.endToEndId?.trim()?.ifBlank { null } ?: generateEndToEndId(),
             rejectReason = null,
@@ -273,14 +271,16 @@ class SepaPaymentService(
 
         val txId = payment.transactionId
         var reversalPerformed = false
+        var reversalTransactionId: UUID? = null
         if (txId != null) {
             try {
-                reversalPort.reverseTransaction(
+                val reversal = reversalPort.reverseTransaction(
                     transactionId = txId,
                     idempotencyKey = "sepa-reversal-${payment.id}",
                     reason = returnMsg.returnReasonCode ?: "return",
                 )
-                reversalPerformed = true
+                reversalPerformed = reversal.reversed
+                reversalTransactionId = reversal.reversalTransactionId.takeIf { reversal.reversed }
             } catch (ex: ReversalUnavailableException) {
                 log.warnf(
                     ex,
@@ -311,6 +311,7 @@ class SepaPaymentService(
                 actorType = command.actorType,
                 correlationId = command.correlationId,
                 reversalPerformed = reversalPerformed,
+                reversalTransactionId = reversalTransactionId,
             ),
         )
     }

@@ -165,6 +165,9 @@ class LendingOutboxWriteIT {
         }
         loanId = response.jsonPath().getString("id")
         assertThat(loanId).isNotBlank()
+        // #11107: the loan the REST call returns already carries the number the repository drew.
+        val contractNumber = response.jsonPath().getString("contractNumber")
+        assertThat(contractNumber).matches("UV-\\d{4}-\\d{6,}")
 
         dataSource.connection.use { conn ->
             conn.prepareStatement(
@@ -176,6 +179,7 @@ class LendingOutboxWriteIT {
                     assertThat(rs.getString("event_type")).isEqualTo("loan.disbursed")
                     assertThat(rs.getString("payload")).contains(loanId)
                     assertThat(rs.getString("payload")).contains("\"rateType\":\"FLOATING\"")
+                    assertThat(rs.getString("payload")).contains("\"contractNumber\":\"$contractNumber\"")
                     // #9003 falsification: do not accept "the default is Instant.now()" as proof —
                     // assert the row that lands through the REAL emitter is not epoch-stamped
                     // (44 of 45 sandbox rows carried 1970-01-01, the #3272 defect class).
@@ -183,19 +187,58 @@ class LendingOutboxWriteIT {
                         .isAfter(java.time.Instant.parse("2020-01-01T00:00:00Z"))
                 }
             }
+            assertBookingIsOneTransaction(conn)
             // The loan row carries the terms the application was approved with.
             conn.prepareStatement(
-                "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date FROM loan WHERE id = ?",
+                "SELECT rate_type, rate_index, spread, reset_frequency_months, next_reset_date, contract_number " +
+                    "FROM loan WHERE id = ?",
             ).use { ps ->
                 ps.setObject(1, UUID.fromString(loanId))
                 ps.executeQuery().use { rs ->
                     assertThat(rs.next()).isTrue()
                     assertThat(rs.getString("rate_type")).isEqualTo("FLOATING")
+                    assertThat(rs.getString("contract_number")).isEqualTo(contractNumber)
                     assertThat(rs.getString("rate_index")).isEqualTo("PRIBOR_3M")
                     assertThat(rs.getBigDecimal("spread")).isEqualByComparingTo("0.025")
                     assertThat(rs.getInt("reset_frequency_months")).isEqualTo(3)
                     assertThat(rs.getDate("next_reset_date").toLocalDate()).isEqualTo(LocalDate.now().plusMonths(4))
                 }
+            }
+        }
+    }
+
+    private fun assertBookingIsOneTransaction(conn: java.sql.Connection) {
+        // #11626: the loan, its schedule, the DISBURSED claim and the transition evidence are
+        // one transaction. Postgres stamps each row version with xmin, the id of the transaction
+        // that wrote it, so all of them must carry the loan row's value. `loan.disbursed` is
+        // deliberately NOT in this set: it is written after the remote ledger posting and the
+        // borrower credit, so it carries a later transaction by design.
+        conn.prepareStatement(
+            """
+            SELECT l.xmin::text,
+                   (SELECT a.xmin::text FROM loan_application a WHERE a.id = l.application_id),
+                   (SELECT string_agg(DISTINCT i.xmin::text, ',') FROM installment i WHERE i.loan_id = l.id),
+                   (SELECT string_agg(DISTINCT o.xmin::text, ',') FROM lending_outbox o
+                      WHERE o.aggregate_id = l.application_id AND o.event_type = 'credit.application.transition'
+                        AND o.payload LIKE '%disbursement booked%'),
+                   (SELECT count(*) FROM installment i WHERE i.loan_id = l.id)
+            FROM loan l WHERE l.id = ?
+            """.trimIndent(),
+        ).use { ps ->
+            ps.setObject(1, UUID.fromString(loanId))
+            ps.executeQuery().use { rs ->
+                assertThat(rs.next()).isTrue()
+                val loanXmin = rs.getString(1)
+                assertThat(rs.getInt(5)).describedAs("schedule rows").isEqualTo(12)
+                assertThat(rs.getString(2))
+                    .describedAs("the DISBURSED claim on loan_application shares the loan row's transaction")
+                    .isEqualTo(loanXmin)
+                assertThat(rs.getString(3))
+                    .describedAs("every installment row shares the loan row's transaction")
+                    .isEqualTo(loanXmin)
+                assertThat(rs.getString(4))
+                    .describedAs("the 'disbursement booked' evidence row shares the loan row's transaction")
+                    .isEqualTo(loanXmin)
             }
         }
     }

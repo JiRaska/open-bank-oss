@@ -67,7 +67,7 @@ export async function postJson<T>(url: string, body: unknown, schema: z.ZodType<
   }
 }
 
-export type DealAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'settle' | 'mature' | 'reverse' | 'override-limit'
+export type DealAction = 'submit' | 'approve' | 'reject' | 'cancel' | 'confirm' | 'settle' | 'mature' | 'reverse' | 'override-limit'
 
 /** POST /deals/{id}/{action}; reject, reverse and override-limit carry `{reason}`. */
 export const dealActionUrl = (dealId: string, action: DealAction) =>
@@ -76,6 +76,8 @@ export const dealActionUrl = (dealId: string, action: DealAction) =>
 /** POST /nostro/statements, GET /nostro/statements/{id}/reconciliation (#10896). */
 export const nostroStatementsUrl = () => treasuryUrl('/nostro/statements')
 export const nostroReconciliationUrl = (id: string) => treasuryUrl(`/nostro/statements/${encodeURIComponent(id)}/reconciliation`)
+/** GET /nostro/{account}/breaks (ADR-0315 D7): open breaks of a configured nostro IBAN, with age. */
+export const nostroBreaksUrl = (iban: string) => treasuryUrl(`/nostro/${encodeURIComponent(iban)}/breaks`)
 
 /**
  * POST a camt.053 XML body with the required Idempotency-Key (400 without it, same as every other

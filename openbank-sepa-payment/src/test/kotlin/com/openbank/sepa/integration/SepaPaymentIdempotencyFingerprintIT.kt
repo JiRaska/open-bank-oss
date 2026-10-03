@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.integration
 
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
@@ -62,8 +63,9 @@ class SepaPaymentIdempotencyFingerprintIT {
         QuarkusMock.installMockForType(failingUseCase, SepaPaymentUseCase::class.java)
 
         val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
-        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
-        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        coEvery { flakyRelease.reserve(any<IdempotencyScope>(), any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any<IdempotencyScope>(), any(), any()) } throws
+            IllegalStateException("redis unavailable")
         QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
 
         // The create failure (422, from the use case's IllegalStateException) must surface — not the
@@ -191,7 +193,9 @@ class SepaPaymentIdempotencyFingerprintIT {
     }
 
     private fun evictRedis(key: String) {
-        redis.key().del("idempotency:$key").await().indefinitely()
+        // The record lives under the caller's scope; deleting exactly one key proves the resource wrote it there.
+        val scoped = "idempotency:" + IdempotencyScope("sepa-payment", ACTOR_ID).storeKey(key)
+        assertThat(redis.key().del(scoped).await().indefinitely()).isEqualTo(1)
     }
 
     private fun requestHashOf(key: String): String? = dataSource.connection.use { connection ->

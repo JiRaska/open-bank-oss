@@ -60,7 +60,7 @@ kover {
                 bound {
                     // Ratchet floor (ADR-0020, sweep #466): measured 31.2% (113/362) LINE at introduction,
                     // ~5 pt headroom, raise-only from here.
-                    minValue = 26
+                    minValue = 76
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }
@@ -80,3 +80,8 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// The hosted CI default 512 MiB heap OOMed during the Quarkus integration suite.
+tasks.test {
+    maxHeapSize = "2g"
+}

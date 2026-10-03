@@ -218,6 +218,24 @@ change_requirements:
     enforced: advisory
     target_enforce_date: "2027-03-26"   # ADR-0318: enforce once the money-path baseline is empty
     ci_producer: ".github/scripts/check-money-rounding-inline.py"
+  outbox_conformance_it_present:
+    detect: ["openbank-*/src/main/**/*.kt extending AbstractOutboxDispatcher (supertype, comments stripped)"]
+    require:
+      - "the same module carries a src/test class extending OutboxDispatchConformanceIT (openbank-libs-testing) — detected by supertype, never by file name"
+      - "no new uncovered owner; the by-name baseline of today's uncovered owners only shrinks (ADR-0327 D9)"
+    gate: outbox-conformance-it-present
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0327 Phase 4: enforce once every Phase 2/3 migration PR has added its IT
+    ci_producer: ".github/scripts/check-outbox-conformance-it.py"
+  outbox_claim_sql_ratchet:
+    detect: ["FOR UPDATE SKIP LOCKED in any openbank-*/src/main/**/*.kt outside openbank-libs-runtime, comments stripped"]
+    require:
+      - "the claim lives in openbank-libs-runtime's AbstractPanacheOutboxRepository (ADR-0327 D1/D3), not in a service"
+      - "no new site; the per-file baseline (count) only shrinks, and a healed entry is reported as stale"
+    gate: outbox-claim-sql-ratchet
+    enforced: advisory
+    target_enforce_date: "2027-03-31"   # ADR-0327 Phase 4: enforce once the baseline is empty
+    ci_producer: ".github/scripts/check-outbox-claim-sql.py"
   raw_http_client_construction:
     detect: ["java.net.http.HttpClient.newBuilder() / HttpClient.newHttpClient() in any openbank-*/src/main outside openbank-libs-*"]
     require:
@@ -244,7 +262,10 @@ change_requirements:
       - "every property the DTO has is declared on the request-body schema"
     gate: openapi-request-schema-conformance
     enforced: advisory
-    target_enforce_date: "2026-09-30"
+    # Moved 2026-09-30 -> 2026-10-31 (#11682): findings burned down 122 -> 0 (#8828), but under
+    # --enforce a missing generated document still returns 0 as "Not a finding", so a flip
+    # would enforce a check that can silently examine nothing. Fix that, re-scan, then flip.
+    target_enforce_date: "2026-10-31"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
     # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
     # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
@@ -536,14 +557,14 @@ change_requirements:
         reason: "ADR-0282 phase 2, first slice. The Lístek ledger publishes earn, benefit-grant and expiry events; the services that would react to them (billing for the IFRS 15 provisioning journal, interest and fx for benefit delivery) are money-path and belong to a later slice, so a consumer written now would have nothing to do. ADR-0006's own sequencing is producers before consumers (#1916). Not the #889 class — the absence is the plan, not an oversight. Re-triage: remove this entry with the first delivering-engine PR (#8793)."
       - topic: "openbank.wealth.events"
         reason: "ADR-0301 D1, first slice. wealth-service publishes the declared-holding lifecycle; the two things that will read it are the customer-edge net-worth composition (D2, issue #9772) and the affluent micro-segment (D7, issue #9774), and D7 is itself blocked on unbuilt ADR-0282 D6 machinery. ADR-0006 sequences producers before consumers (#1916), so a consumer written now would have nothing to do. Not the #889 class — the absence is the plan, not an oversight, and the publish side is genuinely live rather than dormant. Re-triage: remove this entry with the first consumer PR, which the gate requires in that direction too since a stale entry fails under --enforce."
+      - topic: "openbank.risk.limit.events"
+        reason: "ADR-0313 D9, first slice. risk-engine emits risk.limit.early-warning.v1 / breach.v1 from its transactional outbox after the EOD snapshot; D9 routes them to alerting and to the responsible human, and neither consumer exists yet (the admin console reads the same statuses from GET /snapshots/{id}/limits meanwhile). ADR-0006 sequences producers before consumers (#1916). Not the #889 class: the absence is the plan and the producer is fully wired (KafkaTopic CR and Write ACL in openbank-infra/gitops/components/risk). Re-triage: remove this entry with the first consumer PR (#10896)."
       - topic: "openbank.pid.events"
         reason: "Confirmed dead code, not a live gap: PidOutboxRepository.persistInTransaction (the only writer for this channel) has zero callers across all 5 pid-service use cases — grep-verified. pid-service's real domain events flow through a separate, actually-used PartyEventPublisher to party.events instead. application.yaml even documents the emitter exists only so the unwired @Channel doesn't crash the app at boot. Candidate for future cleanup (remove the dead channel), not a #889-class gap."
-      - topic: "openbank.referral.qualified.v1"
-        reason: "#7190's outbox relay replaces UnwiredReferralEventPublisher's silent drop and is deliberately producer-only: the PR's own scope note says building the Campaign Studio consumer side is out of scope, tracked as future work (#7194). The producer is fully wired — openbank-infra/gitops/components/referral/kafka-topic.yaml declares the KafkaTopic and kafka-referral-service-mtls.yaml grants Write+Describe — so this is the same shape as the proposal-events entry above (ADR-0244): a real, deployed producer with no consumer yet. Re-triage and remove once #7194 lands a consumer."
       - topic: "openbank.referral.reward-requested.v1"
-        reason: "Same #7190 outbox relay as openbank.referral.qualified.v1 above — producer-only pending the Campaign Studio consumer (#7194). See that entry for the full reasoning."
+        reason: "#7190's outbox relay is producer-only for this topic: the consumer that would post the reward is ADR-0310 D2, which is Proposed and needs human approval of the money-path owner (billing-service) and the expense account before anything may consume it. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). openbank.referral.qualified.v1, its sibling, left this list when loyalty-service began consuming it (ADR-0310 D3). Re-triage and remove with the first reward-posting consumer."
       - topic: "openbank.referral.reward-outcome.v1"
-        reason: "Same #7190 outbox relay as openbank.referral.qualified.v1 above — producer-only pending the Campaign Studio consumer (#7194). See that entry for the full reasoning."
+        reason: "#7190's outbox relay is producer-only for this topic: RewardOutcome is emitted when applyLedgerOutcome records a posting result, and its readers (Campaign Studio's funnel, #7194) are unbuilt. The producer is fully wired (components/referral/kafka-topic.yaml, Write+Describe in kafka-referral-service-mtls.yaml). Re-triage and remove with the first consumer."
   lineage_code_audit:
     # ADR-0160 mechanism 2. standing-order-service's governance.yaml declares a downstream edge to
     # transaction-service (relationType: api) — copy-pasted boilerplate with no backing
@@ -647,7 +668,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
   release_scope_mismatch:
     # The inverse failure mode of service_code_change above: release-please attributes a
@@ -668,7 +689,7 @@ change_requirements:
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144, same timeline as service_code_change (same root-cause class)
+    target_enforce_date: "2026-10-31"   # ADR-0144; moved 2026-10-01: producer live, false-positive rate unmeasured before --enforce (#11692)
     # CI producer is LIVE (advisory): openbank-infra/scripts/check-release-scope-mismatch.py runs
     # in the "Validate manifests" job on every PR, right after release-registration consistency.
     # Classifies from the PR title (the default squash-commit subject). Findings are ::warning
@@ -726,7 +747,9 @@ change_requirements:
       - "mp.messaging channel config expressed as nested YAML, not a dotted key inside a mapping"
     gate: dotted-mp-messaging-keys
     enforced: advisory
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-12-31 (#11683): re-measured 2026-10-01 at 185 occurrences (still
+    # growing); retirement needs a ruling on the ~170 keys the enforced ratchet never reads.
+    target_enforce_date: "2026-12-31"   # ADR-0144
     # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
     # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
     # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
@@ -804,7 +827,7 @@ change_requirements:
       - "test added/updated for new behavior"
     gate: version-bump
     enforced: advisory
-    target_enforce_date: "2026-10-01"   # ADR-0144
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version.txt==package.json half is already enforced (check-admin-ui-version-sync.sh, ci.yml); 'test added for new behavior' has no automated detector, same gap as service_code_change"
   admin_ui_docs_currency:
     # Documentation must stay current. Any change to a process or an admin-ui
@@ -1482,7 +1505,9 @@ coverage:
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
     enforced: advisory                  # weekly advisory runs are live; blocking flip pending sustained >=70%
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-12-31 (#11684): pitest run 36545321433 (2026-09-29) has balance
+    # 69.7% and sepa-payment 69.6% below 70, ledger at 70.0; not "sustained".
+    target_enforce_date: "2026-12-31"   # ADR-0144
     ci_producer: .github/workflows/pitest.yml
     # Fleet rollout re-verified complete per the ADR-0063 criterion (2026-07-11, issue #265 D3):
     # 10/17 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
@@ -1605,7 +1630,9 @@ provenance:
   # only when ALL enforce_criteria below hold. (A blind flip would outage deploys of
   # uncovered services; cf. the #770 image-signature Enforce revert.)
   enforced: advisory
-  target_enforce_date: "2026-09-30"   # ADR-0144
+  # Moved 2026-09-30 -> 2027-03-31 (#11685): criteria 1 and 4 need producers that do not
+  # exist yet (fleet-coverage evidence check; a provenance gate) — waiting cannot meet them.
+  target_enforce_date: "2027-03-31"   # ADR-0144
   # MEASURED 2026-09-05, criterion by criterion. Two of the four already hold and this record
   # said neither did; the other two cannot be met by waiting, because nothing measures them.
   #
@@ -1816,7 +1843,9 @@ dependencies:
     # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
     mechanism: gradle-verification-metadata-sha256
     enforced: advisory
-    target_enforce_date: "2026-09-30"   # ADR-0144
+    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
+    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
+    target_enforce_date: "2026-10-15"   # ADR-0144
     ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
@@ -3546,6 +3575,25 @@ field_protection:
   target_enforce_date: "2027-03-26"   # ADR-0144; matches the gate's review_after
   ci_producer: ".github/scripts/check-field-crypto-in-libs.py"
 
+libs_bench_alloc_baseline:
+  # The shared libs (libs-domain, libs-runtime, libs-iso20022) are compiled into every service,
+  # and nothing measured them. openbank-libs-benchmarks holds JMH benchmarks; what is compared is
+  # allocation per operation (gc.alloc.rate.norm, B/op), a property of the code that reproduces
+  # across machines. Wall-clock (ns/op) is a property of the runner: reported, never gated.
+  detect: ["openbank-libs-benchmarks/src/jmh/**/*.kt", "openbank-libs-benchmarks/alloc-baseline.json"]
+  require:
+    - "every @Benchmark has an entry in alloc-baseline.json and every entry has a @Benchmark (scope derived, both directions)"
+    - "B/op from a JMH run (-f 1 -wi 3 -i 3 -prof gc, SerialGC, -Xmx512m) stays within max(5 %, 16 B) above the baseline"
+    - "the baseline is written by check-bench-alloc-baseline.py --write-baseline from a run, never typed by hand"
+    - "a benchmark whose B/op is bimodal across forks (the JIT decides it) is listed in the script's UNSTABLE table with the measurement: it runs and is reported, never compared; a stale UNSTABLE entry is a finding"
+  gate: libs-bench-alloc-baseline
+  baseline: "openbank-libs-benchmarks/alloc-baseline.json"
+  # ADVISORY first: the comparison is new and its tolerance is a first setting measured on one
+  # machine; enforce once it has run on hosted runners without a false finding.
+  enforced: advisory
+  target_enforce_date: "2026-12-15"   # ADR-0144; matches the gate's review_after
+  ci_producer: ".github/scripts/check-bench-alloc-baseline.py"
+
 realm_devci_artifact_parity:
   detect: [
     "openbank-infra/gitops/components/keycloak/*realm-template*.json",
@@ -4263,6 +4311,7 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*SchemeAccepted*.kt"
       - "src/main/kotlin/**/*TransactionServiceClient*.kt"
       - "src/main/kotlin/**/*LedgerClient*.kt"
+      - "src/main/kotlin/**/*RiskCurveClient*.kt"  # ADR-0315 D9: m2m OIDC client to the risk engine
       - "src/main/kotlin/**/nostro/**"
       - "src/main/kotlin/**/rest/NostroResource.kt"
       - "src/main/kotlin/**/*PaymentService*.kt"
