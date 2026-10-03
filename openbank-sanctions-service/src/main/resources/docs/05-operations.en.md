@@ -44,6 +44,8 @@ What actually holds the property: `openbank-infra/gitops/components/sanctions-se
 
 ## Health checks
 
+At startup the shared warm-up calls `/api/v1/sanctions/pending` without credentials to exercise the real unauthenticated security path; it does not fetch pending reviews. Its JSON, optional database, and HTTP steps are best-effort. The startup-warmup readiness check stays DOWN until they finish or the 20-second default cap expires. If first-request latency rises after a rollout, check warm-up step failures and cap warnings in application logs. The selected path is configured by `openbank.warmup.protected-path`.
+
 - **Liveness:** `/q/health/live` — JVM + ArC running. Pod restart on failure.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer + Redis.
 

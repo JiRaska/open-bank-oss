@@ -62,6 +62,8 @@ If external publishing is ever needed (e.g. a partner bank wants to reuse libs):
 
 ## Observability
 
+Services using `openbank-libs-runtime` run a best-effort startup warm-up before readiness turns UP. It exercises JSON mapping, the reactive SQL pool when present, and local public and unauthenticated protected HTTP paths. Each step logs its outcome; a failed step does not stop startup. `openbank.warmup.enabled=false` disables it. `openbank.warmup.max-duration` defaults to 20 seconds and caps the readiness delay, so a slow or failed warm-up cannot hold a pod unready indefinitely. Investigate failed steps or repeated cap warnings before treating a first-request latency regression as fixed.
+
 libs itself emits no metrics or logs beyond the instrumentation in `CorrelationIdFilter` (only MDC fill/clear). But it influences fleet observability:
 
 - **`/api/v1/info`** on every service → admin UI Tech Inventory reads the `stack` block from `BuildInfo`

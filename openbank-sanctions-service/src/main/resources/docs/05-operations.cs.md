@@ -44,6 +44,8 @@ Co drží heslo mimo prod: `openbank-infra/gitops/components/sanctions-service/s
 
 ## Health checks
 
+Sdílené zahřátí při startu volá `/api/v1/sanctions/pending` bez přihlašovacích údajů, aby prošlo skutečnou neautentizovanou bezpečnostní cestou; čekající přezkumy nenačítá. Kroky pro JSON, volitelnou databázi a HTTP jsou best-effort. Readiness kontrola startup-warmup zůstává DOWN do jejich dokončení nebo uplynutí výchozího limitu 20 sekund. Pokud po nasazení vzroste latence prvního požadavku, zkontrolujte v aplikačních logách selhání kroků a varování o překročení limitu. Cestu nastavuje `openbank.warmup.protected-path`.
+
 - **Liveness:** `/q/health/live` — JVM + ArC running. Restart podu při selhání.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer + Redis.
 

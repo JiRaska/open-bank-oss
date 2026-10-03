@@ -62,6 +62,8 @@ Pokud někdy bude potřeba externí publishing (např. partner banka chce reusov
 
 ## Observability
 
+Služby používající `openbank-libs-runtime` před přepnutím readiness do UP spouštějí best-effort zahřátí. Projde mapování JSON, reaktivní SQL pool (pokud existuje) a lokální veřejnou i neautentizovanou chráněnou HTTP cestu. Výsledek každého kroku se loguje; selhání kroku nezastaví start. `openbank.warmup.enabled=false` zahřátí vypne. `openbank.warmup.max-duration` má výchozí hodnotu 20 sekund a omezuje prodlevu readiness, takže pomalý nebo neúspěšný krok nemůže držet pod trvale mimo provoz. Před uzavřením regrese latence prvního požadavku prověřte selhané kroky a opakovaná varování o překročení limitu.
+
 libs sám neemituje metrics ani logy nad rámec instrumentace v `CorrelationIdFilter` (jen MDC fill/clear). Ale ovlivňuje observability flotily:
 
 - **`/api/v1/info`** v každé službě → admin UI Tech Inventory čte `stack` block z `BuildInfo`
