@@ -49,6 +49,18 @@ spec:
           port: 3000
     # The deliberate internet hole: HTTPS to the LLM provider (DeepInfra). This is the only pod in
     # the fleet with 0.0.0.0/0:443 egress — the whole point of centralising the choke point here.
+    # Presidio PII services (presidio.yaml), called by the gateway's presidio guardrail before
+    # every model call. Same namespace, port 3000 on both.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-analyzer
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-anonymizer
+      ports:
+        - protocol: TCP
+          port: 3000
     - to:
         - ipBlock:
             cidr: 0.0.0.0/0
