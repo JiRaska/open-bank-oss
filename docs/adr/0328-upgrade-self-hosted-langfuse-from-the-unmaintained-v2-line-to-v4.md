@@ -15,10 +15,10 @@ summary: "Self-hosted Langfuse moves off v2, unpatched since 2025-11-07 while it
 ## Context
 
 ADR-0265 decision 3 chose **self-hosted Langfuse v2**, fed server-side by the LiteLLM gateway.
-It deliberately rejected v3 ("for now") on operational cost. v3 adds web, worker, ClickHouse,
-Redis and S3, which is five new workloads on a cluster "where a single-replica rollout has
-already deadlocked for want of room to surge". It named v3 the upgrade path. This ADR is
-needed because both premises of that deferral have changed:
+It deferred v3 on operational cost because the additional stateful components had no
+accepted capacity or recovery plan. It named v3 the upgrade path. This ADR revisits that
+deferral because the security cost of staying on v2 has increased; rollout still requires
+a measured capacity and recovery review:
 
 - **v2 is no longer maintained.** The newest v2 image on Docker Hub is `2.95.11`, published
   **2025-11-07**. None of the last 100 GitHub releases is a v2 tag, and the current line is
@@ -27,12 +27,8 @@ needed because both premises of that deferral have changed:
   (`openbank-infra/gitops/components/ai-platform/langfuse.yaml`). That is eleven months
   without fixes on the component that holds **every prompt and completion** the gateway
   traces, including copilot conversations.
-- **The capacity premise no longer holds.** Measured 2026-10-01 (`kubectl get nodepool`,
-  pod requests summed):
-  - the `default` NodePool is capped at 72 CPU / 288 Gi, no longer the 48 / 128 Gi of
-    ADR-0173, and a separate `stateful` pool has 28 CPU / 112 Gi;
-  - the cluster has 90 allocatable CPU, of which 62.1 are requested, and 324 Gi
-    allocatable, of which 148 Gi are requested.
+- **Capacity is a delivery gate.** Before rollout, verify schedulable headroom for the web,
+  worker, ClickHouse and Valkey workloads, including a node drain and deployment surge.
 
 Adjacent decisions this ADR does **not** reopen:
 
@@ -41,7 +37,7 @@ Adjacent decisions this ADR does **not** reopen:
   It rejected storing money-path-adjacent prompts in Langfuse. v4's prompt management and
   datasets are therefore **not** adopted as sources of truth.
 - **ADR-0174 / ADR-0175**: the gateway stays the only egress, and Langfuse stays in-cluster
-  and in eu-north-1.
+  and in the approved EU region.
 - **ADR-0022**: the analytics ClickHouse stays the analytics warehouse. Langfuse does not share
   it (see Decision 2).
 
@@ -63,13 +59,13 @@ We will move self-hosted Langfuse from v2.95.11 to the current v4 line.
 2. **Langfuse gets its own ClickHouse, Valkey and S3 bucket. It shares none of them.**
    - **ClickHouse:** a single-node `clickhouse/clickhouse-server` StatefulSet in `ai-platform`,
      same pattern as `components/analytics/clickhouse.yaml`. It is not the analytics instance:
-     that one owns a different data class (ADR-0022) and is the volume that hit 100% in the
-     2026-09-30 observability audit.
+     that one owns a different data class (ADR-0022), so sharing it would couple capacity,
+     access and recovery for unrelated workloads.
    - **Valkey:** one Valkey Deployment in `ai-platform`, the fleet's existing `redis.yaml`
      pattern.
-   - **S3:** one OpenTofu-managed bucket in eu-north-1 with SSE-KMS, Block Public Access, and a
-     lifecycle rule equal to the retention window. Access is through EKS Pod Identity, with no
-     static keys.
+   - **S3:** one OpenTofu-managed bucket in the approved EU region with SSE-KMS, Block
+     Public Access, and a lifecycle rule equal to the retention window. Access is through
+     EKS Pod Identity, with no static keys.
    - Langfuse runs as **web + worker**, both scheduled with requests.
 3. **Retention stays ours, rewritten for the new store.** Retention policies are Enterprise-only,
    so `langfuse-retention-cronjob.yaml` (30 days, nightly) is rewritten:
@@ -87,8 +83,8 @@ We will move self-hosted Langfuse from v2.95.11 to the current v4 line.
      needs one, it is dropped rather than licensed.
 5. **PII handling does not rely on Langfuse.** Server-side masking is Enterprise-only, so the
    control is upstream: the gateway's Presidio guardrail (#11756, #11759) masks before both the
-   provider and the trace callback. That ordering is verified end to end in #11759, which showed
-   the logged messages already carry the placeholders.
+   provider and the trace callback. That ordering must be verified end to end before v4
+   receives live traces; #11759 must supply the guardrail and its verification evidence.
 
 ## Alternatives considered
 
@@ -106,8 +102,8 @@ We will move self-hosted Langfuse from v2.95.11 to the current v4 line.
   cluster to another third party, which ADR-0175's residency posture and ADR-0174's register
   would both have to absorb. ADR-0265 already rejected it on the same grounds. Rejected.
 - **Share the analytics ClickHouse.** Pros: one fewer StatefulSet. Cons: it mixes a regulated
-  analytics warehouse with LLM traces under one volume and one blast radius, and that volume
-  has already filled once. Rejected.
+  analytics warehouse with LLM traces under one volume and one blast radius, and couples
+  capacity and recovery. Rejected.
 
 ## Consequences
 
@@ -119,7 +115,7 @@ We will move self-hosted Langfuse from v2.95.11 to the current v4 line.
 
 **Negative**
 - Four new stateful pieces to run (ClickHouse, Valkey, S3, worker), each needing backup or
-  lifecycle review. S3 is only verified by listing objects (see CLAUDE.md on CNPG backups).
+  lifecycle and recovery review.
 - The retention sweep has to be rewritten and re-proven against ClickHouse.
 - A multi-hour background migration, with no upstream rollback procedure. Rollback is "keep v2
   and its database untouched until v4 is verified", which is why v2 is not deleted in the same
@@ -143,7 +139,9 @@ aws s3 ls s3://<langfuse-bucket>/ --recursive | head   # expect: event objects, 
 
 - PCI DSS: not applicable — no cardholder data is in scope of LLM traces (sandbox PANs are synthetic).
 - DORA: the ICT third-party register (ADR-0174) is unchanged, since Langfuse stays self-hosted; patch currency of an ICT component improves.
-- GDPR: prompts and completions are personal data when customers write them. This ADR keeps them in-cluster, masks them upstream (Presidio guardrail), and keeps a 30-day retention sweep.
+- GDPR: prompts and completions are personal data when customers write them. This ADR keeps
+  them in-cluster and requires verified upstream masking (Presidio guardrail) and a 30-day
+  retention sweep before live traffic shifts.
 - PSD2: not applicable — no payment initiation or account-information interface changes.
 - CNB: not applicable — no reporting obligation touched.
 
