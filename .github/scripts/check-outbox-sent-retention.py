@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
-"""outbox-sent-retention (ADR-0327 D8 / ADR-0329, enforced).
+"""outbox-sent-retention (ADR-0329, enforced).
 
 Every module whose `src/main` extends `AbstractOutboxDispatcher` owns an outbox table, and every
 SENT row in it keeps its payload — often personal data — until something deletes it. The

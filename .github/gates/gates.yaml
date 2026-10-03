@@ -3159,7 +3159,7 @@ gates:
       python3 .github/scripts/check-outbox-conformance-it.py --root .
 
   - id: outbox-sent-retention
-    name: "outbox dispatcher owners opt into SENT-row retention (ADR-0327 D8 / ADR-0329)"
+    name: "outbox dispatcher owners opt into SENT-row retention (ADR-0329)"
     group: kotlin
     mode: enforced
     rationale: >-
