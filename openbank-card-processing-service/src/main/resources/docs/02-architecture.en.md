@@ -129,16 +129,23 @@ sequenceDiagram
   participant T as transaction-service
 
   A->>S: clear(id, amount, currency, key)
+  S->>DB: findClearing(id, key)
+  alt key already applied
+    S-->>A: 200 replay (same body) or 409 IDEMPOTENCY_KEY_REUSED
+  end
   S->>DB: findById
   S->>L: clear(authorization, amount, currency)
   alt refused
     S-->>A: 409 with PresentmentRefusal
   else accepted
-    S->>DB: UPDATE card_authorizations + INSERT card_outbox (card.cleared.v1)
+    S->>DB: INSERT card_clearings + UPDATE card_authorizations + INSERT card_outbox (card.cleared.v1)
+    Note over S,DB: a concurrent duplicate fails ux_card_clearings_authorization_key, rolls back and replays the winner
     S->>T: POST /api/v1/transactions (rail CARD, key card-clearing:KEY)
     S-->>A: 200 with new state
   end
 ```
+
+A clearing key is applied at most once per authorisation (see [03 — API](./03-api.md#idempotency)); a replay never reaches the ledger again.
 
 The posting runs **after** the clearing commits and is never rolled back: the acquirer has already asserted the clearing. Its outcome is three-valued — `POSTED`, `SKIPPED_DISABLED`, `FAILED` — counted in `openbank.card.processing.ledger.postings`, and a `FAILED` posting is logged as an error. Amounts are converted from minor units using the currency's own fraction digits.
 

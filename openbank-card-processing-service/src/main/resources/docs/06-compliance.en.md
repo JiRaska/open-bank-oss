@@ -18,6 +18,7 @@
 | Control | Where |
 |---|---|
 | No double hold on retry | UNIQUE `idempotency_key` |
+| No double clearing on a repeated presentment | UNIQUE `card_clearings (authorization_id, idempotency_key)` + replay / 409 `IDEMPOTENCY_KEY_REUSED` |
 | No over-clearing | `AuthorizationLifecycle.clear` **and** a CHECK constraint |
 | Decline reason only on declines | CHECK constraint |
 | No silent unbound integration | `NOT_BOUND` from vendor bindings without credentials or without a contract |

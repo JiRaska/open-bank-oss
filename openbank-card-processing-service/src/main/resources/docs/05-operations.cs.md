@@ -69,7 +69,7 @@ Všechny nesou `service="card-processing"`, stejně jako gauge backlogu a dead-l
 
 ### Zaúčtování FAILED
 
-Clearing je zaznamenán, účetnictví ne. Hledejte řádek logu `ledger posting FAILED for authorization …` a counter `outcome=FAILED`. Ověřte dosažitelnost transaction-service a token client credentials. Zaúčtování nese idempotenční klíč `card-clearing:<klíč>`, takže opakování přes transaction-service nemůže zaúčtovat dvakrát.
+Clearing je zaznamenán, účetnictví ne. Hledejte řádek logu `ledger posting FAILED for authorization …` a counter `outcome=FAILED`. Ověřte dosažitelnost transaction-service a token client credentials. Zaúčtování nese idempotenční klíč `card-clearing:<klíč>`, takže opakování přes transaction-service nemůže zaúčtovat dvakrát. Opakování stejného clearingu acquirerem zaúčtování **nezkusí znovu**: klíč clearingu je už započten a vrátí replay bez sáhnutí na účetnictví, takže zaúčtování `FAILED` je nutné znovu spustit vědomě.
 
 ### Každá autorizace je zamítnuta
 

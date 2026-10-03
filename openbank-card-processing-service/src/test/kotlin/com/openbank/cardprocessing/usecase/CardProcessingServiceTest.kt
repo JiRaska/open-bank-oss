@@ -14,6 +14,7 @@ import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPort
+import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
 import com.openbank.cardprocessing.application.port.out.FraudScore
 import com.openbank.cardprocessing.application.port.out.FraudScoringOutcome
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
@@ -21,6 +22,7 @@ import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
+import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.application.usecase.CardNotFoundException
 import com.openbank.cardprocessing.application.usecase.CardProcessingService
 import com.openbank.cardprocessing.domain.event.CardAuthorised
@@ -32,6 +34,7 @@ import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
 import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.infrastructure.scheme.SimulatedSchemeAdapter
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -204,7 +207,7 @@ class CardProcessingServiceTest {
     fun `a failed ledger posting is reported as FAILED and never as a success`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved
-        coEvery { repository.save(any(), any(), any()) } answers { firstArg() }
+        stubFreshClearing()
         coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
             PostingResult(PostingOutcome.FAILED, null, "connection refused")
         val recorded = slot<PostingOutcome>()
@@ -223,7 +226,7 @@ class CardProcessingServiceTest {
     fun `a disabled ledger adapter is counted as SKIPPED_DISABLED, not as POSTED`(): Unit = runBlocking {
         val approved = authorization(AuthorizationStatus.APPROVED)
         coEvery { repository.findById(approved.id) } returns approved
-        coEvery { repository.save(any(), any(), any()) } answers { firstArg() }
+        stubFreshClearing()
         coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
             PostingResult(PostingOutcome.SKIPPED_DISABLED, null, "disabled")
         val recorded = slot<PostingOutcome>()
@@ -240,6 +243,7 @@ class CardProcessingServiceTest {
     @Test
     fun `clearing an unknown authorisation refuses instead of throwing`(): Unit = runBlocking {
         val id = UUID.randomUUID()
+        coEvery { repository.findClearing(id, any()) } returns null
         coEvery { repository.findById(id) } returns null
 
         val outcome = service().clear(PresentmentCommand(id, 1_000, "CZK", "clr-3"))
@@ -282,6 +286,114 @@ class CardProcessingServiceTest {
         Unit
     }
 
+    private fun stubFreshClearing() {
+        coEvery { repository.findClearing(any(), any()) } returns null
+        coEvery { repository.saveClearing(any(), any(), any()) } answers { firstArg() }
+    }
+
+    private fun recorded(authorizationId: UUID, key: String, fingerprintOf: PresentmentCommand): RecordedClearing {
+        // Captured from a real first application, so the test never re-implements the fingerprint.
+        val captured = slot<RecordedClearing>()
+        val authorization = authorization(AuthorizationStatus.APPROVED).copy(id = authorizationId)
+        val repo = mockk<CardAuthorizationRepository>()
+        coEvery { repo.findClearing(any(), any()) } returns null
+        coEvery { repo.findById(authorizationId) } returns authorization
+        coEvery { repo.saveClearing(any(), any(), capture(captured)) } answers { firstArg() }
+        val quietLedger = mockk<LedgerPostingPort>()
+        coEvery { quietLedger.postClearedSpend(any(), any(), any()) } returns
+            PostingResult(PostingOutcome.POSTED, null, null)
+        runBlocking {
+            CardProcessingService(
+                repo, cards, issuer, quietLedger, fraud, merchants, mockk(relaxed = true), mapper, clock, HOLD_DAYS,
+            ).clear(fingerprintOf.copy(authorizationId = authorizationId, idempotencyKey = key))
+        }
+        return captured.captured
+    }
+
+    @Test
+    fun `a first clearing records its key and fingerprint with the presentment`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.APPROVED)
+        coEvery { repository.findById(approved.id) } returns approved
+        coEvery { repository.findClearing(approved.id, "clr-new") } returns null
+        val captured = slot<RecordedClearing>()
+        coEvery { repository.saveClearing(any(), any(), capture(captured)) } answers { firstArg() }
+        coEvery { ledger.postClearedSpend(any(), any(), any()) } returns
+            PostingResult(PostingOutcome.POSTED, null, null)
+
+        service().clear(PresentmentCommand(approved.id, 4_000, "czk", "clr-new"))
+
+        assertThat(captured.captured.authorizationId).isEqualTo(approved.id)
+        assertThat(captured.captured.idempotencyKey).isEqualTo("clr-new")
+        assertThat(captured.captured.amountMinorUnits).isEqualTo(4_000)
+        assertThat(captured.captured.currencyCode).isEqualTo("CZK")
+        assertThat(captured.captured.requestFingerprint).hasSize(SHA256_HEX_LENGTH)
+        Unit
+    }
+
+    @Test
+    fun `a repeated clearing key replays and applies nothing a second time`(): Unit = runBlocking {
+        val partially = authorization(AuthorizationStatus.PARTIALLY_CLEARED).copy(clearedAmountMinorUnits = 4_000)
+        val first = recorded(partially.id, "clr-dup", PresentmentCommand(partially.id, 4_000, "CZK", "clr-dup"))
+        coEvery { repository.findClearing(partially.id, "clr-dup") } returns first
+        coEvery { repository.findById(partially.id) } returns partially
+
+        // Lower case on the retry: the domain compares currency case-insensitively, so this is the
+        // same request and must replay, not be refused as a key reuse.
+        val outcome = service().clear(PresentmentCommand(partially.id, 4_000, "czk", "clr-dup"))
+
+        assertThat(outcome).isEqualTo(PresentmentOutcome.Accepted(partially))
+        coVerify(exactly = 0) { repository.saveClearing(any(), any(), any()) }
+        coVerify(exactly = 0) { repository.save(any(), any(), any()) }
+        coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
+        Unit
+    }
+
+    @Test
+    fun `the same clearing key with a different amount is a key reuse, never a replay`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.PARTIALLY_CLEARED).copy(clearedAmountMinorUnits = 4_000)
+        val first = recorded(approved.id, "clr-reuse", PresentmentCommand(approved.id, 4_000, "CZK", "clr-reuse"))
+        coEvery { repository.findClearing(approved.id, "clr-reuse") } returns first
+
+        assertThatThrownBy {
+            runBlocking { service().clear(PresentmentCommand(approved.id, 5_000, "CZK", "clr-reuse")) }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        coVerify(exactly = 0) { repository.saveClearing(any(), any(), any()) }
+        coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
+        Unit
+    }
+
+    @Test
+    fun `losing the race to a concurrent duplicate replays the winner and posts nothing`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.APPROVED)
+        val winner = recorded(approved.id, "clr-race", PresentmentCommand(approved.id, 3_000, "CZK", "clr-race"))
+        val afterWinner = approved.copy(status = AuthorizationStatus.PARTIALLY_CLEARED, clearedAmountMinorUnits = 3_000)
+        // First lookup misses (the race), the lookup after the constraint violation finds the winner.
+        coEvery { repository.findClearing(approved.id, "clr-race") } returnsMany listOf(null, winner)
+        coEvery { repository.findById(approved.id) } returnsMany listOf(approved, afterWinner)
+        coEvery { repository.saveClearing(any(), any(), any()) } throws
+            DuplicateClearingException(IllegalStateException("23505"))
+
+        val outcome = service().clear(PresentmentCommand(approved.id, 3_000, "CZK", "clr-race"))
+
+        assertThat(outcome).isEqualTo(PresentmentOutcome.Accepted(afterWinner))
+        coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
+        coVerify(exactly = 0) { metrics.presentmentApplied(any()) }
+        Unit
+    }
+
+    @Test
+    fun `a refused presentment records nothing, so its retry is evaluated afresh`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.APPROVED)
+        coEvery { repository.findById(approved.id) } returns approved
+        coEvery { repository.findClearing(approved.id, "clr-over") } returns null
+
+        val outcome = service().clear(PresentmentCommand(approved.id, 99_999, "CZK", "clr-over"))
+
+        assertThat(outcome).isInstanceOf(PresentmentOutcome.Refused::class.java)
+        coVerify(exactly = 0) { repository.saveClearing(any(), any(), any()) }
+        Unit
+    }
+
     private fun authorization(status: AuthorizationStatus, expiresAt: Instant = now.plusSeconds(3600)) =
         CardAuthorization(
             id = UUID.randomUUID(),
@@ -318,5 +430,6 @@ class CardProcessingServiceTest {
     private companion object {
         const val HOLD_DAYS = 7L
         const val SECONDS_PER_DAY = 24 * 3600L
+        const val SHA256_HEX_LENGTH = 64
     }
 }

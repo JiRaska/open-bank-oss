@@ -5,22 +5,32 @@
 package com.openbank.cardprocessing.infrastructure.persistence.repository
 
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
+import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
+import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.CountedSpend
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.infrastructure.persistence.entity.CardAuthorizationEntity
+import com.openbank.cardprocessing.infrastructure.persistence.entity.CardClearingEntity
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.PersistenceException
 import java.time.Instant
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress(
+    // The aggregate's whole persistence surface, plus its entity mappers. The clearing record is
+    // written in the SAME transaction as the authorisation it decrements, so splitting it into a
+    // second repository would split one transaction across two classes for a metric.
+    "TooManyFunctions",
+)
 class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRepositoryImpl) :
     CardAuthorizationRepository,
     PanacheRepository<CardAuthorizationEntity> {
@@ -52,6 +62,48 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
             persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(authorization)
         }
     }.awaitSuspending()
+
+    /**
+     * The authorisation update, the clearing record and the outbox row in ONE transaction.
+     *
+     * The clearing row is flushed FIRST, before the authorisation is touched: a concurrent duplicate
+     * blocks on `ux_card_clearings_authorization_key` until the winner commits, then fails 23505,
+     * and its whole transaction — hold decrement and event included — rolls back. The flush also
+     * makes the failure surface inside this call rather than at some later commit, which is what
+     * lets it be translated into [DuplicateClearingException] here.
+     */
+    override suspend fun saveClearing(
+        authorization: CardAuthorization,
+        event: OutboxMessage,
+        clearing: RecordedClearing,
+    ): CardAuthorization = try {
+        Panache.withTransaction {
+            Panache.getSession()
+                .chain { session -> session.persist(clearing.toEntity()).chain { _ -> session.flush() } }
+                .chain { _ -> find("id", authorization.id).firstResult() }
+                .chain { existing ->
+                    checkNotNull(existing) { "authorisation ${authorization.id} vanished while being cleared" }
+                    existing.applyFrom(authorization)
+                    outbox.persistInTransaction(event)
+                }
+                .replaceWith(authorization)
+        }.awaitSuspending()
+    } catch (e: PersistenceException) {
+        if (e.isClearingKeyViolation()) throw DuplicateClearingException(e) else throw e
+    }
+
+    override suspend fun findClearing(authorizationId: UUID, idempotencyKey: String): RecordedClearing? =
+        Panache.withSession {
+            Panache.getSession().chain { session ->
+                session.createQuery(
+                    "from CardClearingEntity where authorizationId = :authorizationId and idempotencyKey = :key",
+                    CardClearingEntity::class.java,
+                )
+                    .setParameter("authorizationId", authorizationId)
+                    .setParameter("key", idempotencyKey)
+                    .singleResultOrNull
+            }
+        }.awaitSuspending()?.toDomain()
 
     override suspend fun findById(id: UUID): CardAuthorization? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
@@ -152,7 +204,40 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         updatedAt = a.updatedAt
     }
 
+    private fun RecordedClearing.toEntity() = CardClearingEntity().also {
+        it.id = id
+        it.authorizationId = authorizationId
+        it.idempotencyKey = idempotencyKey
+        it.requestFingerprint = requestFingerprint
+        it.amountMinorUnits = amountMinorUnits
+        it.currencyCode = currencyCode
+        it.appliedAt = appliedAt
+    }
+
+    private fun CardClearingEntity.toDomain() = RecordedClearing(
+        id = id,
+        authorizationId = authorizationId,
+        idempotencyKey = idempotencyKey,
+        requestFingerprint = requestFingerprint,
+        amountMinorUnits = amountMinorUnits,
+        currencyCode = currencyCode,
+        appliedAt = appliedAt,
+    )
+
+    /**
+     * Matched by constraint NAME anywhere in the cause chain: Hibernate wraps the driver's
+     * `PgException` differently on flush and on commit, and only the name says it is this
+     * constraint and not, say, the outbox's `event_id` UNIQUE — which must stay a 500.
+     */
+    private fun Throwable.isClearingKeyViolation(): Boolean =
+        generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+            it.message?.contains(CLEARING_KEY_CONSTRAINT) == true
+        }
+
     companion object {
+        const val CLEARING_KEY_CONSTRAINT = "ux_card_clearings_authorization_key"
+        private const val MAX_CAUSE_DEPTH = 10
+
         /**
          * `COALESCE` on every aggregate: `SUM` over no rows is NULL, and a NULL read as a Kotlin
          * `Long` is either an exception or, worse, a silent zero that looks measured. A card with no

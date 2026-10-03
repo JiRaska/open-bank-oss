@@ -13,10 +13,12 @@ import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPort
+import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
+import com.openbank.cardprocessing.application.port.out.RecordedClearing
 import com.openbank.cardprocessing.domain.event.CardAuthorised
 import com.openbank.cardprocessing.domain.event.CardCleared
 import com.openbank.cardprocessing.domain.event.CardDeclined
@@ -32,6 +34,8 @@ import com.openbank.cardprocessing.domain.policy.AuthorizationLifecycle
 import com.openbank.libs.domain.cards.scheme.MerchantDataPort
 import com.openbank.libs.domain.cards.scheme.MerchantDescriptor
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -234,7 +238,30 @@ class CardProcessingService(
         )
     }
 
+    /**
+     * Applies a clearing presentment **once per clearing key**.
+     *
+     * The acquirer retries, and a network can deliver one presentment twice. Before this guard the
+     * key was carried but never looked up, so a repeat that still fitted inside the remaining hold
+     * was applied again: a second hold decrement and a second debit of the cardholder, with only
+     * the ledger posting (keyed `card-clearing:<key>`) deduplicated downstream.
+     *
+     * - Same key, same amount and currency: the first result is replayed — nothing is re-applied,
+     *   no second event, no second ledger posting.
+     * - Same key, different body: [IdempotencyKeyReusedException], which libs-runtime maps to
+     *   409 `IDEMPOTENCY_KEY_REUSED` — the fleet's answer, the same as every other rail.
+     * - Two concurrent duplicates: both miss the lookup, and the database decides. The UNIQUE
+     *   constraint on `(authorization_id, idempotency_key)` lets exactly one commit; the loser's
+     *   transaction rolls back whole and it replays the winner.
+     *
+     * A REFUSED presentment records nothing, so a retry is evaluated afresh — refusing is not
+     * applying, and there is nothing to deduplicate.
+     */
     override suspend fun clear(command: PresentmentCommand): PresentmentOutcome {
+        val fingerprint = clearingFingerprint(command)
+        repository.findClearing(command.authorizationId, command.idempotencyKey)?.let {
+            return replayClearing(it, fingerprint)
+        }
         val existing = repository.findById(command.authorizationId)
             ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
         val outcome = AuthorizationLifecycle.clear(existing, command.amountMinorUnits, command.currencyCode, clock)
@@ -253,11 +280,26 @@ class CardProcessingService(
             category = cleared.category,
             occurredAt = Instant.now(clock),
         )
-        val saved = repository.save(
-            cleared,
-            outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event),
-            command.idempotencyKey,
-        )
+        val saved = try {
+            repository.saveClearing(
+                cleared,
+                outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event),
+                RecordedClearing(
+                    id = Ids.newId(),
+                    authorizationId = cleared.id,
+                    idempotencyKey = command.idempotencyKey,
+                    requestFingerprint = fingerprint,
+                    amountMinorUnits = command.amountMinorUnits,
+                    currencyCode = command.currencyCode.uppercase(),
+                    appliedAt = Instant.now(clock),
+                ),
+            )
+        } catch (e: DuplicateClearingException) {
+            // Lost the race to a concurrent duplicate: our transaction rolled back whole, so the
+            // winner's row is the only one, and it is what this caller gets.
+            val winner = repository.findClearing(command.authorizationId, command.idempotencyKey) ?: throw e
+            return replayClearing(winner, fingerprint)
+        }
         metrics.presentmentApplied(fullyCleared)
 
         // Deliberately AFTER the commit, and not rolled back on failure: the clearing is a fact the
@@ -276,6 +318,26 @@ class CardProcessingService(
         }
         return PresentmentOutcome.Accepted(saved)
     }
+
+    private suspend fun replayClearing(recorded: RecordedClearing, fingerprint: String): PresentmentOutcome {
+        if (recorded.requestFingerprint != fingerprint) throw IdempotencyKeyReusedException()
+        // The current state of the authorisation, exactly as an authorisation replay answers: the
+        // presentment is already part of it, and nothing about it is applied a second time.
+        val current = repository.findById(recorded.authorizationId)
+            ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
+        return PresentmentOutcome.Accepted(current)
+    }
+
+    /**
+     * The libs [RequestFingerprint] over what makes two presentments the same request: the
+     * authorisation (in the path), the amount and the currency. Currency is upper-cased because the
+     * domain compares it case-insensitively, so `czk` and `CZK` are one request, not a key reuse.
+     */
+    private fun clearingFingerprint(command: PresentmentCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-authorizations/${command.authorizationId}/clearing",
+        "${command.amountMinorUnits}|${command.currencyCode.uppercase()}",
+    )
 
     override suspend fun reverse(authorizationId: UUID): PresentmentOutcome {
         val existing = repository.findById(authorizationId)

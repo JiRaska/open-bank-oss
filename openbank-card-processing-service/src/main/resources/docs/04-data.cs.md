@@ -34,6 +34,22 @@ Omezení a indexy:
 
 Blokovaná částka (`amount − cleared`, dokud hold trvá) se **odvozuje**, nikdy neukládá.
 
+### `card_clearings`
+
+Jeden řádek na každou **započtenou** prezentaci clearingu (V4) — idempotenční záznam jejího klíče. Pouze insert.
+
+| Sloupec | Typ | Poznámka |
+|---|---|---|
+| `id` | UUID PK | UUIDv7 |
+| `authorization_id` | UUID FK → `card_authorizations.id` | |
+| `idempotency_key` | VARCHAR(128) | klíč clearingu od acquirera |
+| `request_fingerprint` | VARCHAR(64) | libs `RequestFingerprint` (SHA-256 hex) cesty, částky a měny velkými písmeny |
+| `amount_minor_units` | BIGINT | `> 0` |
+| `currency_code` | VARCHAR(3) | |
+| `applied_at` | TIMESTAMPTZ | |
+
+UNIQUE `ux_card_clearings_authorization_key (authorization_id, idempotency_key)` — záruka, že se jeden klíč clearingu započte jednou i při souběžných duplikátech.
+
 ### `card_outbox`
 
 Transakční outbox (ADR-0050): `event_id` (unikátní), `aggregate_id`, `event_type`, `payload`, `status` (výchozí `PENDING`), `attempt_count`, `last_error`, `created_at`, `updated_at`, `sent_at`, `claimed_at`, `synthetic` (V2). Hibernate používá sekvenci `card_outbox_seq` (increment 50), explicitně vytvořenou ve V1.
@@ -44,6 +60,7 @@ Transakční outbox (ADR-0050): `event_id` (unikátní), `aggregate_id`, `event_
 |---|---|---|
 | V1 `init_card_processing` | obě tabulky, indexy, `card_outbox_seq` | `DROP TABLE card_outbox; DROP TABLE card_authorizations;` — bezpečné jen před první autorizací |
 | V2 `synthetic_outbox_taint` | `card_outbox.synthetic BOOLEAN NOT NULL DEFAULT FALSE` (ADR-0252) | `ALTER TABLE card_outbox DROP COLUMN synthetic;` — bezpečné jen před odesláním syntetického provozu |
+| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)` | `DROP TABLE card_clearings;` — pro schéma bezpečné, ale znovu otevře dvojí prezentaci a zahodí záznam započtených klíčů |
 
 `migrate-at-start: true`; `validate-on-migrate: false`.
 
