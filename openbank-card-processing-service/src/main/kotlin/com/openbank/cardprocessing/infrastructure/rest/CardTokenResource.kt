@@ -16,6 +16,7 @@ import com.openbank.cardprocessing.infrastructure.rest.dto.TokenListResponse
 import com.openbank.cardprocessing.infrastructure.rest.dto.TokenResponseDto
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.domain.cards.scheme.NetworkTokenStatus
+import com.openbank.libs.idempotency.IdempotencyKeys
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -51,7 +52,7 @@ class CardTokenResource(private val useCase: CardTokenUseCase) {
         request: ProvisionTokenRequestDto,
     ): Response {
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
-        require(idempotencyKey.isNotBlank()) { "header 'Idempotency-Key' must not be blank" }
+        IdempotencyKeys.requireValid(idempotencyKey)
         val outcome = useCase.provision(
             ProvisionTokenCommand(
                 cardId = request.cardId,
@@ -101,7 +102,8 @@ class CardTokenResource(private val useCase: CardTokenUseCase) {
         Response.ok(TokenListResponse.of(useCase.listForCard(cardId))).build()
 
     /**
-     * A refusal is **409 Conflict**, except the two that are genuinely "no such thing" (404).
+     * A refusal is **409 Conflict**, except the two that are genuinely "no such thing" (404) and
+     * card-issuance being unreachable (**503**, fail closed — the card may well exist).
      *
      * The request was well formed in every case, so 400 would be wrong; and a scheme that cannot be
      * reached is not a client error either. The reason travels as a machine-readable value so a
@@ -111,6 +113,7 @@ class CardTokenResource(private val useCase: CardTokenUseCase) {
     private fun refusal(outcome: TokenOutcome.Refused): Response {
         val status = when (outcome.reason) {
             TokenRefusal.CARD_NOT_FOUND, TokenRefusal.TOKEN_NOT_FOUND -> Response.Status.NOT_FOUND
+            TokenRefusal.ISSUER_UNAVAILABLE -> Response.Status.SERVICE_UNAVAILABLE
             else -> Response.Status.CONFLICT
         }
         return Response.status(status)
@@ -119,7 +122,10 @@ class CardTokenResource(private val useCase: CardTokenUseCase) {
     }
 
     private fun message(reason: TokenRefusal): String = when (reason) {
-        TokenRefusal.CARD_NOT_FOUND -> "no such card, or card-issuance could not be reached to confirm it"
+        TokenRefusal.CARD_NOT_FOUND -> "card-issuance does not know this card"
+        TokenRefusal.CARD_NOT_ACTIVE ->
+            "the card is not ACTIVE; a blocked, suspended or expired card is never tokenised"
+        TokenRefusal.ISSUER_UNAVAILABLE -> "card-issuance could not be reached to confirm the card; retry later"
         TokenRefusal.TOKEN_NOT_FOUND -> "no such token"
         TokenRefusal.TOKEN_TERMINAL -> "the token is DELETED, which is terminal in every scheme"
         TokenRefusal.SCHEME_UNAVAILABLE -> "the tokenisation binding could not answer"

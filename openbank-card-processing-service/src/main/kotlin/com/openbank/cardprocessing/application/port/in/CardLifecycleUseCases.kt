@@ -7,6 +7,7 @@
 package com.openbank.cardprocessing.application.port.`in`
 
 import com.openbank.cardprocessing.domain.model.CardDisputeCase
+import com.openbank.cardprocessing.domain.model.DisputeEvidenceRecord
 import com.openbank.cardprocessing.domain.model.DisputeOutcome
 import com.openbank.cardprocessing.domain.model.TokenOutcome
 import com.openbank.cardprocessing.domain.model.TokenRegistrations
@@ -52,7 +53,12 @@ data class OpenDisputeCommand(
     val idempotencyKey: String,
 )
 
-data class SubmitEvidenceCommand(val disputeId: UUID, val documentReference: String, val note: String?)
+data class SubmitEvidenceCommand(
+    val disputeId: UUID,
+    val documentReference: String,
+    val note: String?,
+    val idempotencyKey: String,
+)
 
 interface CardDisputeUseCase {
     suspend fun open(command: OpenDisputeCommand): DisputeOutcome
@@ -63,6 +69,9 @@ interface CardDisputeUseCase {
     suspend fun refreshStatus(disputeId: UUID): DisputeOutcome
 
     suspend fun findById(id: UUID): CardDisputeCase?
+
+    /** Every evidence submission against a case, oldest first; null when the case does not exist. */
+    suspend fun evidenceHistory(disputeId: UUID): List<DisputeEvidenceRecord>?
 
     suspend fun findByCard(cardId: UUID, limit: Int): List<CardDisputeCase>
 }

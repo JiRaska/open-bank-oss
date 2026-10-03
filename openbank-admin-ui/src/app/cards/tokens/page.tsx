@@ -216,6 +216,11 @@ export default function CardTokensPage() {
                           <span className={`rounded border px-1.5 py-0.5 text-xs ${statusTone(token.status)}`}>
                             {token.status}
                           </span>
+                          {token.absentAtNetwork && (
+                            <span className="ml-1 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-xs text-amber-800">
+                              {t('Síť token nevrátila', 'Not returned by the network')}
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-600">{token.scheme}</td>
                         <td className="px-4 py-3">

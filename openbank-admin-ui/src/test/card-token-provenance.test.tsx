@@ -41,6 +41,7 @@ const TOKEN = {
   expiry: null,
   provisionedAt: '2026-09-05T12:00:00Z',
   updatedAt: '2026-09-05T12:00:00Z',
+  absentAtNetwork: false,
 }
 
 function renderPage() {
@@ -90,5 +91,17 @@ describe('Card Center — network token provenance', () => {
     // The reason travels too: "the network was unreachable" and "the binding is not configured"
     // need different next steps, and the operator can only distinguish them from the detail.
     expect(screen.getByText(/connect timeout/i)).toBeInTheDocument()
+  })
+
+  it('flags a mirrored token the network no longer returns instead of hiding it', async () => {
+    await loadCard({
+      tokens: [TOKEN, { ...TOKEN, id: 'bbbbbbbb-bbbb-4ccc-8ddd-eeeeeeeeeeee', tokenReference: 'sim-tok-gone', requestorLabel: 'Old watch', absentAtNetwork: true }],
+      source: 'NETWORK',
+      degradedReason: null,
+      count: 2,
+    })
+
+    await waitFor(() => expect(screen.getByText('Old watch')).toBeInTheDocument())
+    expect(screen.getAllByText(/Not returned by the network/i)).toHaveLength(1)
   })
 })

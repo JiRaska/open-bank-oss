@@ -45,6 +45,13 @@ data class CardTokenRegistration(
     val expiry: LocalDate?,
     val provisionedAt: Instant,
     val updatedAt: Instant,
+    /**
+     * Set when a NETWORK-sourced read did not return this token. The row is kept and shown — it is
+     * the record that the token existed — but flagged, because "the network no longer knows it" is
+     * exactly the drift an operator has to see. Never set on a mirror-sourced read: there the network
+     * was not asked, so nothing is known about its absence.
+     */
+    val absentAtNetwork: Boolean = false,
 ) {
     /**
      * `DELETED` is terminal in every scheme's token lifecycle.
@@ -76,6 +83,16 @@ data class TokenRegistrations(
 /** Why a token operation was refused. Values, not exceptions — the caller renders each differently. */
 enum class TokenRefusal {
     CARD_NOT_FOUND,
+
+    /**
+     * The card exists but is not ACTIVE (blocked, suspended, expired, cancelled…). A network token
+     * minted for a blocked card is a working credential for a card the bank has stopped — the
+     * fraud vector the block exists to close — so this is refused before the network is asked.
+     */
+    CARD_NOT_ACTIVE,
+
+    /** card-issuance could not be reached to confirm the card. Fails closed, like authorisation. */
+    ISSUER_UNAVAILABLE,
     TOKEN_NOT_FOUND,
     TOKEN_TERMINAL,
     SCHEME_UNAVAILABLE,

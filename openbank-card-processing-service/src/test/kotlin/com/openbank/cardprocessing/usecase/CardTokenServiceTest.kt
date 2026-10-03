@@ -9,10 +9,13 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.cardprocessing.application.port.`in`.ChangeTokenStatusCommand
 import com.openbank.cardprocessing.application.port.`in`.ProvisionTokenCommand
+import com.openbank.cardprocessing.application.port.out.CardIssuerUnavailableException
 import com.openbank.cardprocessing.application.port.out.CardLifecycleMetricsPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.CardTokenRegistrationRepository
+import com.openbank.cardprocessing.application.port.out.IdempotencyClaim
+import com.openbank.cardprocessing.application.port.out.LifecycleOperation
 import com.openbank.cardprocessing.application.usecase.CardTokenService
 import com.openbank.cardprocessing.domain.event.CardTokenProvisioned
 import com.openbank.cardprocessing.domain.model.CardTokenRegistration
@@ -27,14 +30,21 @@ import com.openbank.libs.domain.cards.scheme.SchemeFailure
 import com.openbank.libs.domain.cards.scheme.SchemeResult
 import com.openbank.libs.domain.cards.scheme.TokenRequestor
 import com.openbank.libs.domain.cards.scheme.TokenisationPort
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.mockk.CapturingSlot
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
 import io.mockk.slot
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.ValueSource
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -62,18 +72,30 @@ class CardTokenServiceTest {
     // the reconcile and terminal-status paths pass without the port ever being exercised.
     private val simulator = SimulatedTokenisationAdapter(clock)
 
+    private val idempotency = FakeLifecycleIdempotency()
+
     private fun service(port: TokenisationPort = simulator) =
-        CardTokenService(port, registrations, cards, metrics, mapper, clock)
+        CardTokenService(port, registrations, idempotency, cards, metrics, mapper, clock)
+
+    private fun activeCard(status: String? = "ACTIVE") =
+        CardOwnership(UUID.randomUUID(), UUID.randomUUID(), "CZK", status)
+
+    /** A save that completes the claim the way the real repository does, inside its transaction. */
+    private fun savingCompletes(saved: CapturingSlot<CardTokenRegistration>, event: CapturingSlot<OutboxMessage>) {
+        coEvery { registrations.save(capture(saved), capture(event), any(), any()) } answers {
+            arg<IdempotencyClaim?>(3)?.let { idempotency.complete(it, saved.captured.id) }
+            saved.captured
+        }
+    }
 
     private fun command(key: String = "idem-token-1") = ProvisionTokenCommand(cardId, "wallet-apple", "Apple Pay", key)
 
     @Test
     fun `provisioning mirrors what the scheme answered and emits the event in the same write`(): Unit = runBlocking {
-        coEvery { registrations.findByIdempotencyKey(any()) } returns null
-        coEvery { cards.lookup(cardId) } returns CardOwnership(UUID.randomUUID(), UUID.randomUUID(), "CZK")
+        coEvery { cards.lookup(cardId) } returns activeCard()
         val saved = slot<CardTokenRegistration>()
         val event = slot<OutboxMessage>()
-        coEvery { registrations.save(capture(saved), capture(event), any()) } answers { saved.captured }
+        savingCompletes(saved, event)
 
         val outcome = service().provision(command())
 
@@ -89,24 +111,49 @@ class CardTokenServiceTest {
     }
 
     @Test
-    fun `a repeated idempotency key returns the first registration and does not call the scheme`(): Unit = runBlocking {
-        val existing = registration(NetworkTokenStatus.ACTIVE)
-        coEvery { registrations.findByIdempotencyKey("idem-token-1") } returns existing
+    fun `a repeated idempotency key replays the first registration and does not call the scheme again`(): Unit =
+        runBlocking {
+            coEvery { cards.lookup(cardId) } returns activeCard()
+            val saved = slot<CardTokenRegistration>()
+            savingCompletes(saved, slot())
+            val port = mockk<TokenisationPort>()
+            coEvery { port.provision(any(), any()) } coAnswers { simulator.provision(firstArg(), secondArg()) }
+            val first = service(port).provision(command()) as TokenOutcome.Provisioned
+            coEvery { registrations.findById(first.registration.id) } returns first.registration
+
+            val replay = service(port).provision(command())
+
+            assertThat((replay as TokenOutcome.Provisioned).registration).isEqualTo(first.registration)
+            // The discriminating assertion: a retry that reached the scheme would mint a SECOND
+            // wallet credential the customer can see, and every other assertion here still passes.
+            coVerify(exactly = 1) { port.provision(any(), any()) }
+        }
+
+    @Test
+    fun `a same-key request while the first is still running is told in progress and never reaches the scheme`(): Unit =
+        runBlocking {
+            idempotency.reserve(LifecycleOperation.TOKEN_PROVISION, "idem-token-1", fingerprintOfFirstCall())
+            val port = mockk<TokenisationPort>()
+
+            assertThatThrownBy { runBlocking { service(port).provision(command()) } }
+                .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+            coVerify(exactly = 0) { port.provision(any(), any()) }
+            coVerify(exactly = 0) { cards.lookup(any()) }
+        }
+
+    @Test
+    fun `the same key with a different request is a reuse conflict, not a replay`(): Unit = runBlocking {
+        idempotency.reserve(LifecycleOperation.TOKEN_PROVISION, "idem-token-1", "f".repeat(64))
         val port = mockk<TokenisationPort>()
 
-        val outcome = service(port).provision(command())
-
-        assertThat((outcome as TokenOutcome.Provisioned).registration).isEqualTo(existing)
-        // The discriminating assertion: without the idempotency read, a retry mints a SECOND
-        // wallet credential the customer can see, and every other assertion here still passes.
+        assertThatThrownBy { runBlocking { service(port).provision(command()) } }
+            .isInstanceOf(IdempotencyKeyReusedException::class.java)
         coVerify(exactly = 0) { port.provision(any(), any()) }
-        coVerify(exactly = 0) { registrations.save(any(), any(), any()) }
     }
 
     @Test
-    fun `a scheme that cannot answer refuses and writes no row`(): Unit = runBlocking {
-        coEvery { registrations.findByIdempotencyKey(any()) } returns null
-        coEvery { cards.lookup(cardId) } returns CardOwnership(UUID.randomUUID(), UUID.randomUUID(), "CZK")
+    fun `a scheme that cannot answer refuses, writes no row and frees the key for a retry`(): Unit = runBlocking {
+        coEvery { cards.lookup(cardId) } returns activeCard()
         val unbound = mockk<TokenisationPort>()
         coEvery { unbound.provision(any(), any()) } returns SchemeResult.Unanswered(
             SchemeFailure.NOT_BOUND,
@@ -118,25 +165,87 @@ class CardTokenServiceTest {
 
         assertThat(outcome).isInstanceOf(TokenOutcome.Refused::class.java)
         assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.SCHEME_UNAVAILABLE)
-        coVerify(exactly = 0) { registrations.save(any(), any(), any()) }
+        coVerify(exactly = 0) { registrations.save(any(), any(), any(), any()) }
+        assertThat(idempotency.isPending(LifecycleOperation.TOKEN_PROVISION, "idem-token-1")).isFalse()
     }
 
     @Test
+    fun `a failure after the scheme answered leaves the key pending so a retry cannot mint a second token`(): Unit =
+        runBlocking {
+            coEvery { cards.lookup(cardId) } returns activeCard()
+            coEvery { registrations.save(any(), any(), any(), any()) } throws IllegalStateException("db down")
+
+            assertThatThrownBy { runBlocking { service().provision(command()) } }
+                .isInstanceOf(IllegalStateException::class.java)
+            assertThat(idempotency.isPending(LifecycleOperation.TOKEN_PROVISION, "idem-token-1")).isTrue()
+            assertThatThrownBy { runBlocking { service().provision(command()) } }
+                .isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        }
+
+    @Test
     fun `an unknown card is refused before the scheme is asked`(): Unit = runBlocking {
-        coEvery { registrations.findByIdempotencyKey(any()) } returns null
         coEvery { cards.lookup(cardId) } returns null
         val port = mockk<TokenisationPort>()
 
         val outcome = service(port).provision(command())
 
         assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.CARD_NOT_FOUND)
+        assertThat(outcome.detail).doesNotContain("could not be reached")
+        coVerify(exactly = 0) { port.provision(any(), any()) }
+        coVerify { metrics.tokenProvisioned("NONE", TokenRefusal.CARD_NOT_FOUND.name) }
+    }
+
+    @Test
+    fun `card-issuance being unreachable is ISSUER_UNAVAILABLE, not an unknown card, and frees the key`(): Unit =
+        runBlocking {
+            coEvery { cards.lookup(cardId) } throws CardIssuerUnavailableException(RuntimeException("connect refused"))
+            val port = mockk<TokenisationPort>()
+
+            val outcome = service(port).provision(command())
+
+            assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.ISSUER_UNAVAILABLE)
+            coVerify(exactly = 0) { port.provision(any(), any()) }
+            coVerify { metrics.tokenProvisioned("NONE", TokenRefusal.ISSUER_UNAVAILABLE.name) }
+            assertThat(idempotency.isPending(LifecycleOperation.TOKEN_PROVISION, "idem-token-1")).isFalse()
+        }
+
+    @ParameterizedTest
+    @ValueSource(strings = ["BLOCKED", "SUSPENDED", "EXPIRED", "CANCELLED", "PENDING"])
+    fun `a card that is not ACTIVE is never tokenised`(status: String): Unit = runBlocking {
+        coEvery { cards.lookup(cardId) } returns activeCard(status)
+        val port = mockk<TokenisationPort>()
+
+        val outcome = service(port).provision(command())
+
+        assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.CARD_NOT_ACTIVE)
+        assertThat(outcome.detail).contains(status)
+        // The discriminating assertion: a token minted for a blocked card is a live credential for
+        // a card the bank has stopped.
         coVerify(exactly = 0) { port.provision(any(), any()) }
     }
+
+    @Test
+    fun `a card whose state card-issuance did not report is treated as not active`(): Unit = runBlocking {
+        coEvery { cards.lookup(cardId) } returns activeCard(null)
+        val port = mockk<TokenisationPort>()
+
+        val outcome = service(port).provision(command())
+
+        assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.CARD_NOT_ACTIVE)
+        coVerify(exactly = 0) { port.provision(any(), any()) }
+    }
+
+    private fun fingerprintOfFirstCall(): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-tokens",
+        listOf(cardId, "wallet-apple", "Apple Pay").joinToString("\n"),
+    )
 
     @Test
     fun `a live read is labelled NETWORK and a degraded read is labelled LOCAL_MIRROR`(): Unit = runBlocking {
         val mirror = listOf(registration(NetworkTokenStatus.ACTIVE))
         coEvery { registrations.findByCardId(cardId) } returns mirror
+        coEvery { registrations.adoptNetworkSeen(any()) } answers { firstArg() }
 
         // The scheme answers: provenance is NETWORK and no degraded reason is offered.
         simulator.provision(cardId.toString(), TokenRequestor("wallet-apple", "Apple Pay"))
@@ -160,23 +269,47 @@ class CardTokenServiceTest {
     }
 
     @Test
-    fun `a network token the mirror has never seen is still returned, attributed to the answering scheme`(): Unit =
+    fun `a network token the mirror has never seen is adopted into the mirror with one stable id`(): Unit =
         runBlocking {
             coEvery { registrations.findByCardId(cardId) } returns emptyList()
+            val stored = mutableMapOf<String, CardTokenRegistration>()
+            coEvery { registrations.adoptNetworkSeen(any()) } answers {
+                firstArg<List<CardTokenRegistration>>().map { stored.getOrPut(it.tokenReference) { it } }
+            }
             val port = mockk<TokenisationPort>()
             coEvery { port.listTokens(any()) } returns SchemeResult.Answered(
                 listOf(NetworkToken("tok-unknown", "4242", NetworkTokenStatus.SUSPENDED, null, "wallet-google")),
                 CardScheme.MASTERCARD,
             )
 
-            val answer = service(port).listForCard(cardId)
+            val first = service(port).listForCard(cardId)
+            val second = service(port).listForCard(cardId)
 
-            assertThat(answer.tokens).hasSize(1)
-            assertThat(answer.tokens.single().status).isEqualTo(NetworkTokenStatus.SUSPENDED)
+            assertThat(first.tokens).hasSize(1)
+            assertThat(first.tokens.single().status).isEqualTo(NetworkTokenStatus.SUSPENDED)
             // The scheme comes from the ANSWER. Attributing it to the configured binding would name
             // a network that did not reply.
-            assertThat(answer.tokens.single().scheme).isEqualTo(CardScheme.MASTERCARD)
+            assertThat(first.tokens.single().scheme).isEqualTo(CardScheme.MASTERCARD)
+            // The defect this pins: a fresh random id on every read, and nothing saved.
+            assertThat(second.tokens.single().id).isEqualTo(first.tokens.single().id)
+            assertThat(stored).containsKey("tok-unknown")
         }
+
+    @Test
+    fun `a mirrored token the network no longer returns is kept and flagged, never dropped`(): Unit = runBlocking {
+        val gone = registration(NetworkTokenStatus.ACTIVE)
+        coEvery { registrations.findByCardId(cardId) } returns listOf(gone)
+        val port = mockk<TokenisationPort>()
+        coEvery { port.listTokens(any()) } returns SchemeResult.Answered(emptyList(), CardScheme.SIMULATOR)
+
+        val answer = service(port).listForCard(cardId)
+
+        assertThat(answer.source).isEqualTo(TokenReadSource.NETWORK)
+        assertThat(answer.tokens).hasSize(1)
+        assertThat(answer.tokens.single().id).isEqualTo(gone.id)
+        assertThat(answer.tokens.single().absentAtNetwork).isTrue()
+        coVerify(exactly = 0) { registrations.adoptNetworkSeen(any()) }
+    }
 
     @Test
     fun `a deleted token is terminal and the scheme is never asked to change it`(): Unit = runBlocking {

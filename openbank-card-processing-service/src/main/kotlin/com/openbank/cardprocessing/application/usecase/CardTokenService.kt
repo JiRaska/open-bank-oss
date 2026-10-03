@@ -8,9 +8,15 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardprocessing.application.port.`in`.CardTokenUseCase
 import com.openbank.cardprocessing.application.port.`in`.ChangeTokenStatusCommand
 import com.openbank.cardprocessing.application.port.`in`.ProvisionTokenCommand
+import com.openbank.cardprocessing.application.port.out.CardIssuerUnavailableException
 import com.openbank.cardprocessing.application.port.out.CardLifecycleMetricsPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardTokenRegistrationRepository
+import com.openbank.cardprocessing.application.port.out.IdempotencyClaim
+import com.openbank.cardprocessing.application.port.out.LifecycleIdempotencyPort
+import com.openbank.cardprocessing.application.port.out.LifecycleOperation
+import com.openbank.cardprocessing.application.port.out.Reservation
+import com.openbank.cardprocessing.application.port.out.UNATTRIBUTED_SCHEME
 import com.openbank.cardprocessing.domain.event.CardLifecycleEvent
 import com.openbank.cardprocessing.domain.event.CardTokenProvisioned
 import com.openbank.cardprocessing.domain.event.CardTokenStatusChanged
@@ -26,12 +32,18 @@ import com.openbank.libs.domain.cards.scheme.SchemeResult
 import com.openbank.libs.domain.cards.scheme.TokenRequestor
 import com.openbank.libs.domain.cards.scheme.TokenisationPort
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Provisioning and lifecycle for network tokens — the caller ADR-0283 phase 2 did not have.
@@ -56,9 +68,15 @@ import java.util.UUID
  * index on the row, so a retry returns the first registration instead of provisioning again.
  */
 @ApplicationScoped
+@Suppress(
+    // Named private steps of one provisioning flow (pre-network refusal, network call, fingerprint,
+    // reconcile); splitting the class would put one flow across two files for a metric.
+    "TooManyFunctions",
+)
 class CardTokenService(
     private val tokenisation: TokenisationPort,
     private val registrations: CardTokenRegistrationRepository,
+    private val idempotency: LifecycleIdempotencyPort,
     private val cards: CardLookupPort,
     private val metrics: CardLifecycleMetricsPort,
     private val mapper: ObjectMapper,
@@ -68,16 +86,84 @@ class CardTokenService(
     private val log = Logger.getLogger(CardTokenService::class.java)
 
     override suspend fun provision(command: ProvisionTokenCommand): TokenOutcome {
-        registrations.findByIdempotencyKey(command.idempotencyKey)?.let { return TokenOutcome.Provisioned(it) }
-
-        // The card must be one this bank issued before its credential is put in a wallet. The lookup
-        // fails CLOSED in its adapter (ISSUER_UNAVAILABLE), so an unreachable card-issuance is a
-        // refusal here rather than a token minted against a card nobody could confirm.
-        if (cards.lookup(command.cardId) == null) {
-            metrics.tokenProvisioned("UNKNOWN", TokenRefusal.CARD_NOT_FOUND.name)
-            return TokenOutcome.Refused(TokenRefusal.CARD_NOT_FOUND, "no card ${command.cardId}")
+        val claim = IdempotencyClaim(LifecycleOperation.TOKEN_PROVISION, command.idempotencyKey)
+        when (val reservation = idempotency.reserve(claim.operation, claim.key, fingerprintOf(command))) {
+            is Reservation.Completed -> {
+                // The replay answers from the winner's row — even if the card has been blocked since:
+                // the token already exists, and this request is the same request, not a new one.
+                val existing = registrations.findById(reservation.resultId)
+                    ?: error("idempotency reservation points at missing token registration ${reservation.resultId}")
+                return TokenOutcome.Provisioned(existing)
+            }
+            Reservation.InProgress -> throw IdempotencyRequestInProgressException()
+            Reservation.Mismatch -> throw IdempotencyKeyReusedException()
+            Reservation.Claimed -> Unit
         }
 
+        // From here this request HOLDS the key. Every exit before the network answers releases it;
+        // an exit after the network was called and before the row committed leaves it PENDING, because
+        // the network may have minted a token and a retry must not mint a second.
+        var networkCalled = false
+        try {
+            refuseBeforeNetwork(command)?.let {
+                idempotency.release(claim)
+                return it
+            }
+            networkCalled = true
+            val outcome = callNetwork(command, claim)
+            if (outcome is TokenOutcome.Refused) idempotency.release(claim)
+            return outcome
+        } catch (e: CancellationException) {
+            if (!networkCalled) withContext(NonCancellable) { idempotency.release(claim) }
+            throw e
+        } catch (
+            // Anything at all — a reservation left PENDING by a failure before the network was asked
+            // would block this key forever for no reason.
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            if (!networkCalled) {
+                idempotency.release(claim)
+            } else {
+                log.errorf(
+                    e,
+                    "token provisioning for card %s failed after the network was called; idempotency key " +
+                        "left PENDING so a retry cannot mint a second token — reconcile with the scheme",
+                    command.cardId,
+                )
+            }
+            throw e
+        }
+    }
+
+    /**
+     * The checks that need no network: the card must exist, card-issuance must be reachable to say so,
+     * and the card must be ACTIVE. Null when provisioning may proceed.
+     */
+    private suspend fun refuseBeforeNetwork(command: ProvisionTokenCommand): TokenOutcome.Refused? {
+        val card = try {
+            cards.lookup(command.cardId)
+        } catch (e: CardIssuerUnavailableException) {
+            // Fails CLOSED, like authorisation: no token is minted against a card nobody could
+            // confirm. A 503, not a 404 — the card may well exist.
+            log.warnf(e, "token provisioning for card %s refused: card-issuance unreachable", command.cardId)
+            return refusedBeforeNetwork(TokenRefusal.ISSUER_UNAVAILABLE, "card-issuance could not be reached")
+        } ?: return refusedBeforeNetwork(TokenRefusal.CARD_NOT_FOUND, "no card ${command.cardId}")
+
+        if (!card.active) {
+            return refusedBeforeNetwork(
+                TokenRefusal.CARD_NOT_ACTIVE,
+                "card ${command.cardId} is ${card.status ?: "of unknown state"}; only an ACTIVE card may be tokenised",
+            )
+        }
+        return null
+    }
+
+    private fun refusedBeforeNetwork(reason: TokenRefusal, detail: String): TokenOutcome.Refused {
+        metrics.tokenProvisioned(UNATTRIBUTED_SCHEME, reason.name)
+        return TokenOutcome.Refused(reason, detail)
+    }
+
+    private suspend fun callNetwork(command: ProvisionTokenCommand, claim: IdempotencyClaim): TokenOutcome {
         val requestor = TokenRequestor(command.requestorId, command.requestorLabel)
         return when (val answer = tokenisation.provision(command.cardId.toString(), requestor)) {
             is SchemeResult.Answered -> {
@@ -112,6 +198,7 @@ class CardTokenService(
                     registration,
                     outboxMessage(registration.id, CardTokenProvisioned.EVENT_TYPE, event),
                     command.idempotencyKey,
+                    claim,
                 )
                 metrics.tokenProvisioned(answer.scheme.name, null)
                 TokenOutcome.Provisioned(saved)
@@ -130,6 +217,13 @@ class CardTokenService(
             }
         }
     }
+
+    /** The request an `Idempotency-Key` is bound to: same key, different card or requestor is reuse. */
+    private fun fingerprintOf(command: ProvisionTokenCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-tokens",
+        listOf(command.cardId, command.requestorId, command.requestorLabel).joinToString("\n"),
+    )
 
     override suspend fun changeStatus(command: ChangeTokenStatusCommand): TokenOutcome {
         val existing = registrations.findByTokenReference(command.tokenReference)
@@ -170,10 +264,10 @@ class CardTokenService(
                 val saved = registrations.save(
                     updated,
                     outboxMessage(updated.id, CardTokenStatusChanged.EVENT_TYPE, event),
-                    // The status change reuses the registration's key: the UNIQUE index protects the
-                    // ROW's identity, and this row already exists. A second key here would be a
-                    // second identity for one registration.
+                    // Ignored for an existing row (the key is written once, at insert); passed only
+                    // because the signature is shared with the insert path.
                     idempotencyKeyOf(updated),
+                    null,
                 )
                 metrics.tokenStatusChanged(updated.scheme.name, updated.status.name, null)
                 TokenOutcome.Changed(saved)
@@ -210,43 +304,63 @@ class CardTokenService(
     }
 
     /**
-     * The network's list, described with the mirror's metadata.
+     * The network's list joined with the mirror, losing neither side.
      *
-     * The network knows the token and its state; only this bank knows which requestor label an
-     * operator gave it and when it was first seen here. A token the network returns that has no
-     * mirror row is still returned — it exists, and hiding it would make the screen disagree with
-     * the network — carrying the placeholder label and the network's own timing.
+     * - A token the network returns that the mirror lacks is ADOPTED: written to the mirror under the
+     *   network's token reference, so it has one stable id from the first read on and its existence is
+     *   on record even after the network stops returning it. Inserting is safe on a read path because
+     *   it only adds what the network has just confirmed; it never rewrites an existing row, and the
+     *   drift stays visible — an adopted row carries the [UNMIRRORED_LABEL] and no requestor this bank
+     *   recorded.
+     * - A token the mirror holds that the network did NOT return is kept and flagged
+     *   [absentAtNetwork][CardTokenRegistration.absentAtNetwork]. Dropping it would make a deleted or
+     *   lost token vanish from the one screen that should show the disagreement.
      *
-     * This does NOT write the mirror back. A read path that silently repairs its own store makes
-     * every drift invisible, and drift between the vault and the mirror is a thing an operator has
-     * to be able to see.
+     * The live status is overlaid on the response only; the stored status changes through
+     * [changeStatus] and its event, never silently on a read.
      */
-    private fun reconcile(
+    private suspend fun reconcile(
         cardId: UUID,
         scheme: CardScheme,
         live: List<NetworkToken>,
         mirror: List<CardTokenRegistration>,
     ): List<CardTokenRegistration> {
         val byReference = mirror.associateBy { it.tokenReference }
-        return live.map { token ->
-            val known = byReference[token.tokenReference]
-            known?.copy(status = token.status, expiry = token.expiry ?: known.expiry)
-                ?: CardTokenRegistration(
-                    id = Ids.newId(),
-                    cardId = cardId,
-                    tokenReference = token.tokenReference,
-                    requestorId = token.requestorId ?: UNKNOWN_REQUESTOR,
-                    requestorLabel = UNMIRRORED_LABEL,
-                    last4 = token.last4,
-                    status = token.status,
-                    // The scheme comes from the ANSWER, not from the token: `NetworkToken` carries
-                    // no scheme of its own, because which network replied is a property of the call.
-                    scheme = scheme,
-                    expiry = token.expiry,
-                    provisionedAt = Instant.now(clock),
-                    updatedAt = Instant.now(clock),
-                )
+        val unknown = live.filter { it.tokenReference !in byReference }
+        val adopted = if (unknown.isEmpty()) {
+            emptyMap()
+        } else {
+            val now = Instant.now(clock)
+            registrations.adoptNetworkSeen(
+                unknown.map { token ->
+                    CardTokenRegistration(
+                        id = Ids.newId(),
+                        cardId = cardId,
+                        tokenReference = token.tokenReference,
+                        requestorId = token.requestorId ?: UNKNOWN_REQUESTOR,
+                        requestorLabel = UNMIRRORED_LABEL,
+                        last4 = token.last4,
+                        status = token.status,
+                        // The scheme comes from the ANSWER, not from the token: `NetworkToken` carries
+                        // no scheme of its own, because which network replied is a property of the call.
+                        scheme = scheme,
+                        expiry = token.expiry,
+                        provisionedAt = now,
+                        updatedAt = now,
+                    )
+                },
+            ).associateBy { it.tokenReference }
         }
+        val liveRows = live.mapNotNull { token ->
+            val stored = byReference[token.tokenReference] ?: adopted[token.tokenReference]
+            stored?.copy(status = token.status, expiry = token.expiry ?: stored.expiry)
+        }
+        val liveReferences = live.mapTo(HashSet()) { it.tokenReference }
+        val absent = mirror.filter { it.tokenReference !in liveReferences }.map { it.copy(absentAtNetwork = true) }
+        if (absent.isNotEmpty()) {
+            log.infof("%d mirrored token(s) for card %s were not returned by %s", absent.size, cardId, scheme)
+        }
+        return liveRows + absent
     }
 
     private fun idempotencyKeyOf(registration: CardTokenRegistration) = "token:${registration.tokenReference}"

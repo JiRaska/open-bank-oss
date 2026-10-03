@@ -11,12 +11,18 @@ import com.openbank.cardprocessing.application.port.`in`.SubmitEvidenceCommand
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.CardDisputeCaseRepository
 import com.openbank.cardprocessing.application.port.out.CardLifecycleMetricsPort
+import com.openbank.cardprocessing.application.port.out.IdempotencyClaim
+import com.openbank.cardprocessing.application.port.out.LifecycleIdempotencyPort
+import com.openbank.cardprocessing.application.port.out.LifecycleOperation
+import com.openbank.cardprocessing.application.port.out.Reservation
+import com.openbank.cardprocessing.application.port.out.UNATTRIBUTED_SCHEME
 import com.openbank.cardprocessing.domain.event.CardDisputeEvidenceSubmitted
 import com.openbank.cardprocessing.domain.event.CardDisputeOpened
 import com.openbank.cardprocessing.domain.event.CardDisputeStatusChanged
 import com.openbank.cardprocessing.domain.event.CardLifecycleEvent
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.CardDisputeCase
+import com.openbank.cardprocessing.domain.model.DisputeEvidenceRecord
 import com.openbank.cardprocessing.domain.model.DisputeOutcome
 import com.openbank.cardprocessing.domain.model.DisputeRefusal
 import com.openbank.cardprocessing.domain.model.DisputeStatus
@@ -26,12 +32,21 @@ import com.openbank.libs.domain.cards.scheme.SchemeDispute
 import com.openbank.libs.domain.cards.scheme.SchemeFailure
 import com.openbank.libs.domain.cards.scheme.SchemeResult
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 import org.jboss.logging.Logger
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * Chargeback cases against cleared card spend — the caller for
@@ -51,6 +66,16 @@ import java.util.UUID
  * back — the correct instrument is a reversal, which the money path already has — and the disputed
  * amount may never exceed what cleared. Both are checked against the authorisation row, not against
  * a number the caller supplied.
+ *
+ * The disputed currency must be the authorisation's (a chargeback is filed in the transaction
+ * currency; two currencies have no order without a rate), and the amounts are compared as Money.
+ *
+ * ## Idempotency and closed cases
+ *
+ * Opening and evidence filing reserve the caller's `Idempotency-Key` in the database BEFORE the
+ * network is asked ([LifecycleIdempotencyPort]): of two concurrent same-key requests exactly one
+ * calls the network, the other replays its result or gets 409 IN_PROGRESS. A closed case is terminal
+ * — [refreshStatus] never moves it, it only reports a disagreeing network.
  *
  * One live case per authorisation. Checked here for the message and enforced by a partial UNIQUE
  * index in the database, because a check in application code alone is a race between two operators
@@ -84,6 +109,7 @@ import java.util.UUID
 class CardDisputeService(
     private val disputes: DisputePort,
     private val cases: CardDisputeCaseRepository,
+    private val idempotency: LifecycleIdempotencyPort,
     private val authorizations: CardAuthorizationRepository,
     private val metrics: CardLifecycleMetricsPort,
     private val mapper: ObjectMapper,
@@ -93,8 +119,26 @@ class CardDisputeService(
     private val log = Logger.getLogger(CardDisputeService::class.java)
 
     override suspend fun open(command: OpenDisputeCommand): DisputeOutcome {
-        cases.findByIdempotencyKey(command.idempotencyKey)?.let { return DisputeOutcome.Accepted(it) }
+        val claim = IdempotencyClaim(LifecycleOperation.DISPUTE_OPEN, command.idempotencyKey)
+        when (val reservation = idempotency.reserve(claim.operation, claim.key, fingerprintOf(command))) {
+            is Reservation.Completed -> return DisputeOutcome.Accepted(
+                cases.findById(reservation.resultId)
+                    ?: error("idempotency reservation points at missing dispute ${reservation.resultId}"),
+            )
+            Reservation.InProgress -> throw IdempotencyRequestInProgressException()
+            Reservation.Mismatch -> throw IdempotencyKeyReusedException()
+            Reservation.Claimed -> Unit
+        }
+        return holdingClaim(claim, "dispute open for authorisation ${command.authorizationId}") { network ->
+            openClaimed(command, claim, network)
+        }
+    }
 
+    private suspend fun openClaimed(
+        command: OpenDisputeCommand,
+        claim: IdempotencyClaim,
+        network: NetworkCallMarker,
+    ): DisputeOutcome {
         val authorization = authorizations.findById(command.authorizationId)
             ?: return refuseOpen(
                 DisputeRefusal.AUTHORIZATION_NOT_FOUND,
@@ -115,15 +159,16 @@ class CardDisputeService(
                     "transaction is disputed",
             )
 
+        network.called = true
         return when (
             val answer = disputes.open(
                 networkReference,
                 command.reasonCode,
                 command.amountMinorUnits,
-                command.currencyCode,
+                authorization.currencyCode,
             )
         ) {
-            is SchemeResult.Answered -> recordOpened(authorization, answer, command.idempotencyKey)
+            is SchemeResult.Answered -> recordOpened(authorization, answer, command.idempotencyKey, claim)
 
             is SchemeResult.Unanswered -> {
                 val reason = refusalFor(answer.failure)
@@ -140,6 +185,47 @@ class CardDisputeService(
         }
     }
 
+    /** Set once the network has been asked; after that a failure must leave the reservation PENDING. */
+    private class NetworkCallMarker {
+        var called = false
+    }
+
+    /**
+     * Runs [work] while holding [claim]: a refusal releases it (nothing happened, a retry may run),
+     * an acceptance has already completed it in the result's transaction, and a failure releases it
+     * only if the network was never asked — after that the network may have acted, and a retry under
+     * the same key must not reach it again.
+     */
+    private suspend fun holdingClaim(
+        claim: IdempotencyClaim,
+        what: String,
+        work: suspend (NetworkCallMarker) -> DisputeOutcome,
+    ): DisputeOutcome {
+        val network = NetworkCallMarker()
+        try {
+            val outcome = work(network)
+            if (outcome is DisputeOutcome.Refused) idempotency.release(claim)
+            return outcome
+        } catch (e: CancellationException) {
+            if (!network.called) withContext(NonCancellable) { idempotency.release(claim) }
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            if (!network.called) {
+                idempotency.release(claim)
+            } else {
+                log.errorf(
+                    e,
+                    "%s failed after the network was called; idempotency key left PENDING so a retry " +
+                        "cannot repeat the network call — reconcile with the scheme",
+                    what,
+                )
+            }
+            throw e
+        }
+    }
+
     /**
      * Writes the case the network just opened, with its event, in one transaction.
      *
@@ -151,6 +237,7 @@ class CardDisputeService(
         authorization: CardAuthorization,
         answer: SchemeResult.Answered<SchemeDispute>,
         idempotencyKey: String,
+        claim: IdempotencyClaim,
     ): DisputeOutcome {
         val now = Instant.now(clock)
         val case = CardDisputeCase(
@@ -182,12 +269,45 @@ class CardDisputeService(
             scheme = case.scheme.name,
             occurredAt = now,
         )
-        val saved = cases.save(case, outboxMessage(case.id, CardDisputeOpened.EVENT_TYPE, event), idempotencyKey)
+        val saved = cases.save(
+            case,
+            outboxMessage(case.id, CardDisputeOpened.EVENT_TYPE, event),
+            idempotencyKey,
+            claim,
+        )
         metrics.disputeOpened(answer.scheme.name, null)
         return DisputeOutcome.Accepted(saved)
     }
 
+    /**
+     * Files evidence, idempotently, into an APPEND-ONLY history.
+     *
+     * Each submission is a row in `card_dispute_evidence` and its own event; the case's
+     * `evidenceReference` is only the latest. A retried request (same `Idempotency-Key`, same body)
+     * replays the case without asking the network again; a second, different filing is a new row.
+     */
     override suspend fun submitEvidence(command: SubmitEvidenceCommand): DisputeOutcome {
+        val claim = IdempotencyClaim(LifecycleOperation.DISPUTE_EVIDENCE, command.idempotencyKey)
+        when (val reservation = idempotency.reserve(claim.operation, claim.key, fingerprintOf(command))) {
+            // The fingerprint binds the dispute id, so a completed reservation is for THIS case.
+            is Reservation.Completed -> return DisputeOutcome.Accepted(
+                cases.findById(command.disputeId)
+                    ?: error("idempotency reservation for evidence on missing dispute ${command.disputeId}"),
+            )
+            Reservation.InProgress -> throw IdempotencyRequestInProgressException()
+            Reservation.Mismatch -> throw IdempotencyKeyReusedException()
+            Reservation.Claimed -> Unit
+        }
+        return holdingClaim(claim, "evidence for dispute ${command.disputeId}") { network ->
+            submitEvidenceClaimed(command, claim, network)
+        }
+    }
+
+    private suspend fun submitEvidenceClaimed(
+        command: SubmitEvidenceCommand,
+        claim: IdempotencyClaim,
+        network: NetworkCallMarker,
+    ): DisputeOutcome {
         val case = cases.findById(command.disputeId)
             ?: return refuse(DisputeRefusal.CASE_NOT_FOUND, "no dispute ${command.disputeId}")
         if (case.terminal) {
@@ -195,6 +315,7 @@ class CardDisputeService(
             return refuse(DisputeRefusal.CASE_TERMINAL, "case ${case.networkCaseId} is ${case.status}")
         }
 
+        network.called = true
         val evidence = DisputeEvidence(case.networkCaseId, command.documentReference, command.note)
         return when (val answer = disputes.submitEvidence(evidence)) {
             is SchemeResult.Answered -> {
@@ -205,6 +326,14 @@ class CardDisputeService(
                     evidenceReference = command.documentReference,
                     updatedAt = now,
                 )
+                val record = DisputeEvidenceRecord(
+                    id = Ids.newId(),
+                    disputeId = case.id,
+                    documentReference = command.documentReference,
+                    note = command.note,
+                    schemeStatus = answer.value.status,
+                    submittedAt = now,
+                )
                 val event = CardDisputeEvidenceSubmitted(
                     disputeId = updated.id,
                     authorizationId = updated.authorizationId,
@@ -213,10 +342,11 @@ class CardDisputeService(
                     documentReference = command.documentReference,
                     occurredAt = now,
                 )
-                val saved = cases.save(
+                val saved = cases.recordEvidence(
                     updated,
+                    record,
                     outboxMessage(updated.id, CardDisputeEvidenceSubmitted.EVENT_TYPE, event),
-                    idempotencyKeyOf(updated),
+                    claim,
                 )
                 metrics.disputeEvidenceSubmitted(null)
                 DisputeOutcome.Accepted(saved)
@@ -230,15 +360,24 @@ class CardDisputeService(
         }
     }
 
+    override suspend fun evidenceHistory(disputeId: UUID): List<DisputeEvidenceRecord>? =
+        cases.findById(disputeId)?.let { cases.findEvidence(disputeId) }
+
     /**
      * Re-reads the network's status and records a MOVE, publishing nothing when nothing moved.
      *
      * An event per poll would make "the case changed" indistinguishable from "somebody looked at
      * it", and every consumer would have to de-duplicate a stream that is mostly repeats.
+     *
+     * A CLOSED case (WON, LOST, WITHDRAWN) is terminal and is never mutated here: its outcome has
+     * already been announced, booked and possibly paid out, and a later network read that disagrees
+     * is a discrepancy for a person to investigate, not a state change to apply silently. The stored
+     * case is returned, and a disagreement is counted and logged.
      */
     override suspend fun refreshStatus(disputeId: UUID): DisputeOutcome {
         val case = cases.findById(disputeId)
             ?: return refuse(DisputeRefusal.CASE_NOT_FOUND, "no dispute $disputeId")
+        if (case.terminal) return refreshClosed(case)
 
         return when (val answer = disputes.status(case.networkCaseId)) {
             is SchemeResult.Answered -> {
@@ -263,12 +402,37 @@ class CardDisputeService(
                         updated,
                         outboxMessage(updated.id, CardDisputeStatusChanged.EVENT_TYPE, event),
                         idempotencyKeyOf(updated),
+                        null,
                     ),
                 )
             }
 
             is SchemeResult.Unanswered -> refuse(refusalFor(answer.failure), answer.detail)
         }
+    }
+
+    /**
+     * The network is still asked — a disagreement about a closed case is worth knowing — but its
+     * answer is only compared, never applied. An unreachable network changes nothing either.
+     */
+    private suspend fun refreshClosed(case: CardDisputeCase): DisputeOutcome {
+        val answer = disputes.status(case.networkCaseId)
+        if (answer is SchemeResult.Answered) {
+            val reported = bankStatusFor(answer.value, case.status)
+            if (reported != case.status) {
+                metrics.disputeTerminalMismatch(answer.scheme.name, case.status.name, reported.name)
+                log.warnf(
+                    "closed dispute %s (network case %s) is stored %s but the network now reports %s (%s); " +
+                        "the stored outcome is kept — investigate",
+                    case.id,
+                    case.networkCaseId,
+                    case.status,
+                    reported,
+                    answer.value.status,
+                )
+            }
+        }
+        return DisputeOutcome.Accepted(case)
     }
 
     override suspend fun findById(id: UUID): CardDisputeCase? = cases.findById(id)
@@ -306,28 +470,58 @@ class CardDisputeService(
                 "nothing has cleared on this authorisation — a hold is released with a reversal, not disputed",
             )
         }
-        if (command.amountMinorUnits <= 0L || command.amountMinorUnits > authorization.clearedAmountMinorUnits) {
+        // An unknown or malformed code is the CLIENT's error: InvalidMoneyException, which libs-runtime
+        // renders as a 400. Only a well-formed code that differs from the authorisation's is a 409.
+        val requested = CurrencyCode.of(command.currencyCode)
+        val authorised = CurrencyCode.of(authorization.currencyCode)
+        if (requested != authorised) {
+            return refuseOpen(
+                DisputeRefusal.CURRENCY_MISMATCH,
+                "the dispute is in $requested but authorisation ${authorization.id} cleared in $authorised; " +
+                    "a chargeback is filed in the transaction currency, never converted",
+            )
+        }
+        // Compared as Money, not as raw longs: two minor-unit counts are only comparable once both are
+        // known to be in one currency, and Money refuses the comparison otherwise.
+        val disputed = moneyOf(command.amountMinorUnits, requested)
+        val cleared = moneyOf(authorization.clearedAmountMinorUnits, authorised)
+        if (!disputed.isPositive() || disputed > cleared) {
             return refuseOpen(
                 DisputeRefusal.AMOUNT_EXCEEDS_CLEARED,
-                "the disputed amount must be positive and at most the cleared " +
-                    "${authorization.clearedAmountMinorUnits} minor units",
+                "the disputed amount must be positive and at most the cleared $cleared",
             )
         }
         return null
     }
+
+    private fun moneyOf(minorUnits: Long, currency: CurrencyCode): Money =
+        Money(BigDecimal.valueOf(minorUnits, currency.defaultFractionDigits), currency)
+
+    private fun fingerprintOf(command: OpenDisputeCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-disputes",
+        listOf(command.authorizationId, command.reasonCode, command.amountMinorUnits, command.currencyCode.uppercase())
+            .joinToString("\n"),
+    )
+
+    private fun fingerprintOf(command: SubmitEvidenceCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-disputes/${command.disputeId}/evidence",
+        listOf(command.documentReference, command.note.orEmpty()).joinToString("\n"),
+    )
 
     private fun refuse(reason: DisputeRefusal, detail: String?): DisputeOutcome = DisputeOutcome.Refused(reason, detail)
 
     /**
      * A refusal on the OPEN path, counted before it is returned.
      *
-     * The scheme is [UNATTRIBUTED] because these refusals happen before any network call — the
+     * The scheme is [UNATTRIBUTED_SCHEME] because these refusals happen before any network call — the
      * request never reached a scheme, and labelling them with the configured binding would make the
      * dashboard blame a network that was never asked. That distinction is the difference between
      * "operators keep trying to dispute holds" and "the scheme is down".
      */
     private fun refuseOpen(reason: DisputeRefusal, detail: String?): DisputeOutcome {
-        metrics.disputeOpened(UNATTRIBUTED, reason.name)
+        metrics.disputeOpened(UNATTRIBUTED_SCHEME, reason.name)
         return DisputeOutcome.Refused(reason, detail)
     }
 
@@ -347,9 +541,4 @@ class CardDisputeService(
             payload = mapper.writeValueAsString(event),
             createdAt = Instant.now(clock),
         )
-
-    private companion object {
-        /** No network was asked, so no network is named. */
-        const val UNATTRIBUTED = "NONE"
-    }
 }

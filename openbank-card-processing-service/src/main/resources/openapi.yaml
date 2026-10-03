@@ -189,18 +189,20 @@ paths:
       description: |
         The token is minted by the NETWORK. What this service stores is the record that it exists —
         no token credential, no cryptogram and no PAN. Provisioning is not naturally idempotent, so
-        `Idempotency-Key` is required and is held by a unique index: a retried request returns the
-        first token rather than minting a second credential the customer can see.
+        `Idempotency-Key` is required and is RESERVED in the database before the network is called:
+        of two concurrent requests with one key exactly one reaches the network; a retry returns the
+        first token (201, same id) and a request racing the first is answered 409
+        `IDEMPOTENCY_REQUEST_IN_PROGRESS`. The same key with a different body is 409
+        `IDEMPOTENCY_KEY_REUSED`.
+
+        Only an ACTIVE card is tokenised: a blocked, suspended, expired or cancelled card is refused
+        with 409 `CARD_NOT_ACTIVE` before the network is asked. If card-issuance cannot be reached to
+        confirm the card the request fails closed with 503 `ISSUER_UNAVAILABLE`.
       operationId: provisionCardToken
       security:
         - bearerAuth: []
       parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          description: Retry safety. The same key never mints a second token.
-          schema:
-            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -214,12 +216,25 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Token'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/TokenRefused'
         '409':
-          $ref: '#/components/responses/Refused'
+          description: |
+            A token refusal (`CARD_NOT_ACTIVE`, `SCHEME_UNAVAILABLE`, …) as a `TokenRefusal`, or an
+            idempotency conflict (`IDEMPOTENCY_REQUEST_IN_PROGRESS`, `IDEMPOTENCY_KEY_REUSED`) in the
+            fleet error shape.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/TokenRefusal'
+                  - $ref: '#/components/schemas/IdempotencyConflict'
+        '503':
+          $ref: '#/components/responses/TokenRefused'
 
   /api/v1/card-tokens/{tokenReference}/status:
     post:
@@ -257,9 +272,9 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/TokenRefused'
         '409':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/TokenRefused'
 
   /api/v1/card-tokens/card/{cardId}:
     get:
@@ -270,6 +285,10 @@ paths:
         did not and these are the rows this bank last recorded. A client that renders the list
         without reading `source` presents possibly-stale token states as current, which is why the
         field is required rather than optional.
+
+        On a `NETWORK` read nothing is dropped: a token the network returns that this bank never
+        recorded is adopted into the mirror (one stable `id` from then on), and a mirrored token the
+        network did not return is still listed with `absentAtNetwork: true`.
       operationId: listCardTokens
       security:
         - bearerAuth: []
@@ -299,15 +318,15 @@ paths:
         released with a reversal, and the disputed amount may not exceed what cleared. Opening fails
         CLOSED — if the network cannot be reached no case is recorded, because a local case carries
         a respond-by date nobody is counting down while it renders as active.
+
+        `currencyCode` must be the authorisation's currency (409 `CURRENCY_MISMATCH` otherwise — a
+        chargeback is filed in the transaction currency and never converted); an unknown code is 400.
+        `Idempotency-Key` is reserved before the network is called, exactly as for token provisioning.
       operationId: openCardDispute
       security:
         - bearerAuth: []
       parameters:
-        - name: Idempotency-Key
-          in: header
-          required: true
-          schema:
-            type: string
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -321,22 +340,31 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Dispute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeRefused'
         '409':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeConflict'
 
   /api/v1/card-disputes/{id}/evidence:
     post:
       tags: [Disputes]
       summary: File evidence against an open case
+      description: |
+        Every filing is APPENDED to the case's evidence history (`GET .../evidence`); the case's
+        `evidenceReference` is only the latest. `Idempotency-Key` is required: a retry of the same
+        filing replays the case without filing with the network again, a request racing it is 409
+        `IDEMPOTENCY_REQUEST_IN_PROGRESS`, and the same key with a different body or case is 409
+        `IDEMPOTENCY_KEY_REUSED`.
       operationId: submitCardDisputeEvidence
       security:
         - bearerAuth: []
       parameters:
         - $ref: '#/components/parameters/DisputeId'
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -350,12 +378,33 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Dispute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeRefused'
         '409':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeConflict'
+    get:
+      tags: [Disputes]
+      summary: Every evidence submission against a case, oldest first
+      operationId: listCardDisputeEvidence
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      responses:
+        '200':
+          description: The evidence history
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisputeEvidenceList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such case
 
   /api/v1/card-disputes/{id}/refresh:
     post:
@@ -364,6 +413,10 @@ paths:
       description: |
         Publishes nothing when nothing moved. An event per poll would make "the case changed"
         indistinguishable from "somebody looked at it".
+
+        A CLOSED case (WON, LOST, WITHDRAWN) is terminal: refresh returns the stored case unchanged
+        and never moves its outcome. If the network now reports a different outcome the disagreement
+        is counted (`openbank_card_dispute_terminal_mismatches_total`) and logged for investigation.
       operationId: refreshCardDispute
       security:
         - bearerAuth: []
@@ -371,7 +424,7 @@ paths:
         - $ref: '#/components/parameters/DisputeId'
       responses:
         '200':
-          description: The case as the network now describes it
+          description: The case as the network now describes it (a closed case exactly as stored)
           content:
             application/json:
               schema:
@@ -379,9 +432,9 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeRefused'
         '409':
-          $ref: '#/components/responses/Refused'
+          $ref: '#/components/responses/DisputeRefused'
 
   /api/v1/card-disputes/{id}:
     get:
@@ -485,6 +538,17 @@ components:
       schema:
         type: string
         format: uuid
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: |
+        Retry safety, reserved before the network is called. 1–128 characters of `[A-Za-z0-9._:-]`.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 128
+        pattern: '^[A-Za-z0-9._:-]+$'
 
   responses:
     BadRequest:
@@ -500,6 +564,31 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/Refusal'
+    TokenRefused:
+      description: |
+        A token operation was refused. 404 for `CARD_NOT_FOUND` / `TOKEN_NOT_FOUND`, 503 for
+        `ISSUER_UNAVAILABLE` (card-issuance unreachable — fails closed), 409 otherwise.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TokenRefusal'
+    DisputeRefused:
+      description: A dispute operation was refused. 404 for `AUTHORIZATION_NOT_FOUND` / `CASE_NOT_FOUND`, 409 otherwise.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/DisputeRefusal'
+    DisputeConflict:
+      description: |
+        A dispute refusal (`CURRENCY_MISMATCH`, `ALREADY_DISPUTED`, …) as a `DisputeRefusal`, or an
+        idempotency conflict (`IDEMPOTENCY_REQUEST_IN_PROGRESS`, `IDEMPOTENCY_KEY_REUSED`) in the
+        fleet error shape.
+      content:
+        application/json:
+          schema:
+            oneOf:
+              - $ref: '#/components/schemas/DisputeRefusal'
+              - $ref: '#/components/schemas/IdempotencyConflict'
 
   schemas:
     PresentmentChannel:
@@ -634,6 +723,43 @@ components:
         message:
           type: string
 
+    TokenRefusal:
+      type: object
+      required: [reason, message]
+      properties:
+        reason:
+          type: string
+          enum:
+            [CARD_NOT_FOUND, CARD_NOT_ACTIVE, ISSUER_UNAVAILABLE, TOKEN_NOT_FOUND, TOKEN_TERMINAL,
+             SCHEME_UNAVAILABLE, SCHEME_REFUSED]
+        message:
+          type: string
+
+    DisputeRefusal:
+      type: object
+      required: [reason, message]
+      properties:
+        reason:
+          type: string
+          enum:
+            [AUTHORIZATION_NOT_FOUND, NO_NETWORK_REFERENCE, NOTHING_CLEARED, CURRENCY_MISMATCH,
+             AMOUNT_EXCEEDS_CLEARED, ALREADY_DISPUTED, CASE_NOT_FOUND, CASE_TERMINAL, SCHEME_UNAVAILABLE,
+             SCHEME_REFUSED]
+        message:
+          type: string
+
+    IdempotencyConflict:
+      type: object
+      description: The fleet error shape (libs-runtime) for an idempotency conflict.
+      properties:
+        status:
+          type: integer
+        code:
+          type: string
+          enum: [IDEMPOTENCY_REQUEST_IN_PROGRESS, IDEMPOTENCY_KEY_REUSED]
+        message:
+          type: string
+
     SandboxPurchaseRequest:
       type: object
       required: [idempotencyKey, cardId, amountMinorUnits, currencyCode, channel]
@@ -753,6 +879,11 @@ components:
         updatedAt:
           type: string
           format: date-time
+        absentAtNetwork:
+          type: boolean
+          description: |
+            True when a NETWORK-sourced list did not return this mirrored token — kept and shown,
+            never dropped. Always false on a LOCAL_MIRROR read, where the network was not asked.
     TokenList:
       type: object
       required: [tokens, source, count]
@@ -801,6 +932,7 @@ components:
         note:
           type: string
           nullable: true
+          maxLength: 2000
     DisputeStatus:
       type: string
       description: |
@@ -854,6 +986,34 @@ components:
         updatedAt:
           type: string
           format: date-time
+    DisputeEvidence:
+      type: object
+      required: [id, documentReference, schemeStatus, submittedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        documentReference:
+          type: string
+        note:
+          type: string
+          nullable: true
+        schemeStatus:
+          type: string
+          description: The network's status string as it answered this submission, verbatim.
+        submittedAt:
+          type: string
+          format: date-time
+    DisputeEvidenceList:
+      type: object
+      required: [evidence, count]
+      properties:
+        evidence:
+          type: array
+          items:
+            $ref: '#/components/schemas/DisputeEvidence'
+        count:
+          type: integer
     DisputeList:
       type: object
       required: [disputes, count]

@@ -5,9 +5,12 @@
 package com.openbank.cardprocessing.infrastructure.persistence.repository
 
 import com.openbank.cardprocessing.application.port.out.CardDisputeCaseRepository
+import com.openbank.cardprocessing.application.port.out.IdempotencyClaim
 import com.openbank.cardprocessing.domain.model.CardDisputeCase
+import com.openbank.cardprocessing.domain.model.DisputeEvidenceRecord
 import com.openbank.cardprocessing.domain.model.DisputeStatus
 import com.openbank.cardprocessing.infrastructure.persistence.entity.CardDisputeCaseEntity
+import com.openbank.cardprocessing.infrastructure.persistence.entity.CardDisputeEvidenceEntity
 import com.openbank.libs.domain.cards.scheme.CardScheme
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -19,28 +22,65 @@ import java.util.UUID
 
 /** Dispute cases and their events, committed together (ADR-0050). Same managed-entity rule as the sibling repositories. */
 @ApplicationScoped
-class CardDisputeCaseRepositoryImpl(private val outbox: CardProcessingOutboxRepositoryImpl) :
-    CardDisputeCaseRepository,
+class CardDisputeCaseRepositoryImpl(
+    private val outbox: CardProcessingOutboxRepositoryImpl,
+    private val idempotency: LifecycleIdempotencyRepositoryImpl,
+) : CardDisputeCaseRepository,
     PanacheRepository<CardDisputeCaseEntity> {
 
-    override suspend fun save(case: CardDisputeCase, event: OutboxMessage, idempotencyKey: String): CardDisputeCase =
-        Panache.withTransaction {
-            find("id", case.id).firstResult().flatMap { existing ->
-                val persisted: Uni<CardDisputeCaseEntity> = if (existing != null) {
-                    existing.applyFrom(case)
-                    Uni.createFrom().item(existing)
+    override suspend fun save(
+        case: CardDisputeCase,
+        event: OutboxMessage,
+        idempotencyKey: String,
+        claim: IdempotencyClaim?,
+    ): CardDisputeCase = Panache.withTransaction {
+        upsert(case, idempotencyKey)
+            .chain { _ -> outbox.persistInTransaction(event) }
+            .chain { _ ->
+                if (claim == null) {
+                    Uni.createFrom().voidItem()
                 } else {
-                    persist(case.toEntity(idempotencyKey))
+                    idempotency.completeInTransaction(claim, case.id)
                 }
-                persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(case)
             }
-        }.awaitSuspending()
+            .replaceWith(case)
+    }.awaitSuspending()
+
+    override suspend fun recordEvidence(
+        case: CardDisputeCase,
+        evidence: DisputeEvidenceRecord,
+        event: OutboxMessage,
+        claim: IdempotencyClaim,
+    ): CardDisputeCase = Panache.withTransaction {
+        // Never upserts the evidence: a new id per submission, so history only ever grows.
+        upsert(case, null)
+            .chain { _ -> Panache.getSession().chain { s -> s.persist(evidence.toEntity()) } }
+            .chain { _ -> outbox.persistInTransaction(event) }
+            .chain { _ -> idempotency.completeInTransaction(claim, evidence.id) }
+            .replaceWith(case)
+    }.awaitSuspending()
+
+    override suspend fun findEvidence(disputeId: UUID): List<DisputeEvidenceRecord> = Panache.withSession {
+        Panache.getSession().chain { s ->
+            s.createQuery(
+                "from CardDisputeEvidenceEntity where disputeId = :dispute order by submittedAt asc, id asc",
+                CardDisputeEvidenceEntity::class.java,
+            ).setParameter("dispute", disputeId).resultList
+        }
+    }.awaitSuspending().map { it.toDomain() }
+
+    private fun upsert(case: CardDisputeCase, idempotencyKey: String?): Uni<CardDisputeCaseEntity> =
+        find("id", case.id).firstResult().flatMap { existing ->
+            if (existing != null) {
+                existing.applyFrom(case)
+                Uni.createFrom().item(existing)
+            } else {
+                persist(case.toEntity(requireNotNull(idempotencyKey) { "a new case needs its idempotency key" }))
+            }
+        }
 
     override suspend fun findById(id: UUID): CardDisputeCase? =
         Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
-
-    override suspend fun findByIdempotencyKey(key: String): CardDisputeCase? =
-        Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
 
     override suspend fun findByCardId(cardId: UUID, limit: Int): List<CardDisputeCase> = Panache.withSession {
         find("cardId = ?1 order by openedAt desc", cardId).range(0, limit.coerceAtLeast(1) - 1).list()
@@ -99,3 +139,21 @@ class CardDisputeCaseRepositoryImpl(private val outbox: CardProcessingOutboxRepo
         updatedAt = c.updatedAt
     }
 }
+
+private fun DisputeEvidenceRecord.toEntity() = CardDisputeEvidenceEntity().also {
+    it.id = id
+    it.disputeId = disputeId
+    it.documentReference = documentReference
+    it.note = note
+    it.schemeStatus = schemeStatus
+    it.submittedAt = submittedAt
+}
+
+private fun CardDisputeEvidenceEntity.toDomain() = DisputeEvidenceRecord(
+    id = id,
+    disputeId = disputeId,
+    documentReference = documentReference,
+    note = note,
+    schemeStatus = schemeStatus,
+    submittedAt = submittedAt,
+)

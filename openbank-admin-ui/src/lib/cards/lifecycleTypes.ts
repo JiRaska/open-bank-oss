@@ -22,6 +22,8 @@ export interface NetworkTokenView {
   expiry: string | null
   provisionedAt: string
   updatedAt: string
+  /** True when a NETWORK-sourced list did not return this mirrored token (always false on LOCAL_MIRROR). */
+  absentAtNetwork: boolean
 }
 
 /**

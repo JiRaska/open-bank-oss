@@ -53,6 +53,23 @@ data class CardDisputeCase(
 }
 
 /**
+ * One evidence submission against a case — a row in an APPEND-ONLY history.
+ *
+ * [CardDisputeCase.evidenceReference] is the LATEST document only; this is the file. A scheme rules
+ * on everything submitted, so the bank must be able to show everything submitted — overwriting the
+ * reference on the second filing would erase the first from the record.
+ */
+data class DisputeEvidenceRecord(
+    val id: UUID,
+    val disputeId: UUID,
+    val documentReference: String,
+    val note: String?,
+    /** The network's status string as it answered this submission, verbatim. */
+    val schemeStatus: String,
+    val submittedAt: Instant,
+)
+
+/**
  * The bank-side lifecycle.
  *
  * `EVIDENCE_SUBMITTED` is a state and not a flag on `OPEN`: the representment deadline stops
@@ -72,6 +89,12 @@ enum class DisputeRefusal {
      */
     NO_NETWORK_REFERENCE,
     NOTHING_CLEARED,
+
+    /**
+     * The disputed currency is not the authorisation's. Amounts in two currencies have no order
+     * without a rate, so "at most what cleared" cannot even be asked — refused, never converted.
+     */
+    CURRENCY_MISMATCH,
     AMOUNT_EXCEEDS_CLEARED,
     ALREADY_DISPUTED,
     CASE_NOT_FOUND,

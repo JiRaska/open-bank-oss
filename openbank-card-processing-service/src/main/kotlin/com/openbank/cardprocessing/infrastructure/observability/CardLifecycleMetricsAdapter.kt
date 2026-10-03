@@ -25,9 +25,13 @@ import jakarta.inject.Inject
  *  - `openbank_card_token_reads_total{source}` — NETWORK or LOCAL_MIRROR. **A rising LOCAL_MIRROR
  *    share is the alert-worthy one**: the screens still render, so nothing else about a degraded
  *    read is observable from outside.
- *  - `openbank_card_disputes_opened_total{scheme,refusal}` — `scheme=none` marks the refusals that
+ *  - `openbank_card_disputes_opened_total{scheme,refusal}` — `scheme=NONE` marks the refusals that
  *    happened before any network was asked, so a dashboard cannot blame a network that was not called.
+ *    The token provisioning counter uses the same `scheme=NONE` for its pre-network refusals.
  *  - `openbank_card_dispute_evidence_total{refusal}`
+ *  - `openbank_card_dispute_terminal_mismatches_total{scheme,stored,reported}` — a refresh of a CLOSED
+ *    case found the network reporting a different outcome. The stored outcome is kept; any non-zero
+ *    value is a case for a person to investigate.
  */
 @ApplicationScoped
 class CardLifecycleMetricsAdapter(private val registry: MeterRegistry?) : CardLifecycleMetricsPort {
@@ -89,6 +93,18 @@ class CardLifecycleMetricsAdapter(private val registry: MeterRegistry?) : CardLi
             .tag("service", SERVICE)
             .tag("refusal", refusal ?: NONE)
             .description("Evidence submissions against chargeback cases, by refusal reason")
+            .register(r)
+            .increment()
+    }
+
+    override fun disputeTerminalMismatch(scheme: String, stored: String, reported: String) {
+        val r = registry ?: return
+        Counter.builder("openbank.card.dispute.terminal.mismatches")
+            .tag("service", SERVICE)
+            .tag("scheme", scheme)
+            .tag("stored", stored)
+            .tag("reported", reported)
+            .description("Closed chargeback cases whose network status now disagrees with the stored outcome")
             .register(r)
             .increment()
     }

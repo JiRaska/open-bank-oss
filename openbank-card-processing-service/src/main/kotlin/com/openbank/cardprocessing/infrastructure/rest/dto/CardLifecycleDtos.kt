@@ -8,6 +8,7 @@ package com.openbank.cardprocessing.infrastructure.rest.dto
 
 import com.openbank.cardprocessing.domain.model.CardDisputeCase
 import com.openbank.cardprocessing.domain.model.CardTokenRegistration
+import com.openbank.cardprocessing.domain.model.DisputeEvidenceRecord
 import com.openbank.cardprocessing.domain.model.TokenRegistrations
 import java.time.Instant
 import java.time.LocalDate
@@ -29,6 +30,11 @@ data class TokenResponseDto(
     val expiry: LocalDate?,
     val provisionedAt: Instant,
     val updatedAt: Instant,
+    /**
+     * True when a NETWORK-sourced list did not contain this mirrored token. Always false on a
+     * `LOCAL_MIRROR` read, where the network was not asked.
+     */
+    val absentAtNetwork: Boolean,
 ) {
     companion object {
         fun of(r: CardTokenRegistration) = TokenResponseDto(
@@ -43,6 +49,7 @@ data class TokenResponseDto(
             expiry = r.expiry,
             provisionedAt = r.provisionedAt,
             updatedAt = r.updatedAt,
+            absentAtNetwork = r.absentAtNetwork,
         )
     }
 }
@@ -116,5 +123,20 @@ data class DisputeResponseDto(
         )
     }
 }
+
+data class DisputeEvidenceDto(
+    val id: UUID,
+    val documentReference: String,
+    val note: String?,
+    val schemeStatus: String,
+    val submittedAt: Instant,
+) {
+    companion object {
+        fun of(e: DisputeEvidenceRecord) =
+            DisputeEvidenceDto(e.id, e.documentReference, e.note, e.schemeStatus, e.submittedAt)
+    }
+}
+
+data class DisputeEvidenceListResponse(val evidence: List<DisputeEvidenceDto>, val count: Int)
 
 data class DisputeListResponse(val disputes: List<DisputeResponseDto>, val count: Int)

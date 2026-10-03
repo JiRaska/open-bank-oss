@@ -63,13 +63,16 @@ export default function CardDisputesPage() {
   const disputes = useMemo(() => data?.disputes ?? [], [data])
   const now = new Date()
 
-  async function post(path: string, body?: unknown) {
+  async function post(path: string, body?: unknown, idempotencyKey?: string) {
     setBusy(path)
     setActionError(null)
     try {
       const res = await fetch(svcUrl('card-processing-service', path), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
         body: body === undefined ? undefined : JSON.stringify(body),
       })
       if (!res.ok) {
@@ -203,10 +206,13 @@ export default function CardDisputesPage() {
                         {canAct && dispute.status === 'OPEN' && (
                           <EvidenceButton
                             disabled={busy !== null}
-                            onSubmit={ref => post(`/api/v1/card-disputes/${dispute.id}/evidence`, {
-                              documentReference: ref,
-                              note: null,
-                            })}
+                            onSubmit={ref => post(
+                              `/api/v1/card-disputes/${dispute.id}/evidence`,
+                              { documentReference: ref, note: null },
+                              // One key per filing: the server requires it and replays a retry of
+                              // the same filing instead of submitting it to the network twice.
+                              crypto.randomUUID(),
+                            )}
                           />
                         )}
                       </div>

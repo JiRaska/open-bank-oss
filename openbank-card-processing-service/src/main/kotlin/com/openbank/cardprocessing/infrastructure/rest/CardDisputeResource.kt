@@ -9,12 +9,15 @@ import com.openbank.cardprocessing.application.port.`in`.OpenDisputeCommand
 import com.openbank.cardprocessing.application.port.`in`.SubmitEvidenceCommand
 import com.openbank.cardprocessing.domain.model.DisputeOutcome
 import com.openbank.cardprocessing.domain.model.DisputeRefusal
+import com.openbank.cardprocessing.infrastructure.rest.dto.DisputeEvidenceDto
+import com.openbank.cardprocessing.infrastructure.rest.dto.DisputeEvidenceListResponse
 import com.openbank.cardprocessing.infrastructure.rest.dto.DisputeListResponse
 import com.openbank.cardprocessing.infrastructure.rest.dto.DisputeResponseDto
 import com.openbank.cardprocessing.infrastructure.rest.dto.OpenDisputeRequestDto
 import com.openbank.cardprocessing.infrastructure.rest.dto.RefusalResponse
 import com.openbank.cardprocessing.infrastructure.rest.dto.SubmitEvidenceRequestDto
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.idempotency.IdempotencyKeys
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -50,7 +53,7 @@ class CardDisputeResource(private val useCase: CardDisputeUseCase) {
         request: OpenDisputeRequestDto,
     ): Response {
         requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
-        require(idempotencyKey.isNotBlank()) { "header 'Idempotency-Key' must not be blank" }
+        IdempotencyKeys.requireValid(idempotencyKey)
         val outcome = useCase.open(
             OpenDisputeCommand(
                 authorizationId = request.authorizationId,
@@ -72,10 +75,29 @@ class CardDisputeResource(private val useCase: CardDisputeUseCase) {
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "cardprocessing.dispute", resource = "#id")
-    @Operation(summary = "File evidence against an open case")
-    suspend fun submitEvidence(@PathParam("id") id: UUID, request: SubmitEvidenceRequestDto): Response = respond(
-        useCase.submitEvidence(SubmitEvidenceCommand(id, request.documentReference, request.note)),
-    )
+    @Operation(summary = "File evidence against an open case (appended to the case's evidence history)")
+    suspend fun submitEvidence(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
+        request: SubmitEvidenceRequestDto,
+    ): Response {
+        // Nullable + requireNotNull: a non-nullable @HeaderParam is a 500 for the absent header.
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
+        IdempotencyKeys.requireValid(idempotencyKey)
+        return respond(
+            useCase.submitEvidence(SubmitEvidenceCommand(id, request.documentReference, request.note, idempotencyKey)),
+        )
+    }
+
+    @GET
+    @Path("/{id}/evidence")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
+    @Authorize(action = "cardprocessing.read", resource = "#id")
+    @Operation(summary = "Every evidence submission against a case, oldest first")
+    suspend fun evidence(@PathParam("id") id: UUID): Response {
+        val history = useCase.evidenceHistory(id) ?: return Response.status(Response.Status.NOT_FOUND).build()
+        return Response.ok(DisputeEvidenceListResponse(history.map(DisputeEvidenceDto::of), history.size)).build()
+    }
 
     @POST
     @Path("/{id}/refresh")
@@ -124,6 +146,7 @@ class CardDisputeResource(private val useCase: CardDisputeUseCase) {
         DisputeRefusal.NO_NETWORK_REFERENCE ->
             "the authorisation carries no acquirer reference, so the network cannot identify the transaction"
         DisputeRefusal.NOTHING_CLEARED -> "nothing cleared on this authorisation — release a hold with a reversal"
+        DisputeRefusal.CURRENCY_MISMATCH -> "the dispute currency is not the authorisation's currency"
         DisputeRefusal.AMOUNT_EXCEEDS_CLEARED -> "the disputed amount exceeds what cleared"
         DisputeRefusal.ALREADY_DISPUTED -> "a live case already exists against this authorisation"
         DisputeRefusal.CASE_NOT_FOUND -> "no such dispute case"
