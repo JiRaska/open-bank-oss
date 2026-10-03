@@ -10,6 +10,7 @@ import { useSession } from 'next-auth/react'
 import { Smartphone, RefreshCw, PauseCircle, PlayCircle, Trash2 } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
+import { HumanReference } from '@/components/ui/HumanReference'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { hasPermission } from '@/lib/auth/roles'
@@ -199,8 +200,11 @@ export default function CardTokensPage() {
                     {tokens.map(token => (
                       <tr key={token.tokenReference}>
                         <td className="px-4 py-3">
-                          <div className="font-medium text-slate-900">{token.requestorLabel}</div>
-                          <div className="text-xs text-slate-500">{token.requestorId}</div>
+                          <HumanReference
+                            label={token.requestorLabel}
+                            reference={token.requestorId}
+                            copyLabel={t('Kopírovat ID žadatele', 'Copy requestor ID')}
+                          />
                         </td>
                         <td className="px-4 py-3">
                           <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-800">
