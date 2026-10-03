@@ -35,7 +35,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-balance-service",
     "openbank-billing-service",
     "openbank-card-issuance-service",
-    "openbank-clearing-service",
     "openbank-consent-service",
     "openbank-delegation-service",
     "openbank-domestic-payment",
@@ -50,7 +49,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-security-scanner",
     "openbank-sepa-payment",
     "openbank-standing-order-service",
-    "openbank-swift-service",
     "openbank-transaction-service",
     "openbank-treasury-service",
 }

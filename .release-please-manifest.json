@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.33.1",
-  "openbank-admin-ui": "0.271.0",
+  "openbank-admin-ui": "0.272.0",
   "openbank-agent-service": "1.27.2",
   "openbank-aml-service": "0.13.2",
   "openbank-anacredit-service": "0.9.5",
@@ -10,7 +10,7 @@
   "openbank-balance-service": "1.18.0",
   "openbank-billing-service": "0.13.5",
   "openbank-card-issuance-service": "0.27.0",
-  "openbank-clearing-service": "0.11.3",
+  "openbank-clearing-service": "0.11.4",
   "openbank-clearing-simulator": "0.6.1",
   "openbank-communication-service": "0.2.2",
   "openbank-consent-service": "0.25.0",
@@ -29,7 +29,7 @@
   "openbank-fraud-service": "0.15.4",
   "openbank-fx-service": "0.16.2",
   "openbank-governance-auditor": "0.6.3",
-  "openbank-interest-service": "0.21.1",
+  "openbank-interest-service": "0.21.2",
   "openbank-kyc-service": "0.16.3",
   "openbank-ledger-service": "1.32.1",
   "openbank-lending-service": "0.40.0",
@@ -52,7 +52,7 @@
   "openbank-settlement-service": "0.9.3",
   "openbank-standing-order-service": "0.17.1",
   "openbank-statement-service": "0.12.7",
-  "openbank-swift-service": "0.11.6",
+  "openbank-swift-service": "0.11.7",
   "openbank-tpp-registry-service": "0.10.2",
   "openbank-transaction-service": "1.26.0",
   "openbank-vop-service": "0.5.2",
@@ -65,6 +65,6 @@
   "openbank-wealth-service": "0.2.2",
   "openbank-context-service": "0.4.0",
   "openbank-risk-engine": "0.24.0",
-  "openbank-treasury-service": "0.11.0",
+  "openbank-treasury-service": "0.11.1",
   "openbank-card-processing-service": "0.2.0"
 }
