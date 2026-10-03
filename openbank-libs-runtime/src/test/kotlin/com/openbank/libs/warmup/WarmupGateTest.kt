@@ -34,6 +34,17 @@ class WarmupGateTest {
     }
 
     @Test
+    fun `a gate that is never started is still bounded by the cap`() {
+        // StartupEvent missed: the first readiness query starts the clock, so the pod cannot be
+        // held out of rotation forever.
+        val clock = MutableClock()
+        val gate = WarmupGate(true, cap, clock)
+        assertThat(gate.isReady()).isFalse()
+        clock.now = clock.now.plus(cap).plusSeconds(1)
+        assertThat(gate.isReady()).isTrue()
+    }
+
+    @Test
     fun `is UP once the warm-up has finished`() {
         val gate = WarmupGate(true, cap, MutableClock())
         gate.start()

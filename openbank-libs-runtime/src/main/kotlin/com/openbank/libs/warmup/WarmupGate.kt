@@ -43,7 +43,10 @@ class WarmupGate(
 
     fun isReady(): Boolean {
         if (!enabled || finished) return true
-        val started = startedAt ?: return false
+        // A readiness query that arrives before start() (StartupEvent not yet delivered, or never)
+        // starts the clock itself: the cap must bound the DOWN state in every path, or a missed
+        // event would hold the pod out of rotation forever.
+        val started = startedAt ?: clock.instant().also { start() }
         val elapsed = Duration.between(started, clock.instant())
         if (elapsed >= maxDuration) {
             if (capReported.compareAndSet(false, true)) onCapExceeded(elapsed)
