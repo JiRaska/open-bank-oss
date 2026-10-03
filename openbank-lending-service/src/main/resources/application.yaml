@@ -98,6 +98,12 @@ quarkus:
       url: ${ANALYTICS_SINK_URL:http://localhost:8110}
       connect-timeout: 2000
       read-timeout: 3000
+    # ADR-0214 D3 evidence bundle (#11900). Called with the CALLER's own token
+    # (CallerTokenClientHeadersFactory), never the m2m client: audit-service admits humans only.
+    audit-service:
+      url: ${AUDIT_SERVICE_URL:http://localhost:8113}
+      connect-timeout: 2000
+      read-timeout: 5000
   redis:
     hosts: redis://localhost:6379
   shutdown:
@@ -175,6 +181,13 @@ openbank:
     poll-interval: 5s
     initial-delay: 5s
     dispatch-enabled: true
+    # SENT-row retention (ADR-0329) is wired (LendingOutboxRepositoryImpl implements
+    # SentOutboxRetention) but HELD OFF here until the parity check in
+    # src/main/resources/docs/05-operations.en.md confirms the audit chain holds every event this
+    # outbox ever sent (#11900). The evidence bundle no longer reads this table, so once parity is
+    # confirmed nothing reads a SENT row and this switch is the only thing left to flip.
+    retention:
+      enabled: ${LENDING_OUTBOX_RETENTION_ENABLED:false}
   temporal:
     # ADR-0211 D2 durable origination timers.
     #
@@ -334,11 +347,24 @@ lending:
           pem:
             certs: /mnt/consent-tls/ca.crt
         protocols: TLSv1.3
+      # #11900: audit-service's 8443 mTLS listener, same private CA and client identity as above.
+      audit-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/audit-tls/tls.crt
+              key: /mnt/audit-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/audit-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
       consent-service:
         tls-configuration-name: consent-authority
+      audit-service:
+        tls-configuration-name: audit-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}

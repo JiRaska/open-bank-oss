@@ -59,6 +59,27 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ### Outbox backlog growing
 `lending_outbox.status` rows stuck unsent and `attempt_count` climbing ⇒ check Kafka connectivity and `last_error`. The dispatcher (`@Scheduled every 5s`, batch 25, `SKIP` overlap) retries automatically; a persistent backlog points at the broker or topic `openbank.lending.events`. Do not delete rows — they are the at-least-once delivery guarantee.
 
+### Evidence bundle and SENT-row retention (#11900)
+`GET /api/v1/lending/applications/{id}/evidence` reads audit-service's chain (`GET /api/v1/audit/evidence/{id}`, `AUDIT_SERVICE_URL`) with the **caller's own token** — never the m2m client. 401/403 from audit-service pass through; anything else is **503**. There is deliberately no fallback to `lending_outbox`.
+
+`lending_outbox` purges delivered rows like every other outbox (ADR-0329), but the switch is **off** here (`LENDING_OUTBOX_RETENTION_ENABLED`, default `false`) until this parity check passes once. audit-service subscribed to `openbank.lending.events` on 2026-07-31; events older than the topic's retention at that moment may never have reached the chain, and purging them from the outbox would lose them.
+
+1. Exact match by event id (audit uses the producer's `eventId` as `entry_id` when the payload carries one). Export the lending ids, then look them up in audit:
+   ```sql
+   -- lending DB
+   SELECT event_id FROM lending_outbox WHERE status = 'SENT';
+   -- audit DB, with those ids loaded into a temp table `lending_ids(event_id uuid)`
+   SELECT l.event_id FROM lending_ids l LEFT JOIN audit_entries a ON a.entry_id = l.event_id WHERE a.entry_id IS NULL;
+   ```
+2. Backstop for payloads without an `eventId` (audit then keys the entry by Kafka address): per-application counts must not be lower in audit.
+   ```sql
+   -- lending DB
+   SELECT aggregate_id, count(*) FROM lending_outbox WHERE status = 'SENT' GROUP BY 1;
+   -- audit DB
+   SELECT aggregate_id, count(*) FROM audit_entries WHERE source_service LIKE '%lending%' GROUP BY 1;
+   ```
+3. Zero missing ids and no application with fewer audit rows ⇒ set `LENDING_OUTBOX_RETENTION_ENABLED=true`. Anything missing ⇒ do **not** enable; those loans' evidence exists only in the outbox and needs a replay into the chain first.
+
 ### Ledger posting failing
 When `LENDING_LEDGER_BACKEND=rest`, postings go through `LedgerCallGuard` (fault tolerance) to `ledger-service POST /api/v1/journals`. Failures surface in disburse/repay/writeoff. Verify `LEDGER_SERVICE_URL`, the service OIDC token, and that GL `LENDING_GL_*` accounts exist in the chart. Postings are idempotent (reference = ledger idempotency key), so safe to retry.
 

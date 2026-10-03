@@ -15,6 +15,46 @@ sidecar.
 
 ## Change log
 
+### 2026-10-03 — east-west mTLS listener (8443) for the evidence-bundle caller (#11900)
+
+audit-service gains a private-CA mTLS listener on 8443 (`audit-service-internal-tls`, `openbank-ca`;
+`quarkus.http.ssl.client-auth=required` baked under `%prod`), same shape as consent-service's.
+lending-service's evidence-bundle read uses it with its `lending-internal-tls` client certificate,
+because that request carries a person's bearer token and must not cross the cluster in plaintext
+(ASVS V9.1, which flagged the first draft's `http://…:8113`). **STRIDE-I/S:** the token is no longer
+readable on the wire, and a caller without a CA-issued client certificate cannot reach 8443 at all.
+HTTP/8113 stays for existing callers (admin-ui, security-scanner) and the probes
+(`insecure-requests: enabled`); their migration is not part of this change.
+
+### 2026-10-03 — evidence bundle route, and a fourth reader role (#11900)
+
+New `GET /api/v1/audit/evidence/{aggregateId}` (ADR-0214 D3): every entry about one aggregate,
+oldest first, with each entry's hash recomputed at read time (`VERIFIED` / `MISMATCH` /
+`LEGACY_UNVERIFIABLE` / `UNCHAINED`). Read-only; no new write path.
+
+**New reader (STRIDE-I).** `ROLE_CREDIT_RISK` may call this one route, and only this one
+(`/entries`, `/integrity` and the anchors stay AUDITOR/ADMIN/COMPLIANCE — asserted by
+`AuditEvidenceBundleIT` and the rego tests). Credit-risk staff already read the same loan evidence
+from lending-service; lending now sources it here instead of from its own outbox, so the audience is
+unchanged and the source becomes the tamper-evident chain.
+
+**New caller, same principal (STRIDE-S/E).** lending-service calls this route, forwarding the
+signed-in person's own bearer token — it never uses its service account here. The action is
+`audit.evidence.reconstruct`, deliberately not `*.read`: measured with `opa eval` against this
+bundle, base `rest.rego`'s `operator-read-any` / `compliance-read-any` grant every `*.read` action to
+HUMAN-classified service accounts, so the same route under a read-verb action name was allowed
+for `service-account-openbank-services`. With `reconstruct`, the evidence rule — which
+excludes `service-account-*` — is the only grant; the must-deny controls (lending SA with
+COMPLIANCE + CREDIT_RISK, shared SA with OPERATOR, human OPERATOR) all evaluate to deny.
+**Pre-existing, not changed here:** `audit.read` is a `*.read` action, so the same base rules allow it
+for a service account at the OPA layer; only `@RolesAllowed` (AUDITOR/ADMIN/COMPLIANCE, which the
+realm service accounts do not hold) stops one. The rule comment claiming its service-account
+exclusion keeps M2M out is therefore not what enforces it.
+
+**Tampering (STRIDE-T/R).** An edited row is reported as `MISMATCH` and the bundle as `tampered`.
+Per-entry recomputation cannot detect a deleted or re-ordered row; the response points at
+`/api/v1/audit/integrity` for that, and says so in its contract.
+
 ### 2026-10-03 — policy decision point wiring
 
 The service now opts in to the shared libs-runtime `OpaPolicyDecisionPointProducer`
