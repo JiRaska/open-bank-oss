@@ -33,6 +33,9 @@ import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.MarketCurve
 import com.openbank.treasury.domain.model.PostingEvent
+import com.openbank.treasury.domain.model.ProductLimit
+import com.openbank.treasury.domain.model.ProductLimitBreachedException
+import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import com.openbank.treasury.domain.model.Side
@@ -71,8 +74,11 @@ class TreasuryDealServiceTest {
         if (curvesDown) throw QuoteUnavailableException("risk engine unreachable") else curveSet
     }
     private var quotes: SimulatedQuoteService? = null
+    private var productLimits: ProductLimitPolicy = DealFixtures.permissiveProductLimits
     private val service get() =
-        TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes)
+        TreasuryDealService(
+            deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes, productLimits,
+        )
 
     /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
     private fun quotesOn() {
@@ -190,6 +196,59 @@ class TreasuryDealServiceTest {
         assertThat(b.state).isEqualTo(DealState.BOOKED)
         assertThat(ledger.posted).isEmpty()
         assertThat(deals.events.map { it.eventType }).containsExactly("treasury.deal.booked.v1")
+    }
+
+    @Test
+    fun `ADR-0315 D4 - a product mandate tightened after submission refuses approval and saves nothing`(): Unit =
+        runBlocking {
+            val d = service.draft(cmd(principal = "500000.00"), DealFixtures.dealer)
+            service.submit(d.id, DealFixtures.dealer)
+            productLimits = ProductLimitPolicy(
+                listOf(ProductLimit(ProductType.MM_PLACEMENT, mapOf("CZK" to BigDecimal("400000.00")), 366)),
+            )
+            assertThatThrownBy { runBlocking { service.approve(d.id, DealFixtures.approver) } }
+                .isInstanceOf(ProductLimitBreachedException::class.java)
+                .hasMessageContaining("principal 500000.00 CZK exceeds the product maximum 400000.00 CZK")
+            assertThat(deals.findById(d.id)!!.state).isEqualTo(DealState.PENDING_APPROVAL)
+            assertThat(deals.events).isEmpty()
+        }
+
+    @Test
+    fun `ADR-0315 D4 - a counterparty override does not cover a product-limit breach`(): Unit = runBlocking {
+        val d = service.draft(cmd(principal = "1500000.00"), DealFixtures.dealer)
+        assertThat(service.submit(d.id, DealFixtures.dealer).limitCheck!!.breached).isTrue()
+        service.overrideLimit(d.id, "desk head sign-off", DealFixtures.seniorApprover)
+        productLimits = ProductLimitPolicy(
+            listOf(ProductLimit(ProductType.MM_PLACEMENT, mapOf("EUR" to BigDecimal("1E9")), null)),
+        )
+        assertThatThrownBy { runBlocking { service.approve(d.id, DealFixtures.approver) } }
+            .isInstanceOf(ProductLimitBreachedException::class.java)
+            .hasMessageContaining("may not be dealt in CZK")
+    }
+
+    @Test
+    fun `ADR-0315 D4 - the booked event records the product limit the booking was evaluated against`(): Unit =
+        runBlocking {
+            productLimits = ProductLimitPolicy(
+                listOf(ProductLimit(ProductType.MM_PLACEMENT, mapOf("CZK" to BigDecimal("900000.00")), 30)),
+            )
+            book()
+            assertThat(deals.events.single().payload)
+                .contains(
+                    "\"productLimit\":{\"decision\":\"WITHIN_LIMIT\",\"maxPrincipal\":900000.00,\"maxTenorDays\":30}",
+                )
+        }
+
+    @Test
+    fun `ADR-0315 D4 - a deal outside its product mandate cannot be submitted`(): Unit = runBlocking {
+        productLimits = ProductLimitPolicy(
+            listOf(ProductLimit(ProductType.MM_PLACEMENT, mapOf("CZK" to BigDecimal("1E9")), 5)),
+        )
+        val d = service.draft(cmd(), DealFixtures.dealer)
+        assertThatThrownBy { runBlocking { service.submit(d.id, DealFixtures.dealer) } }
+            .isInstanceOf(ProductLimitBreachedException::class.java)
+            .hasMessageContaining("tenor 7 days exceeds the product maximum 5 days")
+        assertThat(deals.findById(d.id)!!.state).isEqualTo(DealState.DRAFT)
     }
 
     @Test
