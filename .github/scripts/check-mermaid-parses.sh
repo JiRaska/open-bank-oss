@@ -174,7 +174,10 @@ if [ "${1:-}" = "--self-test" ]; then
       echo "  BAD  $label: want rc=$want, got rc=$rc"; echo "$out" | sed 's/^/       | /'
       fails=$((fails + 1)); return
     fi
-    if [ -n "$needle" ] && ! printf '%s' "$out" | grep -qF -- "$needle"; then
+    # With pipefail, grep -q can close the pipe as soon as it sees the filename while printf is
+    # still writing a long Mermaid error. printf then gets SIGPIPE and the whole pipeline fails
+    # even though the filename was present. Match the captured output in Bash instead.
+    if [ -n "$needle" ] && [[ "$out" != *"$needle"* ]]; then
       echo "  BAD  $label: rc=$want as expected, but the output never named '$needle'"
       echo "$out" | sed 's/^/       | /'
       fails=$((fails + 1)); return
