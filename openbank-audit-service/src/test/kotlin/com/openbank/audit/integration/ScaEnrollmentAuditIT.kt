@@ -49,8 +49,8 @@ import java.util.function.Supplier
  * regression that removes `openbank.sca.events` from `TopicAttribution` or from the `topics:` list
  * — the exact defect this issue fixes — fails here, not silently.
  *
- * **What it does and does not prove.** There is no Kafka Testcontainers usage anywhere in this
- * repo (verified before writing this), so this does not drive a literal Kafka broker end to end.
+ * **Scope:** this test uses constructed broker metadata; AuditDlqIT separately drives a real
+ * Kafka broker and its failure strategy.
  * What it DOES exercise is the real production code path: a [Message] carrying a genuine
  * [IncomingKafkaRecordMetadata] (topic `openbank.sca.events`, `ce-type` header `DEVICE_ENROLLED`,
  * matching what a real Kafka `ConsumerRecord` delivers) is handed to the actual
@@ -99,7 +99,7 @@ class ScaEnrollmentAuditIT {
         """.trimIndent()
     }
 
-    private fun kafkaMessage(payload: String): Message<String> {
+    private fun kafkaMessage(payload: String, offset: Long): Message<String> {
         val headers = RecordHeaders()
         headers.add(
             RecordHeader(
@@ -110,7 +110,7 @@ class ScaEnrollmentAuditIT {
         val record = ConsumerRecord(
             "openbank.sca.events",
             0,
-            0L,
+            offset,
             RecordBatch.NO_TIMESTAMP,
             TimestampType.NO_TIMESTAMP_TYPE,
             ConsumerRecord.NULL_SIZE,
@@ -133,7 +133,8 @@ class ScaEnrollmentAuditIT {
         val partyId = UUID.randomUUID()
         val deviceId = UUID.randomUUID()
         val occurredAt = OffsetDateTime.now()
-        val message = kafkaMessage(enrollPayload(partyId, deviceId, occurredAt, includeSourceService = true))
+        val message =
+            kafkaMessage(enrollPayload(partyId, deviceId, occurredAt, includeSourceService = true), offset = 1L)
 
         onEventLoop { consumer.consume(message) }
 
@@ -158,6 +159,7 @@ class ScaEnrollmentAuditIT {
         val occurredAt = OffsetDateTime.now()
         val message = kafkaMessage(
             enrollPayload(partyId, deviceId, occurredAt, includeSourceService = false),
+            offset = 2L,
         )
 
         onEventLoop { consumer.consume(message) }
