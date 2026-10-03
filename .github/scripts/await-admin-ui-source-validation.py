@@ -45,12 +45,27 @@ def check_workflow(fetch, repository, sha, workflow):
     return True
 
 
-def wait_for_validation(fetch, repository, sha, require_pact, *, clock=time.monotonic,
+def latest_ui_change(fetch, repository, source_sha):
+    query = urllib.parse.urlencode({"sha": source_sha, "path": "openbank-admin-ui/", "per_page": 1})
+    commits = fetch(f"repos/{repository}/commits?{query}")
+    if not isinstance(commits, list) or len(commits) != 1:
+        raise RuntimeError(f"Cannot identify the latest Admin UI ancestor of {source_sha}")
+    ui_sha = commits[0].get("sha")
+    if not isinstance(ui_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", ui_sha):
+        raise RuntimeError("Latest Admin UI ancestor has no canonical commit SHA")
+    return ui_sha
+
+
+def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
                         sleep=time.sleep, max_wait=MAX_WAIT_SECONDS):
     deadline = clock() + max_wait
-    required = ("ci.yml", "pact-drift-check.yml") if require_pact else ("ci.yml",)
+    # A governance-only push can rebuild UI code introduced by an earlier main commit.
+    # Bind Pact proof to that latest UI-changing ancestor, or the later push could bypass a
+    # failed Pact verdict simply because its own paths did not trigger Pact drift.
+    ui_sha = latest_ui_change(fetch, repository, sha)
     while True:
-        if all(check_workflow(fetch, repository, sha, workflow) for workflow in required):
+        if (check_workflow(fetch, repository, sha, "ci.yml")
+                and check_workflow(fetch, repository, ui_sha, "pact-drift-check.yml")):
             return
         remaining = deadline - clock()
         if remaining <= 0:
@@ -75,12 +90,11 @@ def main():
     repository = os.environ.get("GITHUB_REPOSITORY", "")
     sha = os.environ.get("SOURCE_SHA", "")
     token = os.environ.get("GH_TOKEN", "")
-    require_pact = os.environ.get("REQUIRE_PACT", "")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
         raise ValueError("Repository identity is missing or invalid")
-    if not re.fullmatch(r"[0-9a-f]{40}", sha) or not token or require_pact not in ("true", "false"):
-        raise ValueError("Exact source SHA, read-only API token and Pact scope are required")
-    wait_for_validation(github_fetch(token), repository, sha, require_pact == "true")
+    if not re.fullmatch(r"[0-9a-f]{40}", sha) or not token:
+        raise ValueError("Exact source SHA and read-only API token are required")
+    wait_for_validation(github_fetch(token), repository, sha)
     print(f"Verified exact-source Admin UI validation for {sha}")
 
 

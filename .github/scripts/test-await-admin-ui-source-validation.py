@@ -33,6 +33,7 @@ def job(name, *, status="completed", conclusion="success"):
 
 class FakeAPI:
     def __init__(self):
+        self.ui_sha = SHA
         self.runs = {
             "ci.yml": [run("ci.yml")],
             "pact-drift-check.yml": [run("pact-drift-check.yml", run_id=2)],
@@ -43,6 +44,8 @@ class FakeAPI:
         }
 
     def __call__(self, path):
+        if "/commits?" in path:
+            return [{"sha": self.ui_sha}] if self.ui_sha else []
         if "/workflows/" in path:
             workflow = path.split("/workflows/", 1)[1].split("/runs?", 1)[0]
             return {"workflow_runs": self.runs[workflow]}
@@ -54,15 +57,28 @@ class SourceValidationTest(unittest.TestCase):
     def setUp(self):
         self.api = FakeAPI()
 
-    def verify(self, pact=True):
-        validation.wait_for_validation(self.api, REPO, SHA, pact, max_wait=0)
+    def verify(self):
+        validation.wait_for_validation(self.api, REPO, SHA, max_wait=0)
 
     def test_exact_source_ui_and_pact_are_admitted(self):
         self.verify()
 
-    def test_pure_image_pin_refresh_needs_ui_but_no_pact(self):
-        self.api.runs["pact-drift-check.yml"] = []
-        self.verify(pact=False)
+    def test_governance_or_image_pin_refresh_uses_latest_ui_ancestor(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
+        self.verify()
+
+    def test_governance_refresh_cannot_bypass_failed_ui_pact(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [run(
+            "pact-drift-check.yml", sha=OTHER_SHA, run_id=2, conclusion="failure")]
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
+    def test_missing_ui_ancestor_fails_closed(self):
+        self.api.ui_sha = None
+        with self.assertRaises(RuntimeError):
+            self.verify()
 
     def test_wrong_sha_or_repository_or_workflow_is_missing_evidence(self):
         for replacement in (
@@ -74,34 +90,34 @@ class SourceValidationTest(unittest.TestCase):
             with self.subTest(replacement=replacement):
                 self.api.runs["ci.yml"] = [replacement]
                 with self.assertRaises(TimeoutError):
-                    self.verify(pact=False)
+                    self.verify()
 
     def test_pending_evidence_waits_and_is_bounded(self):
         self.api.runs["ci.yml"] = [run("ci.yml", status="in_progress", conclusion=None)]
         with self.assertRaises(TimeoutError):
-            self.verify(pact=False)
+            self.verify()
 
     def test_failed_or_cancelled_run_fails_closed(self):
         for outcome in ("failure", "cancelled"):
             with self.subTest(outcome=outcome):
                 self.api.runs["ci.yml"] = [run("ci.yml", conclusion=outcome)]
                 with self.assertRaises(RuntimeError):
-                    self.verify(pact=False)
+                    self.verify()
 
     def test_successful_aggregate_cannot_substitute_for_cancelled_ui_job(self):
         self.api.jobs[1] = [job("Admin UI"), job("Admin UI build", conclusion="cancelled")]
         with self.assertRaises(RuntimeError):
-            self.verify(pact=False)
+            self.verify()
 
     def test_duplicate_newer_pending_run_blocks_older_success(self):
         self.api.runs["ci.yml"].append(run("ci.yml", run_id=3, status="queued", conclusion=None))
         with self.assertRaises(TimeoutError):
-            self.verify(pact=False)
+            self.verify()
 
     def test_duplicate_job_identity_fails_closed(self):
         self.api.jobs[1].append(job("Admin UI build"))
         with self.assertRaises(RuntimeError):
-            self.verify(pact=False)
+            self.verify()
 
     def test_pact_publication_must_complete(self):
         self.api.jobs[2][1]["conclusion"] = "skipped"
