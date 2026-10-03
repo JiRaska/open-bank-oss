@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Exempts namespace `pricing` from the ImageValidatingPolicy
+# verify-openbank-image-sbom-attestation-cel (Deny since #11437).
+#
+# TEMPORARY, 2026-09-12. The openbank-pricing images carry a valid cosign signature and a
+# CycloneDX SBOM attestation against the key the policy pins, but openbank-pricing has no
+# image-building CI (its images were built and signed by hand), so their state is not
+# reproducible through the shared pipeline. Namespace `pricing` holds one private,
+# non-public console and its API; not money-path, no customer data.
+#
+# REMOVAL CRITERIA — all three, then delete this file:
+#   1. openbank-pricing gains a build pipeline that signs and attests through the shared
+#      openbank-infra/scripts/lib/cosign-attest.sh (#9793 is the worked example).
+#   2. A rebuilt console image verifies signature + cyclonedx against the pinned key.
+#   3. deploy/sandbox pinned to that image, and a dry-run Pod create in `pricing` admitted
+#      with this file removed.
+#
+# Its kyverno.io/v2 twin (pricing-image-exception.yaml, for the v1 ClusterPolicy) was
+# deleted with that policy in #11437; the v1 file's history is in git.
+#
+# policyRefs replaces exceptions[].policyName; there are no rule names in the CEL
+# types, so the v1 pair (rule + its autogen- twin) collapses into one reference, and
+# a namespaced PolicyException only ever applies in its own namespace.
+apiVersion: policies.kyverno.io/v1
+kind: PolicyException
+metadata:
+  name: pricing-image-exception-cel
+  namespace: pricing
+spec:
+  policyRefs:
+    - name: verify-openbank-image-sbom-attestation-cel
+      kind: ImageValidatingPolicy
+  matchConditions:
+    - name: pricing-namespace-only
+      expression: "request.namespace == 'pricing'"

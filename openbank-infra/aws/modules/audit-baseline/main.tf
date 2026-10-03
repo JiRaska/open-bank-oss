@@ -436,3 +436,63 @@ resource "aws_config_configuration_recorder_status" "audit" {
   is_enabled = var.config_recording_enabled
   depends_on = [aws_config_delivery_channel.audit]
 }
+
+# ---------------------------------------------------------------------------
+# GuardDuty — the managed threat-detection layer the SIEM inputs were missing.
+# Measured 2026-09-30: no detector in the account. CloudTrail and Config existed,
+# but nothing read them for threats (credential exfiltration, crypto-mining,
+# anomalous API callers, known-bad IPs). Enabled features:
+#   - EKS audit-log monitoring: reads the cluster audit feed (independent of the
+#     CloudWatch export above),
+#   - runtime monitoring for EKS with the managed agent — complements Falco with
+#     AWS threat intel rather than duplicating its rules,
+#   - S3 data events and malware protection for EBS on findings.
+# Findings reach Security Hub below and, from there, EventBridge.
+resource "aws_guardduty_detector" "this" {
+  enable                       = true
+  finding_publishing_frequency = "FIFTEEN_MINUTES"
+  tags                         = var.tags
+}
+
+resource "aws_guardduty_detector_feature" "eks_audit" {
+  detector_id = aws_guardduty_detector.this.id
+  name        = "EKS_AUDIT_LOGS"
+  status      = "ENABLED"
+}
+
+resource "aws_guardduty_detector_feature" "runtime" {
+  detector_id = aws_guardduty_detector.this.id
+  name        = "RUNTIME_MONITORING"
+  status      = "ENABLED"
+
+  additional_configuration {
+    name   = "EKS_ADDON_MANAGEMENT"
+    status = "ENABLED"
+  }
+}
+
+resource "aws_guardduty_detector_feature" "s3" {
+  detector_id = aws_guardduty_detector.this.id
+  name        = "S3_DATA_EVENTS"
+  status      = "ENABLED"
+}
+
+resource "aws_guardduty_detector_feature" "ebs_malware" {
+  detector_id = aws_guardduty_detector.this.id
+  name        = "EBS_MALWARE_PROTECTION"
+  status      = "ENABLED"
+}
+
+# Security Hub aggregates GuardDuty, Config and IAM Access Analyzer findings into
+# one normalised (ASFF) stream and scores the account against the AWS
+# Foundational Security Best Practices standard.
+resource "aws_securityhub_account" "this" {
+  enable_default_standards  = false
+  auto_enable_controls      = true
+  control_finding_generator = "SECURITY_CONTROL"
+}
+
+resource "aws_securityhub_standards_subscription" "fsbp" {
+  depends_on    = [aws_securityhub_account.this]
+  standards_arn = "arn:aws:securityhub:${data.aws_region.current.region}::standards/aws-foundational-security-best-practices/v/1.0.0"
+}

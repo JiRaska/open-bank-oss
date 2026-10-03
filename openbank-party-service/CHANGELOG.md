@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.25.1](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.25.0...party-service-v0.25.1) (2026-10-03)
+
+
+### Performance
+
+* **party,dispute,document,kyc,pid,tpp-registry:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11753](https://github.com/JiRaska/open-bank-oss/issues/11753)) ([51294c7](https://github.com/JiRaska/open-bank-oss/commit/51294c727517168bd6d78a0462c05e887fc0236e))
+
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.8...party-service-v0.25.0) (2026-10-02)
+
+
+### Features
+
+* **admin-ui:** let risk officers see obligor names ([#11702](https://github.com/JiRaska/open-bank-oss/issues/11702)) ([f33def2](https://github.com/JiRaska/open-bank-oss/commit/f33def290221af3fe33127f1964440585f263eef))
+
 ## [0.24.8](https://github.com/JiRaska/open-bank-oss/compare/party-service-v0.24.7...party-service-v0.24.8) (2026-09-29)
 
 

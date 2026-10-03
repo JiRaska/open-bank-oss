@@ -74,12 +74,42 @@ class SnapshotServiceTest {
                 it.requestedBy,
             )
         }
+
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate) =
+            error("not used by SnapshotService tests")
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)
     private val ledger = FakeLedger(Fixtures.tiedOut())
     private val repository = InMemoryRepository()
     private val service = SnapshotService(ledger, repository, clock, Provenance.SYNTHETIC)
+
+    @Test
+    fun `an as-of after the current business date is rejected and nothing is stored`(): Unit = runBlocking {
+        // clock is 2026-10-01T06:00Z = 2026-10-01 in Prague
+        assertThatThrownBy { runBlocking { service.createSnapshot(LocalDate.of(2026, 10, 2)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("business date")
+        assertThat(repository.runs).isEmpty()
+    }
+
+    @Test
+    fun `an as-of equal to the current business date is allowed`(): Unit = runBlocking {
+        val outcome = service.createSnapshot(LocalDate.of(2026, 10, 1))
+
+        assertThat(outcome.replayed).isFalse()
+    }
+
+    @Test
+    fun `the business date is the Prague day, not the UTC day`(): Unit = runBlocking {
+        // 22:30Z on 09-30 is already 2026-10-01 in Prague (CEST, UTC+2)
+        val lateUtc = Clock.fixed(Instant.parse("2026-09-30T22:30:00Z"), ZoneOffset.UTC)
+        val svc = SnapshotService(ledger, InMemoryRepository(), lateUtc, Provenance.SYNTHETIC)
+
+        assertThat(svc.createSnapshot(LocalDate.of(2026, 10, 1)).replayed).isFalse()
+        assertThatThrownBy { runBlocking { svc.createSnapshot(LocalDate.of(2026, 10, 2)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 
     @Test
     fun `a tied-out run is stored with its manifest and serves its positions`(): Unit = runBlocking {

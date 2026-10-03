@@ -86,7 +86,11 @@ class OutboxDeadLetterAlertNamingTest {
                         "really produces — a selector naming a label the metric does not carry " +
                         "fires never, and reads exactly like 'no problem'",
                 )
-                .contains("expr: $selector > 0")
+                .containsAnyOf(
+                    "expr: $selector > 0",
+                    // Aggregated across pods so a restart does not reset `for:` (billing, #9690).
+                    "expr: max by (service) ($selector) > 0",
+                )
         }
     }
 

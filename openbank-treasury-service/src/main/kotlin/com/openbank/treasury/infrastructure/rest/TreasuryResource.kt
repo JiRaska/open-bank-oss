@@ -32,9 +32,9 @@ import java.util.UUID
 
 /**
  * Money-market deals (ADR-0315). Roles are literal realm names (#10618), like risk-engine's
- * ROLE_RISK: ROLE_TREASURY_DEALER drafts, submits and cancels; ROLE_TREASURY_APPROVER approves,
- * rejects, settles, matures and reverses. RBAC here, OPA (`treasury_rest_ext.rego`, human-only)
- * behind it, and the domain's four-eyes / non-human checks behind both — the domain is the one
+ * ROLE_RISK: ROLE_TREASURY_DEALER drafts, submits and cancels; ROLE_TREASURY_APPROVER (the
+ * back office) approves, rejects, confirms, settles, matures and reverses. RBAC here, OPA
+ * (`treasury_rest_ext.rego`, human-only) behind it, and the domain's four-eyes / non-human checks behind both — the domain is the one
  * that holds when `AUTHZ_ENFORCE` is off.
  *
  * NOTE the annotation order: `@Path` sits immediately above `class` (#3371).
@@ -182,9 +182,26 @@ class TreasuryResource {
     )
 
     @POST
+    @Path("/deals/{id}/confirm")
+    @RolesAllowed(APPROVER)
+    @Operation(
+        summary = "Record the counterparty's confirmation of a BOOKED deal (CONFIRMED, ADR-0315 D2); posts " +
+            "nothing. Never the deal's creator or submitter, never an AI agent.",
+    )
+    @Authorize(action = "treasury.deal.confirm", resource = "#id")
+    suspend fun confirm(
+        @PathParam("id") id: UUID,
+        @HeaderParam("Idempotency-Key") key: String?,
+        request: ConfirmRequest?,
+    ): DealResponse = DealResponse.from(deals.confirm(id, request?.reference, actor(), requireKey(key)))
+
+    @POST
     @Path("/deals/{id}/settle")
     @RolesAllowed(APPROVER)
-    @Operation(summary = "Settle a BOOKED deal on or after its value date; posts the settlement journal")
+    @Operation(
+        summary = "Settle a CONFIRMED deal on or after its value date (BOOKED too only when " +
+            "openbank.treasury.confirmation.required is false); posts the settlement journal",
+    )
     @Authorize(action = "treasury.deal.settle", resource = "#id")
     suspend fun settle(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") key: String?): DealResponse =
         deals.settle(id, actor(), requireKey(key)).let { view(id) }
@@ -200,7 +217,7 @@ class TreasuryResource {
     @POST
     @Path("/deals/{id}/reverse")
     @RolesAllowed(APPROVER)
-    @Operation(summary = "Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal")
+    @Operation(summary = "Reverse a BOOKED, CONFIRMED or SETTLED deal; a settled one gets an offsetting journal")
     @Authorize(action = "treasury.deal.reverse", resource = "#id")
     suspend fun reverse(
         @PathParam("id") id: UUID,
@@ -233,10 +250,8 @@ class TreasuryResource {
     @Path("/positions")
     @Operation(summary = "Daily position per currency: placed, borrowed, at ČNB, net")
     @Authorize(action = "treasury.position.read")
-    suspend fun positions(@QueryParam("asOf") asOf: LocalDate?): PositionsResponse {
-        val date = asOf ?: LocalDate.now()
-        return PositionsResponse(date, deals.positions(date).map(CurrencyPositionResponse::from))
-    }
+    suspend fun positions(@QueryParam("asOf") asOf: LocalDate?): PositionsResponse =
+        PositionsResponse.from(deals.positions(asOf))
 }
 
 /** Realm roles (#10618), literal like risk-engine's: adding them to libs Roles.ALL is fleet-wide. */

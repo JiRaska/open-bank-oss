@@ -5,11 +5,13 @@
 // IRRBB of one balance-sheet snapshot run (risk-engine GET /snapshots/{id}/irrbb, ADR-0313 phase 1).
 //
 // HONESTY RULES
-//   - Tier 1 is never fetched or guessed: the outlier ratio appears ONLY when the user typed a
-//     Tier 1 figure and the engine computed a ratio from it.
+//   - Tier 1 is never guessed. It is taken from this same run's Pillar 1 own-funds read (risk-engine
+//     GET /snapshots/{id}/capital, total in CZK) and SAYS so, with the run date and parameter set;
+//     the user may override it explicitly. Without either, no outlier ratio is shown.
 //   - A currency without configured shock sizes is listed as NOT CONFIGURED, never shown as zero.
 //   - The assumptions the engine used (model, shock source, floor, aggregation) are shown with the
 //     figures, and provenance is on the page (synthetic data labelled).
+//   - Only curve sets as of the run's own date are offered: the engine refuses any other.
 
 'use client'
 
@@ -21,9 +23,10 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
+import { CurveSetPicker, RunSubtitle, useCurveSets, useRun } from '@/components/balance-sheet/RunContext'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
-import { curveSetListSchema, irrbbSchema, type CurveSetSummary, type Irrbb, type ScenarioName } from '@/components/balance-sheet/contracts'
-import { gapRows, outlierRatio, parseTier1 } from '@/components/balance-sheet/model'
+import { capitalSchema, irrbbSchema, type Irrbb, type ScenarioName } from '@/components/balance-sheet/contracts'
+import { formatDate, formatMoney, formatTier1Input, gapRows, outlierRatio, outlierVerdict, parseTier1 } from '@/components/balance-sheet/model'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const RepricingGapChart = dynamic(
@@ -40,6 +43,9 @@ const SCENARIO_LABEL: Record<ScenarioName, [string, string]> = {
   'short-down': ['Krátké sazby dolů', 'Short rates down'],
 }
 
+/** Where the Tier 1 figure in use came from: this run's own-funds read, or the user's override. */
+type Tier1Source = { kind: 'capital'; asOf: string; parameterSet: string } | { kind: 'manual' }
+
 export default function SnapshotIrrbbPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   return (
@@ -52,23 +58,32 @@ export default function SnapshotIrrbbPage({ params }: { params: Promise<{ id: st
 function SnapshotIrrbb({ id }: { id: string }) {
   const { t, language } = useLanguage()
   const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const [curveSets, setCurveSets] = useState<CurveSetSummary[]>([])
-  const [curveSetId, setCurveSetId] = useState('')
+  const { run, loaded: runLoaded } = useRun(id)
+  const { sets: curveSetsOrNull, kind: setsKind } = useCurveSets(run, runLoaded)
+  const curveSets = curveSetsOrNull ?? []
+  const [chosenSetId, setChosenSetId] = useState('')
+  const curveSetId = curveSets.some(s => s.id === chosenSetId) ? chosenSetId : (curveSets[0]?.id ?? '')
   const [tier1Input, setTier1Input] = useState('')
   const [tier1, setTier1] = useState<string | null>(null)
+  const [tier1Source, setTier1Source] = useState<Tier1Source | null>(null)
+  const [overriding, setOverriding] = useState(false)
   const [data, setData] = useState<Irrbb | null>(null)
   const [kind, setKind] = useState<UnavailableKind | null>(null)
-  const [setsKind, setSetsKind] = useState<UnavailableKind | null>(null)
 
+  // Tier 1 from this run's own Pillar 1 own-funds read (CZK at the ČNB fixing). Absent or zero
+  // own funds leave the field for the user — nothing is assumed.
   useEffect(() => {
+    let cancelled = false
     void (async () => {
-      const sets = await getJson(riskUrl('/api/v1/risk/curve-sets', { limit: '25' }), curveSetListSchema)
-      if (!sets.ok) { setSetsKind(sets.kind); return }
-      setCurveSets(sets.data.curveSets)
-      if (sets.data.curveSets.length > 0) setCurveSetId(prev => prev || sets.data.curveSets[0].id)
+      const res = await getJson(riskUrl(`/api/v1/risk/snapshots/${encodeURIComponent(id)}/capital`), capitalSchema)
+      if (cancelled || !res.ok) return
+      const value = res.data.total?.ownFunds?.tier1
+      if (typeof value !== 'number' || !(value > 0)) return
+      setTier1(prev => prev ?? String(value))
+      setTier1Source(prev => prev ?? { kind: 'capital', asOf: res.data.asOf, parameterSet: `${res.data.parameterSetId} v${res.data.parameterSetVersion}` })
     })()
-  }, [])
+    return () => { cancelled = true }
+  }, [id])
 
   useEffect(() => {
     if (!curveSetId) return
@@ -91,42 +106,85 @@ function SnapshotIrrbb({ id }: { id: string }) {
   const selectedSet = curveSets.find(s => s.id === curveSetId)
   const ratio = data ? outlierRatio(data) : null
   const tier1Invalid = tier1Input.trim() !== '' && parseTier1(tier1Input) === null
+  // The currency the engine compares Tier 1 in; CZK unless the book is single-currency in another.
+  const tier1Currency = data?.outlierTest.currency ?? 'CZK'
+  const showInput = tier1Source?.kind !== 'capital' || overriding
+  const verdict = data ? outlierVerdict(ratio, data.outlierTest.threshold, language) : null
+  const reporting = data?.reportingAggregate && !data.reportingAggregate.notStated ? data.reportingAggregate : null
+  const reportingLoss = reporting ? new Map(reporting.scenarios.map(r => [r.scenario, r.loss])) : null
+  const worstScenario = data ? (data.worstCase.scenario ?? reporting?.worstScenario ?? null) : null
+  const worstLoss = data ? (data.worstCase.loss ?? reporting?.worstLoss ?? null) : null
 
   return (
     <div>
       <PageHeader
         title={t('Úrokové riziko bankovní knihy (IRRBB)', 'Interest-rate risk in the banking book (IRRBB)')}
-        subtitle={t(`Běh ${id}`, `Run ${id}`)}
+        subtitle={<RunSubtitle id={id} run={run} />}
         icon={<Activity size={20} aria-hidden="true" />}
         actions={back}
       />
 
-      <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          {t('Sada křivek', 'Curve set')}
-          <select className="input" value={curveSetId} onChange={e => setCurveSetId(e.target.value)} aria-label={t('Sada výnosových křivek', 'Yield-curve set')}>
-            {curveSets.map(s => <option key={s.id} value={s.id}>{`${s.asOf} · ${s.source} · ${s.provenance}`}</option>)}
-          </select>
-        </label>
-        <form
-          onSubmit={e => { e.preventDefault(); setTier1(parseTier1(tier1Input)) }}
-          style={{ display: 'flex', gap: 8, alignItems: 'end' }}
-        >
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-            {t('Kapitál Tier 1 (volitelné)', 'Tier 1 capital (optional)')}
-            <input className="input" inputMode="decimal" value={tier1Input} onChange={e => setTier1Input(e.target.value)} aria-invalid={tier1Invalid} aria-label={t('Kapitál Tier 1', 'Tier 1 capital')} />
-          </label>
-          <button type="submit" className="btn btn-secondary btn-sm" disabled={tier1Invalid}>{t('Použít', 'Apply')}</button>
-        </form>
+      <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 16, alignItems: 'start', flexWrap: 'wrap' }}>
+        {curveSetsOrNull !== null && (
+          <CurveSetPicker sets={curveSets} value={curveSetId} onChange={setChosenSetId} asOf={run?.asOf ?? null} />
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, maxWidth: 420 }}>
+          <span>{t(`Kapitál Tier 1 v ${tier1Currency === 'CZK' ? 'Kč' : tier1Currency}`, `Tier 1 capital in ${tier1Currency}`)}</span>
+          {tier1Source?.kind === 'capital' && !overriding && tier1 && (
+            <span data-testid="tier1-from-capital">
+              <strong>{formatMoney(Number(tier1), 'CZK', language)}</strong>{' — '}
+              {t(
+                `převzato z výpočtu kapitálu (Pilíř 1) tohoto snímku k ${formatDate(tier1Source.asOf, 'cs')}, sada parametrů ${tier1Source.parameterSet}.`,
+                `taken from this snapshot's Pillar 1 own-funds read as of ${formatDate(tier1Source.asOf, 'en')}, parameter set ${tier1Source.parameterSet}.`,
+              )}{' '}
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setOverriding(true); setTier1Input(formatTier1Input(tier1, language)) }}>
+                {t('Zadat jinou hodnotu', 'Override')}
+              </button>
+            </span>
+          )}
+          {showInput && (
+            <form
+              onSubmit={e => {
+                e.preventDefault()
+                const v = parseTier1(tier1Input)
+                setTier1(v)
+                setTier1Source(v ? { kind: 'manual' } : null)
+                setOverriding(false)
+              }}
+              style={{ display: 'flex', gap: 8, alignItems: 'end' }}
+            >
+              <input
+                className="input"
+                inputMode="decimal"
+                placeholder={t('např. 1 250 000 000', 'e.g. 1,250,000,000')}
+                value={tier1Input}
+                onChange={e => setTier1Input(e.target.value)}
+                onBlur={() => setTier1Input(v => formatTier1Input(v, language))}
+                aria-invalid={tier1Invalid}
+                aria-describedby="tier1-help"
+                aria-label={t('Kapitál Tier 1', 'Tier 1 capital')}
+              />
+              <button type="submit" className="btn btn-secondary btn-sm" disabled={tier1Invalid}>{t('Použít', 'Apply')}</button>
+            </form>
+          )}
+          {tier1Invalid && <span role="alert" style={{ color: 'var(--danger, inherit)' }}>{t('Zadejte kladné číslo, např. 1 250 000 000.', 'Enter a positive number, e.g. 1,250,000,000.')}</span>}
+          {tier1Source?.kind === 'manual' && tier1 && !overriding && (
+            <span data-testid="tier1-manual">{t(`Použita ručně zadaná hodnota ${formatMoney(Number(tier1), tier1Currency, 'cs')}.`, `Using the manually entered ${formatMoney(Number(tier1), tier1Currency, 'en')}.`)}</span>
+          )}
+          <span id="tier1-help" style={{ color: 'var(--text-secondary)' }}>
+            {t(
+              'Slouží k testu odlehlé hodnoty: změna EVE nad 15 % Tier 1 znamená, že banka je odlehlou institucí (EBA GL/2022/14).',
+              'Used by the supervisory outlier test: an EVE change above 15 % of Tier 1 makes the bank an outlier (EBA GL/2022/14).',
+            )}
+          </span>
+        </div>
         {selectedSet && <ProvenanceBadge provenance={selectedSet.provenance} />}
         {data && <ProvenanceBadge provenance={data.provenance} />}
       </div>
 
       {setsKind ? (
         <DataUnavailable kind={setsKind} service="risk-engine" feature={t('sady výnosových křivek', 'curve sets')} lang={language} />
-      ) : curveSets.length === 0 ? (
-        <DataUnavailable kind="no_data" service="risk-engine" feature={t('sady výnosových křivek — nahrajte sadu v sekci Výnosové křivky', 'curve sets — upload one under Curve sets')} lang={language} />
-      ) : kind ? (
+      ) : curveSetsOrNull === null || curveSets.length === 0 ? null : kind ? (
         <DataUnavailable kind={kind} service="risk-engine" feature="IRRBB" lang={language} />
       ) : data ? (
         <>
@@ -161,6 +219,7 @@ function SnapshotIrrbb({ id }: { id: string }) {
                   <th scope="col" style={{ textAlign: 'right' }}>ΔEVE</th>
                   <th scope="col" style={{ textAlign: 'right' }}>ΔNII</th>
                   <th scope="col" style={{ textAlign: 'right' }}>{t('Agregovaná ztráta', 'Aggregate loss')}</th>
+                  {reportingLoss && <th scope="col" style={{ textAlign: 'right' }}>{t('Ztráta všech měn v Kč', 'Loss, all currencies in CZK')}</th>}
                 </tr>
               </thead>
               <tbody>
@@ -173,9 +232,10 @@ function SnapshotIrrbb({ id }: { id: string }) {
                         {worst && <> <StatusBadge status="WORST" tone="danger" label={t('Nejhorší', 'Worst')} /></>}
                       </td>
                       <td>{c.currency}</td>
-                      <td style={{ textAlign: 'right' }}>{money(c.deltaEve)}</td>
-                      <td style={{ textAlign: 'right' }}>{typeof c.deltaNii === 'number' ? money(c.deltaNii) : '—'}</td>
-                      <td style={{ textAlign: 'right' }}>{typeof s.aggregateLoss === 'number' ? money(s.aggregateLoss) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{formatMoney(c.deltaEve, c.currency, language)}</td>
+                      <td style={{ textAlign: 'right' }}>{typeof c.deltaNii === 'number' ? formatMoney(c.deltaNii, c.currency, language) : '—'}</td>
+                      <td style={{ textAlign: 'right' }}>{typeof s.aggregateLoss === 'number' ? formatMoney(s.aggregateLoss, data.worstCase.currency, language) : '—'}</td>
+                      {reportingLoss && <td style={{ textAlign: 'right' }}>{reportingLoss.has(s.scenario) ? formatMoney(reportingLoss.get(s.scenario) ?? 0, 'CZK', language) : '—'}</td>}
                     </tr>
                   )
                 }))}
@@ -190,11 +250,24 @@ function SnapshotIrrbb({ id }: { id: string }) {
                 {t('Poměr', 'Ratio')}: <strong>{(ratio * 100).toLocaleString(locale, { maximumFractionDigits: 2 })} %</strong>{' '}
                 ({t('práh', 'threshold')} {(data.outlierTest.threshold * 100).toLocaleString(locale)} %){' '}
                 <StatusBadge status={data.outlierTest.breached ? 'BREACHED' : 'WITHIN'} tone={data.outlierTest.breached ? 'danger' : 'success'} label={data.outlierTest.breached ? t('Překročeno', 'Breached') : t('V limitu', 'Within threshold')} />
+                {verdict && <><br /><span data-testid="sot-verdict">{verdict}</span></>}
+                {worstScenario && worstLoss !== null && (
+                  <><br /><span style={{ fontSize: 12 }}>{t(
+                    `Nejhorší scénář: ${SCENARIO_LABEL[worstScenario][0]}, ztráta EVE ${formatMoney(worstLoss, data.outlierTest.currency, 'cs')}, Tier 1 ${formatMoney(data.outlierTest.tier1Capital ?? 0, data.outlierTest.currency, 'cs')}.`,
+                    `Worst scenario: ${SCENARIO_LABEL[worstScenario][1]}, EVE loss ${formatMoney(worstLoss, data.outlierTest.currency, 'en')}, Tier 1 ${formatMoney(data.outlierTest.tier1Capital ?? 0, data.outlierTest.currency, 'en')}.`,
+                  )}</span></>
+                )}
               </p>
             ) : (
               <p style={{ fontSize: 13 }}>{data.outlierTest.tier1Supplied ? t('Poměr nelze spočítat.', 'The ratio cannot be computed.') : t('Tier 1 nezadán — poměr se nepočítá.', 'Tier 1 not supplied — the ratio is not computed.')}</p>
             )}
             <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{data.outlierTest.note}</p>
+            {data.reportingAggregate && data.reportingAggregate.fxRates.length > 0 && (
+              <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                {t('Přepočet do Kč kurzem ČNB', 'Converted to CZK at the ČNB fixing')}:{' '}
+                {data.reportingAggregate.fxRates.map(r => `${r.currency} ${r.rate.toLocaleString(locale)} (${formatDate(r.fixingDate, language)})`).join(' · ')}
+              </p>
+            )}
           </div>
 
           {data.gaps.map(g => (
@@ -215,17 +288,17 @@ function SnapshotIrrbb({ id }: { id: string }) {
                   {g.buckets.map(b => (
                     <tr key={b.bucket}>
                       <td>{b.bucket}</td>
-                      <td style={{ textAlign: 'right' }}>{money(b.assets)}</td>
-                      <td style={{ textAlign: 'right' }}>{money(b.liabilities)}</td>
-                      <td style={{ textAlign: 'right' }}>{money(b.gap)}</td>
-                      <td style={{ textAlign: 'right' }}>{money(b.cumulativeGap)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatMoney(b.assets, g.currency, language)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatMoney(b.liabilities, g.currency, language)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatMoney(b.gap, g.currency, language)}</td>
+                      <td style={{ textAlign: 'right' }}>{formatMoney(b.cumulativeGap, g.currency, language)}</td>
                     </tr>
                   ))}
                   <tr style={{ fontWeight: 600 }}>
                     <td>{t('Celkem', 'Total')}</td>
-                    <td style={{ textAlign: 'right' }}>{money(g.totalAssets)}</td>
-                    <td style={{ textAlign: 'right' }}>{money(g.totalLiabilities)}</td>
-                    <td style={{ textAlign: 'right' }}>{money(g.totalGap)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatMoney(g.totalAssets, g.currency, language)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatMoney(g.totalLiabilities, g.currency, language)}</td>
+                    <td style={{ textAlign: 'right' }}>{formatMoney(g.totalGap, g.currency, language)}</td>
                     <td />
                   </tr>
                 </tbody>

@@ -24,7 +24,7 @@ import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { RequestedByBadge } from '@/components/balance-sheet/RequestedByBadge'
 import { getJson, riskUrl, sendJson } from '@/components/balance-sheet/api'
 import { snapshotListSchema, snapshotRunSchema, type SnapshotSummary } from '@/components/balance-sheet/contracts'
-import { isIsoDate } from '@/components/balance-sheet/model'
+import { bankToday, isIsoDate } from '@/components/balance-sheet/model'
 import { hasPermission } from '@/lib/auth/roles'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -47,6 +47,9 @@ function Snapshots() {
   const [unavailable, setUnavailable] = useState<{ kind: UnavailableKind } | null>(null)
   const [asOf, setAsOf] = useState('')
   const [busy, setBusy] = useState(false)
+  // The server rejects an as-of after the current business day (Europe/Prague) with a 400; mirror it here.
+  const today = bankToday()
+  const isFuture = isIsoDate(asOf) && asOf > today
   const [notice, setNotice] = useState<{ tone: 'success' | 'danger'; text: string; runId?: string } | null>(null)
 
   const load = useCallback(async () => {
@@ -59,6 +62,7 @@ function Snapshots() {
   useEffect(() => { void load() }, [load])
 
   const create = async () => {
+    if (isFuture) return
     if (!isIsoDate(asOf)) {
       setNotice({ tone: 'danger', text: t('Zadejte platné datum (RRRR-MM-DD).', 'Enter a valid date (YYYY-MM-DD).') })
       return
@@ -132,12 +136,17 @@ function Snapshots() {
           <div style={{ display: 'flex', gap: 8, alignItems: 'end', flexWrap: 'wrap' }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
               {t('K datu', 'As of')}
-              <input type="date" className="input" value={asOf} onChange={e => setAsOf(e.target.value)} aria-label={t('Datum snímku', 'Snapshot as-of date')} />
+              <input type="date" className="input" value={asOf} max={today} onChange={e => setAsOf(e.target.value)} aria-label={t('Datum snímku', 'Snapshot as-of date')} />
             </label>
-            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !asOf} onClick={() => void create()}>
+            <button type="button" className="btn btn-primary btn-sm" disabled={busy || !asOf || isFuture} onClick={() => void create()}>
               {busy ? t('Sestavuji…', 'Building…') : t('Sestavit snímek', 'Build snapshot')}
             </button>
           </div>
+          {isFuture && (
+            <p role="alert" style={{ fontSize: 12, color: 'var(--danger)', marginTop: 8 }}>
+              {t('Datum nesmí být v budoucnosti — snímek nelze odsouhlasit s hlavní knihou za den, který ještě neskončil.', 'The date cannot be in the future — a snapshot cannot be tied out to the ledger for a day that has not closed.')}
+            </p>
+          )}
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
             {t('Stejná data hlavní knihy ke stejnému datu vrátí existující běh (replay), nic nového nevznikne.', 'The same ledger data at the same date returns the existing run (a replay); nothing new is stored.')}
           </p>

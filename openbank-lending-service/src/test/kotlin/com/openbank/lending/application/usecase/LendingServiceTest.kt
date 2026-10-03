@@ -85,6 +85,9 @@ class LendingServiceTest {
         every { loans.withLocked<Any>(any(), any()) } answers {
             loans.findById(firstArg()).flatMap(secondArg<(Loan?) -> Uni<Any>>())
         }
+        every { applications.withLocked<Any>(any(), any()) } answers {
+            applications.findById(firstArg()).flatMap(secondArg<(LoanApplication?) -> Uni<Any>>())
+        }
         every { provisioning.findLatestByLoan(any()) } returns Uni.createFrom().nullItem()
 
         every { events.emit(any<LendingOutboxMessage>()) } answers {
@@ -1738,6 +1741,40 @@ class LendingServiceTest {
         )
         // No collateral registered on these loans: LGD stays the flat placeholder (no regression).
         every { collateral.findByLoan(loan.id) } returns Uni.createFrom().item(emptyList())
+    }
+
+    @Test
+    fun `provisioning fails when the same unprovisioned batch repeats`() {
+        val (loan, _) = currentLoanWithSchedule(LoanId.random())
+        every { loans.findUnprovisioned("2026-06", 1) } returns Uni.createFrom().item(listOf(loan))
+        every { loans.findById(loan.id) } returns Uni.createFrom().item(loan.copy(status = LoanStatus.CLOSED))
+
+        assertThatThrownBy {
+            service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
+                .await().indefinitely()
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("made no progress")
+
+        verify(exactly = 2) { loans.findUnprovisioned("2026-06", 1) }
+        verify(exactly = 0) { provisioning.save(any()) }
+    }
+
+    @Test
+    fun `provisioning drains past forty distinct batches before reporting success`() {
+        val (loan, _) = currentLoanWithSchedule(LoanId.random())
+        val loansForPass = List(41) { loan.copy(id = LoanId.random()) }
+        every { loans.findUnprovisioned("2026-06", 1) } returnsMany
+            (loansForPass.map { Uni.createFrom().item(listOf(it)) } + Uni.createFrom().item(emptyList<Loan>()))
+        every { loans.findById(any()) } answers {
+            Uni.createFrom().item(loan.copy(id = firstArg(), status = LoanStatus.CLOSED))
+        }
+
+        val outcome = service.runProvisioningCycle("2026-06", LocalDate.parse("2026-06-01"), 1)
+            .await().indefinitely()
+
+        assertThat(outcome.loansAssessed).isEqualTo(41)
+        assertThat(outcome.journalsQueued).isZero()
+        verify(exactly = 42) { loans.findUnprovisioned("2026-06", 1) }
     }
 
     @Test

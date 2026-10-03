@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.32.1](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.32.0...ledger-service-v1.32.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **ledger:** re-check CUTOFF days behind the tie-out cursor ([#11681](https://github.com/JiRaska/open-bank-oss/issues/11681)) ([653abc5](https://github.com/JiRaska/open-bank-oss/commit/653abc5de7ed5869ec703bd5b782edc7115a9b7b))
+* **ledger:** re-run tie-out for CUTOFF days whose only verdict predates cutoff ([#11790](https://github.com/JiRaska/open-bank-oss/issues/11790)) ([f9bdb0d](https://github.com/JiRaska/open-bank-oss/commit/f9bdb0db8b52a40fe7a316ddc8bd9eb1d387c020)), closes [#11666](https://github.com/JiRaska/open-bank-oss/issues/11666)
+
 ## [1.32.0](https://github.com/JiRaska/open-bank-oss/compare/ledger-service-v1.31.1...ledger-service-v1.32.0) (2026-09-27)
 
 

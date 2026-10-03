@@ -67,6 +67,14 @@
 #         `default-roles-openbank-customers` composed `offline_access` and `uma_authorization`,
 #         neither declared.
 #
+#     R10 a flow reference that names no flow in the template: a client's
+#         `authenticationFlowBindingOverrides` value (a flow ID), a realm binding such as
+#         `browserFlow` (an alias), or an execution's `flowAlias` (a sub-flow). Measured on 26.7.3
+#         (#11797): an override pointing at a missing flow IMPORTS CLEANLY — zero ERROR lines — and
+#         the client silently falls back to the realm flow. For the `openbao` client that fallback
+#         is the step-up flow disappearing, i.e. MFA silently gone after a rebuild. The boot test
+#         cannot see it; only this rule can.
+#
 #   Measured on the pre-fix templates: 12 findings, covering R1 (×5), R2, R3 (×2), R7, R8 and R9.
 #   Each was independently confirmed against the real container — the customers realm needed all
 #   four import-blockers removed before `Realm 'openbank-customers' imported` appeared.
@@ -109,6 +117,12 @@ AUTHENTICATOR_MAX = 36
 
 class DuplicateKey(ValueError):
     """R7. Raised with every duplicated key path found while parsing."""
+
+
+REALM_FLOW_BINDINGS = (
+    "browserFlow", "directGrantFlow", "registrationFlow", "resetCredentialsFlow",
+    "clientAuthenticationFlow", "dockerAuthenticationFlow", "firstBrokerLoginFlow",
+)
 
 
 def _no_duplicates(pairs):
@@ -223,6 +237,33 @@ def check_realm(name, realm):
                     f"{len(a)} chars, over the VARCHAR({AUTHENTICATOR_MAX}) column (R8) — the "
                     f"import aborts with a raw SQL 'Value too long for column' error."
                 )
+
+    flows = realm.get("authenticationFlows", []) or []
+    if flows:
+        flow_ids = {f.get("id") for f in flows if f.get("id")}
+        flow_aliases = {f.get("alias") for f in flows}
+        for c in clients:
+            for binding, ref in (c.get("authenticationFlowBindingOverrides") or {}).items():
+                if ref not in flow_ids:
+                    findings.append(
+                        f"[{name}] client `{c.get('clientId')}` overrides its `{binding}` flow with "
+                        f"`{ref}`, which is no flow id in this template (R10) — Keycloak imports it "
+                        f"cleanly and silently falls back to the realm flow."
+                    )
+        for key in REALM_FLOW_BINDINGS:
+            ref = realm.get(key)
+            if ref is not None and ref not in flow_aliases:
+                findings.append(
+                    f"[{name}] realm `{key}` is `{ref}`, which is no flow alias in this template (R10)."
+                )
+        for flow in flows:
+            for ex in flow.get("authenticationExecutions", []) or []:
+                sub = ex.get("flowAlias")
+                if sub is not None and sub not in flow_aliases:
+                    findings.append(
+                        f"[{name}] flow `{flow.get('alias')}` calls sub-flow `{sub}`, which the "
+                        f"template does not declare (R10)."
+                    )
 
     return findings, (len(clients), len(users))
 
@@ -376,6 +417,28 @@ def self_test():
             sorted(names),
         )
     )
+
+    flowed = _clean()
+    flowed["authenticationFlows"] = [
+        {"id": "f1", "alias": "browser", "authenticationExecutions": [{"flowAlias": "browser forms"}]},
+        {"id": "f2", "alias": "browser forms", "authenticationExecutions": []},
+    ]
+    flowed["browserFlow"] = "browser"
+    flowed["clients"][0]["authenticationFlowBindingOverrides"] = {"browser": "f1"}
+    f, _ = check_realm("t", flowed)
+    cases.append(("R10 resolvable flow references pass", f == [], f))
+    d = copy.deepcopy(flowed)
+    d["clients"][0]["authenticationFlowBindingOverrides"] = {"browser": "missing-id"}
+    f, _ = check_realm("t", d)
+    cases.append(("R10 dangling client flow override flagged", any("R10" in x and "overrides" in x for x in f), f))
+    d = copy.deepcopy(flowed)
+    d["browserFlow"] = "nope"
+    f, _ = check_realm("t", d)
+    cases.append(("R10 dangling realm flow binding flagged", any("R10" in x and "browserFlow" in x for x in f), f))
+    d = copy.deepcopy(flowed)
+    d["authenticationFlows"][0]["authenticationExecutions"][0]["flowAlias"] = "ghost"
+    f, _ = check_realm("t", d)
+    cases.append(("R10 dangling sub-flow flagged", any("R10" in x and "sub-flow" in x for x in f), f))
 
     bad = 0
     for label, passed, detail in cases:

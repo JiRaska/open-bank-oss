@@ -24,3 +24,7 @@ spec:
       remoteRef:
         key: goalert
         property: url
+    # NOT here, and not in this Secret at all: the dead-man heartbeat URL lives in
+    # Secret `alertmanager-deadman` (kube-prometheus-stack.yaml route `deadman`). ESO owns
+    # this Secret and rewrites its whole data on sync, so any key written from outside is
+    # deleted again — measured 2026-10-01.

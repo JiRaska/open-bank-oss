@@ -4,8 +4,11 @@
 
 package com.openbank.account.infrastructure.kafka
 
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.account.application.port.out.ApprovalGroupRevisionRepository
 import com.openbank.account.application.port.out.DelegationProjectionRepository
+import com.openbank.account.domain.model.ApprovalGroupRevision
 import com.openbank.account.domain.model.DelegatedAccessGrant
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.delay
@@ -24,6 +27,8 @@ private data class DelegationEvent(
     val capabilities: Set<String>,
     val approvalPolicy: String,
     val requiredApprovals: Int?,
+    val approvalGroupId: UUID?,
+    val approvalGroupRevision: Long?,
     val perTxLimitAmount: java.math.BigDecimal?,
     val perTxLimitCurrency: String?,
     val validFrom: OffsetDateTime?,
@@ -45,22 +50,43 @@ private data class DelegationEvent(
 @ApplicationScoped
 class DelegationEventConsumer(
     private val projectionRepository: DelegationProjectionRepository,
+    private val approvalGroupRepository: ApprovalGroupRevisionRepository,
     private val objectMapper: ObjectMapper,
 ) {
     private val log = Logger.getLogger(DelegationEventConsumer::class.java)
 
     @Incoming("delegation-events-in")
+    suspend fun consumeDelegation(payload: String) = consume(payload)
+
+    @Incoming("approval-group-revisions-in")
+    suspend fun consumeApprovalGroupRevision(payload: String) = consume(payload)
+
     suspend fun consume(payload: String) {
-        val event = parseEnvelope(payload)
+        val node = runCatching { objectMapper.readTree(payload) }.getOrNull()
+        if (node == null) {
+            log.warnf("Dropping unprocessable delegation event (poison pill): %.300s", payload)
+            return
+        }
+        val type = node.path("eventType").asText("")
+        if (type in APPROVAL_GROUP_TYPES) {
+            val revision = parseApprovalGroup(node)
+            if (revision == null) {
+                log.warnf("Dropping unprocessable approval-group event (poison pill): %.300s", payload)
+                return
+            }
+            withBoundedRetry(type, revision.groupId) { approvalGroupRepository.store(revision) }
+            return
+        }
+
+        val event = parseDelegation(node)
         if (event == null) {
             log.warnf("Dropping unprocessable delegation event (poison pill): %.300s", payload)
             return
         }
-        withBoundedRetry(event) { dispatch(event) }
+        withBoundedRetry(event.type, event.grantId) { dispatch(event) }
     }
 
-    private fun parseEnvelope(payload: String): DelegationEvent? {
-        val node = runCatching { objectMapper.readTree(payload) }.getOrNull() ?: return null
+    private fun parseDelegation(node: JsonNode): DelegationEvent? {
         val grantId = runCatching { UUID.fromString(node.path("aggregateId").asText()) }.getOrNull() ?: return null
         val grantee = runCatching { UUID.fromString(node.path("granteePartyId").asText()) }.getOrNull() ?: return null
         // A grant with no readable grantor cannot be checked against the account owner, so it is
@@ -80,6 +106,9 @@ class DelegationEventConsumer(
             capabilities = caps,
             approvalPolicy = node.path("approvalPolicy").asText(DelegatedAccessGrant.APPROVAL_POLICY_SOLO),
             requiredApprovals = node.path("requiredApprovals").takeIf { it.isIntegralNumber }?.intValue(),
+            approvalGroupId = node.path("approvalGroupId").asText(null)
+                ?.let { runCatching { UUID.fromString(it) }.getOrNull() },
+            approvalGroupRevision = node.path("approvalGroupRevision").takeIf { it.isIntegralNumber }?.longValue(),
             perTxLimitAmount = node.path("perTransactionLimit").path("amount").asText(null)?.toBigDecimalOrNull(),
             perTxLimitCurrency = node.path("perTransactionLimit").path("currency").asText(null),
             validFrom = node.path("validFrom").asText(null)?.let {
@@ -89,6 +118,23 @@ class DelegationEventConsumer(
             lifecycleRevision = node.path("lifecycleRevision").takeIf { it.isIntegralNumber }?.longValue(),
         )
     }
+
+    private fun parseApprovalGroup(node: JsonNode): ApprovalGroupRevision? = runCatching {
+        val members = node.path("members")
+            .takeIf(JsonNode::isArray)
+            ?.map { UUID.fromString(it.asText()) }
+            ?.toSet()
+            ?: return null
+        ApprovalGroupRevision(
+            groupId = UUID.fromString(node.path("aggregateId").asText()),
+            ownerPartyId = UUID.fromString(node.path("ownerPartyId").asText()),
+            revision = node.path("revision").longValue(),
+            name = node.path("name").asText(),
+            members = members,
+            threshold = node.path("threshold").intValue(),
+            active = node.path("active").booleanValue(),
+        )
+    }.getOrNull()
 
     private suspend fun dispatch(event: DelegationEvent) {
         if (event.resourceType !in PROJECTED_RESOURCE_TYPES && event.type in LIFECYCLE_TYPES) return
@@ -112,6 +158,8 @@ class DelegationEventConsumer(
                 capabilities = event.capabilities,
                 approvalPolicy = event.approvalPolicy,
                 requiredApprovals = event.requiredApprovals,
+                approvalGroupId = event.approvalGroupId,
+                approvalGroupRevision = event.approvalGroupRevision,
                 resourceType = event.resourceType,
                 perTransactionLimitAmount = event.perTxLimitAmount,
                 perTransactionLimitCurrency = event.perTxLimitCurrency,
@@ -123,7 +171,7 @@ class DelegationEventConsumer(
         )
     }
 
-    private suspend fun withBoundedRetry(event: DelegationEvent, block: suspend () -> Unit) {
+    private suspend fun withBoundedRetry(type: String, aggregateId: UUID, block: suspend () -> Unit) {
         var attempt = 1
         while (true) {
             try {
@@ -134,8 +182,8 @@ class DelegationEventConsumer(
                     log.errorf(
                         e,
                         "delegation event %s/%s failed after %d attempts (%s: %s) — dead-lettering",
-                        event.type,
-                        event.grantId,
+                        type,
+                        aggregateId,
                         attempt,
                         e.javaClass.simpleName,
                         e.message,
@@ -144,8 +192,8 @@ class DelegationEventConsumer(
                 }
                 log.warnf(
                     "delegation event %s/%s projection attempt %d/%d failed (%s: %s) — retrying",
-                    event.type,
-                    event.grantId,
+                    type,
+                    aggregateId,
                     attempt,
                     MAX_PROJECTION_ATTEMPTS,
                     e.javaClass.simpleName,
@@ -175,6 +223,12 @@ class DelegationEventConsumer(
             "DelegationSuspended",
             "DelegationRenounced",
             "DelegationExpired",
+        )
+
+        val APPROVAL_GROUP_TYPES = setOf(
+            "ApprovalGroupCreated",
+            "ApprovalGroupRevised",
+            "ApprovalGroupDeactivated",
         )
     }
 }

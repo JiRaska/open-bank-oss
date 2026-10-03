@@ -33,11 +33,18 @@ spec:
         # D1a: Absolute daily NAT egress threshold (50 GB). Uses a 24h rate window
         # normalised to bytes/day. Fires if any namespace exceeds the threshold.
         - alert: FinOpsNatEgressSpikeAbsolute
+          # A pod with hostNetwork: true has no network namespace of its own, so cAdvisor
+          # reports the NODE's interface counters for it. Every such pod therefore "sends" the
+          # whole node's traffic. Measured 2026-10-01: the GuardDuty runtime agent DaemonSet
+          # (hostNetwork) read as 1.9 TB/day across 23 pods and fired this alert, while the
+          # largest real namespace was argocd at 21 GB/day. max_over_time keeps pods that have
+          # since been replaced excluded for the whole 24h window.
           expr: |
             sum by (namespace) (
               rate(container_network_transmit_bytes_total{
                 namespace!~"kube-system|monitoring|observability|cert-manager"
               }[24h])
+              unless on (namespace, pod) max_over_time(kube_pod_info{host_network="true"}[24h])
             ) * 86400 > 53687091200
           for: 30m
           labels:
@@ -178,8 +185,12 @@ spec:
         # wrong name never surfaced. Both now fixed; queries below were run against this
         # cluster's Prometheus and return data.
         - alert: FinOpsKarpenterNodeChurnHigh
+          # runners / runners-warm are excluded: ARC CI runner nodes are created and
+          # consolidated empty on every CI burst BY DESIGN (WhenEmptyOrUnderutilized, 30m),
+          # 45 of the 67 terminations in the 24h measured 2026-10-01. Counting them made this
+          # fire on every busy CI hour and say nothing about the service fleet.
           expr: |
-            increase(karpenter_nodes_terminated_total[1h]) > 3
+            increase(karpenter_nodes_terminated_total{nodepool!~"runners.*"}[1h]) > 3
           for: 10m
           labels:
             severity: warning
@@ -193,9 +204,14 @@ spec:
 
         # D3b: Node churn specifically OUTSIDE the maintenance window.
         - alert: FinOpsKarpenterChurnOutsideMaintenance
+          # Was `(hour() >= 7 and hour() < 20) and increase(...)`. hour() returns a vector with
+          # NO labels and `and` matches on labels, so the left side never matched a series that
+          # carries `nodepool` — this critical alert could not fire, at any hour, ever. Measured
+          # 2026-10-01 at 17Z with a `>= 0` positive control: old form empty, this form returns
+          # every non-runner pool. The time window now filters via `and on()`.
           expr: |
-            (hour() >= 7 and hour() < 20) and
-            increase(karpenter_nodes_terminated_total[30m]) > 2
+            increase(karpenter_nodes_terminated_total{nodepool!~"runners.*"}[30m]) > 2
+              and on() (hour() >= 7 and hour() < 20)
           for: 5m
           labels:
             severity: critical
@@ -203,7 +219,7 @@ spec:
             team: platform
             route: finops-agent
           annotations:
-            summary: "Node churn during business hours — {{ $value }} nodes"
+            summary: "Node churn during business hours"
             description: "Karpenter terminated {{ $value }} nodes during business hours (07:00–20:00 UTC). This causes unnecessary EBS detach races and cross-AZ traffic spikes. Prometheus server UTC assumed."
             runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
 

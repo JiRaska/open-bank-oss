@@ -120,6 +120,23 @@ class SettlementAdapterTest {
     }
 
     @Test
+    fun `settle rounds a wide-scale amount half-up to the currency's minor units`(): Unit = runBlocking {
+        // A tie at the third decimal discriminates HALF_UP (10.13) from HALF_EVEN (10.12): the
+        // booking amount keeps the LEDGER_POSTING rounding it has always had.
+        val p = payment().copy(amount = BigDecimal("10.125000"))
+        val response = mockk<Response>()
+        every { response.status } returns 201
+        every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
+        val requestSlot = slot<InitiateSettlementRequest>()
+        every { client.initiateTransaction(any(), capture(requestSlot)) } returns
+            Uni.createFrom().item(response)
+
+        adapter().settle(p)
+
+        assertThat(requestSlot.captured.amount).isEqualTo(BigDecimal("10.13"))
+    }
+
+    @Test
     fun `settle resolves the payee and sends targetAccountId for an internal transfer`(): Unit = runBlocking {
         val p = payment() // INTERNAL_CLIENT, creditor 9876543210 / bank 0100
         val creditorId = UUID.randomUUID()

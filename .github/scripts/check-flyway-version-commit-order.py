@@ -69,12 +69,22 @@ VERSION_RE = re.compile(r"^V(\d+)__.*\.sql$")
 # database). Checked BOTH ways, same idiom as check-kafka-acl-coverage.py's KNOWN_GAPS: an entry
 # that stops reproducing is itself reported, so this list can only shrink.
 KNOWN_VIOLATIONS: dict[str, str] = {
+    "openbank-risk-engine/src/main/resources/db/migration/V7__risk_limit_outbox.sql":
+        "#11549 and #11722 merged hours apart (2026-10-01/02) with V7/V8 picked in parallel; "
+        "no database had applied either (sandbox pod: schema at 6), so every environment "
+        "applies V7 before V8 and no out-of-order flag is needed. Renaming instead would edit "
+        "a committed migration, which db-migration-gate forbids.",
     "openbank-security-scanner/src/main/resources/db/migration/V4__drop_security_outbox.sql":
         "issue #5628 / PR #5630 — QUARKUS_FLYWAY_OUT_OF_ORDER=true set in gitops.",
     "openbank-campaign-service/src/main/resources/db/migration/V13__campaign_decision_graph.sql":
         "V15 (Stories) deployed before the additive graph migrations V13/V14; "
         "QUARKUS_FLYWAY_OUT_OF_ORDER=true set in components/campaign/campaign-service.yaml, "
         "with its own note to remove once all environments have recorded V13/V14.",
+    "openbank-treasury-service/src/main/resources/db/migration/V10__nostro_statement_opening_date.sql":
+        "#11113 landed V10 after #11121 had put V11 on main (2026-09-29). Measured before "
+        "baselining: the sandbox openbank_treasury flyway_schema_history ends at V9, so NO "
+        "database has applied V11 without V10 and the next deploy applies V10 then V11 in order. "
+        "No out-of-order flag is needed; renaming is blocked by db-migration-gate.",
 }
 
 

@@ -58,6 +58,16 @@ class PaymentRailProjectionConsumerTest {
     }
 
     @Test
+    fun `SEPA return cannot claim a reversal identity when reversal did not happen`() {
+        val payload = sepaReturnEvent().replace("\"reversalPerformed\":true", "\"reversalPerformed\":false")
+
+        assertThatThrownBy { runBlocking { consumer.consumeSepaReturn(payload) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("unsupported reversal identity")
+        assertThat(failed("sepa-return")).isEqualTo(1.0)
+    }
+
+    @Test
     fun `unrelated shared clearing events are ignored without persistence`(): Unit = runBlocking {
         consumer.consumeClearing("""{"eventType":"openbank.clearing.batch.settled"}""")
 
@@ -74,6 +84,7 @@ class PaymentRailProjectionConsumerTest {
 
     private fun sepaReturnEvent(): String = """{"eventType":"sepa.payment.returned","sourceService":"sepa-payment",""" +
         """"paymentId":"${UUID.randomUUID()}","version":3,"reversalPerformed":true,""" +
+        """"reversalTransactionId":"${UUID.randomUUID()}",""" +
         """"occurredAt":"2026-09-14T09:59:00Z"}"""
 
     private companion object {

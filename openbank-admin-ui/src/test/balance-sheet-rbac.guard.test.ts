@@ -177,3 +177,13 @@ describe('ČNB minimum reserve requirement read — ADR-0313/ADR-0315', () => {
     expect(granted).toEqual([ROLES.ADMIN, ROLES.FINANCE, ROLES.RISK].sort())
   })
 })
+
+describe('Risk limits read — ADR-0313 D9', () => {
+  it('the limits endpoint is a plain read: risk.snapshot.read, no method-level role widening', () => {
+    const at = riskResource.indexOf('@Path("/{id}/limits")')
+    expect(at).toBeGreaterThan(0)
+    const block = riskResource.slice(at, riskResource.indexOf('suspend fun limits', at))
+    expect(block).toContain('@Authorize(action = "risk.snapshot.read", resource = "#id")')
+    expect(block).not.toContain('@RolesAllowed')
+  })
+})
