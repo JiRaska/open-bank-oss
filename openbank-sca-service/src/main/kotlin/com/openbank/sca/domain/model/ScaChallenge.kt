@@ -107,8 +107,10 @@ data class ScaChallenge(
     val decidedByPartyId: UUID? = null,
     /** The credential that signed the decision; paired with [decidedByPartyId]. */
     val decidedByCredentialId: String? = null,
+    /** Version observed when this snapshot was read; guards concurrent lifecycle writes. */
+    val version: Int = 0,
 ) {
-    fun isExpired(now: OffsetDateTime): Boolean = now.isAfter(expiresAt)
+    fun isExpired(now: OffsetDateTime): Boolean = !now.isBefore(expiresAt)
     fun isCompleted(): Boolean = status == ScaStatus.COMPLETED
     fun canAttempt(now: OffsetDateTime): Boolean =
         attemptCount < maxAttempts && status == ScaStatus.PENDING && !isExpired(now)
