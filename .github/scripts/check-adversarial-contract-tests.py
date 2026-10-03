@@ -43,6 +43,46 @@ NEGATIVE = re.compile(
     r"notFound|rejectsUnauthenticated|missingToken|expiredToken"
 )
 
+# A MESSAGE-only contract test (a Kafka/async pact: the provider is verified by invoking a
+# @PactVerifyProvider method through MessageTestTarget) has no request, no identity and no status
+# code, so "add the 401/403/404 for a wrong identity" cannot be satisfied by a real case — only by
+# a decoy word that the NEGATIVE regex happens to match, which is worse than no rule (#11971:
+# swift-service's only provider contract is the swift.message.status-changed event). Such a file
+# is out of scope. A file that ALSO drives HTTP (any marker below) stays in scope: mixed provider
+# replays exist in account, party, balance, transaction and vop, and their HTTP half must still
+# carry a negative case.
+MESSAGE_TARGET = re.compile(
+    r"\bMessageTestTarget\b|@PactVerifyProvider\b|\bMessagePact\b|ProviderType\.ASYNCH\b"
+)
+HTTP_TARGET = re.compile(
+    r"\bHttpTestTarget\b|\bHttpsTestTarget\b|\bRequestResponsePact\b|\bRestAssured\b|"
+    r"@TestHTTPResource\b|\bMockServer\b|\.uponReceiving\(|\bwillRespondWith\b"
+)
+
+
+def is_message_only(text: str) -> bool:
+    return bool(MESSAGE_TARGET.search(text)) and not HTTP_TARGET.search(text)
+
+
+SELFTEST_MESSAGE_ONLY = '''class FooEventPactProviderVerificationTest {
+    @BeforeEach fun before(context: PactVerificationContext?) {
+        context?.target = MessageTestTarget(listOf("com.example.contract"))
+    }
+    @PactVerifyProvider("a foo.created event") fun produce(): MessageAndMetadata = TODO()
+}'''
+# Message AND HTTP in one class: the HTTP half still needs its negative case.
+SELFTEST_MIXED = '''class FooPactFolderProviderVerificationTest {
+    @BeforeEach fun before(context: PactVerificationContext?) {
+        context?.target = if (isMessage) MessageTestTarget() else HttpTestTarget("localhost", port)
+    }
+    @PactVerifyProvider("a foo.created event") fun produce(): MessageAndMetadata = TODO()
+}'''
+SELFTEST_HTTP = '''class FooPactProviderVerificationTest {
+    @BeforeEach fun before(context: PactVerificationContext?) {
+        context?.target = HttpTestTarget("localhost", port)
+    }
+}'''
+
 SELFTEST_OK = '''class FooPactConsumerTest {
     fun `rejects when token is missing`() { /* expects 401 */ }
 }'''
@@ -75,7 +115,8 @@ def fleet_report() -> int:
         ["git", "ls-files", "*Pact*Test.kt", "*/contract/*Test.kt"],
         capture_output=True, text=True, check=True,
     )
-    files = sorted(set(res.stdout.splitlines()))
+    files = sorted(f for f in set(res.stdout.splitlines())
+                   if not is_message_only(Path(f).read_text(encoding="utf-8", errors="replace")))
     debt = [f for f in files if not is_adversarial(Path(f))]
     print(f"adversarial-contract: {len(files)} contract test file(s), "
           f"{len(files) - len(debt)} adversarial, {len(debt)} happy-path-only (fleet debt, #8590 #3)")
@@ -92,6 +133,12 @@ def _self_test() -> int:
         print("self-test FAIL: a 404 negative case not detected"); bad += 1
     if NEGATIVE.search(SELFTEST_BAD):
         print("self-test FAIL: happy path misread as adversarial"); bad += 1
+    if not is_message_only(SELFTEST_MESSAGE_ONLY):
+        print("self-test FAIL: a message-only provider test not recognised as out of scope"); bad += 1
+    if is_message_only(SELFTEST_MIXED):
+        print("self-test FAIL: a mixed message+HTTP test exempted — its HTTP half lost the rule"); bad += 1
+    if is_message_only(SELFTEST_HTTP) or NEGATIVE.search(SELFTEST_HTTP):
+        print("self-test FAIL: an HTTP-only happy-path test would pass"); bad += 1
     for ok, name in [(True, "x/contract/FooPactConsumerTest.kt"), (True, "x/FooPactTest.kt"),
                      (False, "x/FooTest.kt"), (False, "x/contract/Foo.kt")]:
         if bool(CONTRACT_FILE.search(name)) != ok:
@@ -113,7 +160,10 @@ def main() -> int:
 
     findings = 0
     for path in changed_contract_files(args.since):
-        if is_adversarial(path):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if is_message_only(text):
+            print(f"  skip (message-only contract, no request/identity to reject): {path}")
+        elif is_adversarial(path):
             print(f"  ok: {path}")
         else:
             print(f"::error::{path}: a changed contract test carries no negative case — "
