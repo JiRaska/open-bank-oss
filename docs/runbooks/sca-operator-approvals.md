@@ -35,11 +35,27 @@ SCA does not use the fleet's Redis approval store. Each transition (create, deci
 in one PostgreSQL transaction with an `SCA_OPERATOR_APPROVAL_CHANGED` outbox event naming the actor
 (maker on create and claim, checker on decide). A failed audit insert rolls the transition back.
 Decision and claim do not extend the original deadline. Expiry hides a record from the approval
-APIs; the row and its events remain. No automatic retention or deletion applies to these rows yet.
+APIs; the row and its events remain until retention (below) deletes the row.
 
 `EXECUTED` means the one-use authorization was claimed, not that the protected operation
 committed. If a response is lost, inspect the device or challenge and its own outbox event before
 asking for a fresh approval. Never edit stored approval state to replay an authorization.
+
+## Retention
+
+Approvals are authorisation evidence for the operations they gated, kept like device-decision
+evidence ([sca-durable-decisions](sca-durable-decisions.md)): the daily
+`OperatorApprovalPurgeScheduler` (cron `openbank.sca.approval-purge.cron`, default `0 45 3 * * ?`)
+deletes TERMINAL rows (APPROVED, REJECTED, EXECUTED) whose authorization expired more than
+`openbank.sca.approval-retention-days` (default 1826, AMLD Art. 40) ago, oldest first, in batches of
+`openbank.sca.approval-purge.batch-size` (500) up to `max-batches-per-run` (100) per run. PENDING rows
+are never deleted. The outbox events are not touched.
+
+- Health: `openbank_workflow_last_success_age_seconds{workflow="sca-operator-approval-purge"}` and
+  the counter `openbank_sca_operator_approval_purged_total`. Neither exists when the purge is
+  disabled — an absent series means "not meant to run", not "healthy".
+- Legal hold or investigation: set `openbank.sca.approval-purge.enabled=false` BEFORE the next
+  03:45 run, and re-enable when the hold lifts.
 
 ## Cutover and rollback
 
@@ -57,6 +73,8 @@ snapshot to resurrect a consumed authorization.
   queue, error mapping, customer denial and the existing service-account exemptions.
 - `ScaOperatorApprovalDurabilityIT` — retained expiry evidence, concurrent checker/claim races,
   the per-maker pending bound under concurrency, binding round-trip and rollback on audit failure.
+- `OperatorApprovalRetentionTest` and `OperatorApprovalPurgeSchedulerIT` — cutoff, batching and
+  the per-run cap; the real cron deletes terminal rows past retention and keeps fresh and PENDING ones.
 - `ScaOidcApprovalIT` — an isolated Keycloak realm from the deployment image's pinned base, real
   operator and service-account tokens (no `@TestSecurity`), durable audit actors, tampered or
   missing token rejection, and a full enrol → sign → consume → revoke lifecycle.

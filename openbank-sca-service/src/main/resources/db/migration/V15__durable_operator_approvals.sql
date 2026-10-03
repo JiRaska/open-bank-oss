@@ -31,3 +31,8 @@ CREATE INDEX idx_sca_operator_approvals_pending ON sca_operator_approvals (expir
 
 CREATE INDEX idx_sca_operator_approvals_maker_pending ON sca_operator_approvals (action, maker_id, expires_at)
     WHERE status = 'PENDING';
+
+-- Retention (OperatorApprovalRetention): terminal rows whose authorization expired before the cutoff
+-- are deleted oldest first; PENDING rows are never deleted, so they are outside this index.
+CREATE INDEX idx_sca_operator_approvals_retention ON sca_operator_approvals (expires_at, id)
+    WHERE status IN ('APPROVED', 'REJECTED', 'EXECUTED');

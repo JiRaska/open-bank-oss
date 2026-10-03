@@ -308,5 +308,13 @@ is the **authentication assurance gate** for payments and consent — defeating 
   (2026-10-03): `service-account-openbank-services` and `-edge` are DENIED
   `scaChallenge.approval.decide` but ALLOWED `scaChallenge.approval.read` via `operator-read-any`,
   so they can see the queue (action, party id, maker id — not the request summary or fingerprint)
-  but cannot decide it. Approval rows have no retention purge yet. **Rollback:** revert
+  but cannot decide it (least-privilege restriction deferred to slice 10). **Retention:**
+  `OperatorApprovalPurgeScheduler` (`suspend` `@Scheduled`, daily `0 45 3 * * ?`, bounded batches
+  and a per-run cap, liveness `sca-operator-approval-purge` and counter
+  `openbank.sca.operator.approval.purged` registered only when enabled) deletes TERMINAL approvals
+  (APPROVED, REJECTED, EXECUTED) whose authorization expired more than
+  `openbank.sca.approval-retention-days` (default 1826, AMLD Art. 40 — the approval is part of the
+  authorisation evidence for the operation it gated) ago, via V15
+  `idx_sca_operator_approvals_retention`. A PENDING row is never deleted; the outbox events are not
+  touched by this purge. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
   the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.

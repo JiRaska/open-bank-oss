@@ -175,6 +175,9 @@ quarkus:
       # Off so unrelated tests keep their decision rows; DecisionEvidencePurgeSchedulerIT turns it on.
       decision-purge:
         enabled: false
+      # Off for the same reason; OperatorApprovalPurgeSchedulerIT turns it on.
+      approval-purge:
+        enabled: false
 
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
@@ -194,6 +197,16 @@ openbank:
     decision-purge:
       enabled: true
       cron: "0 30 3 * * ?"
+      batch-size: 500
+      max-batches-per-run: 100
+    # Operator maker/checker approvals (sca_operator_approvals, V15) are authorisation evidence for
+    # the gated device and settlement-gate operations: terminal rows are kept five years after their
+    # authorization expired (AMLD Art. 40, as above), then deleted by OperatorApprovalPurgeScheduler.
+    # PENDING rows are never deleted.
+    approval-retention-days: 1826
+    approval-purge:
+      enabled: true
+      cron: "0 45 3 * * ?"
       batch-size: 500
       max-batches-per-run: 100
   api:
