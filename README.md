@@ -29,99 +29,80 @@ OpenBank is an **early-stage, community-driven** banking platform reference impl
 
 ## Project Status
 
-**Beta — M1 complete, M2/M3/M5 in progress.** ~37 backend microservices in the repo, all now deployed to the AWS sandbox — FINREP (previously the lone code-only service) deploys via its own ArgoCD Application (#547), and the new Verification-of-Payee (VoP) service is live (ADR-0171); customer-edge + admin-UI + developer portal deployed. The intra-bank money path is end-to-end; the ISO 20022 pipeline and clearing simulator are wired; live interbank network connections and multi-region are later milestones. See [docs/ROADMAP.md](docs/ROADMAP.md) for the full M1–M7 plan.
+**Beta reference implementation.** The repository contains banking services, an operator
+console, shared libraries, infrastructure, and governed AI services. Components release
+independently; a component version or a passing CI badge is not a platform-wide readiness claim.
 
-| Area | Status |
-|---|---|
-| Core domain (account, ledger, transaction, balance) | 🟢 Implemented, tested, deployed |
-| Payments — intra-bank (transaction Temporal workflow → ledger → balance) | 🟢 End-to-end, deployed |
-| Payments — interbank rails (SEPA, domestic, instant, clearing) | 🟡 ISO 20022 pipeline + clearing simulator wired (ADR-0104/0108); **live interbank network not connected** |
-| PSD2 / Open Banking (consent, SCA, TPP registry) | 🟢 Consent + SCA + XS2A developer portal live (developer.open-bank.tech); TPP registry deployed to sandbox |
-| EUDI / PID digital identity | 🟢 OpenID4VP + OpenID4VCI e2e live (ADR-0094); pid-service deployed |
-| KYC / AML / Sanctions screening | 🟡 Real screening logic (pg_trgm), deployed; vendor feeds are stubs |
-| GDPR Art. 17 right-to-erasure | 🟢 PARTY_ERASED event handled fleet-wide (kyc, notification, card-issuance) |
-| Cards, disputes, interest, standing orders, statements, onboarding | 🟢 Implemented + deployed; standing-order daily scheduler live |
-| Lending | 🟢 Deployed to sandbox (four-eyes KYC gate, ADR-0028); no live credit bureau integration |
-| SWIFT messaging | 🟡 Deployed (ISO 20022 MT/MX pipeline wired); no live SWIFT network connection |
-| Verification of Payee (VoP) | 🟢 Deployed to sandbox; name-match on outbound credit transfers, UI gate on SCT/SCT Inst (ADR-0171) |
-| AnaCredit, SDD, TPP registry | 🟢 Implemented, deployed to sandbox |
-| FINREP | 🟢 Implemented, deployed to sandbox (ArgoCD Application registered, #547) |
-| Product catalog | 🟢 Implemented, deployed |
-| Customer edge (BFF) + mobile app | 🟡 BFF deployed (OPA enforce mode on); KMP/Compose app in active dev (separate repo) |
-| AI agent service (MCP, policy-gated) | 🟡 Fleet read tools + audit (ADR-0031); **copilot-service with LLM deployed in sandbox** |
-| Fraud detection | 🟡 Deployed; Phase 2 velocity-counter signal plane wired (ADR-0084); rule engine pending |
-| Durable workflow execution | 🟢 Temporal live (ADR-0101); FX + statement flows on durable execution |
-| Test coverage | 🟡 Ratchet-only gate; money-path services carry higher floors |
-| Governance-as-code (versioning, release, catalog) | 🟢 CI-enforced (ADR-0029) |
-| Supply-chain security (SBOM, signing, SAST, pen-test P0–P2) | 🟢 CI-enforced (ADR-0030); external pen-test P0–P2 findings remediated |
-| CI/CD | 🟢 Self-hosted runners + path-scoped gates + GitOps auto-deploy (ADR-0040) |
-| Observability (OTel, Grafana, Prometheus, Loki, Tempo, Pyroscope) | 🟢 Live; GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, DomainMetrics fleet-wide |
-| Cloud substrate (AWS, OpenTofu, ArgoCD GitOps) | 🟢 Sandbox live (EKS + ArgoCD) — full in-repo backend fleet deployed (no service code-only any longer) |
+Source review: **2026-10-03**. This overview describes checked-in capabilities. Deployment
+health, provider connectivity, and control effectiveness require current runtime evidence.
+See the [roadmap](docs/ROADMAP.md) for remaining acceptance work and the
+[ADR registry](docs/adr/CURRENT.md) for decision and delivery status.
 
-### What works right now (sandbox at open-bank.tech)
-
-| Feature | How to try it | Notes |
+| Area | What is in the repository | Evaluation boundary |
 |---|---|---|
-| **Create account** | `POST https://api.open-bank.tech/api/v1/accounts` | Returns IBAN (Czech mod-11 BBAN) |
-| **Get balance** | `GET https://api.open-bank.tech/api/v1/balances/{accountId}` | Multi-currency pockets |
-| **SEPA payment** | `POST https://api.open-bank.tech/api/v1/sepa-payments` | Sanctions/AML gate, Temporal workflow → ledger |
-| **Domestic payment** | `POST https://api.open-bank.tech/api/v1/domestic-payments` | CERTIS-style Czech domestic |
-| **SEPA Instant** | `POST https://api.open-bank.tech/api/v1/sepa-instant-payments` | 10s settlement window |
-| **Standing orders** | `POST https://api.open-bank.tech/api/v1/standing-orders` | Daily due-date sweep, outbox-backed |
-| **Admin UI** | https://admin.open-bank.tech | Operator backoffice (Keycloak auth) |
-| **Developer portal** | https://developer.open-bank.tech | PSD2 XS2A API explorer, TPP sandbox (WAF/ModSecurity) |
-| **AI copilot** | `POST https://copilot.open-bank.tech/api/v1/copilot` | Customer-facing LLM — bearer-auth + rate-limited at the ingress, sandbox only |
-| **EUDI identity** | `GET https://api.open-bank.tech/api/v1/pid` | OpenID4VP + OpenID4VCI credential flows live |
-| **AI agent (ops)** | MCP endpoint (see agent-service docs) | Policy-gated, read-only fleet tools |
+| Core banking | Accounts, double-entry ledger, balances, transaction orchestration, interest and standing orders | Validate the relevant money path and reconciliation against your configuration |
+| Payments and treasury | SEPA, instant, domestic, SDD, SWIFT, clearing, settlement, VoP and treasury components | Simulators and provider adapters do not establish live scheme access |
+| Identity and controls | Party, KYC/KYB, consent, SCA, PSD2, PID, AML, sanctions and fraud components | Credentialed providers, conformance and operator acceptance are separate gates |
+| Products and servicing | Product catalogs, lending, cards, disputes, statements, documents and notifications | Capability availability varies by product, adapter and feature flag |
+| Operator experience | Next.js admin UI, approval flows, evidence views and component documentation | Access and actions depend on roles, policy and deployment configuration |
+| AI and investigations | Copilot, MCP, context graph and specialist agents | Governed capabilities and rollout states; see [agent registry](openbank-libs/governance/agents.yaml) |
+| Engineering evidence | Contract tests, fuzzing, synthetic journeys, performance checks, supply-chain and governance gates | Each check proves its declared scope; the roadmap does not equate configuration with a passing run |
 
-All API calls require a Bearer token from `https://kc.open-bank.tech/realms/openbank`. See [docs/QUICKSTART_SANDBOX.md](docs/QUICKSTART_SANDBOX.md) for a `curl` walkthrough.
+Component source and tests live under `openbank-*`. The
+[release configuration](release-please-config.json) identifies released components;
+[repository layout](docs/repository-layout.md) explains libraries, tools and infrastructure
+that are not interchangeable with deployed services.
 
-> ⚠️ The public sandbox is a **best-effort demo, not a service.** Every endpoint is auth-gated (Keycloak bearer) and rate-limited at the ingress, but it may be reset, throttled, or taken offline at any time, carries **no SLA**, and must **never** receive real personal or payment data.
+### Explore the sandbox
+
+Start with the [sandbox guide](docs/QUICKSTART_SANDBOX.md) and request an appropriate
+identity through [support](SUPPORT.md). The [admin console](https://admin.open-bank.tech/)
+is the main operator entry point. API paths and request schemas are defined by each
+service's `src/main/resources/openapi.yaml`.
+
+The sandbox is a best-effort demonstration with no SLA. Availability and data may change;
+use synthetic data only. This documentation refresh did not revalidate live endpoints.
 
 ### What is NOT there yet
 
-See the full list in [docs/ROADMAP.md — Known gaps](docs/ROADMAP.md#known-gaps-honest-list).
+See [known gaps](docs/ROADMAP.md#known-gaps-honest-list): production acceptance, external
+scheme/provider qualification, independent assurance, and complete multi-region recovery
+and capacity evidence remain separate from feature implementation.
 
 ---
 
 ## Quick Start (Local Docker)
 
-**Prerequisites:** Docker Desktop ≥ 4.x (Compose v2), 16 GB RAM recommended (the full fleet is ~40 services).
+For one service, start with the [contributor setup](CONTRIBUTING.md#local-development-setup):
+JDK 25, the bundled Gradle wrapper, and a running Docker engine for Testcontainers.
+The Compose configuration is a development environment, not a replica of every GitOps component.
 
 ```bash
 cd openbank-infra
-
-# 1. Copy environment template and adjust secrets for local development
 cp .env.example .env
 $EDITOR .env
 
-# 2. Start infrastructure (Postgres, Kafka, Apicurio, Keycloak, OpenBao, Valkey, OPA, observability)
-make up-infra
+# Validate configuration and inspect the services available in this checkout.
+docker compose config --quiet
+docker compose config --services
 
-# 3. Build and start all application services + Admin UI
-make up-all
+# Start the local identity, database, messaging and cache dependencies.
+docker compose up -d --wait postgres kafka schema-registry valkey openbao keycloak
 
-# 4. Verify health
-make health-all
+# Build and start the chosen service and its declared dependencies.
+docker compose up -d --build --wait account-service
+docker compose ps
 ```
 
-Key endpoints:
+Use the checked-in [Compose file](openbank-infra/docker-compose.yml) for service names,
+ports, health checks and dependencies. Add the services needed for the flow you are testing;
+starting one API does not start an entire banking journey. Local account HTTP is on `:8100`,
+Keycloak on `:8080`; the optional admin UI is on `:3000`.
 
-| Service | URL |
-|---|---|
-| Admin UI | http://localhost:3000 |
-| Account Service API | http://localhost:8100 |
-| Ledger Service API | http://localhost:8101 |
-| Transaction Service API | http://localhost:8102 |
-| Keycloak | http://localhost:8080 |
-| Apicurio Schema Registry | http://localhost:8081 |
-| Kafka UI | http://localhost:8090 |
-| OPA (policy decision point) | http://localhost:8181 |
-| Grafana | http://localhost:3001 |
-| Prometheus | http://localhost:9090 |
-| OpenBao | http://localhost:8200 |
-
-Credentials for local dev are read from your `.env` file — see [`openbank-infra/.env.example`](openbank-infra/.env.example).
+The legacy Makefile helpers contain an outdated `vault` service reference and health checks
+for only a subset of services; the direct Compose commands above avoid that mismatch.
+These commands were checked against the configuration, not run as a full Docker deployment
+in this documentation review. Resource requirements depend on the selected services.
 
 ---
 
@@ -133,34 +114,29 @@ OpenBank follows **hexagonal architecture** per service (ADR-0002) with an event
 human approvals and a threat model (ADR-0030). The API contract version is independent of the
 service release version (ADR-0048).
 
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full C4-style narrative — context
-diagram, container diagram, key decisions, deployment topology, and security architecture.
+See the [architecture hub](ARCHITECTURE.md) for the overview and contributor guide, plus
+[docs/repository-layout.md](docs/repository-layout.md) for a map of the monorepo.
 
 ---
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Backend | Kotlin 2.3.20 + Quarkus 3.37 |
-| Database | PostgreSQL 18 via CNPG (Flyway migrations) — cluster fleet migrated 16 → 18 (runbook 0003); local Docker dev still on 16 |
-| Messaging | Apache Kafka, cluster operated by the Strimzi operator (transactional outbox); Redpanda for per-JVM integration tests |
-| Schema registry | Apicurio 2.6 |
-| Cache | Valkey 7.2 |
-| IAM | Keycloak 24 |
-| Secrets | OpenBao (LF fork of Vault; runbook 0005), synced into the cluster by External Secrets Operator |
-| Policy / authz | Open Policy Agent (OPA) for app-level authz; Kyverno for cluster admission policy + supply-chain (SBOM/signature) verification |
-| Durable execution | Temporal (ADR-0101/ADR-0120) — payment orchestration (transaction, SEPA, domestic) plus FX + statement flows; superseded the earlier custom saga framework (ADR-0045, now superseded) |
-| Observability | OpenTelemetry → Grafana (Prometheus + Loki + Tempo + Pyroscope); GoAlert on-call, Pyrra SLO-as-code, GlitchTip errors, ntfy push channel |
-| Admin UI | Next.js 16 + React 19 + TypeScript + shadcn/ui |
-| Ingress | ingress-nginx is the sandbox's actual entrypoint (per-service Ingress + rate limiting); Kong OSS ([`openbank-api-gateway`](openbank-api-gateway/README.md)) is a local-Docker-only dev gateway, not deployed to the sandbox |
-| Autoscaling | Karpenter (node autoscaling, Spot/Graviton); KEDA (event-driven pod autoscaling, scale-to-zero) |
-| Networking / TLS | cert-manager (TLS lifecycle); external-dns (DNS sync); NetworkPolicies fleet-wide, default-deny (generated by `gen-network-policies.py`). Istio service mesh is designed (`openbank-infra/k8s/base/istio.yaml`) but not wired into the sandbox — mTLS isolation today is NetworkPolicy-based, not mesh-based |
-| Runtime security | Falco |
-| Cloud substrate | Cloud-agnostic on Kubernetes; AWS sandbox via OpenTofu ([`openbank-infra/aws`](openbank-infra/aws/README.md)) |
-| GitOps / delivery | ArgoCD (ADR-0010) + Argo Rollouts canary progressive delivery (ADR-0098) |
-| AI agents | MCP, policy-gated via OPA; hybrid/model-agnostic LLM gateway (ADR-0031) |
-| Customer app | Kotlin Multiplatform + Compose Multiplatform — in active dev, separate repo (ADR-0064) |
+| Layer | Technology | Version/configuration source |
+|---|---|---|
+| Backend | Kotlin, Quarkus, JDK 25 | [Version catalogue](openbank-libs/gradle/libs.versions.toml), [service convention](build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts) |
+| Build | Gradle wrapper and shared convention plugins | [Wrapper](gradle/wrapper/gradle-wrapper.properties), [build-logic](build-logic/) |
+| Operator UI | Next.js, React, TypeScript | [Package manifest](openbank-admin-ui/package.json) and lockfile |
+| Data and messaging | PostgreSQL, Kafka, Apicurio, Valkey | [Local Compose](openbank-infra/docker-compose.yml), [GitOps components](openbank-infra/gitops/components/) |
+| Identity, secrets and policy | Keycloak, OpenBao, OPA, Kyverno | [GitOps configuration](openbank-infra/gitops/) |
+| Durable execution | Temporal and transactional outbox | [Temporal library](openbank-libs-temporal/), [runtime library](openbank-libs-runtime/) |
+| Observability | OpenTelemetry, Prometheus, Grafana, Loki, Tempo, Pyroscope | [Observability configuration](openbank-infra/gitops/components/observability/) |
+| Delivery | OpenTofu, Kubernetes, ArgoCD and GitHub Actions | [Infrastructure](openbank-infra/), [workflows](.github/workflows/) |
+| Customer app | Kotlin Multiplatform / Compose; separate project | [Customer application](https://github.com/JiRaska/openbank-app) |
+
+Exact dependency versions belong in their manifests, not a second manually maintained
+inventory. Local Compose and GitOps may pin different versions. NetworkPolicies control
+network access; they do not provide transport encryption. Consult the
+[architecture overview](docs/ARCHITECTURE.md) for ingress and TLS boundaries.
 
 ---
 
@@ -172,16 +148,19 @@ diagram, container diagram, key decisions, deployment topology, and security arc
 ```
 
 CI is path-scoped — only changed services build (ADR-0040). Before opening a PR, verify the same gates
-CI enforces (ADR-0029): PR (no direct `main` commits), per-service version bump, Conventional-Commit message,
+CI enforces (ADR-0029): PR (no direct `main` commits), automatic per-service releases, Conventional-Commit message,
 `openapi.yaml` + contract test for API changes, Flyway migration for DB changes, tests for new behavior,
 and a threat model for money-path services (ADR-0030). See [CONTRIBUTING.md](CONTRIBUTING.md) for the
-full checklist. Maintainers with Claude Code can also run `/ship-check` — it mirrors the same gates.
+full checklist. The portable governance entry point is
+`python3 .github/scripts/run-gates.py --list`; run the relevant gates with `--only` or
+`--group`, or the complete suite with `--all`. A local `/ship-check` skill is optional tooling.
 
 ---
 
 ## Documentation
 
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — how the services fit together (bounded contexts, runtime patterns, deployment)
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — architecture hub, overview, and contributor guide
+- [`docs/repository-layout.md`](docs/repository-layout.md) — monorepo directory map
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) — how it's built, shipped, and run (local Docker, CI/CD, GitOps, infra, runbooks)
 - [`docs/deployment-reference.md`](docs/deployment-reference.md) — evaluator's reference: topology, sizing tiers, cost estimates, and the production delta
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — milestones M1–M7
@@ -199,11 +178,9 @@ full checklist. Maintainers with Claude Code can also run `/ship-check` — it m
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 
-New here? The fastest path in: pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue)
-(each carries a newcomer-context comment telling you exactly where to start), spin the stack up with
-one command (`cd openbank-infra && make up-infra && make up-all`), and sanity-check the live sandbox
-via [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md). Target: first green PR in ~15 minutes
-of hands-on time.
+New here? Pick a [good first issue](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue),
+follow [CONTRIBUTING.md](CONTRIBUTING.md), and build one affected module before expanding
+scope. Share reproducible setup failures through the issue templates.
 
 OpenBank uses the [Developer Certificate of Origin](https://developercertificate.org/) — every commit must
 be signed off and signed with `git commit -s -S`.

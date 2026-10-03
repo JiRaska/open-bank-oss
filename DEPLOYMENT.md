@@ -5,16 +5,15 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 # OpenBank — Deployment
 
-How OpenBank is built, shipped, and run — from a laptop to the cluster. This is the
-operational companion to [`ARCHITECTURE.md`](ARCHITECTURE.md) (what the system *is*) and
-the [`README.md`](README.md) quick-start (the 4-command local spin-up).
+How the repository configures local development, CI, image delivery, and infrastructure. This is the
+operational companion to the [architecture hub](ARCHITECTURE.md) and the local-development
+instructions in [`README.md`](README.md). Check the referenced manifests and workflows for current behavior.
 
-> **Honesty note.** There is **one environment today — the AWS sandbox** at
-> `open-bank.tech` (EKS + ArgoCD). OpenBank is a *reference implementation*, not a
-> production bank: there is no multi-region, no prod change-management, no real customer
-> data. "Deploy" below means "deploy the sandbox or your own copy", not "run a bank".
-> Running it as a real bank needs your own licensing, compliance, and legal review
-> (README → License).
+> **Scope.** This repository contains configuration for a sandbox deployment and local
+> development. Checked-in manifests describe desired configuration; they do not prove the
+> current state of any cluster. OpenBank is a reference implementation, not a licensed bank
+> or a production-ready banking service. See the repository license and security policy before
+> adapting it to another environment.
 
 ---
 
@@ -22,93 +21,94 @@ the [`README.md`](README.md) quick-start (the 4-command local spin-up).
 
 ```mermaid
 flowchart LR
-  dev["git push / merge to main"] --> ci["services-ci.yml<br/>(path-scoped build + test)"]
-  ci --> ad["auto-deploy.yml"]
-  ad --> img["fast-jar → Docker image<br/>ECR: sandbox-&lt;sha&gt;"]
-  img --> mpr["bot PR: rewrite gitops<br/>image: tag → auto-merge"]
-  mpr --> argo["ArgoCD reconciles<br/>(app-of-apps)"]
-  argo --> eks["EKS sandbox"]
+  dev["eligible source change"] --> ci["path-scoped CI"]
+  ci --> ad["auto-deploy workflow<br/>(eligible inputs / reconcile)"]
+  ad --> img["service image build + attest"]
+  img --> mpr["GitOps PR + contract gates"]
+  mpr --> argo["ArgoCD desired state"]
+  argo --> eks["Kubernetes target"]
   tofu["OpenTofu (openbank-infra/aws)"] -. provisions .-> eks
 ```
 
 Two axes, deliberately separate (ADR-0029):
-- **Continuous delivery** (the image axis): every merge that touches service source ships
-  a new image and a gitops manifest bump — *automatically*.
-- **Release** (the versioned axis): release-please cuts per-service SemVer + changelog +
-  signed evidence bundle from Conventional Commits — independent of the deploy.
+- **Image delivery**: eligible changes to configured build inputs enter the image workflow;
+  the workflow applies its contract and GitOps PR gates before a manifest change can merge.
+- **Release** (the versioned axis): release-please manages component versions and changelogs
+  from Conventional Commits, independently of the image workflow.
 
-Everything is **GitOps**: the cluster's desired state is whatever is on `main`. Nobody
-`kubectl apply`s by hand; ArgoCD reconciles (ADR-0010).
+The configured deployment path is **GitOps**: reviewed desired-state changes live under
+`openbank-infra/gitops` and ArgoCD is configured to reconcile them (ADR-0010).
 
 ---
 
 ## 2. Local development (Docker Compose)
 
-The whole fleet runs on a laptop via [`openbank-infra`](openbank-infra). Prereqs: Docker
-Desktop ≥ 4.x (Compose v2), **16 GB RAM** recommended (33 backend services + infra stack).
+[`openbank-infra/docker-compose.yml`](openbank-infra/docker-compose.yml) defines a development
+subset of the platform, not the full service fleet. It includes infrastructure and selected
+applications; use the [`README.md`](README.md) local-development section for the current setup.
+The Compose service names are the ones in that file (for example, `openbao`, not `vault`).
+
+From the repository root, after configuring the environment as described in the README, start
+the defined Compose services with:
 
 ```bash
 cd openbank-infra
-cp .env.example .env && $EDITOR .env     # local dev secrets
-make up-infra                            # Postgres, Kafka, Apicurio, Keycloak, OpenBao, Valkey, OPA, Grafana stack
-make up-all                              # build + start all services + Admin UI
-make health-all                          # verify
+docker compose up -d --build --wait
 ```
 
-Key local endpoints (full list in the README): Admin UI `:3000`, Keycloak `:8080`,
-Apicurio `:8081`, OPA `:8181`, Grafana `:3001`, Prometheus `:9090`, OpenBao `:8200`;
-services on `:8100+` (see the [service catalogue](README.md#project-status)).
+This starts the Compose subset and builds services that define a build context. Review the
+Compose file before starting it if you only want infrastructure or selected applications. The
+`make up-infra` target currently references a `vault` service name that is not defined in the
+Compose file; do not use that target as a verified setup command.
 
-> **Footgun:** running the full fleet + N Quarkus/Docker builds concurrently can OOM a
-> 16 GB Docker Desktop. Build services sequentially or raise Docker's memory to 24 GB+.
-
-The local **pre-PR gate** (mirrors CI):
+Run the Gradle build entry points from the repository root:
 
 ```bash
-./gradlew :<module>:build                       # one service
-./gradlew detekt ktlintCheck koverVerify build  # the gate; add :<svc>:quarkusBuild to catch CDI/ArC wiring
+./gradlew :<module>:build
+./gradlew detekt ktlintCheck koverVerify build
 ```
 
-`/ship-check` runs the exact governance gates CI enforces (version bump, openapi+contract,
-migrations, tests, threat model for money-path).
+The second command is a convenience gate; Gradle stops at the first failing task, so confirm
+which tasks actually ran. See the contributor guide and CI workflows for the checks relevant to
+a particular change.
 
 ---
 
 ## 3. CI/CD pipeline
 
 ### Build & test (path-scoped, ADR-0040)
-`services-ci.yml` builds **only the changed modules** (per-job Testcontainers; Redpanda +
-CNPG-less Postgres). A complementary **fleet-lint** + nightly full build catch the drift
-path-scoping hides. CI runs on the **self-hosted FinOps fleet** — Hetzner x86 + Mac mini
-ARM first, AWS Spot ARC as scale-to-zero overflow (ADR-0053). GitHub-hosted runners are
-budget-blocked; everything that fits runs self-hosted.
+`services-ci.yml` uses path-scoped module discovery, with additional workflows and scheduled
+checks covering other repository paths. Runner pools and labels are defined by each workflow
+and can change; consult the workflow files for the current routing.
 
 ### Auto-deploy (`auto-deploy.yml`)
-On every merge to `main` touching `openbank-*/src/main/**` or `openbank-libs/**` (governance
-catalogs are excluded — they must not trigger a fleet rebuild):
+The workflow runs for configured source/build inputs, scheduled reconciliation, and authorized
+manual dispatch. Its path filters and input constraints are defined in
+[`.github/workflows/auto-deploy.yml`](.github/workflows/auto-deploy.yml); they include selected
+service source, Dockerfiles, version files, and shared build inputs, not every repository change:
 1. detect changed Gradle modules;
 2. build a **fast-jar** per service (never uber-jar — uber-jar leaves `quarkus-app/` empty
-   → crashloop) using the warm Gradle build cache;
-3. bake a `linux/arm64` image, push to **ECR** as `sandbox-<short-SHA>` (auth via **IRSA** —
-   no long-lived credentials);
+   → crashloop) using the configured Gradle build cache;
+3. bake a `linux/arm64` image and push it to ECR with a `sandbox-<short-SHA>` tag using the
+   workflow-configured AWS authentication;
 4. rewrite the `image:` line in each service's gitops manifest;
-5. open a `chore/gitops-auto-deploy-<sha>` **bot PR** with auto-merge — so the bump lands
-   after `Validate manifests` / Gitleaks / Trivy pass, never as a direct push to `main`.
+5. open a `chore/gitops-auto-deploy-<sha>` GitOps PR; the workflow configures merge and
+   validation gates before a desired-state change can land.
 
-ArgoCD then reconciles the new tag onto the cluster.
+ArgoCD is configured to reconcile the desired state after the manifest change.
 
-> **admin-ui is NOT in auto-deploy** (no `quarkusBuild`). Deploy it with
-> `openbank-infra/scripts/build-push-admin-ui.sh` from a clean worktree (`AWS_PROFILE=openbank`),
-> or via `admin-ui-deploy.yml`.
+> Admin UI has its own [admin-ui-deploy workflow](.github/workflows/admin-ui-deploy.yml), with
+> source, evidence-refresh, scheduled, and manual triggers. Use its workflow definition as the
+> current source for the build and deploy path.
 
-> **Concurrency:** two merges in quick succession → the later push cancels the earlier
-> deploy. Re-dispatch with `gh workflow run auto-deploy.yml -f services=<svc>`.
+> **Concurrency and recovery:** behavior depends on the workflow lane. Check the auto-deploy
+> workflow comments and dispatch inputs before rerunning a build or reconciliation.
 
 ### Release (`release-please.yml`)
-Per-service components: merging to `main` opens a per-service Release PR; merging *that*
-bumps `version.txt`, writes the changelog, tags `<component>-v<version>`, and produces a
-**signed evidence bundle** (SBOM + SLSA + OpenVEX via cosign/KMS, ADR-0030). release-please
-owns the **release axis only** — never hand-edit `version.txt`, `CHANGELOG.md`, or a tag.
+Eligible components are registered in release configuration. The workflow opens release PRs,
+then updates version/changelog metadata and tags after those PRs merge. Evidence generation and
+attestation are handled by dedicated workflows; see the release workflow and governance release
+guide for current behavior. Never hand-edit generated version metadata, changelogs, or tags.
 
 ### Manual image build
 Generic path: `openbank-infra/scripts/build-push-service.sh <service>` — builds the
@@ -120,51 +120,46 @@ Verify `git status src/main/` is clean first — a dirty worktree bakes a corrup
 
 ## 4. Infrastructure provisioning
 
-The AWS sandbox is **OpenTofu** ([`openbank-infra/aws`](openbank-infra/aws)) — cloud-agnostic
-on Kubernetes, no managed-service lock-in (ADR-0027). Tofu provisions the substrate (EKS,
-VPC + the required Interface endpoints — STS, ECR dkr+api, EC2, CodeArtifact, S3 gateway —
-to keep traffic off the NAT gateway), ECR, IAM/IRSA. CI applies platform Tofu via
-`platform-tofu.yml` (ADR-0060).
+AWS infrastructure configuration is maintained with OpenTofu under
+[`openbank-infra/aws`](openbank-infra/aws). The repository has separate substrate and platform
+environments and CI workflows; inspect those configurations before applying changes. Kubernetes
+workload configuration is under [`openbank-infra/gitops`](openbank-infra/gitops).
 
-Everything **stateful runs in-cluster as OSS**, reconciled by ArgoCD's app-of-apps from
+The checked-in GitOps configuration describes stateful components intended to run in-cluster and
+be reconciled by ArgoCD from
 [`openbank-infra/gitops`](openbank-infra/gitops):
-- **Postgres** — CloudNativePG (CNPG), one cluster per service (ADR-0009); PG 16→18 in
-  progress (runbook 0003).
+- **Postgres** — CloudNativePG (CNPG) manifests are maintained per component; most inspected
+  application database manifests specify PostgreSQL 18.6, with exceptions. See the component
+  manifests and [runbook 0003](docs/runbooks/0003-postgresql-16-to-18-major-upgrade.md) for scope and status.
 - **Kafka** (Strimzi), **Apicurio** schema registry, **Keycloak** (IAM), **OpenBao**
   (secrets; the Vault LF fork, runbook 0005), **OPA** (authz), **Valkey** (cache),
   **Temporal** (durable execution), and the **Grafana** stack (Prometheus, Loki, Tempo,
   Pyroscope) + GoAlert + Pyrra.
 
 ### Secrets
-No long-lived credentials in git or Tofu state. In-cluster secrets live in **OpenBao**;
-workloads get cloud creds via **IRSA / EKS Pod Identity**. Break-glass recovery keys are
-stored in **AWS Secrets Manager** (`openbank/openbao/break-glass`) — save them at init or
-the cluster is unrecoverable.
+Secret values and recovery procedures are intentionally kept out of this public guide. The
+repository contains OpenBao and workload-identity configuration; consult the approved private
+operational runbook for environment-specific recovery.
 
 ---
 
 ## 5. Runbooks & operations
 
-Infra lifecycle changes follow numbered runbooks in [`docs/runbooks/`](docs/runbooks):
-Loki, Vault upgrade, **PG 16→18** (0003), low-risk bumps (0004), **Vault→OpenBao** (0005),
-Temporal settlement go-live (0006), OpenBao agent identity (0007). Per-service operational
-runbooks (`svc-*.md`) are generated by `scripts/generate-service-runbooks.py`.
+Infra lifecycle guidance is maintained in [`docs/runbooks/`](docs/runbooks). Use the relevant
+runbook and current manifests for the component being changed; generated service runbooks are
+kept alongside them.
 
 Operational guardrails worth knowing before you deploy:
 - **Money-path services** (`rules.yaml: money_path_services`) need 2 approvals + a threat
   model — auto-merge is disabled for them (ADR-0030).
-- **Flyway:** never edit an applied migration (checksum mismatch → boot fail); use
-  `QUARKUS_FLYWAY_REPAIR_AT_START=true` to recover, then remove.
-- **Scale-to-zero tiers** (ADR-0041/0057): latency-tolerant workloads scale to zero via
-  KEDA; a cold first request pays the spin-up.
-- **Images via ECR pull-through:** always reference `docker.io/library/<img>` explicitly —
-  a bare `nginx:tag` bypasses the Kyverno ECR rewrite and pulls via the NAT gateway.
+- **Flyway:** treat applied migrations as immutable. Do not use repair as a generic response to
+  checksum drift; follow the service-specific recovery procedure and fix forward with a new migration.
 
 ---
 
 ## 6. Where to go next
 
-- **What the platform is:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Architecture hub:** [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - **Evaluator's reference (topology, sizing, cost, production delta):** [`docs/deployment-reference.md`](docs/deployment-reference.md)
 - **Local spin-up:** [`README.md`](README.md#quick-start-local-docker) · [`openbank-infra`](openbank-infra)
 - **Infra-as-code & GitOps:** [`openbank-infra/aws`](openbank-infra/aws) · [`openbank-infra/gitops`](openbank-infra/gitops)

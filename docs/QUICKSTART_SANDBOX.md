@@ -1,100 +1,57 @@
 # OpenBank Sandbox Quickstart
 
-Live sandbox at **open-bank.tech**. All APIs require a Bearer token from Keycloak.
+Start at the [admin console](https://admin.open-bank.tech/). Request an appropriate
+sandbox identity through [SUPPORT.md](../SUPPORT.md), then sign in using the browser
+login flow. Available screens and operations depend on the roles assigned to that identity.
 
-> ⚠️ This is a **development sandbox** — data resets periodically, SLAs don't apply.
+The sandbox is a best-effort development demonstration: no SLA, periodic data resets,
+and synthetic data only. The source review on **2026-10-03** did not test live availability
+or provision demo credentials. Do not assume a shared demo password or password-grant client.
 
-## 1. Get a Bearer token
+## Explore with the operator UI
 
-```bash
-# Use the demo user credentials (read-only for most endpoints)
-TOKEN=$(curl -s -X POST \
-  https://kc.open-bank.tech/realms/openbank/protocol/openid-connect/token \
-  -d "grant_type=password" \
-  -d "client_id=openbank-admin-ui" \
-  -d "username=demo" \
-  -d "password=<sandbox demo password — open a GitHub Discussion or ping @JiRaska to request access>" \
-  | jq -r '.access_token')
+Use an existing synthetic party/account supplied for your access scope. Start with account
+and transaction reads, then inspect the available approvals and evidence views. Creating
+accounts or initiating payments needs the appropriate authorisation and business prerequisites;
+an account in one currency is not automatically a funded account for another currency.
 
-echo $TOKEN | cut -c1-20  # should print a JWT prefix
-```
+## Read an account through the API
 
-## 2. Create an account
-
-```bash
-curl -s -X POST https://api.open-bank.tech/api/v1/accounts \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: demo-$(date +%s)" \
-  -d '{
-    "ownerId": "550e8400-e29b-41d4-a716-446655440000",
-    "currency": "CZK",
-    "accountType": "CURRENT"
-  }' | jq .
-# Response: { "id": "...", "iban": "CZ...", "currency": "CZK", ... }
-```
-
-Save the `iban` and `id` for the next steps.
-
-## 3. Check balance
+Obtain an API bearer token using the authentication flow and client approved for your
+sandbox access. Browser login sessions and API access tokens are not interchangeable.
+The following Bash example prompts without echoing the token or placing it in shell history:
 
 ```bash
-ACCOUNT_ID="<id from step 2>"
-curl -s https://api.open-bank.tech/api/v1/balances/$ACCOUNT_ID \
+read -rsp 'API bearer token: ' TOKEN; printf '\n'
+read -rp 'Authorised synthetic account ID: ' ACCOUNT_ID
+curl --fail-with-body --silent --show-error \
+  "https://api.open-bank.tech/api/v1/accounts/$ACCOUNT_ID" \
   -H "Authorization: Bearer $TOKEN" | jq .
+unset TOKEN
 ```
 
-## 4. Initiate a SEPA payment
+The route is declared by the [account API contract](../openbank-account-service/src/main/resources/openapi.yaml).
+Actual access still depends on token audience, roles, policy and record scope.
 
-```bash
-curl -s -X POST https://api.open-bank.tech/api/v1/sepa-payments \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -H "Idempotency-Key: pay-$(date +%s)" \
-  -d '{
-    "debtorIban": "<iban from step 2>",
-    "creditorIban": "DE89370400440532013000",
-    "creditorName": "Max Mustermann",
-    "amount": "10.00",
-    "currency": "EUR",
-    "reference": "Invoice 2026-001"
-  }' | jq .
-# Triggers: sanctions check → AML check → transaction saga → ledger posting
-```
+## Build a payment exercise from the current contract
 
-## 5. View the transaction
+Use the [SEPA API specification](../openbank-sepa-payment/src/main/resources/openapi.yaml)
+and the [balance API specification](../openbank-balance-service/src/main/resources/openapi.yaml)
+for exact request fields, currency constraints, idempotency headers, error responses and
+approval flow. Select funded synthetic debtor data and an approved simulator counterparty.
+Follow the returned payment identifiers and status; do not assume a payment ID is a transaction ID.
 
-```bash
-TX_ID="<id from payment response>"
-curl -s https://api.open-bank.tech/api/v1/transactions/$TX_ID \
-  -H "Authorization: Bearer $TOKEN" | jq .
-```
-
-## 6. Admin UI
-
-Open https://admin.open-bank.tech — log in with the same Keycloak credentials.
-You can browse accounts, ledger entries, payment history, and observe DORA/FinOps metrics.
-
-## Sandbox endpoints
-
-| Service | URL |
-|---|---|
-| Admin UI | https://admin.open-bank.tech |
-| Keycloak | https://kc.open-bank.tech |
-| Accounts API | https://api.open-bank.tech/api/v1/accounts |
-| Balances API | https://api.open-bank.tech/api/v1/balances |
-| SEPA Payments | https://api.open-bank.tech/api/v1/sepa-payments |
-| Domestic Payments | https://api.open-bank.tech/api/v1/domestic-payments |
-| SEPA Instant | https://api.open-bank.tech/api/v1/sepa-instant-payments |
-| Transactions | https://api.open-bank.tech/api/v1/transactions |
-
-## OpenAPI specs
-
-Each deployed service exposes `/q/openapi` and `/q/swagger-ui` (internal cluster only).
-Run `kubectl port-forward svc/sepa-payment 8115:8115 -n payments` to browse locally.
+For repeatable automated scenarios, inspect the
+[synthetic journey workflow](../.github/workflows/synthetic-journeys.yml) and
+[performance fixtures](../perf/). Their execution requires the configured test identity and environment.
 
 ## Troubleshooting
 
-- **401 Unauthorized** — token expired; repeat step 1.
-- **503 Service Unavailable** — payment services may be cold-starting (KEDA scale-to-zero); retry in 10s.
-- **Payment stuck in PENDING** — check Loki logs: `{namespace="payments"} |= "saga"` in Grafana.
+- **401:** verify token expiry, issuer, audience and the configured authentication flow.
+- **403:** verify roles, policy and record scope; obtaining a fresh token does not grant access.
+- **400/409:** compare the request and business state with the current OpenAPI contract.
+- **503 or timeout:** inspect service availability before retrying; preserve idempotency on writes.
+
+Use the [deployment guide](../DEPLOYMENT.md) and service runbooks for operator diagnostics.
+Public API documentation is checked into the repository; management endpoints and Swagger UI
+availability depend on service configuration and are not promised as public sandbox endpoints.

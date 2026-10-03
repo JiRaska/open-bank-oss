@@ -17,24 +17,19 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 
 ## How to Contribute
 
-### Your first contribution (the 15-minute path)
+### Your first contribution
 
-1. **Pick a [`good-first-issue`](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue).**
-   The set is curated to stay at ≥5 open issues, and each carries a *newcomer context* comment:
-   where the code lives, what the fix shape is, and which repo conventions the PR will be judged
-   against.
-2. **Spin up the dev environment (one command).** Prereqs: Docker Desktop ≥ 4.x, 16 GB RAM.
-   ```bash
-   cd openbank-infra && cp .env.example .env && make up-infra && make up-all && make health-all
-   ```
-   Full detail in [`DEPLOYMENT.md`](DEPLOYMENT.md) §2; to poke the *live* sandbox instead of
-   running anything, use [`docs/QUICKSTART_SANDBOX.md`](docs/QUICKSTART_SANDBOX.md).
+1. **Pick a [good first issue](https://github.com/JiRaska/open-bank-oss/labels/good-first-issue).**
+   Read its scope and acceptance conditions before starting.
+2. **Set up one module first.** Follow the [local setup](#local-development-setup) and
+   [README Compose instructions](README.md#quick-start-local-docker). For a hosted
+   demonstration, use the [sandbox guide](docs/QUICKSTART_SANDBOX.md).
 3. **Make the change on a branch** `<type>/<scope>-<summary>`; the commit message *is* the
    changelog (Conventional Commits, `git commit -s -S`).
 4. **Run the local gate before pushing:** `./gradlew detekt ktlintCheck koverVerify build`
    (add `:<svc>:quarkusBuild` — CDI wiring failures surface only there).
 5. **Open the PR** — every PR links its issue (`Closes #<n>`), CI is path-scoped, and
-   `/ship-check` runs the same governance gates CI enforces.
+   `python3 .github/scripts/run-gates.py --all` runs the governance gate suite.
 
 ### Reporting bugs
 
@@ -82,7 +77,7 @@ PRs containing unsigned-off commits will be blocked by CI.
 |---|---|---|
 | JDK | **25 (temurin-25)** | NOT JDK 26 — the Gradle toolchain is pinned to 25. JDK 26 breaks mockk/Objenesis. Install via [SDKMAN](https://sdkman.io/) or [Homebrew](https://brew.sh/) and set `JAVA_HOME` explicitly. |
 | Gradle wrapper | bundled (`./gradlew`) | No global install needed. |
-| Docker Desktop | 4.x+ | Required for Testcontainers integration tests. 16 GB RAM recommended for the full fleet; 24 GB+ if building multiple services in parallel. |
+| Docker Desktop | 4.x+ | Required for Testcontainers integration tests. Memory requirements depend on the services selected; begin with one module. |
 | Node.js | 22+ | Only needed for `openbank-admin-ui`. |
 
 > **JDK version matters.** Mac default JDK may be JDK 26; the Gradle toolchain is pinned to 25.
@@ -131,16 +126,11 @@ npm run dev
 
 ### Local infrastructure stack (Docker Compose)
 
-The full local infrastructure stack (Postgres, Kafka, Keycloak, OpenBao, OPA, Valkey, observability)
-is in `openbank-infra/docker/docker-compose.yml`:
-
-```bash
-cd openbank-infra
-cp .env.example .env   # adjust secrets for local dev
-make up-infra          # start Postgres, Kafka, Keycloak, Vault, OPA, Valkey
-make up-all            # build + start all application services
-make health-all        # verify health endpoints
-```
+The local development subset is defined in
+[`openbank-infra/docker-compose.yml`](openbank-infra/docker-compose.yml). Follow the
+[README quickstart](README.md#quick-start-local-docker) for environment setup and direct
+Compose commands. Inspect `docker compose config --services` before selecting services;
+local Compose and the GitOps deployment inventory are different scopes.
 
 Alternatively, for **a single service** you usually do not need the full stack — Quarkus DevServices
 starts the required containers automatically:
@@ -152,7 +142,7 @@ starts the required containers automatically:
 ### IDE setup
 
 - **IntelliJ IDEA** — import the root `build.gradle.kts` as a Gradle project.
-- Kotlin plugin 1.9+ (bundled in IntelliJ 2024+).
+- A Kotlin plugin compatible with the version in `openbank-libs/gradle/libs.versions.toml`.
 - [Quarkus plugin](https://plugins.jetbrains.com/plugin/13234-quarkus) — optional but recommended
   (live reload, application.yaml completion).
 
@@ -317,3 +307,14 @@ By contributing to OpenBank, you agree that your contributions will be licensed 
 - **Code of conduct concerns:** contact the maintainer privately via the [@JiRaska GitHub profile](https://github.com/JiRaska) (not via public issues or GitHub Security Advisories).
 
 Thank you for helping make OpenBank better!
+
+## Repository layout and scratch files
+
+Keep the root for project entry points and build configuration. Read the
+[repository layout guide](docs/repository-layout.md) before adding a top-level path.
+Put temporary output in ignored `/tmp/` or the platform temporary directory; never
+force-add generated reports, caches, or private tool state. Run
+`python3 .github/scripts/check-repository-root.py` after staging changes. The same
+check runs in pre-commit and the required CI gate suite. New Gradle modules are
+discovered from tracked `openbank-*/build.gradle.kts`; other new root entries need
+an explicit change to `repository_root_layout` in the governance rules.

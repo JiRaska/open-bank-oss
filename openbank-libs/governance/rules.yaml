@@ -4325,3 +4325,66 @@ security_sensitive_paths:
       - "src/main/kotlin/**/*Address*.kt"
       - "src/main/kotlin/**/*Contact*.kt"
     cardholder: []
+
+# Root is a navigation/build entry point, not a workspace for generated output.
+# Gradle modules are discovered by the same marker as settings.gradle.kts.
+repository_root_layout:
+  gate: repository-root-layout
+  enforced: block
+  ci_producer: .github/scripts/check-repository-root.py
+  files:
+    - .dockerignore
+    - .editorconfig
+    - .gitattributes
+    - .gitignore
+    - .gitleaks.toml
+    - .gitleaksignore
+    - .pre-commit-config.yaml
+    - .release-please-manifest.json
+    - .trivyignore
+    - AGENTS.md
+    - ARCHITECTURE.md
+    - CITATION.cff
+    - CLAUDE.md
+    - CODEOWNERS
+    - CODE_OF_CONDUCT.md
+    - CONTRIBUTING.md
+    - DEPLOYMENT.md
+    - GOVERNANCE.md
+    - LICENSE
+    - NOTICE
+    - README.md
+    - RELEASE_NOTES.md
+    - REUSE.toml
+    - SECURITY.md
+    - SPONSORS.md
+    - SUPPORT.md
+    - TRADEMARKS.md
+    - build.gradle.kts
+    - codecov.yml
+    - gradle.properties
+    - gradlew
+    - release-please-config.json
+    - settings.gradle.kts
+  directories:
+    - .clusterfuzzlite
+    - .devcontainer
+    - .github
+    - .security
+    - .semgrep
+    - LICENSES
+    - build-logic
+    - config
+    - docs
+    - evals
+    - fuzz
+    - gradle
+    - openbank-admin-ui
+    - openbank-api-gateway
+    - openbank-contracts
+    - openbank-developer-portal
+    - openbank-document-renderer
+    - openbank-infra
+    - pacts
+    - perf
+    - scripts

@@ -1,7 +1,7 @@
 # OpenBank — agent & contributor guide
 
-A banking platform reference implementation: a Quarkus/Kotlin monorepo of ~34 `openbank-*`
-microservices, a Next.js `openbank-admin-ui`, and a shared `openbank-libs`. Hexagonal
+A banking platform reference implementation: a Quarkus/Kotlin monorepo of `openbank-*`
+services and libraries, a Next.js `openbank-admin-ui`, and a shared `openbank-libs`. Hexagonal
 architecture per service (ADR-0002).
 
 **Authoritative rules live in [`openbank-libs/governance/rules.yaml`](openbank-libs/governance/rules.yaml).**
