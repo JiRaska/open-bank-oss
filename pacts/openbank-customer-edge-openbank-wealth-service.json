@@ -1,0 +1,1229 @@
+{
+  "consumer": {
+    "name": "openbank-customer-edge"
+  },
+  "interactions": [
+    {
+      "description": "GET the declared holdings with no M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "DELETE a holding pledged as lending collateral",
+      "providerStates": [
+        {
+          "name": "the customer party holds a declared holding pledged as lending collateral"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "DELETE",
+        "path": "/api/v1/holdings/33333333-3333-4333-8333-333333333333"
+      },
+      "response": {
+        "status": 409
+      }
+    },
+    {
+      "description": "GET the holding 33333333-3333-4333-8333-333333333333 to prove the customer owns it",
+      "providerStates": [
+        {
+          "name": "the customer party holds a declared holding pledged as lending collateral"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings/33333333-3333-4333-8333-333333333333"
+      },
+      "response": {
+        "body": {
+          "amount": 6500000,
+          "attributableAmount": 3250000,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "currency": "CZK",
+          "holdingId": "22222222-2222-4222-8222-222222222222",
+          "holdingType": "REAL_ESTATE",
+          "isLiability": false,
+          "label": "Flat in Brno",
+          "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+          "ownershipShare": 0.5,
+          "status": "PLEDGED",
+          "updatedAt": "2026-09-01T10:00:00Z",
+          "valuationAgeDays": 261,
+          "valuationSource": "CUSTOMER_DECLARED",
+          "valuedAt": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$.valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "DELETE an active holding",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active declared holding"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "DELETE",
+        "path": "/api/v1/holdings/22222222-2222-4222-8222-222222222222"
+      },
+      "response": {
+        "body": {
+          "amount": 6500000,
+          "attributableAmount": 3250000,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "currency": "CZK",
+          "holdingId": "22222222-2222-4222-8222-222222222222",
+          "holdingType": "REAL_ESTATE",
+          "isLiability": false,
+          "label": "Flat in Brno",
+          "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+          "ownershipShare": 0.5,
+          "status": "WITHDRAWN",
+          "updatedAt": "2026-09-01T10:00:00Z",
+          "valuationAgeDays": 261,
+          "valuationSource": "CUSTOMER_DECLARED",
+          "valuedAt": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$.valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the declared holdings of the customer party",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active declared holding"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 6500000,
+            "attributableAmount": 3250000,
+            "createdAt": "2026-09-01T10:00:00Z",
+            "currency": "CZK",
+            "holdingId": "22222222-2222-4222-8222-222222222222",
+            "holdingType": "REAL_ESTATE",
+            "isLiability": false,
+            "label": "Flat in Brno",
+            "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+            "ownershipShare": 0.5,
+            "status": "ACTIVE",
+            "updatedAt": "2026-09-01T10:00:00Z",
+            "valuationAgeDays": 261,
+            "valuationSource": "CUSTOMER_DECLARED",
+            "valuedAt": "2026-01-15"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$[*].holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$[*].ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$[*].valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$[*].valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the holding 22222222-2222-4222-8222-222222222222 to prove the customer owns it",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active declared holding"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings/22222222-2222-4222-8222-222222222222"
+      },
+      "response": {
+        "body": {
+          "amount": 6500000,
+          "attributableAmount": 3250000,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "currency": "CZK",
+          "holdingId": "22222222-2222-4222-8222-222222222222",
+          "holdingType": "REAL_ESTATE",
+          "isLiability": false,
+          "label": "Flat in Brno",
+          "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+          "ownershipShare": 0.5,
+          "status": "ACTIVE",
+          "updatedAt": "2026-09-01T10:00:00Z",
+          "valuationAgeDays": 261,
+          "valuationSource": "CUSTOMER_DECLARED",
+          "valuedAt": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$.valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the valuation history of the holding",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active declared holding"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings/22222222-2222-4222-8222-222222222222/valuations"
+      },
+      "response": {
+        "body": [
+          {
+            "amount": 6500000,
+            "currency": "CZK",
+            "recordedAt": "2026-09-01T10:00:00Z",
+            "source": "CUSTOMER_DECLARED",
+            "valuedAt": "2026-01-15"
+          }
+        ],
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type",
+                  "min": 1
+                }
+              ]
+            },
+            "$[*].amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$[*].currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$[*].recordedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$[*].source": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$[*].valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "PUT a customer-declared revaluation of the holding",
+      "providerStates": [
+        {
+          "name": "the customer party holds an active declared holding"
+        }
+      ],
+      "request": {
+        "body": {
+          "valuation": {
+            "amount": 7000000,
+            "currency": "CZK",
+            "source": "CUSTOMER_DECLARED",
+            "valuedAt": "2026-09-01"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "PUT",
+        "path": "/api/v1/holdings/22222222-2222-4222-8222-222222222222/valuation"
+      },
+      "response": {
+        "body": {
+          "amount": 6500000,
+          "attributableAmount": 3250000,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "currency": "CZK",
+          "holdingId": "22222222-2222-4222-8222-222222222222",
+          "holdingType": "REAL_ESTATE",
+          "isLiability": false,
+          "label": "Flat in Brno",
+          "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+          "ownershipShare": 0.5,
+          "status": "ACTIVE",
+          "updatedAt": "2026-09-01T10:00:00Z",
+          "valuationAgeDays": 261,
+          "valuationSource": "CUSTOMER_DECLARED",
+          "valuedAt": "2026-01-15"
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$.valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a holding the bank does not hold",
+      "providerStates": [
+        {
+          "name": "the customer party holds no declared holding"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "GET",
+        "path": "/api/v1/holdings/99999999-9999-4999-8999-999999999999"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
+      "description": "POST a customer-declared holding for the customer party",
+      "providerStates": [
+        {
+          "name": "the customer party holds no declared holding"
+        }
+      ],
+      "request": {
+        "body": {
+          "externalReference": null,
+          "holdingType": "REAL_ESTATE",
+          "label": "Flat in Brno",
+          "ownershipShare": 0.5,
+          "valuation": {
+            "amount": 6500000,
+            "currency": "CZK",
+            "source": "CUSTOMER_DECLARED",
+            "valuedAt": "2026-01-15"
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json",
+          "X-Customer-Party-Id": "11111111-1111-4111-8111-111111111111"
+        },
+        "method": "POST",
+        "path": "/api/v1/holdings"
+      },
+      "response": {
+        "body": {
+          "amount": 6500000,
+          "attributableAmount": 3250000,
+          "createdAt": "2026-09-01T10:00:00Z",
+          "currency": "CZK",
+          "holdingId": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "holdingType": "REAL_ESTATE",
+          "isLiability": false,
+          "label": "Flat in Brno",
+          "ownerPartyId": "11111111-1111-4111-8111-111111111111",
+          "ownershipShare": 0.5,
+          "status": "ACTIVE",
+          "updatedAt": "2026-09-01T10:00:00Z",
+          "valuationAgeDays": 261,
+          "valuationSource": "CUSTOMER_DECLARED",
+          "valuedAt": "2026-01-15"
+        },
+        "generators": {
+          "body": {
+            "$.holdingId": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json; charset=UTF-8"
+        },
+        "matchingRules": {
+          "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.attributableAmount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.createdAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.currency": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[A-Z]{3}"
+                }
+              ]
+            },
+            "$.holdingId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.holdingType": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.isLiability": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.label": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.ownerPartyId": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            },
+            "$.ownershipShare": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "number"
+                }
+              ]
+            },
+            "$.updatedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            },
+            "$.valuationAgeDays": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.valuationSource": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "CUSTOMER_DECLARED|EXPERT_APPRAISAL|MARKET_REFERENCE"
+                }
+              ]
+            },
+            "$.valuedAt": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "\\d{4}-\\d{2}-\\d{2}"
+                }
+              ]
+            }
+          },
+          "header": {
+            "Content-Type": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "application/json(;\\s?charset=[\\w\\-]+)?"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-wealth-service"
+  }
+}
