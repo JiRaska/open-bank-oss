@@ -70,11 +70,21 @@ class AuditPactProviderVerificationTest {
         context?.verifyInteraction()
     }
 
-    @State("the audit chain holds evidence for the pact loan application")
-    fun evidenceExists() {
+    @State(EVIDENCE_STATE)
+    fun evidenceExists() = AuditPactStates.seedEvidence(repository)
+}
+
+const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
+const val EVIDENCE_STATE = "the audit chain holds evidence for the pact loan application"
+
+/** State seeding shared by the folder- and broker-sourced verifiers, so the two cannot drift. */
+object AuditPactStates {
+    /** Must equal PACT_APPLICATION_ID in lending's AuditEvidencePactConsumerTest. */
+    const val PACT_APPLICATION_ID = "d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7"
+
+    fun seedEvidence(repository: AuditRepository) {
         // Idempotent: pact-jvm invokes a state setup callback twice per interaction.
-        val existing = onEventLoop { repository.evidenceFor(PACT_APPLICATION_ID) }
-        if (existing.entries.isNotEmpty()) return
+        if (onEventLoop { repository.evidenceFor(PACT_APPLICATION_ID) }.entries.isNotEmpty()) return
         val entry = AuditEntry(
             id = UUID.randomUUID(),
             eventType = "lending.application.submitted",
@@ -94,11 +104,4 @@ class AuditPactProviderVerificationTest {
 
     private fun <T> onEventLoop(block: suspend () -> T): T =
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
-
-    private companion object {
-        /** Must equal PACT_APPLICATION_ID in lending's AuditEvidencePactConsumerTest. */
-        const val PACT_APPLICATION_ID = "d7d7d7d7-d7d7-4d7d-8d7d-d7d7d7d7d7d7"
-    }
 }
-
-const val NEGATIVE_AUTH_STATE = "no valid caller identity is presented"
