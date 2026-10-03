@@ -451,8 +451,8 @@ class CardDisputeServiceTest {
 
     @Test
     fun `a refresh that finds nothing moved, or a closed case, still completes the reservation`(): Unit = runBlocking {
-        val open = case(DisputeStatus.OPEN)
-        val closed = case(DisputeStatus.WON)
+        val open = case(DisputeStatus.OPEN).copy(networkCaseId = "case-open")
+        val closed = case(DisputeStatus.WON).copy(networkCaseId = "case-closed")
         coEvery { cases.findById(open.id) } returns open
         coEvery { cases.findById(closed.id) } returns closed
         val port = mockk<DisputePort>()
