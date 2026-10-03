@@ -6044,7 +6044,7 @@ gates:
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
   - id: workflow-supply-chain
-    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
+    name: "workflow action pins, bounded agent and image admission, and fail-closed service CI"
     group: supplychain
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
@@ -6059,10 +6059,14 @@ gates:
       - ".github/scripts/test-infracost-scope.py"
       - ".github/scripts/agent-admission.py"
       - ".github/scripts/test-agent-admission.py"
+      - ".github/scripts/await-admin-ui-source-validation.py"
+      - ".github/scripts/test-await-admin-ui-source-validation.py"
+      - ".github/workflows/admin-ui-deploy.yml"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
+      python3 .github/scripts/test-await-admin-ui-source-validation.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
 
   # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector
