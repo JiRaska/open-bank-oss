@@ -83,7 +83,7 @@ gates:
     rationale: "A dashboard can look green while service CI, Testcontainers runtime proof and the shared schema drift independently; this gate keeps the complete evidence chain present."
     review_after: "2027-08-23"
     min_subjects: 50
-    selftest: python3 .github/scripts/collect-test-run-evidence.py --self-test && python3 .github/scripts/check-test-intelligence-ecosystem.py --self-test
+    selftest: python3 .github/scripts/collect-test-run-evidence.py --self-test && python3 .github/scripts/check-test-intelligence-ecosystem.py --self-test && python3 .github/scripts/test-test-intelligence-compatibility.py
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-test-intelligence-ecosystem.py
@@ -1320,6 +1320,32 @@ gates:
     selftest_expect: pass
     run: |
       python3 .github/scripts/check-cnpg-update-resilience.py
+
+  # #11286: pricing-db copied an old 18.1 template after the fleet had moved to 18.6.
+  # Diff scope keeps that existing pin from reddening unrelated PRs while #11607 updates it,
+  # but any new or edited GitOps manifest with an older CNPG PostgreSQL minor is blocked.
+  - id: cnpg-postgres-minor-floor
+    name: "CNPG PostgreSQL minor floor on changed GitOps manifests (enforced)"
+    group: gitops
+    budget_seconds: 5
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: >-
+      A new CNPG Cluster copied from an old template can reintroduce an outdated
+      PostgreSQL image after the fleet has been updated. Check changed manifests,
+      including nested Helm values and DR templates, against reviewed minor floors.
+    review_after: "2027-04-01"
+    verified: >-
+      2026-10-03 -- self-test rejects 18.1, 16.14, unknown majors and non-bare
+      tags; accepts 18.6, 16.15 and unrelated images. The existing pricing 18.1
+      manifest is a negative control when named as a changed file.
+    min_subjects: 50   # 71 CNPG PostgreSQL image pins in 65 GitOps files today
+    selftest_inputs: ["openbank-infra/scripts/check-cnpg-postgres-minor-floor.py"]
+    selftest: python3 openbank-infra/scripts/check-cnpg-postgres-minor-floor.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/check-cnpg-postgres-minor-floor.py --base "$PR_DIFF_BASE"
 
   # 2026-09-30 (#11608): 41 spot interruptions in 24h on the Karpenter `default` pool, and 134 of
   # 140 CNPG pods on it -- every reclaim was ~13 Postgres failovers. Owner scope: the CNPG clusters
@@ -3670,6 +3696,23 @@ gates:
     run: |
       python3 .github/scripts/check-outbox-has-writer.py .
 
+  # Money-path calls WITHOUT any pact were invisible to every pact gate (#8345 criterion 4):
+  # 27 of 58 outbound @RegisterRestClients in money_path_services had no contract on 2026-09-30,
+  # found by hand. The pair set is derived from the client annotations, never listed.
+  - id: money-path-pact-coverage
+    name: "every money-path outbound REST call has a consumer pact, or a baselined reason (enforced)"
+    group: api
+    budget_seconds: 20
+    mode: enforced
+    rationale: "check-pact-provider-replay and derive-pact-drift-scope only see pacts that exist; a money-path call with no pact at all is exactly the request-path defect class (#2269) they cannot catch, and the 26-pair gap in #8345 was measured by hand. The pair set is derived from @RegisterRestClient configKeys against rules.yaml: money_path_services, with a shrink-only baseline for today's debt."
+    review_after: "2027-03-31"
+    verified: "2026-09-30 -- against origin/main with no baseline: FAIL with 27 uncovered pairs (three more than the hand-made list on #8345: billing->account, billing->balance, lending->analytics-sink). With the baseline: PASS, 73 subjects (one @RegisterRestClient interface each; several clients share a file, which is why the hand count read 58). Self-test falsifies an unbaselined uncovered pair, a stale baseline entry, an unresolvable configKey, an aliased key, an external key and a covered control."
+    min_subjects: 40   # 73 money-path outbound in-repo client interfaces today (2026-09-30)
+    selftest: python3 .github/scripts/check-money-path-pact-coverage.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-money-path-pact-coverage.py"]
+    run: |
+      python3 .github/scripts/check-money-path-pact-coverage.py
   - id: pact-provider-replay-coverage
     name: "Pact provider replay + broker publication (issues #2338, #7621, enforced)"
     group: api
@@ -6027,7 +6070,7 @@ gates:
       python3 .github/scripts/check-temporal-worker-switch-naming.py --root .
 
   - id: workflow-supply-chain
-    name: "workflow action pins, bounded agent admission, and fail-closed service CI"
+    name: "workflow action pins, bounded agent and image admission, and fail-closed service CI"
     group: supplychain
     mode: enforced
     rationale: "Floating action refs and agent tools reintroduce supply-chain findings; unbounded autonomous intake and non-main watcher events consume capacity needed to finish PRs; service CI must skip empty verification work without accepting an unknown build scope."
@@ -6042,10 +6085,14 @@ gates:
       - ".github/scripts/test-infracost-scope.py"
       - ".github/scripts/agent-admission.py"
       - ".github/scripts/test-agent-admission.py"
+      - ".github/scripts/await-admin-ui-source-validation.py"
+      - ".github/scripts/test-await-admin-ui-source-validation.py"
+      - ".github/workflows/admin-ui-deploy.yml"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py
       python3 .github/scripts/test-agent-admission.py
+      python3 .github/scripts/test-await-admin-ui-source-validation.py
     run: python3 .github/scripts/check-workflow-supply-chain.py
 
   # ADR-0320 P3: field encryption lives in com.openbank.libs.security.FieldProtector

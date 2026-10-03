@@ -222,6 +222,11 @@ jobs:
       # resolver rejects unresolved dependencies and records each intended project.
       # Only a complete, matching set becomes the single snapshot we publish.
       - name: Resolve and validate fleet dependency graph
+        env:
+          # setup-gradle exports refs/pull/N/merge on PRs even though checkout uses
+          # head.sha. GitHub accepts that pair but does not index the snapshot for
+          # dependency-graph/compare. The ref must name the branch owning the SHA.
+          GITHUB_DEPENDENCY_GRAPH_REF: ${{ github.head_ref && format('refs/heads/{0}', github.head_ref) || github.ref }}
         run: >-
           python3 .github/scripts/dependency_snapshot.py
           --out "${RUNNER_TEMP}/dependency-snapshot-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import tempfile
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -37,6 +38,36 @@ import gitops_facts  # noqa: E402  (path must be set before the import)
 REPO = Path(__file__).resolve().parents[2]
 RUNBOOKS = REPO / "docs" / "runbooks"
 GITOPS = REPO / "openbank-infra" / "gitops"
+
+
+@contextmanager
+def static_gitops_reads():
+    """Reuse source manifests during one generation; restore the shared reader afterward."""
+    original = gitops_facts.read
+    gitops_facts.read = lru_cache(maxsize=None)(original)
+    try:
+        yield
+    finally:
+        gitops_facts.read = original
+
+
+# A full run renders 68 services and asks for each workload's namespace, name and kind
+# several times. Each resolver scans GitOps manifests; cache only for this generator
+# invocation, whose source tree is static. Keep the shared gitops_facts API uncached so
+# other callers can observe manifest changes within their own process.
+@lru_cache(maxsize=None)
+def _cached_namespace(short: str) -> str | None:
+    return gitops_facts.service_namespace(short, GITOPS)
+
+
+@lru_cache(maxsize=None)
+def _cached_workload_name(short: str) -> str | None:
+    return gitops_facts.workload_name(short, GITOPS)
+
+
+@lru_cache(maxsize=None)
+def _cached_workload_kind(short: str) -> str:
+    return gitops_facts.workload_kind(short, GITOPS)
 
 
 def read(p: Path) -> str:
@@ -120,7 +151,7 @@ def service_namespace(short: str) -> str:
     fallback stays (the commands need to render as something) and the banner now says the
     commands do not apply.
     """
-    return gitops_facts.service_namespace(short, GITOPS) or short
+    return _cached_namespace(short) or short
 
 
 def zero_replica_workload(short: str) -> bool:
@@ -173,9 +204,13 @@ def management_port(short: str) -> str:
 def probe_containers(gitops: Path) -> dict[str, list[dict]]:
     """Index declared workload containers once per generator invocation."""
     result: dict[str, list[dict]] = {}
+    # Many ConfigMaps mention Deployments in comments or embedded examples.
+    # Only parse YAML that can actually declare a workload document; the YAML
+    # parser below remains authoritative for the kind and container shape.
+    workload_kind = re.compile(r"(?m)^\s*kind:\s*['\"]?(?:Deployment|Rollout)\b")
     for path in sorted(gitops.rglob("*.yaml")):
         text = read(path)
-        if "openbank-" not in text or not any(kind in text for kind in ("Deployment", "Rollout")):
+        if "openbank-" not in text or not workload_kind.search(text):
             continue
         for doc in yaml.load_all(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
             if not isinstance(doc, dict) or doc.get("kind") not in {"Deployment", "Rollout"}:
@@ -250,7 +285,7 @@ def application_automated(short: str) -> bool | None:
 
 def workload_live_unverified(short: str) -> bool:
     """True only for a declared workload whose owning Application is manual-sync."""
-    return gitops_facts.service_namespace(short, GITOPS) is not None and application_automated(short) is False
+    return _cached_namespace(short) is not None and application_automated(short) is False
 
 
 def deployment_status(short: str) -> str:
@@ -273,7 +308,7 @@ def deployment_status(short: str) -> str:
             "the public HTTP port is not a health-evidence substitute.\n"
             "\n"
         )
-    if gitops_facts.service_namespace(short, GITOPS) is not None:
+    if _cached_namespace(short) is not None:
         if workload_live_unverified(short):
             return (
                 "## Deployment status — WORKLOAD DESIRED — LIVE STATUS UNVERIFIED\n"
@@ -506,8 +541,8 @@ def ops_commands(short: str, ns: str) -> dict[str, str]:
     """
     # The workload's real name, not `<short>-service`: released modules without the suffix deploy
     # under their bare name (customer-edge, admin-ui), so the suffix would address nothing (#6253).
-    svc = gitops_facts.workload_name(short, GITOPS) or f"{short}-service"
-    if gitops_facts.workload_kind(short, GITOPS) == "Rollout":
+    svc = _cached_workload_name(short) or f"{short}-service"
+    if _cached_workload_kind(short) == "Rollout":
         return {
             "logs_cmd": f"`kubectl logs -n {ns} -l app.kubernetes.io/name={svc} -f`",
             "restart_cmd": (
@@ -658,7 +693,7 @@ def all_services() -> list[str]:
     for version_txt in REPO.glob("openbank-*/version.txt"):
         short = version_txt.parent.name.removeprefix("openbank-")
         short = short.removesuffix("-service")
-        if gitops_facts.workload_name(short, GITOPS) is not None:
+        if _cached_workload_name(short) is not None:
             out.add(short)
     return sorted(out)
 
@@ -1011,18 +1046,19 @@ def main():
     RUNBOOKS.mkdir(parents=True, exist_ok=True)
     targets = args.services or all_services()
     created, skipped = 0, 0
-    for short in targets:
-        if not gitops_facts.module_dir(short, REPO).is_dir():
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        out = RUNBOOKS / f"svc-{short}.md"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        if write_runbook(out, render(short)):
-            created += 1
-        else:
-            skipped += 1
+    with static_gitops_reads():
+        for short in targets:
+            if not gitops_facts.module_dir(short, REPO).is_dir():
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            out = RUNBOOKS / f"svc-{short}.md"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            if write_runbook(out, render(short)):
+                created += 1
+            else:
+                skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:
