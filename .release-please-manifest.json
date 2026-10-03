@@ -44,7 +44,7 @@
   "openbank-referral-service": "0.5.1",
   "openbank-release-steward": "0.6.2",
   "openbank-sanctions-service": "0.15.0",
-  "openbank-sca-service": "0.19.0",
+  "openbank-sca-service": "0.19.1",
   "openbank-sdd-service": "0.13.5",
   "openbank-security-scanner": "0.9.1",
   "openbank-sepa-instant": "0.10.5",
