@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.1...settlement-service-v0.11.0) (2026-10-03)
+
+
+### Features
+
+* **settlement:** query a settlement's status, with an operator page ([#11935](https://github.com/JiRaska/open-bank-oss/issues/11935)) ([ec34f5a](https://github.com/JiRaska/open-bank-oss/commit/ec34f5a6fb6cb37e4170c12d522c32603b3f468b)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+
 ## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.0...settlement-service-v0.10.1) (2026-10-03)
 
 
