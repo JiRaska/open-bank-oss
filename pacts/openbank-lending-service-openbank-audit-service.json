@@ -53,7 +53,7 @@
               "entryId": "0b7a1c7e-0000-4000-8000-000000000001",
               "eventType": "lending.application.submitted",
               "hashStatus": "VERIFIED",
-              "occurredAt": "2026-09-01T12:00:00Z",
+              "occurredAt": "2026-09-01T10:00:00Z",
               "payload": "{}",
               "sourceService": "lending-service"
             }

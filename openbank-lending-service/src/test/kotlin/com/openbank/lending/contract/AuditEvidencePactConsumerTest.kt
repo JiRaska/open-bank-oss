@@ -54,10 +54,14 @@ class AuditEvidencePactConsumerTest {
                     e.stringType("entryId", "0b7a1c7e-0000-4000-8000-000000000001")
                     e.stringType("eventType", "lending.application.submitted")
                     e.stringType("sourceService", "lending-service")
+                    // UTC explicitly: with no zone the example is rendered in the JVM's default zone
+                    // under a literal 'Z', so the committed pact depended on the machine (CEST gave
+                    // 12:00Z, CI 10:00Z) and named the wrong instant on one of them.
                     e.datetime(
                         "occurredAt",
                         "yyyy-MM-dd'T'HH:mm:ss'Z'",
-                        java.time.Instant.parse("2026-09-01T10:00:00Z"),
+                        java.util.Date.from(java.time.Instant.parse("2026-09-01T10:00:00Z")),
+                        java.util.TimeZone.getTimeZone("UTC"),
                     )
                     e.stringType("payload", "{}")
                     e.stringMatcher("hashStatus", "VERIFIED|MISMATCH|LEGACY_UNVERIFIABLE|UNCHAINED", "VERIFIED")
