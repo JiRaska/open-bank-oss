@@ -42,6 +42,8 @@ export interface DocsIndexItem {
 export interface DocsIndex {
   service: string
   version?: string
+  gitCommit?: string
+  buildTime?: string
   source: 'live' | 'bundle'
   requestedLang: string
   availableLanguages: string[]
@@ -201,10 +203,19 @@ async function liveBaseUrl(svc: ServiceEntry): Promise<string | null> {
   return serviceBaseUrl(svc)
 }
 
-async function indexFromLive(id: string, requestedLang: string): Promise<DocsIndex | null> {
+// Newly discovered workloads can precede an Admin UI registry release. Resolve
+// their DNS only through the Kubernetes discovery allowlist, never by composing
+// a host from the URL parameter. The static registry remains the local-dev path.
+async function docsBaseUrl(id: string): Promise<string | null> {
   const svc = findService(id)
-  if (!svc) return null
-  const base = await liveBaseUrl(svc)
+  if (svc) return liveBaseUrl(svc)
+  if (!inCluster()) return null
+  return (await resolveInClusterBaseUrl(id))
+    ?? (await resolveInClusterBaseUrl(`${id}-service`))
+}
+
+async function indexFromLive(id: string, requestedLang: string): Promise<DocsIndex | null> {
+  const base = await docsBaseUrl(id)
   if (!base) return null
   const url = `${base}/q/openbank/docs?lang=${requestedLang}`
   try {
@@ -216,6 +227,8 @@ async function indexFromLive(id: string, requestedLang: string): Promise<DocsInd
     const body = await res.json() as {
       service: string
       version?: string
+      gitCommit?: string
+      buildTime?: string
       available?: boolean
       requestedLang?: string
       availableLanguages?: string[]
@@ -226,6 +239,8 @@ async function indexFromLive(id: string, requestedLang: string): Promise<DocsInd
     return {
       service: body.service,
       version: body.version,
+      gitCommit: body.gitCommit,
+      buildTime: body.buildTime,
       source: 'live',
       requestedLang: body.requestedLang ?? requestedLang,
       availableLanguages: body.availableLanguages ?? [],
@@ -238,10 +253,8 @@ async function indexFromLive(id: string, requestedLang: string): Promise<DocsInd
 }
 
 async function docFromLive(id: string, slug: string, requestedLang: string): Promise<DocsDocument | null> {
-  const svc = findService(id)
-  if (!svc) return null
   if (!SAFE_SLUG_RE.test(slug)) return null
-  const base = await liveBaseUrl(svc)
+  const base = await docsBaseUrl(id)
   if (!base) return null
   const url = `${base}/q/openbank/docs/${slug}?lang=${requestedLang}`
   try {
