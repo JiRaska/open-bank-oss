@@ -286,6 +286,10 @@ export const PERMISSIONS = {
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
   "approvals:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   "agent:decide":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // SCA and settlement durable operator approvals (#11903, #11915): both services gate the
+  // queue, the evidence read and the decision on @RolesAllowed(OPERATOR, ADMIN) and deny every
+  // service-account principal in rego. Compliance sees the inbox, but not these workbenches.
+  "operator-approvals:decide": [ROLES.ADMIN, ROLES.OPERATOR],
   // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
   "devops:decide":             [ROLES.ADMIN],
@@ -358,6 +362,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['treasury:deal:create', ['/treasury/deals/new']],
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
+  ['operator-approvals:decide', ['/approvals/sca', '/approvals/settlement']],
   ['approvals:view', ['/approvals']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',

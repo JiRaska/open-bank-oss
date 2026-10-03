@@ -10,6 +10,10 @@ Four-eyes (maker/checker) for settlement origination, #10041 slice 10. Service r
   and decides with `PATCH /api/v1/settlements/approvals/{id}` `{"approve": true|false}`; the maker
   repeats the IDENTICAL request with header `X-Approval-Id`, which executes once. Any change to the
   instruction re-parks it. Service accounts are refused the queue by policy (human operators only).
+- **Admin review:** the admin approval inbox lists this queue (source `settlement`) and links to
+  `/approvals/settlement/{id}` (operators and administrators only), which shows the bound
+  `summary`, offers no decision on an expired approval or to the maker, and after a lost response
+  requires a reload before another decision.
 - **Approval retention:** `settlement_operator_approvals` rows are deleted daily
   (`SETTLEMENT_APPROVAL_PURGE_CRON`, default 04:15) once their authorization expired more than
   `SETTLEMENT_APPROVAL_RETENTION_DAYS` (default 1826) ago, in bounded batches. Watch
