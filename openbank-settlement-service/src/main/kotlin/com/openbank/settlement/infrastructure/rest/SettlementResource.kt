@@ -9,6 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.settlement.application.port.`in`.OriginateSettlementCommand
 import com.openbank.settlement.application.port.`in`.SettlementUseCase
 import com.openbank.settlement.domain.model.Settlement
+import com.openbank.settlement.domain.model.SettlementStatus
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.BadRequestException
 import jakarta.ws.rs.Consumes
@@ -90,9 +91,11 @@ data class SettlementResponse(
     val payeeAccountId: UUID,
     val amount: BigDecimal,
     val currency: String,
-    val status: String,
+    val status: SettlementResponseStatus,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val recoveryRequired: Boolean = false,
+    val recoveryReason: String? = null,
 )
 
 private fun Settlement.toResponse() = SettlementResponse(
@@ -101,7 +104,10 @@ private fun Settlement.toResponse() = SettlementResponse(
     payeeAccountId = payeeAccountId,
     amount = amount,
     currency = currency,
-    status = status.name,
+    // Preserve the v1 status vocabulary: an uncertain movement is still pending settlement.
+    status = SettlementResponseStatus.fromDomain(status),
     createdAt = createdAt,
     updatedAt = updatedAt,
+    recoveryRequired = status == SettlementStatus.BALANCE_STATE_UNKNOWN,
+    recoveryReason = status.takeIf { it == SettlementStatus.BALANCE_STATE_UNKNOWN }?.name,
 )

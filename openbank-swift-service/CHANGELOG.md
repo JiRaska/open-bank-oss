@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.7](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.6...swift-service-v0.11.7) (2026-10-03)
+
+
+### Performance
+
+* **swift:** move the outbox onto the kernel v2 repository (ADR-0327 phase 3 pilot) ([#11871](https://github.com/JiRaska/open-bank-oss/issues/11871)) ([e2dd5a7](https://github.com/JiRaska/open-bank-oss/commit/e2dd5a71828478b1db5aaaa28f035393bfb03e9b)), closes [#11652](https://github.com/JiRaska/open-bank-oss/issues/11652)
+
 ## [0.11.6](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.5...swift-service-v0.11.6) (2026-09-29)
 
 
