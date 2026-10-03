@@ -54,7 +54,6 @@ BASELINE: dict[str, int] = {
     "openbank-security-scanner/src/main/kotlin/com/openbank/security/infrastructure/persistence/repository/IctIncidentOutboxRepositoryImpl.kt": 1,
     "openbank-sepa-payment/src/main/kotlin/com/openbank/sepa/infrastructure/persistence/repository/SepaPaymentOutboxRepositoryImpl.kt": 1,
     "openbank-standing-order-service/src/main/kotlin/com/openbank/standingorder/infrastructure/persistence/repository/StandingOrderOutboxRepositoryImpl.kt": 1,
-    "openbank-swift-service/src/main/kotlin/com/openbank/swift/infrastructure/persistence/repository/SwiftOutboxRepositoryImpl.kt": 1,
     "openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/persistence/repository/TransactionOutboxRepositoryImpl.kt": 1,
     "openbank-treasury-service/src/main/kotlin/com/openbank/treasury/infrastructure/persistence/repository/TreasuryOutboxRepositoryImpl.kt": 1,
 }

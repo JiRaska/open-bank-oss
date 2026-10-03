@@ -50,7 +50,6 @@ BASELINE_UNCOVERED: set[str] = {
     "openbank-security-scanner",
     "openbank-sepa-payment",
     "openbank-standing-order-service",
-    "openbank-swift-service",
     "openbank-transaction-service",
     "openbank-treasury-service",
 }
