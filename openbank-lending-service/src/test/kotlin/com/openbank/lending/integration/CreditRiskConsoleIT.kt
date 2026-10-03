@@ -203,7 +203,8 @@ class CreditRiskConsoleIT {
                     """
                     INSERT INTO loan_provisioning(id, loan_id, period, as_of, outstanding_balance, currency,
                         days_past_due, bucket, stage, expected_credit_loss, model_version)
-                    SELECT gen_random_uuid(), id, to_char($utcToday, 'YYYY-MM-DD'), $utcToday, 100, 'ZAR',
+                    SELECT gen_random_uuid(), id, to_char(timezone('UTC', current_timestamp)::date, 'YYYY-MM-DD'),
+                        timezone('UTC', current_timestamp)::date, 100, 'ZAR',
                         120, 'DPD_90_PLUS', 'STAGE_3', 45, 'test-model-v1' FROM loan WHERE currency = 'ZAR'
                     """.trimIndent(),
                 )
@@ -219,7 +220,10 @@ class CreditRiskConsoleIT {
         assertThat((row["over90Outstanding"] as Number).toDouble()).isEqualTo(100100.0)
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
-                statement.executeUpdate("UPDATE loan_provisioning SET as_of = $utcToday - 1 WHERE currency = 'ZAR'")
+                statement.executeUpdate(
+                    "UPDATE loan_provisioning SET as_of = timezone('UTC', current_timestamp)::date - 1 " +
+                        "WHERE currency = 'ZAR'",
+                )
                 statement.executeUpdate(
                     "UPDATE loan SET status = 'CLOSED' WHERE id = (SELECT min(id::text)::uuid FROM loan WHERE currency = 'ZAR')",
                 )

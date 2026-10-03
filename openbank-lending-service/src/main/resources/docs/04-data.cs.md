@@ -9,8 +9,6 @@
 
 ## Tabulky
 
-Filtry stavu žádosti přijímají současné názvy `OriginationState` i rozpoznané historické stavy přes `LegacyOriginationMigration`; neznámý stav je odmítnut místo tichého rozšíření dotazu. Mapování sdílejí čtecí cesty repository a uložené hodnoty stavu se nemění.
-
 | Tabulka | Účel | Klíčové sloupce |
 |---|---|---|
 | `loan_application` | Origination — žádost ve čtyřoč toku | `id`, `party_id`, `requested_amount`+`currency`, `nominal_annual_rate`, `term_periods`, `method`, `status`, `proposed_by` (maker), `decided_by` (checker), `decision_reason`, `created_at`, `decided_at` |
