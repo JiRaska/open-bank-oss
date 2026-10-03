@@ -85,7 +85,13 @@ sequenceDiagram
   S-->>C: 200 APPROVED
   M->>S: POST /api/v1/settlements with X-Approval-Id
   S-->>M: 201 settlement (approval EXECUTED, single use)
+  M->>S: GET /api/v1/settlements/{id}
+  S-->>M: 200 persisted status (read-only, no-store)
 ```
+
+### Settlement status query
+
+`GET /api/v1/settlements/{id}` returns the persisted settlement for reconciliation and never starts, resumes or retries the workflow. It uses the same v1 status vocabulary as origination: only `BOOKED` confirms completion, and an uncertain balance movement reads as `PENDING` with `recoveryRequired=true` (`recoveryReason=BALANCE_STATE_UNKNOWN`). `amount` is exact decimal text and the response is `Cache-Control: no-store`. Access is `ROLE_OPERATOR`/`ROLE_ADMIN` plus OPA `settlement.read` (shared `operator-read-any`); any `service-account-*` principal is refused with 403 by the resource. A malformed id is 400, an unknown one 404, and a 404 does not prove that a timed-out origination had no effect. Use the transfer id from the origination response, not an `approvalId`. The admin UI exposes it at `/settlements` (`settlements:view`).
 
 ## PII fields (GDPR)
 
