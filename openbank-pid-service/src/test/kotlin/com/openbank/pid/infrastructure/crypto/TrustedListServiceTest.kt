@@ -7,6 +7,8 @@ package com.openbank.pid.infrastructure.crypto
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.libs.security.EgressResolver
+import com.sun.net.httpserver.HttpServer
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -18,11 +20,14 @@ import org.jose4j.jws.AlgorithmIdentifiers
 import org.jose4j.jws.JsonWebSignature
 import org.jose4j.keys.EllipticCurves
 import org.junit.jupiter.api.Test
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.security.PrivateKey
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicInteger
 
 class TrustedListServiceTest {
 
@@ -63,6 +68,8 @@ class TrustedListServiceTest {
     private fun service(
         inlineList: String?,
         withAnchor: Boolean = true,
+        url: String? = null,
+        allowedHosts: String? = null,
     ): Triple<TrustedListService, RefreshableTrustStore, WorkflowLivenessRecorder> {
         val store = mockk<RefreshableTrustStore>(relaxed = true)
         val liveness = mockk<WorkflowLivenessRecorder>(relaxed = true)
@@ -75,14 +82,16 @@ class TrustedListServiceTest {
             Optional.empty()
         }
         val svc = TrustedListService(
-            url = Optional.empty(),
+            url = Optional.ofNullable(url),
             inline = Optional.ofNullable(inlineList),
             anchorJwksJson = anchorJwks,
             trustStore = store,
             objectMapper = mapper,
             clock = testClock,
             domainMetrics = metrics,
+            allowedHosts = Optional.ofNullable(allowedHosts),
         )
+        svc.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         svc.registerLiveness()
         return Triple(svc, store, liveness)
     }
@@ -133,6 +142,57 @@ class TrustedListServiceTest {
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }
 
+    // --- ADR-0320 P1: the url pull is allow-listed ---
+
+    private fun listServer(body: String, hits: AtomicInteger): HttpServer =
+        HttpServer.create(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0).apply {
+            createContext("/list") { ex ->
+                hits.incrementAndGet()
+                val b = body.toByteArray()
+                ex.sendResponseHeaders(200, b.size.toLong())
+                ex.responseBody.use { it.write(b) }
+            }
+            start()
+        }
+
+    @Test
+    fun `a list pulled from an allow-listed host is verified and applied`() {
+        val hits = AtomicInteger()
+        val srv = listServer(signedList(), hits)
+        try {
+            val port = srv.address.port
+            val (svc, store, _) = service(
+                null,
+                url = "http://lotl.test:$port/list",
+                allowedHosts = "lotl.test:$port;http;private",
+            )
+            svc.refresh()
+            assertThat(hits.get()).isEqualTo(1)
+            verify { store.replaceDynamicTrust(any()) }
+        } finally {
+            srv.stop(0)
+        }
+    }
+
+    @Test
+    fun `a list url whose host is not allow-listed is never fetched and trust is unchanged`() {
+        val hits = AtomicInteger()
+        val srv = listServer(signedList(), hits)
+        try {
+            val port = srv.address.port
+            val (svc, store, _) = service(
+                null,
+                url = "http://evil.test:$port/list",
+                allowedHosts = "lotl.test:$port;http;private",
+            )
+            svc.refresh()
+            assertThat(hits.get()).isEqualTo(0)
+            verify(exactly = 0) { store.replaceDynamicTrust(any()) }
+        } finally {
+            srv.stop(0)
+        }
+    }
+
     private fun metricsFor(inlineList: String?, listUrl: String?): DomainMetrics {
         val metrics = mockk<DomainMetrics> {
             every { registerWorkflowLiveness(any(), any()) } returns mockk(relaxed = true)
@@ -145,6 +205,7 @@ class TrustedListServiceTest {
             objectMapper = mapper,
             clock = testClock,
             domainMetrics = metrics,
+            allowedHosts = Optional.empty(),
         ).registerLiveness()
         return metrics
     }

@@ -10,6 +10,7 @@ import com.openbank.flakytest.domain.model.FindingSeverity
 import com.openbank.flakytest.domain.model.FlakyTestCheckType
 import com.openbank.flakytest.domain.model.FlakyTestFinding
 import com.openbank.flakytest.infrastructure.config.FlakyTestHunterConfig
+import com.openbank.libs.security.EgressResolver
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import io.mockk.every
@@ -19,6 +20,7 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.nio.charset.StandardCharsets
 import java.time.Instant
@@ -112,7 +114,7 @@ class GitHubProposalAdapterTest {
         }
         srv.start()
         server = srv
-        return "http://127.0.0.1:${srv.address.port}"
+        return "http://stub.test:${srv.address.port}"
     }
 
     private fun respond(ex: HttpExchange, status: Int, body: String) {
@@ -130,6 +132,9 @@ class GitHubProposalAdapterTest {
     private fun adapterFor(config: FlakyTestHunterConfig): GitHubProposalAdapter {
         val adapter = GitHubProposalAdapter(config)
         adapter.objectMapper = objectMapper
+        // ADR-0320 P1: only the stub host is allow-listed, pinned to loopback.
+        adapter.allowedHosts = listOfNotNull(server?.let { "stub.test:${it.address.port};http;private" })
+        adapter.resolver = EgressResolver { listOf(InetAddress.getLoopbackAddress()) }
         return adapter
     }
 
@@ -164,6 +169,17 @@ class GitHubProposalAdapterTest {
             .contains(eligibleFinding.filePath)
             .contains("did not modify production code, approve, or merge")
             .contains("#5281")
+    }
+
+    @Test
+    fun `a GitHub API host that is not allow-listed is refused and nothing is sent`() {
+        val port = startGitHubStub().substringAfterLast(':')
+        val adapter = adapterFor(configWithToken("http://evil.test:$port", Optional.of("fine-grained-test-token")))
+
+        val prUrl = runBlocking { adapter.openProposalPr(eligibleFinding, "add-explicit-unit-return-type") }
+
+        assertThat(prUrl).isNull()
+        assertThat(requestsSeen.get()).isEqualTo(0)
     }
 
     @Test

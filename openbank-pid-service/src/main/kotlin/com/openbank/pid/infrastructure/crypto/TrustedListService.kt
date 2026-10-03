@@ -7,6 +7,10 @@ package com.openbank.pid.infrastructure.crypto
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
+import com.openbank.libs.security.EgressPolicy
+import com.openbank.libs.security.EgressRequest
+import com.openbank.libs.security.EgressResolver
+import com.openbank.libs.security.SafeHttpClient
 import io.quarkus.logging.Log
 import io.quarkus.runtime.StartupEvent
 import io.quarkus.scheduler.Scheduled
@@ -21,10 +25,6 @@ import org.jose4j.jwk.JsonWebKeySet
 import org.jose4j.jwk.PublicJsonWebKey
 import org.jose4j.jws.AlgorithmIdentifiers
 import org.jose4j.jws.JsonWebSignature
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Clock
 import java.time.Duration
 import java.time.Instant
@@ -45,6 +45,10 @@ import java.util.Optional
  * Two sources: `url` (the production pull) or `inline` (a signed list provided directly via config,
  * for environments without a reachable list endpoint). Absent both ⇒ the framework is inert and only
  * the static `trusted-issuers-json` config is in effect.
+ *
+ * The `url` pull goes through [SafeHttpClient] (ADR-0320 P1): its host must be listed in
+ * `openbank.pid.eudi.trusted-list.allowed-hosts` (empty by default, so a URL alone fetches nothing),
+ * DNS is pinned, redirects are not followed and the body is capped.
  */
 @ApplicationScoped
 class TrustedListService(
@@ -58,7 +62,12 @@ class TrustedListService(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
     private val domainMetrics: DomainMetrics,
+    @ConfigProperty(name = "openbank.pid.eudi.trusted-list.allowed-hosts")
+    private val allowedHosts: Optional<String>,
 ) {
+    /** Visible for testing: lets a unit test pin a stub host to loopback. */
+    internal var resolver: EgressResolver = EgressResolver.SYSTEM
+
     private var liveness: WorkflowLivenessRecorder? = null
 
     private val anchor: JsonWebKeySet? = anchorJwksJson
@@ -67,9 +76,16 @@ class TrustedListService(
         .map { runCatching { JsonWebKeySet(it) }.getOrNull() }
         .orElse(null)
 
-    private val httpClient: HttpClient = HttpClient.newBuilder()
-        .connectTimeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS))
-        .build()
+    private val httpClient: SafeHttpClient by lazy {
+        SafeHttpClient(
+            EgressPolicy.fromConfig(allowedHosts.orElse("").split(',')),
+            resolver = resolver,
+            connectTimeout = Duration.ofSeconds(HTTP_TIMEOUT_SECONDS),
+            readTimeout = Duration.ofSeconds(HTTP_TIMEOUT_SECONDS),
+            callTimeout = Duration.ofSeconds(HTTP_TIMEOUT_SECONDS),
+            maxResponseBytes = MAX_LIST_BYTES,
+        )
+    }
 
     private val sigAlgConstraints = AlgorithmConstraints(
         ConstraintType.PERMIT,
@@ -112,10 +128,8 @@ class TrustedListService(
         inline.map { it.trim() }.filter { it.isNotEmpty() }.orElse(null)?.let { return it }
         val listUrl = url.map { it.trim() }.filter { it.isNotEmpty() }.orElse(null) ?: return null
         return runCatching {
-            val request = HttpRequest.newBuilder(URI.create(listUrl))
-                .timeout(Duration.ofSeconds(HTTP_TIMEOUT_SECONDS)).GET().build()
-            val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
-            if (response.statusCode() in HTTP_OK_MIN..HTTP_OK_MAX) response.body().trim() else null
+            val response = httpClient.send(EgressRequest(method = "GET", url = listUrl))
+            if (response.status in HTTP_OK_MIN..HTTP_OK_MAX) response.bodyAsString().trim() else null
         }.getOrElse {
             Log.warnf("EUDI Trusted List: fetch from %s failed: %s", listUrl, it.message)
             null
@@ -165,6 +179,7 @@ class TrustedListService(
     private companion object {
         const val HTTP_TIMEOUT_SECONDS = 5L
         const val CLOCK_SKEW_SECONDS = 120L
+        const val MAX_LIST_BYTES = 2 * 1024 * 1024
         const val HTTP_OK_MIN = 200
         const val HTTP_OK_MAX = 299
         const val WORKFLOW_NAME = "pid-trusted-list-refresh"
