@@ -68,8 +68,9 @@ Obě jsou `suspend fun`; v `%test` je plánovač vypnutý a testy je spouštěj�
 | `openbank.card.token.reads` | `source` (`NETWORK` / `LOCAL_MIRROR`) |
 | `openbank.card.disputes.opened` | `scheme`, `refusal` |
 | `openbank.card.dispute.evidence` | `refusal` |
+| `openbank.card.dispute.terminal.mismatches` | `scheme`, `stored`, `reported` |
 
-Při úspěchu je `refusal` rovno `none`. Všechny nesou `service="card-processing"`, stejně jako gauge backlogu a dead-letter outboxu.
+Při úspěchu je `refusal` rovno `none`. `scheme="NONE"` označuje odmítnutí rozhodnuté dříve, než se ptala jakákoli síť (neznámá nebo neaktivní karta, nedostupná card-issuance, nezpůsobilá reklamace) — stejná hodnota na čítačích tokenů i reklamací. Všechny nesou `service="card-processing"`, stejně jako gauge backlogu a dead-letter outboxu.
 
 ## Alerty
 
@@ -114,10 +115,18 @@ Očekávané, když je vazba `visa`/`mastercard` a chybí přihlašovací údaje
 
 `SCHEME_UNAVAILABLE` na `openbank.card.disputes.opened` znamená, že se nezapsal žádný řádek — otevření selhává uzavřeně. Stejná příčina `NOT_BOUND` jako výše, pokud `CARD_SCHEME_DISPUTE` jmenuje vendora. `NO_NETWORK_REFERENCE` je datový problém autorizace (acquirer neposlal referenci), ne výpadek.
 
+### Požadavek na token odpovídá trvale 409 IDEMPOTENCY_REQUEST_IN_PROGRESS
+
+Rezervace klíče uvízla v `PENDING`: požadavek selhal poté, co se ptala síť (zalogováno jako ERROR, „idempotency key left PENDING“). Automaticky se nikdy neuvolní, protože síť mohla token vydat nebo případ otevřít. Ověřte u schématu, co existuje, a pak řádek buď dokončete (`state='COMPLETED'`, `result_id`) proti záznamu, který vytvoříte, nebo ho smažte, pokud síť nic neudělala. Zaseknuté klíče: `SELECT * FROM card_lifecycle_idempotency WHERE state='PENDING' AND created_at < now() - interval '10 minutes'`.
+
+### Uzavřená reklamace nesouhlasí se sítí
+
+`openbank.card.dispute.terminal.mismatches` > 0: refresh případu WON/LOST/WITHDRAWN zjistil, že síť hlásí jiný výsledek. Uložený výsledek se záměrně ponechává; prošetřete to se schématem (logová řádka „closed dispute … is stored … but the network now reports …“).
+
 ## Testy a CI
 
 - Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest` a jeden test na každý simulátor.
-- Integrační: `CardAuthorizationOutboxIT` proti PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` spouští skutečný cron. Zaúčtování a fraud skórování jsou v `%test` vypnuté.
+- Integrační: `CardLifecycleIdempotencyIT` (souběžné požadavky se stejným klíčem za latchí, stav karty, historie důkazů) a `CardAuthorizationOutboxIT` proti PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` spouští skutečný cron. Zaúčtování a fraud skórování jsou v `%test` vypnuté.
 - Kontrakt: `CardIssuanceAuthorizationPactConsumerTest` (consumer pact vůči card-issuance).
 - Generovaný runbook: `docs/runbooks/svc-card-processing.md`.
 

@@ -68,8 +68,9 @@ Both are `suspend fun`; in `%test` the scheduler is disabled and the tests drive
 | `openbank.card.token.reads` | `source` (`NETWORK` / `LOCAL_MIRROR`) |
 | `openbank.card.disputes.opened` | `scheme`, `refusal` |
 | `openbank.card.dispute.evidence` | `refusal` |
+| `openbank.card.dispute.terminal.mismatches` | `scheme`, `stored`, `reported` |
 
-`refusal` is `none` on success. All carry `service="card-processing"`, as do the outbox backlog and dead-letter gauges.
+`refusal` is `none` on success. `scheme="NONE"` marks a refusal decided before any network was asked (unknown or non-ACTIVE card, card-issuance unreachable, ineligible dispute) — the same value on the token and dispute counters. All carry `service="card-processing"`, as do the outbox backlog and dead-letter gauges.
 
 ## Alerts
 
@@ -114,10 +115,18 @@ Expected when the binding is `visa`/`mastercard` and the credentials are absent 
 
 `SCHEME_UNAVAILABLE` on `openbank.card.disputes.opened` means no row was written — opening fails closed. Same `NOT_BOUND` cause as above when `CARD_SCHEME_DISPUTE` names a vendor. `NO_NETWORK_REFERENCE` is a data problem on the authorisation (the acquirer sent no reference), not an outage.
 
+### A token request answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS indefinitely
+
+The key's reservation is stuck `PENDING`: a request failed after the network was asked (logged at ERROR, "idempotency key left PENDING"). It is never released automatically, because the network may have minted the token or opened the case. Check with the scheme what exists, then either complete the row (`state='COMPLETED'`, `result_id`) against the record you create, or delete it if the network did nothing. Stuck keys: `SELECT * FROM card_lifecycle_idempotency WHERE state='PENDING' AND created_at < now() - interval '10 minutes'`.
+
+### A closed dispute disagrees with the network
+
+`openbank.card.dispute.terminal.mismatches` > 0: a refresh of a WON/LOST/WITHDRAWN case found the network reporting another outcome. The stored outcome is kept on purpose; investigate with the scheme (log line "closed dispute … is stored … but the network now reports …").
+
 ## Testing & CI
 
 - Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest`, and one test per simulator.
-- Integration: `CardAuthorizationOutboxIT` against PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` drives the real cron. Ledger posting and fraud scoring are switched off in `%test`.
+- Integration: `CardLifecycleIdempotencyIT` (parallel same-key requests behind a latch, card state, evidence history) and `CardAuthorizationOutboxIT` against PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` drives the real cron. Ledger posting and fraud scoring are switched off in `%test`.
 - Contract: `CardIssuanceAuthorizationPactConsumerTest` (consumer pact against card-issuance).
 - Generated runbook: `docs/runbooks/svc-card-processing.md`.
 

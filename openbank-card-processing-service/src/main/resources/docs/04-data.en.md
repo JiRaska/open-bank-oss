@@ -48,7 +48,7 @@ The bank's record that a network token exists — a mirror of the network's answ
 | `status` | VARCHAR(16) | `ACTIVE` / `SUSPENDED` / `DELETED` |
 | `scheme` | VARCHAR(16) | `VISA` / `MASTERCARD` / `SIMULATOR` — which binding answered |
 | `expiry` | DATE | optional |
-| `idempotency_key` | VARCHAR(128) UNIQUE | provisioning key; later updates keep it |
+| `idempotency_key` | VARCHAR(160) UNIQUE | provisioning key (`adopted:<token_reference>` for a token adopted from a network read); later updates keep it. A backstop only — idempotency is the reservation in `card_lifecycle_idempotency` |
 | `provisioned_at`, `updated_at` | TIMESTAMPTZ | |
 
 ### `card_dispute_cases` (V3)
@@ -64,11 +64,39 @@ The bank's record that a network token exists — a mirror of the network's answ
 | `status` | VARCHAR(24) | `OPEN`, `EVIDENCE_SUBMITTED`, `WON`, `LOST`, `WITHDRAWN` |
 | `scheme`, `scheme_status` | VARCHAR | binding that answered; network status verbatim |
 | `respond_by_date` | DATE | optional |
-| `evidence_reference` | VARCHAR(256) | the last document reference filed |
+| `evidence_reference` | VARCHAR(256) | the LATEST document reference filed; the full history is `card_dispute_evidence` |
 | `idempotency_key` | VARCHAR(128) UNIQUE | opening key |
 | `opened_at`, `updated_at` | TIMESTAMPTZ | |
 
 `ux_card_dispute_live_per_authorization` — partial UNIQUE on `authorization_id` where status is `OPEN` or `EVIDENCE_SUBMITTED`: at most one live case per authorisation, enforced by the database.
+
+### `card_dispute_evidence` (V3)
+
+Append-only history of evidence filings — one row per filing, never updated. `card_dispute_cases.evidence_reference` is only the latest.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | |
+| `dispute_id` | UUID | **FK → `card_dispute_cases(id)`**, indexed with `submitted_at` |
+| `document_reference` | VARCHAR(256) | a handle, never the document |
+| `note` | VARCHAR(2000) | optional |
+| `scheme_status` | VARCHAR(64) | the network's status as it answered this filing, verbatim |
+| `submitted_at` | TIMESTAMPTZ | |
+
+### `card_lifecycle_idempotency` (V3)
+
+Idempotency reservations for the calls that reach a card network (token provisioning, dispute opening, evidence filing). Inserted (`ON CONFLICT DO NOTHING`) **before** the network is called; completed in the same transaction as the result row.
+
+| Column | Type | Notes |
+|---|---|---|
+| `reservation_key` | VARCHAR(160) PK | `<operation>:<Idempotency-Key>` |
+| `operation` | VARCHAR(32) | `TOKEN_PROVISION`, `DISPUTE_OPEN`, `DISPUTE_EVIDENCE` |
+| `fingerprint` | CHAR(64) | SHA-256 of the request the key is bound to |
+| `state` | VARCHAR(16) | `PENDING` or `COMPLETED` (CHECK) |
+| `result_id` | UUID | the token, case or evidence row; set iff `COMPLETED` |
+| `created_at`, `updated_at` | TIMESTAMPTZ | |
+
+A `PENDING` row never expires: a request that died after the network acted must not be retried into a second action. `ix_card_lifecycle_idempotency_pending` (partial, `state = 'PENDING'`) is the operator's query for stuck keys.
 
 ### `card_outbox`
 
@@ -80,7 +108,7 @@ Transactional outbox (ADR-0050): `event_id` (unique), `aggregate_id`, `event_typ
 |---|---|---|
 | V1 `init_card_processing` | both tables, indexes, `card_outbox_seq` | `DROP TABLE card_outbox; DROP TABLE card_authorizations;` — safe only before any authorisation exists |
 | V2 `synthetic_outbox_taint` | `card_outbox.synthetic BOOLEAN NOT NULL DEFAULT FALSE` (ADR-0252) | `ALTER TABLE card_outbox DROP COLUMN synthetic;` — safe only before synthetic traffic was dispatched |
-| V3 `token_and_dispute_lifecycle` | `card_network_tokens`, `card_dispute_cases`, their indexes | `DROP TABLE card_dispute_cases; DROP TABLE card_network_tokens;` — both are new and nothing references them; the drop loses only rows written since V3 |
+| V3 `token_and_dispute_lifecycle` | `card_network_tokens`, `card_dispute_cases`, `card_dispute_evidence`, `card_lifecycle_idempotency`, their indexes | `DROP TABLE card_dispute_evidence; DROP TABLE card_lifecycle_idempotency; DROP TABLE card_dispute_cases; DROP TABLE card_network_tokens;` — all are new and nothing outside V3 references them; the drop loses only rows written since V3 |
 
 `migrate-at-start: true`; `validate-on-migrate: false`.
 
