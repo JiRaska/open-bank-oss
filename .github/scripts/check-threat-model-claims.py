@@ -162,8 +162,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'occurs only inside a comment in `ledger_rest_ext.rego`; not a policy input',
     'openbank-lending-service|3. Controls in place (this slice)|lending.origination.worker.enabled':
         'renamed to the `openbank.` convention; `rules.yaml:1544` records the rename',
-    'openbank-mcp-service|0. Phase posture — read this before anything below|HTTPRoute':
-        'no HTTPRoute manifest exists in this tree; ingress is expressed otherwise',
     'openbank-mcp-service|8. Change log|StubProposalPort':
         'open PR #8419 — replaced by `UnwiredProposalPort`; only past-tense KDoc remains',
     'openbank-sanctions-service|T3|deactivateByListType':
