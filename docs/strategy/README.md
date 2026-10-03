@@ -1,7 +1,8 @@
 # OpenBank Strategy Documentation
 
-> Last updated: 2026-05-26
-> Status: **v0.1** — initial strategic documentation suite.
+> Navigation reviewed: 2026-10-03. Individual strategy papers retain their own dates.
+> Read the [current roadmap](../ROADMAP.md) and [ADR registry](../adr/CURRENT.md)
+> for current decisions; older strategy snapshots are not live deployment inventories.
 
 This directory contains the strategic, architectural, and compliance reasoning behind OpenBank. It is intended for:
 
@@ -56,9 +57,9 @@ Read bottom-up if you came in via the roadmap and want to understand the why.
 ## Companion documentation
 
 - **Architecture Decision Records:** [`../adr/`](../adr/) — single-page records of architecturally significant decisions (ADR-0001 onward).
-- **Runbooks:** [`../runbooks/`](../runbooks/) — operational playbooks (to be populated in M4).
-- **API contracts:** [`../../openbank-contracts/`](../../openbank-contracts/) — OpenAPI 3.1 and AsyncAPI 3.0 specifications.
-- **Governance:** [`../governance/`](../governance/) — project governance, maintainer responsibilities, decision process.
+- **Runbooks:** [`../runbooks/`](../runbooks/) — operational playbooks and generated service procedures.
+- **API contracts:** service-local `src/main/resources/openapi.yaml`, [shared contract assets](../../openbank-contracts/), and [AsyncAPI](../asyncapi/openbank-events.yaml).
+- **Governance:** [project governance](../../GOVERNANCE.md) and [enforced rules](../../openbank-libs/governance/rules.yaml).
 
 ## Versioning
 

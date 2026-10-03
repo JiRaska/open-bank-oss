@@ -1,97 +1,80 @@
 # OpenBank Roadmap
 
-> The authoritative, gated milestone plan lives in
-> [`docs/strategy/09-roadmap-M1-M7.md`](strategy/09-roadmap-M1-M7.md). This page is the short overview.
+Source review: **2026-10-03**. This is the current navigation page for the
+[M1–M7 acceptance plan](strategy/09-roadmap-M1-M7.md). The review checked repository
+sources and recorded evidence; it did not rerun the fleet, inspect the live cluster,
+or certify regulatory compliance.
 
-Milestones are **outcome-oriented** and **gated** — none is "done" until every acceptance criterion is
-verified. Effort is measured in engineer-weeks (a focused solo engineer), deliberately **without calendar
-dates**: elapsed time depends on maintainer availability and community participation. Track progress by
-milestone completion in releases, not by inferred dates.
+Milestones describe outcomes. **Implementation, deployment configuration, and a passing
+acceptance exercise are different evidence.** No completion percentage is inferred from
+file counts or ADR status. Component releases remain independent of platform milestones.
 
-| # | Name | Goal | Effort (eng-weeks) | Status |
-|---|---|---|---|---|
-| **M1** | Foundation hardening | Audit-ready, testable, contributor-friendly repo | 2–3 | ✅ Complete |
-| **M2** | Resilience primitives | Outbox + Temporal workflows + idempotency everywhere; coverage ≥ 70% | 3–4 | 🟡 In progress |
-| **M3** | Compliance evidence | Every regulatory requirement mapped to demonstrable evidence | 2–3 | 🟡 In progress |
-| **M4** | Observability & ops | OTel everywhere; SLOs; chaos engineering begins | 2–3 | 🟢 Largely done |
-| **M5** | Security baseline | OWASP ASVS L3 + SLSA L3 supply chain + independent pen-test | 3–4 | 🟡 In progress |
-| M6 | Multi-region active-passive | DR failover within 30 min (RTO ≤ 30m, RPO ≤ 5m) | 2–3 | 🔴 Not started |
-| M7 | Multi-region active-active + scale | Sustain Tier-A workload; production chaos | 3–4 | 🔴 Not started |
+| Milestone | Current source-backed position | What is needed to close it |
+|---|---|---|
+| M1 — Foundation | Build conventions, CI gates, contracts and component releases exist; ongoing maintenance | Fresh-clone contributor exercise and current build/security evidence for the claimed scope |
+| M2 — Resilience | Temporal and shared outbox infrastructure exist; outbox v2 adoption is underway | Fleet adoption, real failure/retry/compensation tests, reconciliation and coverage evidence |
+| M3 — Compliance evidence | Audit, privacy, identity, reporting and control-mapping implementations exist | Complete evidence mappings, external conformance and independent review |
+| M4 — Observability and operations | Metrics, SLO configuration, synthetic journeys, performance and recovery workflows exist | Current journey coverage, actionable alerting and repeatable drill/load results |
+| M5 — Security baseline | Security gates, image signing, evidence generation and conformance self-assessments exist | Independently reviewed control effectiveness and explicitly scoped assurance claims |
+| M6 — Multi-region active-passive | Deferred by [ADR-0186](adr/0186-single-region-deployment-and-disaster-recovery-posture.md) | Regional failover/failback and measured cross-service RTO/RPO |
+| M7 — Active-active and scale | Longer-term target, dependent on recovery and capacity proof | Conflict safety, sustained/burst/soak tests and independent operator validation |
 
-**Current focus: M2 + M3 + M5 in parallel.**
+The [detailed plan](strategy/09-roadmap-M1-M7.md) keeps the acceptance criteria and
+source evidence together. M1–M5 have implementation evidence; this review does not declare
+any whole milestone accepted. There is no promised completion date or single platform version.
 
-- **M1 (Foundation)** is complete: all services build green, CI gates enforced fleet-wide
-  (SAST/SBOM/gitleaks/OpenAPI/governance-as-code), branch protection on `main`, per-service SemVer and
-  release-please changelogs live.
-- **M2 (Resilience)** — transactional outbox is fleet-wide (31 services); the original custom saga
-  framework (ADR-0045) is **superseded by Temporal** (ADR-0101/ADR-0120) — `libs/domain/saga` is gone
-  from the repo, and payment orchestration (transaction, SEPA, domestic) plus FX + statement flows now
-  run as Temporal workflows. Idempotency coverage and integration-test depth are the remaining gaps.
-- **M3 (Compliance)** — PSD2 XS2A developer portal live, GDPR Art. 17 erasure pipeline wired fleet-wide,
-  EUDI/PID digital identity (OpenID4VP + OpenID4VCI) live, Verification of Payee (VoP) on outbound
-  credit transfers live (ADR-0171). AnaCredit and FINREP regulatory-reporting services are deployed;
-  live regulator submission and full AML vendor-feed integration are the remaining gaps.
-- **M4 (Observability)** — OTel fleet-wide, DomainMetrics on every service, GoAlert on-call,
-  Pyrra SLO-as-code, GlitchTip error tracking, Grafana dashboards. Chaos engineering is deferred to M6.
-- **M5 (Security)** — external pen-test P0–P2 findings remediated, SBOM + cosign signing in CI,
-  NetworkPolicies enforced fleet-wide (34 services, generated by gen-network-policies.py, ADR-0081). OPA
-  authz in enforce mode on customer-edge. OWASP ASVS L3 self-assessment and SLSA L3 formal attestation
-  are pending.
+## Workstreams represented in current source
 
-## Cross-cutting workstreams
+These are active design/implementation areas, not a new maintainer priority ordering:
 
-Documentation, community building, governance evolution (maintainer → council → foundation), public-launch
-preparation, release cadence, and funding all run **in parallel** with the milestones — see the strategy
-doc for the full matrix.
-
-## Public-launch trigger
-
-The repo flips from private to public when M1 is complete, the security disclosure programme is wired, the
-git history is secret-free (gitleaks-confirmed), and the public-facing docs are polished. M1 is done —
-launch readiness is now gated on doc polish and the security disclosure workflow being publicly accessible.
-
-## Explicitly out of scope (all milestones)
-
-OpenBank distributes **software**; it does not run a SaaS bank, hold a banking licence, or join payment
-schemes directly — operators do. AI-driven account-opening / payment decisions stay experimental in
-`openbank-agent-service` and `openbank-copilot-service` only. See the strategy doc for the full list.
-
----
+- **Shared resilience:** [outbox v2 design](adr/0327-kernel-owned-outbox-v2.md) and
+  [runtime implementation](../openbank-libs-runtime/src/main/kotlin/com/openbank/libs/persistence/outbox/).
+  The design's front matter still says `planned` while shared v2 code exists; consult
+  per-service adoption and delivery evidence before calling the migration complete.
+- **Platform lifecycle:** [CNPG update/drain resilience](adr/0325-cnpg-update-and-node-drain-resilience.md)
+  and [Gateway API migration](adr/0324-replace-retired-ingress-nginx-with-gateway-api-on-envoy-gateway.md).
+  Staged infrastructure is not proof that traffic has migrated.
+- **Banking capability depth:** [card capability ports](adr/0283-card-platform-scheme-agnostic-capability-ports.md),
+  [banking context graph](adr/0303-banking-context-graph-and-authorized-hybrid-retrieval.md),
+  and the [current ADR registry](adr/CURRENT.md) for credit, products, treasury and governed agents.
+- **Operational evidence:** [synthetic journeys](../.github/workflows/synthetic-journeys.yml),
+  [performance gates](../.github/workflows/perf-gate.yml), and
+  [quarterly restore verification](../.github/workflows/dr-restore-verify.yml).
+  Their scope and successful run artifacts determine what they prove.
 
 ## Known gaps (honest list)
 
-Current limitations as of the Beta (July 2026). Updated as milestones ship:
+- **Live external integration is an acceptance task.** Payment rails, card schemes,
+  identity/credit providers and regulator submissions require operator credentials,
+  agreements, provider qualification and end-to-end tests. A stub, simulator or adapter
+  in the source tree does not establish that connectivity.
+- **Recovery proof is narrower than platform recovery.** A ledger restore is recorded in
+  the [DR test log](bcp/dr-test-log.md), and restore verification is now scheduled quarterly.
+  The workflow explicitly does not measure RPO or cross-service recovery consistency.
+  Neither proves M6 regional failover or its RTO ≤ 30 min / RPO ≤ 5 min targets.
+- **Security and compliance evidence is scoped.** Automated checks and self-assessments
+  are not blanket ASVS, FAPI, SLSA or regulatory certification. See the
+  [evidence pack](compliance/evidence-pack.md) and [FAPI self-assessment](compliance/fapi2-self-assessment.md).
+- **Product readiness varies.** Feature flags, provider adapters, approval controls and
+  the corresponding contract/integration tests must be checked per journey. The customer
+  application lives in a separate repository and was not release-audited here.
+- **Performance evidence is not fleet-wide capacity proof.** Existing test lanes have
+  selected workloads; [scalability targets](strategy/06-scalability-targets.md) remain
+  targets until their exact workload and duration are demonstrated.
+- **Documentation delivery labels can lag code.** Use source and test evidence alongside
+  ADR metadata; record discrepancies rather than translating `shipped` into live health.
 
-- **Interbank rails do not connect to live networks.** ISO 20022 pipeline and clearing simulator are
-  wired and flags are on (ADR-0104/0108); money moves end-to-end with a simulated counterparty. Real
-  SEPA/SWIFT/CERTIS network connections and the net-settlement ledger leg are not built.
-- **Customer app is not GA.** A Kotlin Multiplatform + Compose customer app (iOS + Android) is in
-  active development in a separate repo (`JiRaska/openbank-app`); the `openbank-customer-edge` BFF is
-  deployed with OPA enforce mode on, but app stores releases are not yet public.
-- **KYC/AML vendors are stubs** — screening logic is real (sanctions uses pg_trgm fuzzy matching) but
-  runs against in-memory/seed lists, not real providers (Refinitiv, ComplyAdvantage, EBA feed).
-- **Regulatory-reporting services generate reports but do not submit to a live regulator.** The full
-  in-repo backend fleet is now deployed — `finrep`, the last code-only service, deploys via its own
-  ArgoCD Application (#547, 2026-07-08), joining `anacredit`, `sdd`, and `tpp-registry` (deployed since
-  2026-07-01). `finrep`/`anacredit` build the CNB/EBA reports but do not yet transmit them to a live
-  supervisory endpoint. (`lending` and `psd2` are deployed; `swift-service` is deployed with ISO 20022
-  MT/MX but without a live SWIFT network connection.)
-- **SCA is maturing, not complete** — passkey RP, settlement gate and non-repudiation hash chain are
-  in (ADR-0086), but full FIDO2 attestation / real OTP delivery are not finished.
-- **AI copilot is sandbox-only** — a real LLM (deepseek-ai/DeepSeek-V3.2, via DeepInfra) runs in the
-  sandbox copilot-service; the backend is model-agnostic (swap by env). Production model gateway,
-  rate-limiting, and abuse guardrails are not hardened for public traffic.
-- **Contract tests are thin** — Pact Broker is live (pact.open-bank.tech) but published pact coverage
-  across the fleet is a known gap.
-- **HA on money-path DBs only; DR still unproven** — all 17 money-path CNPG clusters run
-  `instances: 2` with live-verified switchover ([ADR-0159](adr/0159-cnpg-ha-money-path.md), shipped
-  2026-07-12); non-money-path databases remain `instances: 1`. Single region, single cluster: the
-  automated DR restore-verify workflow exists but is dispatch-only and not yet on its quarterly
-  schedule, so RTO/RPO targets (M6) are stated, not demonstrated. The CNPG fleet now runs
-  PostgreSQL 18 (migrated from 16; runbook 0003); local Docker dev still ships 16.
-- **Not licensed to operate as a bank.** See the disclaimer in the README.
+The old July gaps are not a reliable inventory: the net-settlement ledger leg now has
+an [implemented design](adr/0281-net-settlement-ledger-leg.md), the fraud
+service contains a rule engine, and local Compose no longer uses PostgreSQL 16. Likewise,
+public launch is history, not a pending milestone.
 
----
+## Maintaining this roadmap
 
-For acceptance criteria, verification steps, and rationale per milestone, read the full plan:
-[`docs/strategy/09-roadmap-M1-M7.md`](strategy/09-roadmap-M1-M7.md).
+Update the acceptance plan in the same PR that changes a criterion or supplies its
+proof. Link the implementation and a dated, scoped verification result. Keep historical
+drill results as historical evidence. Use [issues](https://github.com/JiRaska/open-bank-oss/issues)
+for actionable work, [ADRs](adr/) for decisions, and component changelogs for releases.
+
+OpenBank distributes software. Operating a bank, holding a licence and joining payment
+schemes remain operator responsibilities; this roadmap does not promise those outcomes.

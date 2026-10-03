@@ -5,42 +5,42 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 
 # OpenBank — Reference deployment for evaluators
 
-The corporate-evaluator companion to [`DEPLOYMENT.md`](../DEPLOYMENT.md) (operational how-to).
-This page answers the four questions an evaluation team asks first: **what does the topology look
-like, how big should it be, what does it cost, and what would "real production" change.**
+This evaluator overview complements [`DEPLOYMENT.md`](../DEPLOYMENT.md), which describes the
+repository's operational configuration. It summarizes a reference topology, example sizing,
+legacy order-of-magnitude cost assumptions, and areas an adopter should assess before production.
 
-> **Honesty note.** The only live environment today is the AWS sandbox at `open-bank.tech`.
-> Everything below marked *tier-A* is a **reference design derived from the running sandbox
-> manifests**, not a topology we operate. Cost figures are **order-of-magnitude estimates**
-> (assumptions listed with them), not quotes. OpenBank is not licensed to operate as a bank —
-> running it as one requires your own regulatory approval (see [README](../README.md) → License
-> and [SECURITY.md](../SECURITY.md) → deployer responsibilities).
-
----
+> **Evidence and scope.** Repository sources were reviewed on **2026-10-03**. The diagrams and
+> configuration references below describe design intent or checked-in configuration; they do not
+> establish what is currently running in any environment. Sizing and cost figures are retained as
+> **unvalidated planning assumptions**: they are not benchmarks, a capacity assessment, or current
+> cloud-price estimates. OpenBank is a reference implementation, not a licensed bank. Anyone
+> adapting it for banking must obtain the required regulatory approvals and meet their own
+> security and operational obligations (see [README](../README.md) and [SECURITY.md](../SECURITY.md)).
 
 ## 1. Reference topology
 
-Everything stateful runs **in-cluster as OSS** — no managed-service lock-in (ADR-0027). The
-diagram is the sandbox shape; per-tier deltas are in the sizing table below.
+The architecture uses in-cluster open-source components as a design target (ADR-0027). The
+following diagram is illustrative, not an inventory of deployed workloads. Component membership
+and configuration change; inspect the linked source before making deployment decisions.
 
 ```mermaid
 flowchart TB
-  subgraph edge["Edge (public)"]
-    ce["customer-edge<br/>(mobile/web BFF)"]
+  subgraph edge["Edge entry points (design examples)"]
+    ce["customer-edge<br/>(mobile BFF)"]
     aui["admin-ui<br/>(back office)"]
-    dvp["developer-portal<br/>(PSD2 XS2A)"]
+    dvp["developer-portal<br/>(PSD2 documentation)"]
   end
 
-  subgraph svc["~37 Quarkus/Kotlin microservices (one namespace each)"]
+  subgraph svc["Selected Quarkus/Kotlin services"]
     direction TB
     core["core domain:<br/>account · ledger · transaction · balance"]
-    pay["payments:<br/>sepa · sepa-instant · domestic · swift · sdd · clearing · settlement"]
-    reg["regulatory:<br/>sanctions · aml · kyc · consent · sca · vop · fraud"]
-    sidecar["every pod: OPA PDP sidecar (loopback only)<br/>+ ServiceAccount + NetworkPolicy"]
+    pay["payments:<br/>SEPA · domestic · SWIFT · SDD · clearing"]
+    reg["identity and risk:<br/>consent · SCA · KYC · AML · sanctions · fraud"]
+    policy["OPA policy integrations<br/>(scope varies by service and path)"]
   end
 
-  subgraph data["Stateful platform (all in-cluster, ArgoCD-reconciled)"]
-    pg["CloudNativePG<br/>one Postgres cluster per service"]
+  subgraph data["Shared platform components (configured in GitOps)"]
+    pg["CloudNativePG / PostgreSQL"]
     kafka["Kafka (Strimzi)<br/>+ Apicurio schema registry"]
     kc["Keycloak (OIDC/IAM)"]
     bao["OpenBao (secrets)"]
@@ -48,108 +48,121 @@ flowchart TB
     val["Valkey (cache)"]
   end
 
-  subgraph obs["Observability & control"]
+  subgraph obs["Observability and policy components"]
     prom["Prometheus · Grafana · Loki · Tempo · Pyroscope"]
-    slo["Pyrra SLOs · GoAlert"]
-    kyv["Kyverno (policy) · KEDA (scale-to-zero)"]
+    slo["Pyrra · GoAlert"]
+    kyv["Kyverno · KEDA"]
   end
 
   edge --> svc
   svc --> data
   svc --> obs
-  argo["ArgoCD app-of-apps"] -. reconciles .-> svc
-  argo -. reconciles .-> data
+  argo["ArgoCD configuration"] -. desired state .-> svc
+  argo -. desired state .-> data
 ```
 
-Key topology facts an evaluator should not have to dig for:
+Repository references for this design include the [GitOps tree](../openbank-infra/gitops/),
+[ADR-0009](adr/0009-postgres-per-service.md) for data ownership, [ADR-0027](adr/0027-cloud-agnostic-in-cluster-substrate.md)
+for the platform substrate, and [ADR-0034](adr/0034-unified-opa-authz-mcp-and-rest.md) for authorization.
+The exact paths and filenames in the ADR directory are authoritative; use the [ADR index](adr/README.md)
+if a linked decision has moved.
 
-- **One Postgres cluster per service** (CNPG, ADR-0009) — no shared database; blast radius of a
-  schema incident is one service.
-- **Authz is a sidecar, not a library call:** every pod carries an OPA PDP on loopback evaluating
-  a signed policy bundle generated from `openbank-libs/governance` (ADR-0034). Money-path verbs
-  carry a four-eyes flag (ADR-0280).
-- **No long-lived credentials anywhere:** workload identity via IRSA / EKS Pod Identity; in-cluster
-  secrets in OpenBao; break-glass keys in AWS Secrets Manager.
-- **GitOps only:** desired state is `main`; ArgoCD reconciles; nobody applies by hand (ADR-0010).
+Evaluator notes:
 
----
+- **Data ownership:** ADR-0009 describes database-per-service as the target pattern. Confirm the
+  component's migrations, CNPG resources, and runtime configuration before assuming every service
+  has an independent database deployment.
+- **Authorization:** OPA integrations and policy bundles are represented in source and manifests,
+  but this reference does not claim that every pod carries an OPA sidecar or that every API path is
+  covered. Inspect the service's authorization code, policy bundle, and GitOps resources.
+- **Identity and secrets:** Keycloak, OpenBao, and workload-identity configuration appear in the
+  repository. This page makes no blanket claim about credential storage or the absence of
+  long-lived credentials. Review the applicable IAM, secret, and deployment configuration privately.
+- **Desired state:** ArgoCD and GitOps workflows are configured in the repository; that does not
+  prove a cluster has reconciled a particular revision. See [deployment workflows](../.github/workflows/)
+  and the [GitOps directory](../openbank-infra/gitops/).
 
-## 2. Sizing
+## 2. Sizing assumptions
 
-Grounding: a typical service pod requests **250 mCPU / 512 MiB** plus a **25 mCPU / 32 MiB** OPA
-sidecar (see `openbank-infra/gitops/components/ledger/ledger-service.yaml`); the sandbox node
-group is **2–4 × c7g.large** (ARM Graviton) in one region
-(`openbank-infra/aws/envs/sandbox-substrate/main.tf`).
+The following values are retained as **unvalidated reference-design assumptions**. They have not
+been confirmed as current sandbox allocations or through load testing. Treat them as starting points
+for an adopter's own capacity model, then measure workload demand and validate the applicable
+Kubernetes and database manifests.
 
-| | **dev** (evaluation laptop) | **pilot** (single-region, = today's sandbox) | **tier-A** (production-shaped reference) |
+For context, the checked-in ledger workload manifest contains example resource requests at
+[`openbank-infra/gitops/components/ledger/ledger-service.yaml`](../openbank-infra/gitops/components/ledger/ledger-service.yaml),
+and the substrate example is in
+[`openbank-infra/aws/envs/sandbox-substrate/main.tf`](../openbank-infra/aws/envs/sandbox-substrate/main.tf).
+These are configuration inputs, not evidence of current allocations or utilization.
+
+| | **dev** (local evaluation) | **pilot** (single-region reference) | **tier-A** (production-shaped design) |
 |---|---|---|---|
-| Where | Docker Compose (`make up-all`) | EKS, 1 region, 1–2 AZ | EKS, 1 region, **3 AZ** |
-| Compute | 16 GB RAM min, 24 GB recommended | 2–4 × c7g.large (arm64) | 6–9 × c7g.2xlarge across 3 AZ (baseline services) + burst pool |
-| Postgres | one container | CNPG, 1–2 instances per service cluster, gp3 | CNPG **3 instances** (sync standby) per money-path cluster, PITR + daily base backups to off-cluster object storage |
-| Kafka | single broker (KRaft) | Strimzi, 3 brokers, 1 AZ-set | 3 brokers across 3 AZ, `min.insync.replicas=2`, rack awareness |
-| Temporal | single container | 1 node per role | 2+ per role (frontend/history/matching/worker), dedicated persistence |
-| Keycloak | dev realm import | 1 replica, dev realm | 2 replicas, **production realm**, externalised user federation |
-| OpenBao | dev server | 1 replica, auto-unseal (break-glass in Secrets Manager) | 3 replicas with Raft HA + audited unseal ceremony |
-| OPA | sidecar per pod | sidecar per pod | sidecar per pod (unchanged — the model scales horizontally by design) |
-| Scale-to-zero | n/a | KEDA on latency-tolerant tiers (ADR-0041/0057) | money-path tiers always-on; long tail still KEDA |
-| Deploys | manual | auto-deploy on merge + ArgoCD | same pipeline + **change-management gate** (ADR-0029 release axis already separates deploy from release) |
-| SLO target | none | Pyrra money-path SLOs (ADR-0088) | tighter burn-rate windows + 24/7 alert routing |
+| Where | Docker Compose development subset | EKS, 1 region, 1–2 AZ | EKS, 1 region, **3 AZ** |
+| Compute assumption | 16 GB RAM min, 24 GB recommended | 2–4 × c7g.large (arm64) | 6–9 × c7g.2xlarge across 3 AZ (baseline services) + burst pool |
+| Postgres assumption | one local container | CNPG, 1–2 instances per service cluster, gp3 | CNPG **3 instances** per money-path cluster, PITR + daily base backups to off-cluster object storage |
+| Kafka assumption | single broker (KRaft) | Strimzi, 3 brokers, 1 AZ-set | 3 brokers across 3 AZ, `min.insync.replicas=2`, rack awareness |
+| Temporal assumption | single container | 1 node per role | 2+ per role (frontend/history/matching/worker), dedicated persistence |
+| Keycloak assumption | dev realm import | 1 replica, development realm | 2 replicas, production realm, externalized user federation |
+| OpenBao assumption | local development service | 1 replica | 3 replicas with Raft HA; key-management procedures defined for the adopter's environment |
+| OPA assumption | configuration varies | policy integration per protected path | policy integration per protected path; validate overhead and coverage |
+| Scale-to-zero assumption | n/a | KEDA for latency-tolerant workloads | money-path tiers always-on; evaluate scale-to-zero for other workloads |
+| Deployment assumption | local Compose | CI and GitOps workflow | same workflow plus adopter-defined change management |
+| SLO assumption | set by evaluator | define per workload | tighter burn-rate windows and staffed alert response |
 
----
+## 3. Legacy monthly cost assumptions
 
-## 3. Estimated monthly infra cost
-
-**Order-of-magnitude estimates, not quotes.** Assumptions: AWS eu-central-1 **on-demand** Linux
-pricing, arm64 Graviton, no Reserved Instances / Savings Plans, moderate log/trace volume,
-single region. Your reservation strategy and data-transfer profile will move these ±50 %.
+**These figures are unvalidated planning assumptions, not refreshed benchmarks, current prices, or
+quotes.** They were not recalculated as part of the 2026-10-03 source review. The original assumptions
+were AWS eu-central-1 on-demand Linux pricing, arm64 Graviton, no Reserved Instances or Savings
+Plans, moderate log/trace volume, and a single region. Pricing, architecture, data transfer, and
+retention vary; obtain a current estimate for the chosen region and workload before budgeting.
 
 | Line item | **pilot** | **tier-A** |
-|---|---|---|
+|---|---:|---:|
 | EKS control plane | ~$75 | ~$75 |
-| Compute (nodes) | ~$90–180 (2–4 × c7g.large) | ~$1 000–1 600 (6–9 × c7g.2xlarge) |
-| EBS gp3 storage (~37 CNPG clusters + Kafka + observability) | ~$50–100 (~300–600 GB) | ~$300–600 (2–4 TB incl. backups/WAL archive) |
-| Data transfer + NAT | ~$50–150 | ~$200–500 (VPC endpoints keep service traffic off NAT — the sandbox already does this) |
+| Compute (nodes) | ~$90–180 (2–4 × c7g.large) | ~$1,000–1,600 (6–9 × c7g.2xlarge) |
+| EBS gp3 storage (database clusters + Kafka + observability) | ~$50–100 (~300–600 GB) | ~$300–600 (2–4 TB including backups/WAL archive) |
+| Data transfer + NAT | ~$50–150 | ~$200–500 |
 | ECR + S3 (images, backups, evidence bundles) | ~$20–50 | ~$50–150 |
-| Observability retention (self-hosted Prometheus/Loki/Tempo — the dominant variable) | included above | ~$200–500 depending on retention |
-| **Total** | **~$300–550 / month** | **~$1 800–3 400 / month** |
+| Observability retention (self-hosted Prometheus/Loki/Tempo; major variable) | included above | ~$200–500 depending on retention |
+| **Legacy total assumption** | **~$300–550 / month** | **~$1,800–3,400 / month** |
 
-Not in these numbers: CI runners (the project runs them self-hosted — Hetzner + Mac mini, AWS
-Spot ARC only as overflow, ADR-0053), a second region for DR (roughly +60–80 % of tier-A when
-added), and people.
+The original estimate excluded CI runners, a second region for disaster recovery, and people. It
+also assumed roughly +60–80% of tier-A cost for a second region; that multiplier is unvalidated as
+well. Rebuild the estimate from current provider pricing, region, service count, retention policy,
+and recovery objectives before using it for a decision.
 
----
+## 4. Production-readiness assessment
 
-## 4. What changes for real production
+Use these as evaluation questions, not claims about current implementation or deployment state:
 
-The sandbox proves the software; production is an **operating model**. The delta, in the order an
-evaluator usually asks:
-
-1. **Live rails.** SEPA/SWIFT/CERTIS connectivity and the net-settlement ledger leg are the
-   roadmap's explicit known gap (see [ROADMAP](ROADMAP.md)). Today the ISO 20022 pipeline is
-   wired against a clearing *simulator*. Production means scheme admission, a settlement account
-   at the central bank or a sponsor, and R-transaction handling.
-2. **Real KYC/AML vendors.** Screening logic is real (pg_trgm fuzzy matching); the vendor feeds
-   are stubs. Production means a contracted provider (Refinitiv / ComplyAdvantage class) plus a
-   sanctions-evidence retention policy.
-3. **DR region.** Single-region today. M6/M7 on the roadmap add the DR lane and then
-   active-active; tier-A above is deliberately single-region-with-PITR, the honest intermediate.
-4. **HSM/KMS.** Signing keys (QSEAL, evidence bundles, JWT issuers) move from Kubernetes secrets
-   / KMS software keys to an HSM-backed custody model with dual control.
-5. **Keycloak production posture.** Production realm, brute-force policies, customer identity
-   migration plan, and an IdP DR procedure — the sandbox realm is a demo seed.
-6. **Support & change model.** 24/7 on-call (GoAlert is wired; staffing is yours), prod
-   change-management on top of the existing release axis, incident-postmortem practice, and the
-   regulator-facing evidence pack (the signed release bundles already give you SBOM/SLSA/OpenVEX
-   per release, ADR-0030).
-7. **Licensing.** None of the above substitutes for a banking licence — see the README's
-   licensing note and SECURITY.md's deployer-responsibilities section.
-
----
+1. **External payment rails.** Identify the scheme connections required, admission process, sponsor
+   or settlement-account arrangements, operational cutoffs, and R-transaction handling. The
+   repository includes ISO 20022 payment and clearing components; inspect the relevant service
+   contracts, simulator, and [roadmap](ROADMAP.md) for their stated scope.
+2. **KYC/AML data and providers.** Determine how screening data is sourced, refreshed, licensed,
+   retained, and audited. Review the sanctions, AML, and KYC service implementations and their
+   provider interfaces; do not infer vendor integration from the presence of screening logic.
+3. **Resilience and recovery.** Define region, RPO/RTO, backup retention, restore testing, and
+   failure-domain requirements. Compare those requirements with the current
+   [infrastructure configuration](../openbank-infra/aws/) and database manifests.
+4. **Key management.** Decide on key custody, rotation, recovery, separation of duties, and hardware
+   security requirements. Review the applicable OpenBao, workload identity, signing, and KMS
+   configuration for the target environment.
+5. **Identity operations.** Define realm separation, brute-force protection, user migration,
+   federation, account recovery, and identity-provider disaster recovery for the adopter's needs.
+6. **Support and change management.** Specify staffed incident response, release approval, rollback,
+   post-incident review, and regulator-facing evidence requirements. See the configured
+   [release workflow](../.github/workflows/release-please.yml) and [governance release guide](../openbank-libs/governance/RELEASE.md).
+7. **Licensing and authorization.** Obtain applicable banking approvals and review the project's
+   [license](../LICENSE) and [deployer security responsibilities](../SECURITY.md). This software
+   does not itself grant permission to operate a bank.
 
 ## 5. Where to go next
 
-- Operational how-to: [`DEPLOYMENT.md`](../DEPLOYMENT.md)
-- Milestone plan (M1–M7): [`ROADMAP.md`](ROADMAP.md)
+- Operational configuration: [`DEPLOYMENT.md`](../DEPLOYMENT.md)
+- Milestone plan: [`ROADMAP.md`](ROADMAP.md)
 - Deployer security responsibilities: [`SECURITY.md`](../SECURITY.md)
-- Sandbox API surface: [developer portal](https://developer.open-bank.tech)
-- Cost governance of this repo's own CI: ADR-0053 (FinOps runner fleet)
+- Current code and deployment configuration: the relevant service under `openbank-*` and the
+  [GitOps tree](../openbank-infra/gitops/)
+- CI/deployment behavior: [workflow definitions](../.github/workflows/)

@@ -85,7 +85,6 @@ DEPLOY_RECIPE = ".github/workflows/Dockerfile.deploy"
 # base and so must track it. None is referenced by any workflow or script today —
 # they are declarations, same as the per-service ones, and drift the same way.
 EXTRA_FLEET_BASE = [
-    "Dockerfile.scanner",
     "openbank-security-scanner/Dockerfile.prebuilt",
     "openbank-notification-service/Dockerfile.runtime",
 ]
@@ -195,6 +194,7 @@ def self_test() -> int:
 
         # An EXTRA_FLEET_BASE file must be in scope too, not just the glob.
         drifted.write_text(prose + good + "\nEXPOSE 8101\n")
+        (tmp / EXTRA_FLEET_BASE[0]).parent.mkdir(parents=True, exist_ok=True)
         (tmp / EXTRA_FLEET_BASE[0]).write_text(prose + bad + "\nEXPOSE 8120\n")
         if not any(EXTRA_FLEET_BASE[0] in p for p in check_fleet_bases(tmp)):
             failures.append(f"{EXTRA_FLEET_BASE[0]} drift was NOT flagged (out of scope)")

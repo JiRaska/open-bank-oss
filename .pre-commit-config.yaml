@@ -75,3 +75,13 @@ repos:
     hooks:
       - id: markdownlint
         args: [--disable, MD013, MD033, MD041]
+
+  - repo: local
+    hooks:
+      - id: repository-root-layout
+        name: repository root layout
+        entry: python3 .github/scripts/check-repository-root.py
+        language: python
+        additional_dependencies: [PyYAML==6.0.2]
+        pass_filenames: false
+        always_run: true

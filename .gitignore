@@ -277,6 +277,12 @@ docker-compose.override.yml
 docker-compose.*.local.yml
 
 # --- TEMP / BACKUPS ---
+# Scratch output at the repository root; never shadow nested source directories.
+/tmp/
+/temp/
+# Private machine-local Codex instructions and state.
+/.codex/
+/.Codex/
 *.tmp
 *.temp
 *.bak
