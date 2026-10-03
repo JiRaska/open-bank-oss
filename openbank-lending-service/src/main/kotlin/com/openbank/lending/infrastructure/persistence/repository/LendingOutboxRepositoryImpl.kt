@@ -9,6 +9,9 @@ import com.openbank.lending.infrastructure.persistence.entity.LendingOutboxEntit
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.common.WithTransaction
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
@@ -23,15 +26,12 @@ import java.util.UUID
 @ApplicationScoped
 class LendingOutboxRepositoryImpl(private val clock: Clock) :
     LendingOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("lending_outbox")),
     PanacheRepository<LendingOutboxEntity> {
 
     @WithTransaction
     override fun persistInTransaction(message: LendingOutboxMessage): Uni<Void> =
         persist(message.toEntity()).replaceWithVoid()
-
-    override suspend fun findByAggregateId(aggregateId: UUID): List<OutboxEntry> = Panache.withSession {
-        find("aggregateId = ?1 order by createdAt asc", aggregateId).list()
-    }.awaitSuspending().map { it.toEntry() }
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
         find(

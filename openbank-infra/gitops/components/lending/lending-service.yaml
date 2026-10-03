@@ -172,6 +172,10 @@ spec:
             # by consent_rest_ext.rego's service-consent-m2m rule.
             - name: CONSENT_SERVICE_URL
               value: https://consent-service.consent.svc:8443
+            # ADR-0214 D3 evidence bundle (#11900): GET /api/v1/audit/evidence/{id}, carrying the
+            # signed-in person's own token — no service identity is granted the audit trail.
+            - name: AUDIT_SERVICE_URL
+              value: http://audit-service.audit.svc:8113
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean
