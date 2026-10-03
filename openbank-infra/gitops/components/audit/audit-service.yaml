@@ -116,14 +116,17 @@ spec:
               value: "true"
             - name: AUDIT_ANCHOR_KMS_KEY_ID
               value: alias/openbank-audit-anchor
-            # ADR-0034 Phase 5 / issue #1797: audit-service shipped @Authorize with the app default
-            # AUTHZ_ENFORCE=true and NO sidecar — so the PDP call failed and audit.read / audit.verify
-            # failed closed (HTTP 422). The `opa` sidecar below now answers the PDP call; this explicit
-            # `false` keeps enforcement ADVISORY (the interceptor logs "would DENY" without blocking)
-            # until the live decision log confirms the deny population is empty, then a separate
-            # deliberate flip sets it true (rules.yaml AUTHZ_ENFORCE guardrail).
+            # ADR-0034 Phase 5 / issue #1797: the `opa` sidecar below answers the PDP call, so the
+            # policy decision is ENFORCED (a deny is a 403, a PDP outage a 503). Flipped from advisory
+            # on 2026-10-03. The advisory window observed ZERO decisions (no openbank_authz_decisions
+            # series for this namespace, no PDP request in 30 d of logs), so a clean deny count was
+            # not evidence; the flip instead rests on replaying every known caller through this
+            # bundle with `opa eval` (customer-edge's service account for audit.customerRead; staff
+            # AUDITOR / COMPLIANCE / ADMIN for the trail and audit.verify) — see the PR. Before
+            # reverting to "false", check `openbank_authz_decisions{outcome="deny"}` for this
+            # namespace: a deny there is now a refused call.
             - name: AUTHZ_ENFORCE
-              value: "false"
+              value: "true"
           startupProbe:
             tcpSocket:
               port: management
