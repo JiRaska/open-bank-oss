@@ -40,7 +40,14 @@ spec:
     #
     # The generator cannot derive this one. gen-network-policies.py emits INGRESS from declared
     # env URLs; the caller side of a new in-cluster edge is hand-written, and this file is where.
+    #
+    # Two selectors since ADR-0328 wave B: `langfuse-web` (v3.29.0, where LANGFUSE_HOST points
+    # now) and `langfuse` (v2, scaled to 0). The v2 entry is the rollback path — reverting
+    # LANGFUSE_HOST alone must be enough to send traces back — and leaves with v2 in wave C.
     - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: langfuse-web
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: langfuse
