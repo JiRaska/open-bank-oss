@@ -64,3 +64,14 @@ worker dies without reporting completion; the total deadline alone previously ga
 attempt the full two hours, leaving no budget for recovery after it timed out. Retry retains the
 same settlement identity and relies on the original hold/journal idempotency keys. A timeout
 never establishes whether a remote write committed.
+
+## Read a settlement's status before recovery
+
+A human operator or administrator can read `GET /api/v1/settlements/{id}` (admin UI:
+`/settlements`). It returns the persisted settlement without starting a workflow or consuming an
+approval. Only `BOOKED` records a completed booking. `PENDING` with `recoveryRequired=true` and
+`recoveryReason=BALANCE_STATE_UNKNOWN` is the uncertain-movement case above. Compensation states
+require their own reconciliation, and a historical `LEDGER_REVERSED` is not proof of a reversal.
+Refresh performs one read and never retries origination. A 404 or a failed read is not evidence
+that a timed-out origination had no effect. Use the transfer id from the origination response,
+not an approval id. Service-account identities are refused with 403 by design.

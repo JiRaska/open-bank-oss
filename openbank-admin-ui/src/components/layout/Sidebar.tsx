@@ -152,6 +152,7 @@ const paymentsNav: NavItem[] = [
   { nameCs: 'Karty',             nameEn: 'Cards',            href: '/cards',             icon: CreditCard,permission: 'cards:view' },
   { nameCs: 'Obchodníci',        nameEn: 'Merchants',        href: '/merchants',         icon: Store,     permission: 'transactions:view' },
   { nameCs: 'Clearing',          nameEn: 'Clearing',         href: '/clearing',          icon: Layers,    permission: 'payment-rails:view' },
+  { nameCs: 'Stav settlementu',  nameEn: 'Settlement status', href: '/settlements',     icon: Layers,    permission: 'settlements:view' },
   { nameCs: 'Úroky',             nameEn: 'Interest',         href: '/interest',          icon: TrendingUp,permission: 'interest:view' },
   { nameCs: 'Šablony dokumentů', nameEn: 'Document Templates', href: '/document-templates', icon: FileSignature, permission: 'templates:view' },
 
