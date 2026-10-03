@@ -15,8 +15,10 @@ import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.math.RoundingMode
+import java.security.MessageDigest
 import java.time.Clock
 import java.util.Currency
+import java.util.UUID
 
 /**
  * Posts a cleared presentment as a `CARD`-rail debit through transaction-service.
@@ -65,7 +67,7 @@ class TransactionLedgerPostingAdapter(
                 InitiateTransactionRequest(
                     // Derived from the clearing, not random: transaction-service dedupes on it, so
                     // a retried clearing must present the same key or the customer is debited twice.
-                    idempotencyKey = "card-clearing:$idempotencyKey",
+                    idempotencyKey = CardClearingLedgerKey.of(authorization.id, idempotencyKey),
                     type = TYPE_DEBIT,
                     sourceAccountId = authorization.accountId,
                     targetAccountId = null,
@@ -102,5 +104,35 @@ class TransactionLedgerPostingAdapter(
 
         /** Only reached for a code `Currency` does not know; two digits is the majority shape. */
         const val DEFAULT_FRACTION_DIGITS = 2
+    }
+}
+
+/** The ledger idempotency key a clearing presents to transaction-service. */
+object CardClearingLedgerKey {
+    /** transaction-service's `transactions.idempotency_key` is VARCHAR(100). */
+    const val MAX_LENGTH = 100
+    private const val DIGEST_HEX_CHARS = 32
+
+    /**
+     * The ledger idempotency key for one clearing: `card-clearing:<authorizationId>:<clearingKey>`.
+     *
+     * Scoped by the authorisation because the clearing key is only unique per authorisation
+     * (`card_clearings` UNIQUE (authorization_id, idempotency_key)). The unscoped
+     * `card-clearing:<key>` let two authorisations that happened to share a clearing key collide
+     * in transaction-service, which deduplicated the second posting away — a clearing recorded
+     * here and never in the books.
+     *
+     * Deterministic, so a re-driven posting presents the same key. When the verbatim form would
+     * not fit transaction-service's 100-character column (clearing keys may be 128), the clearing
+     * key is replaced by the first 128 bits of its SHA-256 — still deterministic, still scoped,
+     * and short enough to fit the column (the unscoped form already exceeded it for any clearing
+     * key over 86 characters).
+     */
+    fun of(authorizationId: UUID, clearingKey: String): String {
+        val verbatim = "card-clearing:$authorizationId:$clearingKey"
+        if (verbatim.length <= MAX_LENGTH) return verbatim
+        val digest = MessageDigest.getInstance("SHA-256").digest(clearingKey.toByteArray(Charsets.UTF_8))
+        val hex = digest.joinToString("") { "%02x".format(it) }.take(DIGEST_HEX_CHARS)
+        return "card-clearing:$authorizationId:sha256-$hex"
     }
 }

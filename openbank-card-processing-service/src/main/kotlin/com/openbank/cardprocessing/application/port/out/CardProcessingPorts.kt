@@ -34,6 +34,10 @@ interface CardAuthorizationRepository {
      * one transaction. The record's `(authorizationId, idempotencyKey)` is UNIQUE in the database, so
      * a concurrent duplicate cannot also commit — it fails with [DuplicateClearingException] and its
      * hold decrement and event roll back with it.
+     *
+     * [authorization] must carry the version of the row it was computed from: if the stored row has
+     * moved on (a concurrent clearing under another key), nothing is written and
+     * [StaleAuthorizationException] is thrown.
      */
     suspend fun saveClearing(
         authorization: CardAuthorization,
@@ -85,6 +89,13 @@ data class RecordedClearing(
 /** A concurrent request already applied a clearing under the same key; this one was rolled back. */
 class DuplicateClearingException(cause: Throwable) :
     RuntimeException("a clearing with this key was already applied to the authorisation", cause)
+
+/**
+ * The authorisation changed between the read a clearing was computed from and its write (a
+ * concurrent clearing under another key). Nothing was written; re-read and re-evaluate.
+ */
+class StaleAuthorizationException(cause: Throwable? = null) :
+    RuntimeException("the authorisation was modified concurrently", cause)
 
 /** Outbox port: the libs [OutboxRepository] plus an in-transaction write. */
 interface CardProcessingOutboxRepository : OutboxRepository {
@@ -162,6 +173,9 @@ interface CardProcessingMetricsPort {
     fun authorizationDecided(approved: Boolean, reason: String?)
 
     fun presentmentApplied(fullyCleared: Boolean)
+
+    /** A clearing lost a race to a concurrent clearing on the same authorisation and was re-evaluated. */
+    fun clearingConflict()
 
     fun holdReleased(kind: String)
 

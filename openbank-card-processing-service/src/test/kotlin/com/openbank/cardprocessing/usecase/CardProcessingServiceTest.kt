@@ -23,6 +23,7 @@ import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.PostingResult
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
+import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.application.usecase.CardNotFoundException
 import com.openbank.cardprocessing.application.usecase.CardProcessingService
 import com.openbank.cardprocessing.domain.event.CardAuthorised
@@ -32,9 +33,11 @@ import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.CountedSpend
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import com.openbank.cardprocessing.domain.model.PresentmentOutcome
+import com.openbank.cardprocessing.domain.model.PresentmentRefusal
 import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.infrastructure.scheme.SimulatedSchemeAdapter
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -378,6 +381,46 @@ class CardProcessingServiceTest {
         assertThat(outcome).isEqualTo(PresentmentOutcome.Accepted(afterWinner))
         coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
         coVerify(exactly = 0) { metrics.presentmentApplied(any()) }
+        Unit
+    }
+
+    @Test
+    fun `losing a concurrent clearing race re-evaluates against the real remaining hold`(): Unit = runBlocking {
+        val stale = authorization(AuthorizationStatus.APPROVED)
+        // Another key cleared 8 000 of the 10 000 between our read and our write.
+        val moved = stale.copy(
+            status = AuthorizationStatus.PARTIALLY_CLEARED,
+            clearedAmountMinorUnits = 8_000,
+            version = 1,
+        )
+        coEvery { repository.findClearing(stale.id, "clr-late") } returns null
+        coEvery { repository.findById(stale.id) } returnsMany listOf(stale, moved)
+        coEvery { repository.saveClearing(any(), any(), any()) } throws StaleAuthorizationException()
+
+        val outcome = service().clear(PresentmentCommand(stale.id, 5_000, "CZK", "clr-late"))
+
+        // 5 000 no longer fits the 2 000 left: refused, never applied past the authorised amount.
+        assertThat(outcome).isEqualTo(
+            PresentmentOutcome.Refused(PresentmentRefusal.EXCEEDS_AUTHORIZED_AMOUNT),
+        )
+        coVerify(exactly = 1) { repository.saveClearing(any(), any(), any()) }
+        coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
+        coVerify(exactly = 1) { metrics.clearingConflict() }
+        Unit
+    }
+
+    @Test
+    fun `losing the race twice answers retry-later instead of guessing`(): Unit = runBlocking {
+        val approved = authorization(AuthorizationStatus.APPROVED)
+        coEvery { repository.findClearing(approved.id, "clr-busy") } returns null
+        coEvery { repository.findById(approved.id) } returns approved
+        coEvery { repository.saveClearing(any(), any(), any()) } throws StaleAuthorizationException()
+
+        assertThatThrownBy {
+            runBlocking { service().clear(PresentmentCommand(approved.id, 1_000, "CZK", "clr-busy")) }
+        }.isInstanceOf(IdempotencyRequestInProgressException::class.java)
+        coVerify(exactly = 2) { repository.saveClearing(any(), any(), any()) }
+        coVerify(exactly = 0) { ledger.postClearedSpend(any(), any(), any()) }
         Unit
     }
 

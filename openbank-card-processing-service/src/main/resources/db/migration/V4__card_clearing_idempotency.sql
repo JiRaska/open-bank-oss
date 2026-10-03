@@ -18,7 +18,14 @@
 -- request_fingerprint is the libs RequestFingerprint (SHA-256 hex) of the presented amount and
 -- currency: the same key with a different body is refused as reuse (409), never replayed.
 --
--- ROLLBACK: DROP TABLE card_clearings;
+-- card_authorizations.version is the optimistic lock for the OTHER clearing race: two presentments
+-- under DIFFERENT keys on one authorisation. Both read the same cleared amount, and without a
+-- version the second UPDATE silently overwrote the first — one clearing lost from the hold while
+-- both reached the ledger. Hibernate's @Version turns the second write into a stale-row failure;
+-- the service re-reads and re-evaluates against the real remaining hold, so nothing is ever
+-- applied past the authorised amount.
+--
+-- ROLLBACK: DROP TABLE card_clearings; ALTER TABLE card_authorizations DROP COLUMN version;
 -- Safe at any time for the schema (nothing else references the table), but dropping it re-opens
 -- the double-presentment defect: the rows are the only record of which clearing keys were applied.
 
@@ -32,6 +39,11 @@ CREATE TABLE card_clearings (
     applied_at           TIMESTAMPTZ  NOT NULL,
     CONSTRAINT ux_card_clearings_authorization_key UNIQUE (authorization_id, idempotency_key)
 );
+
+ALTER TABLE card_authorizations ADD COLUMN version BIGINT NOT NULL DEFAULT 0;
+
+COMMENT ON COLUMN card_authorizations.version IS
+    'Optimistic-lock version (Hibernate @Version). Bumped on every update of the row.';
 
 COMMENT ON TABLE card_clearings IS
     'Applied clearing presentments, one per (authorisation, clearing key). The UNIQUE constraint makes a repeated presentment impossible to apply twice.';

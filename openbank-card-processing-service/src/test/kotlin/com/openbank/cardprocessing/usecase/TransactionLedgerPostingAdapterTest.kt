@@ -8,6 +8,7 @@ import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
+import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
 import com.openbank.cardprocessing.infrastructure.client.InitiateTransactionRequest
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
 import com.openbank.cardprocessing.infrastructure.client.TransactionResponse
@@ -65,7 +66,8 @@ class TransactionLedgerPostingAdapterTest {
         coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
-        val result = adapter.postClearedSpend(authorization("CZK"), 12_345, "clr-1")
+        val authorization = authorization("CZK")
+        val result = adapter.postClearedSpend(authorization, 12_345, "clr-1")
 
         assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
         assertThat(sent.captured.amount).isEqualByComparingTo(BigDecimal("123.45"))
@@ -73,8 +75,32 @@ class TransactionLedgerPostingAdapterTest {
         assertThat(sent.captured.sourceAccountId).isNotNull()
         // Derived from the clearing, so a retried presentment presents the same key and
         // transaction-service dedupes it instead of debiting the customer twice.
-        assertThat(sent.captured.idempotencyKey).isEqualTo("card-clearing:clr-1")
+        // Scoped by the authorisation: a clearing key is only unique per authorisation.
+        assertThat(sent.captured.idempotencyKey).isEqualTo("card-clearing:${authorization.id}:clr-1")
         Unit
+    }
+
+    @Test
+    fun `the same clearing key on two authorisations gives two ledger keys`() {
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        // The unscoped key made transaction-service dedupe the second authorisation's posting away.
+        assertThat(CardClearingLedgerKey.of(a, "clr-1"))
+            .isNotEqualTo(CardClearingLedgerKey.of(b, "clr-1"))
+    }
+
+    @Test
+    fun `a long clearing key is digested to fit the ledger column, deterministically`() {
+        val id = UUID.randomUUID()
+        val longKey = "k".repeat(128)
+
+        val key = CardClearingLedgerKey.of(id, longKey)
+
+        assertThat(key.length).isLessThanOrEqualTo(CardClearingLedgerKey.MAX_LENGTH)
+        assertThat(key).startsWith("card-clearing:$id:sha256-")
+        assertThat(CardClearingLedgerKey.of(id, longKey)).isEqualTo(key)
+        assertThat(CardClearingLedgerKey.of(id, longKey + "x")).isNotEqualTo(key)
     }
 
     @Test

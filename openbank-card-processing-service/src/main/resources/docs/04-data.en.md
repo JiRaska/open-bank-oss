@@ -23,6 +23,7 @@ One row per authorisation — approved or declined. It is also the hold.
 | `network_reference` | VARCHAR(64) | acquirer's reference |
 | `idempotency_key` | VARCHAR(128) | written once on insert |
 | `authorized_at`, `expires_at`, `updated_at` | TIMESTAMPTZ | |
+| `version` | BIGINT | optimistic lock (V4, Hibernate `@Version`) — serialises concurrent clearings |
 
 Constraints and indexes:
 
@@ -60,7 +61,7 @@ Transactional outbox (ADR-0050): `event_id` (unique), `aggregate_id`, `event_typ
 |---|---|---|
 | V1 `init_card_processing` | both tables, indexes, `card_outbox_seq` | `DROP TABLE card_outbox; DROP TABLE card_authorizations;` — safe only before any authorisation exists |
 | V2 `synthetic_outbox_taint` | `card_outbox.synthetic BOOLEAN NOT NULL DEFAULT FALSE` (ADR-0252) | `ALTER TABLE card_outbox DROP COLUMN synthetic;` — safe only before synthetic traffic was dispatched |
-| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)` | `DROP TABLE card_clearings;` — schema-safe, but re-opens double presentment and drops the record of applied clearing keys |
+| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)`; `card_authorizations.version` | `DROP TABLE card_clearings; ALTER TABLE card_authorizations DROP COLUMN version;` — schema-safe, but re-opens double presentment and drops the record of applied clearing keys |
 
 `migrate-at-start: true`; `validate-on-migrate: false`.
 

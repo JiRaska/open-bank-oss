@@ -19,6 +19,7 @@ import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
+import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.domain.event.CardAuthorised
 import com.openbank.cardprocessing.domain.event.CardCleared
 import com.openbank.cardprocessing.domain.event.CardDeclined
@@ -35,6 +36,7 @@ import com.openbank.libs.domain.cards.scheme.MerchantDataPort
 import com.openbank.libs.domain.cards.scheme.MerchantDescriptor
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
@@ -256,8 +258,26 @@ class CardProcessingService(
      *
      * A REFUSED presentment records nothing, so a retry is evaluated afresh — refusing is not
      * applying, and there is nothing to deduplicate.
+     *
+     * Concurrent clearings under DIFFERENT keys on one authorisation are the other race: both read
+     * the same cleared amount. The write carries the version it was computed from, so the loser
+     * gets [StaleAuthorizationException] with nothing written, and is re-evaluated once against the
+     * real remaining hold — where it is applied, replayed, or refused (e.g. exceeds the hold). If it
+     * loses again it answers 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS` (retry later). Either way it is
+     * never applied past the authorised amount, and every caller gets a definite answer.
      */
     override suspend fun clear(command: PresentmentCommand): PresentmentOutcome {
+        repeat(CLEARING_ATTEMPTS) {
+            try {
+                return clearOnce(command)
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+            }
+        }
+        throw IdempotencyRequestInProgressException()
+    }
+
+    private suspend fun clearOnce(command: PresentmentCommand): PresentmentOutcome {
         val fingerprint = clearingFingerprint(command)
         repository.findClearing(command.authorizationId, command.idempotencyKey)?.let {
             return replayClearing(it, fingerprint)
@@ -409,6 +429,9 @@ class CardProcessingService(
     companion object {
         const val RELEASE_KIND_REVERSAL = "REVERSAL"
         const val RELEASE_KIND_EXPIRY = "EXPIRY"
+
+        /** The first try plus one re-evaluation after losing a concurrent-clearing race. */
+        private const val CLEARING_ATTEMPTS = 2
 
         /** Card-issuance's own name for an MCC it has no category for. */
         const val UNMAPPED_CATEGORY = "UNMAPPED"

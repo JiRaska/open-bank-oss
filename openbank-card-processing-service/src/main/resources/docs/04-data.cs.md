@@ -23,6 +23,7 @@ Jeden řádek na autorizaci — schválenou i zamítnutou. Je to zároveň hold.
 | `network_reference` | VARCHAR(64) | reference acquirera |
 | `idempotency_key` | VARCHAR(128) | zapsán jednou při insertu |
 | `authorized_at`, `expires_at`, `updated_at` | TIMESTAMPTZ | |
+| `version` | BIGINT | optimistický zámek (V4, Hibernate `@Version`) — serializuje souběžné clearingy |
 
 Omezení a indexy:
 
@@ -60,7 +61,7 @@ Transakční outbox (ADR-0050): `event_id` (unikátní), `aggregate_id`, `event_
 |---|---|---|
 | V1 `init_card_processing` | obě tabulky, indexy, `card_outbox_seq` | `DROP TABLE card_outbox; DROP TABLE card_authorizations;` — bezpečné jen před první autorizací |
 | V2 `synthetic_outbox_taint` | `card_outbox.synthetic BOOLEAN NOT NULL DEFAULT FALSE` (ADR-0252) | `ALTER TABLE card_outbox DROP COLUMN synthetic;` — bezpečné jen před odesláním syntetického provozu |
-| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)` | `DROP TABLE card_clearings;` — pro schéma bezpečné, ale znovu otevře dvojí prezentaci a zahodí záznam započtených klíčů |
+| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)`; `card_authorizations.version` | `DROP TABLE card_clearings; ALTER TABLE card_authorizations DROP COLUMN version;` — pro schéma bezpečné, ale znovu otevře dvojí prezentaci a zahodí záznam započtených klíčů |
 
 `migrate-at-start: true`; `validate-on-migrate: false`.
 

@@ -140,12 +140,12 @@ sequenceDiagram
   else přijato
     S->>DB: INSERT card_clearings + UPDATE card_authorizations + INSERT card_outbox (card.cleared.v1)
     Note over S,DB: souběžný duplikát selže na ux_card_clearings_authorization_key, vrátí se a vrátí výsledek vítěze
-    S->>T: POST /api/v1/transactions (rail CARD, klíč card-clearing:KLÍČ)
+    S->>T: POST /api/v1/transactions (rail CARD, klíč card-clearing:ID_AUTORIZACE:KLÍČ)
     S-->>A: 200 s novým stavem
   end
 ```
 
-Klíč clearingu se na autorizaci započte nejvýše jednou (viz [03 — API](./03-api.md#idempotence)); replay se k účetnictví znovu nedostane.
+Klíč clearingu se na autorizaci započte nejvýše jednou (viz [03 — API](./03-api.md#idempotence)); replay se k účetnictví znovu nedostane. Souběžné clearingy s různými klíči serializuje optimistický zámek (`card_authorizations.version`): poražený se jednou znovu vyhodnotí proti skutečnému zbývajícímu holdu, takže se nikdy nezapočte víc, než bylo autorizováno.
 
 Zaúčtování proběhne **až po** commitu clearingu a nikdy se nevrací zpět: acquirer clearing již potvrdil. Jeho výsledek má tři hodnoty — `POSTED`, `SKIPPED_DISABLED`, `FAILED` — počítané v `openbank.card.processing.ledger.postings`, a zaúčtování `FAILED` se loguje jako chyba. Částky se převádějí z minor units podle počtu desetinných míst dané měny.
 

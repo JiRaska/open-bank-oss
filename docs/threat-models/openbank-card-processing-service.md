@@ -57,7 +57,7 @@ defined.
 |---|---|---|
 | **S**poofing | A caller impersonates an acquirer and authorises spend on someone's card | OIDC bearer + role + OPA action; the card's owner is resolved from card-issuance, never taken from the request |
 | **T**ampering | Replaying an authorisation to take a second hold | `idempotency_key` is UNIQUE in the database, and the use case returns the first authorisation unchanged |
-| **T**ampering | A repeated presentment of the same clearing (acquirer retry, duplicated network delivery, or a deliberate replay) applied again while it still fits inside the remaining hold — a second debit of the cardholder | Each applied clearing is recorded in `card_clearings` under UNIQUE `(authorization_id, idempotency_key)`, in the same transaction as the hold decrement and the event. Same key + same body replays (no second decrement, event or ledger posting); same key + different body is 409 `IDEMPOTENCY_KEY_REUSED`; concurrent duplicates are decided by the constraint, so exactly one commits (§6, 2026-10-03) |
+| **T**ampering | A repeated presentment of the same clearing (acquirer retry, duplicated network delivery, or a deliberate replay) applied again while it still fits inside the remaining hold — a second debit of the cardholder | Each applied clearing is recorded in `card_clearings` under UNIQUE `(authorization_id, idempotency_key)`, in the same transaction as the hold decrement and the event; concurrent clearings under different keys are serialised by an optimistic lock (`version`) and re-evaluated against the remaining hold; the ledger key is scoped per authorisation. Same key + same body replays (no second decrement, event or ledger posting); same key + different body is 409 `IDEMPOTENCY_KEY_REUSED`; concurrent duplicates are decided by the constraint, so exactly one commits (§6, 2026-10-03) |
 | **T**ampering | A clearing for more than was authorised | Refused by `AuthorizationLifecycle.clear` **and** by a CHECK constraint on the table — the application rule alone can be forgotten by a future writer |
 | **R**epudiation | "I was charged twice for one purchase" — a duplicate presentment that cannot be told apart from two real ones | Every applied clearing is a row keyed by the acquirer's clearing key with its amount, currency, request fingerprint and `applied_at`, so "one presentment delivered twice" and "two presentments" are distinguishable after the fact |
 | **R**epudiation | "I never made that purchase" / "my card was refused and I was not told why" | Every decision is a row and an event, including declines, carrying the issuer's own reason name verbatim |
@@ -137,8 +137,16 @@ questions — VoP warns, this authorises.
   ledger posting (`card-clearing:<key>`) was deduplicated. Fixed by V4 `card_clearings` (V3 is claimed by open PR #8864) with UNIQUE
   `(authorization_id, idempotency_key)` plus a fingerprinted lookup (libs `RequestFingerprint`,
   `IdempotencyKeyReusedException` → 409). Proven by `CardClearingIdempotencyIT` over real HTTP and
-  Postgres; with the constraint removed, eight concurrent duplicates all applied. Residual: a replay
-  does not re-attempt a `FAILED` ledger posting (operations re-drive it, §5), and concurrent clearings
-  under DIFFERENT keys on one authorisation still read-modify-write the cleared amount without a row
-  lock. The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
+  Postgres; with the constraint removed, eight concurrent duplicates all applied. Same entry, same
+  failure class, also fixed: (a) concurrent clearings under DIFFERENT keys on one authorisation were a
+  lost update — both read one cleared amount and the second write overwrote the first, so the hold
+  under-counted while every clearing still reached the ledger (with the lock removed, eight 10 000
+  presentments on a 30 000 hold all applied and posted 80 000 while the hold recorded 10 000). Now an
+  optimistic lock (`card_authorizations.version`, V4): the loser is re-evaluated once against the real
+  remaining hold, then answers 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`; nothing applies past the
+  authorised amount. (b) The ledger key `card-clearing:<key>` was not scoped per authorisation, so two
+  authorisations sharing a clearing key collided in transaction-service and the second posting was
+  deduplicated away; it is now `card-clearing:<authorizationId>:<key>` (digested to fit
+  transaction-service's VARCHAR(100)). Residual: a replay does not re-attempt a `FAILED` ledger posting
+  — operations re-drive it (§5, runbook). The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
   not, and is added alongside this fix.

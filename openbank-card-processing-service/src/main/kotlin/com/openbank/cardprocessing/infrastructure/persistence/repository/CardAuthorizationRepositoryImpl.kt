@@ -7,6 +7,7 @@ package com.openbank.cardprocessing.infrastructure.persistence.repository
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
 import com.openbank.cardprocessing.application.port.out.RecordedClearing
+import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.CountedSpend
@@ -20,7 +21,9 @@ import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.OptimisticLockException
 import jakarta.persistence.PersistenceException
+import org.hibernate.StaleStateException
 import java.time.Instant
 import java.util.UUID
 
@@ -83,13 +86,20 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
                 .chain { _ -> find("id", authorization.id).firstResult() }
                 .chain { existing ->
                     checkNotNull(existing) { "authorisation ${authorization.id} vanished while being cleared" }
+                    // Computed from an older read: a concurrent clearing already moved the row on.
+                    if (existing.version != authorization.version) throw StaleAuthorizationException()
                     existing.applyFrom(authorization)
                     outbox.persistInTransaction(event)
                 }
                 .replaceWith(authorization)
         }.awaitSuspending()
     } catch (e: PersistenceException) {
-        if (e.isClearingKeyViolation()) throw DuplicateClearingException(e) else throw e
+        when {
+            e.isClearingKeyViolation() -> throw DuplicateClearingException(e)
+            // Both read the same version; the loser's `UPDATE ... WHERE version = ?` matched no row.
+            e.isStaleRow() -> throw StaleAuthorizationException(e)
+            else -> throw e
+        }
     }
 
     override suspend fun findClearing(authorizationId: UUID, idempotencyKey: String): RecordedClearing? =
@@ -171,6 +181,7 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
         authorizedAt = authorizedAt,
         expiresAt = expiresAt,
         updatedAt = updatedAt,
+        version = version,
     )
 
     private fun CardAuthorization.toEntity(idempotencyKey: String) = CardAuthorizationEntity().also {
@@ -229,6 +240,10 @@ class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRe
      * `PgException` differently on flush and on commit, and only the name says it is this
      * constraint and not, say, the outbox's `event_id` UNIQUE — which must stay a 500.
      */
+    private fun Throwable.isStaleRow(): Boolean = generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+        it is OptimisticLockException || it is StaleStateException
+    }
+
     private fun Throwable.isClearingKeyViolation(): Boolean =
         generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
             it.message?.contains(CLEARING_KEY_CONSTRAINT) == true

@@ -180,6 +180,34 @@ class CardClearingIdempotencyIT {
         assertThat(postings(id)).isEqualTo(1)
     }
 
+    @Test
+    fun `concurrent clearings under distinct keys never clear past the hold and never lose one`() {
+        // Eight presentments of 10 000 against a 30 000 hold: at most three can fit.
+        val id = authorize(30_000, "it-clr-distinct")
+        val start = CountDownLatch(1)
+        val pool = Executors.newFixedThreadPool(PARALLEL)
+        val answers = (1..PARALLEL).map { n ->
+            pool.submit<Int> {
+                start.await()
+                clear(id, "it-clr-distinct-c$n", 10_000).then().extract().statusCode()
+            }
+        }
+        start.countDown()
+        val statuses = answers.map { it.get(TIMEOUT_SECONDS, TimeUnit.SECONDS) }
+        pool.shutdown()
+
+        // A definite answer each: applied (200), or 409 — over the hold, or lost the race twice.
+        assertThat(statuses).allMatch { it == OK || it == CONFLICT }
+        val applied = statuses.count { it == OK }.toLong()
+        // Every 200 is in the hold, in the events and in the books — none overwritten by another.
+        assertThat(cleared(id)).isEqualTo(applied * 10_000)
+        assertThat(cleared(id)).isLessThanOrEqualTo(30_000)
+        assertThat(clearingRows(id)).isEqualTo(applied)
+        assertThat(clearedEvents(id)).isEqualTo(applied)
+        assertThat(postings(id).toLong()).isEqualTo(applied)
+        assertThat(applied).isGreaterThanOrEqualTo(1)
+    }
+
     private companion object {
         const val OK = 200
         const val CREATED = 201

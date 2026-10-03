@@ -74,6 +74,12 @@ data class CardAuthorization(
     /** When an uncleared hold is released. A hold that never expires is a permanent freeze. */
     val expiresAt: Instant,
     val updatedAt: Instant,
+    /**
+     * Optimistic-lock version of the stored row (V4). It travels with the snapshot a transition was
+     * computed from, so a write based on a stale read is refused instead of overwriting a
+     * concurrent clearing. `0` for an authorisation that has never been stored.
+     */
+    val version: Long = 0,
 ) {
     /**
      * Funds still held: the authorised amount less what has already cleared, and zero once the
