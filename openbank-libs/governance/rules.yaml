@@ -267,10 +267,10 @@ change_requirements:
     # compared 156 request schemas with 0 findings and 0 missing artifacts.
     target_enforce_date: "2026-10-31"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
-    # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
-    # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
+    # HISTORICAL MEASUREMENT 2026-09-05 — this gate was a NO-OP then, and its own "Not a finding"
+    # wording hid that. It compares the committed openapi.yaml against the schema Quarkus emits
     # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
-    # That generated document is not being produced. Across three independent CI runs and every
+    # At that time the expected generated document was absent. Across three independent CI runs and every
     # service that REACHES the script — one with no committed openapi.yaml is skipped a step
     # earlier by the workflow's own guard (openbank-simulation, run 33949966927) — billing,
     # interest, swift (run 33949966927),
