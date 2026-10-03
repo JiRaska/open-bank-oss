@@ -234,6 +234,11 @@ equivalent() {
     || differs "could not diff ${pact_sha} against ${dispatch_sha}"
   while IFS= read -r p; do
     [ -n "$p" ] || continue
+    # `own_scope` and the scope comparison below use shell words. A changed path containing
+    # whitespace or Git's C-quoted characters could be split into nonexistent paths, then fall
+    # through the Gradle-module classifier as irrelevant. Refuse unhandled names until the whole
+    # proof uses NUL-delimited paths end to end; never claim byte equivalence for such a path.
+    case "$p" in *[!A-Za-z0-9_./-]*) differs "changed path ${p} has a name this proof cannot compare safely" ;; esac
     # Overlay mode: the caller replaces exactly this subtree from the later commit.
     if [ "${OWN_TEST_OVERLAY:-0}" = 1 ]; then
       case "$p" in "$svc"/src/test/*) continue ;; esac
@@ -424,8 +429,12 @@ selftest() {
   # A src/ sibling that is not `test` (e.g. src/integrationTest, src/testFixtures) is NOT overlaid.
   local o6; o6="$(_commit svc-a/src/testFixtures/F.kt fixture)"
   _expect "overlay: own src/testFixtures added" DIFFERENT --own-test-overlay svc-a "$o5" "$o6"
+  # A space splits `for c in $(git ls-tree ...)` into nonexistent scope entries. Without the
+  # path-name refusal above, this production change was falsely reported EQUIVALENT.
+  local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
+  _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 24 cases (17 + 7 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 25 cases (17 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
   return "$fail"
 }
 
