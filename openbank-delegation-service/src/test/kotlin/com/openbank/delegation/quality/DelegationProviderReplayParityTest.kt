@@ -21,13 +21,11 @@ class DelegationProviderReplayParityTest {
         assertEquals(producerNames(folder), producerNames(broker), "Broker and folder message producers differ")
     }
 
-    private fun stateNames(type: Class<*>): Set<String> =
-        type.declaredMethods.flatMap { method ->
-            method.getAnnotationsByType(State::class.java).flatMap { it.value.toList() }
-        }.toSet()
+    private fun stateNames(type: Class<*>): Set<String> = type.declaredMethods.flatMap { method ->
+        method.getAnnotationsByType(State::class.java).flatMap { it.value.toList() }
+    }.toSet()
 
-    private fun producerNames(type: Class<*>): Set<String> =
-        type.declaredMethods.flatMap { method ->
-            method.getAnnotationsByType(PactVerifyProvider::class.java).map { it.value }
-        }.toSet()
+    private fun producerNames(type: Class<*>): Set<String> = type.declaredMethods.flatMap { method ->
+        method.getAnnotationsByType(PactVerifyProvider::class.java).map { it.value }
+    }.toSet()
 }
