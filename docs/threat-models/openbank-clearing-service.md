@@ -42,10 +42,16 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
 | **S**poofing | Forged submit from non-payment caller | mTLS service identity allow-list |
 | **T**ampering | Alter batch items / settlement position | Immutable items once cycle starts; position recomputed, not client-supplied; audit |
 | **T**ampering | Cross-currency netting: items of different currencies summed into one batch and posted to one currency's GL (#11974) | A batch is per (rail, currency): the cycle groups by currency and sums with kernel `Money` (throws on a mix); only currencies with a settlement GL pair are selected; others stay PENDING, WARN-logged and gauged (`openbank_clearing_unsettleable_pending_items`) |
+| **T**ampering | Cross-rail clearing: a cycle claims payments submitted to another rail because the item discarded its rail | Persist the submitted rail per item; select and count pending items by rail. No historical item's submitted rail can be inferred from its batch, since the old selector mixed rails. Legacy pending rows block clearing until reconciled against their source payment. |
 | **R**epudiation | Deny triggering a settlement cycle | AuditEvent on submit/trigger/settle with actor |
 | **I**nfo disclosure | Cross-institution position leakage | AuthZ scoping; positions keyed by cycle, access-controlled |
 | **D**oS | Batch flooding delays a cycle | Rate limit submit; bounded batch size |
 | **E**oP | Submitter triggers settlement | Distinct role for `cycle/trigger` + `settle`; deny-by-default |
+
+The rail migration is additive. Roll back application code only after stopping clearing, and
+retain the new rail column until newly submitted items have been reconciled; dropping it
+prematurely would make their original rail unknowable. V12 documents the eventual schema
+rollback.
 
 ## 4a. Four-eyes approval (ADR-0155) — STRIDE supplement
 

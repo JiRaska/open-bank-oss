@@ -59,6 +59,7 @@ data class ClearingItem(
     val creditorBic: String? = null,
     val amount: BigDecimal,
     val currency: String = "EUR",
+    val rail: PaymentRail? = null,
     val status: ClearingStatus = ClearingStatus.PENDING,
     /** Monotonic aggregate revision used by outbox consumers for replay-safe evidence. */
     val revision: Long = 0,

@@ -17,6 +17,7 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.util.UUID
@@ -104,7 +105,45 @@ class ClearingCyclePerCurrencyIT {
         assertThat(gauge!!.value()).isGreaterThanOrEqualTo(1.0)
     }
 
-    private fun submit(amount: String, currency: String): UUID {
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_PAYMENTS"])
+    fun `a cycle only claims payments submitted to its rail`() {
+        val sepa = submit("10.00", "EUR", "SEPA_SCT")
+        val swift = submit("20.00", "EUR", "SWIFT")
+
+        trigger("SWIFT")
+        val swiftBatch = batchOf(swift)
+        assertThat(batchRow(swiftBatch).second).isEqualByComparingTo("20.00")
+        assertThat(pendingBatchOf(sepa)).isEqualTo(UNASSIGNED)
+
+        trigger("SEPA_SCT")
+        val sepaBatch = batchOf(sepa)
+        assertThat(sepaBatch).isNotEqualTo(swiftBatch)
+        assertThat(batchRow(sepaBatch).second).isEqualByComparingTo("10.00")
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_PAYMENTS"])
+    fun `every rail persists a cycle id within the database column limit`() {
+        listOf("SEPA_SCT", "SEPA_SCT_INST", "SWIFT", "DOMESTIC", "INTERNAL").forEach { rail ->
+            val response = Given { contentType("application/json") } When {
+                post("/api/v1/clearing/cycle/trigger?rail=$rail")
+            } Then { statusCode(200) }
+            val cycleId = response.extract().jsonPath().getString("cycleId")
+            assertThat(cycleId.length).isLessThanOrEqualTo(32)
+            dataSource.connection.use { conn ->
+                conn.prepareStatement("SELECT count(*) FROM clearing_batches WHERE cycle_id = ?").use { statement ->
+                    statement.setString(1, cycleId)
+                    statement.executeQuery().use { rs ->
+                        assertThat(rs.next()).isTrue()
+                        assertThat(rs.getInt(1)).isGreaterThan(0)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun submit(amount: String, currency: String, rail: String = "SEPA_SCT"): UUID {
         val paymentId = UUID.randomUUID()
         Given {
             contentType("application/json")
@@ -117,7 +156,7 @@ class ClearingCyclePerCurrencyIT {
                   "creditorIban": "DE89370400440532013000",
                   "amount": "$amount",
                   "currency": "$currency",
-                  "rail": "SEPA_SCT"
+                  "rail": "$rail"
                 }
                 """.trimIndent(),
             )
@@ -125,15 +164,25 @@ class ClearingCyclePerCurrencyIT {
             post("/api/v1/clearing/submit")
         } Then {
             statusCode(201)
+            body("rail", equalTo(rail))
         }
         return paymentId
     }
 
-    private fun trigger() {
+    private fun trigger(rail: String = "SEPA_SCT") {
         Given { contentType("application/json") } When {
-            post("/api/v1/clearing/cycle/trigger?rail=SEPA_SCT")
+            post("/api/v1/clearing/cycle/trigger?rail=$rail")
         } Then {
             statusCode(200)
+        }
+    }
+
+    private fun pendingBatchOf(paymentId: UUID): String = dataSource.connection.use { conn ->
+        conn.createStatement().executeQuery(
+            "SELECT batch_id::text FROM clearing_items WHERE payment_id = '$paymentId'",
+        ).use { rs ->
+            assertThat(rs.next()).isTrue()
+            rs.getString(1)
         }
     }
 

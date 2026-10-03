@@ -35,7 +35,6 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
-import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 // TooManyFunctions: the idempotency violation detector (ADR-0298) pushes the use-case facade
@@ -73,6 +72,7 @@ class ClearingService(
             // Canonical currency scale and upper-case ISO code, from the boundary-built Money.
             amount = command.amount.amount,
             currency = command.amount.currency.code,
+            rail = command.rail,
             status = ClearingStatus.PENDING,
             valueDate = command.valueDate ?: LocalDate.now(clock),
             endToEndId = command.endToEndId,
@@ -117,14 +117,19 @@ class ClearingService(
 
     @Timeout(value = 30000)
     override fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingCycleResult> {
-        val cycleId = "CYCLE-${rail.name}-${LocalDate.now(clock).format(
-            DateTimeFormatter.BASIC_ISO_DATE,
-        )}-${clock.millis() % 10000}"
+        // One cycle can open several currency batches; a millisecond suffix can collide,
+        // and the old SEPA_SCT_INST format exceeded cycle_id VARCHAR(32).
+        val cycleId = "C-${rail.name}-${UUID.randomUUID().toString().replace("-", "").take(14)}"
         // #11974: a batch is per (rail, currency). Only currencies with a settlement GL pair are
         // selected at all, so an unsettleable item can neither enter a batch whose journal could
         // never post, nor occupy the selection window and starve settleable items on every run.
         val settleable = settlementAccounts.settleableCurrencies()
-        return itemRepo.countPendingOutside(settleable).flatMap { stranded ->
+        return itemRepo.countPendingWithoutRail().flatMap { unresolved ->
+            check(unresolved == 0L) {
+                "Cannot clear while $unresolved legacy pending items have no verified payment rail"
+            }
+            itemRepo.countPendingOutside(rail, settleable)
+        }.flatMap { stranded ->
             reportUnsettleable(rail, cycleId, stranded)
             itemRepo.findPendingByRail(rail, settleable, CYCLE_ITEM_LIMIT).flatMap { items ->
                 if (items.isEmpty()) {

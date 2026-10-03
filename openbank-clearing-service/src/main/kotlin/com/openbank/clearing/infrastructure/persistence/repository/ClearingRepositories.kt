@@ -206,24 +206,39 @@ class ClearingItemRepositoryImpl @Inject constructor(
         } else {
             sf.withSession { s ->
                 s.createQuery(
-                    "FROM ClearingItemEntity WHERE status = 'PENDING' AND currency IN (:ccys) ORDER BY createdAt ASC",
+                    "FROM ClearingItemEntity WHERE status = 'PENDING' AND rail = :rail " +
+                        "AND currency IN (:ccys) ORDER BY createdAt ASC, id ASC",
                     ClearingItemEntity::class.java,
                 )
+                    .setParameter("rail", rail)
                     .setParameter("ccys", currencies)
                     .setMaxResults(limit).resultList
             }.map { it.map(mapper::toDomain) }
         }
 
     @WithSession
-    override fun countPendingOutside(currencies: Set<String>): Uni<Map<String, Long>> = sf.withSession { s ->
-        val where = if (currencies.isEmpty()) "" else " AND currency NOT IN (:ccys)"
-        val q = s.createQuery(
-            "SELECT currency, count(*) FROM ClearingItemEntity WHERE status = 'PENDING'$where GROUP BY currency",
-            Array<Any>::class.java,
+    override fun countPendingOutside(rail: PaymentRail, currencies: Set<String>): Uni<Map<String, Long>> =
+        sf.withSession { s ->
+            val where = if (currencies.isEmpty()) "" else " AND currency NOT IN (:ccys)"
+            val q = s.createQuery(
+                "SELECT currency, count(*) FROM ClearingItemEntity WHERE status = 'PENDING' AND rail = :rail$where " +
+                    "GROUP BY currency",
+                Array<Any>::class.java,
+            )
+            q.setParameter("rail", rail)
+            if (currencies.isNotEmpty()) q.setParameter("ccys", currencies)
+            q.resultList
+        }.map { rows -> rows.associate { (it[0] as String) to (it[1] as Number).toLong() } }
+
+    @WithSession
+    override fun countPendingWithoutRail(): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT COUNT(i) FROM ClearingItemEntity i WHERE i.status = :status AND i.rail IS NULL",
+            Long::class.javaObjectType,
         )
-        if (currencies.isNotEmpty()) q.setParameter("ccys", currencies)
-        q.resultList
-    }.map { rows -> rows.associate { (it[0] as String) to (it[1] as Number).toLong() } }
+            .setParameter("status", ClearingStatus.PENDING)
+            .singleResult
+    }
 
     @WithTransaction
     override fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int> =

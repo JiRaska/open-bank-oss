@@ -14,7 +14,8 @@ info:
   # 1.5.1 -> 1.6.0 (#11604): additive — submit documents 400 AMOUNT_SCALE_EXCEEDED /
   # CURRENCY_UNSUPPORTED / VALIDATION_ERROR (amount + currency are built into a kernel Money at
   # the boundary, never rounded).
-  version: 1.7.0
+  # 1.7.0 -> 1.8.0: item responses expose the persisted payment rail.
+  version: 1.8.0
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -45,6 +46,12 @@ paths:
       responses:
         '200':
           description: Clearing item created
+        '201':
+          description: Clearing item created with its submitted payment rail.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearingItemResponse'
         '400':
           $ref: '#/components/responses/InvalidMoney'
         '403':
@@ -302,6 +309,26 @@ components:
             type: object
 
   schemas:
+    ClearingItemResponse:
+      type: object
+      description: A clearing item. Historical items may have no verifiable rail.
+      required: [id, paymentId, currency, status]
+      properties:
+        id:
+          type: string
+          format: uuid
+        paymentId:
+          type: string
+          format: uuid
+        rail:
+          type: string
+          nullable: true
+          enum: [SEPA_SCT, SEPA_SCT_INST, SWIFT, DOMESTIC, INTERNAL]
+        currency:
+          type: string
+        status:
+          type: string
+          enum: [PENDING, IN_CLEARING, SETTLED, FAILED, REVERSED]
     ClearingCycleResult:
       type: object
       required: [cycleId, rail, batches, unsettleablePending]

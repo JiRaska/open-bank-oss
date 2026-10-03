@@ -79,12 +79,15 @@ interface ClearingItemRepository {
      * Up to [limit] PENDING items, oldest first, restricted to [currencies] — the currencies a
      * batch can settle (#11974). Restricting the SELECT, rather than filtering after it, is what
      * keeps unsettleable items from occupying the [limit] window and starving settleable ones.
-     * Note: items do not persist a rail today, so [rail] does not narrow the selection.
+     * [rail] narrows the selection to the submitted payment rail.
      */
     fun findPendingByRail(rail: PaymentRail, currencies: Set<String>, limit: Int): Uni<List<ClearingItem>>
 
-    /** Count of PENDING items per currency for every currency NOT in [currencies]. */
-    fun countPendingOutside(currencies: Set<String>): Uni<Map<String, Long>>
+    /** Count of PENDING items for [rail] per currency NOT in [currencies]. */
+    fun countPendingOutside(rail: PaymentRail, currencies: Set<String>): Uni<Map<String, Long>>
+
+    /** Legacy pending rows whose submitted rail cannot be reconstructed from the sentinel batch. */
+    fun countPendingWithoutRail(): Uni<Long>
 
     fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int>
 }

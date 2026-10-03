@@ -52,6 +52,10 @@ class ClearingServiceTest {
         cycleMetrics,
     )
 
+    init {
+        every { itemRepo.countPendingWithoutRail() } returns Uni.createFrom().item(0L)
+    }
+
     @Test
     fun `submit saves clearing item with pending status`() {
         val request = SubmitPaymentCommand(
@@ -81,6 +85,7 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.creditorIban).isEqualTo(request.creditorIban)
         assertThat(itemSlot.captured.amount).isEqualTo(BigDecimal("125.50"))
         assertThat(itemSlot.captured.currency).isEqualTo("EUR")
+        assertThat(itemSlot.captured.rail).isEqualTo(PaymentRail.SEPA_SCT)
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
@@ -260,20 +265,22 @@ class ClearingServiceTest {
         val eventSlot: CapturingSlot<OutboxMessage> = slot()
         val settledMessage = mockk<OutboxMessage>()
 
-        every { itemRepo.countPendingOutside(any()) } returns Uni.createFrom().item(emptyMap())
-        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any(), any()) } returns
+        every { itemRepo.countPendingOutside(PaymentRail.SEPA_SCT_INST, any()) } returns
+            Uni.createFrom().item(emptyMap())
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT_INST, any(), any()) } returns
             Uni.createFrom().item(emptyList())
         every { eventPublisher.batchSettledMessage(capture(batchSlot)) } returns settledMessage
         every { batchRepo.saveWithEvent(any(), capture(eventSlot)) } answers {
             Uni.createFrom().item(firstArg<ClearingBatch>())
         }
 
-        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely().batches.single()
+        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT_INST).await().indefinitely().batches.single()
 
         // The cycle RAN. Without an event a consumer cannot tell that from "the cycle did not
         // run" -- distinguishing those two is why this event exists.
         assertThat(batch.status).isEqualTo(ClearingStatus.SETTLED)
         assertThat(batch.itemCount).isEqualTo(0)
+        assertThat(batch.cycleId!!.length).isLessThanOrEqualTo(32)
         assertThat(eventSlot.captured).isSameAs(settledMessage)
         assertThat(batchSlot.captured.status).isEqualTo(ClearingStatus.SETTLED)
 
@@ -291,7 +298,7 @@ class ClearingServiceTest {
         )
         val batchSlot: CapturingSlot<ClearingBatch> = slot()
 
-        every { itemRepo.countPendingOutside(any()) } returns Uni.createFrom().item(emptyMap())
+        every { itemRepo.countPendingOutside(PaymentRail.SEPA_SCT, any()) } returns Uni.createFrom().item(emptyMap())
         every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any(), any()) } returns Uni.createFrom().item(items)
         every { batchRepo.save(capture(batchSlot)) } answers {
             val b = firstArg<ClearingBatch>()
@@ -315,7 +322,8 @@ class ClearingServiceTest {
             clearingItem(amount = BigDecimal("0.50"), currency = "EUR"),
         )
         val saved = mutableListOf<ClearingBatch>()
-        every { itemRepo.countPendingOutside(setOf("CZK", "EUR")) } returns Uni.createFrom().item(emptyMap())
+        every { itemRepo.countPendingOutside(PaymentRail.SEPA_SCT, setOf("CZK", "EUR")) } returns
+            Uni.createFrom().item(emptyMap())
         every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, setOf("CZK", "EUR"), any()) } returns
             Uni.createFrom().item(items)
         every { batchRepo.save(capture(saved)) } answers { Uni.createFrom().item(firstArg<ClearingBatch>()) }
@@ -331,6 +339,7 @@ class ClearingServiceTest {
         assertThat(byCcy.getValue("EUR").itemCount).isEqualTo(2)
         assertThat(result.batches.map { it.batchReference }).doesNotHaveDuplicates()
         assertThat(result.batches.map { it.cycleId }.distinct()).containsExactly(result.cycleId)
+        assertThat(result.cycleId.length).isLessThanOrEqualTo(32)
         // Each item is re-homed to the batch of its own currency.
         verify {
             itemRepo.saveAll(match { l -> l.all { it.currency == "EUR" && it.batchId == byCcy.getValue("EUR").id } })
@@ -342,7 +351,8 @@ class ClearingServiceTest {
 
     @Test
     fun `a currency with no settlement account is reported, not selected`() {
-        every { itemRepo.countPendingOutside(setOf("CZK", "EUR")) } returns Uni.createFrom().item(mapOf("PLN" to 3L))
+        every { itemRepo.countPendingOutside(PaymentRail.SEPA_SCT, setOf("CZK", "EUR")) } returns
+            Uni.createFrom().item(mapOf("PLN" to 3L))
         every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, setOf("CZK", "EUR"), any()) } returns
             Uni.createFrom().item(emptyList())
         every { eventPublisher.batchSettledMessage(any()) } returns mockk()
@@ -352,6 +362,16 @@ class ClearingServiceTest {
 
         assertThat(result.unsettleablePending).containsEntry("PLN", 3L)
         verify(exactly = 1) { cycleMetrics.recordUnsettleablePending(mapOf("PLN" to 3L)) }
+        verify(exactly = 0) { batchRepo.save(any()) }
+    }
+
+    @Test
+    fun `clearing halts when legacy pending items have no verifiable rail`() {
+        every { itemRepo.countPendingWithoutRail() } returns Uni.createFrom().item(1L)
+
+        assertThatThrownBy { service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely() }
+            .hasMessageContaining("legacy pending items have no verified payment rail")
+        verify(exactly = 0) { itemRepo.findPendingByRail(any(), any(), any()) }
         verify(exactly = 0) { batchRepo.save(any()) }
     }
 
@@ -383,6 +403,7 @@ class ClearingServiceTest {
         creditorBic = creditorBic,
         amount = amount.amount,
         currency = amount.currency.code,
+        rail = rail,
         status = ClearingStatus.PENDING,
         valueDate = valueDate,
         endToEndId = endToEndId,
