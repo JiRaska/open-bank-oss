@@ -5,6 +5,7 @@ package com.openbank.swift.infrastructure.outbox
 
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.AbstractOutboxDispatcher
+import com.openbank.libs.persistence.outbox.OutboxDispatch
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxRepository
@@ -24,8 +25,8 @@ import org.eclipse.microprofile.faulttolerance.Timeout
  * overlap; it does not stop two pods from both running this scheduled method. `replicas: 1` is
  * steady-state only — an Argo Rollouts canary window runs the old and new pod simultaneously
  * for the whole rollout duration, and both dispatch on their own tick.
- * `SwiftOutboxRepositoryImpl` therefore implements [OutboxRepository.claimProcessable] as an
- * atomic `FOR UPDATE SKIP LOCKED` claim, not the unclaimed-peek default, so two concurrently
+ * `SwiftOutboxRepositoryImpl` therefore extends the kernel `AbstractPanacheOutboxRepository`, whose
+ * claim is an atomic `FOR UPDATE SKIP LOCKED` claim by aggregate head (ADR-0327 D3), so two concurrently
  * running pods can never both select and publish the same row.
  */
 @ApplicationScoped
@@ -53,7 +54,10 @@ class SwiftOutboxDispatcher(
         if (dispatchEnabled) dispatchScheduledBatch()
     }
 
-    @Bulkhead(1)
+    // ADR-0327 D6: the v2 loop sends up to SEND_CONCURRENCY rows of one batch at once (each a
+    // different aggregate, D3). A per-call @Bulkhead(1) would reject the overflow with a
+    // BulkheadException, which the loop reads as transport-unavailable and abandons the batch.
+    @Bulkhead(OutboxDispatch.SEND_CONCURRENCY)
     @CircuitBreaker(requestVolumeThreshold = 10, failureRatio = 0.5, delay = 5000)
     @Retry(maxRetries = 2, delay = 200, jitter = 100)
     @Timeout(3000)

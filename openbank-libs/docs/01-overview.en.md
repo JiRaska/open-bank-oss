@@ -67,7 +67,7 @@ mindmap
 
 When a new OpenBank service `openbank-foo-service` is created:
 
-1. Add `implementation(project(":openbank-libs"))` to `build.gradle.kts` — that's it
+1. Add `implementation(project(":openbank-libs-runtime"))` for Quarkus adapters (or `openbank-libs-domain` for domain primitives only)
 2. It auto-gets: `/api/v1/info` with tech stack, rate limiting, correlation ID, security headers, common exception mappers, a unified `ApiError` shape
 3. When it needs money → `import com.openbank.libs.domain.money.Money`
 4. When it needs audit → inject `AuditEventPublisher` + emit an event
@@ -88,7 +88,7 @@ When a new OpenBank service `openbank-foo-service` is created:
 | F1 — house cleaning | ✅ done | Unified dep declaration, Jandex plugin, deleted InfoResource/Redis duplicates |
 | F2 — domain primitives | ✅ done | Outbox, typesafe IDs, common exception mappers |
 | F3 — security foundation | ⚠️ partial | PiiMask, Roles, AuditEvent, S2S auth. `BootstrapVerifier` was scoped into F3 and never shipped (#8426) |
-| F4 — convention plugin | planned | `build-logic/openbank.quarkus-service` Gradle convention plugin |
+| F4 — convention plugin | ✅ done | `build-logic/openbank.quarkus-service` Gradle convention plugin |
 | F5 — Quarkus platform extension | planned | Baseline `application.yaml` as a Quarkus extension |
 
 ## Related

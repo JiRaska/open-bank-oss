@@ -36,32 +36,37 @@ object SettlementJournalFactory {
         glCreditAccountId: UUID,
         date: String,
         createdBy: UUID,
-    ): PostJournalRequest = PostJournalRequest(
-        idempotencyKey = "settlement-book-${posting.settlementId}",
-        transactionId = posting.settlementId,
-        entryDate = date,
-        valueDate = date,
-        description = "Settlement booking ${posting.settlementId}",
-        createdBy = createdBy,
-        lines = listOf(
-            JournalLineRequest(
-                glAccountId = glDebitAccountId,
-                side = "DEBIT",
-                amount = posting.amount,
-                currencyCode = posting.currency,
-                baseAmount = posting.amount,
-                baseCurrencyCode = posting.currency,
-                subAccountId = posting.payerAccountId,
+    ): PostJournalRequest {
+        // Settlement amounts come from NUMERIC(19,4), while Money enforces the currency's
+        // fractional precision. Remove only insignificant database scale; never round value.
+        val amount = posting.amount.stripTrailingZeros()
+        return PostJournalRequest(
+            idempotencyKey = "settlement-book-${posting.settlementId}",
+            transactionId = posting.settlementId,
+            entryDate = date,
+            valueDate = date,
+            description = "Settlement booking ${posting.settlementId}",
+            createdBy = createdBy,
+            lines = listOf(
+                JournalLineRequest(
+                    glAccountId = glDebitAccountId,
+                    side = "DEBIT",
+                    amount = amount,
+                    currencyCode = posting.currency,
+                    baseAmount = amount,
+                    baseCurrencyCode = posting.currency,
+                    subAccountId = posting.payerAccountId,
+                ),
+                JournalLineRequest(
+                    glAccountId = glCreditAccountId,
+                    side = "CREDIT",
+                    amount = amount,
+                    currencyCode = posting.currency,
+                    baseAmount = amount,
+                    baseCurrencyCode = posting.currency,
+                    subAccountId = posting.payeeAccountId,
+                ),
             ),
-            JournalLineRequest(
-                glAccountId = glCreditAccountId,
-                side = "CREDIT",
-                amount = posting.amount,
-                currencyCode = posting.currency,
-                baseAmount = posting.amount,
-                baseCurrencyCode = posting.currency,
-                subAccountId = posting.payeeAccountId,
-            ),
-        ),
-    )
+        )
+    }
 }

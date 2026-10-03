@@ -8,6 +8,10 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SITE="$HERE/landing"
 ENV_DIR="$HERE/../aws/envs/web-prod"
+
+# Refresh the public inventory from the same code-derived catalog as the admin UI.
+# Fail before AWS access if generation is unavailable or invalid.
+python3 "$HERE/generate-public-catalog.py"
 export AWS_PROFILE="${AWS_PROFILE:-openbank}"
 
 BUCKET="$(cd "$ENV_DIR" && tofu output -raw bucket)"

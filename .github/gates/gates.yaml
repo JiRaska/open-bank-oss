@@ -1083,9 +1083,18 @@ gates:
   - id: service-runbook-drift
     name: "service runbook drift (issue #2255, enforced)"
     group: gitops
-    budget_seconds: 46
+    # 2026-10-03: at 46s this gate reddened 5 of the last 40 `main` push runs and #11905/#11916 on
+    # budget alone (no drift). ci.yml job `gates (gitops-api)`, last 40 push + 59 PR runs: push
+    # p50 39.6s / p95 46.5s / max 49.1s, PR p50 25.2s / p95 33.6s. The split is the self-test,
+    # which counts against the budget and runs on every push to main but only on PRs touching
+    # gates.yaml or its inputs. Profiled: ~70% of both halves was gitops_facts re-reading the
+    # whole gitops tree on every call (~600 calls, ~400k file reads). Both now run inside
+    # gitops_facts.frozen_tree(): --force 48s -> 3.8s, --self-test 29.7s -> 3.5s locally, runbooks
+    # byte-identical. LOWERED rather than raised: 25s fails the pre-fix code (183s locally under
+    # load ~35, CI=true) and passes the fixed one (12.7s under load ~43).
+    budget_seconds: 25
     mode: enforced
-    selftest_inputs: ["openbank-infra/scripts/generate-service-runbooks.py"]
+    selftest_inputs: ["openbank-infra/scripts/generate-service-runbooks.py", "openbank-infra/scripts/gitops_facts.py"]
     selftest: python3 openbank-infra/scripts/generate-service-runbooks.py --self-test
     selftest_expect: pass
     run: |
@@ -5473,9 +5482,9 @@ gates:
     review_after: "2027-02-22"
     min_subjects: 25   # 33 today: 30 derived+declared service tokens + 3 governance globs
     when: pull_request
-    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test
+    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test && python3 .github/scripts/test-agent-pr-review.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-agent-pr-guard.py"]
+    selftest_inputs: [".github/scripts/check-agent-pr-guard.py", ".github/scripts/test-agent-pr-review.py"]
     run: |
       python3 .github/scripts/check-agent-pr-guard.py
 
