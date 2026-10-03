@@ -1009,20 +1009,23 @@ def main():
     ap.add_argument("--force", action="store_true", help="overwrite existing runbooks")
     args = ap.parse_args()
     RUNBOOKS.mkdir(parents=True, exist_ok=True)
-    targets = args.services or all_services()
-    created, skipped = 0, 0
-    for short in targets:
-        if not gitops_facts.module_dir(short, REPO).is_dir():
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        out = RUNBOOKS / f"svc-{short}.md"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        if write_runbook(out, render(short)):
-            created += 1
-        else:
-            skipped += 1
+    # A full pass asks the resolver about each of 68 services and previously re-read the
+    # same manifests ~400,000 times. The GitOps tree is read-only during generation.
+    with gitops_facts.snapshot_reads():
+        targets = args.services or all_services()
+        created, skipped = 0, 0
+        for short in targets:
+            if not gitops_facts.module_dir(short, REPO).is_dir():
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            out = RUNBOOKS / f"svc-{short}.md"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            if write_runbook(out, render(short)):
+                created += 1
+            else:
+                skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:

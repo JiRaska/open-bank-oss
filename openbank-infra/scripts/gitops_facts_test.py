@@ -48,6 +48,17 @@ class GitopsFactsTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
+    def test_snapshot_reads_are_scoped_to_one_generation(self):
+        manifest = self.root / "workload.yaml"
+        manifest.write_text("first", encoding="utf-8")
+        with self.mod.snapshot_reads():
+            self.assertEqual(self.mod.read(manifest), "first")
+            manifest.write_text("second", encoding="utf-8")
+            self.assertEqual(self.mod.read(manifest), "first")
+        self.assertEqual(self.mod.read(manifest), "second")
+        with self.mod.snapshot_reads():
+            self.assertEqual(self.mod.read(manifest), "second")
+
     def write_rules(self, body=RULES):
         p = self.root / "openbank-libs" / "governance" / "rules.yaml"
         p.parent.mkdir(parents=True, exist_ok=True)
