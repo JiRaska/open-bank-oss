@@ -13,7 +13,7 @@ REST kontrakt je definován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, 
 | `GET` | `/api/v1/clearing/batches/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Dávka podle id (`404`, pokud chybí) |
 | `GET` | `/api/v1/clearing/batches/{id}/items` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Výpis položek v dávce |
 | `POST` | `/api/v1/clearing/batches/{id}/settle` | `PAYMENTS`, `ADMIN` + `@Authorize(clearingBatch.settle)` | Zúčtování dávky → status SETTLED, emituje batch-settled |
-| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Spuštění zúčtovacího cyklu pro rail |
+| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Spuštění zúčtovacího cyklu pro rail; vrací `ClearingCycleResult` s jednou dávkou pro každou měnu (#11974) |
 | `GET` | `/api/v1/clearing/positions/{cycleId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Pozice zúčtování pro cyklus |
 | `GET` | `/api/v1/clearing/items/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Clearingová položka podle id (`404`, pokud chybí) |
 | `GET` | `/api/v1/clearing/items/by-payment/{paymentId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Clearingové položky pro platbu |
