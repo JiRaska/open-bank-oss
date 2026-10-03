@@ -222,6 +222,9 @@ metadata:
   labels:
     app.kubernetes.io/name: infra-vuln-scanner
     app.kubernetes.io/part-of: admin-ui
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '15 2 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 02:15 UTC daily — after cost-collector (23:50 Prague = 21:50 UTC) and
   # before peak traffic. spec.timeZone GA in Kubernetes 1.27+.
