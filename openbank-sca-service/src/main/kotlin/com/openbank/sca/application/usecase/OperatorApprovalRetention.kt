@@ -20,7 +20,9 @@ import java.time.OffsetDateTime
  * years, AMLD Directive (EU) 2015/849 Art. 40), counted from the moment the authorization expired.
  * Override with `openbank.sca.approval-retention-days` where a longer national period applies.
  *
- * Only TERMINAL rows (APPROVED, REJECTED, EXECUTED) are deleted; a PENDING row is never deleted.
+ * A row is deletable once its authorization has expired and the retention period has passed since:
+ * that covers decided and claimed rows and an expired PENDING row (which can never be decided or
+ * claimed). A still-live approval is never deleted — the cutoff is always in the past.
  * Each run deletes in batches of [batchSize], oldest first, and stops at [maxBatchesPerRun].
  */
 @ApplicationScoped
@@ -41,10 +43,10 @@ class OperatorApprovalRetention(
         require(maxBatchesPerRun > 0) { "openbank.sca.approval-purge.max-batches-per-run must be positive" }
     }
 
-    /** Terminal approvals whose authorization expired strictly before this instant are past retention. */
+    /** Approvals whose authorization expired strictly before this instant are past retention. */
     fun cutoff(): OffsetDateTime = OffsetDateTime.now(clock).minusDays(retentionDays)
 
-    /** Delete out-of-retention terminal approvals; returns the number of rows deleted in this run. */
+    /** Delete out-of-retention approvals; returns the number of rows deleted in this run. */
     suspend fun purgeExpired(): Int {
         val cutoff = cutoff()
         var total = 0

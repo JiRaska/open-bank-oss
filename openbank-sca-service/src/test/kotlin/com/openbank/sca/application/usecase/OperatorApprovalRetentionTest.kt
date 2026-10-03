@@ -77,6 +77,26 @@ class OperatorApprovalRetentionTest {
     }
 
     @Test
+    fun `the cutoff is in the past for the shortest retention so a live approval can never match`() {
+        val cutoff = retention(FakePurge(mutableListOf()), days = 1).cutoff()
+        assertThat(cutoff).isBefore(OffsetDateTime.ofInstant(now, ZoneOffset.UTC))
+        // A live approval has expiresAt >= now > cutoff, and the purge deletes only expiresAt < cutoff.
+        assertThat(OffsetDateTime.ofInstant(now, ZoneOffset.UTC).isBefore(cutoff)).isFalse()
+    }
+
+    @Test
+    fun `an expired pending approval is purged on its expiry like any terminal row`(): Unit = runBlocking {
+        // The use case is status-agnostic by design: expiry, not status, decides terminality.
+        val cutoff = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).minusDays(1826)
+        val expiredPendingOld = cutoff.minusDays(1)
+        val expiredPendingRecent = cutoff.plusDays(1)
+        val livePending = OffsetDateTime.ofInstant(now, ZoneOffset.UTC).plusHours(1)
+        val rows = mutableListOf(expiredPendingOld, expiredPendingRecent, livePending)
+        assertThat(retention(FakePurge(rows)).purgeExpired()).isEqualTo(1)
+        assertThat(rows).containsExactly(expiredPendingRecent, livePending)
+    }
+
+    @Test
     fun `non-positive configuration is refused at construction`() {
         assertThatThrownBy { retention(FakePurge(mutableListOf()), days = 0) }
             .isInstanceOf(IllegalArgumentException::class.java)

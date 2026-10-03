@@ -46,10 +46,11 @@ asking for a fresh approval. Never edit stored approval state to replay an autho
 Approvals are authorisation evidence for the operations they gated, kept like device-decision
 evidence ([sca-durable-decisions](sca-durable-decisions.md)): the daily
 `OperatorApprovalPurgeScheduler` (cron `openbank.sca.approval-purge.cron`, default `0 45 3 * * ?`)
-deletes TERMINAL rows (APPROVED, REJECTED, EXECUTED) whose authorization expired more than
-`openbank.sca.approval-retention-days` (default 1826, AMLD Art. 40) ago, oldest first, in batches of
-`openbank.sca.approval-purge.batch-size` (500) up to `max-batches-per-run` (100) per run. PENDING rows
-are never deleted. The outbox events are not touched.
+deletes rows whose authorization expired more than `openbank.sca.approval-retention-days`
+(default 1826, AMLD Art. 40) ago, oldest first, in batches of `openbank.sca.approval-purge.batch-size`
+(500) up to `max-batches-per-run` (100) per run. Every status qualifies once expired: an expired
+PENDING approval can never be decided or claimed. A still-live approval is never deleted. The outbox
+events are not touched.
 
 - Health: `openbank_workflow_last_success_age_seconds{workflow="sca-operator-approval-purge"}` and
   the counter `openbank_sca_operator_approval_purged_total`. Neither exists when the purge is
@@ -74,7 +75,8 @@ snapshot to resurrect a consumed authorization.
 - `ScaOperatorApprovalDurabilityIT` — retained expiry evidence, concurrent checker/claim races,
   the per-maker pending bound under concurrency, binding round-trip and rollback on audit failure.
 - `OperatorApprovalRetentionTest` and `OperatorApprovalPurgeSchedulerIT` — cutoff, batching and
-  the per-run cap; the real cron deletes terminal rows past retention and keeps fresh and PENDING ones.
+  the per-run cap; the real cron deletes decided, claimed and expired-pending rows past retention and
+  keeps rows inside retention and a live PENDING approval.
 - `ScaOidcApprovalIT` — an isolated Keycloak realm from the deployment image's pinned base, real
   operator and service-account tokens (no `@TestSecurity`), durable audit actors, tampered or
   missing token rejection, and a full enrol → sign → consume → revoke lifecycle.

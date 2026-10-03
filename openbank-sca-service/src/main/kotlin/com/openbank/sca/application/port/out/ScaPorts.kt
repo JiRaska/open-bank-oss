@@ -137,15 +137,16 @@ interface PartyTypeLookup {
 class ScaConcurrentUpdateException(id: UUID) : IllegalStateException("SCA challenge $id was concurrently modified")
 
 /**
- * Deletes operator maker/checker approvals (`sca_operator_approvals`, V15) that are TERMINAL —
- * decided (APPROVED or REJECTED) or claimed (EXECUTED) — and whose authorization expired before the
- * retention cutoff. A PENDING row is never deleted, whatever its age. Separate from
+ * Deletes operator maker/checker approvals (`sca_operator_approvals`, V15) whose authorization
+ * expired before the retention cutoff. An expired approval is terminal in every status (an expired
+ * PENDING one can never be decided or claimed); a still-live approval never matches, because the
+ * cutoff lies in the past. Separate from
  * [com.openbank.libs.approval.ApprovalStore] so the four-eyes path can never reach a delete.
  */
 interface ScaOperatorApprovalEvidencePurge {
 
     /**
-     * Delete at most [batchSize] terminal approvals whose `expires_at` is strictly before [cutoff],
+     * Delete at most [batchSize] approvals whose `expires_at` is strictly before [cutoff],
      * oldest first, and return how many were deleted. Idempotent: a row already gone is not counted.
      */
     suspend fun purgeTerminalExpiredBefore(cutoff: OffsetDateTime, batchSize: Int): Int

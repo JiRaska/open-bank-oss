@@ -17,7 +17,8 @@ import javax.sql.DataSource
 
 /**
  * Proves the operator-approval purge RUNS when the scheduler dispatches it, against real Postgres,
- * and deletes only TERMINAL approvals past retention — never a PENDING one, however old.
+ * and deletes every approval whose authorization expired more than the retention period ago — an
+ * expired PENDING one included — while keeping rows inside retention and any still-live approval.
  *
  * It drives the cron instead of calling `purge()`: a direct call supplies the Vert.x context the
  * real scheduler does not (#2148, #2187).
@@ -42,15 +43,17 @@ class OperatorApprovalPurgeSchedulerIT {
     @Inject lateinit var dataSource: DataSource
 
     @Test
-    fun `a scheduler-dispatched purge deletes terminal approvals past retention and nothing else`() {
+    fun `a scheduler-dispatched purge deletes approvals expired past retention and nothing else`() {
         val approved = seed("APPROVED", expiredDaysAgo = 45)
         val rejected = seed("REJECTED", expiredDaysAgo = 40)
         val executed = seed("EXECUTED", expiredDaysAgo = 31)
+        val expiredPendingOld = seed("PENDING", expiredDaysAgo = 4000)
         val freshExecuted = seed("EXECUTED", expiredDaysAgo = 29)
-        val ancientPending = seed("PENDING", expiredDaysAgo = 4000)
+        val expiredPendingRecent = seed("PENDING", expiredDaysAgo = 29)
+        val livePending = seed("PENDING", expiredDaysAgo = -1)
 
         // batch-size 1 forces the multi-batch path inside a single scheduled run.
-        val purged = await { listOf(approved, rejected, executed).none(::exists) }
+        val purged = await { listOf(approved, rejected, executed, expiredPendingOld).none(::exists) }
         assertThat(purged)
             .describedAs(
                 "a scheduler-dispatched purge must delete terminal approvals past retention — never doing " +
@@ -60,7 +63,9 @@ class OperatorApprovalPurgeSchedulerIT {
 
         Thread.sleep(SETTLE_MILLIS)
         assertThat(exists(freshExecuted)).describedAs("an approval inside retention must survive").isTrue()
-        assertThat(exists(ancientPending)).describedAs("a PENDING approval is never deleted").isTrue()
+        assertThat(exists(expiredPendingRecent))
+            .describedAs("an expired PENDING approval inside retention must survive").isTrue()
+        assertThat(exists(livePending)).describedAs("a live PENDING approval is never deleted").isTrue()
     }
 
     private fun seed(status: String, expiredDaysAgo: Int): UUID {

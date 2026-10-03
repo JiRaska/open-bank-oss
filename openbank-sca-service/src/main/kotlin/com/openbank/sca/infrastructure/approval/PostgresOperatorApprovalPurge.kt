@@ -4,7 +4,6 @@
 
 package com.openbank.sca.infrastructure.approval
 
-import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.sca.application.port.out.ScaOperatorApprovalEvidencePurge
 import com.openbank.sca.infrastructure.persistence.entity.ScaOperatorApprovalEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -19,9 +18,11 @@ import java.util.UUID
  * Retention delete for `sca_operator_approvals` (V15 `idx_sca_operator_approvals_retention`). A
  * separate bean from [PostgresApprovalStore] so the four-eyes path never holds a delete.
  *
- * Terminal rows only: the query names the three terminal statuses rather than `<> PENDING`, so a
- * status added later is retained until someone decides it is terminal. The delete re-checks the
- * status, so a row cannot be removed on the strength of a stale read.
+ * Every row whose authorization expired before the cutoff is terminal, whatever its status: an
+ * expired PENDING approval can never be decided or claimed (both transitions refuse an expired
+ * row), so it is evidence like any other. The cutoff is always in the past (retention >= 1 day), so
+ * a still-live approval — PENDING or APPROVED — can never match. The delete re-checks the predicate,
+ * so a row cannot be removed on the strength of a stale read.
  */
 @ApplicationScoped
 class PostgresOperatorApprovalPurge :
@@ -31,20 +32,16 @@ class PostgresOperatorApprovalPurge :
     override suspend fun purgeTerminalExpiredBefore(cutoff: OffsetDateTime, batchSize: Int): Int {
         require(batchSize > 0) { "Purge batch size must be positive" }
         return Panache.withTransaction {
-            find("status in ?1 and expiresAt < ?2 order by expiresAt, id", TERMINAL, cutoff)
+            find("expiresAt < ?1 order by expiresAt, id", cutoff)
                 .page<ScaOperatorApprovalEntity>(0, batchSize)
                 .list<ScaOperatorApprovalEntity>()
                 .flatMap { rows: List<ScaOperatorApprovalEntity> ->
                     if (rows.isEmpty()) {
                         Uni.createFrom().item(0L)
                     } else {
-                        delete("id in ?1 and status in ?2", rows.map { it.id }, TERMINAL)
+                        delete("id in ?1 and expiresAt < ?2", rows.map { it.id }, cutoff)
                     }
                 }
         }.awaitSuspending().toInt()
-    }
-
-    private companion object {
-        val TERMINAL = listOf(ApprovalStatus.APPROVED, ApprovalStatus.REJECTED, ApprovalStatus.EXECUTED)
     }
 }
