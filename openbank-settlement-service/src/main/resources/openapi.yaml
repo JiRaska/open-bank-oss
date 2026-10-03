@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.7.0"
+  version: "1.8.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -9,6 +9,19 @@ paths:
       tags: [Settlements]
       summary: Originate a settlement and start its workflow
       operationId: originateSettlement
+      description: >-
+        settlement.create is four-eyes gated (ADR-0155, rules.yaml four_eyes.actions). Where the
+        service runs with authz.four-eyes.enforce=true, the first call answers 202 with an
+        approvalId and creates nothing; a different operator decides it via
+        PATCH /api/v1/settlements/approvals/{id}; the maker then repeats the IDENTICAL request
+        with X-Approval-Id, which executes once. An approval is bound to the exact instruction.
+      parameters:
+        - name: X-Approval-Id
+          in: header
+          required: false
+          description: Id of an APPROVED four-eyes approval for this exact request; consumed once.
+          schema:
+            type: string
       requestBody:
         required: true
         content:
@@ -22,6 +35,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SettlementResponse"
+        "202":
+          description: >-
+            Four-eyes approval required; nothing was created. The body carries the approvalId of a
+            PENDING approval bound to this exact request.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PendingApprovalResponse"
+        "400":
+          description: Malformed instruction; refused before any approval is created or consumed.
         "401":
           description: Unauthenticated.
         "403":
@@ -29,8 +52,143 @@ paths:
             Not authorized. Requires SERVICE/OPERATOR/ADMIN (RBAC) and an allow decision
             from the fine-grained `settlement.create` OPA policy, enforced as of
             ADR-0034 Phase 5 (issue #266).
+  /api/v1/settlements/approvals:
+    get:
+      tags: [Settlement Approvals]
+      summary: List pending four-eyes approvals, oldest first (ADR-0227 D2)
+      description: >-
+        The checker's queue. Human operators only — every service-account principal is denied by
+        policy, because the queue exposes the maker and the bound instruction of each request.
+      operationId: listPendingSettlementApprovals
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        "200":
+          description: Pending approvals, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApprovalResponse"
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Not authorized (ROLE_OPERATOR/ROLE_ADMIN and settlement.approval.read).
+  /api/v1/settlements/approvals/{id}:
+    get:
+      tags: [Settlement Approvals]
+      summary: Read one four-eyes approval with its bound instruction, in any status
+      operationId: getSettlementApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The approval and its evidence, including expired and consumed approvals.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementApprovalDetail"
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: Not authorized (ROLE_OPERATOR/ROLE_ADMIN and settlement.approval.read).
+        "404":
+          description: No approval with this id.
+    patch:
+      tags: [Settlement Approvals]
+      summary: Approve or reject a pending four-eyes approval (ADR-0155)
+      description: >-
+        The checker is the authenticated principal, never the body, and must differ from the
+        maker. An approval can be decided once.
+      operationId: decideSettlementApproval
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecideApprovalRequest"
+      responses:
+        "200":
+          description: Decision recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalResponse"
+        "400":
+          description: Missing body.
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: >-
+            Not authorized (ROLE_OPERATOR/ROLE_ADMIN and settlement.approval.decide), or the
+            checker is the maker.
+        "404":
+          description: No pending approval with this id.
+        "409":
+          description: The approval was already decided.
 components:
   schemas:
+    PendingApprovalResponse:
+      type: object
+      required: [status, approvalId]
+      properties:
+        status: { type: string, enum: [PENDING_APPROVAL] }
+        approvalId: { type: string }
+    DecideApprovalRequest:
+      type: object
+      required: [approve]
+      properties:
+        approve: { type: boolean }
+    ApprovalResponse:
+      type: object
+      properties:
+        id: { type: string }
+        action: { type: string }
+        resourceId: { type: string, nullable: true }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
+        makerId: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+        decidedBy: { type: string, nullable: true }
+    SettlementApprovalDetail:
+      type: object
+      properties:
+        id: { type: string }
+        action: { type: string }
+        resourceId: { type: string, nullable: true }
+        status: { type: string, enum: [PENDING, APPROVED, REJECTED, EXECUTED] }
+        makerId: { type: string }
+        createdAt: { type: string, format: date-time }
+        decidedBy: { type: string, nullable: true }
+        decidedAt: { type: string, format: date-time, nullable: true }
+        claimedAt: { type: string, format: date-time, nullable: true }
+        expiresAt: { type: string, format: date-time }
+        expired:
+          type: boolean
+          description: True once the authorization expired; an expired approval can no longer be decided or claimed.
+        summary:
+          type: string
+          nullable: true
+          description: >-
+            Bounded, redacted rendering of the exact request the approval is bound to (endpoint and
+            arguments) — what the checker reviews. Informational; the binding itself is a fingerprint.
     CreateSettlementRequest:
       type: object
       required: [idempotencyKey, payerAccountId, payeeAccountId, amount, currency]
