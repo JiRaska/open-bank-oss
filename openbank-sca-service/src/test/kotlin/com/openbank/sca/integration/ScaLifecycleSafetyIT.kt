@@ -73,6 +73,28 @@ class ScaLifecycleSafetyIT {
     }
 
     @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `concurrent HTTP consumers spend an approval exactly once`(): Unit = runBlocking {
+        val id = seed("COMPLETED", OffsetDateTime.now().plusMinutes(5))
+        val challenge = onContext { repository.findById(id) }!!
+        val start = kotlinx.coroutines.CompletableDeferred<Unit>()
+        val requests = (1..8).map {
+            async(Dispatchers.IO) {
+                start.await()
+                given().contentType("application/json").body(mapOf("partyId" to challenge.partyId))
+                    .post("/api/v1/sca/challenges/$id/consume").statusCode
+            }
+        }
+        start.complete(Unit)
+        val statuses = requests.awaitAll()
+        assertThat(statuses.count { it == 200 }).isEqualTo(1)
+        assertThat(statuses.count { it == 409 }).isEqualTo(7)
+        val consumed = onContext { repository.findById(id) }!!
+        assertThat(consumed.consumedAt).isBetween(challenge.createdAt, OffsetDateTime.now())
+        assertThat(consumed.version).isEqualTo(challenge.version + 1)
+    }
+
+    @Test
     fun `the database refuses consumption of an expired approved challenge`() {
         val id = seed("COMPLETED", OffsetDateTime.now().minusSeconds(1))
         assertThat(onContext { repository.markConsumed(id) }).isFalse()
