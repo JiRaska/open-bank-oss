@@ -41,21 +41,6 @@ triaging an incident that starts on `settlement`.
 - **Scale:** `kubectl scale rollout/settlement-service -n payments --replicas=<n>` (or edit the GitOps manifest — GitOps is source of truth, a later ArgoCD sync reconciles manual changes).
 - **Config/secret change:** edit the GitOps manifest; ArgoCD syncs. Never `kubectl edit` in place.
 
-- **Four-eyes settlement origination (#10041 slice 10):** `settlement.create` is four-eyes gated by
-  policy; enforcement is `AUTHZ_FOUR_EYES_ENFORCE` (default `false`). When on, a maker's
-  `POST /api/v1/settlements` answers 202 with an `approvalId` and creates nothing. A different
-  operator reviews `GET /api/v1/settlements/approvals/{id}` (the `summary` is the bound instruction)
-  and decides with `PATCH /api/v1/settlements/approvals/{id}` `{"approve": true|false}`; the maker
-  repeats the IDENTICAL request with header `X-Approval-Id`, which executes once. Any change to the
-  instruction re-parks it. Service accounts are refused the queue by policy (human operators only).
-- **Approval retention:** `settlement_operator_approvals` rows are deleted daily
-  (`SETTLEMENT_APPROVAL_PURGE_CRON`, default 04:15) once their authorization expired more than
-  `SETTLEMENT_APPROVAL_RETENTION_DAYS` (default 1826) ago, in bounded batches. Watch
-  `openbank_workflow_last_success_age_seconds{workflow="settlement-operator-approval-purge"}` and the
-  `openbank.settlement.operator.approval.purged` counter; `SETTLEMENT_APPROVAL_PURGE_ENABLED=false`
-  stops it (no liveness is registered then). The `SETTLEMENT_OPERATOR_APPROVAL_CHANGED` outbox events
-  are the retained evidence and are never purged.
-
 ## Common failure modes
 
 - **Pod CrashLoopBackOff at boot:** usually a missing/invalid config or secret
