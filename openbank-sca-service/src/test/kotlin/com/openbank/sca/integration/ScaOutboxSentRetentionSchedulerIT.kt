@@ -73,7 +73,7 @@ class ScaOutboxSentRetentionSchedulerIT {
         val msg = OutboxMessage(
             aggregateId = Ids.newId(),
             eventType = "test.event.retention",
-            payload = """{"creditorIban":"CZ6508000000192000145399"}""",
+            payload = """{"case":"retention"}""",
             createdAt = updatedAt,
         )
         onEventLoop {
