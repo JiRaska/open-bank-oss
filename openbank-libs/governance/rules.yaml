@@ -3754,6 +3754,7 @@ security_sensitive_paths:
       - "src/main/kotlin/com/openbank/sepa/infrastructure/client/FraudScoreClient.kt"
       - "src/main/kotlin/com/openbank/sepa/infrastructure/client/ReversalAdapter.kt"
       - "src/main/kotlin/com/openbank/sepa/infrastructure/client/SanctionsServiceClient.kt"
+      - "src/main/kotlin/com/openbank/sepa/infrastructure/persistence/repository/SepaPaymentRepositoryImpl.kt"
     pii:
       - "src/main/kotlin/**/*Party*.kt"
       - "src/main/kotlin/**/*Customer*.kt"
