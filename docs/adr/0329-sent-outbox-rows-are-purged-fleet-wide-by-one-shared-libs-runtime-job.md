@@ -24,9 +24,9 @@ nightly, configurable via `openbank.outbox.retention.sent-days` — and put `pur
    caller. Every outbox in the fleet — 40 modules extend `AbstractOutboxDispatcher` — keeps every
    SENT row forever.
 2. **The payloads are personal data.** A SENT row keeps its `payload`. sca-service's `sca_outbox`
-   carries `DEVICE_ENROLLED` (party id, credential id) today, and the open slice that adds
-   `SCA_DEVICE_DECIDED` puts the signed payment payload — creditor IBAN included — beside it, which
-   would then outlive the 1 826-day retention that same slice gives the durable decision table. Payment, party, KYC and consent
+   carries `DEVICE_ENROLLED` (party id, credential id) and, since #11889, `SCA_DEVICE_DECIDED` with
+   the signed payment payload — creditor IBAN included — which outlives the 1 826-day retention
+   #11889 gives the durable decision table (its threat model records that as a residual). Payment, party, KYC and consent
    outboxes carry account or identity fields in their event payloads the same way.
 3. **The port only reaches half the fleet.** 17 repositories are on the kernel base; 23 are still
    hand-rolled v1 `OutboxRepository` implementations, which have no `purgeSent` at all.
