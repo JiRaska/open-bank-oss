@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.application.port.`in`
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepainstant.domain.model.SctInstPayment
 import io.smallrye.mutiny.Uni
 import java.util.UUID
@@ -30,8 +31,8 @@ data class SubmitSctInstCommand(
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,
-    val amount: java.math.BigDecimal,
-    val currency: String = "EUR",
+    /** Built by [Money.parseInbound] at the REST boundary, before the idempotency key is looked up. */
+    val amount: Money,
     val remittanceInfo: String?,
-    val endToEndId: String
+    val endToEndId: String,
 )

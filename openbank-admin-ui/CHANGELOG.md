@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.273.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.272.0...admin-ui-v0.273.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** publish build-versioned service documentation ([#11585](https://github.com/JiRaska/open-bank-oss/issues/11585)) ([795a703](https://github.com/JiRaska/open-bank-oss/commit/795a703a5ad6cbbe96cc33ac3ef6d99434e30eaf))
+
 ## [0.272.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.271.0...admin-ui-v0.272.0) (2026-10-03)
 
 

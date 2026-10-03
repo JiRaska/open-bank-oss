@@ -5,6 +5,7 @@
 package com.openbank.sepainstant.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepainstant.application.port.`in`.GetSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.RecallSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
@@ -58,6 +59,11 @@ class SctInstResource @Inject constructor(
         // IllegalArgumentException to 400.
         requireNotNull(body) { "request body is required" }
         val key = idempotencyKey ?: body.idempotencyKey
+        // #11604: Money is built here, BEFORE the use case looks the idempotency key up — an amount
+        // or currency it cannot hold is a 400 (kernel InvalidMoneyException: AMOUNT_SCALE_EXCEEDED /
+        // CURRENCY_UNSUPPORTED / VALIDATION_ERROR) that leaves no row, event, screening call or
+        // downstream call behind.
+        val amount = Money.parseInbound(body.amount, body.currency)
         val cmd = SubmitSctInstCommand(
             idempotencyKey = key,
             debtorAccountId = body.debtorAccountId,
@@ -66,8 +72,7 @@ class SctInstResource @Inject constructor(
             creditorIban = body.creditorIban,
             creditorName = body.creditorName,
             creditorBic = body.creditorBic,
-            amount = body.amount,
-            currency = body.currency,
+            amount = amount,
             remittanceInfo = body.remittanceInfo,
             endToEndId = body.endToEndId,
         )
@@ -117,7 +122,7 @@ class SctInstResource @Inject constructor(
     private fun toResponse(p: com.openbank.sepainstant.domain.model.SctInstPayment) = SctInstPaymentResponse(
         paymentId = p.paymentId, status = p.status.name,
         debtorIban = p.debtorIban, creditorIban = p.creditorIban,
-        amount = p.amount, currency = p.currency, endToEndId = p.endToEndId,
+        amount = p.amount.amount, currency = p.currency, endToEndId = p.endToEndId,
         executionTimeoutAt = p.executionTimeoutAt, settledAt = p.settledAt, createdAt = p.createdAt,
     )
 }

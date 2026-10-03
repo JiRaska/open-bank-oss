@@ -143,3 +143,37 @@ test('catalog search finds treasury, handles no results and restores the full in
   assert.equal(d.querySelectorAll('.domain-group[hidden]').length, 0);
   dom.window.close();
 });
+
+
+test('indexable pages expose unique canonical metadata and matching structured data', () => {
+  const pages = ['index.html', 'platform.html', 'labs.html'];
+  const urls = pages.map(page => page === 'index.html' ? 'https://open-bank.tech/' : `https://open-bank.tech/${page}`);
+  const titles = new Set();
+  for (const [index, page] of pages.entries()) {
+    const d = new JSDOM(read(page)).window.document;
+    const url = urls[index];
+    const title = d.title;
+    assert.ok(title.includes('OpenBank'), `${page}: title identifies the project`);
+    assert.ok(!titles.has(title), `${page}: unique title`);
+    titles.add(title);
+    assert.equal(d.querySelector('link[rel=canonical]')?.href, url);
+    assert.equal(d.querySelector('meta[property="og:url"]')?.content, url);
+    assert.equal(d.querySelector('meta[property="og:title"]')?.content, title);
+    assert.equal(d.querySelector('meta[property="og:type"]')?.content, 'website');
+    assert.equal(d.querySelector('meta[name="twitter:card"]')?.content, 'summary_large_image');
+    const description = d.querySelector('meta[name=description]')?.content;
+    assert.ok(description && description.length > 100, `${page}: descriptive snippet`);
+    assert.equal(d.querySelector('meta[property="og:description"]')?.content, description);
+    const image = d.querySelector('meta[property="og:image"]')?.content;
+    assert.ok(image?.startsWith('https://open-bank.tech/assets/'));
+    assert.ok(fs.existsSync(path.join(site, new URL(image).pathname)));
+    const graph = JSON.parse(d.querySelector('script[type="application/ld+json"]')?.textContent);
+    const nodes = graph['@graph'] || [graph];
+    assert.ok(nodes.some(node => node['@type'] === 'WebPage' && node.url === url && node.name === title));
+  }
+  const sitemap = read('sitemap.xml');
+  for (const url of urls) assert.ok(sitemap.includes(`<loc>${url}</loc>`));
+  assert.ok(!sitemap.includes('classic.html'));
+  assert.match(read('classic.html'), /<meta name="robots" content="noindex, follow"/);
+  assert.match(read('robots.txt'), /Sitemap: https:\/\/open-bank.tech\/sitemap.xml/);
+});
