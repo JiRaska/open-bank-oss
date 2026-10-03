@@ -392,8 +392,30 @@ jobs:
 
       # Compatibility projection for the image build: the latest envelope remains
       # separate from immutable attempts above, so a re-run cannot erase history.
-      - name: Upload Test Intelligence evidence
+      # A failed advisory collector may still leave JUnit/Kover files. Uploading those
+      # under the compatibility name makes the deploy select an incomplete newest
+      # artifact and fail even when an older complete main artifact exists (#11850).
+      - name: Check Test Intelligence compatibility evidence
+        id: test-intelligence-compatibility
         if: always()
+        env:
+          SERVICE: ${{ inputs.service }}
+          EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if python3 .github/scripts/check-test-intelligence-compatibility.py \
+            "${SERVICE}/build/test-intelligence/run.json" \
+            --component "${SERVICE}" \
+            --commit "${GITHUB_SHA}" \
+            --branch "${EXPECTED_BRANCH}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::Skipping incomplete Test Intelligence compatibility artifact"
+          fi
+
+      - name: Upload Test Intelligence evidence
+        if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
