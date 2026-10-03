@@ -5,7 +5,9 @@ info:
   title: SCA Service API
   # 1.11 -> 1.12 (#9430): additive — DELEGATION_APPROVAL_GROUP purpose and an optional
   # ConsumeScaRequest.reference compared exactly when supplied.
-  version: 1.12.0
+  # 1.12 -> 1.13 (#10041 slice 9a): additive — DELETE device revocation and
+  # EnrolledDeviceResponse.revokedAt.
+  version: 1.13.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
