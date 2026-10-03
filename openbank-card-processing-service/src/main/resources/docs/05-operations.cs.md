@@ -63,7 +63,26 @@ Obě jsou `suspend fun`; v `%test` je plánovač vypnutý a testy je spouštěj�
 | `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
-Všechny nesou `service="card-processing"`, stejně jako gauge backlogu a dead-letter outboxu.
+| `openbank.card.token.provisions` | `scheme`, `refusal` |
+| `openbank.card.token.status.changes` | `scheme`, `status`, `refusal` |
+| `openbank.card.token.reads` | `source` (`NETWORK` / `LOCAL_MIRROR`) |
+| `openbank.card.disputes.opened` | `scheme`, `refusal` |
+| `openbank.card.dispute.evidence` | `refusal` |
+| `openbank.card.dispute.terminal.mismatches` | `scheme`, `stored`, `reported` |
+
+Při úspěchu je `refusal` rovno `none`. `scheme="NONE"` označuje odmítnutí rozhodnuté dříve, než se ptala jakákoli síť (neznámá nebo neaktivní karta, nedostupná card-issuance, nezpůsobilá reklamace) — stejná hodnota na čítačích tokenů i reklamací. Všechny nesou `service="card-processing"`, stejně jako gauge backlogu a dead-letter outboxu.
+
+## Alerty
+
+Definované v `openbank-infra/gitops/components/observability/prometheus-rules-card-money-path.yaml`, s promtool testy v `openbank-infra/tests/promtool/card_money_path_alerts_test.yaml`:
+
+| Alert | Spustí se, když | Závažnost |
+|---|---|---|
+| `CardClearedButNotPosted` | jakékoli zaúčtování `SKIPPED_DISABLED` za 1h | critical |
+| `CardLedgerPostingFailing` | jakékoli zaúčtování `FAILED` za 30m | warning |
+| `CardTokenReadsServedFromMirror` | víc než polovina čtení tokenů za 30m šla z `LOCAL_MIRROR` | warning |
+| `CardDisputesNotReachingTheScheme` | jakékoli otevření reklamace odmítnuté `SCHEME_UNAVAILABLE` za 6h | warning |
+| `CardTokenProvisioningAlwaysRefused` | každý pokus o vydání tokenu za 1h byl odmítnut | warning |
 
 ## Runbooky
 
@@ -88,10 +107,26 @@ Zkontrolujte liveness gauge `card-processing-hold-expiry` a logy na `card hold e
 
 Očekávané, když je vazba `visa`/`mastercard` a chybí přihlašovací údaje — adaptér žádný požadavek neodešle. U tokenizace a reklamací je `NOT_BOUND` jedinou vendor odpovědí: tyto programy vyžadují smlouvu se schématem.
 
+### Čtení tokenů jde ze zrcadla
+
+`source: LOCAL_MIRROR` znamená, že vazba tokenizace neodpověděla a seznam může být zastaralý; `degradedReason` uvádí selhání. Je-li `CARD_SCHEME_TOKENISATION` nastaveno na `visa` nebo `mastercard`, je to trvalé (`NOT_BOUND` — vendor adaptér neexistuje); přepněte zpět na `simulator` nebo zrcadlo akceptujte.
+
+### Chargeback nešlo otevřít
+
+`SCHEME_UNAVAILABLE` na `openbank.card.disputes.opened` znamená, že se nezapsal žádný řádek — otevření selhává uzavřeně. Stejná příčina `NOT_BOUND` jako výše, pokud `CARD_SCHEME_DISPUTE` jmenuje vendora. `NO_NETWORK_REFERENCE` je datový problém autorizace (acquirer neposlal referenci), ne výpadek.
+
+### Požadavek na token odpovídá trvale 409 IDEMPOTENCY_REQUEST_IN_PROGRESS
+
+Rezervace klíče uvízla v `PENDING`: požadavek selhal poté, co se ptala síť (zalogováno jako ERROR, „idempotency key left PENDING“). Automaticky se nikdy neuvolní, protože síť mohla token vydat nebo případ otevřít. Ověřte u schématu, co existuje, a pak řádek buď dokončete (`state='COMPLETED'`, `result_id`) proti záznamu, který vytvoříte, nebo ho smažte, pokud síť nic neudělala. Zaseknuté klíče: `SELECT * FROM card_lifecycle_idempotency WHERE state='PENDING' AND created_at < now() - interval '10 minutes'`.
+
+### Uzavřená reklamace nesouhlasí se sítí
+
+`openbank.card.dispute.terminal.mismatches` > 0: refresh případu WON/LOST/WITHDRAWN zjistil, že síť hlásí jiný výsledek. Uložený výsledek se záměrně ponechává; prošetřete to se schématem (logová řádka „closed dispute … is stored … but the network now reports …“).
+
 ## Testy a CI
 
-- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `SchemeAdapterFailureTest` a jeden test na každý simulátor.
-- Integrační: `CardAuthorizationOutboxIT` proti PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` spouští skutečný cron. Zaúčtování a fraud skórování jsou v `%test` vypnuté.
+- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest` a jeden test na každý simulátor.
+- Integrační: `CardLifecycleIdempotencyIT` (souběžné požadavky se stejným klíčem za latchí, stav karty, historie důkazů) a `CardAuthorizationOutboxIT` proti PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` spouští skutečný cron. Zaúčtování a fraud skórování jsou v `%test` vypnuté.
 - Kontrakt: `CardIssuanceAuthorizationPactConsumerTest` (consumer pact vůči card-issuance).
 - Generovaný runbook: `docs/runbooks/svc-card-processing.md`.
 

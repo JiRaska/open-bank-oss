@@ -842,7 +842,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-1252eec8
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3e9ab3c6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1202,7 +1202,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-5d753fa9
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-3e9ab3c6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1531,7 +1531,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-d5c8c73c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2427,7 +2427,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "217e96683cb78a16"
+        openbank.tech/policy-checksum: "4ef03db309530273"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2443,7 +2443,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-d5c8c73c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3047,7 +3047,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-1252eec8
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-d5c8c73c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3166,7 +3166,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-49bf3545
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-d5c8c73c
 
           imagePullPolicy: IfNotPresent
           ports:

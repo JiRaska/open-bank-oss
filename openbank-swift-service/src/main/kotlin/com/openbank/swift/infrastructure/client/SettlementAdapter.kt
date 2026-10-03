@@ -13,7 +13,6 @@ import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import org.jboss.logging.Logger
-import java.math.BigDecimal
 import java.util.UUID
 
 /**
@@ -40,7 +39,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             idempotencyKey = "swift-settlement-${message.id}",
             type = "DEBIT",
             sourceAccountId = sourceAccountId,
-            amount = BigDecimal.valueOf(message.amountMinorUnits).movePointLeft(MINOR_UNIT_SCALE),
+            amount = message.amount.amount,
             currencyCode = message.currency,
             description = "MT103 ${message.remittanceInfo ?: message.transactionReference}",
             valueDate = message.valueDate,
@@ -73,7 +72,6 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
     }
 
     private companion object {
-        const val MINOR_UNIT_SCALE = 2
         val ACCEPTED_STATUSES = setOf(200, 201, 202)
     }
 }

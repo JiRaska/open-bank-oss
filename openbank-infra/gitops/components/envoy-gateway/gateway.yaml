@@ -164,7 +164,7 @@ spec:
         mode: Terminate
         certificateRefs:
           - kind: Secret
-            name: langfuse-tls
+            name: langfuse-edge-tls
             namespace: ai-platform
       allowedRoutes:
         namespaces:

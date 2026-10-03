@@ -8,6 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [architecture, regulatory-reporting, analytics, ai-agents]
 summary: "Bring treasury, ALM, liquidity, market and credit-capital risk in scope: a read-only, event-driven balance-sheet engine with forecasting and revaluation, a treasury book for own dealing, and AI agents around, never inside, the numbers."
+followup: "#11107 — NII/EVE projection, InterestRateChanged consumer, repo and FX forward, Temporal EOD workflow, ClickHouse marts, data-quality agent, FTP, IRB/VaR, Pillar 2, live curves"
 followup: "#10896, #11036, #11041, #11052, #11087, #11040, #11015 — IRRBB, LCR/NSFR, Pillar-1 credit capital, money-market deal MVP and EOD snapshot are merged; treasury nostro/FX-spot/lombard, liquidity survival forecast and minimum-reserves tracking are still open, plus go-live steps (Keycloak clients, realm role) tracked on #10896"
 ---
 
