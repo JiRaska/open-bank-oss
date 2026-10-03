@@ -17,6 +17,7 @@ import com.openbank.kyb.domain.model.RegistrySearchQuery
 import com.openbank.kyb.domain.model.RegistrySearchResult
 import com.openbank.kyb.domain.model.RepresentationAttestation
 import com.openbank.kyb.domain.model.UboFinding
+import com.openbank.kyb.domain.model.UboObservation
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import io.smallrye.mutiny.Uni
@@ -63,6 +64,14 @@ interface RegistryExtractCache {
 interface BusinessOnboardingCaseRepository {
     suspend fun save(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
     suspend fun update(case: BusinessOnboardingCase, event: KybEvent?): BusinessOnboardingCase
+
+    /** Stores the case transition and immutable mapped source answer in the same transaction. */
+    suspend fun updateWithUboObservation(
+        case: BusinessOnboardingCase,
+        finding: UboFinding,
+        recordedAt: Instant,
+    ): UboObservation
+
     suspend fun findById(id: UUID): BusinessOnboardingCase?
     suspend fun findOpenByIdentifier(identifier: LegalEntityIdentifier): BusinessOnboardingCase?
     suspend fun findByInvitationToken(token: String): BusinessOnboardingCase?
@@ -72,6 +81,65 @@ interface BusinessOnboardingCaseRepository {
     suspend fun findInvolving(partyId: UUID): List<BusinessOnboardingCase>
     suspend fun listByStatus(status: CaseStatus, page: Int, size: Int): List<BusinessOnboardingCase>
 }
+
+interface UboObservationRepository {
+    /** Exact case and observation pair; never resolve a reference across cases. */
+    suspend fun findUboObservation(caseId: UUID, observationId: UUID): UboObservation?
+
+    /** Must commit before the HTTP layer releases the sensitive finding. */
+    suspend fun recordUboObservationRead(
+        caseId: UUID,
+        observationId: UUID,
+        principalId: String,
+        purpose: String,
+        readAt: Instant,
+    )
+
+    /** Null = observation/case pair absent; false = already restricted; true = restricted and event committed. */
+    suspend fun restrictUboObservation(
+        caseId: UUID,
+        observationId: UUID,
+        reasonCode: String,
+        actorId: String,
+        restrictedAt: Instant,
+    ): Boolean?
+}
+
+/** Correction writes are serialized on the onboarding case and checked again in the database. */
+interface UboCorrectionRepository {
+    suspend fun propose(
+        caseId: UUID,
+        priorObservationId: UUID,
+        candidate: com.openbank.kyb.domain.model.UboFinding,
+        reasonCode: String,
+        actorId: String,
+        proposedAt: Instant,
+    ): com.openbank.kyb.domain.model.UboCorrection?
+
+    /** Commits the read audit before returning personal data. */
+    suspend fun readAndAudit(
+        caseId: UUID,
+        correctionId: UUID,
+        principalId: String,
+        readAt: Instant,
+    ): com.openbank.kyb.domain.model.UboCorrection?
+
+    /** Null means absent/stale; an approval commits its successor observation and reference outbox entry. */
+    suspend fun decide(
+        caseId: UUID,
+        correctionId: UUID,
+        actorId: String,
+        approved: Boolean,
+        decidedAt: Instant,
+    ): Boolean?
+}
+
+/** Live case-root assignment decision from Context; source evidence never trusts a UI-only check. */
+interface UboObservationAccess {
+    suspend fun check(caseId: UUID, bearer: String): UboObservationAccessDecision
+}
+
+enum class UboObservationAccessDecision { ALLOWED, DENIED, UNAVAILABLE }
 
 /**
  * The per-entity store of human confirmations of a representation rule (#9711).

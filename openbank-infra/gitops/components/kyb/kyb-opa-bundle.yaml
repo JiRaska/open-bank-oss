@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: kyb-service
     app.kubernetes.io/part-of: kyb
   annotations:
-    openbank.tech/policy-checksum: "12dd32500be640ff"
+    openbank.tech/policy-checksum: "591bd974cd541fc2"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -50,23 +50,23 @@ data:
     # is trivially answerable.
     # ---------------------------------------------------------------------------------------
     allow := {
-    	"allow": true,
-    	"reason": reason,
-    	"policy_version": policy_version,
-    	"attributes": response_attributes,
+        "allow": true,
+        "reason": reason,
+        "policy_version": policy_version,
+        "attributes": response_attributes,
     } if {
-    	count(allowed_reasons) > 0
+        count(allowed_reasons) > 0
 
-    	# Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
-    	# flag, issue #419) can never be granted by ANY reason — not even operator-on-own-tenant
-    	# with a tenant-matched resource. Gating the allow head, not each reason, makes this
-    	# impossible to bypass by enriching the input (the prohibition is not just surfaced).
-    	not prohibited
+        # Defense-in-depth: a prohibited action (e.g. flipping off SCA/sanctions via a feature
+        # flag, issue #419) can never be granted by ANY reason — not even operator-on-own-tenant
+        # with a tenant-matched resource. Gating the allow head, not each reason, makes this
+        # impossible to bypass by enriching the input (the prohibition is not just surfaced).
+        not prohibited
 
-    	# Pick the lexicographically smallest reason so the complete rule produces a single
-    	# deterministic output even when multiple allowed_reasons rules fire simultaneously
-    	# (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
-    	reason := min(allowed_reasons)
+        # Pick the lexicographically smallest reason so the complete rule produces a single
+        # deterministic output even when multiple allowed_reasons rules fire simultaneously
+        # (e.g. operator-on-own-tenant + operator-read-any for a tenant-scoped read).
+        reason := min(allowed_reasons)
     }
 
     # Surfaced on the allow object so OpaSidecarPolicyDecisionPoint (which reads
@@ -95,49 +95,49 @@ data:
     # tells us WHICH rule fired, not just "allow=true".
     # ---------------------------------------------------------------------------------------
     allowed_reasons contains "operator-on-own-tenant" if {
-    	input.principal.type == "HUMAN"
-    	"ROLE_OPERATOR" in input.principal.roles
+        input.principal.type == "HUMAN"
+        "ROLE_OPERATOR" in input.principal.roles
 
-    	# Resource-scoped actions must target the operator's tenant; non-scoped
-    	# (system-wide) actions are not granted by this rule.
-    	input.resource
-    	input.principal.attributes.tenant == input.resource.attributes.tenant
+        # Resource-scoped actions must target the operator's tenant; non-scoped
+        # (system-wide) actions are not granted by this rule.
+        input.resource
+        input.principal.attributes.tenant == input.resource.attributes.tenant
     }
 
     allowed_reasons contains "compliance-read-any" if {
-    	input.principal.type == "HUMAN"
-    	"ROLE_COMPLIANCE" in input.principal.roles
-    	endswith(input.action, ".read")
+        input.principal.type == "HUMAN"
+        "ROLE_COMPLIANCE" in input.principal.roles
+        endswith(input.action, ".read")
     }
 
     # AI agents go through this same query when the agent's tool wraps a REST call
     # (ADR-0031 D5). The charter check is delegated to agents.rego so we don't
     # duplicate the charter logic — call it through the unified package boundary.
     allowed_reasons contains "agent-charter-allows" if {
-    	input.principal.type == "AI_AGENT"
+        input.principal.type == "AI_AGENT"
 
-    	# Translate the REST input into the MCP input shape and reuse agents.allow --
-    	# NOT charter_allowed: agents.allow ALSO applies hard_denied / charter_denied /
-    	# skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
-    	# directly would let a fleet-wide hard-denied tool tier, or an agent's own
-    	# tools.deny glob, silently reach a REST action anyway.
-    	# object.get (not input.resource): the PDP omits `resource` from the query entirely when
-    	# it is null (OpaSidecarPolicyDecisionPoint.toInput only puts it when non-null), and a bare
-    	# `input.resource` reference is then UNDEFINED, which makes this whole object — and the
-    	# agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
-    	# The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
-    	# rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
-    	# attributes MUST be forwarded (ADR-0195 step 5, #3292): the MCP endpoint sends
-    	# {tool, consentId} on every tools/call, and agents.rego's skill_ok else-branch reads
-    	# input.attributes.skill — a bridge that drops them makes consent-state gating impossible
-    	# and denies a chartered run.skill that arrives via REST. Same object.get pattern as
-    	# resource: a caller that sends no attributes key must not make the query undefined.
-    	data.openbank.agents.allow with input as {
-    		"agent": input.principal.id,
-    		"tool": input.action,
-    		"resource": object.get(input, "resource", null),
-    		"attributes": object.get(input, "attributes", {}),
-    	}
+        # Translate the REST input into the MCP input shape and reuse agents.allow --
+        # NOT charter_allowed: agents.allow ALSO applies hard_denied / charter_denied /
+        # skill_ok, none of which charter_allowed alone consults. Calling charter_allowed
+        # directly would let a fleet-wide hard-denied tool tier, or an agent's own
+        # tools.deny glob, silently reach a REST action anyway.
+        # object.get (not input.resource): the PDP omits `resource` from the query entirely when
+        # it is null (OpaSidecarPolicyDecisionPoint.toInput only puts it when non-null), and a bare
+        # `input.resource` reference is then UNDEFINED, which makes this whole object — and the
+        # agents.allow call — undefined, silently denying every resource-less AI_AGENT REST call.
+        # The MCP server (openbank-mcp-service) is the first caller to route AI_AGENT through
+        # rest.allow with no resource; agent-service queries agents.allow directly and never hit this.
+        # attributes MUST be forwarded (ADR-0195 step 5, #3292): the MCP endpoint sends
+        # {tool, consentId} on every tools/call, and agents.rego's skill_ok else-branch reads
+        # input.attributes.skill — a bridge that drops them makes consent-state gating impossible
+        # and denies a chartered run.skill that arrives via REST. Same object.get pattern as
+        # resource: a caller that sends no attributes key must not make the query undefined.
+        data.openbank.agents.allow with input as {
+            "agent": input.principal.id,
+            "tool": input.action,
+            "resource": object.get(input, "resource", null),
+            "attributes": object.get(input, "attributes", {}),
+        }
     }
 
     # A party (HUMAN whose JWT `sub` is a partyId) may list or read its OWN resources.
@@ -146,11 +146,11 @@ data:
     # realm (ADR-0065/0066) the sub IS the partyId, making the equality check sufficient.
     # Scoped to read-family verbs so self-service can never mutate another party's data.
     allowed_reasons contains "party-self-service" if {
-    	input.principal.type == "HUMAN"
-    	input.resource
-    	input.principal.id == input.resource.id
-    	some verb in {"list", "read"}
-    	endswith(input.action, sprintf(".%v", [verb]))
+        input.principal.type == "HUMAN"
+        input.resource
+        input.principal.id == input.resource.id
+        some verb in {"list", "read"}
+        endswith(input.action, sprintf(".%v", [verb]))
     }
 
     # ---------------------------------------------------------------------------------------
@@ -171,32 +171,32 @@ data:
     # check-matrix-excluded-actions.py read this exclusion: while it stands, both registers must
     # stay empty; remove it and they demand a declared entry per M2M-reachable action again.
     allowed_reasons contains "matrix-allows" if {
-    	input.principal.type == "HUMAN"
-    	not startswith(input.principal.id, "service-account-")
-    	some role in input.principal.roles
-    	matrix_grants(input.action, role)
+        input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
+        some role in input.principal.roles
+        matrix_grants(input.action, role)
     }
 
     # Grants for a role = its own grant list plus ONE level of inheritance (e.g. ROLE_ADMIN
     # inherits ROLE_OPERATOR). Single level deliberately: rego forbids recursion, and one hop
     # covers the ADMIN-as-operator-superset case without a walkable chain to reason about.
     matrix_grants(action, role) if {
-    	data.rules.authz.role_action_matrix[role].grant[_] == action
+        data.rules.authz.role_action_matrix[role].grant[_] == action
     }
 
     matrix_grants(action, role) if {
-    	parent := data.rules.authz.role_action_matrix[role].inherits
-    	data.rules.authz.role_action_matrix[parent].grant[_] == action
+        parent := data.rules.authz.role_action_matrix[role].inherits
+        data.rules.authz.role_action_matrix[parent].grant[_] == action
     }
 
     # Operators and admins may list or read any resource on behalf of any party (support-desk
     # and onboarding cockpit paths, ADR-0068).
     allowed_reasons contains "operator-read-any" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	some verb in {"list", "read"}
-    	endswith(input.action, sprintf(".%v", [verb]))
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        some verb in {"list", "read"}
+        endswith(input.action, sprintf(".%v", [verb]))
     }
 
     # ADR-0224 D2: staff agent-session lifecycle (issue/read/revoke). Operator/admin only — sessions
@@ -215,11 +215,11 @@ data:
     # "mcp-service sees a HUMAN principal whose realm roles were bounded at issuance" — a real person,
     # never a service account.
     allowed_reasons contains "operator-mcp-session" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
-    	startswith(input.action, "mcp.session.")
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        startswith(input.action, "mcp.session.")
     }
 
     # ADR-0176 D4: operator-initiated customer messaging is its own action namespace
@@ -235,11 +235,11 @@ data:
     # m2m-sanctions-screening further down, used there for the opposite purpose (identifying M2M,
     # not excluding it).
     allowed_reasons contains "operator-compose-message" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "opsmessage.compose"
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action == "opsmessage.compose"
     }
 
     # Checker side of the same four-eyes flow (ADR-0155 mechanism, ADR-0176 D5 trigger). Deciding
@@ -247,11 +247,11 @@ data:
     # HUMAN + operator-role + non-service-account shape, not the broader operator-write-any this
     # service otherwise has no equivalent of.
     allowed_reasons contains "operator-decide-message-approval" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "opsmessage.approval.decide"
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action == "opsmessage.approval.decide"
     }
 
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),
@@ -263,11 +263,11 @@ data:
     # below: this rule only says WHO may attempt the call, not whether that specific draft is
     # theirs.
     allowed_reasons contains "commstyle-publish" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "commstyle.publish"
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action == "commstyle.publish"
     }
 
     # Checker side of the same four-eyes flow. Identical shape to operator-decide-message-approval
@@ -275,20 +275,20 @@ data:
     # with no ROLE_OPERATOR grant must still be able to decide a commstyle approval, which the
     # generic operator-read-any rule below (keyed to ROLE_OPERATOR/ROLE_ADMIN only) would not admit.
     allowed_reasons contains "commstyle-decide-publish-approval" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	not startswith(input.principal.id, "service-account-")
-    	input.action == "commstyle.approval.decide"
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action == "commstyle.approval.decide"
     }
 
     # Read side of the same queue (ADR-0227 D2 unified inbox). Same role gate as the decide rule
     # above, for the same reason operator-read-any alone would not admit a lone ROLE_COMMS_APPROVER.
     allowed_reasons contains "commstyle-read-publish-approval" if {
-    	input.principal.type == "HUMAN"
-    	some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
-    	role in input.principal.roles
-    	input.action == "commstyle.approval.read"
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_COMMS_APPROVER", "ROLE_ADMIN"}
+        role in input.principal.roles
+        input.action == "commstyle.approval.read"
     }
 
     # Authenticated customers may perform any `customer.*` action (initiate payments, enroll
@@ -299,8 +299,8 @@ data:
     # This rule intentionally does NOT cover operator or admin actions — those go through
     # operator-write or operator-read-any above.
     allowed_reasons contains "customer-self-action" if {
-    	input.principal.type == "HUMAN"
-    	startswith(input.action, "customer.")
+        input.principal.type == "HUMAN"
+        startswith(input.action, "customer.")
     }
 
     # The customer-edge's M2M identity calling notification-, sca- or document-service on a
@@ -346,10 +346,10 @@ data:
     # forces partyRef from the caller's token and rejects a caller who is not one of the
     # ceremony's signers, so this grant cannot sign on someone else's behalf.
     allowed_reasons contains "edge-service-notification" if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	some family in {"notification.", "device.", "document.", "signatureCeremony."}
-    	startswith(input.action, family)
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-edge"
+        some family in {"notification.", "device.", "document.", "signatureCeremony."}
+        startswith(input.action, family)
     }
 
     # The customer-edge proxying the customer's own PSD2 consent screen (ADR-0126): the app
@@ -362,9 +362,9 @@ data:
     # `consent.` family — so this grant cannot create, activate, or validate consents on the
     # edge principal (least privilege; the edge exposes no route for those anyway).
     allowed_reasons contains "edge-service-consent" if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	input.action in {"consent.list", "consent.revoke"}
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-edge"
+        input.action in {"consent.list", "consent.revoke"}
     }
 
     # The customer-edge proxying the app's in-app engagement surfaces (ADR-0220 D1): the app
@@ -374,9 +374,9 @@ data:
     # engagement-service on its own authority. Scoped to the two exact actions the app uses —
     # NOT an `engagement.` family — least privilege, matching edge-service-consent's shape.
     allowed_reasons contains "edge-service-engagement" if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-edge"
+        input.action in {"engagement.surface.read", "engagement.surface.recordEvent"}
     }
 
     # The customer-edge proxying the app's privacy centre: a customer reads their OWN access log
@@ -396,9 +396,9 @@ data:
     # The identity match below is therefore the load-bearing half: staff sessions authenticate
     # through a different client, so their preferred_username is never "service-account-*".
     allowed_reasons contains "edge-service-audit-customer" if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-edge"
-    	input.action == "audit.customerRead"
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-edge"
+        input.action == "audit.customerRead"
     }
 
     # Any M2M service-account caller (e.g. account-service) may trigger a sanctions screen
@@ -425,9 +425,9 @@ data:
     # covers any M2M caller without a per-caller rule, while still excluding real operator/admin
     # staff sessions from this specific carve-out.
     allowed_reasons contains "m2m-sanctions-screening" if {
-    	input.principal.type == "HUMAN"
-    	startswith(input.principal.id, "service-account-")
-    	input.action == "sanctions.create"
+        input.principal.type == "HUMAN"
+        startswith(input.principal.id, "service-account-")
+        input.action == "sanctions.create"
     }
 
     # NOTE: sanctions.create is not the only resourceless M2M `*.create`-shaped action with
@@ -456,31 +456,31 @@ data:
     # guess — self-documenting, and rest_test.rego pins it so a future rename can't
     # silently drift back out of sync.
     money_path_scopes contains scope if {
-    	some svc in data.rules.money_path_services
-    	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
-    	not data.rules.money_path_action_prefixes[derived]
-    	scope := derived
+        some svc in data.rules.money_path_services
+        derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+        not data.rules.money_path_action_prefixes[derived]
+        scope := derived
     }
 
     money_path_scopes contains scope if {
-    	some svc in data.rules.money_path_services
-    	derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
-    	some scope in data.rules.money_path_action_prefixes[derived]
+        some svc in data.rules.money_path_services
+        derived := trim_suffix(trim_prefix(svc, "openbank-"), "-service")
+        some scope in data.rules.money_path_action_prefixes[derived]
     }
 
     four_eyes_required if {
-    	some scope in money_path_scopes
-    	startswith(input.action, sprintf("%s.", [scope]))
-    	some verb in data.rules.four_eyes.verbs
-    	endswith(input.action, sprintf(".%s", [verb]))
-    	not four_eyes_exempt
+        some scope in money_path_scopes
+        startswith(input.action, sprintf("%s.", [scope]))
+        some verb in data.rules.four_eyes.verbs
+        endswith(input.action, sprintf(".%s", [verb]))
+        not four_eyes_exempt
     }
 
     # Feature-flag flip (ADR-0067 / issue #419): flipping a money-path flag is four-eyes-gated.
     # The target flag key is carried in input.attributes.flag.
     four_eyes_required if {
-    	input.action == "featureflag.flip"
-    	input.attributes.flag in data.rules.feature_flags.money_path_flags
+        input.action == "featureflag.flip"
+        input.attributes.flag in data.rules.feature_flags.money_path_flags
     }
 
     # Exact-action four-eyes, independent of money-path scope (ADR-0176 D5). Generalises the
@@ -491,8 +491,8 @@ data:
     # for any bundle whose rules.yaml predates this key — Rego membership over an undefined
     # collection simply does not fire.
     four_eyes_required if {
-    	input.action in data.rules.four_eyes.actions
-    	not four_eyes_exempt
+        input.action in data.rules.four_eyes.actions
+        not four_eyes_exempt
     }
 
     # Caller-aware exemption (ADR-0280, issue #8360): four_eyes_required is computed by action name
@@ -504,7 +504,7 @@ data:
     # action with no entry: membership over an undefined collection does not fire, so `not
     # four_eyes_exempt` holds and the clauses above behave exactly as before.
     four_eyes_exempt if {
-    	input.principal.id in data.rules.four_eyes.exemptions[input.action]
+        input.principal.id in data.rules.four_eyes.exemptions[input.action]
     }
 
     # ---------------------------------------------------------------------------------------
@@ -515,8 +515,8 @@ data:
     # action, so default-deny also blocks it.
     # ---------------------------------------------------------------------------------------
     prohibited if {
-    	input.action == "featureflag.flip"
-    	input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
+        input.action == "featureflag.flip"
+        input.attributes.flag in data.rules.feature_flags.prohibited_flag_combinations
     }
 
     # ---------------------------------------------------------------------------------------
@@ -556,8 +556,8 @@ data:
     # Until then this is the fleet-wide floor.
     # ---------------------------------------------------------------------------------------
     shared_m2m_identity if {
-    	input.principal.type == "HUMAN"
-    	input.principal.id == "service-account-openbank-services"
+        input.principal.type == "HUMAN"
+        input.principal.id == "service-account-openbank-services"
     }
 
     # Which role-only write reasons this prohibition applies to — DATA, not a name pattern.
@@ -578,15 +578,15 @@ data:
     # Membership over an undefined collection simply does not fire, so a bundle whose rules.yaml
     # predates this key sees no behaviour change.
     role_only_write_reason(r) if {
-    	r in data.rules.shared_m2m_write_prohibition.reasons
+        r in data.rules.shared_m2m_write_prohibition.reasons
     }
 
     prohibited if {
-    	shared_m2m_identity
-    	count(allowed_reasons) > 0
-    	every r in allowed_reasons {
-    		role_only_write_reason(r)
-    	}
+        shared_m2m_identity
+        count(allowed_reasons) > 0
+        every r in allowed_reasons {
+            role_only_write_reason(r)
+        }
     }
   kyb_rest_ext.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -634,6 +634,38 @@ data:
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_KYC"}
     	role in input.principal.roles
     	startswith(input.action, "kyb.")
+    }
+
+    human_restriction_admin if {
+        input.principal.type == "HUMAN"
+        "ROLE_ADMIN" in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+    }
+
+    human_ubo_correction_reviewer if {
+        input.principal.type == "HUMAN"
+        not startswith(input.principal.id, "service-account-")
+        some role in {"ROLE_KYC", "ROLE_ADMIN"}
+        role in input.principal.roles
+    }
+
+    # The resource checks the live case assignment and purpose; OPA first excludes
+    # operators, edge clients and service accounts from all correction operations.
+    prohibited if {
+        startswith(input.action, "kyb.ubo.correction.")
+        not human_ubo_correction_reviewer
+    }
+
+    allowed_reasons contains "admin-kyb-observation-restriction" if {
+        input.action == "kyb.ubo.restrict"
+        human_restriction_admin
+    }
+
+    # The general staff `kyb.` reason also admits KYC and operators. A veto at the
+    # final decision prevents that or a future matrix grant from widening restriction.
+    prohibited if {
+        input.action == "kyb.ubo.restrict"
+        not human_restriction_admin
     }
 
     # The customer edge proxying the customer's own business onboarding (ADR-0284 D6). Enumerated,

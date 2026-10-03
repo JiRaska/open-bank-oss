@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.kyb.integration
 
+import com.openbank.kyb.domain.model.KybEvents
 import com.openbank.kyb.infrastructure.outbox.KybOutboxDispatcher
 import com.openbank.kyb.infrastructure.persistence.repository.KybOutboxRepositoryImpl
 import com.openbank.kyb.it.PostgresTestResource
@@ -60,6 +61,10 @@ class KybOutboxDispatchConformanceIT : OutboxDispatchConformanceIT() {
     override lateinit var connector: InMemoryConnector
 
     override val channelName = "kyb-events-out"
+
+    // KYB publishes only declared lifecycle/reference types; the shared suite's synthetic
+    // test.event.* names are intentionally rejected by the production publisher.
+    override fun eventType(suggested: String): String = KybEvents.STARTED
 
     override suspend fun seed(message: OutboxMessage) {
         Panache.withTransaction { repository.persistInTransaction(message) }.awaitSuspending()

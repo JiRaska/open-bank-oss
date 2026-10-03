@@ -6,6 +6,7 @@ package com.openbank.kyb.integration
 
 import com.openbank.kyb.domain.model.InitiatorIdentity
 import com.openbank.kyb.domain.model.RepresentationAttestation
+import com.openbank.kyb.infrastructure.persistence.repository.KybJson
 import com.openbank.kyb.it.PostgresTestResource
 import com.openbank.kyb.it.StubDocumentGateway
 import com.openbank.kyb.it.StubPartyGateway
@@ -41,9 +42,15 @@ class KybCaseApiIT {
     @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.jdbc.url")
     lateinit var jdbcUrl: String
 
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.username")
+    lateinit var jdbcUser: String
+
+    @org.eclipse.microprofile.config.inject.ConfigProperty(name = "quarkus.datasource.password")
+    lateinit var jdbcPassword: String
+
     private fun seedAttestation(ico: String, ruleText: String, confirmedSigners: Int) {
         val hash = RepresentationAttestation.hashOf(ruleText)
-        DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { c ->
             c.prepareStatement(
                 "INSERT INTO kyb_representation_attestations (id, attestation_id, identifier_scheme, " +
                     "identifier_value, rule_text_hash, rule_text, parsed_mode, parsed_signers, " +
@@ -239,6 +246,47 @@ class KybCaseApiIT {
             statusCode(200)
             body("declarations.peps", hasSize<Any>(2))
         }
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { c ->
+            c.prepareStatement(
+                "SELECT revision, source_sha256, finding_json FROM kyb_ubo_observations WHERE case_id = ?",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(caseId))
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong("revision")).isEqualTo(1)
+                    assertThat(rows.getString("source_sha256")).matches("[0-9a-f]{64}")
+                    assertThat(rows.getString("finding_json")).contains("\"schemaVersion\":1")
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+            c.prepareStatement(
+                "SELECT o.observation_id, o.source_sha256, b.payload FROM kyb_ubo_observations o " +
+                    "JOIN kyb_outbox b ON b.aggregate_id = o.case_id " +
+                    "AND b.event_type = 'KybUboObservationRecorded' WHERE o.case_id = ?",
+            ).use { st ->
+                st.setObject(1, UUID.fromString(caseId))
+                st.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    val payload = rows.getString("payload")
+                    val ref = KybJson.mapper.readTree(payload)
+                    assertThat(ref.fieldNames().asSequence().toSet()).containsExactlyInAnyOrder(
+                        "schemaVersion",
+                        "eventType",
+                        "caseId",
+                        "observationId",
+                        "revision",
+                        "sourceSha256",
+                    )
+                    assertThat(ref.path("caseId").asText()).isEqualTo(caseId)
+                    assertThat(
+                        ref.path("observationId").asText(),
+                    ).isEqualTo(rows.getObject("observation_id").toString())
+                    assertThat(ref.path("sourceSha256").asText()).isEqualTo(rows.getString("source_sha256"))
+                    assertThat(ref.path("revision").asLong()).isEqualTo(1)
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
         Given {
             header("X-Customer-Party-Id", cosigner.toString())
         } When { get("/api/v1/kyb/cases/$caseId/questionnaire/prefill") } Then {
@@ -303,7 +351,7 @@ class KybCaseApiIT {
         assertThat(parties.mandates.filter { it.evidenceRef.contains(caseId) }).hasSize(2)
 
         // 11. the outbox holds one row per lifecycle event, written in the same transactions
-        DriverManager.getConnection(jdbcUrl, "openbank", "openbank_secret").use { c ->
+        DriverManager.getConnection(jdbcUrl, jdbcUser, jdbcPassword).use { c ->
             c.createStatement().executeQuery(
                 "select event_type from kyb_outbox where aggregate_id = '$caseId' order by id",
             ).use { rs ->
@@ -312,6 +360,7 @@ class KybCaseApiIT {
                     "BUSINESS_REGISTRY_VERIFIED",
                     "BUSINESS_SIGNER_INVITED",
                     "BUSINESS_SIGNER_IDENTIFIED",
+                    "KybUboObservationRecorded",
                     "BUSINESS_AGREEMENT_SIGNED",
                 )
             }

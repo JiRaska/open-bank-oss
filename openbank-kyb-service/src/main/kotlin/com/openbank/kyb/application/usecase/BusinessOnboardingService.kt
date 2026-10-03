@@ -195,9 +195,11 @@ class BusinessOnboardingService : BusinessOnboardingUseCase {
         // The people a PEP entry must cover: every natural-person beneficial owner the register
         // reports (a corporate owner is not a person and has no PEP status of its own), plus every
         // listed representative, which the aggregate adds from the extract.
-        val uboNames = ubo.lookup(case.identifier).reportableOwners.filter { !it.corporate }.map { it.fullName }
+        val finding = ubo.lookup(case.identifier)
+        val uboNames = finding.reportableOwners.filter { !it.corporate }.map { it.fullName }
         val made = case.declarationsMade(cmd.declarations, uboNames, knownPersons(case), cmd.callerPartyId, now)
-        return cases.update(made, null).also(::armTimers)
+        cases.updateWithUboObservation(made, finding, now)
+        return made.also(::armTimers)
     }
 
     override suspend fun questionnairePrefill(caseId: UUID, callerPartyId: UUID): QuestionnairePrefill {
