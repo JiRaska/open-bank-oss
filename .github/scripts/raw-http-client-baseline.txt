@@ -28,4 +28,3 @@ openbank-notification-service/src/main/kotlin/com/openbank/notification/infrastr
 openbank-pid-service/src/main/kotlin/com/openbank/pid/infrastructure/crypto/TrustedListService.kt	1
 openbank-sanctions-service/src/main/kotlin/com/openbank/sanctions/application/usecase/SanctionsImportService.kt	1
 openbank-security-scanner/src/main/kotlin/com/openbank/securityscanner/application/SecurityScannerService.kt	1
-openbank-transaction-service/src/main/kotlin/com/openbank/transaction/infrastructure/ingest/LogoFetcher.kt	1

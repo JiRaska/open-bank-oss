@@ -4,10 +4,15 @@
 
 package com.openbank.transaction.infrastructure.ingest
 
+import com.openbank.libs.security.EgressConnector
+import com.openbank.libs.security.EgressResolver
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.net.InetAddress
+import java.net.InetSocketAddress
 import java.util.Optional
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * These are about what [LogoFetcher] REFUSES to connect to.
@@ -253,5 +258,54 @@ class LogoFetcherTest {
     @Test
     fun `200 is the only status that proceeds`() {
         fetcher("upload.wikimedia.org").requireUsableStatus(200)
+    }
+
+    // --- ADR-0320 P1: the fetch runs on SafeHttpClient's pinned connection ---
+
+    private val public: InetAddress = InetAddress.getByAddress(byteArrayOf(1, 1, 1, 1))
+
+    /** A connector that records the address it was asked for and stops there — no network. */
+    private class RecordingConnector : EgressConnector {
+        val reached = mutableListOf<InetSocketAddress>()
+
+        override fun connect(address: InetSocketAddress, timeout: java.time.Duration): java.net.Socket {
+            reached += address
+            throw java.io.IOException("connector reached ${address.address.hostAddress}")
+        }
+    }
+
+    @Test
+    fun `an allowlisted name resolving publicly reaches the pinned connection`() {
+        val connector = RecordingConnector()
+        val f = fetcher("logo.example.com").also {
+            it.resolver = EgressResolver { listOf(public) }
+            it.connector = connector
+        }
+
+        assertThatThrownBy { f.fetch("https://logo.example.com/logo.png") }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+            .hasMessageContaining("connector reached 1.1.1.1")
+        assertThat(connector.reached.map { it.address }).containsExactly(public)
+    }
+
+    /**
+     * The residual risk the old JDK client documented: the name answers public to the check and
+     * loopback to the connection. SafeHttpClient re-vets its own single lookup and never connects.
+     */
+    @Test
+    fun `a name that rebinds inward between the check and the fetch is refused and never connected`() {
+        val lookups = AtomicInteger(0)
+        val connector = RecordingConnector()
+        val f = fetcher("logo.example.com").also {
+            it.resolver = EgressResolver {
+                if (lookups.getAndIncrement() == 0) listOf(public) else listOf(InetAddress.getLoopbackAddress())
+            }
+            it.connector = connector
+        }
+
+        assertThatThrownBy { f.fetch("https://logo.example.com/logo.png") }
+            .isInstanceOf(LogoFetcher.RefusedException::class.java)
+            .hasMessageContaining("refused by the egress policy")
+        assertThat(connector.reached).isEmpty()
     }
 }
