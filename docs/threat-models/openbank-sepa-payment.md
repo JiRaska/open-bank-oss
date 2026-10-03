@@ -489,7 +489,7 @@ simply stops existing).
   caller, privilege or event. Rollback: revert the commit.
 - **2026-10-03** — **The existing inbound `Money` check now uses the kernel parser (#11870).**
   `POST /api/v1/sepa-payments` still constructs `Money` before reserving the idempotency key;
-  `Money.parseInbound` replaces the service-local `inboundMoney` implementation and
+  `Money.parseInbound` replaces the former service-local amount/currency validator and
   `InvalidMoneyExceptionMapper` replaces its `ValidationFailure` rendering. The same authenticated
   caller, endpoint, amount/currency fields, downstream edges and persistence boundary remain.
   **Tampering / input validation:** over-scale amounts and unsupported currencies still fail with
