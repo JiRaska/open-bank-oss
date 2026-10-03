@@ -5,8 +5,9 @@ info:
   title: SCA Service API
   # 1.11 -> 1.12 (#9430): additive — DELEGATION_APPROVAL_GROUP purpose and an optional
   # ConsumeScaRequest.reference compared exactly when supplied.
-  # 1.12 -> 1.13 (#10041 slice 9a): additive — DELETE device revocation and
-  # EnrolledDeviceResponse.revokedAt.
+  # 1.12 -> 1.13 (#10041 slice 9a): additive — DELETE device revocation,
+  # EnrolledDeviceResponse.revokedAt; documents the consume 400/422 responses and the
+  # ScaChallengeResponse fields the service already serves.
   version: 1.13.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
@@ -269,12 +270,18 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
+        '400':
+          description: Invalid request or challenge not approved
         '403':
           description: The challenge belongs to another party
         '404':
           description: Challenge not found
         '409':
           description: Already consumed, or the operation does not match what the device signed
+        '422':
+          description: >-
+            Challenge expired, or concurrently modified by another lifecycle write; re-read the
+            challenge before retrying.
 
   /api/v1/sca/challenges/{id}/decision:
     post:
@@ -449,11 +456,31 @@ components:
           format: uuid
         challengeType:
           type: string
+          deprecated: true
+          description: Legacy documentation field; the current response uses purpose and method.
+        purpose:
+          type: string
+        method:
+          type: string
         status:
           type: string
           enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
         attemptsRemaining:
           type: integer
+          deprecated: true
+          description: Legacy documentation field; the current response uses attemptCount and maxAttempts.
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
         expiresAt:
           type: string
           format: date-time

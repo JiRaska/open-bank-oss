@@ -187,6 +187,7 @@ class ScaPactFolderProviderVerificationTest {
         challengeRepo.save(
             ScaChallenge(
                 id = SAVINGS_CHALLENGE_ID,
+                version = challengeRepo.findById(SAVINGS_CHALLENGE_ID)?.version ?: 0,
                 partyId = SAVINGS_PARTY_ID,
                 purpose = ScaPurpose.SAVINGS_WITHDRAW_APPROVAL,
                 method = ScaMethod.PUSH_NOTIFICATION,
