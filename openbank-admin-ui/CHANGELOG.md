@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.271.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.1...admin-ui-v0.271.0) (2026-10-03)
+
+
+### Features
+
+* **risk-engine:** sandbox reference curve sets, CZK IRRBB aggregate, usable IRRBB/forecast pages ([#11719](https://github.com/JiRaska/open-bank-oss/issues/11719)) ([9cfbc7a](https://github.com/JiRaska/open-bank-oss/commit/9cfbc7a882d7de062c165977e239dc09c343c6d9))
+
 ## [0.270.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.0...admin-ui-v0.270.1) (2026-10-02)
 
 
