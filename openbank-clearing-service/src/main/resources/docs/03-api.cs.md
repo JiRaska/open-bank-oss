@@ -31,8 +31,8 @@ Hodnoty `rail` (query / enum): `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`,
 | `debtorIban` | string | ano (kód) | až 34 znaků |
 | `creditorIban` | string | ano (kód) | až 34 znaků |
 | `debtorBic` / `creditorBic` | string | ne | až 11 znaků |
-| `amount` | number (BigDecimal) | ano | musí být `> 0` (DB CHECK) |
-| `currency` | string (CHAR(3)) | ne | výchozí `EUR` |
+| `amount` | number (BigDecimal) | ano | musí být `> 0` (DB CHECK); nejvýš tolik desetinných míst, kolik má dílčí jednotka měny, nikdy se nezaokrouhluje (#11604) |
+| `currency` | string (CHAR(3)) | ne | výchozí `EUR`; libovolný kód ISO 4217 s dílčí jednotkou, bez ohledu na velikost písmen (`eur` se uloží jako `EUR`) |
 | `rail` | enum | ne | výchozí `SEPA_SCT` |
 | `valueDate` | date | ne | výchozí dnešek, pokud chybí |
 | `endToEndId` | string | ne | až 35 znaků |
@@ -51,6 +51,15 @@ Resource vrací reaktivní `Uni<Response>`:
 - `201 Created` — úspěšný `submit`.
 - `200 OK` — úspěšná čtení, `settle`, `cycle/trigger`.
 - `404 Not Found` — `getBatch` / `getItem`, když id neexistuje.
+- `400 Bad Request` při submitu — dvojici `amount` + `currency` nelze vyjádřit jako kernel `Money` (#11604). Odmítne se
+  hned na vstupu, dřív než se vyhledá `paymentId` (idempotenční klíč submitu, ADR-0298), takže nevznikne žádná
+  clearingová položka a opravený pokus se stejným `paymentId` projde. Tělo je platformní RFC 9457 `ProblemDetail`
+  s položkou `violations[]`, která jmenuje pole; odmítnutá hodnota se nikdy nevrací:
+  - `AMOUNT_SCALE_EXCEEDED` — víc desetinných míst, než měna dovoluje (např. `100.505 EUR`, `1000.5 JPY`, `1.2345 KWD`);
+  - `CURRENCY_UNSUPPORTED` — nejde o kód ISO 4217 s dílčí jednotkou (např. `XYZ`, `EURO`, `XAU`, prázdná hodnota);
+  - `VALIDATION_ERROR` — částka chybí nebo je mimo rozsah (víc než 19 celých číslic).
+  Odpověď na `POST` nese částku v přesnosti měny (`100.50` pro požadavek `100.5`); čtení jdou ze sloupce
+  `NUMERIC(20,4)` jako dosud.
 - `500` s tělem `{ "error": "<zpráva>" }` — selhání `submit`, `settle`, `triggerCycle` jsou převedena na server-error odpověď nesoucí zprávu výjimky (`onFailure().recoverWithItem`). Typovaný RFC-7807 problem+json model zde **zatím** není.
 
 ## Verzování
