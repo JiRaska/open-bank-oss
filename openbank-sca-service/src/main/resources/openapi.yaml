@@ -120,6 +120,7 @@ paths:
     get:
       tags: [SCA]
       summary: List device credentials enrolled to a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listScaDevices
       parameters:
         - name: partyId
@@ -143,6 +144,7 @@ paths:
       tags: [SCA]
       summary: Enrol a device credential for decoupled approval (ADR-0021)
       description: >-
+        Customer callers must have a UUID party identity matching partyId.
         Idempotent on the credentialId natural key (ADR-0296): re-enrolling the same credential
         for the same party replays the original enrollment (201, no duplicate row;
         `credential_id UNIQUE`, V4, is the race backstop). The same credentialId presented for a
@@ -190,6 +192,7 @@ paths:
     get:
       tags: [SCA]
       summary: Live challenges awaiting a decision for a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listPendingScaChallenges
       parameters:
         - name: partyId
