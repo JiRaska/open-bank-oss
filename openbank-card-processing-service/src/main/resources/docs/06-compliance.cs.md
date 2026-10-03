@@ -11,6 +11,7 @@
 | **Účetní právo** | Karetní útrata je účetní záznam | Retence 7 let; každý přijatý clearing se zaúčtuje na railu `CARD`. |
 | **GDPR** | Útratové chování identifikovatelných zákazníků | Klasifikace confidential; reference přes id; žádná volnotextová kartová data. |
 | **DORA** | Provozní odolnost | Volání vydavatele fail closed, krátké timeouty, odolný outbox, liveness gauge, třístavové výsledky zaúčtování a skórování. |
+| **Pravidla schémat (chargebacky)** | Řešení reklamací | Kód důvodu, stav a lhůta respond-by ze sítě se ukládají doslovně vedle bankovního stavu, takže se lhůta nikdy nepočítá z přeložené hodnoty. |
 | **AML** | Vstup pro monitoring transakcí | Události v Kafce; fraud skórování je jen stínové a nic neblokuje. |
 
 ## Kontroly
@@ -22,6 +23,9 @@
 | Důvod zamítnutí jen u zamítnutí | CHECK omezení |
 | Žádná tiše nenapojená integrace | `NOT_BOUND` z vendor vazeb bez přihlašovacích údajů nebo bez smlouvy |
 | Sandbox acquirer nemůže pohybovat penězi v nasazeném prostředí | výchozí vypnuto, jen `ROLE_ADMIN`, 404 při vypnutí |
+| Jeden živý chargeback na transakci | částečný UNIQUE index `ux_card_dispute_live_per_authorization` a kontrola v aplikaci |
+| Žádná lokální reklamace bez případu v síti | otevření selhává uzavřeně; `network_case_id` je NOT NULL |
+| Zastaralý seznam tokenů se nikdy neukáže jako aktuální | každý výpis nese `source` (`NETWORK` / `LOCAL_MIRROR`) |
 | Autorizace přístupu | OIDC role + OPA akce `@Authorize` (poradní, dokud `AUTHZ_ENFORCE=false`; účinnou kontrolou je dnes kontrola role) |
 
 ## Známé mezery (uvedené, ne skryté)
@@ -29,7 +33,8 @@
 - `AUTHZ_ENFORCE=false`: rozhodnutí OPA je poradní.
 - Autorizační endpoint nemá rate limit (threat model §4).
 - Clearing, jehož zaúčtování selže, zůstává zaznamenaný a nezaúčtovaný, dokud někdo nezareaguje na výsledek `FAILED`.
-- Neexistuje napojení na schéma, 3-D Secure ani vendor vazba pro tokenizaci/reklamace.
+- Neexistuje napojení na schéma, 3-D Secure ani vendor vazba pro tokenizaci/reklamace; tokenový a reklamační desk běží jen proti simulátorům.
+- Vyhraný ani prohraný chargeback v této službě nepohne penězi; případná refundace nebo odpis je dnes mimo ni.
 
 ## GDPR
 

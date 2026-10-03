@@ -35,8 +35,8 @@ Všechna odchozí volání platformních služeb se autentizují jako služba (c
 graph TB
   subgraph "openbank-card-processing-service"
     direction TB
-    rest["REST<br/>CardProcessingResource<br/>SandboxAcquirerResource"]
-    uc["Aplikace<br/>CardProcessingService"]
+    rest["REST<br/>CardProcessingResource, SandboxAcquirerResource<br/>CardTokenResource, CardDisputeResource"]
+    uc["Aplikace<br/>CardProcessingService<br/>CardTokenService, CardDisputeService"]
     dom["Doména<br/>CardAuthorization, AuthorizationLifecycle<br/>SpendWindow, CardProcessingEvent"]
     persist["Persistence<br/>CardAuthorizationRepositoryImpl"]
     clients["Klienti<br/>CardIssuanceAdapter, TransactionLedgerPostingAdapter<br/>FraudScoringAdapter"]
@@ -173,13 +173,44 @@ Každý port má router, který čte jeden konfigurační klíč a vybere vazbu.
 
 - Vendor BIN adaptér bez nakonfigurovaných přihlašovacích údajů odpoví `NOT_BOUND` a žádný požadavek neodešle. U Mastercardu se bez consumer key nebo podpisového klíče nevytvoří žádný signer bean.
 - Výsledky jsou hodnoty `SchemeResult` nesoucí `CardScheme`, který odpověděl (`VISA`, `MASTERCARD`, `SIMULATOR`), nebo `SchemeFailure` (`NOT_BOUND`, `NOT_FOUND`, `UNAVAILABLE`, `UNAUTHENTICATED`, `MALFORMED`).
-- **Zatím bez volajícího:** v této službě tok autorizace používá jen `MerchantDataPort`. `BinLookupPort`, `TokenisationPort` a `DisputePort` jsou napojené, ale žádný use case ani REST endpoint je zatím nevolá. Matice schopností je v [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
+- **Volající:** `MerchantDataPort` používá tok autorizace, `TokenisationPort` `CardTokenService` a `DisputePort` `CardDisputeService`. `BinLookupPort` je napojený, ale žádný use case ani REST endpoint ho zatím nevolá. Matice schopností je v [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
+
+## Zrcadlo síťových tokenů (ADR-0283 fáze 3)
+
+`CardTokenService` je volajícím `TokenisationPort`. Tabulka `card_network_tokens` je **záznamem** banky o existenci tokenu; trezor patří síti.
+
+- **Vydání** — opakovaný `Idempotency-Key` vrátí první registraci. Karta musí být známá card-issuance (jinak 404 `CARD_NOT_FOUND`). Když vazba odpoví, řádek a `card.token.provisioned.v1` se zapíší v jedné transakci.
+- **Změna stavu** — `ACTIVE`, `SUSPENDED` nebo `DELETED`. `DELETED` je koncový, vynucený na agregátu (`TOKEN_TERMINAL`). Řádek zrcadla převezme stav vrácený sítí.
+- **Výpis** — nejprve se ptá síť. Pokud odpoví, odpovědí je seznam ze sítě doplněný o pole ze zrcadla (popisek requestora, čas vydání) a `source: NETWORK`; token, který zrcadlo nikdy nevidělo, má popisek requestora `not recorded by this bank`. Pokud neodpoví, odpovědí je zrcadlo se `source: LOCAL_MIRROR` a `degradedReason`. Živé čtení do zrcadla nezapisuje.
+- Selhání schématu se mapují na odmítnutí: `NOT_BOUND` / `UNAVAILABLE` / `UNAUTHENTICATED` ⇒ `SCHEME_UNAVAILABLE`, `NOT_FOUND` ⇒ `TOKEN_NOT_FOUND`, `MALFORMED` ⇒ `SCHEME_REFUSED`.
+
+## Reklamační desk (ADR-0283 fáze 3)
+
+`CardDisputeService` je volajícím `DisputePort`. Případ nese dva slovníky: bankovní `status` a síťový `schemeStatus`, uložený doslovně.
+
+```mermaid
+stateDiagram-v2
+  [*] --> OPEN: síť přidělila id případu
+  OPEN --> EVIDENCE_SUBMITTED: podány důkazy
+  EVIDENCE_SUBMITTED --> EVIDENCE_SUBMITTED: další důkazy
+  OPEN --> WON: refresh
+  OPEN --> LOST: refresh
+  OPEN --> WITHDRAWN: refresh
+  EVIDENCE_SUBMITTED --> WON: refresh
+  EVIDENCE_SUBMITTED --> LOST: refresh
+  EVIDENCE_SUBMITTED --> WITHDRAWN: refresh
+```
+
+- **Otevření** — kontroluje v tomto pořadí: opakování idempotenčního klíče; autorizace existuje; něco bylo zúčtováno (`NOTHING_CLEARED`); částka je kladná a nejvýše zúčtovaná částka (`AMOUNT_EXCEEDS_CLEARED`); pro autorizaci neexistuje živý případ (`OPEN` nebo `EVIDENCE_SUBMITTED`) (`ALREADY_DISPUTED`, vynuceno i částečným unikátním indexem); autorizace má network reference (`NO_NETWORK_REFERENCE`). Teprve pak se ptá síť. **Otevření selhává uzavřeně**: když vazba neodpoví, žádný řádek se nezapíše.
+- **Důkazy** — u koncového případu odmítnuty (`CASE_TERMINAL`); jinak se předají síti a případ přejde do `EVIDENCE_SUBMITTED` s referencí dokumentu.
+- **Refresh** — přečte stav ze sítě. `WON` / `RESOLVED_WON` / `REPRESENTED_WON` ⇒ `WON`; `LOST` / `RESOLVED_LOST` / `CHARGEBACK_ACCEPTED` ⇒ `LOST`; `WITHDRAWN` / `CANCELLED` ⇒ `WITHDRAWN`; jiná hodnota ponechá bankovní stav. Událost se zapíše, jen když se změnil některý ze stavů.
+- Žádný přechod reklamace v této službě nepohybuje penězi: vyhraný ani prohraný případ nic nezaúčtuje.
 
 ## Outbox (ADR-0050)
 
 - Řádek autorizace a jeho událost se zapisují v **jedné transakci** (`card_authorizations` + `card_outbox`).
 - `CardProcessingOutboxDispatcher` běží každých `openbank.outbox.poll-interval` (výchozí 5s), `concurrentExecution = SKIP`, s `@Bulkhead`, `@CircuitBreaker`, `@Retry` a `@Timeout`. Je to `suspend fun`, takže má Vert.x kontext.
-- Kafka klíč = id autorizace; nastavují se hlavičky `ce-id`, `idempotency-key` a `ce-type`. Sloupec `synthetic` (ADR-0252) se přenáší do transportní hlavičky.
+- Kafka klíč = id agregátu (autorizace, registrace tokenu nebo reklamačního případu); nastavují se hlavičky `ce-id`, `idempotency-key` a `ce-type`. Sloupec `synthetic` (ADR-0252) se přenáší do transportní hlavičky.
 - `openbank.outbox.dispatch-enabled: true` je nastaveno v `application.yaml`.
 
 ## Principy
