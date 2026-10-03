@@ -285,6 +285,10 @@ export const PERMISSIONS = {
   // Agent proposal reads/decisions are exposed by ProposalResource to these human roles;
   // demo/system-view users must not see an actionable approval queue that the backend rejects.
   "approvals:view":           [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
+  // Settlement status query: equals GET /api/v1/settlements/{id}'s @RolesAllowed(OPERATOR, ADMIN)
+  // (OPA `settlement.read` via operator-read-any). Deliberately narrower than approvals:view —
+  // compliance cannot read it, so the page must not be offered to them.
+  "settlements:view":         [ROLES.ADMIN, ROLES.OPERATOR],
   "agent:decide":             [ROLES.ADMIN, ROLES.OPERATOR, ROLES.COMPLIANCE],
   // DevOps findings are readable by system:view, but the devops-agent POST approval/rejection
   // endpoints are ADMIN-only. Keep HITL decision authority explicit in the UI matrix.
@@ -359,6 +363,7 @@ const ROUTE_PREFIXES: ReadonlyArray<readonly [Permission, readonly string[]]> = 
   ['treasury:deal:approve', ['/treasury/approvals']],
   ['treasury:nostro:read', ['/treasury/nostro']],
   ['approvals:view', ['/approvals']],
+  ['settlements:view', ['/settlements']],
   ['system:view', [
     '/devops', '/finops', '/iaops', '/infrastructure', '/observability', '/temporal',
     '/security', '/system',

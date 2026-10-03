@@ -105,7 +105,7 @@ data class SettlementResponse(
     val recoveryReason: String? = null,
 )
 
-private fun Settlement.toResponse() = SettlementResponse(
+internal fun Settlement.toResponse() = SettlementResponse(
     id = id,
     payerAccountId = payerAccountId,
     payeeAccountId = payeeAccountId,
