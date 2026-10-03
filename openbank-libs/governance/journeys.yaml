@@ -425,6 +425,15 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-card-processing-service
+      note: >-
+        ADR-0283 phase 1 (#8809). The card money path: authorise (hold) → clear → posted CARD-rail
+        journal through transaction-service. The journey for it is the one named above for
+        card-issuance, and it is blocked by the default blocker: a clearing posts a real debit, so
+        it cannot run until the SYNTHETIC taint reaches the ledger. Its in-repo sandbox acquirer is
+        off in every deployed environment. When the journey lands it should assert the posted
+        transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
+        — a SKIPPED_DISABLED posting also answers 200.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
