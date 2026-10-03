@@ -95,8 +95,10 @@ spec:
                 value: "noindex, nofollow"
             remove:
               - X-Powered-By
+      # Langfuse v3 web (langfuse-v3.yaml) since ADR-0328 wave B; the v2 Service `langfuse` is
+      # scaled to zero and goes in wave C.
       backendRefs:
-        - name: langfuse
+        - name: langfuse-web
           port: 3000
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
