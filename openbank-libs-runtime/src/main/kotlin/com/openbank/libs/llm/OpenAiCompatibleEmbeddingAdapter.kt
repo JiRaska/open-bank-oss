@@ -7,13 +7,13 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.security.BoundedBodyHandlers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jboss.logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -66,7 +66,7 @@ class OpenAiCompatibleEmbeddingAdapter(
                     ),
                 )
                 .build()
-            val resp = withContext(Dispatchers.IO) { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+            val resp = withContext(Dispatchers.IO) { http.send(request, BoundedBodyHandlers.ofString()) }
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("embedding backend returned HTTP %d", resp.statusCode())
                 metrics.recordCall(model, LlmCallMetricsPort.OUTCOME_HTTP_ERROR, 0, 0, System.nanoTime() - startedAt)
