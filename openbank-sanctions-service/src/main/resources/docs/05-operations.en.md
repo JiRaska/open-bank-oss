@@ -141,3 +141,8 @@ Per-service CI pipeline (`.github/workflows/ci-sanctions-service.yml`):
 3. CycloneDX SBOM generation
 4. Docker image build → push to registry
 5. CD: ArgoCD picks up the new tag from the GitOps manifest
+
+
+## Startup warm-up (#11890)
+
+sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so the libs-runtime warm-up (see openbank-libs docs, 05-operations) exercises this endpoint's security path before the pod reports ready. Measured on this service: first authenticated `GET /api/v1/sanctions/pending` after readiness, median 2622 ms without the warm-up, 967 ms with it; later requests 15–60 ms either way.

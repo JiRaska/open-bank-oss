@@ -119,3 +119,12 @@ Vše ostatní (Quarkus types, jakarta APIs, Redis client, Persistence API, Micro
 - Bug reports / questions → repo issues (label `area/libs`)
 - Security issue → SECURITY.md (gpg-encrypted email)
 - Compliance question → `docs/strategy/07-compliance-matrix.md` row "openbank-libs"
+
+
+## Zahřátí při startu a readiness (#11890)
+
+Každá služba postavená na `openbank-libs-runtime` před hlášením připravenosti zahřeje JVM. Po `StartupEvent` spustí `StartupWarmup` na vlastním vlákně: průchody Jacksonem, `select 1` na reaktivním poolu (pokud existuje) a volání sebe sama na `/api/v1/info` a na `openbank.warmup.protected-path` bez tokenu (v produkci 401, které i tak projde bezpečnostními filtry). `WarmupReadinessCheck` hlásí DOWN, dokud zahřátí neskončí, a nejpozději po `openbank.warmup.max-duration` (výchozí 20s) hlásí UP vždy. Argo Rollouts tak pošle provoz jen na zahřátý pod a žádný pod nezůstane mimo rotaci navždy.
+
+Proč: v sandboxu byl každý pomalý požadavek za 48 h první požadavek po startu podu (1–2 s proti 17–60 ms). Naměřený medián prvního požadavku se zahřátím 967 ms, bez něj 2622 ms.
+
+Konfigurace: `openbank.warmup.enabled` (výchozí true, v `%test` vypnuto), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Každý krok loguje `warm-up step <name>: <ms>`; selhání kroku se zaloguje a ostatní kroky pokračují.

@@ -119,3 +119,12 @@ Everything else (Quarkus types, jakarta APIs, Redis client, Persistence API, Mic
 - Bug reports / questions → repo issues (label `area/libs`)
 - Security issue → SECURITY.md (gpg-encrypted email)
 - Compliance question → `docs/strategy/07-compliance-matrix.md` row "openbank-libs"
+
+
+## Startup warm-up and readiness (#11890)
+
+Every service built on `openbank-libs-runtime` warms the JVM before it reports ready. After `StartupEvent`, `StartupWarmup` runs on its own thread: Jackson round-trips, a `select 1` on the reactive pool if present, and self-calls to `/api/v1/info` and to `openbank.warmup.protected-path` without a token (a 401 in production, which still exercises the security filters). `WarmupReadinessCheck` stays DOWN until it finishes and reports UP after `openbank.warmup.max-duration` (default 20s) in every case, so Argo Rollouts routes traffic only to a warm pod and never holds one out forever.
+
+Why: in the sandbox every slow request over 48h was the first request after a pod start (1–2 s vs 17–60 ms). Measured first-request median with the warm-up: 967 ms vs 2622 ms without.
+
+Config: `openbank.warmup.enabled` (default true, off in `%test`), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Each step logs `warm-up step <name>: <ms>`; a step failure is logged and does not stop the others.
