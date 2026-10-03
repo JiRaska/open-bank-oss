@@ -9,6 +9,7 @@ import com.openbank.libs.api.pagination.CursorPage
 import com.openbank.libs.api.pagination.PageInfo
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.libs.domain.payment.SettlementScope
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.temporal.TemporalConfig
@@ -38,7 +39,6 @@ import jakarta.inject.Inject
 import jakarta.persistence.PersistenceException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.math.RoundingMode
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -81,10 +81,6 @@ class TransactionService(
         private const val TRANSACTION_REVERSED_EVENT = "openbank.transactions.transaction.reversed"
         // The completed/failed event types moved with the terminal write into
         // PaymentActivitiesImpl (#4238) — they are emitted by the workflow, not by this caller.
-
-        // Scale for the implied FX rate on a sell-specified conversion (ADR-0107): rate is
-        // derived as settlement/payment and only carried for the ledger's FX posting.
-        private const val IMPLIED_FX_RATE_SCALE = 8
     }
 
     @Suppress("TooGenericExceptionCaught")
@@ -124,7 +120,7 @@ class TransactionService(
         // to ANY caller (domestic, SEPA, SEPA-instant, welcome-bonus, future rails) instead of each
         // sender having to setScale() itself. The FX/settlement leg in resolveSettlement already
         // normalizes its own amounts; Money's constructor invariant stays as a backstop.
-        val normalizedAmount = command.amount.setScale(currency.defaultFractionDigits, RoundingMode.HALF_UP)
+        val normalizedAmount = RoundingPolicy.LEDGER_POSTING.round(command.amount, currency)
         val amount = Money.of(normalizedAmount, command.currencyCode)
         // Business-rule violation (well-formed request, value breaks an invariant) ->
         // IllegalStateException maps to 422 via openbank-libs CommonExceptionMappers, in
@@ -341,16 +337,14 @@ class TransactionService(
         // The applied rate is implied (settlement / payment); the bank keeps the spread in
         // the FX-position GL, as on the derived path.
         settlementAmount?.takeIf { it.signum() > 0 }?.let { sell ->
-            val base = sell.setScale(settlement.defaultFractionDigits, RoundingMode.HALF_UP)
-            val impliedRate = base.divide(amount.amount, IMPLIED_FX_RATE_SCALE, RoundingMode.HALF_UP)
+            val base = RoundingPolicy.LEDGER_POSTING.round(sell, settlement)
+            val impliedRate = RoundingPolicy.FX_RATE.divide(base, amount.amount)
             return impliedRate to Money.of(base, settlementCcy)
         }
 
         val rate = fxRatePort.getRate(paymentCcy, settlementCcy)
             ?: throw FxRateUnavailableException("No FX rate quoted for $paymentCcy/$settlementCcy")
-        val baseAmount = amount.amount
-            .multiply(rate.askRate)
-            .setScale(settlement.defaultFractionDigits, RoundingMode.HALF_UP)
+        val baseAmount = RoundingPolicy.LEDGER_POSTING.round(amount.amount.multiply(rate.askRate), settlement)
         return rate.askRate to Money.of(baseAmount, settlementCcy)
     }
 

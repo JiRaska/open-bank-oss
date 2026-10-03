@@ -135,8 +135,8 @@ gates:
     mode: enforced
     rationale: "A synthetic marker forwarded over REST but replaced by a false default at the asynchronous event boundary makes test activity indistinguishable from real banking activity; both schema and writer mapping must survive together."
     review_after: "2027-08-25"
-    # 32 shared PanacheOutboxEntity implementations on 2026-09-03 (#4348). The floor moved 20 -> 30
-    # with the corpus glob: at 20 a third of the fleet could vanish from scope and still read green.
+    # 38 shared PanacheOutboxEntity/V2 implementations across both migration batches. Keep the floor at 30:
+    # migrating a service onto V2 must not make its synthetic-origin check disappear.
     min_subjects: 30
     selftest: python3 .github/scripts/check-synthetic-outbox-taint.py --self-test
     selftest_expect: pass
@@ -3131,6 +3131,58 @@ gates:
     selftest_inputs: [".github/scripts/check-money-rounding-inline.py"]
     run: |
       python3 .github/scripts/check-money-rounding-inline.py --root .
+
+  # ADR-0327 D9: every module that extends AbstractOutboxDispatcher carries a test extending
+  # OutboxDispatchConformanceIT, detected by the SUPERTYPE on a non-comment line (never by file
+  # name — five services carry a local *OutboxDispatchIT that inherits nothing from the kit). The
+  # subject set is derived from the dispatcher supertype; the 37 uncovered owners measured on
+  # 2026-10-01 are baselined by name and the baseline fails in both directions. ADVISORY in
+  # Phase 1 per the ADR, enforced in Phase 4 once the baseline is empty.
+  - id: outbox-conformance-it-present
+    name: "outbox dispatcher owners carry the conformance IT (ADR-0327 D9, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      OutboxDispatchConformanceIT is the only test layer that proves a service's real
+      reactive-Panache + Kafka outbox wiring (N1 event loop, N2 aggregate key, N3 headers,
+      PENDING to SENT); 37 of 38 dispatcher owners had none, so the kernel's outbox v2 can land
+      per service with no proof the service still relays. Advisory until the Phase 2/3
+      migration PRs have each added theirs.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags an uncovered owner, a file named like the kit that inherits nothing, a stale covered entry and a stale non-owner entry; the real run flagged a wrong baseline entry (agent-service) before it was corrected"
+    budget_seconds: 30
+    min_subjects: 19   # 38 dispatcher owners measured 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-conformance-it.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-conformance-it.py"]
+    run: |
+      python3 .github/scripts/check-outbox-conformance-it.py --root .
+
+  # ADR-0327 D11: a hand-rolled `FOR UPDATE SKIP LOCKED` in any openbank-*/src/main outside
+  # openbank-libs-runtime is a finding unless baselined. Comments are stripped first — a raw
+  # grep matches 70 files, 30 of them dispatcher KDoc that merely EXPLAINS the claim (the
+  # text-matching-guard lesson in .github/CLAUDE.md). Baseline: the 40 files measured on
+  # 2026-10-01 (38 outbox repositories + agent-service's audit outbox + domestic-payment's
+  # delegated-spend binding), by file and count; it may only shrink. detekt cannot see SQL in a
+  # string template, so this is a script gate. ADVISORY in Phase 1, enforced in Phase 4.
+  - id: outbox-claim-sql-ratchet
+    name: "hand-rolled outbox claim SQL ratchet (ADR-0327 D11, advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: >-
+      38 copies of one claim statement share every defect (no backoff, an OR the index cannot
+      serve, per-row markSent); ADR-0327 moves it into AbstractPanacheOutboxRepository. The
+      ratchet keeps a 39th copy from appearing while the fleet migrates, and makes every
+      migration PR shrink the baseline rather than leave a stale entry behind.
+    review_after: "2027-03-31"
+    verified: "2026-10-01 — advisory per ADR-0327 Phase 1; self-test flags a new site, a second site in a baselined file, a stale entry, a vanished file and proves comments (nested) do not count; the real run flagged one mis-keyed baseline path in both directions before it was corrected"
+    budget_seconds: 30
+    min_subjects: 38   # 77 modules with src/main scanned 2026-10-01; half
+    selftest: python3 .github/scripts/check-outbox-claim-sql.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-outbox-claim-sql.py"]
+    run: |
+      python3 .github/scripts/check-outbox-claim-sql.py --root .
   # ADR-0320 P1 (SSRF control): a service that builds its own java.net.http.HttpClient has no
   # egress allowlist, no private/metadata-range denial after DNS resolution and no rebinding
   # protection; libs-runtime's SafeHttpClient is the shared answer. Ratchet: a NEW
@@ -3530,6 +3582,25 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/resolve-record-deployment-version.sh --self-test
+
+  # The deployed-record reconciler re-records a sandbox deployment once the version it needed has
+  # been published (record-deployment is one-shot at gitops merge and races the fan-out's own
+  # contract jobs). Its self-test holds the measured 2026-10-02 state (85a0be3e pinned, 7ccd9bde
+  # recorded) as a known-positive; falsified five ways before wiring in (no drift detection,
+  # classify-always-current, ambiguity guessed, edge scope dropped, none-as-current) — each exits 1.
+  - id: pact-deployed-record-reconcile
+    selftest_exempt: "is-a-test-suite"
+    name: "sandbox deployment record follows the gitops pin (enforced)"
+    group: api
+    mode: enforced
+    budget_seconds: 20   # pure classification over fixtures, measured 0.1s
+    rationale: >-
+      The reconciler is the only control that corrects a sandbox deployment record left stale by
+      the one-shot merge-time recorder; a regression in its drift or classify logic would leave
+      consumers' can-i-deploy asking about versions no longer running while every tick stays green.
+    review_after: 2027-04-02
+    run: |
+      python3 .github/scripts/pact-reconcile-deployed-records.py --self-test
 
   # The verification reconciler's decision table (pact-reconcile-verifications.py) had a
   # --self-test that NOTHING ran: the workflow invokes the script for real every ~30 minutes and
@@ -4105,6 +4176,20 @@ gates:
     run: |
       python3 .github/scripts/check-llm-price-book.py --enforce
 
+  - id: otel-endpoint-declared
+    name: "every deployed Quarkus service declares an OTLP endpoint (enforced)"
+    group: gitops
+    mode: enforced
+    min_subjects: 50   # 66 Quarkus workloads in gitops components today (2026-09-30)
+    budget_seconds: 45   # 11.7s measured on the CI runner (66 workloads x build.gradle reads), ~1s locally
+    rationale: "A service without QUARKUS_OTEL_EXPORTER_OTLP_ENDPOINT exports every span to localhost:4317 in the cluster; nothing errors and Tempo cannot report a service it never heard from. customer-edge, the public entry point, shipped that way."
+    review_after: "2027-03-30"
+    selftest_inputs: [".github/scripts/check-otel-endpoint-declared.py"]
+    selftest: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --selftest
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-otel-endpoint-declared.py --enforce
   - id: alert-metric-emitted
     name: "every alert rule depends on a metric some code emits (issue #5733, enforced)"
     group: data
@@ -4963,6 +5048,23 @@ gates:
   # TLS verification may be relaxed only in %dev/%test (#10865). 53 services copied a top-level
   # `quarkus.oidc.tls.verification: none` (plus 8 oidc-client twins and 5 `${VAR:none}` defaults),
   # which applies to %prod too; inert only while the in-cluster Keycloak leg is plain http.
+  # Quarkus tests bind ephemeral ports (2026-09-30). 65 of 70 service modules ran @QuarkusTest on the
+  # fixed default 8081/9001, so two builds on one machine failed each other with QuarkusBindException
+  # all day; the fix is three system properties in the convention plugin, and this keeps them there.
+  - id: quarkus-test-ports-ephemeral
+    name: "Quarkus tests bind ephemeral HTTP, HTTPS and management ports (enforced)"
+    group: kotlin
+    budget_seconds: 20
+    mode: enforced
+    rationale: "A fixed Quarkus test port is shared by every build on the host, so concurrent runs fail each other with QuarkusBindException and the loser's tests read as SKIPPED; one missing system property in the convention plugin, or one module that skips it, reintroduces that for every future run."
+    review_after: "2027-03-31"
+    verified: "2026-09-30 -- against main's build files: FAIL with 9 findings (the convention plugin and both libs modules missing all three keys). With 8081, 8444 and 9001 held by a listener: account-service's provider replay failed on QuarkusBindException before the fix and passed 6/6 after; finrep's management-socket test passed 1/1 after. Self-test falsifies a dropped key, a pinned plugin value, a module without the plugin, a test-profile override, System.setProperty, and yaml/properties pins, against a compliant control."
+    min_subjects: 50   # 68 modules with Quarkus tests today (2026-09-30)
+    selftest: python3 .github/scripts/check-quarkus-test-ports-ephemeral.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-quarkus-test-ports-ephemeral.py"]
+    run: |
+      python3 .github/scripts/check-quarkus-test-ports-ephemeral.py
   - id: oidc-tls-verification-profile-scoped
     name: "OIDC TLS verification disabled only in %dev/%test (enforced)"
     group: security
@@ -5328,9 +5430,9 @@ gates:
     review_after: "2027-02-22"
     min_subjects: 25   # 33 today: 30 derived+declared service tokens + 3 governance globs
     when: pull_request
-    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test
+    selftest: python3 .github/scripts/check-agent-pr-guard.py --self-test && python3 .github/scripts/test-agent-pr-review.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-agent-pr-guard.py"]
+    selftest_inputs: [".github/scripts/check-agent-pr-guard.py", ".github/scripts/test-agent-pr-review.py"]
     run: |
       python3 .github/scripts/check-agent-pr-guard.py
 
@@ -5966,3 +6068,58 @@ gates:
     selftest_inputs: [".github/scripts/check-field-crypto-in-libs.py"]
     run: |
       python3 .github/scripts/check-field-crypto-in-libs.py --root .
+
+  # The shared libs had no benchmark and no performance regression signal of any kind. The JMH
+  # module (openbank-libs-benchmarks) is compared on ALLOCATION per op, which reproduces across
+  # machines; ns/op is only ever reported. This entry is the half that needs no JVM: the
+  # baseline's entries must be exactly the @Benchmark methods in the module, in both directions,
+  # so a new benchmark cannot go uncompared and a removed one cannot leave a stale number. The
+  # B/op comparison itself is the last step of .github/workflows/libs-bench.yml (needs a JMH run).
+  - id: libs-bench-alloc-baseline
+    name: "libs JMH allocation baseline covers every benchmark (advisory)"
+    group: kotlin
+    mode: advisory
+    rationale: "An allocation regression in Money, the idempotency fingerprint or the audit hash chain is paid on every request by every service and is invisible to every test; a baseline only protects the benchmarks it actually lists, so its scope is derived from the sources."
+    review_after: "2026-12-15"
+    verified: "2026-09-30 — static: 19 @Benchmark, 17 baseline entries + 2 UNSTABLE (MoneyBench.allocate/split, bimodal across forks, reported only), exit 0; --results from three local -f 1 runs all OK (worst compared spread 1.9 %, CanonicalJsonBench.write); the pre-change run against the same baseline is red on all five hex-site benchmarks (+99 % to +971 %)"
+    budget_seconds: 10
+    min_subjects: 15   # 19 @Benchmark methods 2026-09-30
+    selftest: python3 .github/scripts/check-bench-alloc-baseline.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-bench-alloc-baseline.py"]
+    run: |
+      python3 .github/scripts/check-bench-alloc-baseline.py --root .
+
+
+  - id: dr-restore-orchestration
+    name: "DR restore transport, result validation and owned cleanup"
+    group: gitops
+    mode: enforced
+    rationale: "A restore drill must reach its generated workload, reject invalid evidence and clean only resources owned by the current attempt. These orchestration tests do not establish database recovery or RPO."
+    review_after: "2027-03-13"
+    budget_seconds: 45
+    min_subjects: 1
+    selftest_exempt: "is-a-test-suite — the run: IS test-dr-restore-workflow.py, a unittest suite whose failure cases (HTTP failure, unbalanced, vacuous, wrong-year, mismatched totals, cleanup failure) are its own negatives"
+    run: python3 .github/scripts/test-dr-restore-workflow.py
+  # `quarkus.log.console.json` is read by exactly one thing, the quarkus-logging-json extension.
+  # Without it on the application's classpath the key is accepted, does nothing, and the console
+  # keeps the TEXT pattern formatter — so the config described structured logging the process did
+  # not do. The shared config and ~30 services asked for it and no module carried the extension.
+  # Decidable from the build files: a Quarkus application module that asks (own resources or a
+  # project dependency's) must declare the extension (directly, via a catalog alias, or through a
+  # convention plugin it applies). StructuredLogEncodingIT in openbank-ledger-service is the
+  # by-effect half — it boots the app and asserts the console formatter really emits JSON.
+  - id: json-logging-extension-present
+    name: "JSON console logging requested => quarkus-logging-json declared (enforced)"
+    group: kotlin
+    mode: enforced
+    rationale: "A config key nobody reads is invisible from the config; pairing the request with the extension that reads it is the only place the mismatch is decidable without booting every service."
+    review_after: "2027-03-30"
+    verified: "2026-09-30 — 67 Quarkus application modules examined, 0 findings; removing the convention-plugin dependency flags 66 (exit 1)"
+    budget_seconds: 10
+    min_subjects: 33   # 67 measured 2026-09-30; half, so the fleet can shrink without a red
+    selftest: python3 .github/scripts/check-json-logging-extension.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-json-logging-extension.py"]
+    run: |
+      python3 .github/scripts/check-json-logging-extension.py --enforce

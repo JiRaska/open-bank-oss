@@ -7,6 +7,7 @@ package com.openbank.sepa.integration
 import com.github.tomakehurst.wiremock.client.WireMock.containing
 import com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor
 import com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.out.SchemeGatewayPort
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
@@ -47,8 +48,7 @@ class SchemeGatewaySimulatorIT {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob Creditor",
         creditorBic = "BNPAFRPPXXX",
-        amount = BigDecimal("12.34"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("12.34"), "EUR"),
         remittanceInfo = "Invoice IT-1",
         endToEndId = "E2E-IT-0001",
         rejectReason = null,

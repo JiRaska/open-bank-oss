@@ -132,4 +132,34 @@ class TrustedListServiceTest {
         svc.refresh()
         verify(exactly = 0) { store.replaceDynamicTrust(any()) }
     }
+
+    private fun metricsFor(inlineList: String?, listUrl: String?): DomainMetrics {
+        val metrics = mockk<DomainMetrics> {
+            every { registerWorkflowLiveness(any(), any()) } returns mockk(relaxed = true)
+        }
+        TrustedListService(
+            url = Optional.ofNullable(listUrl),
+            inline = Optional.ofNullable(inlineList),
+            anchorJwksJson = Optional.empty(),
+            trustStore = mockk(relaxed = true),
+            objectMapper = mapper,
+            clock = testClock,
+            domainMetrics = metrics,
+        ).registerLiveness()
+        return metrics
+    }
+
+    @Test
+    fun `no source configured registers no workflow liveness (would otherwise alert forever)`() {
+        val metrics = metricsFor(inlineList = null, listUrl = "  ")
+        verify(exactly = 0) { metrics.registerWorkflowLiveness(any(), any()) }
+    }
+
+    @Test
+    fun `a configured source registers workflow liveness`() {
+        val byUrl = metricsFor(inlineList = null, listUrl = "https://tl.example")
+        val byInline = metricsFor(inlineList = signedList(), listUrl = null)
+        verify(exactly = 1) { byUrl.registerWorkflowLiveness(any(), any()) }
+        verify(exactly = 1) { byInline.registerWorkflowLiveness(any(), any()) }
+    }
 }

@@ -83,6 +83,9 @@ kover {
 }
 
 tasks.test {
+    // The hosted CI default 512 MiB heap OOMed during the Quarkus integration suite.
+    maxHeapSize = "2g"
+
     // The convention plugin pins DOCKER_HOST to the retired tcp://localhost:2375
     // (the OrbStack/EC2 endpoint). The ephemeral ARC dind pod (ADR-0053) exposes the
     // daemon on the unix socket instead, so for the Testcontainers-backed ITs we

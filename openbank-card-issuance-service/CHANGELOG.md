@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.27.0](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.7...card-issuance-service-v0.27.0) (2026-10-02)
+
+
+### Features
+
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+
 ## [0.26.7](https://github.com/JiRaska/open-bank-oss/compare/card-issuance-service-v0.26.6...card-issuance-service-v0.26.7) (2026-09-26)
 
 

@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.integration
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.out.SepaPaymentOutboxMessage
 import com.openbank.sepa.application.port.out.SepaPaymentRepository
 import com.openbank.sepa.domain.model.SepaPayment
@@ -53,8 +54,7 @@ class PaymentConfirmationSimulatorIT {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob Creditor",
         creditorBic = "BNPAFRPPXXX",
-        amount = BigDecimal("99.90"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("99.90"), "EUR"),
         remittanceInfo = "IT confirmation",
         endToEndId = "E2E-IT-CONF-$id",
         rejectReason = null,

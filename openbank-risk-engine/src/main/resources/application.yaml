@@ -161,8 +161,26 @@ mp:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    outgoing:
+      # ADR-0313 D9: risk-limit early-warning / breach events, relayed from risk_outbox by
+      # RiskOutboxDispatcher. The KafkaTopic CR is openbank-infra/gitops/components/risk/kafka-topic.yaml
+      # and the Write ACL is on this service's KafkaUser (kafka-risk-engine-mtls.yaml). Nested keys only
+      # (#686, #2945).
+      risk-limit-events-out:
+        connector: smallrye-kafka
+        topic: openbank.risk.limit.events
+        client:
+          id: risk-engine-limit-events-${quarkus.uuid}
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
 
 openbank:
+  outbox:
+    # Defaults to FALSE fleet-wide. Without this line no risk.limit.* event ever leaves risk_outbox:
+    # no error, attempt_count stays 0, and a breach reaches nobody.
+    dispatch-enabled: true
   risk:
     # ADR-0313 D13: a run says which world it describes. Defaults to synthetic, so a run is
     # labelled production only where an environment explicitly says so.
@@ -187,6 +205,13 @@ openbank:
       # itself (EodSnapshotScheduler) — same property-naming and Europe/Prague zone convention as
       # ledger-service's openbank.ledger.accounting-day.cron (AccountingDayScheduler). No key here
       # unless an environment needs to override it, same as that scheduler's own application.yaml.
+    reference-curves:
+      # ADR-0313 D4/D13: give every recent snapshot as-of date the sandbox reference curve set —
+      # illustrative demo quotes, provenance `synthetic`, source text "NOT market data" — so IRRBB,
+      # cash flows and the liquidity forecast have a curve set as of the run's own date. Off by
+      # default; the seeder refuses outright where openbank.risk.provenance is production.
+      # Cadence keys `every` (10m) and `delay` (30s) default in the @Scheduled annotation.
+      enabled: ${OPENBANK_RISK_REFERENCE_CURVES_ENABLED:false}
     # ADR-0313 phase 1: IRRBB supervisory shocks, `CCY=parallel/short/long` in bp, `;`-separated.
     # Shock sizes (parallel/short/long, bp) and the post-shock floor are the EU supervisory outlier
     # test values: Commission Delegated Regulation (EU) 2024/856 (RTS on SOT, Art. 98(5a) CRD),
@@ -652,6 +677,47 @@ openbank:
             start: "2026-12-01"
             end: "2026-12-31"
             base-reference-date: "2026-11-30"
+    # ADR-0313 D9: declarative risk limits, evaluated on every TIED_OUT run (GET .../limits, and by the
+    # EOD scheduler, which writes an event per EARLY_WARNING / BREACH to the outbox). VERSIONED sets —
+    # bump a set's version on ANY change to it; every evaluation and every event names id and version.
+    # The metric fixes the direction (lcr / nsfr / total-capital-ratio are floors; irrbb-eve-outlier /
+    # large-exposure-bank are ceilings); early-warning sits on the safe side of the limit. Every key is
+    # required (LimitsConfig is a mapping), so nothing here has a code default.
+    # Not declared: an open FX position per currency — the snapshot carries no FX derivative legs and
+    # the ledger's FX revaluation accounts (1990-1997) are not modelled, so no net open position is
+    # computable from the data.
+    limits:
+      parameter-set-id: openbank-risk-appetite
+      parameter-sets:
+        openbank-risk-appetite:
+          version: "1"
+          source: "Regulatory minima (CRR, Delegated Regulations (EU) 2015/61 and 2024/856) as limits; every early-warning threshold is a risk-appetite POLICY choice awaiting ALCO sign-off"
+          limits:
+            lcr-min:
+              metric: lcr
+              limit: 1.00
+              early-warning: 1.10
+              citation: "Delegated Regulation (EU) 2015/61 Art. 4(1), CRR Art. 412(1): LCR at least 100 %; early warning 110 % POLICY"
+            nsfr-min:
+              metric: nsfr
+              limit: 1.00
+              early-warning: 1.05
+              citation: "CRR Art. 413(1), Art. 428b(1): NSFR at least 100 %; early warning 105 % POLICY"
+            total-capital-ratio-min:
+              metric: total-capital-ratio
+              limit: 0.08
+              early-warning: 0.105
+              citation: "CRR Art. 92(1)(c): total capital ratio 8 %; early warning 10.5 % = 8 % + 2.5 % capital conservation buffer (CRD Art. 129) POLICY — Pillar 2 and other buffers not applied"
+            irrbb-eve-outlier:
+              metric: irrbb-eve-outlier
+              limit: 0.15
+              early-warning: 0.12
+              citation: "CRD Art. 98(5)(a), Delegated Regulation (EU) 2024/856: supervisory outlier test, EVE decline over 15 % of Tier 1; early warning 12 % POLICY"
+            large-exposure-bank-max:
+              metric: large-exposure-bank
+              limit: 0.25
+              early-warning: 0.20
+              citation: "CRR Art. 395(1): exposure to one client or group at most 25 % of Tier 1; the EUR 150m alternative for institutions is NOT applied (conservative); early warning 20 % POLICY"
   rate-limit:
     enabled: true
     max-concurrent-requests: 100

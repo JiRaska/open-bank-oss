@@ -10,6 +10,7 @@ import com.openbank.delegation.domain.model.SpendReservationOperationType
 import com.openbank.delegation.domain.model.SpendReservationState
 import com.openbank.libs.domain.money.CurrencyCode
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -18,7 +19,6 @@ import jakarta.persistence.Enumerated
 import jakarta.persistence.Id
 import jakarta.persistence.Table
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -84,7 +84,7 @@ class SpendReservationEntity : PanacheEntityBase() {
          */
         fun toMoney(amount: BigDecimal, currency: String): Money {
             val code = CurrencyCode.of(currency.trim())
-            return Money(amount.setScale(code.defaultFractionDigits, RoundingMode.HALF_EVEN), code)
+            return Money(RoundingPolicy.MONEY_SCALE.round(amount, code), code)
         }
 
         fun fromDomain(r: SpendReservation): SpendReservationEntity = SpendReservationEntity().apply {

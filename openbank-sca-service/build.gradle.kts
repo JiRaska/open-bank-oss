@@ -59,6 +59,8 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     // sca-events-out Kafka emitter is switched to in-memory connector in tests.
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    // Consumer-driven contract for this service's outbound money-path call (issue #8345).
+    testImplementation(libs.pact.consumer)
 }
 
 tasks.test {
@@ -113,4 +115,10 @@ pitest {
     timestampedReports = false
     threads = 4
     excludedClasses = setOf("com.openbank.sca.domain.*Kt")
+}
+
+// The complete suite boots several Quarkus profiles; the default 512m fork exhausted its heap
+// during the trace-contract IT. Match the existing balance/account test budget, scoped here.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
 }

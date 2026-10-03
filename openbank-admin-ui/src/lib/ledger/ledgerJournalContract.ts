@@ -73,6 +73,11 @@ function parseLine(value: unknown): LedgerJournalLine {
   }
 }
 
+/** One journal entry (`GET /api/v1/journals/{id}`), validated like a page row. */
+export function parseLedgerJournalEntry(value: unknown): LedgerJournalEntry {
+  return parseEntry(value)
+}
+
 function parseEntry(value: unknown): LedgerJournalEntry {
   if (!isRecord(value) || !Array.isArray(value.lines)) throw new Error('Invalid ledger entry')
   const status = text(value, 'status')

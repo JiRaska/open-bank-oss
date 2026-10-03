@@ -12,6 +12,12 @@ interface TieOutRunRepository {
 
     suspend fun save(record: TieOutRunRecord): TieOutRunRecord
 
+    /**
+     * The run for the highest `as_of` checked (newest `runAt` among runs of that day) — the
+     * forward catch-up cursor for [com.openbank.ledger.infrastructure.schedule.TieOutScheduler]
+     * and the freshness subject of the watchdog. Ordered by `as_of`, not `runAt`, so a re-check of
+     * an older day (which has the newest `runAt`) cannot move the cursor backwards.
+     */
     suspend fun findLatest(): TieOutRunRecord?
 
     /**
