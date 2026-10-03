@@ -5,6 +5,7 @@
 package com.openbank.sepa.application.workflow
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.out.AmlCasePort
 import com.openbank.sepa.application.port.out.FraudScoreOutcome
@@ -69,8 +70,7 @@ class SepaPaymentActivitiesImplTest {
         creditorIban = "GB29NWBK60161331926819",
         creditorName = "Bob",
         creditorBic = null,
-        amount = BigDecimal("100.00"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("100.00"), "EUR"),
         remittanceInfo = null,
         endToEndId = "E2E001",
         rejectReason = null,

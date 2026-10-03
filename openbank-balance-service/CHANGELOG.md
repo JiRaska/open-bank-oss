@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.0](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.3...balance-service-v1.18.0) (2026-10-02)
+
+
+### Features
+
+* **balance:** consume cover reservations atomically ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 6) ([#11805](https://github.com/JiRaska/open-bank-oss/issues/11805)) ([acda263](https://github.com/JiRaska/open-bank-oss/commit/acda263f3b632eb3fa569f4ff7f3343571eaa80b))
+
 ## [1.17.3](https://github.com/JiRaska/open-bank-oss/compare/balance-service-v1.17.2...balance-service-v1.17.3) (2026-09-26)
 
 

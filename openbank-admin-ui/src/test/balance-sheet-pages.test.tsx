@@ -36,6 +36,7 @@ import SnapshotLiquidityPage from '@/app/balance-sheet/snapshots/[id]/liquidity/
 import SnapshotLiquidityForecastPage from '@/app/balance-sheet/snapshots/[id]/liquidity-forecast/page'
 import SnapshotMinReservesPage from '@/app/balance-sheet/snapshots/[id]/min-reserves/page'
 import SnapshotsPage from '@/app/balance-sheet/snapshots/page'
+import { bankToday } from '@/components/balance-sheet/model'
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
@@ -150,6 +151,29 @@ describe('ledger backfill void — four-eyes in the console (#10969, #11487)', (
     expect(options).toEqual(['src-1'])
   })
 
+  it('reads like a finance document: no raw state enums, no truncated ids, styled table headers', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByText('petr.finance')
+    expect(screen.getAllByText(/Čeká na schválení|Awaiting approval/).length).toBe(2)
+    expect(screen.queryByText(/^(PROPOSED|APPROVED|EXECUTED|UNWOUND)$/)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/#\d{4,}/)
+    expect(document.body.textContent).not.toContain('UNWOUND')
+    const option = screen.getAllByRole('option')[0]
+    expect(option.textContent).toMatch(/2 (úvěrů|loans), 13 (zápisů|entries)/)
+    expect(option.textContent).not.toContain('src-1')
+    const headers = screen.getAllByRole('columnheader').map(h => h.textContent)
+    expect(headers).toEqual(expect.arrayContaining([expect.stringMatching(/Průběh schválení|Approval trail/)]))
+    expect(screen.getAllByRole('table').every(tb => tb.className.includes('data-table'))).toBe(true)
+  })
+
+  it('states the dry-run as a plain summary with the total amount', async () => {
+    await renderPage(<LedgerBackfillVoidPage />)
+    await screen.findAllByRole('option')
+    fireEvent.click(screen.getByRole('button', { name: /Spočítat plán|Compute plan/ }))
+    const note = await screen.findByRole('note')
+    expect(note.textContent?.replace(/[  ]/g, ' ')).toMatch(/(Storno vrátí 1 úvěrů a vytvoří 352 protizápisů v celkové výši 1,00 Kč|reverses 1 loans and creates 352 offsetting entries totalling CZK 1\.00)/)
+  })
+
   it('dry-runs the chosen source and proposes with an Idempotency-Key', async () => {
     await renderPage(<LedgerBackfillVoidPage />)
     await screen.findAllByRole('option')
@@ -203,6 +227,35 @@ describe('snapshots', () => {
     expect(await screen.findByRole('button', { name: /Build snapshot|Sestavit snímek/ })).toBeTruthy()
   })
 
+  it('blocks a future as-of (max = Prague today, hint, no request) and allows today', async () => {
+    session.roles = ['ROLE_RISK']
+    router = () => json({ runs: [] })
+    await renderPage(<SnapshotsPage />)
+    const input = (await screen.findByLabelText(/Datum snímku|Snapshot as-of date/)) as HTMLInputElement
+    const btn = screen.getByRole('button', { name: /Build snapshot|Sestavit snímek/ }) as HTMLButtonElement
+    const today = bankToday()
+    expect(input.max).toBe(today)
+    fireEvent.change(input, { target: { value: '9999-12-31' } })
+    expect(btn.disabled).toBe(true)
+    expect(screen.getByRole('alert').textContent).toMatch(/v budoucnosti|in the future/)
+    fireEvent.click(btn)
+    expect(calls.some(c => c.init?.method === 'POST')).toBe(false)
+    fireEvent.change(input, { target: { value: today } })
+    expect(btn.disabled).toBe(false)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+
+  it('surfaces the server 400 message when the engine refuses the as-of', async () => {
+    session.roles = ['ROLE_RISK']
+    router = (_url, init) => init?.method === 'POST'
+      ? json({ error: "field 'asOf' must not be after the current business date (2026-10-01)" }, 400)
+      : json({ runs: [] })
+    await renderPage(<SnapshotsPage />)
+    fireEvent.change(await screen.findByLabelText(/Datum snímku|Snapshot as-of date/), { target: { value: bankToday() } })
+    fireEvent.click(screen.getByRole('button', { name: /Build snapshot|Sestavit snímek/ }))
+    expect(await screen.findByText(/must not be after the current business date/)).toBeTruthy()
+  })
+
   it('shows a human requester as-is, a system: one as a scheduled-run badge, and — for a null/missing one', async () => {
     router = () => json({
       runs: [
@@ -251,6 +304,86 @@ describe('snapshots', () => {
     expect(screen.getByText(/GL_ACCOUNT positions carry no contract terms/)).toBeTruthy()
     expect(calls.some(c => c.url.includes('/cash-flows?curveSetId=cs-1'))).toBe(true)
     expect(document.querySelector('a[href="/balance-sheet/snapshots/run-2/capital"]')).not.toBeNull()
+  })
+
+  it('shows a badge per limit status, and a NOT_EVALUABLE limit with its reason and no figure', async () => {
+    const limit = (limitId: string, status: string, value: number | null, extra: Record<string, unknown> = {}) => ({
+      limitId, metric: limitId, metricDescription: `${limitId} description`, bound: 'MIN', limit: 1, earlyWarning: 1.1,
+      status, value, basis: value === null ? null : `${limitId} basis`, reason: value === null ? `${limitId} gap reason` : null,
+      citation: 'CRR', ...extra,
+    })
+    router = url => {
+      if (url.includes('/limits')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30', provenance: 'synthetic',
+          limitSet: { id: 'openbank-risk-appetite', version: '1', source: 'src' }, curveSetId: null,
+          limits: [
+            limit('lcr-min', 'BREACH', 0.5),
+            limit('nsfr-min', 'EARLY_WARNING', 1.02),
+            limit('total-capital-ratio-min', 'OK', 0.44),
+            limit('irrbb-eve-outlier', 'NOT_EVALUABLE', null, { bound: 'MAX', limit: 0.15, earlyWarning: 0.12 }),
+          ],
+          summary: { OK: 1, EARLY_WARNING: 1, BREACH: 1, NOT_EVALUABLE: 1 }, notes: [],
+        })
+      }
+      if (url.includes('/instruments')) return json({ runId: 'run-4', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    await screen.findByText('lcr-min')
+    expect(calls.some(c => c.url === '/api/svc/risk-engine/api/v1/risk/snapshots/run-4/limits')).toBe(true)
+    const row = (id: string) => screen.getByText(id).closest('tr') as HTMLElement
+    expect(row('lcr-min').textContent).toMatch(/Breach|Překročeno/)
+    expect(row('lcr-min').querySelector('.badge-danger')).not.toBeNull()
+    expect(row('nsfr-min').querySelector('.badge-warning')).not.toBeNull()
+    expect(row('total-capital-ratio-min').querySelector('.badge-success')).not.toBeNull()
+    const gap = row('irrbb-eve-outlier')
+    expect(gap.textContent).toMatch(/Not evaluable|Nelze vyhodnotit/)
+    expect(gap.textContent).toContain('irrbb-eve-outlier gap reason')
+    expect(gap.querySelector('.badge-success')).toBeNull() // a gap is never green
+    expect(gap.textContent).not.toMatch(/0 %/)
+  })
+
+  it('a limits read that fails is shown as unavailable, never as all-clear', async () => {
+    router = url => {
+      if (url.includes('/limits')) return json({ error: 'boom' }, 500)
+      if (url.includes('/instruments')) return json({ runId: 'run-5', asOf: '2026-09-30', instruments: [] })
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-5', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'synthetic', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-5' })} />)
+    const heading = await screen.findByText(/^(Risk limits|Rizikové limity)$/)
+    const card = heading.closest('.card') as HTMLElement
+    await vi.waitFor(() => expect(card.textContent!.length).toBeGreaterThan(heading.textContent!.length))
+    expect(card.querySelector('table')).toBeNull()
+    expect(card.querySelector('.badge-success')).toBeNull()
+    expect(screen.queryByText(/Within limit|V limitu/)).toBeNull()
+  })
+
+  it('shows a loan instrument by its contract number, and an instrument without one by its id', async () => {
+    const instrument = (id: string, contractNumber?: string | null) => ({
+      id, kind: 'AMORTISING_LOAN', glAccountCode: '1200', currency: 'CZK', outstanding: 1000, valueDate: '2026-01-10',
+      maturityDate: '2027-01-15', rateTerms: null, counterpartyRef: null, ifrs9Stage: null, loan: null,
+      ...(contractNumber === undefined ? {} : { contractNumber }),
+    })
+    router = url => {
+      if (url.includes('/instruments')) {
+        return json({
+          runId: 'run-4', asOf: '2026-09-30',
+          instruments: [instrument('loan-uuid-1', 'UV-2026-000123'), instrument('loan-uuid-2', null), instrument('loan-uuid-3')],
+        })
+      }
+      if (url.includes('/curve-sets')) return json({ curveSets: [] })
+      return json({ id: 'run-4', asOf: '2026-09-30', recordedAt: '2026-09-30T06:00:00Z', provenance: 'production', status: 'TIED_OUT', positionCount: 3, mismatchCount: 0, inputHash: 'abcdef0123456789', mismatches: [] })
+    }
+    await renderPage(<SnapshotDetailPage params={Promise.resolve({ id: 'run-4' })} />)
+    // #11107: the loan with a number is referenced by it; the others fall back to the id handle.
+    const numbered = await screen.findByRole('button', { name: /UV-2026-000123/ })
+    expect(numbered.getAttribute('title')).toMatch(/The reference is the contract number/)
+    const fallbacks = screen.getAllByRole('button', { name: /Loan LOAN/ })
+    expect(fallbacks).toHaveLength(2)
+    expect(fallbacks[0].getAttribute('title')).toMatch(/No contract number/)
   })
 })
 
@@ -706,5 +839,91 @@ describe('ČNB minimum reserve requirement', () => {
     await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
     await act(async () => { await Promise.resolve() })
     expect(screen.queryByTestId('total-holdings')).toBeNull()
+  })
+})
+
+// Owner feedback: the IRRBB and liquidity-forecast pages showed a raw run UUID, an empty unlabeled
+// curve-set select and a free-text Tier 1 field with no explanation.
+describe('IRRBB and liquidity forecast — run context, curve-set picker and Tier 1', () => {
+  const RUN_ID = '01a0f402-890a-71ed-9f55-d54f11f19f89'
+  const RUN = {
+    id: RUN_ID, asOf: '2026-09-30', recordedAt: '2026-09-30T20:30:01Z', provenance: 'synthetic', status: 'TIED_OUT',
+    positionCount: 129, mismatchCount: 0, inputHash: 'abc', mismatches: [], requestedBy: 'system:risk-engine-eod-snapshot',
+  }
+  const SET = {
+    id: 'cs-ref', asOf: '2026-09-30', provenance: 'synthetic', recordedAt: '2026-10-01T06:00:00Z',
+    source: 'OpenBank sandbox reference curves v1', indices: ['CZEONIA', 'ESTR', 'EURIBOR_3M', 'PRIBOR_3M'],
+  }
+  const routeWith = (opts: { sets: unknown[]; capital?: unknown; irrbb?: (url: string) => unknown; forecast?: unknown }) => (url: string) => {
+    if (url.includes('/curve-sets')) return json({ curveSets: opts.sets })
+    if (url.includes('/capital')) return opts.capital ? json(opts.capital) : json({ error: 'not here' }, 404)
+    if (url.includes('/irrbb')) return json(opts.irrbb ? opts.irrbb(url) : IRRBB(null, false))
+    if (url.includes('/liquidity-forecast')) return json(opts.forecast ?? FORECAST(null, true))
+    if (url.endsWith(`/snapshots/${RUN_ID}`)) return json(RUN)
+    return json({}, 404)
+  }
+
+  it('describes the run in words, keeps the id small, and asks only for curve sets of the run date', async () => {
+    router = routeWith({ sets: [SET] })
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: RUN_ID })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    const subtitle = screen.getByTestId('run-subtitle').textContent ?? ''
+    expect(subtitle).toMatch(/30\. 9\. 2026|30\/09\/2026/)
+    expect(subtitle).toMatch(/129 (pozic|positions)/)
+    expect(subtitle).toMatch(/plánovaný denní běh|scheduled end-of-day run/)
+    expect(subtitle).not.toContain(RUN_ID)
+    expect(calls.some(c => c.url.includes('/curve-sets?') && c.url.includes('asOf=2026-09-30'))).toBe(true)
+    const option = screen.getByRole('option') as HTMLOptionElement
+    expect(option.textContent).toMatch(/^CZK \+ EUR · (k|as of) .+ · OpenBank sandbox reference curves v1 · (ukázková data|demo data)$/)
+    expect(option.textContent).not.toContain('cs-ref')
+  })
+
+  it('with no curve set for the run date, disables the select, links to the curve-set section and computes nothing', async () => {
+    router = routeWith({ sets: [] })
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: RUN_ID })} />)
+    const cta = await screen.findByTestId('curve-set-cta')
+    expect(cta.querySelector('a')?.getAttribute('href')).toBe('/balance-sheet/curve-sets')
+    expect((screen.getByLabelText(/^(Yield-curve set|Sada výnosových křivek)$/) as HTMLSelectElement).disabled).toBe(true)
+    expect(calls.some(c => c.url.includes('/irrbb'))).toBe(false)
+  })
+
+  it('prefills Tier 1 from the run’s own-funds read, says where it came from, and states the verdict in words', async () => {
+    router = routeWith({ sets: [SET], capital: CAP(), irrbb: url => url.includes('tier1Capital=3600') ? { ...IRRBB(0.05, true), outlierTest: { ...IRRBB(0.05, true).outlierTest, tier1Capital: 3600, currency: 'CZK', breached: false } } : IRRBB(null, false) })
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: RUN_ID })} />)
+    const source = await screen.findByTestId('tier1-from-capital')
+    expect(source.textContent).toMatch(/převzato z výpočtu kapitálu|taken from this snapshot's Pillar 1/)
+    expect(source.textContent).toMatch(/bcbs-d424-sa v1/)
+    await screen.findByTestId('sot-verdict')
+    expect(calls.some(c => c.url.includes('/irrbb') && c.url.includes('tier1Capital=3600'))).toBe(true)
+    expect(screen.getByTestId('sot-verdict').textContent).toMatch(/pod prahem 15 %|below the 15 % threshold/)
+    // An explicit override is possible, and only then is the input shown.
+    expect(screen.queryByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Override|Zadat jinou hodnotu/ }))
+    expect(screen.getByLabelText(/^(Tier 1 capital|Kapitál Tier 1)$/)).toBeTruthy()
+  })
+
+  it('explains what Tier 1 is for when the run has no own funds to take it from', async () => {
+    router = routeWith({ sets: [SET] })
+    await renderPage(<SnapshotIrrbbPage params={Promise.resolve({ id: RUN_ID })} />)
+    await screen.findByText(/Tier 1 not supplied — the ratio|Tier 1 nezadán/)
+    expect(screen.getByText(/změna EVE nad 15 % Tier 1|EVE change above 15 % of Tier 1/)).toBeTruthy()
+    // The label names the currency the engine compares Tier 1 in (this EUR-only fixture: EUR).
+    expect(screen.getByText(/^(Kapitál Tier 1 v EUR|Tier 1 capital in EUR)$/)).toBeTruthy()
+  })
+
+  it('liquidity forecast: same run context and picker, and the survival horizon as a sentence', async () => {
+    router = routeWith({ sets: [SET], forecast: FORECAST(12, true) })
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: RUN_ID })} />)
+    const survival = await screen.findByTestId('survival-CZK')
+    expect(survival.textContent).toMatch(/Banka vydrží 11 dní při scénáři „behaviorální model nmd-linear-core v1\.0\.0“|The bank survives 11 day\(s\) under the "behavioural model nmd-linear-core v1\.0\.0" scenario/)
+    expect(screen.getByTestId('run-subtitle').textContent).not.toContain(RUN_ID)
+    expect(calls.some(c => c.url.includes('/liquidity-forecast') && c.url.includes('curveSetId=cs-ref'))).toBe(true)
+  })
+
+  it('liquidity forecast with no curve set for the run date shows the call to action, not a forecast', async () => {
+    router = routeWith({ sets: [] })
+    await renderPage(<SnapshotLiquidityForecastPage params={Promise.resolve({ id: RUN_ID })} />)
+    await screen.findByTestId('curve-set-cta')
+    expect(calls.some(c => c.url.includes('/liquidity-forecast'))).toBe(false)
   })
 })

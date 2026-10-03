@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.3.1...ap2-service-v0.4.0) (2026-10-02)
+
+
+### Features
+
+* **ap2:** add private-CA mTLS listener on 8443 ([#11720](https://github.com/JiRaska/open-bank-oss/issues/11720)) ([cb0ceeb](https://github.com/JiRaska/open-bank-oss/commit/cb0ceebdcc79e008cde73212aa12c2184310f91f)), closes [#8884](https://github.com/JiRaska/open-bank-oss/issues/8884)
+
 ## [0.3.1](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.3.0...ap2-service-v0.3.1) (2026-08-02)
 
 

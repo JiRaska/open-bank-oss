@@ -4,7 +4,9 @@
 # (com/openbank/libs/api/error/CommonExceptionMappers.kt): IllegalArgumentException,
 # IllegalStateException, NoSuchElementException, Exception, WebApplicationException.
 # Also covers two libs-domain four-eyes types moved into the same file (issue #1394):
-# SelfApprovalNotAllowedException, InvalidApprovalStateException — these were previously
+# SelfApprovalNotAllowedException, InvalidApprovalStateException — and the base of the typed
+# error hierarchy, DomainException (ADR-0326), whose ONE mapper lives in libs-runtime. The
+# four-eyes types were previously
 # duplicated per-service (10+ byte-identical copies plus a divergent shape in
 # notification-service) specifically because no shared mapper existed yet.
 #
@@ -55,6 +57,11 @@ if [ "${1:-}" = "--self-test" ]; then
   # Another owned type from the list, so the case does not pin one name only.
   c="$td/state"; put "$(K "$c")" 'class M : ExceptionMapper<IllegalStateException> {\n}\n'
   expect "IllegalStateException is covered too" "$c" 1 "collides non-deterministically"
+  # ADR-0326: the typed hierarchy's BASE is libs-owned too; a subclass of it is not.
+  f="$td/domain"; put "$(K "$f")" 'class M : ExceptionMapper<DomainException> {\n}\n'
+  expect "a local mapper for DomainException is FLAGGED" "$f" 1 "collides non-deterministically"
+  g="$td/domainsub"; put "$(K "$g")" 'class M : ExceptionMapper<WidgetDomainException> {\n}\n'
+  expect "a type merely ENDING in DomainException is clean" "$g" 0 "none collide"
   # PROSE: the comment explaining the ban names the very type it bans.
   d="$td/comment"; # The comment must carry the FULL signature `: ExceptionMapper<...>`, or the pattern never
   # matches it and the comment filter is never exercised — a fixture that cannot reach the
@@ -66,7 +73,7 @@ if [ "${1:-}" = "--self-test" ]; then
   expect "an empty tree reports 0 checked" "$e" 0 "0 "
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: ExceptionMapper collision guard is falsifiable (5 cases)"
+  echo "self-test ok: ExceptionMapper collision guard is falsifiable (7 cases)"
   exit 0
 fi
 root="${1:-.}"
@@ -77,7 +84,7 @@ checked=0
 # mention of the string — explanatory comments about this exact defect class (including
 # this script's own error message, and the fix's inline documentation) legitimately
 # reference these type names in prose and must not self-trigger.
-pattern=': *ExceptionMapper<(IllegalArgumentException|IllegalStateException|NoSuchElementException|Exception|WebApplicationException|SelfApprovalNotAllowedException|InvalidApprovalStateException)>'
+pattern=': *ExceptionMapper<(IllegalArgumentException|IllegalStateException|NoSuchElementException|Exception|WebApplicationException|SelfApprovalNotAllowedException|InvalidApprovalStateException|DomainException)>'
 
 while IFS= read -r f; do
   checked=$((checked + 1))

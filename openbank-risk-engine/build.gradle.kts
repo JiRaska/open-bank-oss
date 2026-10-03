@@ -6,6 +6,12 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+tasks.test {
+    // Quarkus, Kafka and Testcontainers share this JVM across the full integration suite.
+    // The default 512 MiB heap exhausted on the hosted build after 81 tests (#11719).
+    maxHeapSize = "2g"
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
 
@@ -19,6 +25,7 @@ dependencies {
     implementation(libs.quarkus.jdbc.postgresql)
     implementation(libs.quarkus.smallrye.kafka)
     implementation(libs.quarkus.smallrye.health)
+    implementation(libs.quarkus.smallrye.fault.tolerance)
     implementation(libs.quarkus.micrometer.registry.prometheus)
     implementation(libs.quarkus.scheduler)
     implementation(libs.quarkus.opentelemetry)

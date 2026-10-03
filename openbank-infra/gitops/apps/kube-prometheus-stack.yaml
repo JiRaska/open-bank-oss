@@ -1,6 +1,6 @@
 # Metrics plane: Prometheus + Grafana + kube-state-metrics + node-exporter +
 # alertmanager (enabled, with the routing tree configured below). Lean FinOps
-# sizing per ADR-0027: single Prometheus replica, 12h retention, gp3 PVC.
+# sizing per ADR-0027: single Prometheus replica, 30d retention (ADR-0088 D3), gp3 PVC.
 # serviceMonitorSelectorNilUsesHelmValues=false so app ServiceMonitors are
 # picked up regardless of release labels. Grafana still has no Ingress of its
 # own: it is reached at https://admin.open-bank.tech/tools/grafana, a sub-path of
@@ -78,6 +78,12 @@ spec:
             secrets:
               - goalert-webhook-url
               - alertmanager-slack
+              # Dead-man heartbeat URL (route `deadman`). Created by the ops step that makes
+              # the GoAlert heartbeat monitor (#11666) and owned by nobody else — see below.
+              # It MUST exist before this list changes: the operator mounts these as
+              # non-optional volumes, so a missing Secret holds Alertmanager in
+              # ContainerCreating on its next restart.
+              - alertmanager-deadman
             # On-demand observability pool (ADR-0082) — survive spot reclamation.
             nodeSelector:
               workload: observability
@@ -94,6 +100,23 @@ spec:
                 cpu: 100m
                 memory: 128Mi
           config:
+            # inhibit_rules REPLACES the chart's default list, so the four chart defaults are
+            # restated verbatim (read from the live generated config 2026-10-03) and the
+            # volume-floor rule is added (prometheus-rules-slo-volume.yaml).
+            inhibit_rules:
+              - source_matchers: ['severity = critical']
+                target_matchers: ['severity =~ warning|info']
+                equal: ['namespace', 'alertname']
+              - source_matchers: ['severity = warning']
+                target_matchers: ['severity = info']
+                equal: ['namespace', 'alertname']
+              - source_matchers: ['alertname = InfoInhibitor']
+                target_matchers: ['severity = info']
+                equal: ['namespace']
+              - target_matchers: ['alertname = InfoInhibitor']
+              - source_matchers: ['alertname = SLOBelowVolumeFloor']
+                target_matchers: ['alertname = ErrorBudgetBurn']
+                equal: ['slo']
             route:
               receiver: 'null'
               group_by: ['alertname', 'service']
@@ -108,10 +131,12 @@ spec:
                 # whole observability pool died, the one signal designed to say so went
                 # nowhere. Route it, first and unconditionally, to a GoAlert heartbeat
                 # monitor: GoAlert pages (via ntfy + the on-call policy) when the beat
-                # stops. The heartbeat URL is key `heartbeat_url` of the `goalert-webhook-url`
-                # Secret, written by the ops step that creates the monitor (see
-                # es-goalert-webhook.yaml for why it is not an ExternalSecret key).
-                # While that key is missing, this receiver's url_file does not exist,
+                # stops. The heartbeat URL lives in its own Secret `alertmanager-deadman`
+                # (key `url`). It was first put into `goalert-webhook-url` next to the paging
+                # URL; ESO owns that Secret (creationPolicy Owner) and rewrites its whole
+                # `data` on every sync, so the key vanished within the hour — mergePolicy
+                # Merge governs the template, not keys written from outside (2026-10-01).
+                # While the key is missing, this receiver's url_file does not exist,
                 # every send fails and AlertmanagerFailedToSendAlerts reaches Slack via the
                 # route just below — which is the correct, visible state for "the dead-man
                 # is not wired yet", never a silent one.
@@ -203,7 +228,7 @@ spec:
                   # accepted, so Alertmanager's webhook payload is fine. One beat a minute,
                   # heartbeat timeout set to 5m in GoAlert. send_resolved is meaningless
                   # for a signal whose value is that it never resolves.
-                  - url_file: /etc/alertmanager/secrets/goalert-webhook-url/heartbeat_url
+                  - url_file: /etc/alertmanager/secrets/alertmanager-deadman/url
                     send_resolved: false
               - name: 'goalert'
                 webhook_configs:
@@ -263,7 +288,21 @@ spec:
             # rendered config Secret's storage.tsdb.retention.time). A retention change
             # only takes effect once the Prometheus pod reloads/restarts. Do NOT "fix"
             # the apparent 15d by bumping this value or forcing the CLI flag back.
-            retention: 12h
+            #
+            # 12h -> 30d (2026-09-30). 12h was FinOps-right for a sandbox and wrong for
+            # everything built on top of it since: 20 Pyrra SLOs declare `window: 30d`,
+            # prometheus-rules-forecast/-capacity extrapolate trends, and 418
+            # `:increase30d` recording series existed — all evaluated over a store whose
+            # oldest sample was 13 hours old (measured: prometheus_tsdb_lowest_timestamp
+            # = 0.55d). An error budget over 30d computed from 12h of data is a number
+            # with no meaning, and ADR-0088 D3 names >=30d as the audit window for
+            # SLO evidence. Sizing, measured live: 2.29 GiB of blocks + 0.77 GiB WAL at
+            # 12h, 789k head series, 22.3k samples/s -> ~4.6 GiB/day -> ~85 GiB at
+            # 30d before compaction gains. gp3 at that size is ~$8/month.
+            # `retentionSize` is the hard ceiling below the PVC so a cardinality
+            # regression evicts old blocks instead of filling the disk.
+            retention: 30d
+            retentionSize: 85GB
             # Pin to the on-demand observability node pool (ADR-0082): spot
             # reclamation was killing Prometheus mid-WAL-replay every ~15-30 min.
             nodeSelector:
@@ -313,7 +352,12 @@ spec:
                     requests:
                       # FinOps 2026-06-05: 10Gi → 5Gi; with 12h retention
                       # the sandbox Prometheus never fills more than ~2Gi.
-                      storage: 5Gi
+                      # 2026-09-30: 100Gi for the 30d retention above (85GB
+                      # retentionSize + WAL + compaction headroom). The operator does
+                      # not resize a live PVC: after merge, patch it once —
+                      #   kubectl -n observability patch pvc prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0 -p '{"spec":{"resources":{"requests":{"storage":"100Gi"}}}}'
+                      # gp3 allowVolumeExpansion is true; the filesystem grows online.
+                      storage: 100Gi
         grafana:
           enabled: true
           # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.

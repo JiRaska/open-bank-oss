@@ -136,7 +136,11 @@ class AllowanceOutboxAtomicityIT {
                 SELECT l.status,
                     (SELECT count(*) FROM loan_provisioning p WHERE p.loan_id = l.id),
                     (SELECT count(*) FROM lending_outbox o WHERE o.aggregate_id = l.id
-                        AND o.event_type = 'lending.allowance.posting' AND o.status = 'PENDING')
+                        AND o.event_type = 'lending.allowance.posting' AND o.status = 'PENDING'),
+                    l.xmin::text,
+                    (SELECT string_agg(DISTINCT p.xmin::text, ',') FROM loan_provisioning p WHERE p.loan_id = l.id),
+                    (SELECT string_agg(DISTINCT o.xmin::text, ',') FROM lending_outbox o WHERE o.aggregate_id = l.id
+                        AND o.event_type = 'lending.allowance.posting')
                 FROM loan l WHERE l.id = ?
                 """.trimIndent(),
             ).use { statement ->
@@ -146,9 +150,26 @@ class AllowanceOutboxAtomicityIT {
                     assertThat(rows.getString(1)).isEqualTo(status)
                     assertThat(rows.getInt(2)).isEqualTo(expected)
                     assertThat(rows.getInt(3)).isEqualTo(expected)
+                    assertSameWriter(expected, rows.getString(4), rows.getString(5), rows.getString(6))
                 }
             }
         }
+    }
+
+    /**
+     * #8353: counts prove presence; only the writing transaction id proves the three rows were
+     * committed TOGETHER. Postgres stamps each row version with `xmin`, so one transaction means
+     * one value across the loan UPDATE and the two INSERTs; a second transaction shows as a
+     * second value. Only meaningful on the committed path — after a rollback there is nothing.
+     */
+    private fun assertSameWriter(expected: Int, loanXmin: String, provisioningXmins: String?, outboxXmins: String?) {
+        if (expected == 0) return
+        assertThat(provisioningXmins)
+            .describedAs("loan_provisioning rows must share the loan row's writing transaction")
+            .isEqualTo(loanXmin)
+        assertThat(outboxXmins)
+            .describedAs("the lending_outbox row must share the loan row's writing transaction")
+            .isEqualTo(loanXmin)
     }
 
     private fun cleanup(loanId: UUID, applicationId: UUID) {

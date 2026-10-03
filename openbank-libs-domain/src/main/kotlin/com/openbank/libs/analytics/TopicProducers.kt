@@ -46,6 +46,7 @@ object TopicProducers {
         "openbank.clearing.batch.event" to "clearing-service",
         "openbank.security.ict.incident" to "security-scanner",
         "openbank.cards.events" to "card-issuance-service",
+        "openbank.card.processing.events" to "card-processing-service",
         "openbank.dispute.events" to "dispute-service",
         "openbank.domestic.payment.events" to "domestic-payment",
         "openbank.sepa.payment.events" to "sepa-payment",
@@ -76,6 +77,7 @@ object TopicProducers {
         "openbank.delegation.spend-reservation-state" to "delegation-service",
         // ADR-0312 business-signing lifecycle; its events also state sourceService themselves.
         "openbank.delegation.approval-events" to "delegation-service",
+        "openbank.delegation.approval-group-revisions" to "delegation-service",
         // Issue #6035: four more money-path producers were absent from all three places at once
         // (this table, application.yaml's topics list, and the audit KafkaUser's Read ACLs) --
         // found by .github/scripts/check-audit-money-path-subscription.py, which derives the set

@@ -45,7 +45,20 @@ info:
   #        (ADR-0315 D8): GET /min-reserves/periods (the versioned calendar) and
   #        GET /min-reserves/periods/{periodId} (requirement, running average, coverage, daily
   #        holding proposal). The shipped calendar is SAMPLE / UNVERIFIED and says so.
-  version: 1.18.0
+  # 1.17.0 -> 1.18.0: #11716 (liquidity and capital read by category).
+  # 1.18.0 -> 1.20.0 (#11107): additive — Instrument.contractNumber, the source contract's human
+  #        reference (a loan's UV-YYYY-NNNNNN from lending); null for other kinds and for runs
+  #        recorded before it existed. 1.18.1 and 1.19.0 are claimed by open PRs #11718, #11719
+  #        and #11549.
+  # 1.20.0 -> 1.21.0: additive — declarative risk limits GET /snapshots/{id}/limits (ADR-0313 D9):
+  #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input.
+  # 1.21.0 -> 1.21.1: behaviour/description only — POST /snapshots answers 400 for an `asOf` after
+  #        the current business date (Europe/Prague); no schema change.
+  # 1.21.1 -> 1.22.0: additive — GET /curve-sets takes an optional `asOf` filter, so a run's reads
+  #        can offer exactly the sets they accept (a set must be as of the run's own date); the
+  #        IRRBB read states a multi-currency book's aggregate in CZK at ČNB fixings
+  #        (Irrbb.reportingAggregate), so the outlier test is computed for such a book too.
+  version: 1.22.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -134,7 +147,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SnapshotRun'
         '400':
-          description: Missing or malformed `asOf`
+          description: Missing or malformed `asOf`, or `asOf` after the current business date (Europe/Prague) — a future day cannot be tied out with the general ledger
         '401':
           description: Unauthenticated
         '403':
@@ -555,6 +568,43 @@ paths:
         '404':
           description: No such period in the configured calendar
 
+  /api/v1/risk/snapshots/{id}/limits:
+    get:
+      tags: [Risk]
+      operationId: getSnapshotLimits
+      summary: Declarative risk-limit status of a TIED_OUT run
+      description: |
+        The versioned limit set `openbank.risk.limits.*` (ADR-0313 D9) evaluated on the run: LCR and
+        NSFR floors (CZK totals), a total-capital-ratio floor, the IRRBB supervisory outlier ceiling
+        (worst EVE loss / Tier 1, priced on the latest curve set recorded for the run's as-of date)
+        and a single-bank large-exposure ceiling (/ Tier 1). Each limit is `OK`, `EARLY_WARNING`,
+        `BREACH`, or `NOT_EVALUABLE` with `reason` — a limit whose input has a gap (an unclassified
+        balance, a missing fixing, no curve set, a bank exposure with no counterparty) is never
+        evaluated on the rest. Figures come from the same reads as /liquidity, /capital and /irrbb.
+        Derived on request, never stored. The end-of-day scheduler additionally emits
+        `risk.limit.early-warning.v1` / `risk.limit.breach.v1` events for its own runs.
+      parameters:
+        - $ref: '#/components/parameters/RunId'
+      responses:
+        '200':
+          description: The run's limit evaluations
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Limits'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Forbidden
+        '404':
+          description: No such run
+        '409':
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Untied'
+
   /api/v1/risk/curve-sets:
     get:
       tags: [Risk]
@@ -562,8 +612,17 @@ paths:
       summary: The most recently recorded curve sets, newest first
       description: |
         Curve sets without their pillars (`indices` names the curves each holds). Requires
-        ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN.
+        ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN. In the sandbox, every recent
+        snapshot date also carries an illustrative reference set (provenance `synthetic`, source
+        text "NOT market data").
       parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Only the sets as of this date (YYYY-MM-DD) — the ones a run of that date accepts.
+          schema:
+            type: string
+            format: date
         - name: limit
           in: query
           required: false
@@ -581,7 +640,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CurveSetList'
         '400':
-          description: '`limit` outside 1..100'
+          description: '`limit` outside 1..100, or `asOf` not an ISO date'
         '401':
           description: Unauthenticated
         '403':
@@ -883,6 +942,12 @@ components:
           description: Opaque party reference; identity stays in party-service.
         ifrs9Stage:
           type: [string, 'null']
+        contractNumber:
+          type: [string, 'null']
+          description: >-
+            Human reference of the source contract — for a loan, lending's contract number
+            (UV-YYYY-NNNNNN, #11107). Display only: not an identity (that is id) and not part of
+            the run's input hash. Null for other instrument kinds and for runs recorded before it.
         loan:
           type: [object, 'null']
           properties:
@@ -1290,6 +1355,37 @@ components:
           type: array
           items: {type: string}
         assumptions: {$ref: '#/components/schemas/IrrbbAssumptions'}
+        reportingAggregate:
+          description: |
+            Only for a multi-currency book (a single-currency book's aggregate is `worstCase`): per
+            scenario the currency EVE losses (gains dropped, d368 Annex 2) converted to CZK at the ČNB
+            fixing in effect on asOf and summed; the outlier test then compares its worst loss with
+            Tier 1 in CZK. All or nothing — `notStated` says why when no total is given.
+          type: [object, 'null']
+          required: [currency, scenarios, fxRates]
+          properties:
+            currency: {type: string}
+            scenarios:
+              type: array
+              items:
+                type: object
+                required: [scenario, loss]
+                properties:
+                  scenario: {type: string}
+                  loss: {type: number}
+            worstScenario: {type: [string, 'null']}
+            worstLoss: {type: [number, 'null']}
+            fxRates:
+              type: array
+              items:
+                type: object
+                required: [currency, rate, fixingDate, source]
+                properties:
+                  currency: {type: string}
+                  rate: {type: number}
+                  fixingDate: {type: string, format: date}
+                  source: {type: string}
+            notStated: {type: [string, 'null']}
 
     LiquidityLine:
       type: object
@@ -1836,6 +1932,63 @@ components:
           type: [boolean, 'null']
           description: Only once the period is over, fully covered, with both sides stated
         notes: {type: array, items: {type: string}}
+    Limits:
+      type: object
+      required: [runId, asOf, provenance, limitSet, curveSetId, limits, summary, notes]
+      properties:
+        runId: {type: string, format: uuid}
+        asOf: {type: string, format: date}
+        provenance: {type: string}
+        limitSet:
+          type: object
+          required: [id, version, source]
+          properties:
+            id: {type: string}
+            version: {type: string}
+            source: {type: string}
+        curveSetId:
+          type: [string, 'null']
+          format: uuid
+          description: The curve set the IRRBB limit was priced on; null when none exists for the as-of date.
+        limits:
+          type: array
+          items:
+            $ref: '#/components/schemas/LimitEvaluation'
+        summary:
+          type: object
+          description: Count per status; every status is present, zero included.
+          additionalProperties: {type: integer}
+        notes:
+          type: array
+          items: {type: string}
+    LimitEvaluation:
+      type: object
+      required: [limitId, metric, metricDescription, bound, limit, earlyWarning, status, value, basis, reason, citation]
+      properties:
+        limitId: {type: string}
+        metric:
+          type: string
+          x-extensible-enum: [lcr, nsfr, total-capital-ratio, irrbb-eve-outlier, large-exposure-bank]
+        metricDescription: {type: string}
+        bound:
+          type: string
+          enum: [MIN, MAX]
+          description: MIN = a floor (at or above the limit is within it); MAX = a ceiling.
+        limit: {type: number}
+        earlyWarning: {type: number}
+        status:
+          type: string
+          enum: [OK, EARLY_WARNING, BREACH, NOT_EVALUABLE]
+        value:
+          type: [number, 'null']
+          description: The measured figure as a fraction (1.0 = 100 %); null exactly when NOT_EVALUABLE.
+        basis:
+          type: [string, 'null']
+          description: How the figure was obtained; null when NOT_EVALUABLE.
+        reason:
+          type: [string, 'null']
+          description: The gap that made the limit NOT_EVALUABLE; null otherwise.
+        citation: {type: string}
     MinReserves:
       type: object
       required: [runId, asOf, provenance, parameterSetId, parameterSetVersion, currencies, holdingCurrency,

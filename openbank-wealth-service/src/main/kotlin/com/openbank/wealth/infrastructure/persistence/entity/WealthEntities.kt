@@ -4,7 +4,7 @@
 
 package com.openbank.wealth.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
@@ -108,9 +108,10 @@ class DeclaredHoldingValuationEntity : PanacheEntity() {
     lateinit var recordedAt: Instant
 }
 
+/**
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V3__outbox_v2.sql`.
+ */
 @Entity
 @Table(name = "wealth_outbox")
-class WealthOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class WealthOutboxEntity : PanacheOutboxEntityV2()
