@@ -256,3 +256,14 @@ not change any existing request's outcome until explicitly flipped.
   fails to load (500 naming the row) instead of being served; the sandbox count before this change
   was 8 rows, all EUR, 0 over-scale. No new endpoint, caller, privilege or event. Rollback: revert
   the commit.
+- **2026-10-03** — **Submissions refused unless the currency is EUR (#11913).** SCT Inst is a
+  euro-only scheme, yet `POST /api/v1/sepa-instant` accepted any currency kernel `Money` could hold
+  (`USD`, `CZK`, `GBP` were 201, screened, persisted, emitted and sent towards the scheme gateway as
+  a pacs.008 the scheme cannot settle). **Tampering / input validation:** `SctInstResource` now
+  calls `SctInstSchemeRules.requireSchemeCurrency` right after `Money.parseInbound`, so a non-EUR
+  currency answers **400 `CURRENCY_NOT_ALLOWED`** (service-owned ADR-0326 code, VALIDATION category,
+  rendered by libs-runtime `DomainExceptionMapper`) before any idempotency lookup, screening call,
+  row, event or downstream call exists. The violation names `currency`, never the rejected value.
+  EUR (any case) is unchanged. Sandbox data re-checked read-only before the change: 8 rows, all EUR,
+  so no stored row is affected. No new endpoint, caller, privilege or event. Rollback: revert the
+  commit.
