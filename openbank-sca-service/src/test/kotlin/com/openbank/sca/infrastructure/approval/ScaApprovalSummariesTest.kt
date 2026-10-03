@@ -140,7 +140,8 @@ class ScaApprovalSummariesTest {
             .doesNotContain("0800").doesNotContain("CZ65")
     }
 
-    private fun render(action: String, args: Map<String, Any?>) = runBlocking { renderer.render(action, null, args) }
+    private fun render(action: String, args: Map<String, Any?>): String? =
+        runBlocking { renderer.render(action, null, args) }
 
     private fun challenge(id: UUID, owner: UUID) = ScaChallenge(
         id = id,
