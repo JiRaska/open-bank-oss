@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -19,8 +20,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
+import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -62,7 +63,10 @@ class TreasuryOutboxAtomicityIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    // The service defaults tradeDate to the bank's accounting day (Europe/Prague), so a valueDate
+    // taken from the UTC calendar falls a day BEFORE it between 22:00 and 24:00 UTC (summer) and the
+    // draft is refused with 400 "valueDate must not precede tradeDate".
+    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     @Test
     @Order(1)
