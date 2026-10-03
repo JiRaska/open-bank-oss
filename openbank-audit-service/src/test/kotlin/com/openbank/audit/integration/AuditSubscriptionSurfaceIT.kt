@@ -246,8 +246,11 @@ class AuditSubscriptionSurfaceIT {
      * value the consumer itself derives (`inferAggregateId`), rather than one the test writes to a
      * column directly.
      */
-    private fun recordOn(topic: String, marker: String): Message<String> {
-        val payload = """{"eventType":"$EVENT_TYPE","accountId":"$marker","occurredAt":"${Instant.now()}"}"""
+    private fun recordOn(
+        topic: String,
+        marker: String,
+        payload: String = """{"eventType":"$EVENT_TYPE","accountId":"$marker","occurredAt":"${Instant.now()}"}""",
+    ): Message<String> {
         val headers = RecordHeaders()
         headers.add(
             RecordHeader(
