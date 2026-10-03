@@ -26,6 +26,10 @@ import java.util.UUID
  * (201, persisted at NUMERIC(20,6)) and the over-long / out-of-range ones failed at the database
  * flush as a 500. The refusal is the kernel `InvalidMoneyException`, rendered by libs-runtime's
  * `InvalidMoneyExceptionMapper`; the exact problem body is pinned below.
+ *
+ * #11913: SCT Inst is euro-only, so a currency Money CAN hold but the scheme does not carry (USD,
+ * CZK, GBP) is refused at the same boundary as 400 CURRENCY_NOT_ALLOWED (ADR-0326 domain code,
+ * rendered by libs-runtime's `DomainExceptionMapper`). On main before that change those were 201.
  */
 @QuarkusTest
 @QuarkusTestResource(
@@ -52,6 +56,10 @@ class SctInstMoneyBoundaryIT {
         "10.00, '   ', CURRENCY_UNSUPPORTED",
         "1E+19, EUR, VALIDATION_ERROR",
         "123456789012345678901, EUR, VALIDATION_ERROR",
+        // #11913: a valid ISO currency that SCT Inst (euro-only) does not carry.
+        "10.00, USD, CURRENCY_NOT_ALLOWED",
+        "10.00, CZK, CURRENCY_NOT_ALLOWED",
+        "10.00, gbp, CURRENCY_NOT_ALLOWED",
     )
     @TestSecurity(user = OPERATOR, roles = ["ROLE_OPERATOR"])
     fun `an amount or currency Money cannot hold is a 400 with the exact problem body`(
@@ -158,6 +166,12 @@ class SctInstMoneyBoundaryIT {
                 "The currency is not supported",
                 "currency",
                 "Currency must be an ISO 4217 code with a minor unit",
+            )
+            "CURRENCY_NOT_ALLOWED" -> listOf(
+                "urn:openbank:error:currency-not-allowed",
+                "The currency is not allowed by the payment scheme",
+                "currency",
+                "SCT Inst accepts EUR only",
             )
             else -> listOf(
                 "urn:openbank:error:validation-error",
