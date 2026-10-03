@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
@@ -22,7 +23,9 @@ import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.infrastructure.rest.dto.CreateSepaPaymentRequest
 import com.openbank.sepa.infrastructure.rest.dto.TransitionSepaPaymentStatusRequest
 import com.openbank.sepa.infrastructure.rest.dto.toResponse
+import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
+import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.DefaultValue
 import jakarta.ws.rs.GET
@@ -47,6 +50,7 @@ import java.net.URI
 import java.util.UUID
 
 private const val CREATE_PATH = "/api/v1/sepa-payments"
+private const val IDEMPOTENCY_SERVICE = "sepa-payment"
 private val log = Logger.getLogger(SepaPaymentResource::class.java)
 
 @Path("/api/v1/sepa-payments")
@@ -59,6 +63,9 @@ class SepaPaymentResource(
     private val idempotencyStore: IdempotencyStore,
     private val objectMapper: ObjectMapper,
 ) {
+    // Field-injected, request-scoped: the caller's identity scopes its Idempotency-Key.
+    @Inject
+    lateinit var identity: SecurityIdentity
 
     @POST
     // #10486: ROLE_API admitted so standing-order-service's own identity (ROLE_API only) reaches
@@ -78,12 +85,21 @@ class SepaPaymentResource(
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        // Keys are per service and caller: another principal reusing this key is a different key.
+        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
         // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
         // hold is a 400 (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
         // record, row, outbox event or downstream call behind.
         val command = request.toCommand(idempotencyKey, requestHash)
-        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+        when (
+            val reservation = idempotencyStore.reserve(
+                scope,
+                idempotencyKey,
+                requestHash,
+                IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS,
+            )
+        ) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -106,13 +122,20 @@ class SepaPaymentResource(
             // IN_PROGRESS for its full TTL.
             if (!created) {
                 withContext(NonCancellable) {
-                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                    runCatching { idempotencyStore.release(scope, idempotencyKey, requestHash) }
                         .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
                 }
             }
         }
         val responseBody = payment.toResponse()
-        idempotencyStore.save(idempotencyKey, requestHash, 201, objectMapper.writeValueAsString(responseBody))
+        idempotencyStore.save(
+            scope,
+            idempotencyKey,
+            requestHash,
+            201,
+            objectMapper.writeValueAsString(responseBody),
+            IdempotencyStore.DEFAULT_RECORD_TTL_SECONDS,
+        )
 
         return Response.created(URI.create("/api/v1/sepa-payments/${payment.id}"))
             .entity(responseBody)
