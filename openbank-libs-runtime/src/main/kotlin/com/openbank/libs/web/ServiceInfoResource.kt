@@ -38,8 +38,8 @@ class ServiceInfoResource(
             service = serviceName,
             version = serviceVersion,
             apiVersion = "v$apiVersion",
-            // BuildInfo values come from the libs JAR's openbank-build-info.properties,
-            // stamped at build time from libs.versions.toml. Loaded once per JVM.
+            // The running service commit is stamped into its own artifact;
+            // library stack facts remain a separate build snapshot. Loaded once per JVM.
             buildTime = BuildInfo.buildTime,
             gitCommit = BuildInfo.gitCommit,
             timestamp = OffsetDateTime.now(clock).toString(),

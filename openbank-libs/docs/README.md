@@ -1,44 +1,29 @@
 # openbank-libs — Documentation
 
-> **Co to je:** sdílená infrastrukturní knihovna pro všech 27 Quarkus mikroslužeb OpenBank. **Co to NENÍ:** generická Kotlin utility knihovna ani Quarkus extension.
+> **Co to je:** rodina sdílených knihoven OpenBank. `openbank-libs-domain` obsahuje doménové primitivy bez frameworku, `openbank-libs-runtime` adaptéry Quarkus a endpoint pro vlastní dokumentaci. `openbank-libs` je kompatibilitní zastřešení obou modulů. Nejde o běžící službu.
 
-Tato složka je entry point per-service dokumentace dle standardu **arc42-lite + C4 + Backstage TechDocs file layout**. Stejnou strukturu má mít každá služba v `openbank-<service>/docs/`.
+Tato složka se kopíruje do image Admin UI jako snímek. Běžící služby publikují dokumentaci ze svého buildu na `/q/openbank/docs`; ručně psané kapitoly patří do `src/main/resources/docs/` jednotlivých služeb. Verze a commit běžící služby jsou v jejím indexu dokumentace. Počet služeb se odvozuje z katalogu buildu, nikoli z tohoto textu.
 
 ## Obsah
 
 | Sekce | Pro koho | Co tam najdeš |
 |---|---|---|
-| [01 — Overview](./01-overview.md) | Product, audit, management | Proč libs existuje, jakou hodnotu přináší fleeru 27 služeb, klíčové schopnosti |
+| [01 — Overview](./01-overview.md) | Product, audit, management | Proč sdílené knihovny existují a jejich schopnosti |
 | [02 — Architecture](./02-architecture.md) | Engineering, tech leads | C4 diagramy, mapa balíčků, Jandex discovery, dependency strategie |
 | [03 — API & contracts](./03-api.md) | Service developers | Per-package konzumpční vzory s code snippets (Money, Iban, BuildInfo, IdempotencyStore, …) |
 | [04 — Data](./04-data.md) | Data, analytics | (libs nedrží data — odkaz na per-service docs) |
 | [05 — Operations](./05-operations.md) | DevOps, release engineers | Build, test, release, JDK/Kotlin/Quarkus compatibility matrix |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | Mapping na DORA, GDPR, PSD2, NIS2 (per komponenta) |
 
-## Mapa balíčků v jedné větě
+## Mapa modulů
 
-```
-com.openbank.libs/
-├── api/               REST-side primitives — error model (ApiError), pagination (CursorPage), common exception mappers
-├── audit/             AuditEvent envelope + AuditEventPublisher port (GDPR Art. 30, DORA Art. 17)
-├── domain/
-│   ├── money/         Money + CurrencyCode value objects (ISO 4217)
-│   ├── account/       Iban + Bic value objects (ISO 13616, 9362)
-│   ├── case/          Case state machine primitives (KYC, AML, dispute workflows)
-│   ├── event/         DomainEvent envelope base
-│   └── identifiers/   Typesafe ID value objects (AccountId, TransactionId, …) + JPA converters
-├── idempotency/       IdempotencyStore port + Redis-backed implementation
-├── persistence/
-│   └── outbox/        Generic transactional outbox primitives (entity, dispatcher, ports)
-├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory
-├── util/              BuildInfo (runtime tech-stack snapshot via Gradle stamping)
-└── web/               JAX-RS filters: CorrelationIdFilter, RateLimitFilter, ApiVersionResponseFilter, ServiceInfoResource, ServiceConfigResource
-```
+| Modul | Odpovědnost |
+|---|---|
+| `openbank-libs-domain` | Sdílené doménové hodnoty a porty bez importů Quarkus nebo CDI |
+| `openbank-libs-runtime` | Adaptéry Quarkus, webové resource, observabilita a `/q/openbank/docs` |
+| `openbank-libs` | Kompatibilitní zastřešení exportující domain a runtime |
 
-`security/` **neobsahuje** `BootstrapVerifier` — tento řádek ho dříve uváděl a byl to omyl. ADR-0017
-předepisuje startup fail-fast guard proti dev-placeholder secrets, ten ale nebyl nikdy napsán
-(`git grep BootstrapVerifier -- '*.kt'` vrací 0) a delivery note téže ADR to uvádí. Dev placeholdery
-drží mimo prod injektáž secrets přes ESO/OpenBao `secretKeyRef` (ADR-0007), ne cokoli v této knihovně (#8426).
+U konkrétní služby ukazují běžící `/q/openbank/docs` a `/api/v1/info` skutečně nasazený build. Pro aktuální balíčky a API knihoven jsou autoritativní zdrojové kódy obou modulů výše.
 
 ## Související dokumenty
 

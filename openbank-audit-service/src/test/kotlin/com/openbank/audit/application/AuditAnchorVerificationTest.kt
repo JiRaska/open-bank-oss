@@ -61,7 +61,8 @@ class AuditAnchorVerificationTest {
         lastRecordHash = lastRecordHash,
         chainedCount = 7,
         chainStatus = "INTACT",
-        anchorDigest = "unused",
+        // A coherent stored digest: verifyAnchors now rejects a digest that does not recompute.
+        anchorDigest = AuditAnchor.digest(lastEntryId, lastRecordHash, 7, "INTACT", now),
         signature = signature,
         keyId = keyId,
         signedAt = now,
