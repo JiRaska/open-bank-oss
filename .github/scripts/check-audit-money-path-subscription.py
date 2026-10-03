@@ -106,6 +106,12 @@ _GAP_TOPICS: dict[str, str] = {}
 # service produces any more is reported - so the exclusion is the thing a human has to justify,
 # and it cannot outlive its reason.
 OUT_OF_SCOPE: dict[str, str] = {
+    "openbank.fraud.investigation.case.references": (
+        "a reference-only Context projection, not a money-path fact stream: its versioned "
+        "contract carries only case type, ID, revision and time, with Fraud Write and Context "
+        "Read ACLs. Source detail is obtained through a separately authorized case-scoped API. "
+        "Audit Read on this topic would add a reader outside the approved minimal flow."
+    ),
     "openbank.notification.requests": (
         "not a domain-event stream: it is notification-service's own INBOX, a fan-in command "
         "topic four services write onto (account, sca, campaign, and notification itself). "

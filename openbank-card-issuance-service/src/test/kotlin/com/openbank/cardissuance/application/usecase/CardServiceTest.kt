@@ -211,6 +211,16 @@ class CardServiceTest {
         assertThat(result).isEmpty()
     }
 
+    @Test fun `bounded party read uses the database slice instead of the export list`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val latest = card(status = CardStatus.BLOCKED)
+        coEvery { repo.findRecentByPartyId(partyId, 51) } returns listOf(latest)
+
+        assertThat(service.listRecentByParty(partyId, 51)).containsExactly(latest)
+        coVerify(exactly = 1) { repo.findRecentByPartyId(partyId, 51) }
+        coVerify(exactly = 0) { repo.findByPartyId(partyId) }
+    }
+
     // ── cancel (#2) ────────────────────────────────────────────────────────────────────
 
     @Test fun `cancel card writes a status changed event to the outbox`(): Unit = runBlocking {

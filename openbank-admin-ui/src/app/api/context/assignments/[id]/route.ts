@@ -3,6 +3,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { contextHeaders, contextServiceUrl } from '@/lib/context/server'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -15,7 +16,7 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
   const token = await adminToken(); const { id } = await ctx.params
   if (!token) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
   if (!UUID.test(id)) return NextResponse.json({ error: 'invalid_id' }, { status: 400 })
-  const body = await req.json().catch(() => null) as { approve?: unknown } | null
+  const body = await readBoundedContextJson(req, 1024).catch(() => null) as { approve?: unknown } | null
   if (typeof body?.approve !== 'boolean') return NextResponse.json({ error: 'invalid_decision' }, { status: 400 })
   return relay(`/api/v1/context/assignment-proposals/${id}`, token, 'PATCH', { approve: body.approve })
 }
@@ -34,7 +35,7 @@ async function relay(path: string, token: string, method: string, body?: unknown
       body: body === undefined ? undefined : JSON.stringify(body), signal: AbortSignal.timeout(5_000),
     })
     if (upstream.status === 204) return new NextResponse(null, { status: 204 })
-    return NextResponse.json(await upstream.json(), { status: upstream.status, headers: { 'Cache-Control': 'no-store' } })
+    return NextResponse.json(await readBoundedContextJson(upstream, 256 * 1024), { status: upstream.status, headers: { 'Cache-Control': 'no-store' } })
   } catch {
     return NextResponse.json({ error: 'upstream_unreachable' }, { status: 502 })
   }

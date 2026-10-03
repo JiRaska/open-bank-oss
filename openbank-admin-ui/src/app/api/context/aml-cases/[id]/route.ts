@@ -4,6 +4,7 @@ import { auth } from '@/auth'
 import { contextServiceUrl } from '@/lib/context/server'
 import { AUTHORITY_UUID, authorityTimestamp } from '@/lib/context/authorityHistory'
 import { amlTimestampNanos, parseAmlCaseEvidence, parseAmlCaseNetwork } from '@/lib/context/amlCaseEvidence'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 export const dynamic = 'force-dynamic'
 const fail = (error: string, status: number) => NextResponse.json({ error }, { status, headers: { 'Cache-Control': 'no-store' } })
@@ -33,7 +34,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ id: string 
     if (!response.ok) return fail('context_unavailable', [401, 403, 404, 429, 503].includes(response.status) ? response.status : 502)
     let history
     try {
-      const raw = await response.json()
+      const raw = await readBoundedContextJson(response, 256 * 1024)
       history = network ? parseAmlCaseNetwork(raw) : parseAmlCaseEvidence(raw)
       const scoped = 'related' in history ? history.root : history
       if (scoped.root !== `aml-case:${rootId}`) throw new Error('Scope mismatch')

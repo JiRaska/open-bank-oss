@@ -67,15 +67,36 @@ class SettlementAdapterTest {
     }
 
     @Test
-    fun `settle returns settled=true with null transactionId on HTTP 409 (idempotent)`(): Unit = runBlocking {
+    fun `retry accepts the existing transaction replayed with HTTP 201`(): Unit = runBlocking {
+        val payment = payment()
+        val txId = UUID.randomUUID()
+        val response = mockk<Response>()
+        every { response.status } returns 201
+        every { response.readEntity(String::class.java) } returns """{"id":"$txId","status":"COMPLETED"}"""
+        val requests = mutableListOf<InitiateSettlementRequest>()
+        every { client.initiateTransaction(any(), capture(requests)) } returns Uni.createFrom().item(response)
+        val adapter = adapter()
+
+        val first = adapter.settle(payment)
+        val replay = adapter.settle(payment)
+
+        assertThat(first.settled).isTrue()
+        assertThat(replay.settled).isTrue()
+        assertThat(replay.transactionId).isEqualTo(txId)
+        assertThat(requests).hasSize(2)
+        assertThat(requests.map { it.idempotencyKey }).containsOnly("domestic-settlement-${payment.id}")
+        assertThat(requests.map { it.originatingPaymentId }).containsOnly(payment.id)
+    }
+
+    @Test
+    fun `settle rejects HTTP 409 instead of declaring a conflicting booking settled`(): Unit = runBlocking {
         val response = mockk<Response>()
         every { response.status } returns 409
         every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
 
-        val outcome = adapter().settle(payment())
-
-        assertThat(outcome.settled).isTrue()
-        assertThat(outcome.transactionId).isNull()
+        assertThatThrownBy { runBlocking { adapter().settle(payment()) } }
+            .isInstanceOf(SettlementUnavailableException::class.java)
+            .hasMessageContaining("HTTP 409")
     }
 
     @Test
@@ -113,6 +134,7 @@ class SettlementAdapterTest {
         val req = requestSlot.captured
         assertThat(req.idempotencyKey).isEqualTo("domestic-settlement-${p.id}")
         assertThat(req.rail).isEqualTo("DOMESTIC")
+        assertThat(req.originatingPaymentId).isEqualTo(p.id)
         assertThat(req.type).isEqualTo("DEBIT")
         assertThat(req.sourceAccountId).isEqualTo(p.debtorAccountId)
         assertThat(req.amount).isEqualByComparingTo(p.amount)

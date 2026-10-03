@@ -16,6 +16,8 @@
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "idempotencyKey": "pact-domestic-txn-001",
+          "instructionType": "ONE_OFF",
+          "originatingPaymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
           "rail": "DOMESTIC",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           "type": "DEBIT",
@@ -56,6 +58,36 @@
           }
         },
         "status": 201
+      }
+    },
+    {
+      "description": "POST initiate domestic transaction with no credentials",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 1000.00,
+          "currencyCode": "CZK",
+          "description": "pact contract domestic payment",
+          "idempotencyKey": "pact-domestic-txn-001",
+          "instructionType": "ONE_OFF",
+          "originatingPaymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+          "rail": "DOMESTIC",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "type": "DEBIT",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
       }
     }
   ],

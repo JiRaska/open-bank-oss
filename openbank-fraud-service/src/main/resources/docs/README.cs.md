@@ -1,0 +1,7 @@
+# Zdrojové důkazy při šetření podvodů
+
+Fraud vlastní fakta svých případů a poskytuje HTTPS zdrojové API v rozsahu konkrétního případu. Vyhrazená Kafka událost je minimalizovaný ukazatel (typ události, ID případu, revize a čas); neobsahuje identifikátory účtů ani protistran. Context z ukazatele samotného nesmí odvozovat propojení případů.
+
+`GET /api/v1/fraud/cases/{caseId}/match-assigned` je určen autentizované službě Context pro šetření s účelem `FRAUD_INVESTIGATION` a bearer tokenem lidského vyšetřovatele. Fraud si od Contextu vyžádá omezenou množinu právě přiřazených kandidátních případů, jen v ní porovná zdrojové reference účtů a protistran a vrátí omezenou odpověď s počtem kandidátů a příznakem zkrácení. Shodný identifikátor je vodítko pro šetření, nikoli důkaz společného vlastnictví či protiprávního jednání. Případ musí být stále otevřený; chybějící nebo nedostupná autorizační závislost selže uzavřeně.
+
+Otevření, čtení důkazů a uzavření případu ve Fraud podléhá samostatným kontrolám politiky podle případu. Context před zobrazením každého nalezeného případu znovu kontroluje aktuální roli, účel, přesné přiřazení kořenového případu, politiku a audit čtení i sdělení. Odpovědi nesou `Cache-Control: no-store`. Detail zdroje nech na mTLS cestě; nekopíruj jej do Kafka ukazatelů ani široké grafové projekce. Aditivní smlouva je v [`openapi.yaml`](../openapi.yaml), Flyway V9 ukládá trvalé případy šetření.

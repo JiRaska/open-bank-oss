@@ -2,10 +2,10 @@
 
 import React from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { CustomerContextGraph } from '@/components/party/CustomerContextGraph'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
-import { buildCustomerGraph } from '@/lib/context/customerGraph'
+import { buildCustomerGraph, selectGraphFocus, type CustomerGraph } from '@/lib/context/customerGraph'
 import type { Customer360Evidence } from '@/lib/customer360/evidence'
 
 const PARTY = '11111111-1111-4111-8111-111111111111'
@@ -66,6 +66,48 @@ function graph(data = evidence) {
 afterEach(() => { cleanup(); vi.unstubAllGlobals() })
 
 describe('Customer context graph', () => {
+  it('shows later exact matches when an earlier source chain exceeds the visible budget', () => {
+    const nodes: CustomerGraph['nodes'] = ['parent', 'child', 'grandchild', 'direct'].map(id => ({
+      id, kind: 'domain', label: id, source: 'test', facts: [],
+    }))
+    const graphData: CustomerGraph = {
+      nodes,
+      edges: [
+        { id: 'root-parent', from: 'customer', to: 'parent', relation: 'REF' },
+        { id: 'parent-child', from: 'parent', to: 'child', relation: 'REF' },
+        { id: 'child-grandchild', from: 'child', to: 'grandchild', relation: 'REF' },
+        { id: 'root-direct', from: 'customer', to: 'direct', relation: 'REF' },
+      ],
+      truncated: false,
+    }
+
+    expect(selectGraphFocus(graphData, [nodes[2], nodes[3]], 2).map(node => node.id)).toEqual(['direct'])
+  })
+
+  it('keeps authorised source-backed relationships visible when analytics is unavailable', async () => {
+    installSources()
+    graph({ ...evidence, available: false, asOf: null, domains: [], accountIds: [], consents: [], error: 'clickhouse unavailable' })
+
+    expect(await screen.findByRole('button', { name: 'Account: CZ12…3456' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Card: 411111******1111' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Interaction: SCA_APPROVAL' })).toBeInTheDocument()
+    expect(screen.getByText(/The analytics projection is unavailable/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+  })
+
+  it('hides projected graph evidence when the live authorization check is denied', async () => {
+    let deny!: (response: Response) => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(resolve => { deny = resolve })))
+    graph()
+
+    expect(screen.getByRole('status')).toHaveTextContent('Checking graph access…')
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+    deny({ ok: false, status: 403 } as Response)
+    expect(await screen.findByRole('alert')).toHaveTextContent('Access to the context graph was denied.')
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Customer: Oldřich Vaněk' })).not.toBeInTheDocument()
+  })
+
   it('connects live accounts, products, cards and interactions to the customer', async () => {
     const fetchMock = installSources()
     graph()
@@ -84,6 +126,28 @@ describe('Customer context graph', () => {
     expect(document.querySelectorAll('animateMotion')).toHaveLength(0)
     expect(screen.getByRole('button', { name: 'Resume flow' })).toHaveAttribute('aria-pressed', 'false')
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('omits projection-only evidence when any source rejects this operator', async () => {
+    const result = buildCustomerGraph(evidence, {
+      accounts: [account], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: [], restricted: ['cards'], truncated: [],
+    })
+    expect(result.nodes.some(node => node.source === 'analytics-sink')).toBe(false)
+    expect(result.nodes.some(node => node.id === `account:${ACCOUNT_ID}` && node.source === 'account-service')).toBe(true)
+  })
+
+  it('shows the restricted lens without exposing projected nodes', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({
+      accounts: [account], cards: [], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: [], restricted: ['cards'], truncated: [],
+    })))
+    graph()
+
+    expect(await screen.findByRole('button', { name: 'Account: CZ12…3456' })).toBeInTheDocument()
+    expect(screen.getByText(/Restricted sources: cards/)).toBeInTheDocument()
+    expect(screen.getByText('6/7 domain feeds')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Domain: credit_funnel' })).not.toBeInTheDocument()
   })
 
   it('shows card lifecycle evidence without exposing notification destination or content', async () => {
@@ -195,10 +259,19 @@ describe('Customer context graph', () => {
     expect(result.truncated).toBe(true)
   })
 
-  it('does not render any customer surface when the authorized projection is unavailable', async () => {
-    installSources()
-    graph({ ...evidence, available: false })
-    expect(screen.queryByText('Context graph')).not.toBeInTheDocument()
-    await waitFor(() => expect(screen.queryByRole('button', { name: /Card:/ })).not.toBeInTheDocument())
+  it('connects source-only account references without asserting account ownership', () => {
+    const result = buildCustomerGraph({ ...evidence, accountIds: [] }, {
+      accounts: [], cards: [card], notifications: [], lendingApplications: [], amlCases: [],
+      devices: [], documents: [], unavailable: ['accounts'], truncated: [],
+    })
+
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      from: 'customer', to: `account:${ACCOUNT_ID}`, relation: 'CARD_ACCOUNT_REFERENCE',
+    }))
+    expect(result.edges).toContainEqual(expect.objectContaining({
+      from: `account:${ACCOUNT_ID}`, to: `card:${CARD_ID}`, relation: 'HAS_CARD',
+    }))
+    expect(result.edges.some(edge => edge.to === `account:${ACCOUNT_ID}` && edge.relation === 'OWNS')).toBe(false)
   })
+
 })

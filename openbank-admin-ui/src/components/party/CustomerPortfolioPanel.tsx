@@ -29,7 +29,9 @@ export function CustomerPortfolioPanel({ partyId }: { partyId: string }) {
         aml: facts.amlCases,
       }
       setState(Object.fromEntries((Object.keys(values) as Source[]).map(source => [source,
-        facts.unavailable.includes(source)
+        facts.restricted?.includes(source)
+          ? { kind: 'unknown', why: 'unauthorized' }
+          : facts.unavailable.includes(source)
           ? { kind: 'unknown', why: 'unreachable' }
           : {
               kind: 'ok', count: values[source].length,

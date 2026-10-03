@@ -50,8 +50,15 @@ class DomesticPaymentProjectionConsumer(
             }
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected domestic payment event source" }
             val event = parse(root)
-            sessions.withTransaction { session, _ -> project(session, event) }
-                .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery(
+                        "select set_config('openbank.bank_scope', :bank, true)",
+                        String::class.java,
+                    )
+                        .setParameter("bank", bankScope).singleResult
+                }.flatMap { project(operation, event) }
+            }.awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", STREAM, "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
         } catch (failure: RuntimeException) {
@@ -63,35 +70,66 @@ class DomesticPaymentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: DomesticPaymentProjectionEvent): Uni<Void> = mutation(
-        session,
-        """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
-        """.trimIndent(),
-        mapOf(
-            "bankScope" to bankScope,
-            "eventKey" to event.eventKey,
-            "source" to SOURCE_SERVICE,
-            "aggregateRef" to event.paymentKey,
-            "version" to event.sourceVersion,
-            "occurredAt" to event.occurredAt,
-            "processedAt" to clock.instant(),
-        ),
-    ).flatMap { inserted ->
-        if (inserted == 0) {
-            Uni.createFrom().voidItem()
-        } else {
-            upsertNode(session, event.paymentNode)
-                .flatMap { upsertNode(session, event.stageNode) }
-                .flatMap { upsertEdge(session, event.stageEdge) }
-                .replaceWithVoid()
+    private fun project(operation: ContextSqlOperation, event: DomesticPaymentProjectionEvent): Uni<Void> =
+        GraphNodeHistoryWriter.append(
+            operation,
+            bankScope,
+            projectionGeneration,
+            event.eventKey,
+            event.paymentKey,
+            listOf(event.paymentNode.observation(), event.stageNode.observation()),
+            clock.instant(),
+        ).flatMap {
+            GraphEdgeHistoryWriter.append(
+                operation,
+                bankScope,
+                projectionGeneration,
+                event.eventKey,
+                event.paymentKey,
+                listOf(
+                    GraphEdgeObservation(
+                        event.stageEdge.from,
+                        event.stageEdge.to,
+                        event.stageEdge.relation,
+                        SOURCE_SERVICE,
+                        event.stageEdge.validFrom,
+                        event.stageEdge.sourceVersion,
+                    ),
+                ),
+                clock.instant(),
+            )
+        }.flatMap {
+            mutation(
+                operation,
+                """INSERT INTO context_projection_events
+                    (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at)
+                    VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt)
+                    ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
+                """.trimIndent(),
+                mapOf(
+                    "bankScope" to bankScope,
+                    "generation" to projectionGeneration,
+                    "eventKey" to event.eventKey,
+                    "source" to SOURCE_SERVICE,
+                    "aggregateRef" to event.paymentKey,
+                    "version" to event.sourceVersion,
+                    "occurredAt" to event.occurredAt,
+                    "processedAt" to clock.instant(),
+                ),
+            )
+        }.flatMap { inserted ->
+            if (inserted == 0) {
+                Uni.createFrom().voidItem()
+            } else {
+                upsertNode(operation, event.paymentNode)
+                    .flatMap { upsertNode(operation, event.stageNode) }
+                    .flatMap { upsertEdge(operation, event.stageEdge) }
+                    .replaceWithVoid()
+            }
         }
-    }
 
-    private fun upsertNode(session: Mutiny.Session, node: PaymentProjectionNode): Uni<Int> = mutation(
-        session,
+    private fun upsertNode(operation: ContextSqlOperation, node: PaymentProjectionNode): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
@@ -125,14 +163,15 @@ class DomesticPaymentProjectionConsumer(
         ),
     )
 
-    private fun upsertEdge(session: Mutiny.Session, edge: PaymentProjectionEdge): Uni<Int> = mutation(
-        session,
+    private fun upsertEdge(operation: ContextSqlOperation, edge: PaymentProjectionEdge): Uni<Int> = mutation(
+        operation,
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
-             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version)
+             source_system, evidence_ref, valid_from, valid_to, recorded_at, source_version, retained_history_from)
             VALUES (:id, :bankScope, :generation, 'COMPLAINT', :fromKey, :toKey, :relation,
-                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (edge_id) DO NOTHING
+                    :source, :evidenceRef, :validFrom, NULL, :recordedAt, :version, :validFrom)
+            ON CONFLICT (bank_scope, projection_generation, edge_id) DO UPDATE SET
+              retained_history_from = LEAST(context_edges.retained_history_from, EXCLUDED.retained_history_from)
         """.trimIndent(),
         mapOf(
             "id" to edge.id,
@@ -149,11 +188,12 @@ class DomesticPaymentProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private fun parse(root: JsonNode): DomesticPaymentProjectionEvent {
         val paymentId = root.text("paymentId")
@@ -211,6 +251,17 @@ private data class PaymentProjectionNode(
     val label: String,
     val validFrom: Instant,
     val sourceVersion: Long,
+)
+
+private fun PaymentProjectionNode.observation() = GraphNodeObservation(
+    key,
+    type,
+    "domestic-payment",
+    sourceRef,
+    label,
+    validFrom,
+    sourceVersion,
+    true,
 )
 
 private data class PaymentProjectionEdge(

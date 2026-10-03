@@ -51,6 +51,31 @@ Complaint context may return opaque typed references and evidence links to assig
 Incident impact returns aggregate counts by node type. It never returns affected identifiers;
 identifier drill-down requires a separate future action, assignment and audit trail.
 
+### Complaint revision history
+
+Complaint corrections retain source-versioned graph-input snapshots with opaque account,
+transaction and dispute IDs, event time, receipt time and a normalized graph-input digest.
+Same-revision conflicts roll back the transaction; older deliveries cannot replace the
+latest current projection. Append-only triggers and forced bank-scoped RLS protect the
+snapshot table, and the reader sets its scope transaction-locally with the same SQL timeout.
+Historical reads still require a current exact-root assignment, purpose, OPA and durable
+disclosure audit. They cannot pivot into another complaint through a shared transaction.
+
+The selected complaint revision is effective at source event time; it does not prove what
+was known then. Pre-migration overwritten evidence cannot be backfilled from current rows,
+and linked payment projectors still require their own historical reproducibility proof.
+This increases retained restricted references: governed retention/restriction/erasure and
+replay operations remain production prerequisites. No bulk history export is introduced.
+
+Normalized payment/booking/rail nodes use a shared append-only history and event digest store
+with forced bank-scoped RLS. A changed event node set fails before current-state deduplication;
+older deliveries are retained without replacing the latest current materialization. Source-owned
+nodes and references are explicitly distinct, and a future owning-source fact cannot erase an
+earlier reference. Historical lookups use scoped indexed top-one candidates for at most 100 keys,
+retain SQL and caller timeouts, and suppress dangling links when a node's history is unavailable.
+No raw source payload is retained. Stable edge-history correctness and the increased history
+retention footprint remain separate production acceptance requirements.
+
 ## Delegation source history
 
 The authority-history endpoint adds root-scoped assignments and an append-only source observation
@@ -129,6 +154,48 @@ propagation and an egress review are required together before enabling the produ
 This design does not authorize owner evidence ingestion or change the P0/P1 invariant
 that their projection stores only opaque references.
 
+## Fraud case reference ingress
+
+The dedicated Fraud topic contains only an event type, case ID, revision and event
+time. Context checks the broker topic, partition key, event identity/type headers,
+the exact four-field payload and lifecycle revision before inserting an append-only,
+bank-scoped reference row. The consumer's own DLQ and Kafka group are isolated from
+payment, AML and KYB streams. Replay is idempotent; a conflicting event ID or case
+revision fails instead of rewriting prior knowledge. PostgreSQL forces bank-scoped
+RLS, and the application sets scope and statement timeout within each transaction.
+No read endpoint or inferred customer edge is introduced by this ingestion step.
+
+Context now exposes a data-free 204/403/503 access decision for one exact Fraud case
+root. It requires the investigator's current root assignment, FRAUD_INVESTIGATION
+purpose, human-admin policy allow and committed read audit. Fraud passes the human
+bearer to this decision endpoint before its source-owned evidence route returns any
+account or counterparty identifier. The Fraud network lens now first authorizes and
+read-audits the exact root, then fetches its current OPEN source associations with
+the investigator's bearer over HTTPS. Candidate discovery uses only the same
+investigator's currently valid Fraud case assignments and is limited to four case
+IDs. Each candidate receives a separate policy decision, committed read audit, and
+current OPEN source check before identifiers are compared. Only same-role account
+or counterparty UUID equality creates a visible edge; score identity is source
+evidence but never a cross-case match. A candidate denial is omitted; source,
+policy, audit or reference-store failure fails the whole request. Truncation is
+disclosed, and a missing edge is not a completeness or innocence claim. A case
+pointer or exact identifier match is a lead, not a finding or permission to inspect
+an unassigned customer. Context stores no account/counterparty values from this feed.
+The source case and outbox remain authoritative if the topic or Context consumer
+lags. A malformed or unauthorized broker record is nacked to the dedicated DLQ.
+
+## Lending source evidence
+
+The optional single-loan guarantee view reads evidence from Lending only after
+Context verifies the human investigator's exact loan assignment, purpose and
+policy. It forwards that investigator's bearer token, requests at most 100 facts,
+validates the returned loan ID and evidence references, limits concurrent source
+calls, records disclosure references, and returns `no-store`. Shared guarantors
+do not authorize a read of another loan. Source outages and invalid responses
+fail closed. The view remains disabled by default; activation requires a declared
+Context-to-Lending network edge and a trusted source connection. The Kafka
+reference pointer is not used by this view and cannot establish a guarantee.
+
 ## Invariants
 
 1. No graph read occurs before assignment verification, current OPA allow and committed audit.
@@ -145,3 +212,29 @@ Scale the context deployment to zero to stop routes and projections; source serv
 paths continue independently. Before any real projection or audit record exists, migrations can be
 rolled back in reverse order. After adoption, retain projection, assignment and audit tables for
 evidence retention and rebuild a new generation instead of deleting the active one.
+
+
+Generation replay retains unknown legacy ledger provenance as NULL and never assigns it to an
+active generation. Retained legacy incident digests are checked before a new generation write by source aggregate
+and revision; a conflict rolls back without graph or ledger rows. Missing legacy digests remain
+unverifiable rather than being represented as verified. New idempotency identities, incident revision constraints and ORM edge
+identities include bank and generation. V19 requires a drained, coordinated writer transition;
+old binaries must not run against the new conflict targets. Replay still requires controlled
+source retention and generation configuration and does not independently grant access to any
+graph. Existing authorization and bank-scoped readers continue to apply.
+
+
+Relationship observations use the same bank/generation boundaries as node history, with forced
+RLS and append-only event/edge tables. Event-level edge-set hashes reject changed or omitted
+relationships on replay. Historical selection applies source/prefix/relation allowlists before
+result limits and returns evidence/time/version from one eligible observation. Missing producer
+withdrawal semantics must never be interpreted as proof that a relationship is currently valid
+or revoked; these are historical source observations.
+
+
+Relationship history coverage on current edges is derived metadata, scoped by bank, generation,
+namespace and complete source relationship identity. Updates preserve original validity and
+evidence, retain the earliest observation time under concurrent insertion, and commit with the
+verified observation. Backfill sets/restores transaction-local bank scope for forced-RLS reads.
+Governed history removal must rebuild coverage before reading resumes; stale coverage must not
+stand in for evidence that has been deleted.

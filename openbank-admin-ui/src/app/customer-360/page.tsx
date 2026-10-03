@@ -88,7 +88,16 @@ export default function Customer360Page() {
       // `available: false` means one thing only: ClickHouse did not answer. A party that simply has
       // no projected events comes back available with empty domains, and is rendered as such below.
       if (!body.available) {
-        setFailure(body.error === 'unauthorized' ? 'unauthorized' : 'unreachable')
+        if (body.error === 'unauthorized') {
+          clearSelectedCustomerGraphFacts(party.id)
+          setSelected(null)
+          setFailure('unauthorized')
+          return
+        }
+        // The graph also reads independently authorised source services. Keep its typed empty
+        // projection so a warehouse outage cannot hide current accounts, cards or interactions.
+        setData(body)
+        setFailure('unreachable')
         return
       }
       setData(body)
@@ -127,7 +136,7 @@ export default function Customer360Page() {
 
       <PartySearch onSelect={load360} selectedId={selected?.id} busy={loading} />
 
-      {!loading && !failure && data && selected && (
+      {!loading && data && selected && (
         <CustomerContextGraph key={selected.id} evidence={data} partyName={partyDisplayName(selected)} />
       )}
 
@@ -168,7 +177,7 @@ export default function Customer360Page() {
       {/* A party that exists but has no projected events. Stated as exactly that — the source is up,
           this party simply has no analytics history yet. The earlier copy said the source held no
           records at all, which an operator cannot distinguish from a broken page. */}
-      {!loading && data && data.domains.length === 0 && (
+      {!loading && data?.available && data.domains.length === 0 && (
         <div className="card" style={{ padding: '32px', textAlign: 'center' }}>
           <p style={{ margin: '0 0 6px', fontWeight: 600, color: 'var(--text-primary)' }}>
             {t('Tato party nemá žádné analytické události', 'This party has no analytics events')}

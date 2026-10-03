@@ -49,4 +49,5 @@ data class InitiateSettlementRequest(
     val valueDate: String,
     val rail: String,
     val instructionType: String? = null,
+    val originatingPaymentId: UUID? = null,
 )

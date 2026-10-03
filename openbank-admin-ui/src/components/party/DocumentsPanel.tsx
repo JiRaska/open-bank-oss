@@ -21,7 +21,9 @@ export function DocumentsPanel({ partyId }: { partyId: string }) {
     ;(async () => {
       try {
         const facts = await loadCustomerGraphFacts(partyId)
-        if (live) setState(facts.unavailable.includes('documents')
+        if (live) setState(facts.restricted?.includes('documents')
+          ? { kind: 'unknown', why: 'unauthorized' }
+          : facts.unavailable.includes('documents')
           ? { kind: 'unknown', why: 'unreachable' }
           : { kind: 'ok', documents: facts.documents })
       } catch {

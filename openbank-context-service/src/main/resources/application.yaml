@@ -21,37 +21,93 @@ quarkus:
     client-id: openbank-services
     credentials:
       secret: ${OIDC_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+  oidc-client:
+    auth-server-url: ${CONTEXT_INVESTIGATION_OIDC_URL:http://localhost:8080/realms/openbank}
+    client-id: openbank-context-investigation
+    credentials:
+      secret: ${CONTEXT_INVESTIGATION_CLIENT_SECRET:CHANGE_ME_LOCAL_DEV_ONLY}
+    grant:
+      type: client
   rest-client:
     aml-service:
       url: ${AML_CASE_SOURCE_URL:http://localhost:8117}
       connect-timeout: 250
       read-timeout: 1250
+    fraud-service:
+      url: ${FRAUD_CASE_SOURCE_URL:http://localhost:8133}
+      connect-timeout: 250
+      read-timeout: 4500
+    lending-service:
+      url: ${LENDING_GRAPH_SOURCE_URL:http://localhost:8126}
+      connect-timeout: 250
+      read-timeout: 4500
   smallrye-openapi:
     store-schema-directory: target/openapi
   management:
     enabled: true
     port: 8085
     root-path: /q
+"%prod":
+  quarkus:
+    tls:
+      fraud-source:
+        trust-store:
+          pem:
+            certs: /mnt/fraud-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      fraud-service:
+        tls-configuration-name: fraud-source
+
+# Activate together with prod only after the optional client certificate and the HTTPS
+# Lending source URL are provisioned. Keeping this bucket out of the default prod profile
+# lets the existing Context deployment boot while the source-backed lens stays disabled.
+"%lending-graph-source":
+  quarkus:
+    tls:
+      lending-source:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/lending-client-tls/tls.crt
+              key: /mnt/lending-client-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/lending-client-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      lending-service:
+        tls-configuration-name: lending-source
+
 "%dev":
   quarkus:
     oidc:
       enabled: false
 "%test":
   quarkus:
+    kafka:
+      devservices:
+        # This profile uses in-memory messaging; real Kafka is verified by source E2E probes.
+        enabled: false
     oidc:
+      enabled: false
+    oidc-client:
       enabled: false
   openbank:
     context:
-      # Hosted CI cold-starts PostgreSQL and the reactive pool under shared CPU.
-      # Keep production's 500 ms fail-fast budget while preventing infrastructure
-      # scheduling jitter from turning the integration test into a false 500.
-      query-timeout-ms: 5000
+      # Exercise the same 500 ms fail-fast budget as production.
+      query-timeout-ms: 500
+    commitment-export:
+      # Each enabled relay claims a bounded batch once per second; tune only after measured drain proof.
+      batch-size: ${CONTEXT_COMMITMENT_EXPORT_BATCH_SIZE:200}
   mp:
     messaging:
       outgoing:
         context-audit-commitments-out:
           connector: smallrye-in-memory
       incoming:
+        fraud-case-references-in:
+          connector: smallrye-in-memory
         kyb-ubo-observation-references-in:
           connector: smallrye-in-memory
         aml-case-evidence-in:
@@ -86,6 +142,19 @@ mp:
         ssl.truststore.type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
         ssl.truststore.password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
     incoming:
+      fraud-case-references-in:
+        connector: smallrye-kafka
+        topic: openbank.fraud.investigation.case.references
+        group:
+          id: openbank-context-service-fraud-cases
+        auto:
+          offset:
+            reset: earliest
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.context-service.fraud-case-references
       kyb-ubo-observation-references-in:
         connector: smallrye-kafka
         topic: openbank.kyb.ubo-observation-references
@@ -205,3 +274,6 @@ openbank:
     max-nodes: 100
     max-edges: 200
     query-timeout-ms: 500
+    commitment-export:
+      # Each enabled relay claims a bounded batch once per second; tune only after measured drain proof.
+      batch-size: ${CONTEXT_COMMITMENT_EXPORT_BATCH_SIZE:200}

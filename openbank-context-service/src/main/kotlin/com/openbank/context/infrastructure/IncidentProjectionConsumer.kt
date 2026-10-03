@@ -46,8 +46,15 @@ class IncidentProjectionConsumer(
             require(root.text("sourceService") == SOURCE_SERVICE) { "unexpected ICT incident event source" }
             require(root.long("schemaVersion") == SCHEMA_VERSION) { "unsupported ICT incident schemaVersion" }
             val event = parse(root, incidentDigest(payload))
-            sessions.withTransaction { session, _ -> project(session, event) }
-                .ifNoItem().after(Duration.ofMillis(timeoutMs.toLong())).fail().awaitSuspending()
+            ContextSqlOperation.execute(sessions, timeoutMs) { operation ->
+                operation.sql { session ->
+                    session.createNativeQuery(
+                        "select set_config('openbank.bank_scope', :bank, true)",
+                        String::class.java,
+                    )
+                        .setParameter("bank", bankScope).singleResult
+                }.flatMap { project(operation, event) }
+            }.awaitSuspending()
             meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "projected").increment()
             projectionLagSeconds.set((clock.instant().epochSecond - event.occurredAt.epochSecond).coerceAtLeast(0))
         } catch (failure: RuntimeException) {
@@ -59,17 +66,39 @@ class IncidentProjectionConsumer(
         }
     }
 
-    private fun project(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
-        session,
+    private fun project(operation: ContextSqlOperation, event: IncidentProjectionEvent): Uni<Void> =
+        operation.sql { session ->
+            session.createNativeQuery(
+                "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
+                    "WHERE bank_scope = :bank AND projection_generation IS NULL " +
+                    "AND source_system = :source AND aggregate_ref = :aggregate AND source_version = :version",
+                String::class.java,
+            ).setParameter("bank", bankScope).setParameter("source", SOURCE_SERVICE)
+                .setParameter("aggregate", event.rootKey).setParameter("version", event.sourceVersion)
+                .resultList
+        }.invoke { digests ->
+            digests.forEach { digest ->
+                if (digest.isEmpty()) {
+                    meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_digest_unavailable")
+                        .increment()
+                } else {
+                    require(digest == event.contentDigest) { "conflicting legacy ICT incident revision replay" }
+                }
+            }
+        }.flatMap { projectCurrent(operation, event) }
+
+    private fun projectCurrent(operation: ContextSqlOperation, event: IncidentProjectionEvent): Uni<Void> = mutation(
+        operation,
         """INSERT INTO context_projection_events
-                (bank_scope, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at,
+                (bank_scope, projection_generation, event_key, source_system, aggregate_ref, source_version, occurred_at, processed_at,
                  content_digest)
-                VALUES (:bankScope, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt,
+                VALUES (:bankScope, :generation, :eventKey, :source, :aggregateRef, :version, :occurredAt, :processedAt,
                         :digest)
-                ON CONFLICT (bank_scope, event_key) DO NOTHING
+                ON CONFLICT (bank_scope, projection_generation, event_key) DO NOTHING
         """.trimIndent(),
         mapOf(
             "bankScope" to bankScope,
+            "generation" to projectionGeneration,
             "eventKey" to event.eventKey,
             "source" to SOURCE_SERVICE,
             "aggregateRef" to event.rootKey,
@@ -80,30 +109,40 @@ class IncidentProjectionConsumer(
         ),
     ).flatMap { inserted ->
         if (inserted == 0) {
-            verifyReplay(session, event)
+            verifyReplay(operation, event)
         } else {
-            upsertIncident(session, event).flatMap { changed ->
-                if (changed == 0) Uni.createFrom().voidItem() else replaceAffectedServices(session, event)
+            upsertIncident(operation, event).flatMap { changed ->
+                if (changed == 0) Uni.createFrom().voidItem() else replaceAffectedServices(operation, event)
             }
         }
     }
 
-    private fun verifyReplay(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> =
-        session.createNativeQuery(
-            "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
-                "WHERE bank_scope = :bankScope AND event_key = :eventKey",
-            String::class.java,
-        ).setParameter("bankScope", bankScope).setParameter("eventKey", event.eventKey).singleResult.flatMap { stored ->
+    private fun verifyReplay(operation: ContextSqlOperation, event: IncidentProjectionEvent): Uni<Void> =
+        operation.sql { session ->
+            session.createNativeQuery(
+                "SELECT COALESCE(content_digest, '') FROM context_projection_events " +
+                    "WHERE bank_scope = :bankScope AND projection_generation = :generation " +
+                    "AND event_key = :eventKey",
+                String::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("eventKey", event.eventKey).singleResult
+        }.flatMap { stored ->
             if (stored.isEmpty()) {
-                meters.counter(METRIC_EVENTS, "stream", "incident", "outcome", "legacy_digest_unavailable").increment()
+                meters.counter(
+                    METRIC_EVENTS,
+                    "stream",
+                    "incident",
+                    "outcome",
+                    "legacy_digest_unavailable",
+                ).increment()
             } else {
                 require(stored == event.contentDigest) { "conflicting ICT incident revision replay" }
             }
             Uni.createFrom().voidItem()
         }
 
-    private fun upsertIncident(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Int> = upsertNode(
-        session,
+    private fun upsertIncident(operation: ContextSqlOperation, event: IncidentProjectionEvent): Uni<Int> = upsertNode(
+        operation,
         key = event.rootKey,
         type = "INCIDENT",
         sourceRef = event.id,
@@ -112,51 +151,65 @@ class IncidentProjectionConsumer(
         sourceVersion = event.sourceVersion,
     )
 
-    private fun replaceAffectedServices(session: Mutiny.Session, event: IncidentProjectionEvent): Uni<Void> = mutation(
-        session,
-        """DELETE FROM context_edges
+    private fun replaceAffectedServices(operation: ContextSqlOperation, event: IncidentProjectionEvent): Uni<Void> =
+        mutation(
+            operation,
+            """DELETE FROM context_edges
              WHERE bank_scope = :bankScope AND projection_generation = :generation
                AND namespace = 'INCIDENT' AND from_key = :root AND relation_type = 'AFFECTS_SERVICE'
-        """.trimIndent(),
-        mapOf("bankScope" to bankScope, "generation" to projectionGeneration, "root" to event.rootKey),
-    ).flatMap {
-        var chain: Uni<*> = Uni.createFrom().voidItem()
-        event.affectedServices.distinct().sorted().forEach { service ->
-            val serviceKey = "service:$service"
-            chain = chain.flatMap {
-                upsertNode(session, serviceKey, "SERVICE", service, service, event.detectedAt, event.sourceVersion)
-            }.flatMap {
-                mutation(
-                    session,
-                    """INSERT INTO context_edges
+            """.trimIndent(),
+            mapOf("bankScope" to bankScope, "generation" to projectionGeneration, "root" to event.rootKey),
+        ).flatMap {
+            var chain: Uni<*> = Uni.createFrom().voidItem()
+            event.affectedServices
+                .distinct()
+                .sorted()
+                .forEach { service ->
+                    val serviceKey = "service:$service"
+                    chain = chain.flatMap {
+                        upsertNode(
+                            operation,
+                            serviceKey,
+                            "SERVICE",
+                            service,
+                            service,
+                            event.detectedAt,
+                            event.sourceVersion,
+                        )
+                    }.flatMap {
+                        mutation(
+                            operation,
+                            """INSERT INTO context_edges
                         (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type,
                          source_system, evidence_ref, valid_from, recorded_at, source_version)
                         VALUES (:id, :bankScope, :generation, 'INCIDENT', :root, :serviceKey, 'AFFECTS_SERVICE',
                                 :source, :evidence, :validFrom, :recordedAt, :version)
-                        ON CONFLICT (edge_id) DO UPDATE SET recorded_at = EXCLUDED.recorded_at,
+                        ON CONFLICT (bank_scope, projection_generation, edge_id)
+                        DO UPDATE SET recorded_at = EXCLUDED.recorded_at,
                           source_version = EXCLUDED.source_version
                         WHERE context_edges.source_version < EXCLUDED.source_version
-                    """.trimIndent(),
-                    mapOf(
-                        "id" to incidentStableId("$bankScope|$projectionGeneration|${event.rootKey}|$serviceKey"),
-                        "bankScope" to bankScope,
-                        "generation" to projectionGeneration,
-                        "root" to event.rootKey,
-                        "serviceKey" to serviceKey,
-                        "source" to SOURCE_SERVICE,
-                        "evidence" to event.eventKey,
-                        "validFrom" to event.detectedAt,
-                        "recordedAt" to clock.instant(),
-                        "version" to event.sourceVersion,
-                    ),
-                )
-            }
+                            """.trimIndent(),
+                            mapOf(
+                                "id" to
+                                    incidentStableId("$bankScope|$projectionGeneration|${event.rootKey}|$serviceKey"),
+                                "bankScope" to bankScope,
+                                "generation" to projectionGeneration,
+                                "root" to event.rootKey,
+                                "serviceKey" to serviceKey,
+                                "source" to SOURCE_SERVICE,
+                                "evidence" to event.eventKey,
+                                "validFrom" to event.detectedAt,
+                                "recordedAt" to clock.instant(),
+                                "version" to event.sourceVersion,
+                            ),
+                        )
+                    }
+                }
+            chain.replaceWithVoid()
         }
-        chain.replaceWithVoid()
-    }
 
     private fun upsertNode(
-        session: Mutiny.Session,
+        operation: ContextSqlOperation,
         key: String,
         type: String,
         sourceRef: String,
@@ -164,7 +217,7 @@ class IncidentProjectionConsumer(
         validFrom: Instant,
         sourceVersion: Long,
     ): Uni<Int> = mutation(
-        session,
+        operation,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, recorded_at, source_version)
@@ -190,11 +243,12 @@ class IncidentProjectionConsumer(
         ),
     )
 
-    private fun mutation(session: Mutiny.Session, sql: String, values: Map<String, Any>): Uni<Int> {
-        val query = session.createNativeMutationQuery(sql)
-        values.forEach { (name, value) -> query.setParameter(name, value) }
-        return query.executeUpdate()
-    }
+    private fun mutation(operation: ContextSqlOperation, sql: String, values: Map<String, Any>): Uni<Int> =
+        operation.sql { session ->
+            val query = session.createNativeMutationQuery(sql)
+            values.forEach { (name, value) -> query.setParameter(name, value) }
+            query.executeUpdate()
+        }
 
     private fun parse(root: JsonNode, contentDigest: String): IncidentProjectionEvent {
         val incident = root.path("incident")
@@ -241,9 +295,6 @@ class IncidentProjectionConsumer(
         )
     }
 
-    private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
-    private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
-
     private companion object {
         const val SOURCE_SERVICE = "security-scanner"
         const val SCHEMA_VERSION = 1L
@@ -260,6 +311,9 @@ class IncidentProjectionConsumer(
         )
     }
 }
+
+private fun JsonNode.text(name: String): String = path(name).takeIf { it.isTextual }?.asText()?.trim().orEmpty()
+private fun JsonNode.long(name: String): Long = path(name).takeIf { it.canConvertToLong() }?.asLong() ?: 0
 
 private fun incidentDigest(payload: String): String = MessageDigest.getInstance("SHA-256")
     .digest(payload.toByteArray(StandardCharsets.UTF_8)).joinToString("") { "%02x".format(it) }

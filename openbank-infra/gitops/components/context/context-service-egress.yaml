@@ -49,3 +49,21 @@ spec:
               app.kubernetes.io/name: keycloak
       ports:
         - { protocol: TCP, port: 8080 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: lending
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: lending-service
+      ports:
+        - { protocol: TCP, port: 8443 }
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: fraud
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: fraud-service
+      ports:
+        - { protocol: TCP, port: 8443 }
