@@ -70,6 +70,8 @@ Flyway, neměnné historické skripty, forward-only (`migrate-at-start: true`):
 | `V2__compliance_fields.sql` | Sloupce PSD2 RTS + SEPA CT Rulebook (purpose_code, charge_bearer, sca_reference, consent_id, aml_screened…), `chk_sepa_charge_bearer`, partial indexy | `ALTER TABLE … DROP COLUMN …` |
 | `V3__create_sepa_payment_outbox.sql` | Tabulka `sepa_payment_outbox` (transakční outbox) + indexy | `DROP TABLE sepa_payment_outbox` |
 | `V4__hibernate_sequences.sql` | `sepa_payments_seq`, `sepa_payment_outbox_seq` (INCREMENT BY 50) — vyžadováno Hibernate Reactive + Panache (generování schématu `none`) | `DROP SEQUENCE sepa_payments_seq, sepa_payment_outbox_seq` |
+| `V13__payment_workflow_observations.sql` | Append-only tabulka `sepa_payment_workflow_observations`, klíčovaná UUID události, unikátní pro platbu/revizi a navázaná na vlastníka platby | Před zápisem lze tabulku odstranit; po zápisu zachovat důkazy do konce retenční doby |
+| `V14__workflow_observation_scope.sql` | Nullable prostředí a čas začátku workflow; starší řádky zůstávají výslovně bez rozsahu | Před odebráním obou sloupců vyřadit čtečky i zapisovače |
 
 > V4 opravuje runtime defekt: BIGSERIAL vytvoří jen `<table>_id_seq`, ale Hibernate alokuje id ze `<table>_seq`. Hlídáno `HibernateSequenceGuardTest`. Nikdy nepřepisuj již aplikovanou migraci (checksum mismatch → pád při startu; použij `QUARKUS_FLYWAY_REPAIR_AT_START`, pokud je zasažena živá DB).
 
@@ -81,6 +83,7 @@ Flyway, neměnné historické skripty, forward-only (`migrate-at-start: true`):
 - `sepa_payments(aml_screened) WHERE aml_screened = FALSE` — partial (neprověřený backlog)
 - `sepa_payment_outbox(status, created_at ASC)` — poll dispatcheru
 - `sepa_payment_outbox(aggregate_id)` — vyhledání událostí per platba
+- `sepa_payment_workflow_observations(payment_id, payment_revision)` — omezené čtení historie v opačném pořadí; unikátní index brání dvěma pozorováním jedné revize
 
 ## Retence
 
@@ -90,6 +93,7 @@ Deklarovaná retenční politika: **7 let** (`governance.yaml: retentionPolicy`)
 |---|---|---|
 | `sepa_payments` | 7 let (AML / platební záznamy) | regulatorní; přebíjí GDPR výmaz u záznamů o transakcích |
 | `sepa_payment_outbox` | krátké provozní okno po `SENT` | troubleshooting / replay (viz provoz) |
+| `sepa_payment_workflow_observations` | doba uchování zdrojových důkazů; v této fázi bez automatického mazání | append-only důkaz o výsledku platby včetně UUID události a digestu payloadu, nikoli payloadu samotného |
 
 ## PII pole (GDPR)
 

@@ -37,7 +37,7 @@ import java.util.UUID
  */
 @QuarkusTest
 @QuarkusTestResource(com.openbank.sepa.it.PostgresRedisTestResource::class)
-@QuarkusTestResource(DocumentServiceWireMockResource::class)
+@QuarkusTestResource(DocumentServiceWireMockResource::class, restrictToAnnotatedClass = true)
 class PaymentConfirmationSimulatorIT {
 
     @Inject

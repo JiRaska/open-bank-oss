@@ -41,6 +41,8 @@ openbank-infra/scripts/build-push-service.sh sepa-payment
 | `AML_SERVICE_URL` | `http://localhost:8117` | REST klient aml-service (otevírání případů) |
 | `OPA_URL` / `OPA_PATH` / `OPA_TIMEOUT_MS` | `http://localhost:8181` / `/v1/data/openbank/rest/allow` / `500` | OPA sidecar (ADR-0034) |
 | `AUTHZ_ENFORCE` | `false` | OPA přepínač advisory→enforce |
+| `SEPA_WORKFLOW_OBSERVATIONS_ENABLED` | `false` | Zápis zdrojových pozorování průběhu platby; ponechat vypnutý do ověření latence při zátěži 1× a 10× v #11725 |
+| `OPENBANK_ENVIRONMENT` | nenastaveno | Prostředí zapisované k novým pozorováním; při zapnutém zápisu je povinné už při startu |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata pro `/api/v1/info` |
 
 DB je dostupná přes reaktivní (`postgresql://…/openbank_sepa_payments`) i JDBC (Flyway) URL. Redis na `redis://localhost:6379` zajišťuje idempotenci.
@@ -84,6 +86,12 @@ To je **záměr**, když screening vrátí REVIEW nebo je nedostupný (fail-clos
 1. `SELECT count(*) FROM sepa_payment_outbox WHERE status='PENDING'`.
 2. Zkontroluj dostupnost Kafky a logy dispatcheru (`SepaPaymentOutboxDispatcher`).
 3. Prozkoumej `last_error` / `attempt_count` na FAILED řádcích; po opakovaných selháních publikace může být circuit breaker otevřený.
+
+### Důkazní pozorování průběhu platby
+
+Zápis pozorování je **ve výchozím stavu vypnutý**. Po zapnutí se změna stavu platby, její outbox událost a pozorování uloží v jedné transakci. Přepínač nezapínej bez platného `OPENBANK_ENVIRONMENT` ani před přijetím měření latence zápisu při zátěži 1× a 10× podle #11725. U starších plateb a plateb zpracovaných s vypnutým zápisem je historie neznámá; chybějící řádek nedokazuje, že k události nedošlo.
+
+Při oprávněném šetření ve zdrojové službě vyhledávej přesnou referenci platby a události. Historie COMPLETE, PARTIAL nebo UNKNOWN popisuje jen pozorování této služby; neprokazuje příčinnou souvislost s ICT incidentem. Zdrojové vyhledání je interní, bez oprávnění k detailu případu a bez externího endpointu. Chybějící prostředí, revize z různých prostředí či obrácený časový interval znamenají UNKNOWN. Při rollbacku nech přepínač vypnutý; vzniklé řádky zachovej po dobu uchování zdrojových důkazů místo odstranění tabulky.
 
 ### Idempotenční replay
 

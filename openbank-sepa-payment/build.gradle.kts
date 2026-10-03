@@ -91,6 +91,14 @@ kover {
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
 
+// The workflow-observation suite (#10879) adds a third Quarkus boot (the default-off
+// SepaPaymentBootSmokeIT profile) next to the Postgres/Redis integration profile; at the
+// default 512 MiB test heap the forked JVM ran out of memory mid-suite. 2g matches the
+// per-module override already used by account/balance/ledger/domestic-payment.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "2g"
+}
+
 // Mutation testing on the money-path domain (ADR-0063 / ADR-0030 D3). Weekly + manual via
 // pitest.yml, advisory — never a per-PR gate. Per-service plugin pin on purpose (rules.yaml
 // money_path_depth): keeping it out of the shared version catalog avoids a fleet-wide rebuild.

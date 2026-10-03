@@ -41,6 +41,8 @@ openbank-infra/scripts/build-push-service.sh sepa-payment
 | `AML_SERVICE_URL` | `http://localhost:8117` | aml-service REST client (case opening) |
 | `OPA_URL` / `OPA_PATH` / `OPA_TIMEOUT_MS` | `http://localhost:8181` / `/v1/data/openbank/rest/allow` / `500` | OPA sidecar (ADR-0034) |
 | `AUTHZ_ENFORCE` | `false` | OPA advisory→enforce switch |
+| `SEPA_WORKFLOW_OBSERVATIONS_ENABLED` | `false` | Source-local workflow evidence write; leave disabled until #11725 proves payment-path latency at 1× and 10× load |
+| `OPENBANK_ENVIRONMENT` | unset | Explicit environment recorded on new observations; required at startup when workflow observations are enabled |
 | `BUILD_TIME` / `GIT_COMMIT` | `unknown` | build metadata for `/api/v1/info` |
 
 The DB is reached via both reactive (`postgresql://…/openbank_sepa_payments`) and JDBC (Flyway) URLs. Redis at `redis://localhost:6379` backs idempotency.
@@ -84,6 +86,12 @@ This is **by design** when screening returns REVIEW or is unavailable (fail-clos
 1. `SELECT count(*) FROM sepa_payment_outbox WHERE status='PENDING'`.
 2. Check Kafka reachability and the dispatcher logs (`SepaPaymentOutboxDispatcher`).
 3. Inspect `last_error` / `attempt_count` on FAILED rows; the circuit breaker may be open after repeated publish failures.
+
+### Workflow observation evidence
+
+The observation write is **off by default**. When enabled, a payment status change, its outbox event and the source-local observation commit in one transaction. Do not enable the flag without a valid `OPENBANK_ENVIRONMENT` or before the 1×/10× write-latency evidence in #11725 is accepted. Existing payments and payments processed while disabled have unknown observation history; missing rows must not be interpreted as proof that no workflow event occurred.
+
+For an authorized source investigation, query by exact payment and event reference. A COMPLETE, PARTIAL or UNKNOWN history describes only what this service observed; it cannot establish that an ICT incident caused the outcome. The source lookup is internal and provides no case-scoped authorization or external detail endpoint. Treat a missing environment, cross-environment revisions, or reversed time interval as UNKNOWN. Keep the flag disabled during rollback; after writes exist, retain their rows for the source evidence period rather than dropping the table.
 
 ### Idempotency replay
 
