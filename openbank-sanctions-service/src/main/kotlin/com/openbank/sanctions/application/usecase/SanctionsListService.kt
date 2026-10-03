@@ -5,10 +5,13 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.sanctions.application.port.out.ListImportOutcome
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
+import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsList
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.domain.model.UpdateSanctionsListRequest
+import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsListRepositoryImpl
 import io.quarkus.logging.Log
 import io.quarkus.scheduler.Scheduled
@@ -19,12 +22,16 @@ import java.time.Clock
 import java.time.ZonedDateTime
 import java.util.UUID
 
+private suspend fun SanctionsListRepositoryImpl.requireList(listType: String): SanctionsList =
+    findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
+
 @ApplicationScoped
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
     private val importer: SanctionsImportService,
     private val clock: Clock,
     private val publisher: SanctionsChangePublisher,
+    private val publicationFence: SanctionsImportPublicationFence? = null,
 ) {
 
     // CDI entry point: injects the production UTC clock. Tests use the primary constructor with a
@@ -34,7 +41,8 @@ class SanctionsListService(
         repo: SanctionsListRepositoryImpl,
         importer: SanctionsImportService,
         publisher: SanctionsChangePublisher,
-    ) : this(repo, importer, Clock.systemUTC(), publisher)
+        publicationFence: SanctionsImportPublicationFence,
+    ) : this(repo, importer, Clock.systemUTC(), publisher, publicationFence)
 
     suspend fun listAll(): List<SanctionsList> = repo.listSanctionsLists()
 
@@ -56,26 +64,49 @@ class SanctionsListService(
 
     suspend fun refresh(listType: String): SanctionsList {
         Log.info("Manual refresh triggered for list: $listType")
-        val list = repo.findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
+        val list = repo.requireList(listType)
         val enumType = runCatching { SanctionsListType.valueOf(listType) }.getOrNull()
-        val count = if (enumType != null) {
-            val result = importer.importList(enumType, list.sourceUrl)
-            // Failed imports may already have committed earlier batches. Publish what actually
-            // committed, including retained evidence from previous attempts, regardless of outcome.
-            publisher.publishPending(list.id, enumType)
+        suspend fun markCompleted(
+            result: ListImportResult,
+            currentList: SanctionsList,
+            permit: SanctionsPublicationPermit? = null,
+        ): SanctionsList {
             // Key on the outcome, never on "count > 0" (issue #8362 / #4348): only IMPORTED means
             // the usable feed count is known. Other outcomes cannot establish a new population,
             // so retain the prior reported count; committed partial changes are journaled separately.
-            if (result.outcome == ListImportOutcome.IMPORTED) {
+            val count = if (result.outcome == ListImportOutcome.IMPORTED) {
                 result.entriesImported
             } else {
-                list.lastEntryCount ?: 0
+                currentList.lastEntryCount ?: 0
             }
-        } else {
-            list.lastEntryCount ?: 0
+            val marked = if (permit == null) {
+                repo.markUpdated(listType, count)
+            } else {
+                repo.markUpdatedFenced(listType, count, permit)
+            }
+            return marked
+                ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
         }
-        return repo.markUpdated(listType, count)
-            ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
+        if (enumType == null) {
+            return repo.markUpdated(listType, list.lastEntryCount ?: 0)
+                ?: throw IllegalStateException("Failed to persist sanctions list refresh for $listType")
+        }
+        // The metadata write belongs to the same fenced refresh as import and publication.
+        // Releasing the fence first lets an older pod overwrite a newer refresh's entry count.
+        if (publicationFence != null) {
+            return publicationFence.duringRefresh(enumType) { permit ->
+                // A queued refresh may wait for another pod to finish. Read the list only
+                // after ownership passes, so a failed import cannot restore an older count.
+                val currentList = repo.requireList(listType)
+                val result = importer.importList(enumType, currentList.sourceUrl, permit)
+                publisher.publishFenced(currentList.id, enumType, permit)
+                markCompleted(result, currentList, permit)
+            }
+        }
+        // Unit-test constructor exercises the same orchestration with a mocked publisher.
+        val result = importer.importList(enumType, list.sourceUrl)
+        publisher.publishPending(list.id, enumType)
+        return markCompleted(result, list)
     }
 
     /**

@@ -7,9 +7,32 @@ package com.openbank.sanctions.application.port.out
 import com.openbank.sanctions.domain.model.SanctionsListType
 import java.util.UUID
 
-enum class SanctionsPublicationOutcome { NO_CHANGES, PUBLISHED, WITHHELD }
+enum class SanctionsPublicationOutcome { NO_CHANGES, PUBLISHED, WITHHELD, DEFERRED }
+
+/** Capability held only while one list's import and final publication own the database fence. */
+class SanctionsPublicationPermit internal constructor(
+    private val listType: SanctionsListType,
+    val generation: Long = 0,
+) {
+    @Volatile
+    private var active = true
+
+    internal fun checkFor(type: SanctionsListType) {
+        check(active && type == listType) { "Sanctions publication fence is not held for $type" }
+    }
+
+    internal fun invalidate() {
+        active = false
+    }
+}
 
 /** Publish committed pending changes; retain their evidence on failure or withheld publication. */
 interface SanctionsChangePublisher {
     suspend fun publishPending(listId: UUID, listType: SanctionsListType): SanctionsPublicationOutcome
+
+    suspend fun publishFenced(
+        listId: UUID,
+        listType: SanctionsListType,
+        permit: SanctionsPublicationPermit,
+    ): SanctionsPublicationOutcome
 }
