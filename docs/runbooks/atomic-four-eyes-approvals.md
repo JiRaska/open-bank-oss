@@ -1,8 +1,9 @@
 # Atomic four-eyes approvals
 
 A configured four-eyes gate must obtain a one-time claim before invoking its operation.
-`RedisApprovalStore` uses a single-key compare-and-set script for checker decisions and
-execution claims. Concurrent requests cannot both acknowledge a transition. An expired
+`RedisApprovalStore` performs every check-and-write (create, checker decision, execution
+claim) as one server-side Lua script, so the status and maker checks and the write are a
+single atomic step. Concurrent requests cannot both acknowledge a transition. An expired
 or deleted key is not recreated by a late write. The interceptor starts a new pending
 approval if a previously valid record disappears before it can be claimed.
 
@@ -13,8 +14,12 @@ allow result carrying the obligation alone does not prove that a service enforce
 
 ## Rollout and rollback
 
-The record encoding and TTL convention are unchanged. Redis must permit EVAL and the
-GET/SET commands used by its script. Replace all writers for a service while approval
+Records are stored as one hash per approval under a per-service namespace
+(`approval-v2:<quarkus.application.name>:`), with a pending index and a per-maker index.
+Records in the previous layout stay readable by id until their TTL ends and are moved on
+first write; they carry no request binding and so never satisfy an intercepted request.
+The TTL convention is unchanged. Redis must permit EVAL and the hash, sorted-set and key
+commands used by the scripts. Replace all writers for a service while approval
 writes are quiesced before reopening its decision and execution paths. An older writer
 uses unconditional SET and invalidates the atomicity guarantee during mixed operation.
 
@@ -26,11 +31,12 @@ approval record and the business operation before requesting another approval.
 An EXECUTED record means the interceptor claimed authorization. It does not establish
 that the subsequent business operation committed: the approval store and business
 database are separate transactions. An uncertain business result needs reconciliation.
-Redis TTL is not durable audit retention. Each endpoint must bind the exact intended
-operation to its approval resource; this store fix does not add request-body binding.
+Redis TTL is not durable audit retention. Each approval is bound to a fingerprint of
+the request it was issued for; a retry with different arguments is not satisfied by it.
 
-`RedisApprovalStoreIT` (libs-runtime) executes the production store against real Valkey and checks
-concurrent checker decisions, concurrent consumption (both forced through one shared read
-snapshot) and eviction at the write boundary; the race tests fail against the pre-CAS store.
-`AuthorizeInterceptorTest` verifies missing-store and disappearing-record refusal;
-`RedisApprovalStoreTest` retains the shared maker/checker contract checks.
+`RedisApprovalStoreIT` (libs-runtime) executes the production store against real Valkey: it binds
+the shared maker/checker contract and checks concurrent checker decisions, concurrent
+consumption (every racer held until all have read, before any writes) and eviction at the
+write boundary; the race tests fail against a read-then-write store. Without Docker it is
+skipped locally and fails in CI. `AuthorizeInterceptorTest` verifies missing-store and
+disappearing-record refusal.

@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.272.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.271.0...admin-ui-v0.272.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** guided curve-set upload form ([#11704](https://github.com/JiRaska/open-bank-oss/issues/11704)) ([089d5bc](https://github.com/JiRaska/open-bank-oss/commit/089d5bce5a00d674013e4c1a61ab7c5a4794dcd9)), closes [#11107](https://github.com/JiRaska/open-bank-oss/issues/11107)
+
+## [0.271.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.1...admin-ui-v0.271.0) (2026-10-03)
+
+
+### Features
+
+* **risk-engine:** sandbox reference curve sets, CZK IRRBB aggregate, usable IRRBB/forecast pages ([#11719](https://github.com/JiRaska/open-bank-oss/issues/11719)) ([9cfbc7a](https://github.com/JiRaska/open-bank-oss/commit/9cfbc7a882d7de062c165977e239dc09c343c6d9))
+
+## [0.270.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.0...admin-ui-v0.270.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **risk-engine:** reject a snapshot as-of after the current business date ([#11718](https://github.com/JiRaska/open-bank-oss/issues/11718)) ([a56389b](https://github.com/JiRaska/open-bank-oss/commit/a56389b05fd559348f5717c3a657d6feb1e0ec6c))
+
 ## [0.270.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.269.0...admin-ui-v0.270.0) (2026-10-02)
 
 

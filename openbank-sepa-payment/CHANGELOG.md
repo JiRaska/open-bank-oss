@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.17.0...sepa-payment-v0.17.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **libs:** scope idempotency keys per service and caller ([#11677](https://github.com/JiRaska/open-bank-oss/issues/11677)) ([f3a062a](https://github.com/JiRaska/open-bank-oss/commit/f3a062aba3d89a07d4a36b5118b1fda6d3012a93))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.16.0...sepa-payment-v0.17.0) (2026-10-02)
+
+
+### Features
+
+* **sepa-payment:** build kernel Money at the create boundary ([#11813](https://github.com/JiRaska/open-bank-oss/issues/11813)) ([91fa9e7](https://github.com/JiRaska/open-bank-oss/commit/91fa9e794177102f708b9ca1f6c8ed7576bf29e2))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-payment-v0.15.1...sepa-payment-v0.16.0) (2026-10-02)
 
 

@@ -932,3 +932,14 @@ decision use first; the additive projection table may remain until its consumer 
   (reference, amount, currency) must match exactly and is restated on consume
   (`DecisionScaBindingTest`).
   Rollback: disable the delegation flag first; V31/V32 are additive.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("account-service", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:account-service:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).

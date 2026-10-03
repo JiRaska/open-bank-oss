@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.11.0...treasury-service-v0.11.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **treasury:** date nostro breaks on the Prague bank day, not the pod's UTC day ([#11822](https://github.com/JiRaska/open-bank-oss/issues/11822)) ([cf8187c](https://github.com/JiRaska/open-bank-oss/commit/cf8187c3ccebaf8edc603dbe9b00f30a8c5a8633))
+
 ## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.10.0...treasury-service-v0.11.0) (2026-10-02)
 
 

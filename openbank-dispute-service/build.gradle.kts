@@ -64,3 +64,9 @@ kover {
         }
     }
 }
+
+// Quarkus ITs boot Kafka, Postgres, and the scheduler in one test JVM. The default
+// 512 MiB heap OOMed on hosted CI before any JUnit XML was written.
+tasks.test {
+    maxHeapSize = "2g"
+}
