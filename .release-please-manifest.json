@@ -1,6 +1,6 @@
 {
   "openbank-account-service": "0.33.1",
-  "openbank-admin-ui": "0.274.0",
+  "openbank-admin-ui": "0.275.0",
   "openbank-agent-service": "1.27.2",
   "openbank-aml-service": "0.13.2",
   "openbank-anacredit-service": "0.9.5",
@@ -66,5 +66,5 @@
   "openbank-context-service": "0.4.0",
   "openbank-risk-engine": "0.24.0",
   "openbank-treasury-service": "0.11.1",
-  "openbank-card-processing-service": "0.4.0"
+  "openbank-card-processing-service": "0.5.0"
 }
