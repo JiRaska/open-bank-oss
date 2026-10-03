@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -19,8 +20,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
+import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -62,7 +63,8 @@ class TreasuryOutboxAtomicityIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    // Choose a value date after the bank day so a test crossing Prague midnight stays valid.
+    private val valueDate: LocalDate = AccountingClock.bank(Clock.systemUTC()).today().plusDays(1)
 
     @Test
     @Order(1)
@@ -148,7 +150,7 @@ class TreasuryOutboxAtomicityIT {
             .body(
                 """
                 {"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK",
-                 "principal":$principal,"rate":4.25,"valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
+                 "principal":$principal,"rate":4.25,"valueDate":"$valueDate","maturityDate":"${valueDate.plusDays(30)}"}
                 """.trimIndent(),
             )
             .`when`().post("/api/v1/treasury/deals")
