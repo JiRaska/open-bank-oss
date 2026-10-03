@@ -487,3 +487,15 @@ simply stops existing).
   already holding an over-scale amount or unknown currency now fails to load (500 naming the row)
   instead of being served; the PR body carries the SQL count to run before deploy. No new endpoint,
   caller, privilege or event. Rollback: revert the commit.
+- **2026-10-03** — **The existing inbound `Money` check now uses the kernel parser (#11870).**
+  `POST /api/v1/sepa-payments` still constructs `Money` before reserving the idempotency key;
+  `Money.parseInbound` replaces the service-local `inboundMoney` implementation and
+  `InvalidMoneyExceptionMapper` replaces its `ValidationFailure` rendering. The same authenticated
+  caller, endpoint, amount/currency fields, downstream edges and persistence boundary remain.
+  **Tampering / input validation:** over-scale amounts and unsupported currencies still fail with
+  HTTP 400 and the same machine-readable codes and field names; out-of-range amounts now include
+  `VALIDATION_ERROR` on the violation as well. Error titles and messages change, but the rejected
+  value is not echoed. `SepaPaymentMoneyBoundaryIT` pins the stable problem fields for all three
+  refusals and the no-idempotency-record outcome. **Residual risk:** a client that compares human
+  error prose could observe a change despite the stable codes; no new privilege or data-flow risk
+  is introduced. Rollback: revert this parser substitution and keep the service-local validator.
