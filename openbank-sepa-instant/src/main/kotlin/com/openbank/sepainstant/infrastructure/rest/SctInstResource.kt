@@ -10,6 +10,7 @@ import com.openbank.sepainstant.application.port.`in`.GetSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.RecallSctInstPaymentUseCase
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstPaymentUseCase
+import com.openbank.sepainstant.domain.error.SctInstSchemeRules
 import com.openbank.sepainstant.infrastructure.rest.dto.RecallRequest
 import com.openbank.sepainstant.infrastructure.rest.dto.SctInstPaymentResponse
 import com.openbank.sepainstant.infrastructure.rest.dto.SubmitSctInstRequest
@@ -64,6 +65,9 @@ class SctInstResource @Inject constructor(
         // CURRENCY_UNSUPPORTED / VALIDATION_ERROR) that leaves no row, event, screening call or
         // downstream call behind.
         val amount = Money.parseInbound(body.amount, body.currency)
+        // #11913: SCT Inst is a euro-only scheme. A valid ISO currency other than EUR is refused here,
+        // still before the key is looked up — 400 CURRENCY_NOT_ALLOWED, nothing persisted or screened.
+        SctInstSchemeRules.requireSchemeCurrency(amount)
         val cmd = SubmitSctInstCommand(
             idempotencyKey = key,
             debtorAccountId = body.debtorAccountId,

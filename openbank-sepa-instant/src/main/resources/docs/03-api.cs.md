@@ -88,6 +88,11 @@ Chyby se vrací jako malý JSON objekt přes exception mappery:
   - `AMOUNT_SCALE_EXCEEDED` — částka má víc desetinných míst, než měna dovoluje (např. `1.005 EUR`);
   - `CURRENCY_UNSUPPORTED` — nejde o kód ISO 4217 s dílčí jednotkou (např. `XYZ`, `XAU`, prázdná hodnota);
   - `VALIDATION_ERROR` — částka je mimo rozsah (víc než 19 celých číslic).
+- `400 Bad Request` při odeslání, kód `CURRENCY_NOT_ALLOWED` (#11913) — měna je platný kód ISO 4217, ale není
+  to `EUR`. SCT Inst je čistě eurové schéma (ekvivalentní důvod ISO 20022: `AM03` NotAllowedCurrency), takže
+  `USD`, `CZK`, `GBP` a každá jiná měna než EUR se odmítne na stejném vstupu, po kontrole `Money` a před
+  screeningem, uložením, idempotencí, eventy i pacs.008. Položka `violations[]` jmenuje pole `currency`;
+  odmítnutá hodnota se nevrací.
   Měna malými písmeny nebo s mezerami (`eur`, `" EUR "`) se převede na `EUR`. Částky se vrací a posílají
   v přesnosti měny (`10.50`, ne `10.500000`).
 
