@@ -200,6 +200,44 @@ class AuditSubscriptionSurfaceIT {
     }
 
     @Test
+    fun `signed SCA decision evidence reaches the audit store with credential attribution`() {
+        val topic = "openbank.sca.events"
+        assertThat(subscribedTopics()).contains(topic)
+        val id = UUID.randomUUID().toString()
+        val eventId = UUID.randomUUID().toString()
+        val credential = "test-audit-credential-${UUID.randomUUID()}"
+        val occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString()
+        val payload = """
+            {"eventId":"$eventId","eventType":"SCA_DEVICE_DECIDED","schemaVersion":1,
+             "aggregateType":"SCA_CHALLENGE","aggregateId":"$id","sourceService":"sca-service",
+             "actorId":"$credential","actorType":"DEVICE_CREDENTIAL","partyId":"${UUID.randomUUID()}",
+             "credentialId":"$credential","decision":"APPROVED","signatureB64":"dGVzdA==",
+             "signedPayloadB64":"cGF5bG9hZA==","occurredAt":"$occurredAt",
+             "expiresAt":"${Instant.parse(occurredAt).plusSeconds(60)}","challengeVersion":3}
+        """.trimIndent()
+        val source: InMemorySource<Message<String>> = connector.source(CHANNEL)
+        source.runOnVertxContext(true)
+        source.send(recordOn(topic, id, payload))
+        assertThat(awaitRows(setOf(id))[id]).isEqualTo("SCA_DEVICE_DECIDED" to "sca-service")
+        DriverManager.getConnection(jdbcUrl(), jdbcUser(), jdbcPassword()).use { connection ->
+            connection.prepareStatement(
+                "SELECT entry_id, aggregate_type, actor_id, actor_type, occurred_at " +
+                    "FROM audit_entries WHERE aggregate_id = ?",
+            ).use { query ->
+                query.setString(1, id)
+                query.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1, UUID::class.java).toString()).isEqualTo(eventId)
+                    assertThat(rows.getString(2)).isEqualTo("SCA_CHALLENGE")
+                    assertThat(rows.getString(3)).isEqualTo(credential)
+                    assertThat(rows.getString(4)).isEqualTo("DEVICE_CREDENTIAL")
+                    assertThat(rows.getTimestamp(5).toInstant()).isEqualTo(Instant.parse(occurredAt))
+                }
+            }
+        }
+    }
+
+    @Test
     fun `settlement state events reach the audit store with declared identity`() {
         val topic = "openbank.settlement.events"
         assertThat(subscribedTopics()).contains(topic)

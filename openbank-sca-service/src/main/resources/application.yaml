@@ -170,6 +170,11 @@ quarkus:
     # Tests replace the party-register lookup with a stub bean, so nothing needs an outbound token.
     oidc-client:
       enabled: false
+  openbank:
+    sca:
+      # Off so unrelated tests keep their decision rows; DecisionEvidencePurgeSchedulerIT turns it on.
+      decision-purge:
+        enabled: false
 
 openbank:
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
@@ -182,6 +187,15 @@ openbank:
     max-concurrent-requests: 100
   sca:
     idempotency-ttl-seconds: 300
+    # Signed device-decision evidence (sca_device_decisions, V13) carries the signed payload, which
+    # for payments embeds amount and creditor IBAN. Kept five years (AMLD Art. 40 record-keeping for
+    # transaction evidence), then deleted in bounded batches by DecisionEvidencePurgeScheduler.
+    decision-retention-days: 1826
+    decision-purge:
+      enabled: true
+      cron: "0 30 3 * * ?"
+      batch-size: 500
+      max-batches-per-run: 100
   api:
     version: "1"
   build:
