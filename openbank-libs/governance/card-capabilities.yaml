@@ -79,6 +79,11 @@ capabilities:
     why: >-
       A network token replaces the PAN at the merchant, so a breach at one merchant cannot be
       replayed. Also the mechanism behind wallet provisioning.
+    # Simulator only, and that is a decision rather than a backlog item: both networks put
+    # tokenisation behind a commercial contract (`availability: contract` below), so there is no
+    # sandbox to build an adapter against. Selecting `visa` or `mastercard` answers NOT_BOUND
+    # naming the contract; writing a client from documentation nobody here can open would be
+    # unexecutable code that passes every test and fails on the day it is first used.
     bindings: [simulator]
     networks:
       visa: { product: Visa Token Service (VTS), availability: contract }
@@ -101,6 +106,9 @@ capabilities:
     why: >-
       The scheme's own case lifecycle, reason codes and evidence exchange. The bank-side lifecycle
       is ADR-0117; this is the wire to the network.
+    # Simulator only, same reasoning as tokenisation above. Worth adding for disputes: ADR-0117's
+    # bank-side lifecycle does not depend on this port being bound — a bank can run its own dispute
+    # process while the scheme leg stays manual.
     bindings: [simulator]
     networks:
       visa: { product: Visa Resolve Online (VROL), availability: contract }
