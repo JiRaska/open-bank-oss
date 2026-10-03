@@ -161,7 +161,7 @@ class PostgresApprovalStore(
         val eventId = Ids.newId()
         val payload = mapOf(
             "eventId" to eventId.toString(),
-            "eventType" to EVENT_TYPE,
+            "eventType" to "SCA_OPERATOR_APPROVAL_CHANGED",
             "schemaVersion" to 1,
             "sourceService" to "sca-service",
             "aggregateType" to "SCA_OPERATOR_APPROVAL",
@@ -184,7 +184,7 @@ class PostgresApprovalStore(
             OutboxMessage(
                 eventId = eventId,
                 aggregateId = entity.id,
-                eventType = EVENT_TYPE,
+                eventType = "SCA_OPERATOR_APPROVAL_CHANGED",
                 payload = mapper.writeValueAsString(payload),
             ),
         ).replaceWith(entity.toDomain())
@@ -199,7 +199,6 @@ class PostgresApprovalStore(
     private fun parseId(id: String): UUID? = runCatching { UUID.fromString(id) }.getOrNull()
 
     companion object {
-        const val EVENT_TYPE = "SCA_OPERATOR_APPROVAL_CHANGED"
         const val MAX_PENDING_CONFIG_KEY = "openbank.approval.max-pending-per-maker-action"
         private const val MAX_PENDING_LIMIT = 200
     }
