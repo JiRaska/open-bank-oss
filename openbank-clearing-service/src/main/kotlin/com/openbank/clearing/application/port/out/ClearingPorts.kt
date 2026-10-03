@@ -76,15 +76,19 @@ interface ClearingItemRepository {
     fun findByPaymentId(paymentId: UUID): Uni<List<ClearingItem>>
 
     /**
-     * Up to [limit] PENDING items, oldest first, restricted to [currencies] — the currencies a
-     * batch can settle (#11974). Restricting the SELECT, rather than filtering after it, is what
-     * keeps unsettleable items from occupying the [limit] window and starving settleable ones.
-     * Note: items do not persist a rail today, so [rail] does not narrow the selection.
+     * Up to [limit] PENDING items submitted for [rail] (#12004), oldest first, restricted to
+     * [currencies] — the currencies a batch can settle (#11974). Restricting the SELECT, rather
+     * than filtering after it, is what keeps another rail's or an unsettleable item from occupying
+     * the [limit] window and starving this rail's settleable ones. An item with no rail (pre-V12)
+     * matches no rail and is never returned.
      */
     fun findPendingByRail(rail: PaymentRail, currencies: Set<String>, limit: Int): Uni<List<ClearingItem>>
 
     /** Count of PENDING items per currency for every currency NOT in [currencies]. */
     fun countPendingOutside(currencies: Set<String>): Uni<Map<String, Long>>
+
+    /** Count of PENDING items with no recorded rail (pre-V12 rows) — selected by no cycle (#12004). */
+    fun countPendingWithoutRail(): Uni<Long>
 
     fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int>
 }

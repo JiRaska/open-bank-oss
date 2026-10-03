@@ -59,6 +59,12 @@ data class ClearingItem(
     val creditorBic: String? = null,
     val amount: BigDecimal,
     val currency: String = "EUR",
+    /**
+     * The rail the payment was submitted for (#12004); a cycle for one rail selects only its own
+     * items. Null only on a row written before V12 — such an item is selected by NO cycle (it
+     * stays PENDING and is reported), because guessing its rail could settle it on the wrong one.
+     */
+    val rail: PaymentRail? = null,
     val status: ClearingStatus = ClearingStatus.PENDING,
     /** Monotonic aggregate revision used by outbox consumers for replay-safe evidence. */
     val revision: Long = 0,
@@ -97,7 +103,8 @@ data class SubmitPaymentCommand(
     val debtorBic: String? = null,
     val creditorBic: String? = null,
     val amount: Money,
-    val rail: PaymentRail = PaymentRail.SEPA_SCT,
+    /** Required (#12004): no default, so no caller can enter clearing on a rail it did not choose. */
+    val rail: PaymentRail,
     val valueDate: LocalDate? = null,
     val endToEndId: String? = null,
     val remittanceInfo: String? = null,
