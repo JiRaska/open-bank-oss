@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Publish a compatibility artifact only for a complete current-run envelope."""
 
 import argparse

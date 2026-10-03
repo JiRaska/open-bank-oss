@@ -1,13 +1,11 @@
-#!/usr/bin/env python3
 """Exercise complete, missing, malformed, and stale compatibility evidence."""
 
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
-
+from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 COLLECTOR = HERE / "collect-test-run-evidence.py"
