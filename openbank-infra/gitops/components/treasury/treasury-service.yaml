@@ -34,7 +34,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-treasury-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "11b1a39ad9b93acb"
+        openbank.tech/policy-checksum: "d60a93bbce2b23ae"
       labels:
         app.kubernetes.io/name: treasury-service
         app.kubernetes.io/part-of: treasury
@@ -51,7 +51,7 @@ spec:
           # First build lands via auto-deploy on the merge that adds openbank-treasury-service to
           # ALL_SERVICES; the auto-deploy gitops PR rewrites this pin to the built sha. Until then
           # the tag is the declared placeholder (fleet-attestation-placeholders.txt).
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-6a789fdd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-treasury-service:sandbox-d8a5e5fb
           imagePullPolicy: IfNotPresent
           ports:
             # HTTP 8160 and management 8090 — both read off the service's own application.yaml
@@ -73,6 +73,12 @@ spec:
               value: jdbc:postgresql://treasury-db-rw.treasury.svc:5432/openbank_treasury
             - name: QUARKUS_DATASOURCE_REACTIVE_URL
               value: vertx-reactive:postgresql://treasury-db-rw.treasury.svc:5432/openbank_treasury
+            # ADR-0315 D7 / #10896: the SYNTHETIC sandbox nostro accounts (IBAN -> GL) from the
+            # treasury-service-nostro-override ConfigMap, mounted below, as an external Quarkus
+            # config source (a map keyed by IBAN does not fit env vars). Optional location: an
+            # absent file warns and boots with no nostro account configured.
+            - name: QUARKUS_CONFIG_LOCATIONS
+              value: /mnt/nostro-config/override.properties
             - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
@@ -119,6 +125,17 @@ spec:
             # plaintext edge, so the legacy HTTP/8101 port is not used.
             - name: LEDGER_SERVICE_URL
               value: https://ledger-service.ledger.svc:8443
+            # ADR-0315 D9: the simulated counterparties quote the risk engine's curve sets, read over
+            # its private-CA mTLS listener (8443, client auth REQUIRED; %prod TLS bucket
+            # risk-authority, the same treasury-internal-tls certificate) as treasury's own m2m
+            # identity, which risk_rest_ext.rego grants risk.curve-set.read and nothing else.
+            - name: RISK_ENGINE_URL
+              value: https://risk-engine.risk.svc:8443
+            # Quotes stay OFF here until the grant, this edge and the TLS bucket are verified live
+            # (GET /api/v1/treasury/quotes answers 200 once flipped). Off, the simulated market
+            # confirms every BOOKED deal without a quote check, exactly as before.
+            - name: OPENBANK_TREASURY_SIMULATED_QUOTES_ENABLED
+              value: "false"
             # Keycloak runs in `iam`, not `platform`. A wrong host does not fail the boot (OIDC
             # defers discovery to the first request) — it just makes every authenticated call
             # fail later with `Name does not resolve`.
@@ -180,6 +197,9 @@ spec:
               readOnly: true
             - name: ledger-tls
               mountPath: /mnt/ledger-tls
+              readOnly: true
+            - name: nostro-override
+              mountPath: /mnt/nostro-config
               readOnly: true
         # OPA policy decision point (ADR-0034). Co-located sidecar the app reaches on
         # localhost:8181 (AuthorizeInterceptor default). Bundle mounted read-only from the
@@ -273,6 +293,9 @@ spec:
             optional: false
         - name: opa-tmp
           emptyDir: {}
+        - name: nostro-override
+          configMap:
+            name: treasury-service-nostro-override
         - name: opa-bundle
           configMap:
             name: treasury-opa-bundle

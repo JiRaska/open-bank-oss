@@ -35,6 +35,8 @@ dependencies {
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.assertj)
+    // Property tests over random schedules (Amortization small-principal invariants).
+    testImplementation("io.kotest:kotest-property:5.9.1")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 }
 

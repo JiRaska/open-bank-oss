@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.23.0...audit-service-v0.24.0) (2026-10-03)
+
+
+### Features
+
+* **settlement:** project settlements to the ledger with a state audit outbox ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 7) ([#11860](https://github.com/JiRaska/open-bank-oss/issues/11860)) ([b46cd46](https://github.com/JiRaska/open-bank-oss/commit/b46cd46702852cb97269bf905b38e2ef478d18b8))
+
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.22.0...audit-service-v0.23.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.1...audit-service-v0.22.0) (2026-10-02)
+
+
+### Features
+
+* **card-processing:** the card money path — authorisation, hold, clearing, ledger posting (ADR-0283 phase 1) ([#8837](https://github.com/JiRaska/open-bank-oss/issues/8837)) ([6a559c3](https://github.com/JiRaska/open-bank-oss/commit/6a559c3932537248960175c86800c64bb7542337))
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+
 ## [0.21.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.0...audit-service-v0.21.1) (2026-09-29)
 
 

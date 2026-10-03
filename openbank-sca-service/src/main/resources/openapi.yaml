@@ -3,7 +3,12 @@
 openapi: 3.1.0
 info:
   title: SCA Service API
-  version: 1.11.0
+  # 1.11 -> 1.12 (#9430): additive — DELEGATION_APPROVAL_GROUP purpose and an optional
+  # ConsumeScaRequest.reference compared exactly when supplied.
+  # 1.12 -> 1.13 (#10041 slice 9a): additive — DELETE device revocation,
+  # EnrolledDeviceResponse.revokedAt; documents the consume 400/422 responses and the
+  # ScaChallengeResponse fields the service already serves.
+  version: 1.13.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -114,10 +119,42 @@ paths:
         '429':
           description: Max attempts exceeded
 
+  /api/v1/sca/parties/{partyId}/devices/{deviceId}:
+    delete:
+      tags: [SCA]
+      summary: Revoke an enrolled device credential
+      description: |
+        Revokes the owned credential and cancels its pending or completed, unconsumed
+        approvals in the same transaction as the audit event. Repeated revocation is a
+        successful no-op. Public keys and prior signatures remain as evidence. Customers
+        must own the party; the money-path four-eyes policy also applies in enforced mode.
+      operationId: revokeScaDevice
+      parameters:
+        - name: partyId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+        - name: deviceId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '204':
+          description: Credential revoked or already revoked
+        '401':
+          description: Authentication required
+        '403':
+          description: Ownership or authorization policy rejected the request
+        '404':
+          description: No such device belongs to the party
+        '409':
+          description: Revocation transaction conflicted; reconcile before retrying
+
   /api/v1/sca/parties/{partyId}/devices:
     get:
       tags: [SCA]
       summary: List device credentials enrolled to a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listScaDevices
       parameters:
         - name: partyId
@@ -141,6 +178,7 @@ paths:
       tags: [SCA]
       summary: Enrol a device credential for decoupled approval (ADR-0021)
       description: >-
+        Customer callers must have a UUID party identity matching partyId.
         Idempotent on the credentialId natural key (ADR-0296): re-enrolling the same credential
         for the same party replays the original enrollment (201, no duplicate row;
         `credential_id UNIQUE`, V4, is the race backstop). The same credentialId presented for a
@@ -188,6 +226,7 @@ paths:
     get:
       tags: [SCA]
       summary: Live challenges awaiting a decision for a party
+      description: Customer callers must have a UUID party identity matching partyId.
       operationId: listPendingScaChallenges
       parameters:
         - name: partyId
@@ -231,18 +270,28 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ScaChallengeResponse'
+        '400':
+          description: Invalid request or challenge not approved
         '403':
           description: The challenge belongs to another party
         '404':
           description: Challenge not found
         '409':
           description: Already consumed, or the operation does not match what the device signed
+        '422':
+          description: >-
+            Challenge expired, or concurrently modified by another lifecycle write; re-read the
+            challenge before retrying.
 
   /api/v1/sca/challenges/{id}/decision:
     post:
       tags: [SCA]
       summary: Record an out-of-band device approval/denial (ADR-0021)
       description: >-
+        A successful response acknowledges a durable first decision and its atomic audit event.
+        Expiry limits authorization; it does not delete signature evidence.
+        A successful response acknowledges a durable first decision and its atomic audit event.
+        Expiry limits authorization; it does not delete signature evidence.
         Authenticated as the enrolled device/party (a different principal from the verify caller).
         The signed assertion is verified against the challenge's dynamic-linking data (amount, payee)
         before it is recorded. No valid decision leaves the challenge PENDING — push/biometric is
@@ -266,7 +315,7 @@ paths:
         '401':
           description: Invalid device assertion
         '403':
-          description: Device does not belong to the challenge party
+          description: Device is revoked or does not belong to the challenge party
         '404':
           description: Challenge or device not found
         '409':
@@ -311,7 +360,7 @@ components:
           # valid values; the drift this comment used to describe is corrected as of #5962.
           enum: [PAYMENT_INITIATION, CONSENT_GRANT, LOGIN, AGENT_ACTION, SENSITIVE_DATA_ACCESS,
                  DOCUMENT_SIGNING, CARD_MANAGEMENT, DELEGATION_GRANT, DELEGATION_ACCEPT,
-                 SAVINGS_WITHDRAW_APPROVAL, APPROVAL]
+                 DELEGATION_APPROVAL_GROUP, SAVINGS_WITHDRAW_APPROVAL, APPROVAL]
         preferredMethod:
           type: string
         dynamicLinkingData:
@@ -361,6 +410,10 @@ components:
         amount: { type: string, nullable: true }
         currency: { type: string, nullable: true }
         creditor: { type: string, nullable: true }
+        reference:
+          type: string
+          nullable: true
+          description: Opaque operation fingerprint; when supplied it must equal the challenge's reference.
         documentSha256: { type: string, nullable: true }
         ceremonyId: { type: string, nullable: true }
         cardId: { type: string, nullable: true }
@@ -403,11 +456,31 @@ components:
           format: uuid
         challengeType:
           type: string
+          deprecated: true
+          description: Legacy documentation field; the current response uses purpose and method.
+        purpose:
+          type: string
+        method:
+          type: string
         status:
           type: string
           enum: [PENDING, COMPLETED, FAILED, EXPIRED, CANCELLED]
         attemptsRemaining:
           type: integer
+          deprecated: true
+          description: Legacy documentation field; the current response uses attemptCount and maxAttempts.
+        attemptCount:
+          type: integer
+        maxAttempts:
+          type: integer
+        completedAt:
+          type: string
+          format: date-time
+          nullable: true
+        consumedAt:
+          type: string
+          format: date-time
+          nullable: true
         expiresAt:
           type: string
           format: date-time
@@ -453,6 +526,10 @@ components:
           type: string
           format: date-time
           description: When the device credential was enrolled.
+        revokedAt:
+          type: [string, 'null']
+          format: date-time
+          description: Revocation time; a revoked credential cannot be reactivated by enrollment.
 
     RecordDecisionRequest:
       type: object

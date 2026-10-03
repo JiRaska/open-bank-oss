@@ -214,6 +214,143 @@ resource "kubectl_manifest" "ec2nodeclass_default" {
   })
 }
 
+# ---------------------------------------------------------------------------
+# Pool sizing, DERIVED (the arc-runners.tf pattern, #11535): the numbers a human
+# measures go in as inputs; node counts and NodePool limits are computed from
+# them, never hand-set next to them.
+# ---------------------------------------------------------------------------
+locals {
+  default_instance_categories = ["c", "m", "r"]
+  default_instance_sizes      = ["xlarge", "2xlarge", "4xlarge"]
+  # arm64 gen>5 types offered in eu-north-1 for the categories/sizes above
+  # (`aws ec2 describe-instance-type-offerings --location-type availability-zone`,
+  # 2026-09-30): 54 types / 156 AZ offerings, vs 22 / 62 for the previous m|r,
+  # xlarge–2xlarge set. Informational — Karpenter reads the requirements, not this.
+  default_spot_pools = 156
+
+  # --- `stateful` pool (on-demand, tainted) ---------------------------------
+  # SCOPE (owner decision 2026-09-30, #11608): only the CNPG clusters backing
+  # `rules.yaml: money_path_services`, plus temporal/temporal-db -- 26 clusters, the
+  # set the `stateful-on-demand-cel` Kyverno policy routes (derived, see that file).
+  # Other CNPG clusters, Kafka and the Temporal server stay on spot.
+  # Measured 2026-09-30 on the live cluster: summed container REQUESTS of those 26
+  # clusters' 52 instance pods, grouped by the AZ each pod runs in. Grouped by AZ
+  # because it cannot be pooled across AZs: a CNPG instance is bound to its EBS
+  # volume, and the volume to its AZ. Total 5.80 vCPU / 15.25 GiB (memory raised by #11621, sanctions-db by #11782);
+  # check-stateful-not-on-spot.py fails when the requests those 26 Clusters declare
+  # in gitops outgrow this table, so the limit below cannot silently fall behind.
+  stateful_load_by_zone = {
+    "eu-north-1a" = { cpu = 0.55, memory_gib = 1.375, pods = 4 }
+    "eu-north-1b" = { cpu = 4.25, memory_gib = 11.5, pods = 41 }
+    "eu-north-1c" = { cpu = 1.00, memory_gib = 2.375, pods = 7 }
+  }
+  # One xlarge m-family node as the sizing unit (2xlarge is also admitted and is
+  # exactly two units, so the limit below bounds both). USABLE = kubelet allocatable
+  # (measured on live m7g.xlarge: 3920m / ~14.1 GiB / 58 pods) minus the per-node
+  # DaemonSet tax recorded on the default pool (0.26 vCPU / 962Mi / ~7 pods).
+  stateful_node = { vcpu = 4, memory_gib = 16, usable_cpu = 3.66, usable_memory_gib = 13.2, usable_pods = 51 }
+  # N+1 PER AZ: nodes to carry that AZ's load, plus one spare in the same AZ so a
+  # node loss (or a drift replacement surging a new node) always has somewhere to
+  # land that the pod's volume can reach. A cross-AZ spare would be useless.
+  stateful_nodes_by_zone = {
+    for z, l in local.stateful_load_by_zone : z => 1 + max(
+      ceil(l.cpu / local.stateful_node.usable_cpu),
+      ceil(l.memory_gib / local.stateful_node.usable_memory_gib),
+      ceil(l.pods / local.stateful_node.usable_pods),
+    )
+  }
+  stateful_nodes              = sum(values(local.stateful_nodes_by_zone))
+  stateful_nodepool_cpu_limit = local.stateful_nodes * local.stateful_node.vcpu
+  stateful_nodepool_mem_limit = "${local.stateful_nodes * local.stateful_node.memory_gib}Gi"
+}
+
+# `stateful` — ON-DEMAND ONLY, tainted, for the money-path databases and temporal-db
+# (#11608). 2026-09-29/30: 41 spot interruptions in 24h on the `default` pool, each
+# one costing ~13 CNPG failovers, because 134 of 140 CNPG pods lived on spot.
+#
+# Pods reach this pool through the Kyverno MutatingPolicy
+# gitops/components/kyverno/stateful-on-demand-cel.yaml, which on pod CREATE adds
+# REQUIRED node affinity `karpenter.sh/capacity-type In [on-demand]` and a toleration
+# for the taint below. NOT this pool's own label, on purpose: if this NodePool is
+# missing (policy synced by Argo before this root is applied) the `default` pool can
+# still provision on-demand for them, so no database is stranded Pending by the
+# rollout order. `weight = 100` is what makes Karpenter choose THIS pool over
+# `default` (weight 0) for them once it exists.
+#
+# Admission-time only: existing pods are untouched, so merging/applying this rolls
+# NOTHING. Pods move one at a time as they are recreated — see the PR for the waved
+# switchover procedure. Never replace this with Cluster.spec.affinity edits: that
+# rolls every CNPG cluster in one Argo sync (the 2026-09-28 outage shape).
+resource "kubectl_manifest" "nodepool_stateful" {
+  depends_on = [kubectl_manifest.ec2nodeclass_default]
+
+  yaml_body = yamlencode({
+    apiVersion = "karpenter.sh/v1"
+    kind       = "NodePool"
+    metadata   = { name = "stateful" }
+    spec = {
+      weight = 100
+      template = {
+        metadata = { labels = { "openbank.io/pool" = "stateful" } }
+        spec = {
+          taints = [
+            { key = "openbank.io/stateful", value = "true", effect = "NoSchedule" }
+          ]
+          requirements = [
+            { key = "kubernetes.io/arch", operator = "In", values = ["arm64"] },
+            { key = "kubernetes.io/os", operator = "In", values = ["linux"] },
+            # The whole point of the pool. check-stateful-not-on-spot.py fails if
+            # `spot` ever appears here.
+            { key = "karpenter.sh/capacity-type", operator = "In", values = ["on-demand"] },
+            # m only: the routed set requests 2.4 GiB/vCPU, which c (2 GiB/vCPU
+            # capacity) cannot hold and r (8 GiB/vCPU) would pay for idle memory.
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["m"] },
+            { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
+            # `large` admitted 2026-10-02 (#11608): after #11621/#11782 no routed pod's 12h
+            # working set exceeds its request (max sanctions-db-1 540/640Mi), and the worst
+            # node packed to requests on a large (1.67 vCPU / 5.8 GiB left for DBs after
+            # DaemonSets) keeps ~40% memory free. Excluded from `default` for the mixed-
+            # workload evictions of 2026-08-02; that evidence does not apply to a tainted,
+            # databases-only pool. Adding a size does NOT drift existing xlarge nodes (they
+            # still match), so nothing restarts: new nodeclaims after an interruption or an
+            # AMI drift simply pick the cheaper fitting shape. The limit below stays sized in
+            # xlarge units, a conservative cap for a mix of both.
+            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["large", "xlarge", "2xlarge"] },
+            # All three AZs: every AZ holds target volumes (4/41/7 pods, 2026-09-30).
+            { key = "topology.kubernetes.io/zone", operator = "In", values = keys(local.stateful_load_by_zone) },
+          ]
+          nodeClassRef = {
+            group = "karpenter.k8s.aws"
+            kind  = "EC2NodeClass"
+            name  = "default"
+          }
+          # No calendar expiry: every node replacement here is a batch of DB
+          # failovers, and AMI/kubelet updates already arrive as drift (budgeted
+          # below to one node at a time).
+          expireAfter = "Never"
+          # Same deadline as `default` (#11304): stop waiting on a stuck EBS detach.
+          terminationGracePeriod = "1h"
+        }
+      }
+      disruption = {
+        # WhenEmpty, not WhenEmptyOrUnderutilized: moving a DB pod to pack nodes
+        # tighter is exactly the churn this pool exists to remove. The cost is some
+        # fragmentation after pods leave, bounded by the limit below.
+        consolidationPolicy = "WhenEmpty"
+        consolidateAfter    = "10m"
+        budgets = [
+          { nodes = "1" },
+        ]
+      }
+      limits = {
+        # DERIVED: sum over AZs of (nodes for that AZ's load + 1 spare) x node size.
+        cpu    = tostring(local.stateful_nodepool_cpu_limit)
+        memory = local.stateful_nodepool_mem_limit
+      }
+    }
+  })
+}
+
 resource "kubectl_manifest" "nodepool_default" {
   depends_on = [kubectl_manifest.ec2nodeclass_default]
 
@@ -236,7 +373,24 @@ resource "kubectl_manifest" "nodepool_default" {
             # exactly the state the evictions came from. m (4 GiB/vCPU) and r
             # (8 GiB/vCPU) both clear the ratio; Karpenter still price-sorts
             # within them.
-            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = ["m", "r"] },
+            #
+            # `c` RE-ADDED (2026-09-30, spot diversity). The memory-ratio argument
+            # above still holds as arithmetic (this pool's requests are 2.2 GiB/vCPU
+            # with or without the stateful set, measured 2026-09-30), so a c node
+            # the spot allocator picks is memory-bound with idle CPU — an EFFICIENCY
+            # cost, not the eviction cause: the #809-era evictions came from the
+            # `large` + ~962Mi DaemonSet tax, which the size floor below still
+            # excludes. What changed is the other side of the trade: 41 spot
+            # interruptions in 24h on ~10 nodes (2026-09-29/30), 12 of them one
+            # type (m7g.xlarge) in one AZ (1b). Karpenter asks EC2 for
+            # price-capacity-optimized spot across every allowed type, so more
+            # pools directly lowers the chance the chosen pool is the one being
+            # reclaimed. See local.default_spot_pools for the count.
+            { key = "karpenter.k8s.aws/instance-category", operator = "In", values = local.default_instance_categories },
+            # minValues: every launch request names >= 5 instance FAMILIES, so the
+            # allocator can never be handed a single hot pool (m7g in 1b) because
+            # it happened to be cheapest at that moment.
+            { key = "karpenter.k8s.aws/instance-family", operator = "Exists", minValues = 5 },
             { key = "karpenter.k8s.aws/instance-generation", operator = "Gt", values = ["5"] },
             # xlarge–2xlarge (2026-08-02). `large` removed; `4xlarge` removed.
             #
@@ -273,9 +427,20 @@ resource "kubectl_manifest" "nodepool_default" {
             # the upper bound was written for (Karpenter reaching for
             # c6g.12xlarge) is unchanged and still guarded.
             #
-            # Spot diversity is not a casualty: m/r, gen>5, xlarge–2xlarge is
-            # 22 instance types x 3 AZs = 66 spot pools.
-            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = ["xlarge", "2xlarge"] }
+            # "Spot diversity is not a casualty: m/r, gen>5, xlarge–2xlarge is
+            # 22 instance types x 3 AZs = 66 spot pools." — measured 2026-09-30 it
+            # was 62 offerings (not every type is offered in every AZ), and the
+            # interruption rate says it WAS a casualty.
+            #
+            # `4xlarge` RE-ADDED (2026-09-30). Its removal reason was that one
+            # r8g.4xlarge (128 GiB) would consume the whole 128Gi memory limit of
+            # that day and wedge the pool; the limit has been 288Gi since #3496,
+            # so a 4xlarge is <= 16/72 vCPU and 128/288 GiB — no longer a wedge.
+            #
+            # `large` deliberately NOT re-added: the measured eviction cause above
+            # (52% of a `large` is overhead; kyc/sdd evicted at 19Mi headroom) is
+            # unchanged, and it would add 52 pools for a known failure.
+            { key = "karpenter.k8s.aws/instance-size", operator = "In", values = local.default_instance_sizes }
           ]
           # NO `topology.kubernetes.io/zone` REQUIREMENT HERE, AND ADDING ONE
           # WILL BREAK THE CLUSTER. Recorded 2026-08-03 (#3496) because pinning
@@ -464,6 +629,16 @@ resource "kubectl_manifest" "nodepool_default" {
       # BELOW today's 48 because xlarge nodes pay the ~962Mi/0.26-vCPU per-node
       # DaemonSet tax once instead of 22 times. Memory stays at 4x the CPU cap
       # so CPU remains the single binding guardrail, per the note above.
+      #
+      # 72 KEPT (2026-09-30) although the money-path databases + temporal-db
+      # (5.80 vCPU of requests, 26 clusters) move to the `stateful` pool. The move
+      # is gradual — a pod leaves only when it is recreated — so lowering this now
+      # would take capacity from the pool that still carries them. The combined
+      # CEILING therefore grows by local.stateful_nodepool_cpu_limit (28), stated
+      # here so it is not silent; SPEND does not, because pods move rather than
+      # duplicate. Once `migrate-stateful-to-on-demand.sh` reports every target on
+      # on-demand, this could drop by ceil(5.80 / 4) x 4 = 8 — small enough that
+      # keeping the surge headroom is the better trade; revisit with #3496's numbers.
       limits = {
         cpu    = "72"
         memory = "288Gi"
@@ -517,17 +692,39 @@ resource "helm_release" "argocd" {
       name  = "configs.params.controller\\.diff\\.server\\.side"
       value = "true"
     },
-    # Keep Karpenter from consolidating the node out from under the singleton
-    # application-controller. Root cause of a ~7h ArgoCD outage (2026-07-11): the
-    # controller's node was Evicted "Underutilized" by Karpenter, went NotReady,
-    # and the StatefulSet pod (ordinal 0, at-most-one) got stuck Terminating — so
-    # no app synced for hours (deploys silently stopped updating). `do-not-disrupt`
-    # tells Karpenter not to voluntarily drain a node running this pod; the
-    # priority class keeps it from being preempted. Same footgun class as the
-    # DaemonSet/critical-pod priority note in CLAUDE.md.
+    # Run the singleton application-controller on the on-demand `stateful` pool
+    # (#11608). Root cause of a ~7h ArgoCD outage (2026-07-11): the controller's node
+    # was Evicted "Underutilized" by Karpenter, went NotReady, and the StatefulSet pod
+    # (ordinal 0, at-most-one) got stuck Terminating -- no app synced for hours. That
+    # was guarded with `karpenter.sh/do-not-disrupt`, which had a cost of its own:
+    # whichever node the pod landed on could never be consolidated or drift-replaced.
+    # 2026-10-02 it pinned an on-demand c6g.xlarge in `default` (AMIDrift pending,
+    # DisruptionBlocked, six money-path DB pods stuck on it). The `stateful` pool
+    # removes the incident class instead of freezing a node: it consolidates only
+    # WhenEmpty (never "Underutilized"), is on-demand (no spot interruption), never
+    # expires, and drift is budgeted to one node with a 1h terminationGracePeriod,
+    # which also bounds the stuck-Terminating case. The node-hang half of 07-11 is
+    # covered by the resources below. Priority class still prevents preemption.
     {
-      name  = "controller.podAnnotations.karpenter\\.sh/do-not-disrupt"
+      name  = "controller.nodeSelector.karpenter\\.sh/nodepool"
+      value = "stateful"
+    },
+    {
+      name  = "controller.tolerations[0].key"
+      value = "openbank.io/stateful"
+    },
+    {
+      name  = "controller.tolerations[0].operator"
+      value = "Equal"
+    },
+    {
+      name  = "controller.tolerations[0].value"
       value = "true"
+      type  = "string"
+    },
+    {
+      name  = "controller.tolerations[0].effect"
+      value = "NoSchedule"
     },
     {
       name  = "controller.priorityClassName"

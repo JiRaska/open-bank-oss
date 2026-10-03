@@ -23,8 +23,15 @@ spec:
         # Fires when the realm template and the running realm disagree in either direction — a
         # declared role the realm never got, or a live role no template declares.
         - alert: KeycloakRealmDrift
-          expr: kube_job_failed{namespace="iam", job_name=~"keycloak-realm-drift-.*"} > 0
-          for: 5m
+          # Latest run, not "any failed Job still exists". The old form keyed on the failed Job
+          # OBJECT, which lives for ttlSecondsAfterFinished (48h) after the realm is fixed: the
+          # 2026-09-29 drift was repaired live by 09-30 and the next two scans passed, yet this
+          # kept firing on 10-01. A scan that is scheduled but has not succeeded since is the
+          # drift signal; `for: 30m` covers the scan's own run time.
+          expr: >-
+            kube_cronjob_status_last_schedule_time{namespace="iam", cronjob="keycloak-realm-drift"}
+              > kube_cronjob_status_last_successful_time{namespace="iam", cronjob="keycloak-realm-drift"}
+          for: 30m
           labels:
             severity: warning
             component: iam

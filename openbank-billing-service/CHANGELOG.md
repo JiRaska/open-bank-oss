@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.4...billing-service-v0.13.5) (2026-10-02)
+
+
+### Bug Fixes
+
+* **billing:** read the booked balance balance-service actually sends ([#11664](https://github.com/JiRaska/open-bank-oss/issues/11664)) ([cddd2a1](https://github.com/JiRaska/open-bank-oss/commit/cddd2a196188c67cca953aac9ed5b16927113bf1))
+
 ## [0.13.4](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.3...billing-service-v0.13.4) (2026-09-29)
 
 

@@ -3,7 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.statement.infrastructure.persistence.entity
 
-import com.openbank.libs.persistence.outbox.PanacheOutboxEntity
+import com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2
 import com.openbank.statement.domain.model.PeriodCloseStatus
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import jakarta.persistence.Column
@@ -77,17 +77,9 @@ class StatementPeriodEntity : PanacheEntityBase {
 }
 
 /**
- * Transactional outbox for `account.statement.period.closed` (ADR-0049 D3).
- *
- * `claimed_at` is statement-only — added straight on this entity, not the shared
- * [PanacheOutboxEntity] (mapped by every outbox-bearing service — a shared-entity migration
- * would need every service migrated in lockstep). Stamped by
- * `StatementOutboxRepositoryImpl.claimProcessable`'s atomic claim query on DISPATCHING; read
- * back by the same query to decide if a DISPATCHING row is stale enough to reclaim.
+ * Outbox row on the kernel v2 base (ADR-0327): `claimed_at` and `next_attempt_at` come from
+ * [PanacheOutboxEntityV2]; the table gains them in `V10__outbox_v2.sql`.
  */
 @Entity
 @Table(name = "statement_outbox")
-class StatementOutboxEntity : PanacheOutboxEntity() {
-    @Column(name = "claimed_at")
-    var claimedAt: Instant? = null
-}
+class StatementOutboxEntity : PanacheOutboxEntityV2()

@@ -46,7 +46,9 @@ THIS DIFF are required:
   item            decided by                                             auto-pass when
   secrets/PII     gitleaks gate (secrets) + file classification          every money-path file is INERT
   suppressions    `+` lines of the diff: @Suppress/@SuppressWarnings/as Any  none added anywhere
-  dependency      build/dependency manifests in the diff                 none changed anywhere
+  dependency      build/dependency manifests in the diff                 none changed, or only Gradle build
+                                                                         scripts whose changed lines declare
+                                                                         no dependency/plugin/version (line-level)
   auth/crypto/pay path classification                                    money-path files all INERT and no
                                                                          auth/crypto path changed anywhere
   PII path        path classification                                    same, PII patterns
@@ -71,6 +73,24 @@ the list cannot be narrowed silently. `--coverage` keeps it honest: a strong sig
 TLS import, the shared approval library, a PII-/card-named field or column) outside its
 category's globs is a finding. The gate writes its evidence for each auto-answered item to
 the job log and $GITHUB_STEP_SUMMARY, so the answer is reviewable, not silent.
+
+LINE-LEVEL REFINEMENTS (line-level). Three triggers used to fire on the FILE when only its LINES can
+say whether the question arises; each now reads the changed lines, and each fails closed:
+  * dependency — a changed `build.gradle(.kts)` is a dependency change only if a changed non-`//`
+    line matches DEP_LINE (configurations, plugins, coordinate strings, versions, `libs.`, `val`/
+    `$` indirection, resolution tampering, any block-comment marker). Every other manifest
+    (catalog, lockfiles, settings, gradle.properties, Dockerfile) still counts on any change.
+    Measured over the last 200 money-path commits on main: 12 coverage-floor / test-heap /
+    comment-only script edits no longer ask for a dependency review; the two PRs that added a
+    plugin or `implementation(` line (#11636, #11860) still do.
+  * secrets — an added log call counts only when it can write a runtime value: anything but a
+    single plain string literal (`$x`, `{}`+arg, `+`, lambda, raw string, a call split across
+    lines) is interpolating. A file whose every changed line is a comment, and a Gradle build
+    script, are treated like docs/*.md for this item only (gitleaks still scans them for secrets).
+    Comment-only fails closed on a REMOVED block-comment marker and on unbalanced added markers —
+    either can make commented-out code live.
+  * auth / PII / cardholder are NOT relaxed: comment-only or build-only changes in an undeclared
+    money-path service still need those ticks.
 
 Usage:  check-security-checklist.py --body-file <file> [--base origin/main]
         check-security-checklist.py --self-test
@@ -112,7 +132,7 @@ def is_release_derived(path: str) -> bool:
 # Positive list of paths that carry no runtime behaviour. Anything not matched is UNKNOWN.
 INERT_SEGMENTS = ("/src/test/", "/src/testFixtures/", "/src/integrationTest/", "/e2e/", "/docs/")
 DEP_MANIFEST = re.compile(
-    r"(^|/)(build\.gradle(\.kts)?|settings\.gradle(\.kts)?|libs\.versions\.toml|"
+    r"(^|/)(build\.gradle(\.kts)?|settings\.gradle(\.kts)?|libs\.versions\.toml|gradle\.properties|"
     r"verification-metadata\.xml|package(-lock)?\.json|pnpm-lock\.yaml|yarn\.lock|"
     r"requirements[^/]*\.txt|pyproject\.toml|go\.(mod|sum)|Dockerfile[^/]*)$")
 SUPPRESSION = re.compile(r"@Suppress\b|@SuppressWarnings\b|@file:Suppress\b|\bas\s+Any\b")
@@ -148,24 +168,117 @@ def item_of(text: str) -> str | None:
     return None
 
 
-def added_lines(base: str) -> list[tuple[str, str]]:
-    out = subprocess.run(["git", "diff", "-U0", f"{base}...HEAD"],
+def diff_lines(base: str) -> tuple[list[tuple[str, str]], list[tuple[str, str]]]:
+    """(added, removed) lines of the diff as (path, text). A deleted file's lines carry its old path."""
+    out = subprocess.run(["git", "diff", "-U0", "--no-color", f"{base}...HEAD"],
                          capture_output=True, text=True, check=True).stdout
-    cur, res = "", []
+    cur, old, add, rem = "", "", [], []
     for ln in out.splitlines():
-        if ln.startswith("+++ "):
-            cur = ln[6:] if ln.startswith("+++ b/") else ""
-        elif ln.startswith("+") and not ln.startswith("+++"):
-            res.append((cur, ln[1:]))
-    return res
+        if ln.startswith("diff --git "):
+            cur = old = ""
+        elif ln.startswith("--- "):
+            old = ln[6:] if ln.startswith("--- a/") else ""
+        elif ln.startswith("+++ "):
+            cur = ln[6:] if ln.startswith("+++ b/") else old
+        elif ln.startswith("+"):
+            add.append((cur, ln[1:]))
+        elif ln.startswith("-"):
+            rem.append((cur, ln[1:]))
+    return add, rem
+
+
+def added_lines(base: str) -> list[tuple[str, str]]:
+    return diff_lines(base)[0]
+
+
+# ── line-level refinements (each one narrows a trigger; none widens an auto-answer) ──────────
+# Gradle build scripts are the only manifests parsed. Every other manifest (version catalog,
+# lockfiles, package.json, verification-metadata, settings.gradle, gradle.properties, Dockerfile)
+# is a dependency change whenever it changes at all — those files ARE coordinates.
+GRADLE_SCRIPT = re.compile(r"(^|/)build\.gradle(\.kts)?$")
+# A changed build-script line is a POSSIBLE dependency change when it matches any of these. The
+# list is deliberately over-broad: a false match costs one human tick, a missed one is a false
+# "no new dependency". Covers configurations (`implementation(`, `fooImplementation(`, `kapt`,
+# `platform(`), plugin declarations (`id(`, `kotlin(`, `alias(`, `version "x"`), coordinate-shaped
+# strings (`"g:a:v"`, `":project"`), resolution tampering (`force`, `exclude`, `substitute`,
+# repositories), and every way a version can be indirected: `val`/`var`/`extra`/`$` interpolation,
+# `libs.` catalog refs, `*Version` properties (pitest's `junit5PluginVersion` pulls an artifact).
+# A block-comment marker counts too: deleting `/*` … `*/` UNcomments a dependency while every
+# changed line is comment syntax. Only `//` line comments are ignored.
+DEP_LINE = re.compile(
+    r"\b(implementation|api|compileOnly|runtimeOnly|developmentOnly|kapt|ksp|annotationProcessor|"
+    r"classpath|platform|enforcedPlatform|dependencies|constraints|plugins|pluginManagement|id|kotlin|"
+    r"alias|force|exclude|resolutionStrategy|substitute|substitution|dependencySubstitution|"
+    r"repositories|maven|mavenCentral|mavenLocal|google|gradlePluginPortal|ivy|flatDir|apply|from|"
+    r"module|project|files|fileTree|configurations|buildscript|libs|catalogs?|val|var|extra|ext|by)\b|"
+    r"[Vv]ersion|\w(Implementation|Api|CompileOnly|RuntimeOnly|AnnotationProcessor)\b|"
+    r"\"[^\"\s]*:[^\"\s]*\"|\$|/\*|\*/")
+LINE_COMMENT = re.compile(r"^\s*//")
+# A log call whose ONLY argument is a plain string literal (no `$`, no `+`, no second argument, no
+# lambda/raw string) cannot carry a runtime value into a log line. Anything else — `{}` with args,
+# `$x`, concatenation, a lambda, a call continued on the next line — is "interpolating".
+LOG_LITERAL_ONLY = re.compile(r'\s*\(\s*"(?:[^"\\$]|\\.)*"\s*\)')
+SOURCE_COMMENT = re.compile(r"^\s*(//|\*|/\*)")
+HASH_COMMENT = re.compile(r"^\s*#")
+
+
+def log_interpolates(text: str) -> bool:
+    """True when the line holds a log call that may write a runtime value."""
+    return any(not LOG_LITERAL_ONLY.match(text, m.end()) for m in LOG_CALL.finditer(text))
+
+
+def comment_only(path: str, add: list[str], rem: list[str]) -> bool:
+    """True when every changed line of the file is comment text, so its runtime behaviour cannot
+    change. Fail closed: needs at least one changed line, a known comment syntax for the file type,
+    no block-comment marker on a REMOVED line (deleting `/*` or `*/` uncomments code), and balanced
+    markers on the added side (adding `/* … */` around code only ever disables it)."""
+    if not add and not rem:
+        return False
+    if path.endswith((".kt", ".kts", ".java")):
+        if any("/*" in t or "*/" in t for t in rem):
+            return False
+        joined = "\n".join(add)
+        if joined.count("/*") != joined.count("*/"):
+            return False
+        for t in add + rem:
+            if not t.strip():
+                continue
+            if not SOURCE_COMMENT.match(t):
+                return False
+            if t.lstrip().startswith(("/*", "*")) and re.search(r"\*/\s*\S", t):
+                return False  # `/* x */ code()` — code after the comment closes
+        return True
+    if path.endswith((".yaml", ".yml", ".properties")):
+        return all(not t.strip() or HASH_COMMENT.match(t) for t in add + rem)
+    return False
+
+
+def dependency_lines(f: str, add: list[str], rem: list[str]) -> list[str]:
+    """Changed lines of a build manifest that may declare or move a dependency. A non-Gradle-script
+    manifest, or a script with no visible changed line (rename, mode change), answers itself."""
+    if not GRADLE_SCRIPT.search(f):
+        return ["(manifest is all coordinates — any change is a dependency change)"]
+    lines = [t for t in add + rem if t.strip() and not LINE_COMMENT.match(t)]
+    if not add and not rem:
+        return ["(no changed line visible — rename or mode change)"]
+    return [t.strip() for t in lines if DEP_LINE.search(t)]
 
 
 def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
            decls: dict[str, dict[str, list[str]]] | None = None,
-           decl_changed: bool = False) -> dict[str, str | None]:
+           decl_changed: bool = False,
+           removed: list[tuple[str, str]] | None = None) -> dict[str, str | None]:
     """item -> evidence string when the diff answers it (auto-pass), or None when a human must.
-    The None branches are the default; an item is auto-answered only by positive evidence."""
+    The None branches are the default; an item is auto-answered only by positive evidence.
+    `removed=None` (the caller has no removed lines) disables every line-level refinement."""
     decls = decls or {}
+    lines_known = removed is not None
+    add_by: dict[str, list[str]] = {}
+    rem_by: dict[str, list[str]] = {}
+    for f, t in added:
+        add_by.setdefault(f, []).append(t)
+    for f, t in removed or []:
+        rem_by.setdefault(f, []).append(t)
     unknown = [f for f in touched if not is_inert(f)]
     touched_set = set(touched)
     other_code = [f for f in files if not is_inert(f) and f not in touched_set]
@@ -182,15 +295,31 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
     decl_note = (f"{len(declared)} production file(s) in declared service(s) "
                  f"({', '.join(sorted({f.split('/', 1)[0] for f in declared}))}) checked against "
                  f"rules.yaml: {DECL_KEY}")
-    if not unknown:
-        ans["secrets"] = (inert_note + "; no production code/config/log statement changed on the "
-                          "money path, and secrets across the whole diff are scanned by the gitleaks gate")
-    elif not undeclared and not decl_changed:
-        cfg = [f for f in unknown if CONFIG_FILE.search("/" + f)]
-        logs = [f"{f}: {t.strip()[:60]}" for f, t in added if f in declared and LOG_CALL.search(t)]
+    # secrets/PII: a file whose every changed line is a comment, and a Gradle build script, put no
+    # value into a runtime log line or runtime config — the same standing as docs/*.md, which is
+    # already INERT. Secrets anywhere in the diff (comments and build scripts included) remain the
+    # gitleaks gate's job. Only this item uses the relaxation; auth/PII/cardholder do not.
+    quiet = {f for f in unknown if lines_known and (
+        comment_only(f, add_by.get(f, []), rem_by.get(f, [])) or GRADLE_SCRIPT.search(f))}
+    relevant = [f for f in unknown if f not in quiet]
+    quiet_note = (f"; {len(quiet)} other money-path file(s) change only comments or Gradle build "
+                  "script lines: " + ", ".join(sorted(quiet)[:6])) if quiet else ""
+    if not relevant:
+        lead = inert_note if not quiet else (
+            f"{len(touched) - len(quiet)} money-path file(s) are tests/docs")
+        ans["secrets"] = lead + quiet_note + (
+            "; no production code/config/log statement changed on the money path, and secrets across "
+            "the whole diff are scanned by the gitleaks gate")
+    elif not [f for f in relevant if f.split("/", 1)[0] not in decls] and not decl_changed:
+        cfg = [f for f in relevant if CONFIG_FILE.search("/" + f)]
+        logs = [f"{f}: {t.strip()[:60]}" for f, t in added if f in declared and LOG_CALL.search(t)
+                and (log_interpolates(t) or not lines_known)]
         if not cfg and not logs and not cat_hits("pii"):
-            ans["secrets"] = (decl_note + "; none is a declared PII path, no application config changed, "
-                              "no log statement added — secrets across the diff are scanned by the gitleaks gate")
+            lit = sum(1 for f, t in added if f in declared and LOG_CALL.search(t))
+            ans["secrets"] = (decl_note + "; none is a declared PII path, no application config changed "
+                              "(beyond comments), no log statement added that interpolates a value"
+                              + (f" ({lit} literal-only log line(s))" if lit else "") + quiet_note
+                              + " — secrets across the diff are scanned by the gitleaks gate")
     sup = [f"{f}: {t.strip()[:80]}" for f, t in added if SUPPRESSION.search(t)]
     if not sup:
         ans["suppressions"] = (f"no added line in the diff ({len(added)} added) contains "
@@ -199,6 +328,12 @@ def decide(files: list[str], touched: list[str], added: list[tuple[str, str]],
     if not deps:
         ans["dependency"] = ("no dependency manifest changed (build.gradle*, libs.versions.toml, "
                              "verification-metadata.xml, package*.json, lockfiles, Dockerfile)")
+    elif lines_known:
+        hits = {f: dependency_lines(f, add_by.get(f, []), rem_by.get(f, [])) for f in deps}
+        if not any(hits.values()):
+            ans["dependency"] = (f"{len(deps)} Gradle build script(s) changed ({', '.join(sorted(deps)[:6])}) "
+                                 "but no changed line declares, versions, excludes or repositories a "
+                                 "dependency or plugin (only e.g. coverage floors, test heap, task config)")
     for key, rx, what in (("auth", AUTH_CRYPTO, "auth/crypto"), ("pii", PII, "PII"),
                           ("cardholder", CARDHOLDER, "cardholder-data")):
         if decl_changed:
@@ -408,7 +543,8 @@ def run(root: Path, body: str, base: str, enforce: bool,
     for svc in sorted({t.split("/")[0] for t in touched if not is_inert(t)}):
         print(f"security-checklist: {svc}: " + (f"declared in {DECL_KEY}" if svc in decls
               else f"NOT declared in {DECL_KEY} — judgement items fail closed"))
-    answers = decide(files, touched, added_lines(base), decls, decl_changed)
+    add, rem = diff_lines(base)
+    answers = decide(files, touched, add, decls, decl_changed, removed=rem)
     auto = {k: v for k, v in answers.items() if v is not None}
     human = [k for k, v in answers.items() if v is None]
     summary = ["### security-checklist-money-path", ""]
@@ -428,9 +564,12 @@ def run(root: Path, body: str, base: str, enforce: bool,
             body = current
     res = unticked(body)
     why = {
-        "secrets": "production code in an undeclared service, a declared PII path, app config or an added log statement changed — only a human can say no PII reaches logs/config",
+        "secrets": ("non-comment production code in an undeclared service, a declared PII path, app config, "
+                    "or an added log statement that interpolates a value changed — only a human can say "
+                    "no PII reaches logs/config"),
         "suppressions": "the diff ADDS a suppression or `as Any` — state the justification in the PR",
-        "dependency": "a dependency/build manifest changed — attach the dependency review",
+        "dependency": ("a changed manifest line may add/move a dependency or plugin (or a non-Gradle-script "
+                       "manifest changed) — attach the dependency review"),
         "auth": ("a declared auth/crypto/payment path, an undeclared money-path service, an auth/crypto path "
                  f"elsewhere, or {DECL_KEY} itself changed — decide on `security-review-required`"),
         "pii": ("a declared PII path, an undeclared money-path service, a PII-pattern path elsewhere, "
@@ -662,9 +801,132 @@ def self_test() -> int:
     # (h2) inside the PII glob → fails too, and an added log line makes the secrets item human.
     if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/CustomerView.kt": "x\n"}, no_checklist) == 0:
         print("self-test FAIL (h2): change inside a declared PII glob passed without a tick"); bad += 1
-    if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": 'log.info("amount")\n'},
+    if dfixture(decl_rules, {f"{svc}/src/main/kotlin/com/x/domain/Money.kt": 'log.info("amount $amount")\n'},
                 no_checklist) == 0:
-        print("self-test FAIL (h3): an added log statement passed the secrets item without a tick"); bad += 1
+        print("self-test FAIL (h3): an added interpolating log statement passed without a tick"); bad += 1
+    # ── line-level refinements — must-PASS / must-FAIL pairs ────────────────────────────────────
+    # Two layers. A few cases run end-to-end through git (so diff_lines' parsing — removed lines,
+    # deleted files — is exercised as the gate runs it); the full matrix drives decide() with the
+    # changed lines directly, because thirty throwaway repos cost ~15 s of the gate's budget.
+    decl = declarations_from_text(decl_rules) or {}
+    src = f"{svc}/src/main/kotlin/com/x/Pay.kt"
+    gradle = f"{svc}/build.gradle.kts"
+    cfg = f"{svc}/src/main/resources/application.yaml"
+
+    def answers(changes: dict[str, tuple[list[str], list[str]]], declared: bool = True) -> dict:
+        files = list(changes)
+        add = [(f, t) for f, (a, _) in changes.items() for t in a]
+        rem = [(f, t) for f, (_, r) in changes.items() for t in r]
+        return decide(files, [f for f in files if f.startswith(svc + "/")], add,
+                      decl if declared else {}, False, removed=rem)
+
+    def expect(tag: str, item: str, auto: bool, changes: dict, declared: bool = True) -> None:
+        nonlocal bad
+        got = answers(changes, declared)[item] is not None
+        if got != auto:
+            print(f"self-test FAIL ({tag}): {item} {'still needs a human' if auto else 'auto-answered'} "
+                  f"for {changes}"); bad += 1
+
+    # secrets ← log lines. must-FAIL: every interpolation shape; must-PASS: literal-only.
+    for i, ln in enumerate(('log.info("amount {}", amount)', 'LOG.warn("iban " + iban)',
+                            'logger.debug { "x=$x" }', 'log.error(', 'log.info("""raw $x""")',
+                            'log.info("ok"); log.warn("pan $pan")', 'log.info("a $b")')):
+        expect(f"h4.{i}", "secrets", False, {f"{svc}/src/main/kotlin/com/x/domain/M.kt": ([ln], [])})
+    for i, ln in enumerate(('log.info("projection started")', 'LOG.warn("retrying \\$ literal");',
+                            'if (x) logger.debug("skip")')):
+        expect(f"h5.{i}", "secrets", True, {f"{svc}/src/main/kotlin/com/x/domain/M.kt": ([ln], [])})
+    # dependency ← build-script lines. must-PASS: floors, heap, comments, task config.
+    for i, (a, r) in enumerate(((["        minValue = 85"], ["        minValue = 80"]),
+                                (['    maxHeapSize = "3g"'], ['    maxHeapSize = "2g"']),
+                                (["// why the heap is 3g", "tasks.withType<Test>().configureEach {",
+                                  '    maxHeapSize = "2g"', "}"], []),
+                                (["// implementation(libs.old) was removed upstream"], []))):
+        expect(f"l.{i}", "dependency", True, {gradle: (a, r)})
+    # must-FAIL: every way a script can add, version, move or un-comment a dependency or plugin.
+    for i, (a, r) in enumerate(((["    implementation(libs.quarkus.kafka)"], []),
+                                (['    testImplementation("org.foo:bar:1.0")'], []),
+                                (['    id("info.solidsoft.pitest") version "1.19.0"'], []),
+                                (['    junit5PluginVersion = "1.2.3"'], []),
+                                (['val fooRev = "2.0"'], []),
+                                (['    implementation(libs.a) { exclude(group = "x") }'],
+                                 ["    implementation(libs.a)"]),
+                                ([], ["/*", "*/"]),
+                                (['    integrationTestImplementation(libs.x)'], []),
+                                (['    "org.foo:bar:2.0",'], ['    "org.foo:bar:1.0",']),
+                                (['    systemProperty("v", "${rootProject.version}")'], []),
+                                (["    mavenLocal()"], []),
+                                (["    force(libs.netty)"], []),
+                                ([], []))):
+        expect(f"l2.{i}", "dependency", False, {gradle: (a, r)})
+    # a non-script manifest is a dependency change on any edit, even a comment.
+    expect("l3", "dependency", False, {"gradle/libs.versions.toml": (["# note"], [])})
+    expect("l3b", "dependency", False, {f"{svc}/gradle.properties": (["org.gradle.caching=true"], [])})
+    # secrets ← comment-only / build-only, UNDECLARED service. must-PASS secrets; auth stays human.
+    kdoc = (["/**", " * Executes the payment.", " */", "    // no retries here"], [])
+    expect("m", "secrets", True, {src: kdoc}, declared=False)
+    expect("m.b", "secrets", True, {gradle: (["        minValue = 85"], ["        minValue = 80"])},
+           declared=False)
+    for item in ("auth", "pii", "cardholder"):
+        expect(f"m2.{item}", item, False, {src: kdoc}, declared=False)
+        expect(f"m2b.{item}", item, False, {gradle: (["// x"], [])}, declared=False)
+    # must-FAIL: a code line beside a comment; uncommenting; an early or unbalanced close; code
+    # after an inline block comment; a no-line change (rename) is not "comment-only".
+    for i, ch in enumerate(((["// note", '    fun x() = log.info("iban $iban")'], []),
+                            (['    fun leak() = log.info("pan $pan")'], ["/*", "*/"]),
+                            ([], ["*/"]),
+                            (["*/"], []),
+                            (['/* off */ fun leak() = 1'], []),
+                            ([" * doc */ val x = 1"], []),
+                            ([], []))):
+        expect(f"m3.{i}", "secrets", False, {src: ch}, declared=False)
+    # config: comment-only is quiet; a real value is not (declared service).
+    expect("n", "secrets", True, {cfg: (["  # why b is 1"], [])})
+    expect("n2", "secrets", False, {cfg: (["  # why", "  b: 2"], ["  b: 1"])})
+    # removed=None (lines unknown) must fall back to the file-level rules, never to a pass.
+    if decide([gradle], [gradle], [(gradle, "    minValue = 85")], decl, False,
+              removed=None)["dependency"] is not None:
+        print("self-test FAIL (o): unknown lines answered the dependency item"); bad += 1
+
+    # end-to-end through git (parser included): one must-PASS and two must-FAIL.
+    base_gradle = ('plugins {\n    id("openbank.quarkus-service")\n}\n\ndependencies {\n'
+                   '    implementation(libs.quarkus.core)\n}\n\nkover {\n    minValue = 80\n}\n')
+
+    def efixture(base_files: dict[str, str], head_files: dict[str, str], body: str) -> int:
+        with _tf.TemporaryDirectory() as td:
+            root = Path(td)
+            env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+                   "GIT_COMMITTER_EMAIL": "t@t", "PATH": os.environ.get("PATH", "")}
+            def git(*a):
+                _sp.run(["git", "-C", str(root), *a], check=True, capture_output=True, env=env)
+            def put(files: dict[str, str]) -> None:
+                for rel, content in files.items():
+                    f = root / rel
+                    f.parent.mkdir(parents=True, exist_ok=True)
+                    f.write_text(content, encoding="utf-8")
+            (root / RULES).parent.mkdir(parents=True)
+            (root / RULES).write_text(decl_rules, encoding="utf-8")
+            put(base_files)
+            git("init", "-q", "-b", "base"); git("add", "-A"); git("commit", "-q", "-m", "base")
+            git("checkout", "-q", "-b", "head")
+            put(head_files)
+            git("add", "-A"); git("commit", "-q", "-m", "head")
+            cwd = os.getcwd()
+            try:
+                os.chdir(root)
+                return run(root, body, "base", enforce=True)
+            finally:
+                os.chdir(cwd)
+
+    floors = base_gradle.replace("minValue = 80", "minValue = 85")
+    if efixture({gradle: base_gradle}, {gradle: floors}, no_checklist) != 0:
+        print("self-test FAIL (e2e-l): coverage-floor-only build script edit still demanded ticks"); bad += 1
+    added_dep = base_gradle.replace("    implementation(libs.quarkus.core)\n",
+                                    "    implementation(libs.quarkus.core)\n    implementation(libs.evil)\n")
+    if efixture({gradle: base_gradle}, {gradle: added_dep}, no_checklist) == 0:
+        print("self-test FAIL (e2e-l2): an added implementation() line passed the dependency item"); bad += 1
+    hidden = base_gradle.replace("}\n\nkover", "/*\n    implementation(libs.evil)\n*/\n}\n\nkover")
+    if efixture({gradle: hidden}, {gradle: added_dep}, no_checklist) == 0:
+        print("self-test FAIL (e2e-l3): un-commenting a dependency passed the dependency item"); bad += 1
     # (i) the same refactor in an UNDECLARED service → fails (fail closed).
     undeclared_rules = "money_path_services:\n  - " + svc + "\n"
     if dfixture(undeclared_rules, refactor, no_checklist, rules_base=undeclared_rules) == 0:

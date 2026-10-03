@@ -244,6 +244,19 @@ legacy tombstones. A delayed lower revision cannot reopen a closed grant or trig
 card blocking after a newer lifecycle decision. Consumers must be deployed and verified before the
 revisioned delegation producer.
 
+- **2026-09-25 — Bounded party-card read for Customer 360.** The existing
+  `GET /api/v1/cards/party/{partyId}` accepts an optional `limit` of 1–200. A supplied
+  limit is applied in the database to the newest `(createdAt, id)` rows; omitting it
+  preserves the complete list required by the existing subject-access flow. This
+  changes response size, not authority: `card.list` still receives the party resource,
+  role checks still run, and the named machine-caller guard runs before either read.
+  **Disclosure/DoS boundary:** a caller authorized for the wrong party could still
+  enumerate that party's masked card metadata, and the legacy unbounded read can
+  still be expensive. Customer-facing callers must establish party ownership; the
+  Customer 360 BFF requires its compliance permission and caps the source response.
+  The bounded route exposes no PAN or CVV. Rollback omits the new parameter and
+  disables the graph feed if its source volume exceeds the UI budget; it does not
+  weaken the source's party and caller checks.
 - **2026-09-26** — **`sanitizeForLog` de-duplication (#10937), no behavior change.**
   `CardOutboxAdminResource.kt` (inbound REST surface) drops its locally-copied
   `String?.sanitizeForLog()` helper for the single shared implementation in

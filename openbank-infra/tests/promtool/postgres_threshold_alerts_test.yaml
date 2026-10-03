@@ -34,6 +34,21 @@ tests:
               description: "This primary has no first recoverability point — no base backup exists, so the database cannot be restored to any moment. WAL archiving alone is not a backup. Check `kubectl get cluster -n pricing` for a barmanObjectStore, then force a base backup with an on-demand `kind: Backup`. Verify by listing the destination in S3, never by reading ContinuousArchiving (runbook 0003)."
 
   - interval: 1m
+    # A cluster declared in openbank:cnpg_backup_exempt (glitchtip-pg, unbacked by design, #1444)
+    # must NOT fire. The pricing case above is the must-fire half, so this exemption cannot be
+    # satisfied by a rule that has simply stopped firing for everyone.
+    name: "a primary of a declared backup-exempt cluster does NOT fire PostgresNoRecoveryPoint"
+    input_series:
+      - series: 'cnpg_collector_first_recoverability_point{namespace="observability",pod="glitchtip-pg-1"}'
+        values: "0+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="observability",pod="glitchtip-pg-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: PostgresNoRecoveryPoint
+        exp_alerts: []
+
+  - interval: 1m
     # The primary filter is load-bearing and the rule's comment says so: unfiltered, the
     # expression matches every healthy replica (19 of them, measured 2026-08-19). This is the
     # must-NOT-fire half.
@@ -94,3 +109,128 @@ tests:
             exp_annotations:
               summary: "Postgres base backup has gone stale on pricing/pricing-db-1"
               description: "This primary's newest completed base backup is over 30h old and every ScheduledBackup in the fleet is daily, so at least one run has been missed. A recovery point still exists, so this is not PostgresNoRecoveryPoint -- the chain has stopped advancing. Check `kubectl get scheduledbackup -n pricing` and `kubectl get backup -n pricing` for the newest attempt and its failure, and confirm against the Cluster's own .status.lastSuccessfulBackup, which is what this metric mirrors (runbook 0003)."
+
+  # ---- PostgresWALArchiveFailing: "stuck", not "failed once" ----------------------------------
+  - interval: 1m
+    # The 2026-09-28 pricing-db-1 shape: archiving worked (last success at t=60s), then every
+    # attempt failed (a new failure each minute) and nothing got through. Must fire.
+    name: "a primary whose archiver keeps failing with no success fires PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "60+0x60"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 120+60x58"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              namespace: pricing
+              pod: pricing-db-1
+            exp_annotations:
+              summary: "Postgres WAL archiving failing on pricing/pricing-db-1"
+              description: "No WAL segment has been archived since the last archive failure for >10m — backups/PITR are not durable. Blocks safe pg_upgrade (runbook 0003). Read the reason with `kubectl logs -n pricing pricing-db-1 | grep barman-cloud-wal-archive`. If it says `Unable to locate credentials`, the pod was admitted before its EKS Pod Identity association existed (credentials are injected only at admission): confirm the association in db-backups.tf is applied, then recreate the pod — switch over or delete the replica first, never wait for it to heal."
+
+  - interval: 1m
+    # The blip the old `rate(failed_count[15m]) > 0` expression nearly paged on: one failure
+    # at t=120s, the retry succeeds a minute later. Must NOT fire at any point.
+    name: "a single transient archive failure that the retry fixes does NOT fire PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "60 60 60 180+60x57"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 120+0x58"
+      - series: 'cnpg_pg_stat_archiver_failed_count{namespace="pricing",pod="pricing-db-1"}'
+        values: "0 0 1+0x58"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-1"}'
+        values: "0+0x60"
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
+
+  - interval: 1m
+    # A replica (e.g. a demoted former primary) keeps its last failure forever because it no
+    # longer archives. Must NOT fire.
+    name: "a replica whose last archiver event was a failure does NOT fire PostgresWALArchiveFailing"
+    input_series:
+      - series: 'cnpg_pg_stat_archiver_last_archived_time{namespace="pricing",pod="pricing-db-2"}'
+        values: "60+0x60"
+      - series: 'cnpg_pg_stat_archiver_last_failed_time{namespace="pricing",pod="pricing-db-2"}'
+        values: "120+0x60"
+      - series: 'cnpg_pg_replication_in_recovery{namespace="pricing",pod="pricing-db-2"}'
+        values: "1+0x60"
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PostgresWALArchiveFailing
+        exp_alerts: []
+
+  - interval: 1m
+    # Must-FIRE: sanctions-db-1 as measured 2026-09-30 (334Mi working set, 256Mi request).
+    name: "a postgres pod above its memory request for >30m fires CnpgWorkingSetAboveRequest"
+    input_series:
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
+        values: "350224384+0x60"
+      - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-1",container="postgres",resource="memory"}'
+        values: "268435456+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CnpgWorkingSetAboveRequest
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              namespace: sanctions
+              pod: sanctions-db-1
+            exp_annotations:
+              summary: "Postgres resident memory above memory request on sanctions/sanctions-db-1"
+              description: "The postgres container's RSS (non-reclaimable memory, page cache excluded) has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max RSS x 1.3) plus shared_buffers, 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
+
+  - interval: 1m
+    # Must-NOT-fire: the same pod after its request was raised to 448Mi.
+    name: "a postgres pod under its memory request does NOT fire CnpgWorkingSetAboveRequest"
+    input_series:
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
+        values: "350224384+0x60"
+      - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-1",container="postgres",resource="memory"}'
+        values: "469762048+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CnpgWorkingSetAboveRequest
+        exp_alerts: []
+
+  - interval: 1m
+    # Must-NOT-fire: sanctions-db-2 as measured 2026-10-03 — page cache drove the working set to
+    # 907Mi over a 640Mi request while RSS was 47Mi. A full cache is not a request problem.
+    name: "page cache above the request with low RSS does NOT fire CnpgWorkingSetAboveRequest"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="sanctions",pod="sanctions-db-2",container="postgres"}'
+        values: "951058432+0x60"
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-2",container="postgres"}'
+        values: "49283072+0x60"
+      - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-2",container="postgres",resource="memory"}'
+        values: "671088640+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CnpgWorkingSetAboveRequest
+        exp_alerts: []
+
+  - interval: 1m
+    # Must-NOT-fire: a 20-minute startup/WAL-replay spike above the request, then back under.
+    name: "a short spike above the memory request does NOT fire CnpgWorkingSetAboveRequest"
+    input_series:
+      - series: 'container_memory_rss{namespace="accounts",pod="accounts-db-1",container="postgres"}'
+        values: "350224384+0x20 150000000+0x40"
+      - series: 'kube_pod_container_resource_requests{namespace="accounts",pod="accounts-db-1",container="postgres",resource="memory"}'
+        values: "268435456+0x60"
+    alert_rule_test:
+      # 19m into the spike: pending, not firing. Evaluating after the spike ended would
+      # pass with ANY `for:` (the alert resolves), so this point is what pins for: 30m.
+      - eval_time: 19m
+        alertname: CnpgWorkingSetAboveRequest
+        exp_alerts: []

@@ -48,6 +48,7 @@ NOT_RUNTIME_MODULES = {
     "openbank-libs": "aggregator; its src/main is in GLOBAL_RE, which rebuilds everything",
     "openbank-libs-testing": "testImplementation only; a change there rebuilds no image",
     "openbank-libs-detekt-rules": "detekt plugin; affects lint, not any service's runtime",
+    "openbank-libs-benchmarks": "JMH harness; nothing depends on it and it ships in no image",
 }
 
 PACKAGE_RE = re.compile(r"^\s*package\s+([A-Za-z0-9_.]+)", re.M)

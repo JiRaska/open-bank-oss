@@ -27,8 +27,9 @@ const routes: Record<string, unknown> = {
     { id: 'a1', partyId: 'p1', status: 'SUBMITTED', createdAt: new Date().toISOString(), requestedAmount: { amount: 30000, currency: CZK } },
   ],
   '/loans/active': [
-    { id: 'l1', partyId: 'p2', status: 'ACTIVE', principal: { amount: 150000, currency: CZK } },
-    { id: 'l2', partyId: 'p3', status: 'ACTIVE', principal: { amount: 250000, currency: CZK } },
+    { id: 'l1', contractNumber: 'UV-2026-000123', partyId: 'p2', status: 'ACTIVE', principal: { amount: 150000, currency: CZK } },
+    // An older lending without contractNumber says so, never a blank cell or a raw id.
+    { id: 'abcdef12-0000-7000-8000-000000000002', partyId: 'p3', status: 'ACTIVE', principal: { amount: 250000, currency: CZK } },
   ],
   '/applications/summary': [
     { status: 'SUBMITTED', count: 1, oldestCreatedAt: new Date().toISOString(), requested: [{ currency: 'CZK', amount: 30000 }] },
@@ -70,6 +71,10 @@ describe('lending console with object-shaped currency', () => {
     fireEvent.click(screen.getByLabelText('Show portfolio'))
     await waitFor(() => expect(Array.from(document.querySelectorAll('td')).map(td => td.textContent?.replace(/\s/g, ' '))).toContain('Active'))
     expect(Array.from(document.querySelectorAll('td')).map(td => td.textContent?.replace(/\s/g, ' '))).not.toContain('ACTIVE')
+    // #11107: the portfolio shows the human contract number, the UUID only as its title.
+    const contracts = screen.getAllByTestId('loan-contract-number')
+    expect(contracts.map(c => c.textContent)).toEqual(['UV-2026-000123', 'no number'])
+    expect(contracts[0].getAttribute('title')).toBe('l1')
   })
 
   it('renders the credit-risk currency form so both pages read alike', () => {
