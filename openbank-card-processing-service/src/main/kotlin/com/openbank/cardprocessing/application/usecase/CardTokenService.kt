@@ -225,7 +225,69 @@ class CardTokenService(
         listOf(command.cardId, command.requestorId, command.requestorLabel).joinToString("\n"),
     )
 
+    /**
+     * Suspend, resume or delete a token — idempotently.
+     *
+     * A status change reaches the network, so a retried request must not reach it twice: a DELETE
+     * replayed after a crash is harmless at most schemes, but a SUSPEND replayed after a later RESUME
+     * would silently re-suspend a credential the customer was just given back. The caller's
+     * `Idempotency-Key` is reserved with the same mechanism as [provision]; the reservation completes
+     * in the transaction that writes the new status and its event.
+     */
     override suspend fun changeStatus(command: ChangeTokenStatusCommand): TokenOutcome {
+        val claim = IdempotencyClaim(LifecycleOperation.TOKEN_STATUS_CHANGE, command.idempotencyKey)
+        when (val reservation = idempotency.reserve(claim.operation, claim.key, fingerprintOf(command))) {
+            is Reservation.Completed -> {
+                val existing = registrations.findById(reservation.resultId)
+                    ?: error("idempotency reservation points at missing token registration ${reservation.resultId}")
+                return TokenOutcome.Changed(existing)
+            }
+            Reservation.InProgress -> throw IdempotencyRequestInProgressException()
+            Reservation.Mismatch -> throw IdempotencyKeyReusedException()
+            Reservation.Claimed -> Unit
+        }
+        val network = NetworkCall()
+        try {
+            val outcome = changeStatusClaimed(command, claim, network)
+            if (outcome is TokenOutcome.Refused) idempotency.release(claim)
+            return outcome
+        } catch (e: CancellationException) {
+            if (!network.called) withContext(NonCancellable) { idempotency.release(claim) }
+            throw e
+        } catch (
+            @Suppress("TooGenericExceptionCaught") e: Exception,
+        ) {
+            if (!network.called) {
+                idempotency.release(claim)
+            } else {
+                log.errorf(
+                    e,
+                    "token status change for %s failed after the network was called; idempotency key left " +
+                        "PENDING so a retry cannot repeat the network call — reconcile with the scheme",
+                    command.tokenReference,
+                )
+            }
+            throw e
+        }
+    }
+
+    /** Set once the network has been asked; after that a failure must leave the reservation PENDING. */
+    private class NetworkCall {
+        var called = false
+    }
+
+    /** Same key, different token or different target status is reuse. */
+    private fun fingerprintOf(command: ChangeTokenStatusCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-tokens/${command.tokenReference}/status",
+        command.status.name,
+    )
+
+    private suspend fun changeStatusClaimed(
+        command: ChangeTokenStatusCommand,
+        claim: IdempotencyClaim,
+        network: NetworkCall,
+    ): TokenOutcome {
         val existing = registrations.findByTokenReference(command.tokenReference)
             ?: return TokenOutcome.Refused(TokenRefusal.TOKEN_NOT_FOUND, "no token ${command.tokenReference}")
 
@@ -244,6 +306,7 @@ class CardTokenService(
             )
         }
 
+        network.called = true
         return when (val answer = tokenisation.changeStatus(command.tokenReference, command.status)) {
             is SchemeResult.Answered -> {
                 val now = Instant.now(clock)
@@ -267,7 +330,7 @@ class CardTokenService(
                     // Ignored for an existing row (the key is written once, at insert); passed only
                     // because the signature is shared with the insert path.
                     idempotencyKeyOf(updated),
-                    null,
+                    claim,
                 )
                 metrics.tokenStatusChanged(updated.scheme.name, updated.status.name, null)
                 TokenOutcome.Changed(saved)

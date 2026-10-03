@@ -12,12 +12,12 @@ Kontrakt je `src/main/resources/openapi.yaml` (`info.version` 1.0.0, major v URL
 | POST | `/api/v1/card-authorizations/{id}/reversal` | stejné | `cardprocessing.reverse` | 200 nebo 409 |
 | GET | `/api/v1/card-authorizations/card/{cardId}` | stejné | `cardprocessing.read` | od nejnovějších; `limit` výchozí 50, omezen na 1..200 |
 | POST | `/api/v1/card-tokens` | `ROLE_API`, `ROLE_OPERATOR`, `ROLE_ADMIN` | `cardprocessing.token` | `Idempotency-Key` povinný. 201, 404, 409 nebo 503 |
-| POST | `/api/v1/card-tokens/{tokenReference}/status` | stejné | `cardprocessing.token` | tělo `{ status }` — `ACTIVE`, `SUSPENDED`, `DELETED`; jiné hodnoty 400 |
+| POST | `/api/v1/card-tokens/{tokenReference}/status` | stejné | `cardprocessing.token` | `Idempotency-Key` povinný; tělo `{ status }` — `ACTIVE`, `SUSPENDED`, `DELETED`; jiné hodnoty 400. 200, 404 nebo 409 |
 | GET | `/api/v1/card-tokens/card/{cardId}` | stejné | `cardprocessing.read` | `{ tokens, source, degradedReason, count }` |
 | POST | `/api/v1/card-disputes` | stejné | `cardprocessing.dispute` | `Idempotency-Key` povinný. 201, 400, 404 nebo 409 |
 | POST | `/api/v1/card-disputes/{id}/evidence` | stejné | `cardprocessing.dispute` | `Idempotency-Key` povinný; tělo `{ documentReference, note }`; připojí se do historie důkazů |
 | GET | `/api/v1/card-disputes/{id}/evidence` | stejné | `cardprocessing.read` | historie důkazů, od nejstaršího |
-| POST | `/api/v1/card-disputes/{id}/refresh` | stejné | `cardprocessing.dispute` | znovu načte stav ze sítě; uzavřený případ vrátí beze změny |
+| POST | `/api/v1/card-disputes/{id}/refresh` | stejné | `cardprocessing.dispute` | `Idempotency-Key` povinný; znovu načte stav ze sítě; uzavřený případ vrátí beze změny |
 | GET | `/api/v1/card-disputes/{id}` | stejné | `cardprocessing.read` | `status` i `schemeStatus` |
 | GET | `/api/v1/card-disputes/card/{cardId}` | stejné | `cardprocessing.read` | od nejnovějších; `limit` výchozí 50, omezen na 1..200 |
 | POST | `/api/v1/sandbox/acquirer/purchase` | `ROLE_ADMIN` | `cardprocessing.simulate` | **404, pokud není** `openbank.card-processing.sandbox-acquirer-enabled=true` |
@@ -51,7 +51,7 @@ Oba resource odpovídají na odmítnutí `{ reason, message }`. `CARD_NOT_FOUND`
 - **Token:** `CARD_NOT_FOUND` (card-issuance kartu nezná), `CARD_NOT_ACTIVE` (blokovaná, pozastavená, expirovaná, zrušená nebo s neuvedeným stavem — nikdy se netokenizuje), `ISSUER_UNAVAILABLE`, `TOKEN_NOT_FOUND`, `TOKEN_TERMINAL`, `SCHEME_UNAVAILABLE` (zahrnuje `NOT_BOUND`), `SCHEME_REFUSED`.
 - **Reklamace:** `AUTHORIZATION_NOT_FOUND`, `NO_NETWORK_REFERENCE`, `NOTHING_CLEARED`, `CURRENCY_MISMATCH` (měna reklamace není měnou autorizace; porovnává se jako Money, nikdy se nepřepočítává — neznámý kód je 400), `AMOUNT_EXCEEDS_CLEARED`, `ALREADY_DISPUTED`, `CASE_NOT_FOUND`, `CASE_TERMINAL`, `SCHEME_UNAVAILABLE`, `SCHEME_REFUSED`.
 
-Idempotence: vydání tokenu, otevření reklamace a podání důkazu **rezervují** `Idempotency-Key` v databázi (`card_lifecycle_idempotency`) ještě před voláním sítě. Ze dvou souběžných požadavků se stejným klíčem se k síti dostane právě jeden; opakování po jeho dokončení přehraje první výsledek, souběžný požadavek dostane **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`** a stejný klíč s jiným tělem je **409 `IDEMPOTENCY_KEY_REUSED`** (flotilový tvar chyby). Odmítnutí klíč uvolní. Klíč má 1–128 znaků z `[A-Za-z0-9._:-]` (jinak 400). Změny stavu a refresh klíč nepřijímají.
+Idempotence: vydání tokenu, změna stavu tokenu, otevření reklamace, podání důkazu a refresh reklamace **rezervují** `Idempotency-Key` v databázi (`card_lifecycle_idempotency`) ještě před voláním sítě. Ze dvou souběžných požadavků se stejným klíčem se k síti dostane právě jeden; opakování po jeho dokončení přehraje první výsledek, souběžný požadavek dostane **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`** a stejný klíč s jiným tělem je **409 `IDEMPOTENCY_KEY_REUSED`** (flotilový tvar chyby). Odmítnutí klíč uvolní. Klíč má 1–128 znaků z `[A-Za-z0-9._:-]` (jinak 400). Přehraná změna stavu vrátí token v aktuálním stavu; přehraný refresh vrátí případ, který vytvořil první refresh — u uzavřeného případu uložený výsledek — aniž by se znovu ptal sítě.
 
 OPA politika uděluje `cardprocessing.token` a `cardprocessing.dispute` HUMAN principálům s `ROLE_OPERATOR` nebo `ROLE_ADMIN` (důvod `operator-card-lifecycle-write`); kontrola rolí na resource navíc připouští `ROLE_API`. Dokud `AUTHZ_ENFORCE=false`, účinnou kontrolou je kontrola rolí.
 

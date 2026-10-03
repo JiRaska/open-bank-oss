@@ -15,6 +15,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
+import { newIdempotencyKey } from '@/lib/cards/lifecycleRequests'
 import {
   daysUntil,
   formatMinorUnits,
@@ -197,7 +198,11 @@ export default function CardDisputesPage() {
                         <button
                           type="button"
                           disabled={busy !== null}
-                          onClick={() => post(`/api/v1/card-disputes/${dispute.id}/refresh`)}
+                          // One key per click: the service requires it and replays a retry
+                          // instead of asking the network again.
+                          onClick={() =>
+                            post(`/api/v1/card-disputes/${dispute.id}/refresh`, undefined, newIdempotencyKey())
+                          }
                           className="inline-flex items-center gap-1 rounded border border-slate-300 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                         >
                           <RefreshCw className="h-3.5 w-3.5" />

@@ -127,7 +127,7 @@ interface CardLifecycleMetricsPort {
 const val UNATTRIBUTED_SCHEME = "NONE"
 
 /** Which mutating operation an `Idempotency-Key` was presented to. Keys are scoped per operation. */
-enum class LifecycleOperation { TOKEN_PROVISION, DISPUTE_OPEN, DISPUTE_EVIDENCE }
+enum class LifecycleOperation { TOKEN_PROVISION, TOKEN_STATUS_CHANGE, DISPUTE_OPEN, DISPUTE_EVIDENCE, DISPUTE_REFRESH }
 
 /** A reservation this request holds and must complete (in the result's transaction) or release. */
 data class IdempotencyClaim(val operation: LifecycleOperation, val key: String)
@@ -164,4 +164,11 @@ interface LifecycleIdempotencyPort {
 
     /** Frees a PENDING reservation — only when the network was provably not reached, or refused. */
     suspend fun release(claim: IdempotencyClaim)
+
+    /**
+     * Completes [claim] on its own transaction, pointing at [resultId]. For an outcome that writes no
+     * row — a dispute refresh that found nothing moved, or a refresh of a CLOSED case — so there is no
+     * result transaction to complete it in. Paths that DO write complete inside that write instead.
+     */
+    suspend fun complete(claim: IdempotencyClaim, resultId: UUID)
 }
