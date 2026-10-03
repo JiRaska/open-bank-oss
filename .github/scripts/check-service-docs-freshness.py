@@ -22,7 +22,7 @@ def changed_paths(repo: Path, base: str, head: str) -> dict[str, str]:
         text=True,
     )
     entries = result.stdout.rstrip("\0").split("\0") if result.stdout else []
-    return {path: status for status, path in zip(entries[::2], entries[1::2])}
+    return {path: status for status, path in zip(entries[::2], entries[1::2], strict=True)}
 
 
 def authored_docs_at_head(repo: Path, head: str) -> set[str]:
