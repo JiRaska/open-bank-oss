@@ -38,5 +38,5 @@ and retry; do not directly update the marker or delete retained evidence.
 idempotency, concurrent decision submission and an injected audit failure.
 `ScaLifecycleSafetyIT` checks that a stale verifier cannot undo cancellation.
 `ScaFourEyesFlowIT` additionally runs enforced authorization over real HTTP with the generated
-deployment OPA bundle, Redis and PostgreSQL. It exercises distinct maker/checker identities,
+deployment OPA bundle and PostgreSQL. It exercises distinct maker/checker identities,
 target substitution and replay. A live approval-flow drill remains necessary.

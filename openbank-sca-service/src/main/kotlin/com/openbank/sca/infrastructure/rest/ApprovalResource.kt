@@ -5,9 +5,9 @@
 package com.openbank.sca.infrastructure.rest
 
 import com.openbank.libs.approval.ApprovalStore
-import com.openbank.libs.approval.web.toApprovalResponse
 import com.openbank.libs.approval.web.ApprovalEndpointSupport
 import com.openbank.libs.approval.web.DecideApprovalRequest
+import com.openbank.libs.approval.web.toApprovalResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
 import io.quarkus.security.identity.SecurityIdentity

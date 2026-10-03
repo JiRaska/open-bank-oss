@@ -281,3 +281,32 @@ is the **authentication assurance gate** for payments and consent — defeating 
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-10-03** — **Durable four-eyes for SCA operator actions (#10041 slice 9b).** New surface:
+  `GET /api/v1/sca/approvals`, `GET /api/v1/sca/approvals/{id}` and `PATCH /api/v1/sca/approvals/{id}`
+  (`@RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN)`, `@Authorize("scaChallenge.approval.read"/".decide")`,
+  admitted by the existing `operator-sca-write` (decide; excludes `service-account-*`) and base
+  `operator-read-any` (read) rules — no rego or `rules.yaml` change). SCA now wires an `ApprovalStore`
+  bean, so with `authz.four-eyes.enforce=true` (default false, unset in every manifest) the gated
+  actions `device.enroll`, `device.revoke` and `scaChallenge.consume` park with 202 instead of
+  failing closed with 503. **Four-eyes:** the paused request runs only on a retry carrying an
+  `APPROVED` approval for the same action and maker whose request fingerprint (SHA-256 of endpoint +
+  arguments, #11675) equals the retry's; the claim is one-use. So an approval for one device cannot
+  revoke another, and one for an enrollment cannot enrol a different credential, key or algorithm.
+  **Self-approval prevention:** `PostgresApprovalStore.decide` refuses `decidedBy == makerId` before
+  the status check, under a row lock, and V15 repeats it as a table CHECK
+  (`decided_by <> maker_id`), so neither a REST-layer omission nor a direct writer can record one.
+  **Identity of the decider:** the checker id is the authenticated `principal.name`, resolved by
+  `ApprovalEndpointSupport` after the body check, never taken from the request body — the same
+  representation the interceptor records as the maker, so the comparison is between like values;
+  `ScaOidcApprovalIT` proves it with real Keycloak tokens rather than injected identities. Every
+  transition commits in one transaction with an `SCA_OPERATOR_APPROVAL_CHANGED` outbox event naming
+  its actor, so who made, who decided and who claimed survive the authorization's expiry (a failed
+  audit insert rolls the transition back). **Risk class:** segregation of duties on device
+  credentials and settlement-gate consumption. **Residual:** the shared M2M client still classifies
+  as HUMAN with `ROLE_OPERATOR` in some realms. Measured with `opa eval` on the generated bundle
+  (2026-10-03): `service-account-openbank-services` and `-edge` are DENIED
+  `scaChallenge.approval.decide` but ALLOWED `scaChallenge.approval.read` via `operator-read-any`,
+  so they can see the queue (action, party id, maker id — not the request summary or fingerprint)
+  but cannot decide it. Approval rows have no retention purge yet. **Rollback:** revert
+  the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.
