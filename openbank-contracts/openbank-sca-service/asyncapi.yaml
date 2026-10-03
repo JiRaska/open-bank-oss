@@ -2,14 +2,16 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank SCA device events
-  version: 1.0.0
-  description: Enrollment and signed decision facts from the SCA transactional outbox.
+  version: 1.1.0
+  description: Enrollment, revocation and signed decision facts from the SCA transactional outbox.
 channels:
   scaEvents:
     address: openbank.sca.events
     messages:
       enrolled:
         $ref: '#/components/messages/DeviceEnrolled'
+      revoked:
+        $ref: '#/components/messages/DeviceRevoked'
       decided:
         $ref: '#/components/messages/DeviceDecided'
   notificationRequests:
@@ -88,3 +90,27 @@ components:
           occurredAt: {type: string, format: date-time}
           expiresAt: {type: string, format: date-time}
           challengeVersion: {type: integer, minimum: 0}
+    DeviceRevoked:
+      name: DEVICE_REVOKED
+      contentType: application/json
+      description: |
+        Revocation, cancellation of unconsumed approvals and this event commit together.
+        It does not reverse already consumed operations. actorId is the authenticated
+        principal, not a separate proof of human identity. Deduplicate by eventId.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, sourceService, aggregateType, aggregateId,
+                   actorId, actorType, partyId, credentialId, occurredAt, cancelledChallenges]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: DEVICE_REVOKED}
+          schemaVersion: {type: integer, const: 1}
+          sourceService: {type: string, const: sca-service}
+          aggregateType: {type: string, const: SCA_DEVICE}
+          aggregateId: {type: string, format: uuid}
+          actorId: {type: string}
+          actorType: {type: string, const: AUTHENTICATED_PRINCIPAL}
+          partyId: {type: string, format: uuid}
+          credentialId: {type: string}
+          occurredAt: {type: string, format: date-time}
+          cancelledChallenges: {type: integer, minimum: 0}

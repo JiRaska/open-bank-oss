@@ -43,6 +43,7 @@ data class EnrolledDevice(
     val publicKeySpkiB64: String,
     val algorithm: SignatureAlgorithm,
     val createdAt: OffsetDateTime,
+    val revokedAt: OffsetDateTime? = null,
 )
 
 /**

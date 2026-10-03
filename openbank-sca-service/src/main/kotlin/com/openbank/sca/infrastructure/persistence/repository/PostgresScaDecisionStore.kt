@@ -8,6 +8,7 @@ import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.ScaStatus
 import com.openbank.sca.domain.model.dynamicLinkingPayload
+import com.openbank.sca.infrastructure.persistence.entity.EnrolledDeviceEntity
 import com.openbank.sca.infrastructure.persistence.entity.ScaChallengeEntity
 import com.openbank.sca.infrastructure.persistence.entity.ScaDeviceDecisionEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -25,6 +26,7 @@ import java.util.UUID
 @ApplicationScoped
 class PostgresScaDecisionStore(
     private val challenges: ScaChallengeRepositoryImpl,
+    private val devices: EnrolledDeviceRepositoryImpl,
     private val outbox: ScaOutboxRepositoryImpl,
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
@@ -33,16 +35,34 @@ class PostgresScaDecisionStore(
     override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean {
         require(ttlSeconds > 0) { "Decision TTL must be positive" }
         return Panache.withTransaction {
-            challenges.find("id", decision.challengeId).withLock<ScaChallengeEntity>(LockModeType.PESSIMISTIC_WRITE)
-                .firstResult<ScaChallengeEntity>().flatMap { challenge ->
-                    if (challenge == null || !challenge.eligibleFor(decision, OffsetDateTime.now(clock))) {
+            devices.find("credentialId", decision.credentialId)
+                .withLock<EnrolledDeviceEntity>(LockModeType.PESSIMISTIC_WRITE)
+                .firstResult<EnrolledDeviceEntity>().flatMap { device ->
+                    if (device == null || device.revokedAt != null) {
                         Uni.createFrom().item(false)
                     } else {
-                        acceptFirst(challenge, decision, ttlSeconds)
+                        recordForActiveDevice(decision, ttlSeconds, device)
                     }
                 }
         }.awaitSuspending()
     }
+
+    private fun recordForActiveDevice(
+        decision: DeviceApprovalDecision,
+        ttlSeconds: Long,
+        device: EnrolledDeviceEntity,
+    ): Uni<Boolean> =
+        challenges.find("id", decision.challengeId).withLock<ScaChallengeEntity>(LockModeType.PESSIMISTIC_WRITE)
+            .firstResult<ScaChallengeEntity>().flatMap { challenge ->
+                if (challenge == null ||
+                    challenge.partyId != device.partyId ||
+                    !challenge.eligibleFor(decision, OffsetDateTime.now(clock))
+                ) {
+                    Uni.createFrom().item(false)
+                } else {
+                    acceptFirst(challenge, decision, ttlSeconds)
+                }
+            }
 
     override suspend fun find(challengeId: UUID): DeviceApprovalDecision? = Panache.withSession {
         find("challengeId = ?1 and expiresAt > ?2", challengeId, OffsetDateTime.now(clock))
