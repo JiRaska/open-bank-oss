@@ -104,7 +104,7 @@ class StartupWarmup(
         if (!objectMappers.isResolvable) return "no ObjectMapper bean"
         val mapper = objectMappers.get()
         val sample = WarmupPayload(
-            id = UUID.randomUUID(),
+            id = UUID.fromString("00000000-0000-0000-0000-000000000001"),
             at = Instant.now(),
             amount = BigDecimal("12345.67"),
             tags = listOf("a", "b", "c"),
