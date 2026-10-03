@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.0...account-service-v0.33.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **libs:** scope idempotency keys per service and caller ([#11677](https://github.com/JiRaska/open-bank-oss/issues/11677)) ([f3a062a](https://github.com/JiRaska/open-bank-oss/commit/f3a062aba3d89a07d4a36b5118b1fda6d3012a93))
+
+## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.32.1...account-service-v0.33.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
+## [0.32.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.32.0...account-service-v0.32.1) (2026-10-02)
+
+
+### Security
+
+* **account:** block account opening on every screening status but CLEAR and WHITELISTED ([#11640](https://github.com/JiRaska/open-bank-oss/issues/11640)) ([6aa3e47](https://github.com/JiRaska/open-bank-oss/commit/6aa3e4700c3d721dd2aa3e39c426add082c9f081))
+
 ## [0.32.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.31.5...account-service-v0.32.0) (2026-09-28)
 
 

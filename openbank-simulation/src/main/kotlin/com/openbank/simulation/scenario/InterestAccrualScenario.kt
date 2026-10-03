@@ -16,6 +16,7 @@ import com.openbank.ledger.domain.model.JournalLine
 import com.openbank.ledger.domain.model.JournalSide
 import com.openbank.ledger.domain.model.JournalStatus
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.domain.money.RoundingPolicy
 import com.openbank.simulation.adapters.AccountBookedChanged
 import com.openbank.simulation.model.AccountCurrency
 import com.openbank.simulation.runner.World
@@ -72,8 +73,6 @@ object InterestAccrualScenario {
     private val SYSTEM_ACTOR: UUID = UUID(0L, SYSTEM_ACTOR_LSB)
 
     private const val MAX_ACCRUAL_DAYS = 5
-    private const val DAILY_RATE_SCALE = 10
-    private const val ACCRUAL_SCALE = 6
     private const val DAYS_PER_YEAR = 365
     private val DAY_COUNT_DIVISOR = BigDecimal(DAYS_PER_YEAR)
 
@@ -162,7 +161,7 @@ object InterestAccrualScenario {
         from: LocalDate,
         now: OffsetDateTime,
     ): List<InterestAccrual> {
-        val dailyRate = config.annualRate.divide(DAY_COUNT_DIVISOR, DAILY_RATE_SCALE, RoundingMode.HALF_UP)
+        val dailyRate = RoundingPolicy.INTEREST_DAILY_RATE.divide(config.annualRate, DAY_COUNT_DIVISOR)
         val balance = world.balances.get(key).bookedAmount
         val days = 1 + world.context.random.nextInt(MAX_ACCRUAL_DAYS)
         return (0 until days).map { offset ->
@@ -174,7 +173,7 @@ object InterestAccrualScenario {
                 accrualDate = from.plusDays(offset.toLong()),
                 balance = balance,
                 dailyRate = dailyRate,
-                accruedAmount = balance.multiply(dailyRate).setScale(ACCRUAL_SCALE, RoundingMode.HALF_UP),
+                accruedAmount = RoundingPolicy.INTEREST_ACCRUAL.round(balance.multiply(dailyRate)),
                 currency = key.currency,
                 createdAt = now,
             )

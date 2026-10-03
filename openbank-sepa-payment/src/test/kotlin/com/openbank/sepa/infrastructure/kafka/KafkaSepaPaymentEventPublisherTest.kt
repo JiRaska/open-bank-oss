@@ -6,6 +6,7 @@ package com.openbank.sepa.infrastructure.kafka
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.sepa.domain.model.SepaPayment
@@ -53,8 +54,7 @@ class KafkaSepaPaymentEventPublisherTest {
         creditorIban = "FR7630006000011234567890189",
         creditorName = "Bob Example",
         creditorBic = "DEUTDEFF",
-        amount = BigDecimal("123.45"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("123.45"), "EUR"),
         remittanceInfo = "ref",
         endToEndId = "E2E-kafka",
         rejectReason = rejectReason,

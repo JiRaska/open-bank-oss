@@ -24,17 +24,30 @@ import java.time.OffsetDateTime
  * [created] is load-bearing for the interceptor tests, and [createdAt] is fixed so `findPending`'s
  * ordering is deterministic.
  */
-class InMemoryApprovalStore : ApprovalStore {
+class InMemoryApprovalStore(
+    private val namespace: String = "test",
+    private val backing: MutableMap<String, PendingApproval> = mutableMapOf(),
+    private val maxPendingPerMakerAction: Int = 20,
+) : ApprovalStore {
     val created = mutableListOf<PendingApproval>()
-    private val approvals = mutableMapOf<String, PendingApproval>()
     private var nextId = 0
+
+    // Every operation is one critical section, so the store is atomic the way the Redis Lua
+    // scripts are — the contract's concurrency cases hold it to that.
+    private val lock = Any()
+
+    private fun key(id: String) = "$namespace:$id"
 
     override suspend fun create(
         action: String,
         resourceId: String?,
         makerId: String,
         ttlSeconds: Long,
-    ): PendingApproval {
+        binding: ApprovalRequestBinding?,
+    ): PendingApproval = synchronized(lock) {
+        val open = backing.filterKeys { it.startsWith("$namespace:") }.values
+            .count { it.status == ApprovalStatus.PENDING && it.action == action && it.makerId == makerId }
+        if (open >= maxPendingPerMakerAction) throw ApprovalLimitExceededException(action, maxPendingPerMakerAction)
         val approval = PendingApproval(
             id = "approval-${nextId++}",
             action = action,
@@ -42,40 +55,45 @@ class InMemoryApprovalStore : ApprovalStore {
             makerId = makerId,
             status = ApprovalStatus.PENDING,
             createdAt = OffsetDateTime.parse("2026-06-22T10:20:00Z"),
+            requestFingerprint = binding?.fingerprint,
+            summary = binding?.summary,
         )
         created += approval
-        approvals[approval.id] = approval
-        return approval
+        backing[key(approval.id)] = approval
+        approval
     }
 
-    override suspend fun find(id: String): PendingApproval? = approvals[id]
+    override suspend fun find(id: String): PendingApproval? = synchronized(lock) { backing[key(id)] }
 
-    override suspend fun findPending(limit: Int): List<PendingApproval> =
-        approvals.values.filter { it.status == ApprovalStatus.PENDING }.sortedBy { it.createdAt }.take(limit)
+    override suspend fun findPending(limit: Int): List<PendingApproval> = synchronized(lock) {
+        backing.filterKeys { it.startsWith("$namespace:") }.values
+            .filter { it.status == ApprovalStatus.PENDING }.sortedBy { it.createdAt }.take(limit)
+    }
 
-    override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? {
-        val approval = approvals[id] ?: return null
-        // Segregation of duties, checked BEFORE the status guard — same order as RedisApprovalStore,
-        // and the contract test asserts that order rather than assuming it.
-        if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
-        if (approval.status != ApprovalStatus.PENDING) {
-            throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
+    override suspend fun decide(id: String, decidedBy: String, approve: Boolean): PendingApproval? =
+        synchronized(lock) {
+            val approval = backing[key(id)] ?: return null
+            // Segregation of duties, checked BEFORE the status guard — same order as RedisApprovalStore,
+            // and the contract test asserts that order rather than assuming it.
+            if (decidedBy == approval.makerId) throw SelfApprovalNotAllowedException(approval.makerId)
+            if (approval.status != ApprovalStatus.PENDING) {
+                throw InvalidApprovalStateException(id, ApprovalStatus.PENDING, approval.status)
+            }
+            val decided = approval.copy(
+                status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED,
+                decidedBy = decidedBy,
+            )
+            backing[key(id)] = decided
+            decided
         }
-        val decided = approval.copy(
-            status = if (approve) ApprovalStatus.APPROVED else ApprovalStatus.REJECTED,
-            decidedBy = decidedBy,
-        )
-        approvals[id] = decided
-        return decided
-    }
 
-    override suspend fun markExecuted(id: String): PendingApproval? {
-        val approval = approvals[id] ?: return null
+    override suspend fun markExecuted(id: String): PendingApproval? = synchronized(lock) {
+        val approval = backing[key(id)] ?: return null
         if (approval.status != ApprovalStatus.APPROVED) {
             throw InvalidApprovalStateException(id, ApprovalStatus.APPROVED, approval.status)
         }
         val executed = approval.copy(status = ApprovalStatus.EXECUTED)
-        approvals[id] = executed
-        return executed
+        backing[key(id)] = executed
+        executed
     }
 }

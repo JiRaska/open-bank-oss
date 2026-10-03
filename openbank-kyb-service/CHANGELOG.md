@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.2...kyb-service-v0.8.3) (2026-10-02)
+
+
+### Performance
+
+* **case-coordinator,kyb,wealth,referral:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11755](https://github.com/JiRaska/open-bank-oss/issues/11755)) ([20e52ee](https://github.com/JiRaska/open-bank-oss/commit/20e52ee64073aa8519596283ae6ede81c681aea8))
+
 ## [0.8.2](https://github.com/JiRaska/open-bank-oss/compare/kyb-service-v0.8.1...kyb-service-v0.8.2) (2026-09-29)
 
 

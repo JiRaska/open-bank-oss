@@ -19,6 +19,7 @@ import com.openbank.fx.domain.screening.ScreeningDecision
 import com.openbank.fx.domain.screening.ScreeningMatchStatus
 import com.openbank.fx.domain.screening.ScreeningPolicy
 import com.openbank.fx.domain.screening.ScreeningRole
+import com.openbank.libs.domain.money.CurrencyCode
 import io.quarkus.vertx.VertxContextSupport
 import io.smallrye.mutiny.coroutines.asUni
 import jakarta.enterprise.context.ApplicationScoped
@@ -124,7 +125,8 @@ open class FxActivitiesImpl(
             ?: error("Conversion $conversionId not found during fraud score activity")
         val outcome = fraudScoringPort.score(
             FraudScoreCommand(
-                amount = BigDecimal(conv.fromAmountMinorUnits).movePointLeft(2),
+                amount = BigDecimal(conv.fromAmountMinorUnits)
+                    .movePointLeft(CurrencyCode.of(conv.fromCurrency).defaultFractionDigits),
                 currency = conv.fromCurrency,
                 rail = "FX",
                 accountId = conv.accountId,

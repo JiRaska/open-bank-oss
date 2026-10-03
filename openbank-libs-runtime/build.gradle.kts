@@ -163,6 +163,10 @@ dependencies {
     // 2.0.5 is what the Quarkus BOM resolves for every service; the catalog's 1.20.4 bundles a
     // docker-java that current Docker Engines reject (API < 1.40), which would silently skip it.
     testImplementation("org.testcontainers:testcontainers:2.0.5")
+    // OutboxClaimPlanIT (ADR-0327 D12) EXPLAINs the kernel's claim SQL over plain JDBC against a
+    // Testcontainers Postgres — no Hibernate needed for a plan. Same driver line the fleet forces
+    // (openbank.dependency-vulnerability-pins) and openbank-libs-testing already declares.
+    testImplementation("org.postgresql:postgresql:42.7.12")
     // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
     // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
     // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
@@ -173,6 +177,11 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+    // Ephemeral Quarkus test ports - see openbank.quarkus-service.gradle.kts, which this module
+    // does not apply. Enforced by the `quarkus-test-ports-ephemeral` gate.
+    systemProperty("quarkus.http.test-port", "0")
+    systemProperty("quarkus.http.test-ssl-port", "0")
+    systemProperty("quarkus.management.test-port", "0")
     jvmArgs("-Dnet.bytebuddy.experimental=true")
 
     // OutboxDeadLetterAlertNamingTest asserts that the committed PrometheusRule selector matches
@@ -206,6 +215,10 @@ kover {
             excludes {
                 classes("com.openbank.libs.web.ServiceInfoResource")
                 classes("com.openbank.libs.persistence.outbox.PanacheOutboxEntity")
+                classes("com.openbank.libs.persistence.outbox.PanacheOutboxEntityV2")
+                // Reactive-Panache surface: only a booted service can execute it; its statement
+                // TEXT is covered by OutboxSqlTest and its plan by OutboxClaimPlanIT (ADR-0327 D12).
+                classes("com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository")
                 classes("com.openbank.libs.persistence.outbox.AbstractOutboxEntity")
             }
         }
