@@ -4,8 +4,8 @@
 
 package com.openbank.interest.domain.tax
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 
 /**
@@ -64,8 +64,8 @@ object WithholdingTaxPolicy {
 
         // Resident/non-resident individual — withhold at source.
         val rate = rateFor(profile)
-        val taxableBase = grossInterest.max(BigDecimal.ZERO).setScale(TAX_SCALE, RoundingMode.DOWN)
-        val taxAmount = taxableBase.multiply(rate).setScale(TAX_SCALE, RoundingMode.DOWN)
+        val taxableBase = RoundingPolicy.TAX_WITHHOLDING.round(grossInterest.max(BigDecimal.ZERO))
+        val taxAmount = RoundingPolicy.TAX_WITHHOLDING.round(taxableBase.multiply(rate))
         val netAmount = grossInterest.subtract(taxAmount)
         return WithholdingResult(
             taxableBase = taxableBase,

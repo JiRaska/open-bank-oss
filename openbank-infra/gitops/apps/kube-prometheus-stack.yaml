@@ -100,6 +100,23 @@ spec:
                 cpu: 100m
                 memory: 128Mi
           config:
+            # inhibit_rules REPLACES the chart's default list, so the four chart defaults are
+            # restated verbatim (read from the live generated config 2026-10-03) and the
+            # volume-floor rule is added (prometheus-rules-slo-volume.yaml).
+            inhibit_rules:
+              - source_matchers: ['severity = critical']
+                target_matchers: ['severity =~ warning|info']
+                equal: ['namespace', 'alertname']
+              - source_matchers: ['severity = warning']
+                target_matchers: ['severity = info']
+                equal: ['namespace', 'alertname']
+              - source_matchers: ['alertname = InfoInhibitor']
+                target_matchers: ['severity = info']
+                equal: ['namespace']
+              - target_matchers: ['alertname = InfoInhibitor']
+              - source_matchers: ['alertname = SLOBelowVolumeFloor']
+                target_matchers: ['alertname = ErrorBudgetBurn']
+                equal: ['slo']
             route:
               receiver: 'null'
               group_by: ['alertname', 'service']

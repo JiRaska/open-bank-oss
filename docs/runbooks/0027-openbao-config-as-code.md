@@ -60,6 +60,16 @@ Nobody types an OpenBao token. The admin token comes from SSO and expires in 15 
 to the admin token, so the token cannot widen its own grant. A change to either one is a
 bootstrap-class change: review the PR, then apply with the privileged identity, as in Bootstrap.
 
+## MFA (#11797)
+
+Every SSO login to OpenBao requires a second factor:
+
+- **Keycloak.** The `openbao` client overrides its browser flow with `openbao-step-up` (password at LoA 1, OTP at LoA 2) and sets minimum ACR `mfa` (realm `acr.loa.map` `{"pwd":1,"mfa":2}`). The `acr` scope puts the claim in the ID token.
+- **OpenBao.** `openbank-sso-writer` requires `acr = "mfa"`, so a Keycloak change that drops the step-up cannot silently hand out a writer token. The admin role gets the same claim as a bootstrap-class change.
+- **First login after enabling:** Keycloak asks you to register an authenticator app (TOTP).
+- **Rollback** (Keycloak bootstrap admin, recoverable at any time): clear the `openbao` client's `authenticationFlowBindingOverrides` and `minimum.acr.value`.
+- **Gate.** `check-realm-template-importable.py` R10 fails a template whose flow override names no flow. Keycloak imports such an override cleanly and falls back to the realm flow, so without R10 a rebuild would lose MFA without a trace.
+
 ## Verify by effect
 
 ```sh

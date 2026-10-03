@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- ADR-0305 expand stage: explicit mapped-finding correction, never an inferred legal
 -- effective date. No writer or event is enabled by this migration.
--- Rollback before the first proposal: drop V9 triggers/functions, the two new
+-- Rollback before the first proposal: drop V16 triggers/functions, the two new
 -- observation columns and case-ID uniqueness, then the proposal table. After adoption, disable writers
 -- and retain evidence; dropping populated corrections is not deployment rollback.
 

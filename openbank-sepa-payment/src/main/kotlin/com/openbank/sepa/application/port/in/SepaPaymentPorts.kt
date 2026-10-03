@@ -4,11 +4,11 @@
 
 package com.openbank.sepa.application.port.`in`
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
 import com.openbank.sepa.domain.model.SepaRejectReason
-import java.math.BigDecimal
 import java.util.UUID
 
 data class CreateSepaPaymentCommand(
@@ -20,8 +20,7 @@ data class CreateSepaPaymentCommand(
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,
-    val amount: BigDecimal,
-    val currency: String,
+    val amount: Money,
     val remittanceInfo: String?,
     val endToEndId: String?,
     /**

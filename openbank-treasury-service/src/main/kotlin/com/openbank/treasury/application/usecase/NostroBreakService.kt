@@ -5,6 +5,7 @@
 package com.openbank.treasury.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.treasury.application.port.`in`.NostroBreakSweep
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
@@ -47,7 +48,7 @@ class NostroBreakService(
         val r = reconciliation.reconcile(statementId)
         val s = stored.statement
         val existing = breakRepo.inScope(stored.glCode, statementId, s.firstDate, s.lastDate)
-        val changes = NostroBreakBook.observe(r, statementId, existing, LocalDate.now(clock), Ids::newId)
+        val changes = NostroBreakBook.observe(r, statementId, existing, bankToday(), Ids::newId)
         if (!changes.isEmpty) breakRepo.apply(changes)
         return changes
     }
@@ -104,11 +105,14 @@ class NostroBreakService(
     override suspend fun breaks(iban: String, includeResolved: Boolean): List<NostroBreakView> {
         val account = normalize(iban)
         if (account !in ibans) throw NostroAccountNotFoundException(account)
-        val today = LocalDate.now(clock)
+        val today = bankToday()
         return breakRepo.byIban(account, includeResolved)
             .sortedWith(compareBy({ it.firstSeenOn }, { it.bookingDate }, { it.breakKey }))
             .map { NostroBreakView(it, it.ageBusinessDays(today), policy.isAged(it, today)) }
     }
+
+    /** The Prague bank day, never the pod's UTC default: after 22:00/23:00 UTC that is already tomorrow. */
+    private fun bankToday(): LocalDate = AccountingClock.bank(clock).today()
 
     private fun normalize(iban: String) = iban.replace(" ", "").uppercase()
 

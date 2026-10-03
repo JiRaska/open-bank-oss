@@ -10,6 +10,7 @@ import io.quarkus.redis.datasource.ReactiveRedisDataSource
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.inject.Instance
 import jakarta.enterprise.inject.Produces
+import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 
 /**
@@ -65,6 +66,10 @@ import java.time.Clock
  */
 @ApplicationScoped
 class DefaultIdempotencyStoreProducer {
+    /** Responses above this many UTF-8 bytes are not stored for replay (a retry answers 409). */
+    @field:ConfigProperty(name = "openbank.idempotency.max-response-bytes", defaultValue = "262144")
+    var maxResponseBytes: Int = RedisIdempotencyStore.DEFAULT_MAX_RESPONSE_BYTES
+
     @Produces
     @DefaultBean
     @ApplicationScoped
@@ -74,6 +79,6 @@ class DefaultIdempotencyStoreProducer {
                 "and add the quarkus-redis-client dependency, or supply your own " +
                 "@Produces IdempotencyStore to override this default bean."
         }
-        return RedisIdempotencyStore(redis.get(), clock)
+        return RedisIdempotencyStore(redis.get(), clock, maxResponseBytes = maxResponseBytes)
     }
 }

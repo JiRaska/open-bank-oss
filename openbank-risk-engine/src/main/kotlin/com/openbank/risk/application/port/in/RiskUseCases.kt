@@ -14,6 +14,7 @@ import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
+import com.openbank.risk.domain.irrbb.IrrbbReportingAggregate
 import com.openbank.risk.domain.irrbb.IrrbbResult
 import com.openbank.risk.domain.limits.LimitEvaluation
 import com.openbank.risk.domain.limits.LimitSet
@@ -62,7 +63,8 @@ data class CreateCurveSetCommand(
 )
 
 interface CurveSetUseCase {
-    suspend fun list(limit: Int): List<CurveSetSummary>
+    /** Newest first; only the sets as of [asOf] when given (a run's reads need its own date). */
+    suspend fun list(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     suspend fun create(command: CreateCurveSetCommand): CurveSet
 
@@ -86,6 +88,8 @@ data class IrrbbAnalysis(
     val result: IrrbbResult,
     /** Operator-supplied Tier 1 capital, in the aggregation currency; never fetched or defaulted. */
     val tier1Capital: BigDecimal?,
+    /** The multi-currency book's CZK aggregate at ČNB fixings; null for a single-currency book. */
+    val reporting: IrrbbReportingAggregate? = null,
 )
 
 interface IrrbbUseCase {
