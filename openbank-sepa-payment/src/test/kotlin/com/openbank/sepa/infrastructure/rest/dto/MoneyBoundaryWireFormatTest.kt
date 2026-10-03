@@ -8,10 +8,9 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.libs.domain.error.PlatformErrorCode
-import com.openbank.libs.domain.error.ValidationFailure
+import com.openbank.libs.domain.money.InvalidMoneyException
 import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
-import com.openbank.sepa.domain.model.SepaPaymentErrorCode
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.infrastructure.kafka.KafkaSepaPaymentEventPublisher
 import com.openbank.sepa.infrastructure.persistence.mapper.toDomain
@@ -89,22 +88,23 @@ class MoneyBoundaryWireFormatTest {
         "100000000000000000000, EUR, VALIDATION_ERROR",
     )
     fun `the boundary names why Money refused`(amount: String, currency: String, code: String) {
-        assertThatThrownBy { inboundMoney(BigDecimal(amount), currency) }
-            .isInstanceOfSatisfying(ValidationFailure::class.java) {
+        assertThatThrownBy { Money.parseInbound(BigDecimal(amount), currency) }
+            .isInstanceOfSatisfying(InvalidMoneyException::class.java) {
                 assertThat(it.errorCode.code).isEqualTo(code)
-                assertThat(it.isConsistent).isTrue()
+                assertThat(it.field).isEqualTo(if (code == "CURRENCY_UNSUPPORTED") "currency" else "amount")
             }
     }
 
     @Test
     fun `codes are well-formed VALIDATION codes`() {
-        SepaPaymentErrorCode.entries.forEach { assertThat(it.category.name).isEqualTo("VALIDATION") }
+        listOf(PlatformErrorCode.AMOUNT_SCALE_EXCEEDED, PlatformErrorCode.CURRENCY_UNSUPPORTED)
+            .forEach { assertThat(it.category.name).isEqualTo("VALIDATION") }
         assertThat(PlatformErrorCode.VALIDATION_ERROR.code).isEqualTo("VALIDATION_ERROR")
     }
 
     @Test
     fun `lower-case and padded currency codes keep meaning what they meant`() {
-        assertThat(inboundMoney(BigDecimal("10.5"), " eur ")).isEqualTo(Money.of("10.50", "EUR"))
+        assertThat(Money.parseInbound(BigDecimal("10.5"), " eur ")).isEqualTo(Money.of("10.50", "EUR"))
     }
 
     private fun requestJson(amount: String, currency: String) =

@@ -62,6 +62,41 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-10-03** — **Durable challenge and device lifecycle** (#10041 slice 9a). Four changes,
+  one risk class: integrity and non-repudiation of the decoupled-approval ceremony.
+  (1) Optimistic `version` on `sca_challenges` (V12): every lifecycle write, including the
+  compare-and-consume, carries the version it read, so a stale verify cannot erase a consumption or
+  overwrite a newer attempt count; expiry is now inclusive at the exact deadline. Conflicts fail
+  closed (422). (2) Device decisions move from Redis (`SET` with TTL) to `sca_device_decisions`
+  (V13): the first signature-verified decision, the exact signed payload, the deciding party
+  (#10281 item 3) and an `SCA_DEVICE_DECIDED` outbox event commit in one transaction under a row
+  lock on the challenge; a second decision is refused. Expiry limits authorisation, not evidence
+  retention, and losing Redis can no longer erase an acknowledged approval. New outbound event on
+  the existing `openbank.sca.events` topic, published in `openbank-contracts/openbank-sca-service/asyncapi.yaml`;
+  audit-service already subscribes. (3) New inbound operation `DELETE
+  /api/v1/sca/parties/{partyId}/devices/{deviceId}` (`device.revoke`, V14 `revoked_at`): revokes
+  the credential and cancels its pending or completed-but-unconsumed challenges in the same
+  transaction as the audit event; a revoked credential cannot decide and cannot be re-enrolled.
+  `sca_rest_ext.rego` gains `device-self-revocation` (HUMAN + `ROLE_CUSTOMER` + `principal.id ==
+  resource.id`); the money-path four-eyes obligation is unchanged. (4) Customer party routes
+  (pending, list/enrol devices, revoke) now require a UUID party identity for `ROLE_CUSTOMER`
+  callers rather than skipping the ownership check when `sub` is not a UUID. Operator approvals
+  (four-eyes resolution endpoints) are NOT in this change; they follow in slice 9b. Rollback: the
+  three migrations are additive and must be retained; draining unexpired challenges is required
+  before any binary rollback, and a rollback after the first revocation is unsafe (older binaries
+  ignore `revoked_at`) — recover forward. Runbooks: `docs/runbooks/sca-lifecycle-conflicts.md`,
+  `sca-durable-decisions.md`, `sca-device-revocation.md`.
+  **Retention (STRIDE-I).** The durable evidence row keeps the exact signed payload, which for a
+  payment embeds amount and creditor IBAN, so moving decisions out of a TTL store would otherwise
+  have made that disclosure surface unbounded in time. It is now bounded: `openbank.sca.decision-retention-days`
+  (default 1826 days, the AMLD Art. 40 record-keeping period for transaction evidence) and a daily
+  `DecisionEvidencePurgeScheduler` (`suspend` `@Scheduled`, batched oldest-first by
+  `idx_sca_device_decisions_decided_at`, liveness `sca-decision-evidence-purge`, counter
+  `openbank.sca.decision.evidence.purged`) deletes rows decided before the cutoff; the challenge
+  row is untouched. Residual: the `SCA_DEVICE_DECIDED` copy of the same payload in `sca_outbox`
+  is not covered by this purge — sca-service does not call the shared outbox `purgeSent` today, so
+  SENT outbox rows remain unbounded until outbox retention is wired; the audit store's copy follows
+  audit-service retention.
 - **2026-09-26** — Challenge initiation binds its Idempotency-Key to a request fingerprint
   (#10916, #10946). The key is reserved atomically before a challenge is minted. Same key + same
   body still replays; same key + different body is now 409 `IDEMPOTENCY_KEY_REUSED` instead of a

@@ -513,7 +513,7 @@ class ScaServiceTest {
         coEvery { decisionStore.find(challenge.id) } returns null
         coEvery { enrolledDeviceRepository.findByCredentialId(device.credentialId) } returns device
         every { assertionVerifier.verify(any(), any(), any(), any()) } returns true
-        coEvery { decisionStore.record(any(), any()) } returns Unit
+        coEvery { decisionStore.record(any(), any()) } returns true
 
         val result = service.recordDecision(
             RecordDeviceDecisionCommand(
@@ -527,6 +527,24 @@ class ScaServiceTest {
         // recordDecision records only; verify() is the completion authority.
         assertThat(result.status).isEqualTo(ScaStatus.PENDING)
         coVerify(exactly = 1) { decisionStore.record(match { it.decision == DeviceDecisionType.APPROVED }, any()) }
+    }
+
+    @Test
+    fun `recordDecision refuses the loser of an atomic decision claim`(): Unit = runBlocking {
+        val challenge = challenge(method = ScaMethod.PUSH_NOTIFICATION)
+        val device = device(partyId = challenge.partyId)
+        coEvery { repository.findById(challenge.id) } returns challenge
+        coEvery { decisionStore.find(challenge.id) } returns null
+        coEvery { enrolledDeviceRepository.findByCredentialId(device.credentialId) } returns device
+        every { assertionVerifier.verify(any(), any(), any(), any()) } returns true
+        coEvery { decisionStore.record(any(), any()) } returns false
+        assertThatThrownBy {
+            runBlocking {
+                service.recordDecision(
+                    RecordDeviceDecisionCommand(challenge.id, device.credentialId, DeviceDecisionType.APPROVED, "sig"),
+                )
+            }
+        }.isInstanceOf(ScaChallengeNotAwaitingException::class.java)
     }
 
     @Test
@@ -837,6 +855,28 @@ class ScaServiceTest {
         )
 
         verify(exactly = 0) { metrics.scaChallengeResolved(any(), any()) }
+    }
+
+    @Test
+    fun `consume refuses a completed challenge after its expiry`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(expiresAt = now.minusSeconds(1))
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking { service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null)) }
+        }.isInstanceOf(ScaChallengeExpiredException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
+    }
+
+    @Test
+    fun `consume refuses a completed challenge exactly at its expiry`(): Unit = runBlocking {
+        val ch = challenge(status = ScaStatus.COMPLETED).copy(expiresAt = now)
+        coEvery { repository.findById(ch.id) } returns ch
+        coEvery { repository.markConsumed(ch.id) } returns true
+        assertThatThrownBy {
+            runBlocking { service.consume(ConsumeScaCommand(ch.id, ch.partyId, null, null, null)) }
+        }.isInstanceOf(ScaChallengeExpiredException::class.java)
+        coVerify(exactly = 0) { repository.markConsumed(any()) }
     }
 
     // --- consume (ADR-0021 settlement gate) ---
