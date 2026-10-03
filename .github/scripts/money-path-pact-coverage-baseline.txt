@@ -6,30 +6,7 @@
 # list can only shrink. Regenerate a candidate list with `--print-baseline`; keep the reasons.
 #
 # format: <consumer> -> <provider>  # <reason>
-openbank-account-service -> openbank-sanctions-service  # no consumer pact yet — #8345 burn-down
-openbank-account-service -> openbank-sca-service  # no consumer pact yet — #8345 burn-down
-openbank-billing-service -> openbank-account-service  # no consumer pact yet — #8345 burn-down
-openbank-billing-service -> openbank-balance-service  # no consumer pact yet — #8345 burn-down
-openbank-clearing-service -> openbank-ledger-service  # no consumer pact yet — #8345 burn-down
-openbank-delegation-service -> openbank-document-service  # no consumer pact yet — #8345 burn-down
-openbank-domestic-payment -> openbank-aml-service  # no consumer pact yet — #8345 burn-down
 openbank-domestic-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
-openbank-domestic-payment -> openbank-fraud-service  # no consumer pact yet — #8345 burn-down
-openbank-domestic-payment -> openbank-sanctions-service  # no consumer pact yet — #8345 burn-down
-openbank-fx-service -> openbank-fraud-service  # no consumer pact yet — #8345 burn-down
-openbank-interest-service -> openbank-account-service  # no consumer pact yet — #8345 burn-down
-openbank-lending-service -> openbank-account-service  # no consumer pact yet — #8345 burn-down
 openbank-lending-service -> openbank-analytics-sink  # credit-profile read for offers; no provider replay exists yet — #8345
-openbank-lending-service -> openbank-consent-service  # no consumer pact yet — #8345 burn-down
-openbank-psd2-service -> openbank-consent-service  # no consumer pact yet — #8345 burn-down
-openbank-sca-service -> openbank-party-service  # no consumer pact yet — #8345 burn-down
-openbank-sepa-instant -> openbank-aml-service  # no consumer pact yet — #8345 burn-down
 openbank-sepa-instant -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
-openbank-sepa-instant -> openbank-fraud-service  # no consumer pact yet — #8345 burn-down
-openbank-sepa-instant -> openbank-sanctions-service  # no consumer pact yet — #8345 burn-down
-openbank-sepa-payment -> openbank-aml-service  # no consumer pact yet — #8345 burn-down
 openbank-sepa-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
-openbank-sepa-payment -> openbank-sanctions-service  # no consumer pact yet — #8345 burn-down
-openbank-settlement-service -> openbank-balance-service  # no consumer pact yet — #8345 burn-down
-openbank-standing-order-service -> openbank-account-service  # no consumer pact yet — #8345 burn-down
-openbank-standing-order-service -> openbank-sepa-payment  # no consumer pact yet — #8345 burn-down
