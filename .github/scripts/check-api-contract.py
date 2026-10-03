@@ -7,6 +7,10 @@ base, classify the API-contract change from the OpenAPI diff (oasdiff):
     breaking   => info.version MAJOR must move (new URL major, /api/v{N+1})
     correction => a breaking DOCUMENT diff in a PR that changes nothing else in the service:
                   the served contract is unchanged, so MINOR (see below)
+    idempotency-hardening
+               => every breaking finding is a newly REQUIRED `Idempotency-Key` header on a
+                  POST of a money-path service: MINOR (see [idempotency_hardening], ADR-0048
+                  -> ADR-0330)
     additive   => info.version MINOR (or MAJOR) must move within the same /v{N}
     editorial  => info.version PATCH (or higher) must move
 
@@ -380,13 +384,88 @@ def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]
     return "none", []
 
 
-REQUIRED_BUMP = {"breaking": "MAJOR", "correction": "MINOR", "additive": "MINOR", "editorial": "PATCH"}
+REQUIRED_BUMP = {
+    "breaking": "MAJOR",
+    "correction": "MINOR",
+    "idempotency-hardening": "MINOR",
+    "additive": "MINOR",
+    "editorial": "PATCH",
+}
+
+RULES_YAML = Path("openbank-libs/governance/rules.yaml")
+_IDEM_HEADER_TEXT = re.compile(r"new required `header` request parameter `([^`]+)`")
+
+
+def breaking_entries(oasdiff: str, old: Path, new: Path) -> list[dict]:
+    """The ERR-level `oasdiff breaking` entries, raw — what [idempotency_hardening] decides on."""
+    raw = sh(oasdiff, "breaking", str(old), str(new), "--format", "json", check=False)
+    if not raw.strip():
+        return []
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError:
+        return [{"id": "unparseable"}]
+    return [c for c in entries if str(c.get("level", "")).lower() in ("", "error", "err", "3")]
+
+
+def money_path_services(rules_text: str) -> set[str]:
+    """`money_path_services:` from rules.yaml (stdlib-only: a top-level block list of names).
+
+    Read from the HEAD tree, so a PR that ADDS a service to the list is judged as money-path —
+    the classification and the hardening it licenses land together.
+    """
+    out: set[str] = set()
+    in_block = False
+    for line in rules_text.splitlines():
+        if not in_block:
+            in_block = line.rstrip() == "money_path_services:"
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(r"^\s+-\s+([A-Za-z0-9._-]+)", line)
+        if not m:
+            break
+        out.add(m.group(1))
+    return out
+
+
+def idempotency_hardening(entries: list[dict], money_path: bool) -> bool:
+    """True when a breaking diff is ONLY idempotency hardening on money-path POSTs.
+
+    Requiring an `Idempotency-Key` on a money-path POST that lacked one IS breaking for a client
+    that does not send it — but the alternative the plain rule demands is a whole-service move
+    to /api/v{N+1} (ADR-0048 D2), which no team takes for a duplicate-debit fix, so the fix is
+    not shipped and the endpoint keeps double-booking on retry. The enforced
+    `idempotency-coverage-money-path` gate requires exactly this header, and this gate then
+    made it unreachable for any POST that existed before the service joined the money-path
+    list (#11996). The obligation that replaces the MAJOR bump: the PR updates its in-repo
+    callers to send a key (they 400 otherwise, loudly, not silently).
+
+    Narrow by construction — ALL must hold, else the normal breaking rule applies:
+      * the service is in `money_path_services` (as of HEAD, so a PR adding it qualifies);
+      * there is at least one breaking finding, and EVERY one is
+        `new-required-request-parameter` for a HEADER named `Idempotency-Key`
+        (case-insensitive) on a POST (ADR-0330). Any other breaking change anywhere in the same spec —
+        including on the same operation — keeps requiring MAJOR.
+    """
+    if not money_path or not entries:
+        return False
+    for e in entries:
+        if e.get("id") != "new-required-request-parameter":
+            return False
+        if str(e.get("operation", "")).upper() != "POST":
+            return False
+        m = _IDEM_HEADER_TEXT.search(str(e.get("text", "")))
+        if not m or m.group(1).lower() != "idempotency-key":
+            return False
+    return True
 
 
 def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int, int]) -> bool:
     if kind == "breaking":
         return new_v[0] > old_v[0]
-    if kind in ("additive", "correction"):
+    if kind in ("additive", "correction", "idempotency-hardening"):
         return new_v[0] > old_v[0] or (new_v[0] == old_v[0] and new_v[1] > old_v[1])
     if kind == "editorial":
         return new_v > old_v
@@ -544,6 +623,7 @@ def _self_test() -> int:
             print(f"ok: {name} own={sorted(got_own)} url={sorted(got_url)}")
 
     failures += classification_self_test()
+    failures += idempotency_hardening_self_test()
 
     if failures:
         print(f"{failures} self-test case(s) failed")
@@ -662,6 +742,102 @@ def classification_self_test() -> int:
     return failures
 
 
+IDEM_BASE_SPEC = """openapi: 3.0.3
+info:
+  title: fixture
+  version: "1.2.0"
+paths:
+  /api/v1/things/{id}/refresh:
+    post:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /api/v1/things/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /api/v1/other:
+    post:
+      responses:
+        "200":
+          description: ok
+"""
+
+
+def _with_header(spec: str, path_line: str, name: str) -> str:
+    """Insert a REQUIRED header parameter as the first parameter of the operation under path_line."""
+    head, tail = spec.split(path_line, 1)
+    marker = "      parameters:\n"
+    header = (
+        f"      parameters:\n        - name: {name}\n          in: header\n          required: true\n"
+        f"          schema:\n            type: string\n"
+    )
+    return head + path_line + tail.replace(marker, header, 1)
+
+
+def idempotency_hardening_self_test() -> int:
+    """Falsify [idempotency_hardening]: one must-PASS case, and every narrowing must bite."""
+    oasdiff = shutil.which("oasdiff")
+    if not oasdiff:
+        print("SELF-TEST FAIL: oasdiff not on PATH — idempotency-hardening cases did not run")
+        return 1
+    post_line = "  /api/v1/things/{id}/refresh:\n"
+    get_line = "  /api/v1/things/{id}:\n"
+    post_key = _with_header(IDEM_BASE_SPEC, post_line, "Idempotency-Key")
+    cases: list[tuple[str, str, bool, bool]] = [
+        ("MUST PASS: only a required Idempotency-Key on a money-path POST", post_key, True, True),
+        ("lower-case header name still qualifies", _with_header(IDEM_BASE_SPEC, post_line, "idempotency-key"), True, True),
+        ("MUST FAIL: the same header on a GET", _with_header(IDEM_BASE_SPEC, get_line, "Idempotency-Key"), True, False),
+        ("MUST FAIL: a different required header on a POST", _with_header(IDEM_BASE_SPEC, post_line, "X-Tenant"), True, False),
+        (
+            "MUST FAIL: Idempotency-Key plus another breaking change (an endpoint removed)",
+            post_key.replace('  /api/v1/other:\n    post:\n      responses:\n        "200":\n          description: ok\n', ""),
+            True,
+            False,
+        ),
+        ("MUST FAIL: a service that is not money-path", post_key, False, False),
+    ]
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        old_p = Path(tmp) / "old.yaml"
+        new_p = Path(tmp) / "new.yaml"
+        old_p.write_text(IDEM_BASE_SPEC, encoding="utf-8")
+        for name, new_text, money_path, expected in cases:
+            new_p.write_text(new_text, encoding="utf-8")
+            entries = breaking_entries(oasdiff, old_p, new_p)
+            got = idempotency_hardening(entries, money_path)
+            if not entries and expected is False and money_path:
+                print(f"SELF-TEST FAIL: {name}: oasdiff reported nothing breaking — the fixture proves nothing")
+                failures += 1
+            elif got is not expected:
+                print(f"SELF-TEST FAIL: {name}: expected {expected}, got {got} ({[e.get('id') for e in entries]})")
+                failures += 1
+            else:
+                print(f"ok: {name}")
+
+    rules = "x: 1\nmoney_path_services:\n  - openbank-ledger-service\n  # a comment\n  - openbank-new-service\nnext_key:\n  - not-a-service\n"
+    got_set = money_path_services(rules)
+    if got_set != {"openbank-ledger-service", "openbank-new-service"}:
+        print(f"SELF-TEST FAIL: money_path_services parsed {sorted(got_set)}")
+        failures += 1
+    else:
+        print("ok: money_path_services reads the block list and stops at the next key")
+    return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="git sha of the PR base (not needed with --self-test)")
@@ -714,14 +890,12 @@ def main() -> int:
                 old_path = Path(tf.name)
             try:
                 kind, breaking = oasdiff_classify(args.oasdiff, old_path, head_path)
-            except SpecLoadError as e:
+            except SpecLoadError as e:  # old_path is removed after the reclassification below
                 findings.append(
                     f"{rel}: cannot classify — spec fails strict OpenAPI resolution "
                     f"(fix the dangling $ref): {e}"
                 )
                 kind = None
-            finally:
-                old_path.unlink(missing_ok=True)
 
             # A breaking DOCUMENT diff is not a breaking CONTRACT change when the PR changed
             # nothing else in the service: the running server is byte-identical, so no client
@@ -742,6 +916,18 @@ def main() -> int:
             # spec diffs and the first PR has none. What the reclassification does NOT check is
             # whether the corrected document is true — that is openapi-route-conformance for the
             # route set, and still nothing for schemas.
+            if kind == "breaking":
+                rules_text = RULES_YAML.read_text(encoding="utf-8") if RULES_YAML.is_file() else ""
+                is_money_path = service in money_path_services(rules_text)
+                if idempotency_hardening(breaking_entries(args.oasdiff, old_path, head_path), is_money_path):
+                    print(
+                        f"::notice::api-contract gate: {service}: every breaking change is a newly "
+                        f"required Idempotency-Key header on a money-path POST — classifying as "
+                        f"IDEMPOTENCY-HARDENING (MINOR). In-repo callers must send a key in the "
+                        f"same PR (ADR-0330)."
+                    )
+                    kind = "idempotency-hardening"
+            old_path.unlink(missing_ok=True)
             if kind == "breaking":
                 others = service_touched_beyond_spec(service, rel, changed_all)
                 if not others:
