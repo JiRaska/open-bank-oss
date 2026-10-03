@@ -10,12 +10,12 @@ import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.ReconciliationReport
 import com.openbank.clearing.domain.model.SettlementPosition
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
 interface SubmitPaymentUseCase {
-    fun submit(request: SubmitPaymentRequest): Uni<ClearingItem>
+    fun submit(command: SubmitPaymentCommand): Uni<ClearingItem>
 }
 
 interface GetBatchUseCase {

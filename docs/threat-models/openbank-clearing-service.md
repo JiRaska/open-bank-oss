@@ -208,3 +208,20 @@ not change any existing request's outcome until explicitly flipped.
   triple unchanged — `ClearingSettleOutboxAtomicityIT`'s same-`xmin` proof still applies), and the
   publish bulkhead widens from 1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch.
   Rollback: revert the commit; the additive column and indexes are inert under the v1 repository.
+- **2026-10-03** — **Inbound amount and currency validated as kernel `Money` before the paymentId
+  is looked up (#11604).** `POST /api/v1/clearing/submit` now builds a kernel `Money` with
+  `Money.parseInbound(amount, currency)` in `ClearingResource`; the use case takes a
+  `SubmitPaymentCommand` carrying `Money`. **Tampering / input validation:** an amount that would
+  need rounding to fit the currency (`100.505 EUR`, `1000.5 JPY`) or a currency that is not an ISO
+  4217 code with a minor unit (`XYZ`, `XAU`, blank) was previously accepted and persisted as a
+  PENDING item that the next clearing cycle would net into a batch and post to the ledger;
+  over-long currencies and out-of-range amounts failed only at the database. Each now answers
+  **400 `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR`** (libs-runtime
+  `InvalidMoneyExceptionMapper`) before the idempotency lookup (ADR-0298, natural key
+  `paymentId`), so no row exists and the paymentId is not consumed. The refusal names the field,
+  never the value. `eur` is stored as `EUR`. Valid input persists the same `NUMERIC(20,4)` value;
+  only the POST response echoes the currency scale (`100.50` for `100.5`). The only Kafka consumer
+  (`clearing-net-settlement-in`) reads the service's own outbox command, not external input, and
+  is unchanged (DLQ strategy as before). **Residual:** the clearing cycle sums items across
+  currencies on one rail — tracked as #11974; no currency allow-list is added here. No new
+  endpoint, caller, privilege or event. Rollback: revert the commit.
