@@ -3696,6 +3696,7 @@ agent_case_capability_matrix:
 # blast radius without being money-path by that list's definition. The gate's SCOPE is not
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
+  max_open_prs: 3
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:

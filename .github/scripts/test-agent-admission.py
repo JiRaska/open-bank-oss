@@ -12,41 +12,76 @@ spec.loader.exec_module(admission)
 
 
 def pr(number, branch='agent/fix', **extra):
-    return dict(number=number, head={'ref': branch}, state='open', **extra)
+    item = dict(number=number, head={'ref': branch}, state='open', created_at='2026-10-03T20:00:00Z')
+    item.update(extra)
+    return item
 
 
 class AdmissionTest(unittest.TestCase):
     prefixes = ('agent/', 'codex/')
+    limit = 3
+    cutoff = '2026-10-03T19:00:00Z'
 
     def test_empty_queue(self):
-        self.assertEqual(admission.admit([[]], self.prefixes), (True, 0))
+        self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))
 
     def test_capacity_boundary(self):
-        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix')]], self.prefixes), (True, 2))
-        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix'), pr(3)]], self.prefixes), (False, 3))
+        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix')]], self.prefixes, self.limit), (True, 2))
+        self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix'), pr(3)]], self.prefixes, self.limit), (False, 3))
 
     def test_pagination_drafts_and_other_branches(self):
         self.assertEqual(admission.admit([[pr(1, draft=True), pr(2, 'codex/fix')],
-                                          [pr(3), pr(4, 'fix/human')]], self.prefixes), (False, 3))
+                                          [pr(3), pr(4, 'fix/human')]], self.prefixes, self.limit), (False, 3))
 
     def test_invalid_snapshot_fails_closed(self):
         for pages in (None, {}, [], [None], [[{}]], [[pr(1), pr(1)]],
                       [[{'number': 1, 'state': 'closed', 'head': {'ref': 'agent/x'}}]]):
             with self.subTest(pages=pages), self.assertRaises(ValueError):
-                admission.admit(pages, self.prefixes)
+                admission.admit(pages, self.prefixes, self.limit)
 
     def test_rules_are_the_prefix_authority(self):
-        self.assertIn('agent/', admission.load_prefixes())
-        self.assertIn('codex/', admission.load_prefixes())
+        prefixes, limit = admission.load_policy()
+        self.assertIn('agent/', prefixes)
+        self.assertIn('codex/', prefixes)
+        self.assertEqual(limit, 3)
 
     def test_invalid_rules_fail_closed(self):
         import tempfile
-        for content in ('{}', 'autonomous_agent_prs: {}', 'autonomous_agent_prs:\n  agent_branch_prefixes: []'):
+        for content in ('{}', '[]', 'autonomous_agent_prs: {}',
+                        'autonomous_agent_prs:\n  agent_branch_prefixes: []',
+                        'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: 0',
+                        'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: true'):
             with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as rules:
                 rules.write(content)
                 rules.flush()
                 with self.assertRaises(ValueError):
-                    admission.load_prefixes(rules.name)
+                    admission.load_policy(rules.name)
+
+    def test_current_pr_first_three_win_even_with_concurrent_openings(self):
+        pages = [[pr(10, draft=True), pr(11, 'codex/fix')], [pr(12), pr(13)]]
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 12, self.cutoff), (True, 3))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 13, self.cutoff), (False, 4))
+
+    def test_current_pr_can_proceed_after_an_older_pr_closes(self):
+        pages = [[pr(10), pr(11, 'codex/fix'), pr(13)]]
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 13, self.cutoff), (True, 3))
+
+    def test_grandfathered_pr_does_not_deadlock_the_existing_queue(self):
+        pages = [[pr(1, created_at='2026-10-03T18:00:00Z'), pr(2), pr(3), pr(4)]]
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 1, self.cutoff), (True, 1))
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 4, self.cutoff), (False, 4))
+
+    def test_human_branch_is_out_of_scope(self):
+        pages = [[pr(1), pr(2), pr(3), pr(4, 'fix/human')]]
+        self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 4, self.cutoff), (True, 0))
+
+    def test_current_pr_missing_or_timestamp_unreadable_fails_closed(self):
+        pages = [[pr(1)]]
+        for number, cutoff in ((2, self.cutoff), (1, 'bad')):
+            with self.subTest(number=number, cutoff=cutoff), self.assertRaises(ValueError):
+                admission.admit_current_pr(pages, self.prefixes, self.limit, number, cutoff)
+        with self.assertRaises(ValueError):
+            admission.admit_current_pr([[pr(1, created_at=None)]], self.prefixes, self.limit, 1, self.cutoff)
 
 
 if __name__ == '__main__':
