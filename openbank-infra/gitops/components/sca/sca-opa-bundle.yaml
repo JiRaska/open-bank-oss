@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "5043876074725281"
+    openbank.tech/policy-checksum: "3ba861ab205ad681"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -690,6 +690,18 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"scaChallenge.read", "scaChallenge.consume"}
+    }
+
+    # Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
+    # and each record expose the action, the party id and the maker id of every parked four-eyes SCA
+    # operation. Base operator-read-any is role-only, and both realm M2M clients
+    # (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+    # ROLE_OPERATOR in at least one realm, so without this veto both could read the queue. No M2M
+    # consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
+    # reading and deciding are human-operator only. Identity decides, never principal.type (#266).
+    prohibited if {
+    	startswith(input.principal.id, "service-account-")
+    	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1485,6 +1497,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1901,7 +1914,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"
