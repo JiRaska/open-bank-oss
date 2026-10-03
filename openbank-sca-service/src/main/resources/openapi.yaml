@@ -248,6 +248,10 @@ paths:
       tags: [SCA]
       summary: Record an out-of-band device approval/denial (ADR-0021)
       description: >-
+        A successful response acknowledges a durable first decision and its atomic audit event.
+        Expiry limits authorization; it does not delete signature evidence.
+        A successful response acknowledges a durable first decision and its atomic audit event.
+        Expiry limits authorization; it does not delete signature evidence.
         Authenticated as the enrolled device/party (a different principal from the verify caller).
         The signed assertion is verified against the challenge's dynamic-linking data (amount, payee)
         before it is recorded. No valid decision leaves the challenge PENDING — push/biometric is

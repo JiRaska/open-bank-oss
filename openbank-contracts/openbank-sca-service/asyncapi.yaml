@@ -1,0 +1,90 @@
+# SPDX-License-Identifier: Apache-2.0
+asyncapi: 3.0.0
+info:
+  title: OpenBank SCA device events
+  version: 1.0.0
+  description: Enrollment and signed decision facts from the SCA transactional outbox.
+channels:
+  scaEvents:
+    address: openbank.sca.events
+    messages:
+      enrolled:
+        $ref: '#/components/messages/DeviceEnrolled'
+      decided:
+        $ref: '#/components/messages/DeviceDecided'
+  notificationRequests:
+    address: openbank.notification.requests
+    description: Direct push delivery command; it does not use the device-event outbox.
+    messages:
+      approvalRequest:
+        contentType: application/json
+        payload:
+          type: object
+          required: [partyId, channel, template, recipient, variables]
+          properties:
+            partyId: {type: string, format: uuid}
+            channel: {type: string, const: PUSH}
+            template: {type: string, const: SCA_APPROVAL}
+            recipient: {type: string, format: uuid}
+            variables:
+              type: object
+              required: [detail]
+              properties:
+                detail: {type: string}
+operations:
+  publishApprovalRequest:
+    action: send
+    channel:
+      $ref: '#/channels/notificationRequests'
+  publishDeviceEvents:
+    action: send
+    channel:
+      $ref: '#/channels/scaEvents'
+components:
+  messages:
+    DeviceEnrolled:
+      name: DEVICE_ENROLLED
+      contentType: application/json
+      description: Existing enrollment event; the credential row and outbox commit together.
+      payload:
+        type: object
+        required: [eventType, deviceId, partyId, credentialId, algorithm, occurredAt, sourceService]
+        properties:
+          eventType: {type: string, const: DEVICE_ENROLLED}
+          deviceId: {type: string, format: uuid}
+          partyId: {type: string, format: uuid}
+          credentialId: {type: string}
+          algorithm: {type: string, enum: [ES256, ED25519]}
+          occurredAt: {type: string, format: date-time}
+          sourceService: {type: string, const: sca-service}
+    DeviceDecided:
+      name: SCA_DEVICE_DECIDED
+      contentType: application/json
+      description: |
+        The first signature-verified decision and this event commit in one transaction.
+        Delivery is at least once: deduplicate by eventId. A decision records a credential's
+        assertion, not a hardware-attestation result, completed payment or human identity check.
+        signedPayloadB64 contains the exact signed bytes. Authorization expires; evidence remains.
+        Consumers must tolerate other event types on this shared topic.
+      payload:
+        type: object
+        required: [eventId, eventType, schemaVersion, sourceService, aggregateType, aggregateId,
+                   actorId, actorType, partyId, credentialId, decision, signatureB64,
+                   signedPayloadB64, occurredAt, expiresAt, challengeVersion]
+        properties:
+          eventId: {type: string, format: uuid}
+          eventType: {type: string, const: SCA_DEVICE_DECIDED}
+          schemaVersion: {type: integer, const: 1}
+          sourceService: {type: string, const: sca-service}
+          aggregateType: {type: string, const: SCA_CHALLENGE}
+          aggregateId: {type: string, format: uuid}
+          actorId: {type: string}
+          actorType: {type: string, const: DEVICE_CREDENTIAL}
+          partyId: {type: string, format: uuid}
+          credentialId: {type: string}
+          decision: {type: string, enum: [APPROVED, DENIED]}
+          signatureB64: {type: string, contentEncoding: base64}
+          signedPayloadB64: {type: string, contentEncoding: base64}
+          occurredAt: {type: string, format: date-time}
+          expiresAt: {type: string, format: date-time}
+          challengeVersion: {type: integer, minimum: 0}

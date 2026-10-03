@@ -77,12 +77,12 @@ interface EnrolledDeviceRepository {
 }
 
 /**
- * Transient store of signature-verified device decisions, keyed by challenge id.
- * Mirrors [OtpStore]: a decision only needs to outlive its challenge.
+ * Durable store of signature-verified decisions, keyed by challenge id. Authorization
+ * expiry does not delete evidence. Acceptance and its audit event must commit together.
  */
 interface ScaDecisionStore {
 
-    /** Atomically retain the first decision. False means another decision already owns the challenge. */
+    /** Atomically retain the first eligible decision and its audit event; false means it cannot be accepted. */
     suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean
 
     suspend fun find(challengeId: UUID): DeviceApprovalDecision?
