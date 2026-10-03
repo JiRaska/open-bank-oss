@@ -121,16 +121,26 @@ spec:
           # replay after a switchover) and a short checkpoint burst; a pod that
           # stays above its request for half an hour needs a bigger request.
           # container="postgres" matches CNPG instance pods only.
+          #
+          # RSS, not working set (2026-10-03). The working set counts ACTIVE page cache, and a
+          # database fills page cache by design: sanctions-db-2 read 907Mi working set against
+          # a 640Mi request with RSS 47Mi and cache 958Mi, right after the nightly list read.
+          # Sized on the working set, the request chases the cache up to the limit and the
+          # alert re-fires after every resize. RSS is the anonymous memory Postgres cannot
+          # hand back (backends, work_mem, maintenance); that is what a request has to cover.
+          # shared_buffers (shmem) is reported under cache, so the comparison allows for it
+          # by subtracting nothing from the request — at the 128MB default it is well inside
+          # every request in this fleet.
           expr: |
-            max by (namespace, pod) (container_memory_working_set_bytes{container="postgres"})
+            max by (namespace, pod) (container_memory_rss{container="postgres"})
               > on (namespace, pod)
             max by (namespace, pod) (kube_pod_container_resource_requests{container="postgres", resource="memory"})
           for: 30m
           labels:
             severity: warning
           annotations:
-            summary: "Postgres working set above memory request on {{ $labels.namespace }}/{{ $labels.pod }}"
-            description: "The postgres container's working set has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max working set x 1.3), 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
+            summary: "Postgres resident memory above memory request on {{ $labels.namespace }}/{{ $labels.pod }}"
+            description: "The postgres container's RSS (non-reclaimable memory, page cache excluded) has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max RSS x 1.3) plus shared_buffers, 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
         - alert: PostgresTransactionWraparoundRisk
           # xid age climbing toward the 2^31 wraparound horizon. autovacuum
           # freezes at 200M by default; 300M means freezing is falling behind.
