@@ -11,6 +11,7 @@
 | **Accounting law** | Card spend is an accounting record | 7-year retention; every accepted clearing is posted on the `CARD` rail. |
 | **GDPR** | Spending behaviour of identifiable customers | Confidential classification; references by id; no free-text card data. |
 | **DORA** | Operational resilience | Fail-closed issuer call, short timeouts, fault-tolerant outbox, liveness gauges, three-valued outcomes for posting and scoring. |
+| **Scheme rules (chargebacks)** | Dispute handling | The network's reason code, status and respond-by date are stored verbatim next to the bank's own status, so a deadline is never computed from a translated value. |
 | **AML** | Transaction monitoring input | Events on Kafka; fraud scoring is shadow only and blocks nothing. |
 
 ## Controls
@@ -22,6 +23,9 @@
 | Decline reason only on declines | CHECK constraint |
 | No silent unbound integration | `NOT_BOUND` from vendor bindings without credentials or without a contract |
 | Sandbox acquirer cannot move money in a deployed environment | default off, `ROLE_ADMIN` only, 404 when off |
+| One live chargeback per transaction | partial UNIQUE index `ux_card_dispute_live_per_authorization` plus an application check |
+| No local dispute without a network case | opening fails closed; `network_case_id` is NOT NULL |
+| A stale token list is never shown as current | every list carries `source` (`NETWORK` / `LOCAL_MIRROR`) |
 | Authorisation | OIDC roles + OPA `@Authorize` actions (advisory while `AUTHZ_ENFORCE=false`; the effective control today is the role check) |
 
 ## Known gaps (stated, not hidden)
@@ -29,7 +33,8 @@
 - `AUTHZ_ENFORCE=false`: the OPA decision is advisory.
 - The authorisation endpoint is not rate limited (threat model §4).
 - A clearing whose ledger posting fails stays recorded and unposted until someone acts on the `FAILED` outcome.
-- No scheme connection, 3-D Secure or tokenisation/dispute vendor binding exists.
+- No scheme connection, 3-D Secure or tokenisation/dispute vendor binding exists; the token and dispute desks run against the simulators only.
+- A won or lost chargeback moves no money in this service; any refund or write-off is outside it today.
 
 ## GDPR
 

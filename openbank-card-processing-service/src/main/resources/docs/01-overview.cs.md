@@ -11,6 +11,8 @@
 - **Uvolnění** — reverzace od acquirera nebo expirace neprezentovaného holdu (výchozí 7 dní, sweep každých 15 minut).
 - **Zamítnutí se také zaznamenávají** — zamítnutá autorizace je řádek a událost `card.declined.v1` nesoucí doslovně název důvodu z card-issuance.
 - **Stínové fraud skórování** — každá commitnutá autorizace je oskórována fraud-service; verdikt nic nemění (ADR-0084).
+- **Zrcadlo síťových tokenů** (ADR-0283 fáze 3) — přes `TokenisationPort` vydá síťový token pro kartu u wallet/merchant requestora, zaznamená ho, umožní operátorovi ho pozastavit, obnovit nebo smazat a vypíše tokeny karty ze sítě, pokud odpovídá, jinak z lokálního zrcadla se `source: LOCAL_MIRROR`.
+- **Reklamační desk** (ADR-0283 fáze 3) — přes `DisputePort` otevře chargeback případ proti autorizaci, která byla zúčtována, podá důkazy a obnoví stav ze sítě. Žádný případ se nezaznamená, pokud síť nepřidělila id případu.
 - **Capability porty schémat** (ADR-0283 fáze 2) — `BinLookupPort`, `MerchantDataPort`, `TokenisationPort` a `DisputePort` z `openbank-libs-domain`, každý se simulátorem. Viz [02 — Architektura](./02-architecture.md).
 
 ## Co služba **NEDĚLÁ**
@@ -20,7 +22,8 @@
 - ❌ Sama nerozhoduje o schválení/zamítnutí — to dělá card-issuance.
 - ❌ Fraud skórování nic neblokuje (pouze stínové).
 - ❌ Žádná tolerance přečerpání clearingu podle kategorie (palivo, pohostinství): jakékoli překročení je odmítnuto.
-- ❌ Tokenizace (VTS / MDES) a reklamace (VROL / Mastercom) **nejsou napojeny na vendora** — tyto programy vyžadují smlouvu. Odpovídají jen simulátory. Žádný REST endpoint této služby zatím nevystavuje tokenizaci, reklamace ani BIN lookup.
+- ❌ Tokenizace (VTS / MDES) a reklamace (VROL / Mastercom) **nejsou napojeny na vendora** — tyto programy vyžadují smlouvu. Odpovídají jen simulátory. BIN lookup v této službě zatím nemá REST endpoint ani volajícího.
+- ❌ Není trezor tokenů: neukládá se žádný tokenový údaj, kryptogram ani PAN. Tabulka tokenů je **zrcadlem** toho, co řekla síť.
 
 ## Pozice v doméně
 
@@ -44,11 +47,19 @@ graph LR
 | Expirovat neprezentované holdy | plánovač `card-processing-hold-expiry` | `card.hold_released.v1` (`EXPIRY`) |
 | Načíst jednu autorizaci | `GET /api/v1/card-authorizations/{id}` | — |
 | Vypsat autorizace karty | `GET /api/v1/card-authorizations/card/{cardId}` | — |
+| Vydat síťový token | `POST /api/v1/card-tokens` | `card.token.provisioned.v1` |
+| Pozastavit, obnovit nebo smazat token | `POST /api/v1/card-tokens/{tokenReference}/status` | `card.token.status_changed.v1` |
+| Vypsat tokeny karty (s původem odpovědi) | `GET /api/v1/card-tokens/card/{cardId}` | — |
+| Otevřít chargeback případ | `POST /api/v1/card-disputes` | `card.dispute.opened.v1` |
+| Podat důkazy | `POST /api/v1/card-disputes/{id}/evidence` | `card.dispute.evidence_submitted.v1` |
+| Obnovit stav případu ze sítě | `POST /api/v1/card-disputes/{id}/refresh` | `card.dispute.status_changed.v1` (jen při změně) |
+| Načíst případ / případy karty | `GET /api/v1/card-disputes/{id}`, `GET /api/v1/card-disputes/card/{cardId}` | — |
 | Sandbox nákup (autorizace + volitelný clearing) | `POST /api/v1/sandbox/acquirer/purchase` | viz výše |
 
 ## Volající
 
 - **Integrace na straně acquirera** autentizované OIDC tokenem s `ROLE_API` / `ROLE_OPERATOR` / `ROLE_ADMIN`. Produkční adaptér acquirera ani procesoru v tomto repozitáři dnes neexistuje.
+- **admin-ui** — stránky Cards pro tokeny a reklamace (`/cards/tokens`, `/cards/disputes`).
 - **Sandbox acquirer** (`/api/v1/sandbox/acquirer/purchase`) — zapnutý jen v `%dev` a `%test`; jinde odpovídá 404.
 
 ## Závislosti
