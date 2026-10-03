@@ -5,7 +5,7 @@
 `openbank-clearing-service` is the **clearing & settlement engine** of the OpenBank platform. It sits *after* payment origination and *before* (or alongside) ledger posting, and is responsible for grouping payments into settlement batches and driving them through a settlement cycle. It holds three aggregates:
 
 - **ClearingItem** — a single payment submitted for clearing: `paymentId`, `paymentReference`, debtor/creditor IBAN + optional BIC, `amount`, `currency`, `rail`, `valueDate`, `endToEndId`, `remittanceInfo`, and a `status` (PENDING / IN_CLEARING / SETTLED / FAILED / REVERSED).
-- **ClearingBatch** — a settlement cycle for a given payment rail: `batchReference`, `rail`, `settlementType` (GROSS / NET / DEFERRED_NET, default NET), aggregate `totalDebit` / `totalCredit` / `netPosition`, `currency`, `itemCount`, `cycleId`, `settlementDate`, `settledAt` and `status`.
+- **ClearingBatch** — one currency's share of a settlement cycle for a given payment rail (a batch is per rail **and** currency, #11974): `batchReference`, `rail`, `settlementType` (GROSS / NET / DEFERRED_NET, default NET), aggregate `totalDebit` / `totalCredit` / `netPosition`, `currency`, `itemCount`, `cycleId`, `settlementDate`, `settledAt` and `status`.
 - **SettlementPosition** — a per-participant net position within a cycle: `participantBic`, `currency`, `cycleId`, `grossDebit`, `grossCredit`, `netPosition`, `settled` flag.
 
 Supported payment rails: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, `INTERNAL`.
@@ -45,7 +45,7 @@ Supported payment rails: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, `INTE
 | Use case | API | Event / effect |
 |---|---|---|
 | Submit a payment to clearing | `POST /api/v1/clearing/submit` | new `ClearingItem` (status PENDING), placeholder batch id until cycle |
-| Trigger a clearing cycle for a rail | `POST /api/v1/clearing/cycle/trigger?rail=…` | creates a `ClearingBatch`, attaches pending items, status IN_CLEARING (or SETTLED if empty) |
+| Trigger a clearing cycle for a rail | `POST /api/v1/clearing/cycle/trigger?rail=…` | creates one `ClearingBatch` per currency, attaches each pending item to its currency's batch, status IN_CLEARING (or one SETTLED batch if empty) |
 | Settle a batch | `POST /api/v1/clearing/batches/{id}/settle` | batch status → SETTLED, `publishBatchSettled` event |
 | List / inspect batches | `GET /api/v1/clearing/batches`, `…/{id}`, `…/{id}/items` | read |
 | Get settlement positions for a cycle | `GET /api/v1/clearing/positions/{cycleId}` | read |

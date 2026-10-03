@@ -4,6 +4,7 @@
 
 package com.openbank.swift.domain.model
 
+import com.openbank.swift.domain.model.SwiftMessage
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.time.Instant
@@ -61,8 +62,7 @@ class SwiftMessageTest {
         transactionReference = "TRX-001",
         relatedReference = null,
         valueDate = valueDate,
-        currency = "EUR",
-        amountMinorUnits = amountMinorUnits,
+        amount = SwiftMessage.moneyOfMinorUnits(amountMinorUnits, "EUR"),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = null,
         orderingCustomerName = "Alice",

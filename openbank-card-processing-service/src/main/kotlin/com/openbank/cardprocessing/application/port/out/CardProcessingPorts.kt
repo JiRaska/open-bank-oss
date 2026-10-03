@@ -81,10 +81,33 @@ interface CardIssuancePolicyPort {
     ): IssuerDecision
 }
 
-/** Card facts card-processing needs and does not own: which account and party the card belongs to. */
-data class CardOwnership(val accountId: UUID, val partyId: UUID, val currencyCode: String)
+/**
+ * Card facts card-processing needs and does not own: which account and party the card belongs to,
+ * and the card's lifecycle state as card-issuance reports it (`ACTIVE`, `BLOCKED`, …), or null when
+ * card-issuance did not say — which every caller that gates on it must treat as NOT active.
+ */
+data class CardOwnership(
+    val accountId: UUID,
+    val partyId: UUID,
+    val currencyCode: String,
+    val status: String? = null,
+) {
+    val active: Boolean get() = status.equals(ACTIVE, ignoreCase = true)
+
+    private companion object {
+        const val ACTIVE = "ACTIVE"
+    }
+}
+
+/**
+ * card-issuance could not be asked — a transport failure or a non-404 error. Distinct from "no such
+ * card" (a null from [CardLookupPort.lookup]): one is the client's mistake, the other is an outage,
+ * and answering an outage as a 404 tells a wallet the card does not exist.
+ */
+class CardIssuerUnavailableException(cause: Throwable) : RuntimeException("card-issuance could not be reached", cause)
 
 interface CardLookupPort {
+    /** Null for an unknown card; throws [CardIssuerUnavailableException] when card-issuance cannot answer. */
     suspend fun lookup(cardId: UUID): CardOwnership?
 }
 

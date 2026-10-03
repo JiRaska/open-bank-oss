@@ -4,7 +4,7 @@ Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 
 -->
 # Threat model — openbank-card-processing-service
 
-- **Date:** 2026-09-05
+- **Date:** 2026-10-03
 - **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). Money-path service from its first commit.
 - **Service ADR:** [ADR-0283](../adr/0283-card-platform-scheme-agnostic-capability-ports.md) (card platform — scheme-agnostic capability ports and card-processing as a bounded context)
 
@@ -107,6 +107,24 @@ customer's app, "the issuer was down" and "you turned gambling off" must not loo
 This is the opposite of VoP's deliberate fail-open (ADR-0171) because the two answer different
 questions — VoP warns, this authorises.
 
+## 4d. Network tokens and chargebacks (ADR-0283 phase 3) — STRIDE supplement
+
+`POST /api/v1/card-tokens`, `POST /api/v1/card-disputes` and `POST /api/v1/card-disputes/{id}/evidence`
+each make a call to a card network that is NOT idempotent at the network: asking twice mints a second
+wallet credential, opens a second chargeback or files the evidence twice.
+
+| Threat | STRIDE | Mitigation |
+|---|---|---|
+| Two concurrent requests with one `Idempotency-Key` both reach the network (duplicate credential / chargeback), the loser 500s | T, D | `LifecycleIdempotencyRepositoryImpl.reserve` — an `INSERT ... ON CONFLICT DO NOTHING` into `card_lifecycle_idempotency` committed BEFORE the network call; the loser replays the winner (`Reservation.Completed`) or gets 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Completion flips the row in the same transaction as the result row and its outbox event (`completeInTransaction`). Proven by `CardLifecycleIdempotencyIT` (two requests released by one latch, network held open). |
+| A crash after the network acted, then a retry, acts twice | T | A PENDING reservation never expires; it is released only when the network was provably not asked or refused. A stuck key answers 409 until an operator reconciles it (`ix_card_lifecycle_idempotency_pending`). |
+| The same key replayed for a different request returns someone else's result | I, T | The reservation stores a SHA-256 request fingerprint; a mismatch is 409 `IDEMPOTENCY_KEY_REUSED`. |
+| A network token minted for a blocked/suspended/expired card — a working credential for a card the bank stopped | E, S | `CardTokenService.refuseBeforeNetwork` refuses any card whose card-issuance `status` is not `ACTIVE` (an absent status counts as not active), 409 `CARD_NOT_ACTIVE`, before the network is asked. Pinned by the consumer pact (`status` type matcher). |
+| card-issuance unreachable presented as "no such card" | R | `CardIssuerUnavailableException` → 503 `ISSUER_UNAVAILABLE`, fails closed like authorisation (§4c). |
+| A chargeback filed in a currency other than the transaction's, compared as raw minor units | T | `CardDisputeService.eligibility` compares `CurrencyCode` then `Money`; a mismatch is 409 `CURRENCY_MISMATCH` and the network is never asked. |
+| A late or wrong network read flips a closed case's outcome (WON → LOST after funds moved) | T, R | Closed cases are terminal in `refreshStatus`: never mutated; a disagreement is counted on `openbank_card_dispute_terminal_mismatches_total` and logged for investigation. |
+| Evidence silently overwritten, so the file a scheme ruled on cannot be reconstructed | R | `card_dispute_evidence` is append-only, one row per filing, written in the filing's transaction; `GET .../evidence` reads it. |
+| A token the network holds never appears in the bank's record, or a token the network lost disappears from view | R | A NETWORK read adopts unknown tokens into the mirror (`adoptNetworkSeen`, `ON CONFLICT (token_reference) DO NOTHING`, stable id) and flags mirror-only tokens `absentAtNetwork` instead of dropping them. |
+
 ## 5. Residual risks / assumptions
 
 - **No rate limit on the authorisation endpoint.** Acquirer traffic is authenticated and bounded by
@@ -118,6 +136,11 @@ questions — VoP warns, this authorises.
 - **The ledger posting is not two-phase.** A posting that fails is visible and retriable by
   operations, but there is no automatic compensation. Adding one needs the processor binding's own
   reconciliation file, which does not exist yet.
+- **A stuck PENDING idempotency reservation blocks its key indefinitely.** Deliberate (expiring it
+  could repeat a network action); there is no automated reconciliation yet, only the partial index
+  an operator query uses.
+- **The authorisation path still answers an unreachable card-issuance lookup with a generic 500**;
+  only token provisioning maps it to 503 today.
 - **No PAN today, by design.** If a real processor is ever bound, the cardholder-data environment
   question reopens — HSM/P2PE and full PCI DSS 4.0.1 scope — and ADR-0283 D7 says that is a separate
   decision, not a config change.
@@ -128,3 +151,9 @@ questions — VoP warns, this authorises.
   Money-path from the first commit: `rules.yaml: money_path_services`, an SLO pair, a journey
   accountability entry and this document all land in the same PR as the code, rather than being
   retrofitted after the service is already carrying traffic.
+- **2026-10-03** — Token and dispute lifecycle (#8864, before merge): §4d added. Idempotency keys are
+  reserved in Postgres before any network call; tokens are refused for non-ACTIVE cards and fail
+  closed (503) when card-issuance is unreachable; disputes must match the authorisation currency
+  (compared as Money); closed cases are terminal on refresh; evidence history is append-only and
+  idempotent; network-seen tokens are adopted into the mirror with stable ids and mirror-only ones
+  are flagged `absentAtNetwork`.

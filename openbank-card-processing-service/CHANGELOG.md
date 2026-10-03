@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.3.0...card-processing-service-v0.4.0) (2026-10-03)
+
+
+### Features
+
+* **card-processing:** tokenisation and dispute bindings (ADR-0283 phase 2) ([#8858](https://github.com/JiRaska/open-bank-oss/issues/8858)) ([dec2efd](https://github.com/JiRaska/open-bank-oss/commit/dec2efdcd047fb7accc0ca0a9f20199bacc4a5b3))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.2.0...card-processing-service-v0.3.0) (2026-10-03)
 
 
