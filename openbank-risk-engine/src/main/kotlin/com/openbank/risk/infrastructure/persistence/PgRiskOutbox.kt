@@ -10,6 +10,7 @@ import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.risk.application.port.`in`.LimitAnalysis
 import com.openbank.risk.application.port.out.LimitEventOutbox
 import com.openbank.risk.domain.limits.RiskLimitEvents
@@ -28,16 +29,28 @@ import java.util.UUID
  * for limit events ([LimitEventOutbox]) and the dispatcher's [OutboxRepository].
  *
  * **Atomic.** Every row of one evaluation is inserted in ONE transaction, so a run's early-warning
- * and breach events commit together or not at all. **Idempotent.** Each insert is
- * `ON CONFLICT (dedup_key) DO NOTHING` on (run, limit id, limit-set id, limit-set version), so a
- * replayed run or two pods ticking together write each event once. **Claimed.** The dispatcher claims
+ * and breach events commit together or not at all. **Idempotent.** Each event first claims its
+ * natural key (run, limit id, limit-set id, limit-set version) in `risk_limit_event_dedup`, and the
+ * outbox row is inserted only if that claim was new — so a replayed run or two pods ticking together
+ * write each event once. The claim lives in its own permanent table, not in `risk_outbox`, so the
+ * outbox can purge delivered rows ([purgeSent], ADR-0329) without un-remembering what was emitted
+ * (#11901). **Claimed.** The dispatcher claims
  * rows with `FOR UPDATE SKIP LOCKED` and reclaims a claim older than `staleAfter` (#1201), because an
  * Argo Rollouts canary runs two dispatchers at once.
  */
 @ApplicationScoped
 class PgRiskOutbox(private val pool: Pool, private val mapper: ObjectMapper) :
     OutboxRepository,
+    SentOutboxRetention,
     LimitEventOutbox {
+
+    override val retentionLabel: String = "risk"
+
+    /** SENT-row retention (ADR-0329): the dedup claim survives in `risk_limit_event_dedup`. */
+    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = pool.preparedQuery(PURGE_SENT)
+        .execute(Tuple.of(now.minus(olderThan).atOffset(ZoneOffset.UTC), batch.coerceAtLeast(1)))
+        .awaitSuspending()
+        .rowCount()
 
     override suspend fun recordNonOk(analysis: LimitAnalysis, occurredAt: Instant): Int {
         val run = analysis.run
@@ -114,9 +127,21 @@ class PgRiskOutbox(private val pool: Pool, private val mapper: ObjectMapper) :
         const val COLUMNS =
             "event_id, aggregate_id, event_type, payload, status, attempt_count, created_at, updated_at, " +
                 "sent_at, last_error, synthetic"
+
+        /**
+         * Claim the natural key first; insert the outbox row only from a NEW claim. One statement per
+         * event, all inside the evaluation's transaction, so the claim and the row commit together.
+         * `risk_outbox.dedup_key` keeps its own UNIQUE as a second line.
+         */
         const val INSERT =
-            "INSERT INTO risk_outbox (event_id, aggregate_id, event_type, payload, dedup_key, created_at, " +
-                "updated_at, synthetic) VALUES ($1, $2, $3, $4, $5, $6, $6, $7) ON CONFLICT (dedup_key) DO NOTHING"
+            "WITH claimed AS (INSERT INTO risk_limit_event_dedup (dedup_key, event_id, created_at) " +
+                "VALUES ($5, $1, $6) ON CONFLICT (dedup_key) DO NOTHING RETURNING event_id) " +
+                "INSERT INTO risk_outbox (event_id, aggregate_id, event_type, payload, dedup_key, created_at, " +
+                "updated_at, synthetic) SELECT $1, $2, $3, $4, $5, $6, $6, $7 FROM claimed " +
+                "ON CONFLICT (dedup_key) DO NOTHING"
+        const val PURGE_SENT =
+            "DELETE FROM risk_outbox WHERE event_id IN (SELECT event_id FROM risk_outbox " +
+                "WHERE status = 'SENT' AND sent_at < $1 LIMIT $2)"
         const val SELECT_PROCESSABLE =
             "SELECT $COLUMNS FROM risk_outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY created_at LIMIT $1"
         const val COUNT_PROCESSABLE = "SELECT count(*) FROM risk_outbox WHERE status IN ('PENDING', 'FAILED')"
