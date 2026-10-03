@@ -51,7 +51,18 @@ import java.time.Instant
  * the same night delete disjoint-or-already-gone rows and the second one finds a short batch.
  */
 @ApplicationScoped
-class OutboxSentRetentionJob {
+class OutboxSentRetentionJob(
+    // Constructor parameters with NO Kotlin default: a default would make Arc build the bean through
+    // the synthetic constructor and the @ConfigProperty would never apply (configproperty-kotlin-defaults).
+    @ConfigProperty(name = "openbank.outbox.retention.enabled", defaultValue = "true")
+    internal val enabled: Boolean,
+    @ConfigProperty(name = "openbank.outbox.retention.sent-days", defaultValue = "7")
+    internal val sentDays: Long,
+    @ConfigProperty(name = "openbank.outbox.retention.batch-size", defaultValue = "5000")
+    internal val batchSize: Int,
+    @ConfigProperty(name = "openbank.outbox.retention.max-batches", defaultValue = "200")
+    internal val maxBatches: Int,
+) {
 
     @Inject
     @Any
@@ -62,18 +73,6 @@ class OutboxSentRetentionJob {
 
     @Inject
     lateinit var clock: Clock
-
-    @ConfigProperty(name = "openbank.outbox.retention.enabled", defaultValue = "true")
-    var enabled: Boolean = true
-
-    @ConfigProperty(name = "openbank.outbox.retention.sent-days", defaultValue = "7")
-    var sentDays: Long = OutboxRetention.DEFAULT_SENT_DAYS
-
-    @ConfigProperty(name = "openbank.outbox.retention.batch-size", defaultValue = "5000")
-    var batchSize: Int = OutboxRetention.DEFAULT_BATCH_SIZE
-
-    @ConfigProperty(name = "openbank.outbox.retention.max-batches", defaultValue = "200")
-    var maxBatches: Int = OutboxRetention.DEFAULT_MAX_BATCHES
 
     private var liveness: WorkflowLivenessRecorder? = null
 

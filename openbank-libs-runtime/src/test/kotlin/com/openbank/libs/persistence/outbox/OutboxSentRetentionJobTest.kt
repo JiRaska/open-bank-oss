@@ -49,14 +49,10 @@ class OutboxSentRetentionJobTest {
         val targetInst = mockk<Instance<SentOutboxRetention>>()
         every { targetInst.iterator() } answers { targets.toList().toMutableList().iterator() }
         every { targetInst.stream() } answers { Stream.of(*targets) }
-        return OutboxSentRetentionJob().apply {
+        return OutboxSentRetentionJob(enabled = enabled, sentDays = 7, batchSize = 2, maxBatches = 100).apply {
             this.targets = targetInst
             metrics = DomainMetrics().apply { registryInstance = regInst }
             clock = Clock.fixed(now, ZoneOffset.UTC)
-            this.enabled = enabled
-            sentDays = 7
-            batchSize = 2
-            maxBatches = 100
         }
     }
 
