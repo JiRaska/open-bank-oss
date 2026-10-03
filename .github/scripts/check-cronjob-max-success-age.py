@@ -100,7 +100,7 @@ def longest_gap_seconds(schedule: str) -> int:
     f = schedule.split()
     if len(f) != 5:
         raise ValueError(f"expected 5 cron fields, got {schedule!r}")
-    mins, hours, dom, mon, dow = (_field(x, lo, hi) for x, (lo, hi) in zip(f, _FIELDS))
+    mins, hours, dom, mon, dow = (_field(x, lo, hi) for x, (lo, hi) in zip(f, _FIELDS, strict=True))
     if f[2] != "*" and f[4] != "*":
         raise ValueError(f"both day-of-month and day-of-week restricted: {schedule!r}")
     start = dt.datetime(2026, 1, 5)  # a Monday
@@ -112,7 +112,7 @@ def longest_gap_seconds(schedule: str) -> int:
             fires.extend(d + dt.timedelta(minutes=x) for x in times_of_day)
     if len(fires) < 2:
         raise ValueError(f"schedule {schedule!r} fires fewer than twice in 5 weeks")
-    return int(max((b - a).total_seconds() for a, b in zip(fires, fires[1:])))
+    return int(max((b - a).total_seconds() for a, b in zip(fires, fires[1:], strict=False)))
 
 
 def check_one(where: str, schedule: str | None, value, tiers: set[int]) -> list[str]:
