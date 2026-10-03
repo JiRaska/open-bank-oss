@@ -12,7 +12,8 @@ info:
   # 1.5 -> 1.6 (#11604): additive — POST /api/v1/swift documents its 400 as InvalidMoney
   # (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR); amountMinorUnits + currency
   # are built into a kernel Money at the boundary. Request and response schemas are unchanged.
-  version: "1.6.0"
+  # 1.6 -> 1.7 (#11972): correct error bodies to the platform's actual envelope.
+  version: "1.7.0"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -79,13 +80,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
         "422":
           description: BIC validation failed or business rule violation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationError'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/messages:
     get:
@@ -195,7 +196,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/{id}/reject:
     post:
@@ -238,7 +239,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/approvals:
     get:
@@ -516,33 +517,66 @@ components:
       enum: [NORMAL, URGENT, SYSTEM]
       default: NORMAL
 
-    ErrorResponse:
+    ProblemDetail:
       type: object
-      required: [error, message]
+      description: >-
+        Platform error envelope (ADR-0326). Existing exceptions render ApiError;
+        typed domain exceptions render its RFC 9457 superset. The required fields
+        are present in both; RFC 9457 members are optional while the migration runs.
+      required: [traceId, status, code, message, timestamp]
       properties:
-        error:
+        traceId:
+          type: string
+        status:
+          type: integer
+        code:
           type: string
         message:
           type: string
-        traceId:
+        timestamp:
           type: string
-
-    ValidationError:
-      type: object
-      required: [error, violations]
-      properties:
-        error:
+          format: date-time
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+        type:
           type: string
-          example: "Validation failed"
+        title:
+          type: string
+        detail:
+          type: string
+        instance:
+          type: string
+        correlationId:
+          type: string
+        retryable:
+          type: boolean
         violations:
           type: array
           items:
-            type: object
-            properties:
-              field:
-                type: string
-              message:
-                type: string
+            $ref: '#/components/schemas/ProblemViolation'
+
+    FieldError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        rejectedValue: {}
+
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
 
     ApprovalResponse:
       type: object
@@ -591,28 +625,27 @@ components:
         VALIDATION_ERROR — any other invalid field, including an `amountMinorUnits` outside a signed
         64-bit integer. Nothing is created, nothing is published and the `idempotencyKey` is not
         consumed. The offending field is named in `violations[].field` and its code in
-        `violations[].code`; the rejected value is never echoed. The schema below is this spec's
-        shared error schema, kept so this change stays additive; the body is libs-runtime's problem
-        document (`type`, `title`, `status`, `detail`, `code`, `violations[]`, `message`).
+        `violations[].code`; the rejected value is never echoed. The body is libs-runtime's
+        problem document (`type`, `title`, `status`, `detail`, `code`, `violations[]`, `message`).
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
     BadRequest:
       description: Invalid request body
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
     NotFound:
       description: Resource not found
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
     Forbidden:
       description: Policy denied the request (ADR-0034 OPA authorization)
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
