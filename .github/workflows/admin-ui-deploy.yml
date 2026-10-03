@@ -130,7 +130,7 @@ jobs:
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 60
     # Coalesce evidence completions across successive main SHAs before the
     # privileged build. Cancellation applies to this cheap source job only;
     # build-push below must always finish signing an image it has pushed.
@@ -141,6 +141,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     outputs:
       proceed: ${{ steps.source.outputs.proceed }}
     steps:
@@ -199,6 +200,22 @@ jobs:
           proceed="$(bash .github/scripts/authorize-admin-ui-deploy-source.sh \
             "$source_sha" "$main_sha" "$EVENT_NAME" "$open_deploy_pr_exists")"
           echo "proceed=$proceed" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          # Pact drift runs on every main push that changes Admin UI files. An image-pin-only
+          # refresh does not trigger it; the exact-source CI build remains mandatory.
+          if git diff-tree --first-parent --no-commit-id --name-only -r "$source_sha" \
+            | grep -q '^openbank-admin-ui/'; then
+            echo "require_pact=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "require_pact=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Require exact-source Admin UI validation
+        if: steps.source.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ steps.source.outputs.source_sha }}
+          REQUIRE_PACT: ${{ steps.source.outputs.require_pact }}
+        run: python3 .github/scripts/await-admin-ui-source-validation.py
 
   build-push:
     name: Build + push admin-ui
