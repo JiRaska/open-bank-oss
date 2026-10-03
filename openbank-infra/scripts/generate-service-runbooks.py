@@ -26,6 +26,7 @@ import os
 import re
 import sys
 import tempfile
+from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
@@ -37,6 +38,17 @@ import gitops_facts  # noqa: E402  (path must be set before the import)
 REPO = Path(__file__).resolve().parents[2]
 RUNBOOKS = REPO / "docs" / "runbooks"
 GITOPS = REPO / "openbank-infra" / "gitops"
+
+
+@contextmanager
+def static_gitops_reads():
+    """Reuse source manifests during one generation; restore the shared reader afterward."""
+    original = gitops_facts.read
+    gitops_facts.read = lru_cache(maxsize=None)(original)
+    try:
+        yield
+    finally:
+        gitops_facts.read = original
 
 
 # A full run renders 68 services and asks for each workload's namespace, name and kind
@@ -192,9 +204,13 @@ def management_port(short: str) -> str:
 def probe_containers(gitops: Path) -> dict[str, list[dict]]:
     """Index declared workload containers once per generator invocation."""
     result: dict[str, list[dict]] = {}
+    # Many ConfigMaps mention Deployments in comments or embedded examples.
+    # Only parse YAML that can actually declare a workload document; the YAML
+    # parser below remains authoritative for the kind and container shape.
+    workload_kind = re.compile(r"(?m)^\s*kind:\s*['\"]?(?:Deployment|Rollout)\b")
     for path in sorted(gitops.rglob("*.yaml")):
         text = read(path)
-        if "openbank-" not in text or not any(kind in text for kind in ("Deployment", "Rollout")):
+        if "openbank-" not in text or not workload_kind.search(text):
             continue
         for doc in yaml.load_all(text, Loader=getattr(yaml, "CSafeLoader", yaml.SafeLoader)):
             if not isinstance(doc, dict) or doc.get("kind") not in {"Deployment", "Rollout"}:
@@ -1030,18 +1046,19 @@ def main():
     RUNBOOKS.mkdir(parents=True, exist_ok=True)
     targets = args.services or all_services()
     created, skipped = 0, 0
-    for short in targets:
-        if not gitops_facts.module_dir(short, REPO).is_dir():
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        out = RUNBOOKS / f"svc-{short}.md"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        if write_runbook(out, render(short)):
-            created += 1
-        else:
-            skipped += 1
+    with static_gitops_reads():
+        for short in targets:
+            if not gitops_facts.module_dir(short, REPO).is_dir():
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            out = RUNBOOKS / f"svc-{short}.md"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            if write_runbook(out, render(short)):
+                created += 1
+            else:
+                skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:
