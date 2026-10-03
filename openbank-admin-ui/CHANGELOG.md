@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.272.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.271.0...admin-ui-v0.272.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** guided curve-set upload form ([#11704](https://github.com/JiRaska/open-bank-oss/issues/11704)) ([089d5bc](https://github.com/JiRaska/open-bank-oss/commit/089d5bce5a00d674013e4c1a61ab7c5a4794dcd9)), closes [#11107](https://github.com/JiRaska/open-bank-oss/issues/11107)
+
 ## [0.271.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.1...admin-ui-v0.271.0) (2026-10-03)
 
 

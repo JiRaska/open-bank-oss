@@ -89,7 +89,7 @@ class SepaPaymentResource(
         val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CREATE_PATH, request)
         // #11642: Money is built here, BEFORE the key is reserved — an amount or currency it cannot
-        // hold is a 400 (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
+        // hold is a 400 (kernel InvalidMoneyException: AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED) that leaves no idempotency
         // record, row, outbox event or downstream call behind.
         val command = request.toCommand(idempotencyKey, requestHash)
         when (

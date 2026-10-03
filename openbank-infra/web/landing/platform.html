@@ -1,406 +1,323 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Platform · Open Bank Foundation · governance, cost & continuity in real time</title>
-  <meta name="description" content="Not a pitch deck. A running European bank you can inspect. Governance coverage mapped to DORA, PSD2, GDPR and more, real-time FinOps cost per business process, business continuity, AI governance and live cloud architecture." />
-  <meta name="theme-color" content="#0a0e27" />
-  <link rel="icon" type="image/png" href="assets/openbank-logo.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="stylesheet" href="platform.css" />
-  <link rel="canonical" href="https://open-bank.tech/platform.html" />
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Inside the platform · OpenBank</title>
+<meta name="description" content="Explore OpenBank business areas and the full code-derived module inventory, with source links and recorded product views." />
+<meta name="theme-color" content="#f8f6f1" />
+<meta property="og:title" content="Inside the platform · OpenBank" />
+<meta property="og:description" content="Explore OpenBank business areas and the full code-derived module inventory, with source links and recorded product views." />
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
+<link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
+<link rel="canonical" href="https://open-bank.tech/platform.html" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <div class="bg-grid" aria-hidden="true"></div>
-  <div class="bg-blob blob-a" aria-hidden="true"></div>
-  <div class="bg-blob blob-b" aria-hidden="true"></div>
-
-  <!-- NAV -->
-  <header class="nav">
-    <a class="nav-brand" href="index.html">
-      <img src="assets/openbank-logo.png" alt="Open Bank Foundation logo" />
-      <span>Open Bank <strong>Foundation</strong></span>
-    </a>
-    <nav class="nav-links">
-      <a href="index.html#manifesto">Manifesto</a>
-      <a href="index.html#framework">Framework</a>
-      <a href="platform.html" class="active">Platform</a>
-      <a href="index.html#app">App</a>
-      <a href="index.html#join">Join</a>
-    </nav>
-    <button class="btn btn-ghost nav-cta" data-open-demo type="button"><span class="play">▶</span> Live demo</button>
-  </header>
-
-  <!-- HERO -->
-  <section class="pf-hero">
-    <div class="reveal">
-      <span class="eyebrow"><span class="dot"></span> Live from the openbank-sandbox cluster</span>
-      <h1>The platform, <span class="grad">in real time</span>.</h1>
-      <p class="lede">
-        This isn't a pitch deck. It's a running European bank you can inspect: governance mapped to the
-        regulation, the real cost of every business process this month, continuity proven tier by tier,
-        AI under the same gates as humans, and live cloud architecture. All of it, observable.
-      </p>
-      <div class="legend">
-        <span class="lg lg-live">● Live today</span>
-        <span class="lg lg-partial">◐ Partial</span>
-        <span class="lg lg-planned">○ Planned</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 1 · REGULATORY GOVERNANCE COVERAGE ============ -->
-  <section class="section pf-section" id="governance">
-    <div class="section-head reveal">
-      <span class="kicker">European regulatory coverage</span>
-      <h2>Governance, mapped to the regulation.</h2>
-      <p class="sub">Every framework control traces to a named article. This is the maturity of that mapping today: a coverage surface, not a compliance claim. The work in the open is closing the gap.</p>
-    </div>
-
-    <div class="reg-grid">
-      <!-- each card: data-cov drives the ring + bar animation -->
-      <article class="reg-card reveal" data-cov="90">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:90"><span>90<i>%</i></span></div>
-          <div class="reg-id"><h3>CNB</h3><p>Czech National Bank</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>§4</b> Books of account → double-entry ledger</li>
-          <li><b>§20d</b> Business continuity plan → BCP tiers</li>
-          <li><b>CERTIS</b> Domestic clearing → domestic-payment</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="88">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:88"><span>88<i>%</i></span></div>
-          <div class="reg-id"><h3>DORA</h3><p>Digital Operational Resilience</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.17</b> Immutable audit → audit-service (WORM)</li>
-          <li><b>Art.11-12</b> Recovery objectives → RTO/RPO tiers</li>
-          <li><b>Art.5</b> ICT risk → governance-as-code in CI</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="86">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:86"><span>86<i>%</i></span></div>
-          <div class="reg-id"><h3>PSD2</h3><p>Payment Services Directive</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.97</b> Strong auth (SCA) → sca-service · Keycloak</li>
-          <li><b>AISP/PISP</b> XS2A portal live → psd2 · tpp-registry</li>
-          <li><b>VoP</b> Verification of Payee → vop-service (ADR-0171)</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="84">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:84"><span>84<i>%</i></span></div>
-          <div class="reg-id"><h3>5AMLD</h3><p>Anti-Money-Laundering</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.18</b> Screening before payout → compliance gate</li>
-          <li><b>Sanctions</b> Real-time list checks → sanctions-service</li>
-          <li><b>CDD/KYC</b> Due diligence → kyc-service (pg_trgm)</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="83">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:83"><span>83<i>%</i></span></div>
-          <div class="reg-id"><h3>GDPR</h3><p>Data Protection</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.25</b> Protection by design → party-service PII masking</li>
-          <li><b>Art.17</b> Right to erasure → PARTY_ERASED fleet-wide</li>
-          <li><b>Consent</b> Lawful basis → consent-service</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="78">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:78"><span>78<i>%</i></span></div>
-          <div class="reg-id"><h3>EBA</h3><p>European Banking Authority</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>ICT</b> Risk guidelines → BCP + observability</li>
-          <li><b>FINREP</b> Supervisory reporting → finrep-service</li>
-          <li><b>AnaCredit</b> Credit register → anacredit-service</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="74">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:74"><span>74<i>%</i></span></div>
-          <div class="reg-id"><h3>PCI DSS</h3><p>v4.0 · Card Security</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Req.3.5</b> Key management → OpenBao / KMS</li>
-          <li><b>Isolation</b> Cardholder scope → card-issuance</li>
-          <li><b>Req.4</b> TLS 1.2+ in transit → Kong gateway</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="72">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:72"><span>72<i>%</i></span></div>
-          <div class="reg-id"><h3>eIDAS 2.0</h3><p>EUDI Wallet · digital identity</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Art.5a</b> EUDI Wallet → pid-service (deployed)</li>
-          <li><b>OpenID4VP</b> Presentation → e2e live (ADR-0094)</li>
-          <li><b>OpenID4VCI</b> Credential issuance → e2e live</li>
-        </ul>
-      </article>
-
-      <article class="reg-card reveal" data-cov="66">
-        <div class="reg-top">
-          <div class="reg-ring" style="--cov:66"><span>66<i>%</i></span></div>
-          <div class="reg-id"><h3>EU AI Act</h3><p>AI Governance</p></div>
-        </div>
-        <ul class="reg-maps">
-          <li><b>Oversight</b> Human-in-the-loop → ADR-0031</li>
-          <li><b>Traceability</b> AI-attributed audit → every action logged</li>
-          <li><b>Risk</b> Deny-by-default agents → OPA policy gate</li>
-        </ul>
-      </article>
-    </div>
-  </section>
-
-  <!-- ============ 2 · REAL-TIME FINOPS ============ -->
-  <section class="section pf-section" id="finops">
-    <div class="section-head reveal">
-      <span class="kicker">FinOps · this month</span>
-      <h2>Real cost, broken down by business process.</h2>
-      <p class="sub">Every euro of run-cost attributed to the flow that spends it, fully-loaded with shared dependencies. Not an estimate. The current month, live.</p>
-    </div>
-
-    <div class="finops-wrap reveal">
-      <div class="finops-summary">
-        <div class="fo-stat"><b data-count="118.40" data-prefix="$">$0.00</b><span>total run-cost / month</span></div>
-        <div class="fo-stat"><b data-count="18">0</b><span>business flows costed</span></div>
-        <div class="fo-stat"><b data-count="46">0</b><span>services attributed</span></div>
-        <div class="fo-stat"><b><span class="ok">live</span></b><span>cost feed status</span></div>
-      </div>
-
-      <div class="bars" id="finops-bars">
-        <!-- value = USD, w = % of max for bar width -->
-        <div class="bar-row" data-w="100"><div class="bar-label">SEPA Credit Transfer<small>PSD2 · pacs.008</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="22.80" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="72"><div class="bar-label">AI Copilot (LLM)<small>copilot-service · inference</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="16.40" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="61"><div class="bar-label">SEPA Instant<small>PSD2 · 10s SLA</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="13.90" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="61"><div class="bar-label">Domestic Payment<small>CNB CERTIS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="13.90" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="46"><div class="bar-label">SWIFT Cross-Border<small>pacs.008 · cross-border</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="10.40" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="38"><div class="bar-label">EUDI PID Issuance<small>eIDAS 2.0 · OpenID4VCI</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="8.60" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="30"><div class="bar-label">Double-Entry Ledger<small>CNB §4 · books of account</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="6.90" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="30"><div class="bar-label">FX Conversion<small>Temporal durable · 3 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="6.90" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="24"><div class="bar-label">Account Management<small>4 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="5.40" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="24"><div class="bar-label">Balance Projection<small>2 services</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="5.40" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="18"><div class="bar-label">Verification of Payee<small>vop-service · name-match</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="4.10" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="17"><div class="bar-label">Open Banking<small>PSD2 AISP/PISP</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.90" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="15"><div class="bar-label">Compliance Gate<small>5AMLD Art.18 · AML/Sanctions</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.50" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="15"><div class="bar-label">Card Issuance<small>PCI DSS</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.50" data-prefix="$">$0</div></div>
-        <div class="bar-row" data-w="14"><div class="bar-label">Audit Trail<small>DORA Art.17 · immutable</small></div><div class="bar-track"><div class="bar-fill"></div></div><div class="bar-val" data-count="3.10" data-prefix="$">$0</div></div>
-      </div>
-      <p class="finops-note">Flows share services, so the per-flow sums overlap. Figures are fully-loaded sandbox run-cost.</p>
-    </div>
-  </section>
-
-  <!-- ============ 3 · BUSINESS CONTINUITY ============ -->
-  <section class="section pf-section" id="bcp">
-    <div class="section-head reveal">
-      <span class="kicker">Business continuity · live</span>
-      <h2>Continuity you can prove, tier by tier.</h2>
-      <p class="sub">A prioritized recovery plan per DORA Art.11-12, CNB §20d and EBA ICT guidelines, with real-time health, not a document in a drawer.</p>
-    </div>
-
-    <div class="bcp-status reveal">
-      <div class="bcp-stat"><span class="bcp-k">Overall</span><b class="ok">HEALTHY</b><small>39 / 46 services healthy</small></div>
-      <div class="bcp-stat"><span class="bcp-k">Compliance gate</span><b class="ok">CLEAR</b><small>5AMLD Art.18 / DORA Art.12</small></div>
-      <div class="bcp-stat"><span class="bcp-k">Payment processing</span><b class="ok">ENABLED</b><small>Tier 4 payment services</small></div>
-      <div class="bcp-stat"><span class="bcp-k">Target RTO</span><b class="grad-t">&lt; 8 min</b><small>pre-built images · GitOps</small></div>
-    </div>
-
-    <div class="bcp-tiers reveal">
-      <div class="tier">
-        <div class="tier-head">
-          <span class="tier-no t0">0</span>
-          <div><h3>Tier 0 · Infrastructure prerequisites</h3><p>Prerequisite of every other tier</p></div>
-          <div class="tier-meta"><span>RTO <b>5 min</b></span><span>RPO <b>0</b></span><span class="t-prio">P0</span><span class="t-ok">7/7 ✓</span></div>
-        </div>
-        <div class="nodes">
-          <span class="node up">PostgreSQL 18 (CNPG)</span><span class="node up">Apache Kafka</span><span class="node up">Keycloak (IAM)</span>
-          <span class="node up">OpenBao</span><span class="node up">Valkey (Redis)</span><span class="node up">Apicurio Registry</span><span class="node up">Temporal</span>
-        </div>
-      </div>
-
-      <div class="tier">
-        <div class="tier-head">
-          <span class="tier-no t1">1</span>
-          <div><h3>Tier 1 · Core ledger &amp; identity</h3><p>CNB §4 accounts · DORA Art.17 audit online during incident</p></div>
-          <div class="tier-meta"><span>RTO <b>15 min</b></span><span>RPO <b>&lt;1 min</b></span><span class="t-prio">P1</span><span class="t-ok">5/5 ✓</span></div>
-        </div>
-        <div class="nodes">
-          <span class="node up">Account Service</span><span class="node up">Ledger Service</span><span class="node up">Transaction Service</span>
-          <span class="node up">Party Service</span><span class="node up">Audit Service</span>
-        </div>
-      </div>
-
-      <div class="tier">
-        <div class="tier-head">
-          <span class="tier-no t2">2</span>
-          <div><h3>Tier 2 · Compliance gate</h3><p>5AMLD Art.18 · payments must not run without AML/sanctions</p></div>
-          <div class="tier-meta"><span>RTO <b>20 min</b></span><span>RPO <b>&lt;5 min</b></span><span class="t-prio">P1</span><span class="t-ok">5/6 ✓</span></div>
-        </div>
-        <div class="nodes">
-          <span class="node up">Sanctions Service</span><span class="node up">AML Service</span><span class="node up">KYC Service</span>
-          <span class="node up">Consent Service</span><span class="node up">VoP Service</span><span class="node unknown">Case Mgmt</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 4 · AI GOVERNANCE ============ -->
-  <section class="section pf-section" id="aiops">
-    <div class="section-head reveal">
-      <span class="kicker">AIOps · AI governance</span>
-      <h2>AI under the same gates as humans.</h2>
-      <p class="sub">ADR-0031 · Accepted, deployed. Agents propose; governance disposes. An agent never holds more privilege than a human. It holds less. A customer-facing LLM copilot is live in the sandbox, bearer-auth + rate-limited at the ingress.</p>
-    </div>
-
-    <div class="ai-posture reveal">
-      <div class="ai-stat"><b>3/5</b><span>Phase</span><small>policy enforced · deny-by-default</small></div>
-      <div class="ai-stat"><b>Enforce</b><span>Enforcement</span><small>OPA enforce mode on the edge</small></div>
-      <div class="ai-stat"><b>8</b><span>Agents in fleet</span><small>finops · devops · governance · release · docs · copilot</small></div>
-      <div class="ai-stat"><b>4/9</b><span>Roadmap D1-D9</span><small>3 partial · 2 planned</small></div>
-    </div>
-
-    <div class="ai-tiers reveal">
-      <div class="ai-tier read">
-        <h4>read <span>read-only · PII masked</span></h4>
-        <div class="chips">
-          <span class="chip g">query.ledger.readonly</span><span class="chip g">read.catalog</span>
-          <span class="chip g">read.logs</span><span class="chip g">read.governance</span><span class="chip g">copilot.inference</span>
-        </div>
-      </div>
-      <div class="ai-tier prop">
-        <h4>write_proposal <span>proposal only</span></h4>
-        <div class="chips">
-          <span class="chip a">draft.ticket</span><span class="chip a">gh.pr.open</span><span class="chip a">draft.adr</span>
-          <span class="chip a">git.branch</span><span class="chip a">git.commit.signed</span><span class="chip a">run.skill</span>
-        </div>
-      </div>
-      <div class="ai-tier deny">
-        <h4>deny <span>forbidden for all agents</span></h4>
-        <div class="chips">
-          <span class="chip r">money.transfer</span><span class="chip r">money.post.ledger</span>
-          <span class="chip r">gh.pr.merge</span><span class="chip r">gh.pr.approve</span><span class="chip r">secrets.read.raw</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ 5 · CLOUD ARCHITECTURE ============ -->
-  <section class="section pf-section" id="cloud">
-    <div class="section-head reveal">
-      <span class="kicker">Cloud architecture · live status</span>
-      <h2>A live system, not an architecture diagram.</h2>
-      <p class="sub">Target state per ADR-0027 with a live health overlay from the openbank-sandbox EKS cluster. Cloud-agnostic by design: one AWS-managed layer, everything stateful runs as in-cluster OSS.</p>
-    </div>
-
-    <div class="cloud reveal">
-      <div class="cloud-layer edge">
-        <div class="cl-title">Internet / Edge <span>Kong gateway live · WAF/ModSecurity on developer portal</span></div>
-        <div class="nodes">
-          <span class="node up">Kong API gateway</span><span class="node up">WAF / ModSecurity</span>
-          <span class="node planned">Route 53</span><span class="node planned">CloudFront + Shield</span><span class="node planned">ACM (TLS certs)</span>
-        </div>
-      </div>
-
-      <div class="cloud-layer aws">
-        <div class="cl-title">AWS substrate <span>account 2651·7546·8565 · eu-north-1 · the only AWS-managed layer</span></div>
-        <div class="nodes">
-          <span class="node up">S3 · tofu state</span><span class="node up">EC2 / Mac mini CI runner</span><span class="node up">VPC · 3 AZ</span>
-          <span class="node up">EKS control plane 1.31</span><span class="node up">Bootstrap nodes (Graviton)</span><span class="node up">KMS CMK</span>
-          <span class="node up">IAM (OIDC, Karpenter)</span><span class="node up">ECR</span>
-          <span class="node planned">CloudTrail + Config</span><span class="node planned">S3 Object Lock (WORM)</span>
-        </div>
-      </div>
-
-      <div class="cloud-layer eks">
-        <div class="cl-title">EKS cluster · openbank-sandbox <span>k8s 1.31 · Karpenter Graviton/Spot autoscaling</span></div>
-        <div class="cl-sub">platform bootstrap</div>
-        <div class="nodes">
-          <span class="node up">cert-manager</span><span class="node up">Karpenter</span><span class="node up">ArgoCD</span><span class="node up">ARC runners</span>
-        </div>
-        <div class="cl-sub">stateful core <small>cnpg · messaging · iam · durable</small></div>
-        <div class="nodes">
-          <span class="node up">CloudNativePG (PG 18)</span><span class="node up">Strimzi / Kafka</span><span class="node up">Apicurio</span>
-          <span class="node up">Keycloak</span><span class="node up">Valkey / Redis</span><span class="node up">OpenBao + ESO</span><span class="node up">Temporal</span><span class="node planned">ClickHouse</span>
-        </div>
-        <div class="cl-sub">application <small>~37 backend services · edge · AI fleet</small></div>
-        <div class="nodes">
-          <span class="node up">30+ domain services</span><span class="node up">customer-edge (BFF)</span><span class="node up">admin-ui</span><span class="node up">developer-portal</span>
-          <span class="node up">pid-service (EUDI)</span><span class="node up">copilot-service (LLM)</span><span class="node up">agent-service (MCP)</span>
-          <span class="node up">Notification Service</span><span class="node up">Security Scanner</span>
-        </div>
-        <div class="cl-sub">observability <small>OTel · SLO · on-call · errors</small></div>
-        <div class="nodes">
-          <span class="node up">Prometheus</span><span class="node up">Grafana</span><span class="node up">Loki</span>
-          <span class="node up">Tempo</span><span class="node up">Pyroscope</span><span class="node up">OTel Collector</span>
-          <span class="node up">GoAlert</span><span class="node up">Pyrra (SLO)</span><span class="node up">GlitchTip</span>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- CTA -->
-  <section class="section join" id="see">
-    <div class="join-card reveal">
-      <span class="join-tag">Everything above is live</span>
-      <h2>Don't take the screenshots. Open the real thing.</h2>
-      <p>The admin portal you just scrolled through is running right now. Sign in with the demo account and click around: FinOps, BCP, AI governance, the live cloud map.</p>
-      <div class="join-cta">
-        <button class="btn btn-primary" data-open-demo type="button"><span class="play">▶</span> Open the live demo</button>
-        <a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">Read the source · Apache-2.0</a>
-        <a class="btn btn-ghost" href="index.html">Back to the vision</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="footer">
-    <div class="footer-brand">
-      <img src="assets/openbank-logo.png" alt="" />
-      <span>Open Bank <strong>Foundation</strong></span>
-    </div>
-    <p class="footer-note">An open framework for banking in the AI era. Patterns shared, not hoarded. Source: <a href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">github.com/JiRaska/open-bank-oss</a> · Apache-2.0.</p>
-    <p class="footer-fine">© <span id="year"></span> · A proposal by <a href="https://www.linkedin.com/in/jiriraska" target="_blank" rel="noopener">Jiří Raška</a>. Coverage figures reflect sandbox maturity, not a certified compliance statement.</p>
-  </footer>
-
-  <!-- DEMO MODAL (shared markup) -->
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand" href="index.html" aria-label="OpenBank home">
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt="" /></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<button class="sandbox-cta" data-open-demo type="button">Explore the sandbox ↗</button>
+</header>
+<main id="main">
+<section class="platform-hero wrap">
+<p class="eyebrow">Inside OpenBank</p>
+<h1>Follow your curiosity.<br />
+<span>All the way through.</span>
+</h1>
+<p class="lede">From the first account to the balance sheet. Explore the business areas, the contracts between them and the tools that make the bank understandable.</p>
+<div class="actions">
+<a class="btn btn-primary" href="#domains">Explore the domains ↓</a>
+<button class="btn btn-ghost" data-open-demo type="button">Open the admin demo ↗</button>
+</div>
+</section>
+<section class="section wrap" id="domains">
+<div class="section-heading">
+<p class="eyebrow">The whole picture</p>
+<h2>More than accounts<br />and payments.</h2>
+<p>Browse by business capability, then open the source. These editorial areas make the full module catalog easier to explore; they are not a count of deployed services.</p>
+</div>
+<div class="catalog-controls">
+<label for="module-search">Find an area or module</label>
+<input id="module-search" type="search" placeholder="Try treasury, cards, identity…" />
+<p id="catalog-status" role="status" aria-live="polite">
+</p>
+</div>
+<!-- CATALOG:START -->
+<p class="catalog-meta">Code snapshot: 2026-10-03 · <a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b">65f4987f30</a> · 85 repository modules · 60 OpenAPI specifications. Derived by the admin catalog generator; not live deployment or health data.</p>
+<div class="domain-grid">
+<article class="domain-group" id="core"><h3>Accounts &amp; ledger</h3><p>Account lifecycle, balances, bookkeeping and interest.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-account-service">account-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-account-service/src/main/resources/openapi.yaml" aria-label="account-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-balance-service">balance-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-balance-service/src/main/resources/openapi.yaml" aria-label="balance-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-interest-service">interest-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-interest-service/src/main/resources/openapi.yaml" aria-label="interest-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-ledger-service">ledger-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-ledger-service/src/main/resources/openapi.yaml" aria-label="ledger-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-transaction-service">transaction-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-transaction-service/src/main/resources/openapi.yaml" aria-label="transaction-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="payments"><h3>Payments &amp; settlement</h3><p>Domestic and international rails, recurring payments and settlement.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-ap2-service">ap2-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-ap2-service/src/main/resources/openapi.yaml" aria-label="ap2-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-clearing-service">clearing-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-clearing-service/src/main/resources/openapi.yaml" aria-label="clearing-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-clearing-simulator">clearing-simulator</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-clearing-simulator/src/main/resources/openapi.yaml" aria-label="clearing-simulator OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-domestic-payment">domestic-payment</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-domestic-payment/src/main/resources/openapi.yaml" aria-label="domestic-payment OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-fx-service">fx-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-fx-service/src/main/resources/openapi.yaml" aria-label="fx-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-sdd-service">sdd-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-sdd-service/src/main/resources/openapi.yaml" aria-label="sdd-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-sepa-instant">sepa-instant</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-sepa-instant/src/main/resources/openapi.yaml" aria-label="sepa-instant OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-sepa-payment">sepa-payment</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-sepa-payment/src/main/resources/openapi.yaml" aria-label="sepa-payment OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-settlement-service">settlement-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-settlement-service/src/main/resources/openapi.yaml" aria-label="settlement-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-standing-order-service">standing-order-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-standing-order-service/src/main/resources/openapi.yaml" aria-label="standing-order-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-swift-service">swift-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-swift-service/src/main/resources/openapi.yaml" aria-label="swift-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-vop-service">vop-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-vop-service/src/main/resources/openapi.yaml" aria-label="vop-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="identity"><h3>Identity &amp; onboarding</h3><p>People, companies, digital identity, delegated access and authentication.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-delegation-service">delegation-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-delegation-service/src/main/resources/openapi.yaml" aria-label="delegation-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-kyb-service">kyb-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-kyb-service/src/main/resources/openapi.yaml" aria-label="kyb-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-kyc-service">kyc-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-kyc-service/src/main/resources/openapi.yaml" aria-label="kyc-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-onboarding-service">onboarding-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-onboarding-service/src/main/resources/openapi.yaml" aria-label="onboarding-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-party-service">party-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-party-service/src/main/resources/openapi.yaml" aria-label="party-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-pid-service">pid-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-pid-service/src/main/resources/openapi.yaml" aria-label="pid-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-sca-service">sca-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-sca-service/src/main/resources/openapi.yaml" aria-label="sca-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="cards"><h3>Cards &amp; disputes</h3><p>Card lifecycle, processing and disputes.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-card-issuance-service">card-issuance-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-card-issuance-service/src/main/resources/openapi.yaml" aria-label="card-issuance-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-card-processing-service">card-processing-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-card-processing-service/src/main/resources/openapi.yaml" aria-label="card-processing-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-dispute-service">dispute-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-dispute-service/src/main/resources/openapi.yaml" aria-label="dispute-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="lending"><h3>Lending &amp; credit risk</h3><p>Lending workflows and the shared risk engine.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-lending-service">lending-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-lending-service/src/main/resources/openapi.yaml" aria-label="lending-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-lending">libs-lending</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-risk-engine">risk-engine</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-risk-engine/src/main/resources/openapi.yaml" aria-label="risk-engine OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="treasury"><h3>Treasury &amp; wealth</h3><p>Treasury and wealth-management modules.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-treasury-service">treasury-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-treasury-service/src/main/resources/openapi.yaml" aria-label="treasury-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-wealth-service">wealth-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-wealth-service/src/main/resources/openapi.yaml" aria-label="wealth-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="compliance"><h3>Financial crime &amp; audit</h3><p>Screening, fraud signals, sanctions and audit evidence.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-aml-service">aml-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-aml-service/src/main/resources/openapi.yaml" aria-label="aml-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-audit-service">audit-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-audit-service/src/main/resources/openapi.yaml" aria-label="audit-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-fraud-service">fraud-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-fraud-service/src/main/resources/openapi.yaml" aria-label="fraud-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-sanctions-service">sanctions-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-sanctions-service/src/main/resources/openapi.yaml" aria-label="sanctions-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="reporting"><h3>Regulatory reporting</h3><p>Financial reporting, credit reporting and tax reporting.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-anacredit-service">anacredit-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-anacredit-service/src/main/resources/openapi.yaml" aria-label="anacredit-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-finrep-service">finrep-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-finrep-service/src/main/resources/openapi.yaml" aria-label="finrep-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-tax-reporting-service">tax-reporting-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-tax-reporting-service/src/main/resources/openapi.yaml" aria-label="tax-reporting-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="products"><h3>Products &amp; pricing</h3><p>Product definitions, customer products and billing.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-billing-service">billing-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-billing-service/src/main/resources/openapi.yaml" aria-label="billing-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-client-product-catalog">client-product-catalog</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-product-catalog">product-catalog</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-product-catalog/src/main/resources/openapi.yaml" aria-label="product-catalog OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="engagement"><h3>Customer engagement</h3><p>Context, campaigns, incentives, loyalty and referrals.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-campaign-service">campaign-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-campaign-service/src/main/resources/openapi.yaml" aria-label="campaign-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-context-service">context-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-context-service/src/main/resources/openapi.yaml" aria-label="context-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-engagement-service">engagement-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-engagement-service/src/main/resources/openapi.yaml" aria-label="engagement-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-incentive-service">incentive-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-incentive-service/src/main/resources/openapi.yaml" aria-label="incentive-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-loyalty-service">loyalty-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-loyalty-service/src/main/resources/openapi.yaml" aria-label="loyalty-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-referral-service">referral-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-referral-service/src/main/resources/openapi.yaml" aria-label="referral-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="open-banking"><h3>Open banking</h3><p>Consent, PSD2 interfaces and third-party provider registration.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-consent-service">consent-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-consent-service/src/main/resources/openapi.yaml" aria-label="consent-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-developer-portal">developer-portal</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-psd2-service">psd2-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-psd2-service/src/main/resources/openapi.yaml" aria-label="psd2-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-tpp-registry-service">tpp-registry-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-tpp-registry-service/src/main/resources/openapi.yaml" aria-label="tpp-registry-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="communication"><h3>Communication &amp; documents</h3><p>Notifications, communication, documents and statements.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-communication-service">communication-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-communication-service/src/main/resources/openapi.yaml" aria-label="communication-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-document-renderer">document-renderer</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-document-service">document-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-document-service/src/main/resources/openapi.yaml" aria-label="document-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-notification-service">notification-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-notification-service/src/main/resources/openapi.yaml" aria-label="notification-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-statement-service">statement-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-statement-service/src/main/resources/openapi.yaml" aria-label="statement-service OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="channels"><h3>Customer &amp; operator channels</h3><p>The customer edge, admin portal and API gateway.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-admin-ui">admin-ui</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-api-gateway">api-gateway</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-customer-edge">customer-edge</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-customer-edge/src/main/resources/openapi.yaml" aria-label="customer-edge OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="operations"><h3>Operations &amp; AI</h3><p>Governed tools, specialist agents, assurance and platform operations.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-agent-service">agent-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-agent-service/src/main/resources/openapi.yaml" aria-label="agent-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-authz-policy-auditor">authz-policy-auditor</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-case-coordinator-agent">case-coordinator-agent</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-case-coordinator-agent/src/main/resources/openapi.yaml" aria-label="case-coordinator-agent OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-control-liveness-sentinel">control-liveness-sentinel</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-copilot-service">copilot-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-copilot-service/src/main/resources/openapi.yaml" aria-label="copilot-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-devops-agent">devops-agent</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-docs-truth-agent">docs-truth-agent</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-finops-agent">finops-agent</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-flaky-test-hunter">flaky-test-hunter</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-flaky-test-hunter/src/main/resources/openapi.yaml" aria-label="flaky-test-hunter OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-governance-auditor">governance-auditor</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-mcp-service">mcp-service</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-mcp-service/src/main/resources/openapi.yaml" aria-label="mcp-service OpenAPI specification">API ↗</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-release-steward">release-steward</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-security-scanner">security-scanner</a> <a class="api-link" href="https://github.com/JiRaska/open-bank-oss/blob/65f4987f305fb1f0285043b76466911229f0210b/openbank-security-scanner/src/main/resources/openapi.yaml" aria-label="security-scanner OpenAPI specification">API ↗</a></li>
+</ul></article>
+<article class="domain-group" id="analytics"><h3>Analytics &amp; simulation</h3><p>Analytical ingestion and simulation tooling.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-analytics-sink">analytics-sink</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-simulation">simulation</a></li>
+</ul></article>
+<article class="domain-group" id="shared"><h3>Shared libraries &amp; delivery</h3><p>Shared code, contracts, infrastructure and other supporting modules.</p><ul class="module-list">
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-contracts">contracts</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-infra">infra</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs">libs</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-benchmarks">libs-benchmarks</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-detekt-rules">libs-detekt-rules</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-domain">libs-domain</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-iso20022">libs-iso20022</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-runtime">libs-runtime</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-temporal">libs-temporal</a></li>
+<li><a href="https://github.com/JiRaska/open-bank-oss/tree/65f4987f305fb1f0285043b76466911229f0210b/openbank-libs-testing">libs-testing</a></li>
+</ul></article>
+</div>
+<!-- CATALOG:END -->
+<p class="fine">No match? <a href="https://admin.open-bank.tech/services">Open the service catalog ↗</a> or <a href="https://github.com/JiRaska/open-bank-oss">browse the repository ↗</a>.</p>
+</section>
+<section class="section wrap" id="aiops">
+<div class="section-heading split">
+<div>
+<p class="eyebrow">Governed collaboration</p>
+<h2>A shared case.<br />An accountable human.</h2>
+</div>
+<p>Explore the Agent Control Room and the tools behind each role. Charters describe permissions; they do not prove that an agent is currently running.</p>
+</div>
+<figure class="portal-shot">
+<a href="assets/agent-control-room.webp" aria-label="Enlarge the Agent Control Room screenshot">
+<img src="assets/agent-control-room.webp" width="1600" height="1000" loading="lazy" alt="Recorded Agent Control Room view from the OpenBank presentation, showing roles and the agent collaboration flow." />
+</a>
+<figcaption>Actual admin portal capture from the supplied presentation · recorded demo view, not live telemetry.</figcaption>
+</figure>
+<a class="btn btn-primary" href="https://admin.open-bank.tech/iaops">Explore the agent control room ↗</a>
+</section>
+<section class="evidence-band">
+<div class="wrap section">
+<div class="section-heading">
+<p class="eyebrow">Evidence, at the source</p>
+<h2>A claim should<br />come with a way in.</h2>
+<p>Open the corresponding portal surface for current evidence. This public page does not measure live health, cost, recovery performance or regulatory coverage.</p>
+</div>
+<div class="evidence-grid">
+<article id="governance">
+<span class="index">01 / GOVERNANCE</span>
+<h3>Controls you can inspect.</h3>
+<p>Read the rules, architecture decisions and control mapping. Mapping a regulation is not a certification.</p>
+<a href="https://admin.open-bank.tech/docs/compliance">Open compliance ↗</a>
+</article>
+<article id="finops">
+<span class="index">02 / FINOPS</span>
+<h3>Understand the cost.</h3>
+<p>Explore how infrastructure cost is allocated to services and business flows, with evidence in the portal.</p>
+<a href="https://admin.open-bank.tech/finops">Open FinOps ↗</a>
+</article>
+<article id="bcp">
+<span class="index">03 / CONTINUITY</span>
+<h3>Know the recovery plan.</h3>
+<p>Inspect recovery tiers and declared objectives. Targets and measured outcomes are different things.</p>
+<a href="https://admin.open-bank.tech/docs/bcp">Open continuity ↗</a>
+</article>
+<article id="cloud">
+<span class="index">04 / ARCHITECTURE</span>
+<h3>See the connections.</h3>
+<p>Follow the service map, infrastructure and data lineage in the actual admin interface.</p>
+<a href="https://admin.open-bank.tech/docs/service-map">Open the service map ↗</a>
+</article>
+</div>
+<p class="fine">Portal links require sign-in. <button class="inline-button" data-open-demo type="button">Show the existing demo access instructions.</button>
+</p>
+</div>
+</section>
+<section class="section wrap">
+<div class="section-heading">
+<p class="eyebrow">An honest reference implementation</p>
+<h2>Explore what’s here.<br />Know what’s next.</h2>
+</div>
+<div class="entry-grid">
+<article class="entry">
+<h3>Public sandbox</h3>
+<p>Use demo data. Availability and data may change; the sandbox is not a banking service.</p>
+</article>
+<article class="entry">
+<h3>External connections</h3>
+<p>A rail implementation or simulator does not mean a live interbank network connection.</p>
+</article>
+<article class="entry">
+<h3>Work in the open</h3>
+<p>Follow the roadmap and issues for implementation status and remaining work.</p>
+<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/ROADMAP.md">Read the roadmap ↗</a>
+</article>
+</div>
+</section>
+</main>
+<footer class="footer wrap">
+<a class="brand" href="index.html">
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<div>
+<p>An open banking reference implementation. Built to be explored.</p>
+<p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
+<p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a>
+</p>
+<p class="fine">© <span id="year">
+</span> OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a>
+</p>
+</div>
+</footer>    <!-- DEMO MODAL -->
   <dialog id="demo-modal" class="modal" aria-labelledby="demo-title">
     <div class="modal-card">
       <button class="modal-close" data-close-demo aria-label="Close">&times;</button>
       <span class="modal-tag"><span class="live-dot"></span> Live demo · read-only sandbox</span>
       <h3 id="demo-title">Open Bank admin portal</h3>
       <p class="modal-lede">A running instance of the admin console: service catalog, governance dashboards and the platform's control surfaces. Sign in with the shared demo account.</p>
+
       <div class="cred">
-        <div class="cred-row"><span class="cred-label">Portal</span><code>admin.open-bank.tech</code><button class="copy" data-copy="https://admin.open-bank.tech" aria-label="Copy URL">Copy</button></div>
-        <div class="cred-row"><span class="cred-label">User</span><code>demo@openbank.local</code><button class="copy" data-copy="demo@openbank.local" aria-label="Copy username">Copy</button></div>
-        <div class="cred-row"><span class="cred-label">Password</span><code>OpenBank+</code><button class="copy" data-copy="OpenBank+" aria-label="Copy password">Copy</button></div>
+        <div class="cred-row">
+          <span class="cred-label">Portal</span>
+          <code>admin.open-bank.tech</code>
+          <button class="copy" data-copy="https://admin.open-bank.tech" aria-label="Copy URL">Copy</button>
+        </div>
+        <div class="cred-row">
+          <span class="cred-label">User</span>
+          <code>demo@openbank.local</code>
+          <button class="copy" data-copy="demo@openbank.local" aria-label="Copy username">Copy</button>
+        </div>
+        <div class="cred-row">
+          <span class="cred-label">Password</span>
+          <code>OpenBank+</code>
+          <button class="copy" data-copy="OpenBank+" aria-label="Copy password">Copy</button>
+        </div>
       </div>
+
       <a class="btn btn-primary modal-go" href="https://admin.open-bank.tech" target="_blank" rel="noopener">Open admin portal &rarr;</a>
       <p class="modal-fine">Demo data only. Please don't enter real personal or payment information.</p>
     </div>
   </dialog>
 
-  <script src="main.js"></script>
-  <script src="platform.js"></script>
+  <!-- TESTFLIGHT MODAL -->
+  <dialog id="tf-modal" class="modal" aria-labelledby="tf-title">
+    <div class="modal-card">
+      <button class="modal-close" data-close-tf aria-label="Close">&times;</button>
+      <span class="modal-tag"><span class="live-dot"></span> iOS TestFlight beta · volunteers</span>
+      <h3 id="tf-title">Join the mobile app beta</h3>
+      <p class="modal-lede">Test the OpenBank customer app on your iPhone through Apple TestFlight. The form below asks only for the Apple ID email your TestFlight uses, plus your consent to send the invite.</p>
+
+      <div class="tf-collect" id="tf-privacy">
+        <h4>What we collect, and nothing else</h4>
+        <p>Just two things: your <b>Apple ID email</b>, which Apple needs to send you a TestFlight invite, and <b>your explicit consent</b> via a checkbox you have to tick, which is the lawful basis (GDPR Art.6(1)(a)).</p>
+        <p class="tf-fine">No name, no phone, no card, no device data, no analytics or tracking cookies. The email is stored only to send the invite, never shared, and deleted when the beta closes or you ask (just write to <a href="mailto:hello@open-bank.tech?subject=OpenBank%20beta%3A%20delete%20my%20email">hello@open-bank.tech</a>). The sandbox holds no real banking data. See the platform's regulatory coverage on the <a href="platform.html#governance">Platform page</a>.</p>
+      </div>
+
+      <button class="btn btn-primary modal-go" data-close-tf type="button">Got it, back to the form</button>
+      <p class="modal-fine">Submissions handled by Web3Forms (GDPR-compliant), with spam protection on. No tracking cookies.</p>
+    </div>
+  </dialog>
+
+<script src="main.js">
+</script>
+<script src="catalog.js">
+</script>
 </body>
 </html>
