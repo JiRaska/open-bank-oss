@@ -86,6 +86,17 @@ is the **authentication assurance gate** for payments and consent — defeating 
   before any binary rollback, and a rollback after the first revocation is unsafe (older binaries
   ignore `revoked_at`) — recover forward. Runbooks: `docs/runbooks/sca-lifecycle-conflicts.md`,
   `sca-durable-decisions.md`, `sca-device-revocation.md`.
+  **Retention (STRIDE-I).** The durable evidence row keeps the exact signed payload, which for a
+  payment embeds amount and creditor IBAN, so moving decisions out of a TTL store would otherwise
+  have made that disclosure surface unbounded in time. It is now bounded: `openbank.sca.decision-retention-days`
+  (default 1826 days, the AMLD Art. 40 record-keeping period for transaction evidence) and a daily
+  `DecisionEvidencePurgeScheduler` (`suspend` `@Scheduled`, batched oldest-first by
+  `idx_sca_device_decisions_decided_at`, liveness `sca-decision-evidence-purge`, counter
+  `openbank.sca.decision.evidence.purged`) deletes rows decided before the cutoff; the challenge
+  row is untouched. Residual: the `SCA_DEVICE_DECIDED` copy of the same payload in `sca_outbox`
+  is not covered by this purge — sca-service does not call the shared outbox `purgeSent` today, so
+  SENT outbox rows remain unbounded until outbox retention is wired; the audit store's copy follows
+  audit-service retention.
 - **2026-09-26** — Challenge initiation binds its Idempotency-Key to a request fingerprint
   (#10916, #10946). The key is reserved atomically before a challenge is minted. Same key + same
   body still replays; same key + different body is now 409 `IDEMPOTENCY_KEY_REUSED` instead of a

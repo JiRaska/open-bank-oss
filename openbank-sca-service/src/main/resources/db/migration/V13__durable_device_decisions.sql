@@ -1,7 +1,7 @@
 -- SPDX-License-Identifier: Apache-2.0
 -- Rollback: retain the table and signature evidence. Pause initiation and drain all unexpired
 -- challenges before replacing every writer with an older binary; Redis has no copy of these decisions.
--- Retain signature evidence after authorization expiry. No automatic deletion policy is implied.
+-- Retain signature evidence after authorization expiry, until the configured retention period ends.
 -- Rollout/rollback require draining unexpired challenges before switching decision stores.
 CREATE TABLE sca_device_decisions (
     challenge_id UUID PRIMARY KEY REFERENCES sca_challenges(id),
@@ -16,3 +16,7 @@ CREATE TABLE sca_device_decisions (
     deciding_party_id UUID,
     CHECK (expires_at > decided_at)
 );
+
+-- Retention purge predicate (decided_at < now() - retention), oldest first in bounded batches.
+-- Evidence is deleted only by DecisionEvidencePurgeScheduler after openbank.sca.decision-retention-days.
+CREATE INDEX idx_sca_device_decisions_decided_at ON sca_device_decisions (decided_at);

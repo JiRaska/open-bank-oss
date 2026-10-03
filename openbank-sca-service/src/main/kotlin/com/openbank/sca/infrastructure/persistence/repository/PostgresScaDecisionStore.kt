@@ -5,6 +5,7 @@ package com.openbank.sca.infrastructure.persistence.repository
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.sca.application.port.out.ScaDecisionEvidencePurge
 import com.openbank.sca.application.port.out.ScaDecisionStore
 import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.ScaStatus
@@ -32,6 +33,7 @@ class PostgresScaDecisionStore(
     private val objectMapper: ObjectMapper,
     private val clock: Clock,
 ) : ScaDecisionStore,
+    ScaDecisionEvidencePurge,
     PanacheRepository<ScaDeviceDecisionEntity> {
     override suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean {
         require(ttlSeconds > 0) { "Decision TTL must be positive" }
@@ -69,6 +71,26 @@ class PostgresScaDecisionStore(
         find("challengeId = ?1 and expiresAt > ?2", challengeId, OffsetDateTime.now(clock))
             .firstResult<ScaDeviceDecisionEntity>()
     }.awaitSuspending()?.toDomain()
+
+    /**
+     * Two statements in one transaction: pick the oldest [batchSize] ids past retention, then delete
+     * exactly those. HQL has no LIMIT on DELETE, and bounding the batch is what keeps one run from
+     * holding a long lock on the table. `idx_sca_device_decisions_decided_at` (V13) serves both.
+     */
+    override suspend fun purgeDecidedBefore(cutoff: OffsetDateTime, batchSize: Int): Int {
+        require(batchSize > 0) { "Purge batch size must be positive" }
+        return Panache.withTransaction {
+            find("decidedAt < ?1 order by decidedAt", cutoff).page<ScaDeviceDecisionEntity>(0, batchSize)
+                .list<ScaDeviceDecisionEntity>()
+                .flatMap { rows: List<ScaDeviceDecisionEntity> ->
+                    if (rows.isEmpty()) {
+                        Uni.createFrom().item(0L)
+                    } else {
+                        delete("challengeId in ?1", rows.map { it.challengeId })
+                    }
+                }
+        }.awaitSuspending().toInt()
+    }
 
     private fun acceptFirst(
         challenge: ScaChallengeEntity,

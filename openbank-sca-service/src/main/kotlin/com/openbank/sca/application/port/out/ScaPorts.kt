@@ -9,6 +9,7 @@ import com.openbank.sca.domain.model.DeviceApprovalDecision
 import com.openbank.sca.domain.model.EnrolledDevice
 import com.openbank.sca.domain.model.ScaChallenge
 import com.openbank.sca.domain.model.SignatureAlgorithm
+import java.time.OffsetDateTime
 import java.util.UUID
 
 /** Outbound persistence port for the SCA challenge aggregate. */
@@ -89,6 +90,20 @@ interface ScaDecisionStore {
     suspend fun record(decision: DeviceApprovalDecision, ttlSeconds: Long): Boolean
 
     suspend fun find(challengeId: UUID): DeviceApprovalDecision?
+}
+
+/**
+ * Deletes signed device-decision evidence that has outlived its retention period. Separate from
+ * [ScaDecisionStore] so the ceremony path cannot reach a delete, and so a retention change never
+ * touches the decision contract.
+ */
+interface ScaDecisionEvidencePurge {
+
+    /**
+     * Delete at most [batchSize] decision rows decided strictly before [cutoff], oldest first, and
+     * return how many were deleted. Idempotent: a row already gone is simply not counted.
+     */
+    suspend fun purgeDecidedBefore(cutoff: OffsetDateTime, batchSize: Int): Int
 }
 
 /**
