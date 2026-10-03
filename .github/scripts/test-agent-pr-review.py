@@ -69,6 +69,41 @@ class ReviewTests(unittest.TestCase):
             with self.assertRaises(guard.Undetermined):
                 guard.human_review_allows(1, ['.github/scripts/example.py'], {})
 
+    def test_owner_decision_is_bound_to_pr_head_and_identity(self):
+        def comment(i, command, login='JiRaska', sha=SHA, number=11585, when='2026-10-03T12:00:00Z'):
+            return dict(id=i, user=dict(login=login, type='User'),
+                        body=f'/agent-pr {command} {number} {sha}', created_at=when)
+        approve = comment(1, 'approve')
+        self.assertTrue(guard.owner_decision_allows([approve], 'JiRaska', 11585, SHA,
+                                                    '2026-10-03T11:00:00Z'))
+        for altered in (comment(1, 'approve', login='other'),
+                        comment(1, 'approve', sha='b' * 40),
+                        comment(1, 'approve', number=11586),
+                        comment(1, 'approve', when='2026-10-03T10:00:00Z')):
+            self.assertFalse(guard.owner_decision_allows([altered], 'JiRaska', 11585, SHA,
+                                                         '2026-10-03T11:00:00Z'))
+        self.assertFalse(guard.owner_decision_allows([approve, comment(2, 'revoke')],
+                                                     'JiRaska', 11585, SHA, '2026-10-03T11:00:00Z'))
+        self.assertTrue(guard.owner_decision_allows([approve, comment(2, 'revoke'),
+                                                     comment(3, 'approve')],
+                                                    'JiRaska', 11585, SHA, '2026-10-03T11:00:00Z'))
+
+    def test_owner_route_cannot_approve_its_own_code(self):
+        for path in guard.REVIEW_POLICY_PATHS:
+            self.assertFalse(guard.owner_approval_allows(11856, [path]))
+
+    def test_owner_route_checks_live_head_again(self):
+        pr = dict(head=dict(sha=SHA), state='open', draft=False)
+        comment = dict(id=1, user=dict(login='JiRaska', type='User'),
+                       body=f'/agent-pr approve 11585 {SHA}',
+                       created_at='2026-10-03T12:00:00Z')
+        responses = [pr, dict(owner=dict(login='JiRaska')),
+                     dict(commit=dict(committer=dict(date='2026-10-03T11:00:00Z'))),
+                     [[comment]], dict(pr, head=dict(sha='b' * 40))]
+        with patch.dict(guard.os.environ, {}, clear=True), patch.object(guard, '_gh', side_effect=responses):
+            with self.assertRaises(guard.Undetermined):
+                guard.owner_approval_allows(11585, ['.github/scripts/example.py'])
+
 
 if __name__ == '__main__':
     unittest.main()
