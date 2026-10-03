@@ -8,6 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [architecture, ledger, accounting-close, ai-agents]
 summary: "openbank-treasury-service owns the bank's own deals: a deal lifecycle with four-eyes booking, GL posting through the ledger API, nostro reconciliation and ČNB minimum reserves; AI agents draft tickets and never book."
+followup: "#11107 — product-limit check at approval (D4), repo and FX forward deals, Temporal EOD workflow, live ČNB/ECB curve feeds"
 followup: "#10872, #10877, #10992, #10995, #11006, #11036, #11041, #11052, #11087 — the first five merged (deal MVP with four-eyes booking, GL posting, ČNB facility as HQLA, daily accrual, senior limit-override); #11036 (limit utilisation), #11041 (FX spot), #11052 (nostro reconciliation via camt.053) and #11087 (ČNB lombard facility) are still open, tracked on #10896"
 ---
 

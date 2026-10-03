@@ -4,6 +4,7 @@
 
 package com.openbank.clearing.domain.model
 
+import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -67,15 +68,19 @@ data class SettlementPosition(
     val createdAt: OffsetDateTime,
 )
 
-data class SubmitPaymentRequest(
+/**
+ * A payment entering clearing, after the inbound boundary validated it (#11604): [amount] is a
+ * kernel [Money], so its scale already fits the currency's minor unit and the currency is an
+ * ISO 4217 code with one. The REST body is `SubmitPaymentRequest` in the REST adapter.
+ */
+data class SubmitPaymentCommand(
     val paymentId: UUID,
     val paymentReference: String,
     val debtorIban: String,
     val creditorIban: String,
     val debtorBic: String? = null,
     val creditorBic: String? = null,
-    val amount: BigDecimal,
-    val currency: String = "EUR",
+    val amount: Money,
     val rail: PaymentRail = PaymentRail.SEPA_SCT,
     val valueDate: LocalDate? = null,
     val endToEndId: String? = null,

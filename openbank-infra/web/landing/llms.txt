@@ -1,7 +1,7 @@
 # OpenBank
 > An early-stage, open-source banking ecosystem and reference implementation, not a licensed bank or production service.
 
-OpenBank connects banking domains, shared libraries, Product Studio, test evidence, observability, customer and business relationships, a customer app and governed AI tooling. The public sandbox uses demo data. The code and its documented limits are the source of truth; a repository module list is not a live deployment report.
+OpenBank connects banking domains, shared libraries, Product Studio, test evidence, observability, customer and business relationships, a customer app and governed AI tooling. Bank as Code means a service reports its API contract, version and health at runtime. Documentation as Code keeps service-owned docs with releases and generates decision indexes and runbooks from source. Compliance as Code ties per-service governance declarations to checks against the code where verification is possible. The public sandbox uses demo data. The code and its documented limits are the source of truth; a repository module list is not a live deployment report.
 
 ## Start here
 - [Overview](https://open-bank.tech/): Customer experience, connected ecosystem, Product Studio, AI/MCP overview and iOS TestFlight signup.
@@ -14,6 +14,9 @@ OpenBank connects banking domains, shared libraries, Product Studio, test eviden
 
 ## How to describe the project accurately
 - Bank ecosystem: Domains cover identity, products, accounts, payments, risk and operations. Shared openbank-libs rules, tests and runtime observability are intended to make behavior traceable across the platform.
+- Bank as Code: Services expose OpenAPI, version and health endpoints. The public catalog is a build-time snapshot, while runtime endpoints show deployed state.
+- Documentation as Code: Service-owned docs are bundled with releases and exposed by participating services. ADRs have a machine-readable registry and generated index; runbooks derive from governance and GitOps sources, with CI drift checks.
+- Compliance as Code: Each service declares ownership, lineage and retention in governance metadata. CI cross-checks claims that can be derived from code; other claims remain explicitly declared rather than automatically proved. This supports audit traceability, not a blanket compliance certification.
 - Relationship view: Customer 360 is shipped; person-to-company links are partial and a broader wealth composition is planned. Do not describe a complete holistic view as already available.
 - Customer experience: The app and sandbox demonstrate banking products and services. Screenshots are recorded views, not live account data.
 - Product Studio: Operators can author and review versioned offers. Catalog policy and human maker-checker control publication; AI can propose or explain, not set terms.

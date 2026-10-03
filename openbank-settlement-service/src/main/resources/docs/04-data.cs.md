@@ -85,7 +85,13 @@ sequenceDiagram
   S-->>C: 200 APPROVED
   M->>S: POST /api/v1/settlements with X-Approval-Id
   S-->>M: 201 settlement (approval EXECUTED, single use)
+  M->>S: GET /api/v1/settlements/{id}
+  S-->>M: 200 uložený stav (jen čtení, no-store)
 ```
+
+### Dotaz na stav settlementu
+
+`GET /api/v1/settlements/{id}` vrací uložený settlement pro rekonciliaci a nikdy nespouští, neobnovuje ani neopakuje workflow. Používá stejný slovník stavů v1 jako založení: dokončení potvrzuje jen `BOOKED` a nejistý pohyb zůstatku se čte jako `PENDING` s `recoveryRequired=true` (`recoveryReason=BALANCE_STATE_UNKNOWN`). `amount` je přesný desetinný text a odpověď má `Cache-Control: no-store`. Přístup mají `ROLE_OPERATOR`/`ROLE_ADMIN` s OPA akcí `settlement.read` (sdílené `operator-read-any`); každý `service-account-*` principal resource odmítne s 403. Chybný identifikátor je 400, neznámý 404 a 404 nedokazuje, že založení, které vypršelo, nemělo účinek. Použijte identifikátor převodu z odpovědi na založení, ne `approvalId`. Admin UI ho zpřístupňuje na `/settlements` (`settlements:view`).
 
 ## PII polia (GDPR)
 

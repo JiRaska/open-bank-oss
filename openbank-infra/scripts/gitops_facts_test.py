@@ -112,6 +112,36 @@ class GitopsFactsTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.mod.money_path_services(self.root)
 
+    # -- frozen_tree: a batch reads the tree once, a library call never caches --
+    def _workload(self, name):
+        comp = self.root / "gitops" / "components" / name
+        comp.mkdir(parents=True)
+        (comp / f"{name}.yaml").write_text(
+            f"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {name}-service\n"
+            f"  namespace: {name}-ns\nspec:\n  template:\n    spec:\n      containers:\n"
+            f"        - image: openbank-{name}-service:1\n"
+        )
+
+    def test_outside_frozen_tree_a_new_manifest_is_seen(self):
+        """The collector's own tests write a workload and ask again; caching here broke them."""
+        gitops = self.root / "gitops"
+        self._workload("alpha")
+        self.assertIsNone(self.mod.service_namespace("beta", gitops))
+        self._workload("beta")
+        self.assertEqual(self.mod.service_namespace("beta", gitops), "beta-ns")
+
+    def test_inside_frozen_tree_the_tree_is_read_once(self):
+        """The snapshot is the whole point (service-runbook-drift went 48s -> 4s); if a write made
+        mid-block were visible, the tree would still be re-read on every call."""
+        gitops = self.root / "gitops"
+        self._workload("alpha")
+        with self.mod.frozen_tree():
+            self.assertEqual(self.mod.service_namespace("alpha", gitops), "alpha-ns")
+            self._workload("beta")
+            self.assertIsNone(self.mod.service_namespace("beta", gitops))
+            self.assertEqual(self.mod.workload_name("alpha", gitops), "alpha-service")
+        self.assertEqual(self.mod.service_namespace("beta", gitops), "beta-ns")
+
     # -- the live repo: the two sets must not diverge ----------------------
     def test_the_live_money_path_set_is_reachable_and_non_trivial(self):
         """Guards the wiring end to end: a regex that stops matching rules.yaml's real formatting

@@ -1,7 +1,7 @@
 openapi: "3.0.3"
 info:
   title: OpenBank Settlement Service
-  version: "1.8.0"
+  version: "1.9.0"
   description: "Settlement orchestration service (ADR-0101 P3)"
 paths:
   /api/v1/settlements:
@@ -52,6 +52,40 @@ paths:
             Not authorized. Requires SERVICE/OPERATOR/ADMIN (RBAC) and an allow decision
             from the fine-grained `settlement.create` OPA policy, enforced as of
             ADR-0034 Phase 5 (issue #266).
+  /api/v1/settlements/{id}:
+    get:
+      tags: [Settlements]
+      summary: Read a settlement's persisted status
+      operationId: getSettlement
+      description: >-
+        Returns the stored settlement for operator reconciliation. Reading never starts, resumes
+        or retries the settlement workflow. Only BOOKED confirms completion; PENDING with
+        recoveryRequired=true means a balance movement may have committed and needs reconciliation.
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: Persisted settlement state. Not cacheable.
+          headers:
+            Cache-Control:
+              schema: { type: string, enum: [no-store] }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SettlementResponse"
+        "400":
+          description: The id is not a canonical UUID.
+        "401":
+          description: Unauthenticated.
+        "403":
+          description: >-
+            Not authorized. Requires a human OPERATOR or ADMIN (RBAC) and an allow decision for the
+            `settlement.read` OPA action; service-account identities are refused.
+        "404":
+          description: No settlement with this id.
   /api/v1/settlements/approvals:
     get:
       tags: [Settlement Approvals]

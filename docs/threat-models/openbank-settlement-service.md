@@ -317,6 +317,21 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-10-03** — **Read-only settlement status query (#10041).** `GET /api/v1/settlements/{id}`
+  returns the persisted settlement (stable v1 status vocabulary, `recoveryRequired` for an
+  uncertain balance movement, amount as exact decimal text) with `Cache-Control: no-store`. It
+  calls only the repository lookup and never starts, resumes or retries a workflow. **STRIDE-E/I:**
+  `@RolesAllowed(OPERATOR, ADMIN)` plus OPA `settlement.read`, which the shared `operator-read-any`
+  reason already grants to a HUMAN operator or admin, so no settlement rego changed. That reason
+  also admits a `service-account-*` principal holding ROLE_OPERATOR (verified by `opa eval` against
+  the deployed bundle), and an extra allow rule cannot narrow it, so the resource refuses any
+  `service-account-*` principal itself with 403 (`SettlementStatusQueryIT`, falsified by disabling
+  the check). A malformed or non-canonical id is 400, an unknown one 404; neither confirms a
+  timed-out origination had no effect. The admin-ui BFF (`settlements:view` = OPERATOR, ADMIN)
+  forwards only the session bearer, validates identity and shape, suppresses upstream error bodies
+  and sets `no-store`. Residual risk: settlement and account UUIDs are disclosed to operators who
+  can already read accounts.
+
 - **2026-10-03** — **Durable operator approvals for settlement origination (#10041 slice 10).**
   `settlement.create` joins rules.yaml `four_eyes.actions`; with `AUTHZ_FOUR_EYES_ENFORCE=true`
   (default false, fleet convention) an operator's `POST /api/v1/settlements` is parked with 202 and

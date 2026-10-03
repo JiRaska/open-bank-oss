@@ -12,7 +12,8 @@ import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
@@ -43,15 +44,14 @@ class ClearingServiceTest {
 
     @Test
     fun `submit saves clearing item with pending status`() {
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
             debtorBic = "DEUTDEFF",
             creditorBic = "COBADEFF",
-            amount = BigDecimal("125.50"),
-            currency = "EUR",
+            amount = Money.of("125.50", "EUR"),
             valueDate = LocalDate.of(2026, 1, 20),
             endToEndId = "E2E-001",
             remittanceInfo = "Invoice 42",
@@ -69,8 +69,8 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.paymentReference).isEqualTo(request.paymentReference)
         assertThat(itemSlot.captured.debtorIban).isEqualTo(request.debtorIban)
         assertThat(itemSlot.captured.creditorIban).isEqualTo(request.creditorIban)
-        assertThat(itemSlot.captured.amount).isEqualByComparingTo(request.amount)
-        assertThat(itemSlot.captured.currency).isEqualTo(request.currency)
+        assertThat(itemSlot.captured.amount).isEqualTo(BigDecimal("125.50"))
+        assertThat(itemSlot.captured.currency).isEqualTo("EUR")
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
@@ -79,12 +79,12 @@ class ClearingServiceTest {
     fun `a retried submit for the same payment replays the existing clearing item`() {
         // ADR-0298 (#8351): a payment enters clearing exactly once — a retry must not stack a
         // second PENDING row that the clearing cycle would sweep into a batch and settle twice.
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
-            amount = BigDecimal("125.50"),
+            amount = Money.of("125.50", "EUR"),
         )
         val existing = request.toExpectedItem()
 
@@ -100,12 +100,12 @@ class ClearingServiceTest {
     fun `a submit that loses the unique-index race re-reads the winner`() {
         // ADR-0298 (#8351): uq_clearing_items_payment (V9) fires on a true-concurrency race; the
         // loser replays the winner instead of erroring the caller.
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
-            amount = BigDecimal("125.50"),
+            amount = Money.of("125.50", "EUR"),
         )
         val winner = request.toExpectedItem()
         val violation = java.sql.SQLException(
@@ -312,7 +312,7 @@ class ClearingServiceTest {
         updatedAt = fixedNow,
     )
 
-    private fun SubmitPaymentRequest.toExpectedItem(): ClearingItem = ClearingItem(
+    private fun SubmitPaymentCommand.toExpectedItem(): ClearingItem = ClearingItem(
         batchId = UUID.fromString("00000000-0000-0000-0000-000000000000"),
         paymentId = paymentId,
         paymentReference = paymentReference,
@@ -320,8 +320,8 @@ class ClearingServiceTest {
         creditorIban = creditorIban,
         debtorBic = debtorBic,
         creditorBic = creditorBic,
-        amount = amount,
-        currency = currency,
+        amount = amount.amount,
+        currency = amount.currency.code,
         status = ClearingStatus.PENDING,
         valueDate = valueDate,
         endToEndId = endToEndId,
