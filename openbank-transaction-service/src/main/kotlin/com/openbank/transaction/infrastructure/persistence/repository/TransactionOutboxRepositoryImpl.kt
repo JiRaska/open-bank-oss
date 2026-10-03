@@ -8,6 +8,9 @@ import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxFailurePolicy
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.persistence.outbox.OutboxStatus
+import com.openbank.libs.persistence.outbox.OutboxTableShape
+import com.openbank.libs.persistence.outbox.PanacheOutboxRetention
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.transaction.application.port.out.TransactionOutboxRepository
 import com.openbank.transaction.infrastructure.persistence.entity.TransactionOutboxEntity
 import io.quarkus.hibernate.reactive.panache.Panache
@@ -23,6 +26,7 @@ import java.util.UUID
 @ApplicationScoped
 class TransactionOutboxRepositoryImpl(private val clock: Clock) :
     TransactionOutboxRepository,
+    SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("transaction_outbox")),
     PanacheRepository<TransactionOutboxEntity> {
 
     override suspend fun persistInTransaction(message: OutboxMessage) {
