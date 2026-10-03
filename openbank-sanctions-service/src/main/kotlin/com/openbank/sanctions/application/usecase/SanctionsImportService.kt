@@ -5,6 +5,7 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.xml.SecureXml
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
@@ -32,7 +33,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import javax.xml.parsers.SAXParserFactory
 
 /**
  * Downloads, parses and upserts sanctions/PEP list entries.
@@ -209,8 +209,8 @@ class SanctionsImportService(
         val inputStream = httpGetStream(url)
         val allEntries = mutableListOf<SanctionsEntry>()
 
-        val saxFactory = SAXParserFactory.newInstance().apply { isNamespaceAware = false }
-        saxFactory.newSAXParser().parse(
+        // Remote list content: parsed only through the fleet-wide hardened SAX parser.
+        SecureXml.saxParser(namespaceAware = false).parse(
             inputStream,
             object : DefaultHandler() {
                 private var inEntry = false
