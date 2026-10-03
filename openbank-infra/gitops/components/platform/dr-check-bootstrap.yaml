@@ -1,0 +1,41 @@
+# Supporting objects for the DR restore check bootstrap GeneratingPolicies
+# (components/kyverno/dr-check-generating-cel.yaml).
+#
+# 1. ESO ClusterGenerator: the random password behind the per-run read-only database
+#    role `ledger_dr_check`. Each dr-verify-<run-id> namespace gets its own
+#    ExternalSecret (refreshPolicy: CreatedOnce), so every run draws a fresh value that
+#    lives only in that namespace and dies with it. No value is in git or in OpenBao.
+#    Fields per the generators.external-secrets.io/v1alpha1 CRDs of chart 2.11.0
+#    (apps/external-secrets.yaml): Password requires allowRepeat, length and noUpper.
+apiVersion: generators.external-secrets.io/v1alpha1
+kind: ClusterGenerator
+metadata:
+  name: ledger-dr-check-db-password
+  labels:
+    app.kubernetes.io/part-of: openbank-ci
+spec:
+  kind: Password
+  generator:
+    passwordSpec:
+      length: 40
+      digits: 8
+      symbols: 0
+      noUpper: false
+      allowRepeat: true
+---
+# 2. Kyverno's background controller applies GeneratingPolicy output. The chart's core
+#    ClusterRole already covers networking.k8s.io/networkpolicies; ExternalSecrets are a
+#    CRD it does not know, so they are added by aggregation (label read by the chart's
+#    background-controller ClusterRole, kyverno chart 3.9.1). Only externalsecrets, and
+#    no Secret verbs: the Secret itself is written by ESO, never by Kyverno.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kyverno:background-controller:dr-check-externalsecrets
+  labels:
+    app.kubernetes.io/part-of: openbank-ci
+    rbac.kyverno.io/aggregate-to-background-controller: "true"
+rules:
+  - apiGroups: ["external-secrets.io"]
+    resources: ["externalsecrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

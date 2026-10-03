@@ -138,7 +138,12 @@ class TreasuryDealConsumer {
         const val OUTCOME_IGNORED = "ignored"
 
         /** Known treasury types that move nothing in the book (see the class KDoc). */
-        val IGNORED_TYPES: Set<String> = setOf("treasury.deal.confirmed.v1")
+        val IGNORED_TYPES: Set<String> = setOf(
+            "treasury.deal.confirmed.v1",
+            // ADR-0315 D7: a nostro reconciliation break passed its alert threshold. Same topic,
+            // not a deal: nothing the book models, so acked as ignored rather than malformed.
+            "treasury.nostro.break-aged.v1",
+        )
 
         /** The four state-moving types in treasury's asyncapi; anything else not ignored is malformed. */
         val STATE_BY_TYPE: Map<String, String> = mapOf(

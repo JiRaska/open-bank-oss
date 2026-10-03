@@ -156,6 +156,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                 i.ifrs9Stage,
                 loan?.method?.name,
                 loan?.periodsPerYear,
+                i.contractNumber,
             ),
         )
     }
@@ -194,6 +195,7 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
                 },
                 counterpartyRef = row.getString("counterparty_ref"),
                 ifrs9Stage = row.getString("ifrs9_stage"),
+                contractNumber = row.getString("contract_number"),
                 extension = method?.let {
                     LoanExtension(
                         method = AmortizationMethod.valueOf(it),
@@ -291,16 +293,16 @@ class PgSnapshotRepository(private val pool: Pool) : SnapshotRepository {
             "INSERT INTO snapshot_instrument (run_id, instrument_id, instrument_kind, gl_account_code, currency, " +
                 "outstanding, value_date, maturity_date, rate_type, current_annual_rate, rate_index, spread, " +
                 "reset_frequency_months, next_reset_date, counterparty_ref, ifrs9_stage, amortization_method, " +
-                "periods_per_year) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, " +
-                "$17, $18)"
+                "periods_per_year, contract_number) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, " +
+                "$13, $14, $15, $16, $17, $18, $19)"
         const val INSERT_INSTALLMENT =
             "INSERT INTO snapshot_instrument_installment (run_id, instrument_id, installment_number, due_date, " +
                 "principal, interest) VALUES ($1, $2, $3, $4, $5, $6)"
         const val SELECT_INSTRUMENTS =
             "SELECT instrument_id, instrument_kind, gl_account_code, currency, outstanding, value_date, " +
                 "maturity_date, rate_type, current_annual_rate, rate_index, spread, reset_frequency_months, " +
-                "next_reset_date, counterparty_ref, ifrs9_stage, amortization_method, periods_per_year " +
-                "FROM snapshot_instrument WHERE run_id = $1 ORDER BY instrument_id"
+                "next_reset_date, counterparty_ref, ifrs9_stage, amortization_method, periods_per_year, " +
+                "contract_number FROM snapshot_instrument WHERE run_id = $1 ORDER BY instrument_id"
         const val SELECT_INSTALLMENTS =
             "SELECT instrument_id, installment_number, due_date, principal, interest " +
                 "FROM snapshot_instrument_installment WHERE run_id = $1 ORDER BY instrument_id, installment_number"

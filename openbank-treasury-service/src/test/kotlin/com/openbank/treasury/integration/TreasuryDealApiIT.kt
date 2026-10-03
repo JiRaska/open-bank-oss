@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -22,8 +23,8 @@ import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
+import java.time.Clock
 import java.time.LocalDate
-import java.time.ZoneOffset
 import java.util.UUID
 
 /**
@@ -51,10 +52,10 @@ class TreasuryDealApiIT {
     @Inject
     lateinit var ledger: FakeLedger
 
-    // The service decides settlement/maturity eligibility off its injected Clock, which is
-    // Clock.systemUTC() (DefaultClockProducer) — derive "today" the same way, not from local time,
-    // or this drifts a day out of step with the service between local midnight and UTC midnight.
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    // The service decides trade date and settlement/maturity eligibility on the Prague bank day
+    // (AccountingClock.bank over Clock.systemUTC(), DefaultClockProducer) — derive "today" the same
+    // way, or this drifts a day out of step with the service between 22:00/23:00 UTC and midnight.
+    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun draftBody(principal: String, counterparty: String = "SIMBK-A", product: String = "MM_PLACEMENT") = """
         {"product":"$product","counterpartyId":"$counterparty","currency":"CZK",
@@ -212,6 +213,13 @@ class TreasuryDealApiIT {
             .body("find { it.counterpartyId == 'CNB' }.kind", equalTo("CENTRAL_BANK"))
         given().`when`().get("/api/v1/treasury/positions?asOf=$today").then().statusCode(200)
             .body("positions.currency", org.hamcrest.Matchers.contains("CZK", "EUR"))
+            .body("basis", equalTo("ACTUAL"))
+            .body("countedStates", org.hamcrest.Matchers.containsInAnyOrder("MATURED", "SETTLED"))
+            .body("positions.dealCount", org.hamcrest.Matchers.everyItem(org.hamcrest.Matchers.notNullValue()))
+        given().`when`().get("/api/v1/treasury/positions?asOf=${today.plusDays(30)}")
+            .then().statusCode(200)
+            .body("basis", equalTo("PROJECTED"))
+            .body("countedStates", org.hamcrest.Matchers.hasItems("BOOKED", "CONFIRMED"))
     }
 
     @Test

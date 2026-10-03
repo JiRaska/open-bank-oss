@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.client
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.out.SettlementUnavailableException
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
@@ -46,8 +47,7 @@ class SettlementAdapterTest {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob Creditor",
         creditorBic = "BNPAFRPPXXX",
-        amount = BigDecimal("12.34"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("12.34"), "EUR"),
         remittanceInfo = "Invoice 1",
         endToEndId = "E2E-0001",
         rejectReason = null,

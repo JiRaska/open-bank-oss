@@ -208,6 +208,9 @@ jobs:
           # `detachedConfiguration11` would silently stop matching.
           dependency-graph-exclude-configurations: '^(detachedConfiguration.*|classpath)$'
 
+      - name: Provision Gradle wrapper distribution
+        run: bash .github/scripts/provision-gradle-distribution.sh
+
       - name: Test unresolved dependency rejection with Gradle
         run: |
           set -euo pipefail

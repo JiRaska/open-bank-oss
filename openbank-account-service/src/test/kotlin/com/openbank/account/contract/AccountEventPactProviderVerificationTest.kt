@@ -16,6 +16,7 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.account.application.port.out.AccountRepository
+import com.openbank.account.application.port.out.BalanceQueryPort
 import com.openbank.account.application.port.out.DelegationProjectionRepository
 import com.openbank.account.domain.event.AccountCreatedEvent
 import com.openbank.account.domain.model.Account
@@ -28,6 +29,7 @@ import com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -117,6 +119,9 @@ class AccountEventPactProviderVerificationTest {
     lateinit var testPort: String
 
     @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
+    @Inject
     lateinit var accountRepository: AccountRepository
 
     @Inject
@@ -124,6 +129,10 @@ class AccountEventPactProviderVerificationTest {
 
     @Inject
     lateinit var vertx: Vertx
+
+    /** Resolves to the `@Mock` TestBalanceQueryPort, as in the git-pact twin. */
+    @Inject
+    lateinit var balancePort: BalanceQueryPort
 
     /** See the git-pact twin: Pact-JVM calls `@State` on a thread with no Vert.x context. */
     private fun runOnVertxContext(block: suspend () -> Unit) {
@@ -158,7 +167,17 @@ class AccountEventPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would answer as if signed in.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /**
@@ -235,6 +254,18 @@ class AccountEventPactProviderVerificationTest {
             ),
         )
         Unit
+    }
+
+    /** Mirror of the git-pact twin's handler (#8345) — see there for why it is two bridged blocks. */
+    @State("a CZK balance exists for the pact account")
+    fun czkBalanceExistsForPactAccount() {
+        accountOwnedByKnownParty()
+        runOnVertxContext {
+            if (balancePort.getByAccountAndCurrency(ACCOUNT_ID, "CZK") == null) {
+                balancePort.initialize(ACCOUNT_ID, "CZK", java.math.BigDecimal.ZERO)
+            }
+            Unit
+        }
     }
 
     /**

@@ -11,7 +11,6 @@ import com.openbank.balance.application.port.`in`.LedgerProjectionUseCase
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
-import org.jboss.logging.Logger
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
@@ -37,27 +36,15 @@ class LedgerProjectionConsumer(
     @ConfigProperty(name = "openbank.balance.projection.enabled", defaultValue = "false")
     private val projectionEnabled: Boolean,
 ) {
-    private val log = Logger.getLogger(LedgerProjectionConsumer::class.java)
-
     @Incoming("ledger-events-in")
     suspend fun consume(payload: String) {
         if (!projectionEnabled) return
 
-        val node: JsonNode = try {
-            objectMapper.readTree(payload)
-        } catch (e: Exception) {
-            log.errorf(e, "Unparseable ledger event, skipping: %s", payload.take(200))
-            return
-        }
+        val node: JsonNode = objectMapper.readTree(payload)
 
         if (node["eventType"]?.asText() != EVENT_TYPE) return
 
-        val change = try {
-            toChange(node)
-        } catch (e: Exception) {
-            log.errorf(e, "Malformed AccountBookedChanged, skipping: %s", payload.take(200))
-            return
-        }
+        val change = toChange(node)
 
         projection.apply(change)
     }

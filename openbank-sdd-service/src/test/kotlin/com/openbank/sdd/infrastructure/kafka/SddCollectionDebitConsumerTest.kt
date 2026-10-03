@@ -122,4 +122,15 @@ class SddCollectionDebitConsumerTest {
         assertThat(req.captured.amount.scale()).isEqualTo(2)
         assertThat(req.captured.amount).isEqualByComparingTo("2200.00")
     }
+
+    @Test
+    fun `a tie in the dropped digits rounds half-up, never half-even`(): Unit = runBlocking {
+        val req = slot<InitiateTransactionRequest>()
+        every { transactionClient.initiateTransaction(capture(req)) } returns
+            Uni.createFrom().item(Response.status(201).build())
+
+        consumer.consume(collectionAuthorisedEvent(amount = "10.125"))
+
+        assertThat(req.captured.amount).isEqualTo(java.math.BigDecimal("10.13"))
+    }
 }
