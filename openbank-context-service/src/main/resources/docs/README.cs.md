@@ -1,0 +1,7 @@
+# Context: reference KYB vlastnické historie
+
+Context odebírá vyhrazené téma `openbank.kyb.ubo-observation-references` a ukládá omezený index referencí KYB pozorování oddělený podle banky. Payload je záměrně malý: ID případu a pozorování, revize, identita události, digest zdroje a čas. Jména a detaily skutečných majitelů zůstávají v KYB. Konzument před potvrzením kontroluje téma, Kafka klíč, identifikační hlavičky a tvar payloadu; vadné zprávy odmítne do vyhrazené DLQ kanálu.
+
+`GET /api/v1/context/kyb-cases/{id}/access` dává KYB autorizační odpověď bez předání dat. `GET /api/v1/context/kyb-cases/{id}/ownership-observations` vrací pouze reference. Oba požadují roli KYC/admin, ID případu shodné s cestou, účel `KYB_OWNERSHIP_REVIEW`, aktuální oprávnění k případu a audit čtení či sdělení. Zamítnutí vrací 403 a nedostupná autorizace 503. Historické `knownAt` musí být v RFC 3339 a nejvýše aktuální čas; neobchází aktuální kontrolu oprávnění. Odpovědi nesou `Cache-Control: no-store`.
+
+Událost omezení z KYB uloží append-only záznam v `context_kyb_observation_restrictions` (Flyway V13). Historie vynechá omezené reference bez ohledu na pořadí doručení. Záznamy omezení zachovej, dokud existují původní reference: jejich odstranění by znovu odhalilo důkaz, který KYB omezilo. Context sám neopravňuje čtení detailu vlastníků u zdroje; přesný KYB endpoint znovu kontroluje aktuální přiřazení, účel, politiku a audit čtení. Smlouva API je v [`openapi.yaml`](../openapi.yaml).

@@ -78,14 +78,14 @@ including when the restriction event arrives before the recorded event. Replays 
 idempotent and conflicting references fail. This slice does not yet implement
 erasure, corrected-observation lineage, indirect ownership or the complete authority
 lens; those remain acceptance gates before full delivery.
-Flyway V9 reserves an append-only, case-scoped correction proposal and replacement
+Flyway V16 reserves an append-only, case-scoped correction proposal and replacement
 link. It enforces a changed mapped finding, matching case, different proposal and
 decision actors, and an approved proposal plus its replacement in one transaction.
-V10 adds append-only case-, principal- and purpose-scoped read audit for correction
+V17 adds append-only case-, principal- and purpose-scoped read audit for correction
 candidates. The KYB API can now propose a candidate only from a fresh register read,
 release it after a live assignment check and committed read audit, and let a different
 KYC/admin reviewer approve or reject it only after their own audited candidate read.
-V11 indexes that reviewer/candidate existence check and the read path stops at one row;
+V18 indexes that reviewer/candidate existence check and the read path stops at one row;
 it does not imply a measured 10× workload qualification.
 Approval writes the successor observation
 and the existing minimized reference event in one transaction. The observation detail
