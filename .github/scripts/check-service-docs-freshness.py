@@ -27,13 +27,20 @@ def changed_paths(repo: Path, base: str, head: str) -> dict[str, str]:
 
 def authored_docs_at_head(repo: Path, head: str) -> set[str]:
     result = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "-z", head, "--"],
+        ["git", "ls-tree", "-r", "-l", "-z", head, "--"],
         cwd=repo,
         check=True,
         capture_output=True,
         text=True,
     )
-    return set(result.stdout.split("\0"))
+    docs = set()
+    for entry in result.stdout.split("\0"):
+        if not entry:
+            continue
+        metadata, path = entry.split("\t", 1)
+        if path.endswith(".md") and int(metadata.rsplit(" ", 1)[-1]) > 0:
+            docs.add(path)
+    return docs
 
 
 def missing_updates(repo: Path, paths: dict[str, str], head_files: set[str]) -> list[str]:

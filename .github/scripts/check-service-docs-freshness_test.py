@@ -80,6 +80,12 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
         cls.git("commit", "-m", "delete only authored service documentation")
         cls.deleted_only_service_doc = cls.git("rev-parse", "HEAD")
 
+        cls.git("checkout", "-b", "empty-service-doc-pr", cls.base)
+        cls.write("openbank-alpha-service/src/main/resources/docs/README.md", "")
+        cls.git("add", "--", "openbank-alpha-service/src/main/resources/docs/README.md")
+        cls.git("commit", "-m", "empty authored service documentation")
+        cls.empty_service_doc = cls.git("rev-parse", "HEAD")
+
         cls.git("checkout", "-b", "deleted-shared-doc-with-code-pr", cls.base)
         cls.git("rm", "openbank-libs/docs/README.md")
         cls.write("openbank-libs-runtime/src/main/Shared.kt", "new shared behavior with removed docs\n")
@@ -165,6 +171,11 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
     def test_every_runnable_service_retains_authored_documentation(self):
         result = self.gate("--head", self.deleted_only_service_doc)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_empty_authored_documentation_is_not_coverage(self):
+        result = self.gate("--head", self.empty_service_doc)
         self.assertEqual(1, result.returncode)
         self.assertIn("openbank-alpha-service", result.stderr)
 
