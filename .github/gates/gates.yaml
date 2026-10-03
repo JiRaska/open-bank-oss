@@ -1321,6 +1321,32 @@ gates:
     run: |
       python3 .github/scripts/check-cnpg-update-resilience.py
 
+  # #11286: pricing-db copied an old 18.1 template after the fleet had moved to 18.6.
+  # Diff scope keeps that existing pin from reddening unrelated PRs while #11607 updates it,
+  # but any new or edited GitOps manifest with an older CNPG PostgreSQL minor is blocked.
+  - id: cnpg-postgres-minor-floor
+    name: "CNPG PostgreSQL minor floor on changed GitOps manifests (enforced)"
+    group: gitops
+    budget_seconds: 5
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    rationale: >-
+      A new CNPG Cluster copied from an old template can reintroduce an outdated
+      PostgreSQL image after the fleet has been updated. Check changed manifests,
+      including nested Helm values and DR templates, against reviewed minor floors.
+    review_after: "2027-04-01"
+    verified: >-
+      2026-10-03 -- self-test rejects 18.1, 16.14, unknown majors and non-bare
+      tags; accepts 18.6, 16.15 and unrelated images. The existing pricing 18.1
+      manifest is a negative control when named as a changed file.
+    min_subjects: 50   # 71 CNPG PostgreSQL image pins in 65 GitOps files today
+    selftest_inputs: ["openbank-infra/scripts/check-cnpg-postgres-minor-floor.py"]
+    selftest: python3 openbank-infra/scripts/check-cnpg-postgres-minor-floor.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 openbank-infra/scripts/check-cnpg-postgres-minor-floor.py --base "$PR_DIFF_BASE"
+
   # 2026-09-30 (#11608): 41 spot interruptions in 24h on the Karpenter `default` pool, and 134 of
   # 140 CNPG pods on it -- every reclaim was ~13 Postgres failovers. Owner scope: the CNPG clusters
   # behind money_path_services plus temporal-db go on-demand; everything else stays on spot. The
