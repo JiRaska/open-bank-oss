@@ -3,6 +3,13 @@ kotlin = "2.4.10"
 quarkus = "3.38.0"
 quarkus-plugin = "3.38.0"
 coroutines = "1.8.1"
+# Temporal Java SDK, one version for every worker and client in the fleet (was 1.25.1 typed into
+# 19 build files). Server is 1.31.x. The SDK's own grpc is overridden fleet-wide by
+# build-logic/openbank.dependency-vulnerability-pins (grpc-netty-shaded), so bumping this does not
+# move grpc. Breaking changes 1.26-1.40 were checked against src/main: none of the touched APIs
+# (ActivityInfo workflow fields, Update/UpdateWithStart, continue-as-new search attributes,
+# SlotSupplier, Nexus, API-key TLS) is used.
+temporal = "1.40.0"
 # 2.22.3 (Dependabot #158-#160; was 2.22.1 per #75): 2.22.0/2.22.1 carry GHSAs fixed by 2.22.2 — same
 # patch series Quarkus 3.37.2's BOM resolves jackson-databind/jackson-core to
 # (enforcedPlatform); this floors the modules that declare Jackson directly (libs-domain)
@@ -73,6 +80,9 @@ pdfbox = "3.0.3"
 bouncycastle = "1.85"
 
 [libraries]
+temporal-sdk = { module = "io.temporal:temporal-sdk", version.ref = "temporal" }
+temporal-serviceclient = { module = "io.temporal:temporal-serviceclient", version.ref = "temporal" }
+temporal-testing = { module = "io.temporal:temporal-testing", version.ref = "temporal" }
 kotlin-stdlib = { module = "org.jetbrains.kotlin:kotlin-stdlib", version.ref = "kotlin" }
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
