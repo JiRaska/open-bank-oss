@@ -40,8 +40,8 @@ import java.time.Instant
  * `AuditRepository` that wrote it asks the code under test whether it did its job. This opens its
  * own connection to the Testcontainers Postgres and selects the row.
  *
- * **What this does and does not drive.** There is no Kafka Testcontainer in this repo, so this is
- * not a literal broker round trip: it is the real CDI-managed [AgentAuditConsumer] — including its
+ * **What this drives.** This is a direct call into the real CDI-managed [AgentAuditConsumer],
+ * including its
  * ack-after-persist ordering — and the real database write. The transport itself (topic, mTLS,
  * ACLs) is manifest, verified by review of `openbank-infra/gitops/components/agent/` rather than
  * executed here. Stated plainly rather than implied by a green test.

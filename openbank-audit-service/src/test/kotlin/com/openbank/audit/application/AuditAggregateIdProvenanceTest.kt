@@ -135,12 +135,16 @@ class AuditAggregateIdProvenanceTest {
     }
 
     @Test
-    fun `a malformed eventId does not lose the audit row - it is swallowed at the consume boundary`(): Unit =
-        runBlocking {
+    fun `a malformed eventId propagates so the transport can NACK it to the dead-letter queue`(): Unit = runBlocking {
+        // Swallowing here would ACK a record that was never stored; the Kafka entry point
+        // NACKs on this exception and the configured DLQ keeps the original record.
+        val failure = runCatching {
             consumer.consume("""{"eventId":"not-a-uuid","eventType":"X","sourceService":"kyc-service"}""")
+        }.exceptionOrNull()
 
-            coVerify(exactly = 0) { repo.save(any()) }
-        }
+        assertThat(failure).isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 0) { repo.save(any()) }
+    }
 
     @Test
     fun `a PARTY_MERGED event records the retired-to-survivor edge alongside the audit row`(): Unit = runBlocking {
