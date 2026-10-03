@@ -221,3 +221,53 @@ spec:
       ports:
         - protocol: TCP
           port: 4000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: presidio-analyzer-ingress-allow-list
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+    openbank.io/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-analyzer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 3000
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: presidio-anonymizer-ingress-allow-list
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+    openbank.io/derived: gen-network-policies
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-anonymizer
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector: {}
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 3000

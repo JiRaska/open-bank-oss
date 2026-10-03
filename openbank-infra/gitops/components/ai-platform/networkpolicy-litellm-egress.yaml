@@ -47,6 +47,21 @@ spec:
       ports:
         - protocol: TCP
           port: 3000
+    # Presidio PII services (presidio.yaml), called by the gateway's presidio guardrail before
+    # every model call and before the Langfuse callback sees the request. Same namespace; port 3000
+    # on both, serving TLS from the openbank-ca ClusterIssuer (presidio-internal-tls), so the raw
+    # PII this edge exists to carry is never on the wire in plaintext. Hand-written for the same
+    # reason as the Langfuse rule above: the generator emits ingress, not the caller's egress.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-analyzer
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-anonymizer
+      ports:
+        - protocol: TCP
+          port: 3000
     # The deliberate internet hole: HTTPS to the LLM provider (DeepInfra). This is the only pod in
     # the fleet with 0.0.0.0/0:443 egress — the whole point of centralising the choke point here.
     - to:
