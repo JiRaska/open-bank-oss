@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -175,8 +175,10 @@ object PostingRules {
         val total = deal.days
         if (total <= 0L) return BigDecimal.ZERO
         val elapsed = ChronoUnit.DAYS.between(deal.valueDate, date).coerceIn(0L, total)
-        return deal.interest.multiply(BigDecimal.valueOf(elapsed))
-            .divide(BigDecimal.valueOf(total), MONEY_SCALE, RoundingMode.HALF_UP)
+        return RoundingPolicy.TREASURY_AMOUNT.divide(
+            deal.interest.multiply(BigDecimal.valueOf(elapsed)),
+            BigDecimal.valueOf(total),
+        )
     }
 
     /** The journal accruing [date]'s interest, or null when that day adds nothing. */
@@ -262,6 +264,4 @@ object PostingRules {
 
     private fun line(code: String, side: Side, amount: BigDecimal, ccy: String): PostingLine? =
         if (amount.signum() > 0) PostingLine(code, side, amount, ccy) else null
-
-    private const val MONEY_SCALE = 2
 }

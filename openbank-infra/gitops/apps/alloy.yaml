@@ -136,8 +136,21 @@ spec:
           configMap:
             content: |-
               // ---- discover every pod on this node ----
+              // NODE-SCOPED. Until 2026-10-02 this block had no selector, so every DaemonSet
+              // pod discovered every pod in the CLUSTER: one Alloy instance (on a node with 28
+              // pods) was tailing 1,503 containers, all 19 instances sent the same ~152 lines/s,
+              // and each log line reached Loki up to 19 times. That was the real source of the
+              // `too_far_behind` discards (the later copies of a line arrive behind the stream),
+              // of the 640Mi-per-pod Alloy memory, and of 19x kubelet log-API reads. The comment
+              // above said "on this node" the whole time. The field selector is evaluated by the
+              // API server, so a pod on another node is never even listed. K8S_NODE_NAME is set
+              // by the chart from spec.nodeName.
               discovery.kubernetes "pods" {
                 role = "pod"
+                selectors {
+                  role  = "pod"
+                  field = "spec.nodeName=" + sys.env("K8S_NODE_NAME")
+                }
               }
 
               // Keep useful target labels; drop the rest to keep streams cheap.

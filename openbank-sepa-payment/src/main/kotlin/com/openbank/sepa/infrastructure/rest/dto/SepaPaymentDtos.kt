@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.infrastructure.rest.dto
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
 import com.openbank.sepa.application.port.`in`.TransitionSepaPaymentStatusCommand
 import com.openbank.sepa.domain.model.SepaPayment
@@ -37,8 +38,7 @@ data class CreateSepaPaymentRequest(
         creditorIban = creditorIban,
         creditorName = creditorName,
         creditorBic = creditorBic,
-        amount = amount,
-        currency = currency,
+        amount = Money.parseInbound(amount, currency),
         remittanceInfo = remittanceInfo,
         endToEndId = endToEndId,
     )
@@ -91,7 +91,7 @@ fun SepaPayment.toResponse() = SepaPaymentResponse(
     creditorIban = creditorIban,
     creditorName = creditorName,
     creditorBic = creditorBic,
-    amount = amount,
+    amount = amount.amount,
     currency = currency,
     remittanceInfo = remittanceInfo,
     endToEndId = endToEndId,
