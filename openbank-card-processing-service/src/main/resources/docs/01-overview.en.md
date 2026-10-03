@@ -11,6 +11,8 @@
 - **Release** — a reversal from the acquirer, or expiry of an unpresented hold (default 7 days, swept every 15 minutes).
 - **Declines are recorded too** — a declined authorisation is a row and a `card.declined.v1` event carrying card-issuance's own reason name verbatim.
 - **Shadow fraud scoring** — every committed authorisation is scored by fraud-service; the verdict changes nothing (ADR-0084).
+- **Network-token mirror** (ADR-0283 phase 3) — provisions a network token for a card at a wallet/merchant requestor through `TokenisationPort`, records it, lets an operator suspend, resume or delete it, and lists a card's tokens from the network when it answers, otherwise from the local mirror with `source: LOCAL_MIRROR`.
+- **Dispute desk** (ADR-0283 phase 3) — opens a chargeback case through `DisputePort` against an authorisation that has cleared, files evidence, and refreshes the network's status. No case is recorded unless the network assigned a case id.
 - **Scheme capability ports** (ADR-0283 phase 2) — `BinLookupPort`, `MerchantDataPort`, `TokenisationPort` and `DisputePort` from `openbank-libs-domain`, each with a simulator binding. See [02 — Architecture](./02-architecture.md).
 
 ## What the service does **NOT** do
@@ -20,7 +22,8 @@
 - ❌ Does not make the approve/decline decision itself — card-issuance does.
 - ❌ Fraud scoring does not block anything (shadow only).
 - ❌ No per-category over-clearing tolerance (fuel, hospitality): any overage is refused.
-- ❌ Tokenisation (VTS / MDES) and disputes (VROL / Mastercom) are **not bound to a vendor** — those programmes are contract-only. Only the simulators answer. No REST endpoint of this service exposes tokenisation, disputes or BIN lookup yet.
+- ❌ Tokenisation (VTS / MDES) and disputes (VROL / Mastercom) are **not bound to a vendor** — those programmes are contract-only. Only the simulators answer. BIN lookup has no REST endpoint or caller in this service yet.
+- ❌ Not a token vault: no token credential, cryptogram or PAN is stored. The token table is a **mirror** of what the network said.
 
 ## Position in the domain
 
@@ -44,11 +47,19 @@ graph LR
 | Expire unpresented holds | scheduler `card-processing-hold-expiry` | `card.hold_released.v1` (`EXPIRY`) |
 | Read one authorisation | `GET /api/v1/card-authorizations/{id}` | — |
 | List a card's authorisations | `GET /api/v1/card-authorizations/card/{cardId}` | — |
+| Provision a network token | `POST /api/v1/card-tokens` | `card.token.provisioned.v1` |
+| Suspend, resume or delete a token | `POST /api/v1/card-tokens/{tokenReference}/status` | `card.token.status_changed.v1` |
+| List a card's tokens (with provenance) | `GET /api/v1/card-tokens/card/{cardId}` | — |
+| Open a chargeback case | `POST /api/v1/card-disputes` | `card.dispute.opened.v1` |
+| File evidence | `POST /api/v1/card-disputes/{id}/evidence` | `card.dispute.evidence_submitted.v1` |
+| Refresh the network's case status | `POST /api/v1/card-disputes/{id}/refresh` | `card.dispute.status_changed.v1` (only when something moved) |
+| Read a case / a card's cases | `GET /api/v1/card-disputes/{id}`, `GET /api/v1/card-disputes/card/{cardId}` | — |
 | Sandbox purchase (authorise + optional clear) | `POST /api/v1/sandbox/acquirer/purchase` | as above |
 
 ## Callers
 
 - **Acquirer-side integrations** authenticated with an OIDC token carrying `ROLE_API` / `ROLE_OPERATOR` / `ROLE_ADMIN`. No production acquirer or processor adapter exists in this repository today.
+- **admin-ui** — the Cards pages for tokens and disputes (`/cards/tokens`, `/cards/disputes`).
 - **Sandbox acquirer** (`/api/v1/sandbox/acquirer/purchase`) — enabled in `%dev` and `%test` only; answers 404 elsewhere.
 
 ## Dependencies
