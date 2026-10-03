@@ -189,7 +189,6 @@ FEEDS = [
 NOT_PROBED = [
     ("https://api.github.com", "authenticated API, not a data feed; failure is loud at call time"),
     ("https://api.deepinfra.com/v1/openai", "authenticated LLM gateway; needs a key"),
-    ("https://integrate.api.nvidia.com/v1", "authenticated LLM gateway; needs a key"),
     ("https://s3.eu-north-1.amazonaws.com", "AWS endpoint, reached with SigV4 credentials"),
     ("https://kc.open-bank.tech/realms/openbank-customers", "our own Keycloak realm, covered by its own probes"),
     ("https://pid.open-bank.tech", "our own PID issuer, covered by its own probes"),
@@ -247,14 +246,6 @@ NOT_PROBED = [
     ("https://repo1.maven.org", "Maven Central, mirrored by Reposilite"),
     ("https://plugins.gradle.org", "Gradle plugin portal, mirrored by Reposilite"),
     ("https://dl.google.com", "Google Maven, mirrored by Reposilite"),
-    #
-    # (3b) AUTHENTICATED LLM EGRESS. Real third-party egress from a running workload, but it
-    # cannot be probed: the endpoint answers 401 without a key, so a probe would assert the
-    # liveness of an error page (the #2204 shape it exists to prevent). HolmesGPT dials this for
-    # its meta/llama-3.1-70b-instruct route; a failure surfaces as a failed investigation, not as
-    # a silently-empty table, and the LLM-failure alerts (#6041) cover the gateway path.
-    # Same category and same reason as api.deepinfra.com above.
-    ("https://integrate.api.nvidia.com/v1", "authenticated LLM endpoint for HolmesGPT; needs a key, so a probe would only measure a 401"),
     #
     # (4) ACME. Real egress; a failure surfaces as an un-renewed Certificate, which cert-manager
     # reports and the certificate-expiry alert covers.

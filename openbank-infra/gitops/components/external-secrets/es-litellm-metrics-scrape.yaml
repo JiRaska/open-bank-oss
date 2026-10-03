@@ -1,0 +1,27 @@
+# The credential Prometheus presents to LiteLLM's /metrics (observability/servicemonitor-litellm.yaml).
+#
+# /metrics stays authenticated, the upstream default. This is a LiteLLM virtual key (alias
+# `prometheus-scrape`, seeded by openbank-infra/scripts/seed-litellm-virtual-keys.sh) with a 0.01 USD
+# daily budget — so it is worthless as a model credential if it leaks, and scraping, which spends
+# nothing, never trips it. Never the master key: that one mints keys and is exempt from budgets.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: litellm-metrics-scrape
+  namespace: observability
+  annotations:
+    # Review and rotate the dedicated scrape key no later than this date.
+    openbank.io/rotation-deadline: "2027-10-01"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    name: vault-kv
+    kind: ClusterSecretStore
+  target:
+    name: litellm-metrics-scrape
+    creationPolicy: Owner
+  data:
+    - secretKey: token
+      remoteRef:
+        key: litellm
+        property: KEY_PROMETHEUS_SCRAPE

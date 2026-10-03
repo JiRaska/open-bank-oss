@@ -1,11 +1,12 @@
 # AI / LLM cost and reliability rules (ADR-0112, ADR-0174).
 #
-# Why these live here and not in LiteLLM: the gateway is the natural choke point and it does ship a
-# Prometheus exporter, but that exporter is a LiteLLM **Enterprise** feature — verified against
-# upstream docs (docs.litellm.ai/docs/proxy/prometheus, "Enterprise LiteLLM Only") before choosing
-# an approach, not assumed. So the tokens are counted client-side instead, by DomainMetrics on the
-# three code paths that make real /chat/completions calls, and this file turns those counts into
-# spend and into alerts.
+# Two sources, deliberately both. Client-side: DomainMetrics counts tokens on the Kotlin code paths
+# that make real /chat/completions calls, and the price book below turns them into spend. That was
+# the only source while the gateway's Prometheus exporter was believed to be LiteLLM Enterprise;
+# it is not (docs.litellm.ai/docs/proxy/prometheus gates only managed batches, and the v1.99.4
+# exporter has no premium check), so the gateway is now scraped too — see the openbank.ai.gateway
+# group at the end. The client-side series stay: they carry the agent/outcome labels the gateway
+# cannot know; the gateway series cover callers the client side cannot see, and budget headroom.
 #
 # What this replaces: FinOpsAgentTokenBudgetExceeded in prometheus-rules-finops.yaml was written
 # against langfuse_agent_tokens_total / langfuse_model_cost_per_token / langfuse_agent_daily_budget_usd.
@@ -443,3 +444,68 @@ spec:
               embedding route on the gateway and whether `help_passage_embedding` still holds rows
               for the CURRENT embedding model: a model swap without a re-index leaves the table
               full and the query returning nothing, because rows are filtered by model id.
+
+    # ── Gateway-side (LiteLLM's own exporter, servicemonitor-litellm.yaml) ────────────────────
+    #
+    # What the client-side counters above cannot see: the gateway's own view of every caller,
+    # per-key budget headroom, and whether a route is up. A key that runs out of budget is a
+    # 4xx at the caller — which the agents treat as "no model" and degrade on quietly — so the
+    # useful alert fires BEFORE the refusal, not after.
+    - name: openbank.ai.gateway
+      interval: 1m
+      rules:
+        - alert: AiGatewayKeyBudgetNearlyExhausted
+          # The prometheus-scrape key (0.01 USD) is excluded by the max-budget floor: it never
+          # spends, and a near-zero ceiling would make the ratio meaningless.
+          expr: |
+            (
+              litellm_remaining_api_key_budget_metric
+              /
+              litellm_api_key_max_budget_metric
+            ) < 0.1
+            and litellm_api_key_max_budget_metric > 0.05
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+            route: finops-agent
+          annotations:
+            summary: "LiteLLM key {{ $labels.api_key_alias }} has under 10% of its daily budget left"
+            description: >-
+              The gateway will refuse this key's calls once the remainder is spent, and the caller
+              degrades to its no-model path without paging anyone. Check the key's recent spend in
+              LiteLLM /spend/logs (filter by key_alias) — a loop is the usual cause; raising the
+              budget in seed-litellm-virtual-keys.sh is the last resort, not the first.
+
+        - alert: AiGatewayDeploymentOutage
+          # 2 = complete outage in LiteLLM's own encoding (0 healthy, 1 partial).
+          expr: max by (litellm_model_name, api_provider) (litellm_deployment_state) == 2
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "LiteLLM route {{ $labels.litellm_model_name }} ({{ $labels.api_provider }}) is in complete outage"
+            description: >-
+              Every recent call to this deployment failed. Routes with a fallback in
+              litellm-config.yaml router_settings keep answering on the fallback model; routes
+              without one (llama-guard, bge-m3) are failing for their callers. Distinguish a dead
+              KEY (401/403 on every model) from a dead MODEL (404 on this one only) before acting —
+              this file's history has both.
+
+        - alert: AiGatewayFallbackActive
+          # A fallback answered, i.e. the requested route failed. Info, not warning: the caller got
+          # an answer. Sustained, it means a route is dead and its fallback is spending against a
+          # different budget (see the arithmetic in litellm-config.yaml).
+          expr: sum by (requested_model, fallback_model) (increase(litellm_deployment_successful_fallbacks_total[1h])) > 0
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "LiteLLM is serving {{ $labels.requested_model }} from fallback {{ $labels.fallback_model }}"
+            description: >-
+              Requests for {{ $labels.requested_model }} are being answered by
+              {{ $labels.fallback_model }}. Check AiGatewayDeploymentOutage and the provider's
+              catalogue for the requested model.

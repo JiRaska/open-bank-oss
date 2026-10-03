@@ -1,0 +1,99 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# openbank.ai.gateway (LiteLLM's own exporter). Each alert has a case that must fire and controls
+# that must not: a healthy key, the near-zero prometheus-scrape key, a partial outage, no fallbacks.
+rule_files:
+  - prometheus-rules-ai.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a key under 10% of its budget warns; a healthy key and the scrape key do not"
+    input_series:
+      # devops-agent: 3 USD budget, 0.2 left -> 6.7% -> fires.
+      - series: 'litellm_remaining_api_key_budget_metric{hashed_api_key="a",api_key_alias="devops-agent"}'
+        values: "0.2x20"
+      - series: 'litellm_api_key_max_budget_metric{hashed_api_key="a",api_key_alias="devops-agent"}'
+        values: "3x20"
+      # copilot-service: 8 USD, 6 left -> healthy.
+      - series: 'litellm_remaining_api_key_budget_metric{hashed_api_key="b",api_key_alias="copilot-service"}'
+        values: "6x20"
+      - series: 'litellm_api_key_max_budget_metric{hashed_api_key="b",api_key_alias="copilot-service"}'
+        values: "8x20"
+      # prometheus-scrape: 0.01 USD, 0 left -> ratio 0, but excluded by the floor.
+      - series: 'litellm_remaining_api_key_budget_metric{hashed_api_key="c",api_key_alias="prometheus-scrape"}'
+        values: "0x20"
+      - series: 'litellm_api_key_max_budget_metric{hashed_api_key="c",api_key_alias="prometheus-scrape"}'
+        values: "0.01x20"
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: AiGatewayKeyBudgetNearlyExhausted
+        exp_alerts: []
+      - eval_time: 17m
+        alertname: AiGatewayKeyBudgetNearlyExhausted
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              route: finops-agent
+              hashed_api_key: a
+              api_key_alias: devops-agent
+            exp_annotations:
+              summary: "LiteLLM key devops-agent has under 10% of its daily budget left"
+              description: >-
+                The gateway will refuse this key's calls once the remainder is spent, and the caller
+                degrades to its no-model path without paging anyone. Check the key's recent spend in
+                LiteLLM /spend/logs (filter by key_alias) — a loop is the usual cause; raising the
+                budget in seed-litellm-virtual-keys.sh is the last resort, not the first.
+
+  - interval: 1m
+    name: "complete outage warns; partial outage and healthy do not"
+    input_series:
+      - series: 'litellm_deployment_state{litellm_model_name="deepinfra/x",model_id="1",api_base="b",api_provider="deepinfra"}'
+        values: "2x15"
+      - series: 'litellm_deployment_state{litellm_model_name="deepinfra/y",model_id="2",api_base="b",api_provider="deepinfra"}'
+        values: "1x15"
+      - series: 'litellm_deployment_state{litellm_model_name="deepinfra/z",model_id="3",api_base="b",api_provider="deepinfra"}'
+        values: "0x15"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: AiGatewayDeploymentOutage
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              litellm_model_name: deepinfra/x
+              api_provider: deepinfra
+            exp_annotations:
+              summary: "LiteLLM route deepinfra/x (deepinfra) is in complete outage"
+              description: >-
+                Every recent call to this deployment failed. Routes with a fallback in
+                litellm-config.yaml router_settings keep answering on the fallback model; routes
+                without one (llama-guard, bge-m3) are failing for their callers. Distinguish a dead
+                KEY (401/403 on every model) from a dead MODEL (404 on this one only) before acting —
+                this file's history has both.
+
+  - interval: 1m
+    name: "fallbacks being served raise info; a flat counter does not"
+    input_series:
+      - series: 'litellm_deployment_successful_fallbacks_total{requested_model="llama-3.3-70b-versatile",fallback_model="openai/gpt-oss-120b",hashed_api_key="d",api_key_alias="agent-service",team="",team_alias=""}'
+        values: "0+1x40"
+      - series: 'litellm_deployment_successful_fallbacks_total{requested_model="deepseek-ai/DeepSeek-V3.2",fallback_model="openai/gpt-oss-120b",hashed_api_key="e",api_key_alias="devops-agent",team="",team_alias=""}'
+        values: "5x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: AiGatewayFallbackActive
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              team: platform
+              requested_model: llama-3.3-70b-versatile
+              fallback_model: openai/gpt-oss-120b
+            exp_annotations:
+              subject_period: continuous
+              summary: "LiteLLM is serving llama-3.3-70b-versatile from fallback openai/gpt-oss-120b"
+              description: >-
+                Requests for llama-3.3-70b-versatile are being answered by
+                openai/gpt-oss-120b. Check AiGatewayDeploymentOutage and the provider's
+                catalogue for the requested model.

@@ -37,6 +37,11 @@ AGENT_BUDGETS=(
   "control-liveness-sentinel:3"
   "copilot-service:8"          # customer-facing, interactive, highest legitimate volume
   "agent-service:5"            # admin-UI assistant; matches the llama route's own ceiling
+  "holmesgpt:2"                # alert RCA (apps/holmesgpt.yaml); was calling NVIDIA directly
+  # Not an agent: the credential Prometheus presents to the authenticated /metrics endpoint
+  # (observability/servicemonitor-litellm.yaml). A near-zero budget makes it worthless as a model
+  # key if it ever leaks; scraping spends nothing, so the ceiling never bites the scrape itself.
+  "prometheus-scrape:0.01"
 )
 
 ROTATE=0
