@@ -220,6 +220,10 @@ kind: ExternalSecret
 metadata:
   name: langfuse-clickhouse-auth
   namespace: ai-platform
+  annotations:
+    # ADR-0279 #18. Rotation = new KV value + `ALTER USER langfuse IDENTIFIED BY ...` in
+    # clickhouse-client (the env var only applies on an empty data dir) + restart web/worker.
+    openbank.io/rotation-deadline: "2027-10-03"
 spec:
   refreshInterval: 1h
   secretStoreRef:
