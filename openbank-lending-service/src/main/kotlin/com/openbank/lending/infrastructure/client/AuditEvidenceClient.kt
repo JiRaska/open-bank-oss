@@ -8,6 +8,7 @@ import com.openbank.lending.application.port.out.LoanEvidence
 import com.openbank.lending.application.port.out.LoanEvidenceEvent
 import com.openbank.lending.application.port.out.LoanEvidencePort
 import com.openbank.lending.application.port.out.LoanEvidenceUnavailable
+import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
@@ -19,6 +20,7 @@ import jakarta.ws.rs.Produces
 import jakarta.ws.rs.WebApplicationException
 import jakarta.ws.rs.core.MediaType
 import org.eclipse.microprofile.rest.client.annotation.RegisterClientHeaders
+import org.eclipse.microprofile.rest.client.annotation.RegisterProvider
 import org.eclipse.microprofile.rest.client.inject.RegisterRestClient
 import org.eclipse.microprofile.rest.client.inject.RestClient
 import java.time.Instant
@@ -30,6 +32,8 @@ import java.time.Instant
  */
 @RegisterRestClient(configKey = "audit-service")
 @RegisterClientHeaders(CallerTokenClientHeadersFactory::class)
+// ADR-0252: an internal edge, so a synthetic request's taint must reach audit-service too.
+@RegisterProvider(SyntheticTaintClientFilter::class)
 @Path("/api/v1/audit")
 @Produces(MediaType.APPLICATION_JSON)
 interface AuditEvidenceRestClient {

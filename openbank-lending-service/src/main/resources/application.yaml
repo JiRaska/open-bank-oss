@@ -347,11 +347,24 @@ lending:
           pem:
             certs: /mnt/consent-tls/ca.crt
         protocols: TLSv1.3
+      # #11900: audit-service's 8443 mTLS listener, same private CA and client identity as above.
+      audit-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/audit-tls/tls.crt
+              key: /mnt/audit-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/audit-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
       consent-service:
         tls-configuration-name: consent-authority
+      audit-service:
+        tls-configuration-name: audit-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}
