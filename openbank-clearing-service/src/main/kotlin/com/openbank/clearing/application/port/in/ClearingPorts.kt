@@ -5,17 +5,18 @@
 package com.openbank.clearing.application.port.`in`
 
 import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingCycleResult
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.ReconciliationReport
 import com.openbank.clearing.domain.model.SettlementPosition
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
 import io.smallrye.mutiny.Uni
 import java.util.UUID
 
 interface SubmitPaymentUseCase {
-    fun submit(request: SubmitPaymentRequest): Uni<ClearingItem>
+    fun submit(command: SubmitPaymentCommand): Uni<ClearingItem>
 }
 
 interface GetBatchUseCase {
@@ -30,7 +31,7 @@ interface GetItemUseCase {
 }
 
 interface TriggerClearingUseCase {
-    fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingBatch>
+    fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingCycleResult>
     fun settleBatch(batchId: UUID): Uni<ClearingBatch>
 }
 
