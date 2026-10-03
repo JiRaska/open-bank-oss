@@ -51,8 +51,8 @@ Odpovědi:
 |---|---|
 | `201` | Přijato a zařazeno; vrací `SwiftMessage` (stav `VALIDATED`) |
 | `400` | Neplatné tělo požadavku; pro částku a měnu viz [Částka a měna](#částka-a-měna) |
-| `409` | Duplicitní idempotency key s konfliktním payloadem (`ErrorResponse`) |
-| `422` | Selhání validace BIC nebo porušení business pravidla (`ValidationError`) |
+| `409` | Duplicitní idempotency key s konfliktním payloadem (`ProblemDetail`) |
+| `422` | Selhání validace BIC nebo porušení business pravidla (`ProblemDetail`) |
 
 ## Částka a měna
 
@@ -95,20 +95,27 @@ Oba vracejí aktualizovanou `SwiftMessage`; `404` při neznámém id; `409`, pok
 
 ## Model chyb
 
-```json
-{ "error": "string", "message": "string", "traceId": "string" }
-```
-
-Validační chyby používají `ValidationError`:
+Chyby používají platformní obálku `ProblemDetail`. Každá chyba obsahuje `traceId`, `status`,
+`code`, `message` a `timestamp`; typované validační chyby navíc obsahují pole RFC 9457 a
+`violations`. Služba neposílá pole `error`.
 
 ```json
-{ "error": "Validation failed", "violations": [ { "field": "senderBic", "message": "..." } ] }
+{
+  "traceId": "00000000-0000-4000-8000-000000000001",
+  "status": 400,
+  "code": "AMOUNT_SCALE_EXCEEDED",
+  "message": "amountMinorUnits: Amount in minor units must be a whole number",
+  "timestamp": "2026-10-03T00:00:00Z",
+  "type": "urn:openbank:error:amount-scale-exceeded",
+  "title": "The amount has more decimal places than its currency allows",
+  "violations": [{ "field": "amountMinorUnits", "message": "Amount in minor units must be a whole number", "code": "AMOUNT_SCALE_EXCEEDED" }]
+}
 ```
 
 ## Verzování
 
 - **URL major** `/api/v1` ← `openbank.api.version`.
-- **Verze API kontraktu** `openapi.yaml: info.version = 1.0.0` — bumpováno z OpenAPI diffu (`oasdiff`), nezávisle na release `version.txt` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+- **Verze API kontraktu** `openapi.yaml: info.version = 1.7.0` — bumpováno z OpenAPI diffu (`oasdiff`), nezávisle na release `version.txt` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
 - Hlavičky `X-API-Version` / `X-Service-Version` a `/api/v1/info` poskytuje `openbank-libs`.
 
 ## Management / podpůrné endpointy

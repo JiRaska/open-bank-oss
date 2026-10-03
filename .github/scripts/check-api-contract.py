@@ -5,7 +5,7 @@ For every `openbank-*/src/main/resources/openapi.yaml` changed against the PR
 base, classify the API-contract change from the OpenAPI diff (oasdiff):
 
     breaking   => info.version MAJOR must move (new URL major, /api/v{N+1})
-    correction => a breaking DOCUMENT diff in a PR that changes nothing else in the service:
+    correction => a breaking DOCUMENT diff in a PR that changes no API implementation input:
                   the served contract is unchanged, so MINOR (see below)
     additive   => info.version MINOR (or MAJOR) must move within the same /v{N}
     editorial  => info.version PATCH (or higher) must move
@@ -393,16 +393,22 @@ def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int
     return True
 
 
-# Derived files that cannot change what the service serves, so their presence in a diff does
-# not disqualify a spec correction. release-please writes both.
+# Files that cannot change the HTTP contract implementation do not disqualify a spec correction.
+# release-please writes the derived files; regression tests and Markdown docs can explain
+# and prove the corrected schema without changing the HTTP implementation.
+# Production code, configuration, migrations and build files still force breaking classification.
 BEHAVIOURLESS = {"CHANGELOG.md", "version.txt"}
 
 
 def service_touched_beyond_spec(service: str, spec_rel: str, changed_all: list[str]) -> list[str]:
-    """Files in this service the PR changed other than its openapi.yaml (and derived files)."""
+    """Changed service inputs that may alter the HTTP implementation."""
     return [
         f for f in changed_all
-        if f.startswith(service + "/") and f != spec_rel and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+        if f.startswith(service + "/")
+        and f != spec_rel
+        and not f.startswith(service + "/src/test/")
+        and not (f.startswith(service + "/src/main/resources/docs/") and f.endswith(".md"))
+        and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
     ]
 
 
@@ -476,6 +482,22 @@ def _self_test() -> int:
     ]
 
     failures = 0
+    service = "openbank-swift-service"
+    spec = f"{service}/src/main/resources/openapi.yaml"
+    if service_touched_beyond_spec(
+        service,
+        spec,
+        [spec, f"{service}/src/test/kotlin/ContractIT.kt", f"{service}/src/main/resources/docs/03-api.en.md"],
+    ):
+        print("SELF-TEST FAIL: a test or documentation witness disqualified a spec correction")
+        failures += 1
+    if service_touched_beyond_spec(service, spec, [spec, f"{service}/src/main/kotlin/Resource.kt"]) != [
+        f"{service}/src/main/kotlin/Resource.kt"
+    ]:
+        print("SELF-TEST FAIL: a production change escaped breaking classification")
+        failures += 1
+    if failures == 0:
+        print("ok: tests and docs witness a correction; production changes remain breaking")
     with tempfile.TemporaryDirectory() as tmp:
         for name, source, expected in cases:
             svc = Path(tmp) / name.replace(" ", "_")
@@ -724,8 +746,8 @@ def main() -> int:
                 old_path.unlink(missing_ok=True)
 
             # A breaking DOCUMENT diff is not a breaking CONTRACT change when the PR changed
-            # nothing else in the service: the running server is byte-identical, so no client
-            # that works today can stop working. What breaks is a client generated from a
+            # no API implementation input in the service: the running HTTP contract is the same,
+            # so no client that works today can stop working. What breaks is a client generated from a
             # document that never described this server — already broken before the edit.
             # Demanding a MAJOR bump there is not merely strict, it is unsatisfiable: D2 below
             # requires major(info.version) == the served URL major, which a spec-only PR cannot
@@ -734,8 +756,8 @@ def main() -> int:
             # value and a wrong default.
             #
             # The discriminator is mechanical, not declared — no marker file, no PR-body token
-            # to assert a spec "was never served". Touch any other file in the service and the
-            # normal breaking rule applies unchanged.
+            # to assert a spec "was never served". Touch a production input in the service
+            # and the normal breaking rule applies unchanged; tests may prove the correction.
             #
             # This opens no new hole. Landing a genuinely breaking change as code-only in one PR
             # and the spec in another already escapes this gate entirely, because it is scoped to
@@ -747,9 +769,9 @@ def main() -> int:
                 if not others:
                     detail = f" (first: {breaking[0]})" if breaking else ""
                     print(
-                        f"::notice::api-contract gate: {service}: spec-only PR — reclassifying "
+                        f"::notice::api-contract gate: {service}: spec correction — reclassifying "
                         f"{len(breaking)} breaking document change(s){detail} as a CORRECTION. "
-                        f"No other file in {service} changed, so the served contract is unchanged "
+                        f"No API implementation input in {service} changed, so the served contract is unchanged "
                         f"and a MAJOR bump would violate the ADR-0048 D2 URL-major invariant. "
                         f"Requiring MINOR instead."
                     )

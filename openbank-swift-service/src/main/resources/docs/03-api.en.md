@@ -51,8 +51,8 @@ Responses:
 |---|---|
 | `201` | Accepted and queued; returns the `SwiftMessage` (status `VALIDATED`) |
 | `400` | Invalid request body; for amount/currency see [Amount and currency](#amount-and-currency) |
-| `409` | Duplicate idempotency key with conflicting payload (`ErrorResponse`) |
-| `422` | BIC validation failed or business-rule violation (`ValidationError`) |
+| `409` | Duplicate idempotency key with conflicting payload (`ProblemDetail`) |
+| `422` | BIC validation failed or business-rule violation (`ProblemDetail`) |
 
 ## Amount and currency
 
@@ -94,20 +94,27 @@ Both return the updated `SwiftMessage`; `404` if the id is unknown; `409` if the
 
 ## Error model
 
-```json
-{ "error": "string", "message": "string", "traceId": "string" }
-```
-
-Validation errors use `ValidationError`:
+Errors use the platform `ProblemDetail` envelope. Every error includes `traceId`, `status`,
+`code`, `message` and `timestamp`; typed validation errors also include RFC 9457 fields and
+`violations`. The service does not send an `error` field.
 
 ```json
-{ "error": "Validation failed", "violations": [ { "field": "senderBic", "message": "..." } ] }
+{
+  "traceId": "00000000-0000-4000-8000-000000000001",
+  "status": 400,
+  "code": "AMOUNT_SCALE_EXCEEDED",
+  "message": "amountMinorUnits: Amount in minor units must be a whole number",
+  "timestamp": "2026-10-03T00:00:00Z",
+  "type": "urn:openbank:error:amount-scale-exceeded",
+  "title": "The amount has more decimal places than its currency allows",
+  "violations": [{ "field": "amountMinorUnits", "message": "Amount in minor units must be a whole number", "code": "AMOUNT_SCALE_EXCEEDED" }]
+}
 ```
 
 ## Versioning
 
 - **URL major** `/api/v1` ← `openbank.api.version`.
-- **API contract version** `openapi.yaml: info.version = 1.0.0` — bumped from the OpenAPI diff (`oasdiff`), independent of the release `version.txt` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
+- **API contract version** `openapi.yaml: info.version = 1.7.0` — bumped from the OpenAPI diff (`oasdiff`), independent of the release `version.txt` ([ADR 0048](../../../../docs/adr/0048-decouple-api-contract-version-from-service-release-version.md)).
 - `X-API-Version` / `X-Service-Version` headers and `/api/v1/info` are served by `openbank-libs`.
 
 ## Management / supporting endpoints

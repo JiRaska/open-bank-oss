@@ -14,8 +14,10 @@ import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
+import org.junit.jupiter.api.Test
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.CsvSource
+import org.yaml.snakeyaml.Yaml
 import java.util.UUID
 import javax.sql.DataSource
 
@@ -43,6 +45,39 @@ class SwiftMoneyBoundaryIT {
         const val ACTOR = "00000000-0000-0000-0000-000000000099"
         const val REF_LEN = 12
         const val MIN_ECHO_PROBE = 4
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_PAYMENTS"])
+    fun `published invalid money schema describes the served error body`() {
+        val document = requireNotNull(javaClass.getResourceAsStream("/openapi.yaml")).use { stream ->
+            Yaml().load<Map<String, Any>>(stream)
+        }
+        val components = document["components"] as Map<*, *>
+        val responses = components["responses"] as Map<*, *>
+        val invalidMoney = responses["InvalidMoney"] as Map<*, *>
+        val content = invalidMoney["content"] as Map<*, *>
+        val json = content["application/json"] as Map<*, *>
+        val schema = json["schema"] as Map<*, *>
+        assertThat(schema["${'$'}ref"]).isEqualTo("#/components/schemas/ProblemDetail")
+
+        val schemas = components["schemas"] as Map<*, *>
+        val problem = schemas["ProblemDetail"] as Map<*, *>
+        val required = (problem["required"] as List<*>).filterIsInstance<String>()
+        assertThat(required).isNotEmpty()
+
+        val actual: Map<String, Any?> = Given {
+            contentType("application/json")
+            body(body("swift-contract-${UUID.randomUUID()}", "150.5", "EUR"))
+        } When {
+            post("/api/v1/swift")
+        } Then {
+            statusCode(400)
+        } Extract {
+            jsonPath().getMap("")
+        }
+        assertThat(actual).containsKeys(*required.toTypedArray())
+        assertThat(actual).doesNotContainKey("error")
     }
 
     @ParameterizedTest(name = "{0} {1} -> 400 {2}")
