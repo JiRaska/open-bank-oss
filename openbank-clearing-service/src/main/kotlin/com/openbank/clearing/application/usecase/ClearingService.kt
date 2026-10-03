@@ -11,10 +11,13 @@ import com.openbank.clearing.application.port.`in`.ReconcileUseCase
 import com.openbank.clearing.application.port.`in`.SubmitPaymentUseCase
 import com.openbank.clearing.application.port.`in`.TriggerClearingUseCase
 import com.openbank.clearing.application.port.out.ClearingBatchRepository
+import com.openbank.clearing.application.port.out.ClearingCycleMetrics
 import com.openbank.clearing.application.port.out.ClearingEventPublisher
 import com.openbank.clearing.application.port.out.ClearingItemRepository
+import com.openbank.clearing.application.port.out.SettlementAccountDirectory
 import com.openbank.clearing.application.port.out.SettlementPositionRepository
 import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingCycleResult
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
@@ -22,11 +25,13 @@ import com.openbank.clearing.domain.model.ReconciliationReport
 import com.openbank.clearing.domain.model.SettlementPosition
 import com.openbank.clearing.domain.model.SettlementType
 import com.openbank.clearing.domain.model.SubmitPaymentCommand
+import com.openbank.libs.domain.money.Money
+import io.smallrye.mutiny.Multi
 import io.smallrye.mutiny.Uni
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.faulttolerance.Retry
 import org.eclipse.microprofile.faulttolerance.Timeout
-import java.math.BigDecimal
+import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
 import java.time.OffsetDateTime
@@ -43,12 +48,16 @@ class ClearingService(
     private val positionRepo: SettlementPositionRepository,
     private val eventPublisher: ClearingEventPublisher,
     private val clock: Clock,
+    private val settlementAccounts: SettlementAccountDirectory,
+    private val cycleMetrics: ClearingCycleMetrics,
 ) : SubmitPaymentUseCase,
     GetBatchUseCase,
     GetItemUseCase,
     TriggerClearingUseCase,
     GetPositionsUseCase,
     ReconcileUseCase {
+
+    private val log = Logger.getLogger(ClearingService::class.java)
 
     @Retry(maxRetries = 3)
     override fun submit(command: SubmitPaymentCommand): Uni<ClearingItem> {
@@ -107,68 +116,117 @@ class ClearingService(
     override fun listItemsByPayment(paymentId: UUID): Uni<List<ClearingItem>> = itemRepo.findByPaymentId(paymentId)
 
     @Timeout(value = 30000)
-    override fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingBatch> {
+    override fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingCycleResult> {
         val cycleId = "CYCLE-${rail.name}-${LocalDate.now(clock).format(
             DateTimeFormatter.BASIC_ISO_DATE,
         )}-${clock.millis() % 10000}"
-        return itemRepo.findPendingByRail(rail, 1000).flatMap { items ->
-            if (items.isEmpty()) {
-                val now = OffsetDateTime.now(clock)
-                val emptyBatch = ClearingBatch(
-                    batchReference = cycleId,
-                    rail = rail,
-                    status = ClearingStatus.SETTLED,
-                    cycleId = cycleId,
-                    settlementDate = LocalDate.now(clock),
-                    createdAt = now,
-                    updatedAt = now,
-                )
-                // An empty cycle still RAN, and a consumer that receives nothing cannot tell
-                // "the cycle ran and had nothing to settle" from "the cycle did not run" -- the
-                // two states are the reason this event exists. So the batch is born SETTLED *and*
-                // announced, atomically, exactly as a populated one is.
-                //
-                // `batch.settled` only: NOT the net_settlement.post command the populated path
-                // also emits, because there is no journal to post. Emitting a zero-amount
-                // settlement command would give NetSettlementPostingConsumer work that must not
-                // happen.
-                batchRepo.saveWithEvent(emptyBatch, eventPublisher.batchSettledMessage(emptyBatch))
-            } else {
-                val now = OffsetDateTime.now(clock)
-                // For GROSS settlement: every item is a debit from our participant's perspective.
-                // totalCredit = gross sum of incoming amounts for the counterparty rail leg.
-                // For NET batches these will be equal (bilateral exchange); for multi-lateral
-                // netting positionRepo.upsertPosition() is used per participant in settleBatch().
-                val totalDebit = items.fold(BigDecimal.ZERO) { acc, i -> acc + i.amount }
-                val totalCredit = totalDebit // bilateral: same volume on both legs
-                val netPosition = totalDebit - totalCredit // net exposure after offset
-                val batch = ClearingBatch(
-                    batchReference = cycleId,
-                    rail = rail,
-                    settlementType = SettlementType.NET,
-                    status = ClearingStatus.IN_CLEARING,
-                    totalDebit = totalDebit,
-                    totalCredit = totalCredit,
-                    netPosition = netPosition,
-                    currency = items.first().currency,
-                    itemCount = items.size,
-                    cycleId = cycleId,
-                    settlementDate = LocalDate.now(clock),
-                    createdAt = now,
-                    updatedAt = now,
-                )
-                batchRepo.save(batch).flatMap { savedBatch ->
-                    val updatedItems = items.map {
-                        it.copy(
-                            batchId = savedBatch.id,
-                            status = ClearingStatus.IN_CLEARING,
-                            revision = it.revision + 1,
-                            updatedAt = now,
-                        )
-                    }
-                    itemRepo.saveAll(updatedItems).map { savedBatch }
+        // #11974: a batch is per (rail, currency). Only currencies with a settlement GL pair are
+        // selected at all, so an unsettleable item can neither enter a batch whose journal could
+        // never post, nor occupy the selection window and starve settleable items on every run.
+        val settleable = settlementAccounts.settleableCurrencies()
+        return itemRepo.countPendingOutside(settleable).flatMap { stranded ->
+            reportUnsettleable(rail, cycleId, stranded)
+            itemRepo.findPendingByRail(rail, settleable, CYCLE_ITEM_LIMIT).flatMap { items ->
+                if (items.isEmpty()) {
+                    emptyCycle(rail, cycleId).map { ClearingCycleResult(cycleId, rail, listOf(it), stranded) }
+                } else {
+                    // One batch per currency, in a stable order so the batch references and the
+                    // event sequence of a cycle are reproducible.
+                    val byCurrency = items.groupBy { it.currency }.toSortedMap()
+                    Multi.createFrom().iterable(byCurrency.entries)
+                        .onItem().transformToUniAndConcatenate { (currency, group) ->
+                            openCurrencyBatch(rail, cycleId, currency, group)
+                        }
+                        .collect().asList()
+                        .map { ClearingCycleResult(cycleId, rail, it, stranded) }
                 }
             }
+        }
+    }
+
+    private fun emptyCycle(rail: PaymentRail, cycleId: String): Uni<ClearingBatch> {
+        val now = OffsetDateTime.now(clock)
+        val emptyBatch = ClearingBatch(
+            batchReference = cycleId,
+            rail = rail,
+            status = ClearingStatus.SETTLED,
+            cycleId = cycleId,
+            settlementDate = LocalDate.now(clock),
+            createdAt = now,
+            updatedAt = now,
+        )
+        // An empty cycle still RAN, and a consumer that receives nothing cannot tell
+        // "the cycle ran and had nothing to settle" from "the cycle did not run" -- the
+        // two states are the reason this event exists. So the batch is born SETTLED *and*
+        // announced, atomically, exactly as a populated one is.
+        //
+        // `batch.settled` only: NOT the net_settlement.post command the populated path
+        // also emits, because there is no journal to post. Emitting a zero-amount
+        // settlement command would give NetSettlementPostingConsumer work that must not
+        // happen.
+        return batchRepo.saveWithEvent(emptyBatch, eventPublisher.batchSettledMessage(emptyBatch))
+    }
+
+    /**
+     * Opens the IN_CLEARING batch for one currency of the cycle. Every item in [items] carries
+     * [currency] by construction (the caller grouped on it), so the kernel `Money.plus` below is a
+     * safety net: it would throw on a mixed group instead of adding euros to koruny, and for a
+     * valid group it cannot.
+     */
+    private fun openCurrencyBatch(
+        rail: PaymentRail,
+        cycleId: String,
+        currency: String,
+        items: List<ClearingItem>,
+    ): Uni<ClearingBatch> {
+        val now = OffsetDateTime.now(clock)
+        // For GROSS settlement: every item is a debit from our participant's perspective.
+        // totalCredit = gross sum of incoming amounts for the counterparty rail leg.
+        // For NET batches these will be equal (bilateral exchange); for multi-lateral
+        // netting positionRepo.upsertPosition() is used per participant in settleBatch().
+        val totalDebit = items.fold(Money.zero(currency)) { acc, i -> acc + Money.of(i.amount, i.currency) }
+        val totalCredit = totalDebit // bilateral: same volume on both legs
+        val netPosition = totalDebit - totalCredit // net exposure after offset
+        val batch = ClearingBatch(
+            // batch_reference is UNIQUE (V1); the cycle has one batch per currency.
+            batchReference = "$cycleId-$currency",
+            rail = rail,
+            settlementType = SettlementType.NET,
+            status = ClearingStatus.IN_CLEARING,
+            totalDebit = totalDebit.amount,
+            totalCredit = totalCredit.amount,
+            netPosition = netPosition.amount,
+            currency = currency,
+            itemCount = items.size,
+            cycleId = cycleId,
+            settlementDate = LocalDate.now(clock),
+            createdAt = now,
+            updatedAt = now,
+        )
+        return batchRepo.save(batch).flatMap { savedBatch ->
+            val updatedItems = items.map {
+                it.copy(
+                    batchId = savedBatch.id,
+                    status = ClearingStatus.IN_CLEARING,
+                    revision = it.revision + 1,
+                    updatedAt = now,
+                )
+            }
+            itemRepo.saveAll(updatedItems).map { savedBatch }
+        }
+    }
+
+    private fun reportUnsettleable(rail: PaymentRail, cycleId: String, stranded: Map<String, Long>) {
+        cycleMetrics.recordUnsettleablePending(stranded)
+        stranded.forEach { (currency, count) ->
+            log.warnf(
+                "[clearing-cycle] %s %s: %d PENDING item(s) in %s left unbatched — no settlement GL " +
+                    "account exists for that currency; they settle on the first cycle after one is seeded",
+                cycleId,
+                rail,
+                count,
+                currency,
+            )
         }
     }
 
@@ -231,4 +289,8 @@ class ClearingService(
                 }
             }
         }
+
+    private companion object {
+        const val CYCLE_ITEM_LIMIT = 1000
+    }
 }
