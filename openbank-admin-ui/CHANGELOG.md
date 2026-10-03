@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.274.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.273.0...admin-ui-v0.274.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** review SCA and settlement operator approvals in the inbox ([#11949](https://github.com/JiRaska/open-bank-oss/issues/11949)) ([dcdf4e2](https://github.com/JiRaska/open-bank-oss/commit/dcdf4e2706b4c8d3dde3895b81246e22fb76473a)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+* **settlement:** query a settlement's status, with an operator page ([#11935](https://github.com/JiRaska/open-bank-oss/issues/11935)) ([ec34f5a](https://github.com/JiRaska/open-bank-oss/commit/ec34f5a6fb6cb37e4170c12d522c32603b3f468b)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+
+## [0.273.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.272.0...admin-ui-v0.273.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** publish build-versioned service documentation ([#11585](https://github.com/JiRaska/open-bank-oss/issues/11585)) ([795a703](https://github.com/JiRaska/open-bank-oss/commit/795a703a5ad6cbbe96cc33ac3ef6d99434e30eaf))
+
+## [0.272.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.271.0...admin-ui-v0.272.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** guided curve-set upload form ([#11704](https://github.com/JiRaska/open-bank-oss/issues/11704)) ([089d5bc](https://github.com/JiRaska/open-bank-oss/commit/089d5bce5a00d674013e4c1a61ab7c5a4794dcd9)), closes [#11107](https://github.com/JiRaska/open-bank-oss/issues/11107)
+
 ## [0.271.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.270.1...admin-ui-v0.271.0) (2026-10-03)
 
 

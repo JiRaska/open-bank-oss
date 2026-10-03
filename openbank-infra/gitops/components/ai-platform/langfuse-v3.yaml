@@ -1,0 +1,300 @@
+# Langfuse v3.29.0 web + worker, running ALONGSIDE v2 (langfuse.yaml) — ADR-0328 decision 1, wave A.
+#
+# WHY 3.29.0 AND NOT v4 DIRECTLY. Upstream's v2->v3 guide: the upgrade "is known to work well
+# between v2.92.0 and v3.29.0. Newer versions of v3 remove database entities that v2 still depends
+# on." v2 here is 2.95.11, so 3.29.0 is the version that can share langfuse-db with the running v2
+# pod. Minor-by-minor to v4 happens only after v2 is gone (wave C).
+#
+# SHARED POSTGRES, BY DESIGN (upstream: "You can reuse your existing Postgres instance"). On start,
+# langfuse-web applies 3.29.0's Prisma migrations to langfuse-db — which v2 keeps using — and its
+# ClickHouse migrations to langfuse-clickhouse. That is the one irreversible step in this file, so
+# the PR asks for an on-demand CNPG Backup of langfuse-db before merge. NEXTAUTH_SECRET, SALT and
+# ENCRYPTION_KEY MUST be the same values v2 uses (the existing langfuse-secrets): API keys are
+# stored salted-hashed and provider credentials encrypted in the SHARED tables, so a different SALT
+# makes every existing project key invalid for v3 and a different ENCRYPTION_KEY makes stored
+# secrets unreadable.
+#
+# NO TRAFFIC IN THIS WAVE (ADR-0328 point 5: the Presidio guardrail, #11756/#11759, must mask before
+# the trace callback first). Four independent things keep it that way:
+#   - no Ingress / HTTPRoute for these Services;
+#   - litellm-config.yaml still points the callback at the v2 Service `langfuse`;
+#   - litellm's egress NetworkPolicy admits only pods labelled app.kubernetes.io/name=langfuse,
+#     which neither of these pods carries, so even a mistaken callback edit is DROPPED;
+#   - LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS=false, so v3 does not start copying v2 history into
+#     ClickHouse yet (the guide: until traffic shifts, or the migration misses events v2 is still
+#     ingesting).
+# The v3 UI is therefore EMPTY until wave B; that is the expected state, not a fault. To look at it:
+#   kubectl -n ai-platform port-forward svc/langfuse-web 3000:3000  (NEXTAUTH_URL matches this)
+#
+# No LANGFUSE_INIT_*: the org, project, keys and operator user already exist in the shared
+# database (created by v2's headless init). Re-declaring them here would make v3 upsert rows v2 owns.
+#
+# Placement: `stateful` NodePool, for the reason in langfuse-clickhouse.yaml (default pool is
+# 85-99 % memory-requested). ServiceAccount `langfuse` carries the EKS Pod Identity association for
+# the S3 bucket (aws/envs/sandbox-platform/langfuse-s3.tf) — no static keys; Langfuse's AWS SDK
+# picks the injected credentials up from the default chain when LANGFUSE_S3_*_ACCESS_KEY_ID is
+# unset. Credentials are injected at ADMISSION: if these pods start before the association is
+# applied, restart them afterwards.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: langfuse
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+automountServiceAccountToken: false
+---
+# Environment shared by web and worker. Non-secret only; secrets are secretKeyRefs below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-v3-env
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: ai-platform
+data:
+  CLICKHOUSE_URL: http://langfuse-clickhouse.ai-platform.svc:8123
+  CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse.ai-platform.svc:9000
+  CLICKHOUSE_USER: langfuse
+  # Single node: Langfuse defaults to the replicated (ON CLUSTER) DDL, which fails without Keeper.
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: langfuse-valkey.ai-platform.svc
+  REDIS_PORT: "6379"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: openbank-sandbox-langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: eu-north-1
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  # The upstream guide's zero-downtime switch. Flipped to "true" in wave B, AFTER traffic moves.
+  LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "false"
+  AUTH_DISABLE_SIGNUP: "true"
+  TELEMETRY_ENABLED: "false"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  # Port-forward origin while there is no public route (wave B moves this to the public host).
+  NEXTAUTH_URL: http://localhost:3000
+  HOSTNAME: "0.0.0.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-web
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-web
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  replicas: 1
+  # Terminate-first, as langfuse.yaml: one replica, no room assumed for a surge pod.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-web
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langfuse-web
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      serviceAccountName: langfuse
+      nodeSelector:
+        openbank.io/pool: stateful
+      tolerations:
+        - key: openbank.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: langfuse-web
+          image: docker.io/langfuse/langfuse:3.29.0@sha256:726e1b081e71fffcd24c810d71dbd6ce655d351459aff26cf5c40dca2ab0d01c
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          envFrom:
+            - configMapRef:
+                name: langfuse-v3-env
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-db-app
+                  key: uri
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: NEXTAUTH_SECRET
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: SALT
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: ENCRYPTION_KEY
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-auth
+                  key: CLICKHOUSE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          # The first start runs Prisma + ClickHouse migrations; give it room before liveness.
+          startupProbe:
+            httpGet:
+              path: /api/public/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/public/ready
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/public/health
+              port: http
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-web
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  selector:
+    app.kubernetes.io/name: langfuse-web
+  ports:
+    - name: http
+      port: 3000
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-worker
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-worker
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langfuse-worker
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      serviceAccountName: langfuse
+      nodeSelector:
+        openbank.io/pool: stateful
+      tolerations:
+        - key: openbank.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: langfuse-worker
+          image: docker.io/langfuse/langfuse-worker:3.29.0@sha256:0fc868c5188d0d1c672f9644ea5996a1d53bc737d002dc4207b71c425cb80b7a
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3030
+          envFrom:
+            - configMapRef:
+                name: langfuse-v3-env
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-db-app
+                  key: uri
+            - name: NEXTAUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: NEXTAUTH_SECRET
+            - name: SALT
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: SALT
+            - name: ENCRYPTION_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-secrets
+                  key: ENCRYPTION_KEY
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-auth
+                  key: CLICKHOUSE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          # ADR-0328 FinOps section: 100m / 512Mi.
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 10
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            periodSeconds: 30

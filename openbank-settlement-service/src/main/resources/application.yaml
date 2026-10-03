@@ -77,6 +77,8 @@ openbank:
   authz:
     opa-pdp-producer:
       enabled: true
+  outbox:
+    dispatch-enabled: true
   temporal:
     # ADR-0209 D1 (#2572): server-url and namespace were previously carried as this service's own
     # @WithDefault values in a per-service TemporalConfig copy. The shared contract in
@@ -90,6 +92,17 @@ openbank:
   build:
     time: "${BUILD_TIME:unknown}"
   settlement:
+    # Upgrade every originator/worker and verify balance projection before new originations opt in.
+    ledger-projection-enabled: "${SETTLEMENT_LEDGER_PROJECTION_ENABLED:false}"
+    # Retention for settlement_operator_approvals (V6, OperatorApprovalRetention): a row is deleted
+    # once its authorization expired more than this many days ago. 1826 days = five years (AMLD
+    # Art. 40); the SETTLEMENT_OPERATOR_APPROVAL_CHANGED outbox evidence is not purged.
+    approval-retention-days: "${SETTLEMENT_APPROVAL_RETENTION_DAYS:1826}"
+    approval-purge:
+      enabled: "${SETTLEMENT_APPROVAL_PURGE_ENABLED:true}"
+      cron: "${SETTLEMENT_APPROVAL_PURGE_CRON:0 15 4 * * ?}"
+      batch-size: "${SETTLEMENT_APPROVAL_PURGE_BATCH_SIZE:500}"
+      max-batches-per-run: "${SETTLEMENT_APPROVAL_PURGE_MAX_BATCHES:100}"
     gl:
       debit-account-id: "${SETTLEMENT_GL_DEBIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
       credit-account-id: "${SETTLEMENT_GL_CREDIT_ACCOUNT_ID:a0000000-0000-0000-0000-000000000002}"
@@ -100,6 +113,12 @@ opa:
   timeout-ms: "${OPA_TIMEOUT_MS:500}"
 authz:
   enforce: "${AUTHZ_ENFORCE:false}"
+  # ADR-0155 / #10041 slice 10: settlement.create is in rules.yaml four_eyes.actions. When true,
+  # AuthorizeInterceptor parks an operator's origination with 202 and a durable approval
+  # (PostgresApprovalStore, V6) until a different operator decides it. Off by default, like the
+  # rest of the fleet; flipping it is a deliberate operational decision.
+  four-eyes:
+    enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 "%test":
   quarkus:
@@ -113,11 +132,41 @@ authz:
       ledger-api:
         url: http://localhost:${quarkus.http.port}
   openbank:
+    outbox:
+      dispatch-enabled: false
     settlement:
       # No real Temporal frontend in @QuarkusTest: don't register the worker (it would fail boot on
       # UNAVAILABLE). Tests that need the workflow drive their own in-process TestWorkflowEnvironment.
       worker:
         enabled: false
+      # Off so unrelated tests keep their approval rows; OperatorApprovalPurgeSchedulerIT re-enables it.
+      approval-purge:
+        enabled: false
       gl:
         debit-account-id: "a0000000-0000-0000-0000-000000000002"
         credit-account-id: "a0000000-0000-0000-0000-000000000002"
+
+mp:
+  messaging:
+    connector:
+      smallrye-kafka:
+        security:
+          protocol: ${KAFKA_SECURITY_PROTOCOL:PLAINTEXT}
+        ssl:
+          keystore:
+            location: ${KAFKA_SSL_KEYSTORE_LOCATION:}
+            type: ${KAFKA_SSL_KEYSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_KEYSTORE_PASSWORD:}
+          truststore:
+            location: ${KAFKA_SSL_TRUSTSTORE_LOCATION:}
+            type: ${KAFKA_SSL_TRUSTSTORE_TYPE:PKCS12}
+            password: ${KAFKA_SSL_TRUSTSTORE_PASSWORD:}
+    outgoing:
+      settlement-events-out:
+        connector: smallrye-kafka
+        topic: openbank.settlement.events
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        acks: all
