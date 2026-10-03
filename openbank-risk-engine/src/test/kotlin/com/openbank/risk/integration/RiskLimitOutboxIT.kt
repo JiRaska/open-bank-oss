@@ -5,6 +5,7 @@
 package com.openbank.risk.integration
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.outbox.SentOutboxRetention
 import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.out.LimitEventOutbox
 import com.openbank.risk.domain.Fixtures
@@ -28,6 +29,7 @@ import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -49,6 +51,9 @@ class RiskLimitOutboxIT {
 
     @Inject
     lateinit var outbox: LimitEventOutbox
+
+    @Inject
+    lateinit var retention: SentOutboxRetention
 
     private val json = ObjectMapper()
 
@@ -151,5 +156,54 @@ class RiskLimitOutboxIT {
         var out = ""
         TestDb.query("SELECT payload FROM risk_outbox WHERE aggregate_id = '$runId'") { out = it }
         return out
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a delivered event purged by SENT retention is still never re-emitted by a replay (#11901)`() {
+        val analysis = onEventLoop { limits.evaluate(breachingRun("2024-04-05")) }
+        val runId = analysis.run.id
+        assertThat(onEventLoop { outbox.recordNonOk(analysis, Instant.parse("2024-04-05T20:30:00Z")) }).isEqualTo(1)
+        TestDb.execute(
+            "UPDATE risk_outbox SET status = 'SENT', sent_at = TIMESTAMPTZ '2024-04-05T20:31:00Z' " +
+                "WHERE aggregate_id = '$runId'",
+        )
+
+        val purged = onEventLoop { retention.purgeSent(Duration.ofDays(7), 100, Instant.parse("2024-05-01T00:00:00Z")) }
+
+        assertThat(purged).isGreaterThanOrEqualTo(1)
+        assertThat(rows(runId)).describedAs("the delivered row is gone from the outbox").isEqualTo(0)
+        assertThat(onEventLoop { outbox.recordNonOk(analysis, Instant.parse("2024-05-01T20:30:00Z")) })
+            .describedAs("the replay must find the key in risk_limit_event_dedup and write nothing")
+            .isEqualTo(0)
+        assertThat(rows(runId)).isEqualTo(0)
+        assertThat(
+            TestDb.count(
+                "SELECT count(*) FROM risk_limit_event_dedup WHERE dedup_key = '$runId:lcr-min:openbank-risk-appetite:1'",
+            ),
+        ).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `SENT retention deletes only delivered rows older than the window`() {
+        val old = onEventLoop { limits.evaluate(breachingRun("2024-04-06")) }
+        val fresh = old.copy(run = old.run.copy(id = UUID.randomUUID()))
+        val pending = old.copy(run = old.run.copy(id = UUID.randomUUID()))
+        listOf(old, fresh, pending).forEach { a ->
+            onEventLoop { outbox.recordNonOk(a, Instant.parse("2024-04-06T20:30:00Z")) }
+        }
+        TestDb.execute(
+            "UPDATE risk_outbox SET status = 'SENT', sent_at = TIMESTAMPTZ '2024-04-06T20:31:00Z' WHERE aggregate_id = '${old.run.id}'",
+        )
+        TestDb.execute(
+            "UPDATE risk_outbox SET status = 'SENT', sent_at = TIMESTAMPTZ '2024-04-30T20:31:00Z' WHERE aggregate_id = '${fresh.run.id}'",
+        )
+
+        onEventLoop { retention.purgeSent(Duration.ofDays(7), 100, Instant.parse("2024-05-01T00:00:00Z")) }
+
+        assertThat(rows(old.run.id)).isEqualTo(0)
+        assertThat(rows(fresh.run.id)).describedAs("SENT inside the window survives").isEqualTo(1)
+        assertThat(rows(pending.run.id)).describedAs("an undelivered row is never purged").isEqualTo(1)
     }
 }
