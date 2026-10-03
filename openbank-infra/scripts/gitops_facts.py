@@ -26,13 +26,10 @@ Stdlib only, no pyyaml: this module is imported by scripts that must run on a ba
 from __future__ import annotations
 
 import re
-from contextlib import contextmanager
-from contextvars import ContextVar
 from pathlib import Path
 
 __all__ = [
     "read",
-    "snapshot_reads",
     "module_dir",
     "module_names",
     "money_path_services",
@@ -52,35 +49,13 @@ __all__ = [
 # stayed absent from the prod-readiness matrix while `rules.yaml` declared all three money-path
 # (#2364). Resolve the directory instead of assuming its shape.
 _MODULE_SHAPES = ("openbank-{short}-service", "openbank-{short}")
-_read_snapshot: ContextVar[dict[Path, str] | None] = ContextVar("gitops_read_snapshot", default=None)
-
-
-@contextmanager
-def snapshot_reads():
-    """Reuse immutable manifest text during one read-only fleet traversal.
-
-    The runbook generator asks the same resolver about every service, repeatedly scanning
-    the GitOps tree. Scope the cache to its render pass so later invocations and fixture
-    tests still observe file edits. Do not mutate GitOps manifests inside this context.
-    """
-    token = _read_snapshot.set({})
-    try:
-        yield
-    finally:
-        _read_snapshot.reset(token)
 
 
 def read(path: Path) -> str:
-    snapshot = _read_snapshot.get()
-    if snapshot is not None and path in snapshot:
-        return snapshot[path]
     try:
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        return path.read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        text = ""
-    if snapshot is not None:
-        snapshot[path] = text
-    return text
+        return ""
 
 
 def module_dir(short: str, repo: Path) -> Path:
