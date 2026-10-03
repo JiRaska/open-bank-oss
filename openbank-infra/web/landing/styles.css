@@ -204,7 +204,27 @@ background:var(--white)}
 .hero-note{
   font-size:12px;
   color:var(--muted);
-margin:19px 0 8px}
+margin:19px 0 14px}
+.iphone-cta{
+  display:inline-flex;
+  align-items:center;
+  gap:13px;
+  min-height:62px;
+  padding:8px 13px 8px 9px;
+  border:1px solid #b8cfff;
+  border-radius:13px;
+  background:linear-gradient(120deg,#f3f7ff,#e5eeff);
+  color:#174fae;
+  text-decoration:none;
+  box-shadow:0 8px 22px #1f6feb16;
+  transition:transform .18s,box-shadow .18s,border-color .18s}
+.iphone-cta:hover{transform:translateY(-2px);box-shadow:0 13px 26px #1f6feb26;border-color:#6c9af2}
+.iphone-cta-icon{display:grid;place-items:center;width:42px;height:42px;border-radius:10px;background:#1f6feb;color:#fff}
+.iphone-cta-icon svg{width:22px;height:26px}
+.iphone-cta-copy{display:flex;flex-direction:column;line-height:1.25}
+.iphone-cta-copy strong{font-size:14px}
+.iphone-cta-copy small{margin-top:3px;font:10px var(--mono);color:#536b9b}
+.iphone-cta-arrow{margin-left:8px;font-size:19px;font-weight:700}
 .text-link{
   font-size:14px;
 font-weight:600}
