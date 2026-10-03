@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.7](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.6...pid-service-v0.10.7) (2026-10-03)
+
+
+### Performance
+
+* **party,dispute,document,kyc,pid,tpp-registry:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11753](https://github.com/JiRaska/open-bank-oss/issues/11753)) ([51294c7](https://github.com/JiRaska/open-bank-oss/commit/51294c727517168bd6d78a0462c05e887fc0236e))
+
 ## [0.10.6](https://github.com/JiRaska/open-bank-oss/compare/pid-service-v0.10.5...pid-service-v0.10.6) (2026-10-02)
 
 
