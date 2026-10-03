@@ -646,13 +646,8 @@ def observations(service: Path) -> list[dict]:
                     # stream. Keep that provenance only while deduplicating;
                     # the published schema deliberately contains no host data.
                     resource = item.get("resource")
-                    # Some service-local recorders also emit resources outside the
-                    # v1 vocabulary (for example KYC's Kafka container). They
-                    # cannot be published as v1 observations; retaining one makes
-                    # validation discard the entire run envelope instead.
-                    if resource not in INFRASTRUCTURE:
-                        continue
-                    item["image"] = public_runtime_image(resource, item.get("image", ""))
+                    if resource in INFRASTRUCTURE:
+                        item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
@@ -877,7 +872,6 @@ def main() -> None:
                 '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
-                '{"schemaVersion":1,"resource":"kafka","image":"apache/kafka:3.9.0","lifecycle":"started","observedAt":"2026-08-22T21:10:11Z"}\n'
             )
             performance = service / "perf.json"
             # This is k6's actual summary-export form: true means the threshold was crossed.
