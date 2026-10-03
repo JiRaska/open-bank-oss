@@ -70,6 +70,8 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start: true`):
 | `V2__compliance_fields.sql` | PSD2 RTS + SEPA CT Rulebook columns (purpose_code, charge_bearer, sca_reference, consent_id, aml_screened…), `chk_sepa_charge_bearer`, partial indexes | `ALTER TABLE … DROP COLUMN …` |
 | `V3__create_sepa_payment_outbox.sql` | Table `sepa_payment_outbox` (transactional outbox) + indexes | `DROP TABLE sepa_payment_outbox` |
 | `V4__hibernate_sequences.sql` | `sepa_payments_seq`, `sepa_payment_outbox_seq` (INCREMENT BY 50) — required by Hibernate Reactive + Panache (schema generation `none`) | `DROP SEQUENCE sepa_payments_seq, sepa_payment_outbox_seq` |
+| `V13__payment_workflow_observations.sql` | Append-only `sepa_payment_workflow_observations`, keyed by event UUID, unique by payment/revision and linked to the owning payment | Before writes: drop the table; after writes: retain evidence until its retention period ends |
+| `V14__workflow_observation_scope.sql` | Nullable environment and workflow start time; older rows remain explicitly unscoped | Retire readers/writers before removing the two columns |
 
 > V4 fixes a runtime defect: BIGSERIAL only creates `<table>_id_seq`, but Hibernate allocates ids from `<table>_seq`. Guarded by `HibernateSequenceGuardTest`. Never rewrite a migration once applied (checksum mismatch → startup fail; use `QUARKUS_FLYWAY_REPAIR_AT_START` if a live DB is affected).
 
@@ -81,6 +83,7 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start: true`):
 - `sepa_payments(aml_screened) WHERE aml_screened = FALSE` — partial (un-screened backlog)
 - `sepa_payment_outbox(status, created_at ASC)` — dispatcher poll
 - `sepa_payment_outbox(aggregate_id)` — per-payment event lookup
+- `sepa_payment_workflow_observations(payment_id, payment_revision)` — bounded reverse-order source history; a unique index prevents two observations for one revision
 
 ## Retention
 
@@ -90,6 +93,7 @@ Declared retention policy: **7 years** (`governance.yaml: retentionPolicy`).
 |---|---|---|
 | `sepa_payments` | 7 years (AML / payment records) | regulatory; overrides GDPR erasure for transaction records |
 | `sepa_payment_outbox` | short-lived operational window after `SENT` | troubleshooting / replay (see operations) |
+| `sepa_payment_workflow_observations` | source evidence period; no automatic purge in this stage | append-only payment outcome evidence, including event UUID and payload digest, not the payload itself |
 
 ## PII fields (GDPR)
 
