@@ -88,8 +88,11 @@ KEDA_NS = "keda"
 # still gets the management/security-scanner rules if it separately exposes a
 # port literally named "management". This is the gap behind the fraud-service
 # online-feature-store Redis fix (PR #706): any non-"management" port was
-# unconditionally treated as an admin-ui-reachable HTTP port.
-INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql"}
+# unconditionally treated as an admin-ui-reachable HTTP port. ClickHouse's
+# HTTP interface is a SQL endpoint, not an API the BFF discovers, so the
+# Langfuse ClickHouse (ADR-0328) names its ports `ch-http`/`ch-native` to land
+# here too.
+INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
 # Container ports belonging to a SIDECAR the app container reaches over the pod's
 # own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
