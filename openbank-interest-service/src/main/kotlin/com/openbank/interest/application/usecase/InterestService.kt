@@ -21,7 +21,6 @@ import com.openbank.interest.domain.event.InterestRateChanged
 import com.openbank.interest.domain.model.AccrualRequest
 import com.openbank.interest.domain.model.AccrualStatus
 import com.openbank.interest.domain.model.AccrualSummary
-import com.openbank.interest.domain.model.DayCount
 import com.openbank.interest.domain.model.InterestAccrual
 import com.openbank.interest.domain.model.InterestCapitalization
 import com.openbank.interest.domain.model.InterestRateConfig
@@ -130,11 +129,7 @@ class InterestService(
                         RateConfigNotFoundException(request.productId, request.currency),
                     )
                 } else {
-                    val divisor = when (config.dayCount) {
-                        DayCount.ACT_360 -> BigDecimal(360)
-                        else -> BigDecimal(365)
-                    }
-                    val dailyRate = config.annualRate.divide(divisor, 10, RoundingMode.HALF_UP)
+                    val dailyRate = config.dayCount.dailyRate(config.annualRate, request.accrualDate)
                     val accruedAmount = request.balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
                     val accrual = InterestAccrual(
                         accountId = request.accountId,
