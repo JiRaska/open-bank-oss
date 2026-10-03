@@ -183,6 +183,9 @@ configurations.all {
 // makes per-service copies removable at all.
 tasks.withType<Test>().configureEach {
     useJUnitPlatform()
+    // Fail the test fork on heap exhaustion so CI can report the failure without waiting for
+    // the job timeout. The Gradle test task then fails rather than hanging in the JVM agent.
+    jvmArgs("-XX:+ExitOnOutOfMemoryError")
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
     // Every Quarkus test binds EPHEMERAL ports, never the defaults (8081 HTTP, 8444 HTTPS, 9001
     // management). A fixed test port is shared by every build on the machine, so two concurrent
