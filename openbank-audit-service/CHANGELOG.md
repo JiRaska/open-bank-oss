@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.22.0...audit-service-v0.23.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
 ## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.21.1...audit-service-v0.22.0) (2026-10-02)
 
 

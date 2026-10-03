@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.21.0...delegation-service-v0.22.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
 ## [0.21.0](https://github.com/JiRaska/open-bank-oss/compare/delegation-service-v0.20.1...delegation-service-v0.21.0) (2026-09-29)
 
 

@@ -11,211 +11,90 @@ import java.math.BigDecimal
 import java.math.RoundingMode
 
 /**
- * Pins every [RoundingPolicy] to the code it claims to describe (ADR-0318). Each case copies a
- * real call site's rounding expression LITERALLY, with its file:line on `main` as of 2026-09-27,
- * and requires the policy to produce the same result on inputs chosen to sit exactly on a tie
- * (or, for DOWN, just below the next unit), where HALF_UP, HALF_EVEN and DOWN disagree.
+ * Pins the [RoundingPolicy] registry itself (ADR-0318) and how a policy applies its rule.
  *
- * If a call site changes its mode or scale, update the literal here and decide whether the policy
- * follows it; if a policy is edited, the literal still encodes what the code does, so this fails.
+ * What this test deliberately does NOT do any more: the earlier version re-typed each call site's
+ * `setScale(n, MODE)` expression here as a literal, with a `file:line` comment, and compared the
+ * policy to it. That could not detect drift — the literal lived in this file, not at the call
+ * site, so a service changing its own rounding left this green — and its line references went
+ * stale as soon as the sites moved. Now that call sites USE the policies, the two checks that
+ * matter are separate:
+ *
+ * - **call sites use a named policy, not a literal** — the `money-rounding-inline-ratchet` gate
+ *   (`.github/scripts/check-money-rounding-inline.py`) counts inline `RoundingMode.`/`setScale(`
+ *   in every money-path service and fails on any new one;
+ * - **a policy's (scale, mode) does not change silently** — `registry is pinned` below. A policy
+ *   edit changes every amount its call sites produce, so it must fail here and go through its own
+ *   money-path review rather than ride along in a refactor.
  */
 class MoneyRoundingPolicyCallSiteTest {
 
     private val eur = CurrencyCode.of("EUR")
-    private val czk = CurrencyCode.of("CZK")
     private val jpy = CurrencyCode.of("JPY")
     private val kwd = CurrencyCode.of("KWD")
 
-    /** Ties that separate HALF_UP / HALF_EVEN / DOWN at 0, 2 and 3 decimals, both signs. */
-    private fun tiesAt(scale: Int): List<BigDecimal> = listOf("0.5", "1.5", "2.5", "-2.5", "2.4999").flatMap { t ->
-        listOf(BigDecimal(t).movePointLeft(scale), BigDecimal(t).movePointLeft(scale).add(BigDecimal.TEN))
-    }
-
-    private fun check(
-        policy: RoundingPolicy,
-        currency: CurrencyCode,
-        inputs: List<BigDecimal>,
-        site: (BigDecimal) -> BigDecimal,
-    ) {
-        inputs.forEach { v ->
-            assertThat(policy.round(v, currency))
-                .describedAs("$policy on $v (${currency.code})")
-                .isEqualByComparingTo(site(v))
-            assertThat(policy.round(v, currency).scale()).isEqualTo(site(v).scale())
+    @Test
+    fun `registry is pinned`() {
+        val pinned = mapOf(
+            RoundingPolicy.MONEY_SCALE to (null to RoundingMode.HALF_EVEN),
+            RoundingPolicy.LEDGER_POSTING to (null to RoundingMode.HALF_UP),
+            RoundingPolicy.INTEREST_DAILY_RATE to (10 to RoundingMode.HALF_UP),
+            RoundingPolicy.INTEREST_ACCRUAL to (6 to RoundingMode.HALF_UP),
+            RoundingPolicy.FX_RATE to (8 to RoundingMode.HALF_UP),
+            RoundingPolicy.FX_AMOUNT to (null to RoundingMode.HALF_UP),
+            RoundingPolicy.FEE to (null to RoundingMode.HALF_UP),
+            RoundingPolicy.TAX_WITHHOLDING to (0 to RoundingMode.DOWN),
+            RoundingPolicy.DISPLAY to (null to RoundingMode.HALF_UP),
+            RoundingPolicy.RATIO_PERCENT to (2 to RoundingMode.HALF_UP),
+            RoundingPolicy.RATE_PERCENT to (4 to RoundingMode.HALF_UP),
+            RoundingPolicy.TREASURY_AMOUNT to (2 to RoundingMode.HALF_UP),
+            RoundingPolicy.TREASURY_INTEREST_WORK to (12 to RoundingMode.HALF_UP),
+        )
+        assertThat(RoundingPolicy.entries).containsExactlyInAnyOrderElementsOf(pinned.keys)
+        pinned.forEach { (policy, rule) ->
+            assertThat(policy.fixedScale to policy.mode).describedAs(policy.name).isEqualTo(rule)
         }
     }
 
     @Test
-    fun `MONEY_SCALE is Money scale and the entity rehydration mappers`() {
-        for (c in listOf(eur, jpy, kwd)) {
-            val ins = tiesAt(c.defaultFractionDigits)
-            // openbank-libs-domain Money.kt:43 scale(); ledger PanacheJournalRepository.kt:377/379,
-            // transaction PanacheTransactionRepository.kt:211/214, delegation DelegationGrantEntity.kt:191
-            check(RoundingPolicy.MONEY_SCALE, c, ins) { it.setScale(c.defaultFractionDigits, RoundingMode.HALF_EVEN) }
-        }
+    fun `a currency-scaled policy rounds to the currency's minor units`() {
+        val v = BigDecimal("2.5005")
+        assertThat(RoundingPolicy.LEDGER_POSTING.round(v, eur)).isEqualTo(BigDecimal("2.50"))
+        assertThat(RoundingPolicy.LEDGER_POSTING.round(v, jpy)).isEqualTo(BigDecimal("3"))
+        assertThat(RoundingPolicy.LEDGER_POSTING.round(v, kwd)).isEqualTo(BigDecimal("2.501"))
+        // HALF_EVEN vs HALF_UP on an exact tie
+        assertThat(RoundingPolicy.MONEY_SCALE.round(BigDecimal("2.125"), eur)).isEqualTo(BigDecimal("2.12"))
+        assertThat(RoundingPolicy.LEDGER_POSTING.round(BigDecimal("2.125"), eur)).isEqualTo(BigDecimal("2.13"))
     }
 
     @Test
-    fun `LEDGER_POSTING is how amounts are normalised for booking`() {
-        for (c in listOf(eur, jpy, kwd)) {
-            val ins = tiesAt(c.defaultFractionDigits)
-            // openbank-transaction-service TransactionService.kt:127 (also :344, :353)
-            check(RoundingPolicy.LEDGER_POSTING, c, ins) { it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP) }
-            // openbank-interest-service InterestService.kt:394 gross (and :406 net)
-            check(RoundingPolicy.LEDGER_POSTING, c, ins) { it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP) }
-            // openbank-sdd-service SddCollectionDebitConsumer.kt:127; domestic SettlementAdapter.kt:84
-            check(RoundingPolicy.LEDGER_POSTING, c, ins) { it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP) }
-        }
-        // NOT pinned here: openbank-ledger-service FxRevaluationPosting.kt:119-120 is a literal
-        // setScale(2, HALF_UP) — equal to LEDGER_POSTING for CZK only, so it stays out of the registry.
+    fun `a fixed-scale policy ignores the currency`() {
+        assertThat(RoundingPolicy.FX_RATE.round(BigDecimal("0.123456785"), jpy)).isEqualTo(BigDecimal("0.12345679"))
+        assertThat(RoundingPolicy.TAX_WITHHOLDING.round(BigDecimal("150.99"))).isEqualTo(BigDecimal("150"))
+        assertThat(RoundingPolicy.TAX_WITHHOLDING.round(BigDecimal("-2.5"))).isEqualTo(BigDecimal("-2"))
     }
 
     @Test
-    fun `INTEREST_DAILY_RATE then INTEREST_ACCRUAL reproduce the two-step accrual`() {
-        val divisor = BigDecimal(365)
-        val rates = listOf("0.0365", "0.05", "0.0123456789", "0.00000000365").map(::BigDecimal)
-        val balances = listOf("1000.00", "12345.67", "0.01", "-2500.00").map(::BigDecimal)
-        for (annualRate in rates) {
-            for (balance in balances) {
-                // openbank-interest-service InterestService.kt:137
-                val dailyRate = annualRate.divide(divisor, 10, RoundingMode.HALF_UP)
-                // openbank-interest-service InterestService.kt:138
-                val accruedAmount = balance.multiply(dailyRate).setScale(6, RoundingMode.HALF_UP)
-
-                val policyRate = RoundingPolicy.INTEREST_DAILY_RATE.round(
-                    annualRate.divide(divisor, java.math.MathContext.DECIMAL128),
-                    eur,
-                )
-                assertThat(policyRate).isEqualTo(dailyRate)
-                assertThat(
-                    RoundingPolicy.INTEREST_ACCRUAL.round(balance.multiply(policyRate), eur),
-                ).isEqualTo(accruedAmount)
-            }
-        }
-        // Tie inputs directly at each scale.
-        check(RoundingPolicy.INTEREST_DAILY_RATE, eur, tiesAt(10)) { it.setScale(10, RoundingMode.HALF_UP) }
-        check(RoundingPolicy.INTEREST_ACCRUAL, eur, tiesAt(6)) { it.setScale(6, RoundingMode.HALF_UP) }
+    fun `divide rounds once, at the policy's scale`() {
+        assertThat(RoundingPolicy.RATIO_PERCENT.divide(BigDecimal(2), BigDecimal(3))).isEqualTo(BigDecimal("0.67"))
+        // 0.0445 rounded via scale 3 then 2 would give 0.05; a single HALF_UP rounding gives 0.04.
+        assertThat(RoundingPolicy.TREASURY_AMOUNT.divide(BigDecimal("0.0445"), BigDecimal.ONE))
+            .isEqualTo(BigDecimal("0.04"))
     }
 
     @Test
-    fun `FX_RATE is the scale-8 rate arithmetic`() {
-        // openbank-fx-service FxRate.kt:53 / CnbFixing.kt:23 / transaction TransactionService.kt:345
-        check(RoundingPolicy.FX_RATE, eur, tiesAt(8)) { it.setScale(8, RoundingMode.HALF_UP) }
-        val ask = BigDecimal("24.6875")
-        assertThat(RoundingPolicy.FX_RATE.round(BigDecimal.ONE.divide(ask, java.math.MathContext.DECIMAL128), eur))
-            .isEqualTo(BigDecimal.ONE.divide(ask, 8, RoundingMode.HALF_UP))
+    fun `the two-step interest accrual is daily rate then accrual`() {
+        val dailyRate = RoundingPolicy.INTEREST_DAILY_RATE.divide(BigDecimal("0.05"), BigDecimal(365))
+        assertThat(dailyRate).isEqualTo(BigDecimal("0.0001369863"))
+        assertThat(RoundingPolicy.INTEREST_ACCRUAL.round(BigDecimal("12345.67").multiply(dailyRate)))
+            .isEqualTo(BigDecimal("1.691188"))
     }
 
     @Test
-    fun `FX_AMOUNT and FEE round the minor-unit product HALF_UP`() {
-        for (c in listOf(eur, jpy, kwd)) {
-            val d = c.defaultFractionDigits
-            tiesAt(d).forEach { v ->
-                // openbank-fx-service FxRate.kt:92 (convert) and :96 (fee), in minor units
-                val siteMinor = v.movePointRight(d).setScale(0, RoundingMode.HALF_UP)
-                assertThat(RoundingPolicy.FX_AMOUNT.round(v, c).movePointRight(d)).isEqualByComparingTo(siteMinor)
-                assertThat(RoundingPolicy.FEE.round(v, c).movePointRight(d)).isEqualByComparingTo(siteMinor)
-            }
-        }
-    }
-
-    @Test
-    fun `TAX_WITHHOLDING truncates to whole units`() {
-        // openbank-interest-service WithholdingTaxPolicy.kt:67-68 (TAX_SCALE = 0, DOWN)
-        check(RoundingPolicy.TAX_WITHHOLDING, czk, tiesAt(0) + BigDecimal("150.99")) {
-            it.setScale(0, RoundingMode.DOWN)
-        }
-    }
-
-    @Test
-    fun `DISPLAY is the statement renderers' currency minor-unit scale`() {
-        for (c in listOf(eur, czk, jpy, kwd)) {
-            // openbank-statement-service Pdf/Camt053/Mt940Renderer money()/amount() after #11081:
-            // v.setScale(CurrencyScale.of(currency), HALF_UP). Written as a literal, not read from the
-            // renderer, so this holds whichever of #11011 / #11081 merges first.
-            check(RoundingPolicy.DISPLAY, c, tiesAt(c.defaultFractionDigits)) {
-                it.setScale(c.defaultFractionDigits, RoundingMode.HALF_UP)
-            }
-        }
-    }
-
-    @Test
-    fun `RATIO_PERCENT is treasury's counterparty-limit utilisation, single rounding`() {
-        val hundred = BigDecimal(100)
-        val limits = listOf("1000", "3", "7", "0.03", "-400", "8").map(::BigDecimal)
-        val exposures = listOf(
-            "0", "1000", "1500", "123.45", "0.00125", "-12.3456", "1", "2", "5000000", "-0.0001",
-        ).map(::BigDecimal)
-        for (limit in limits) {
-            for (exposure in exposures) {
-                // openbank-treasury-service TreasuryUseCases.kt:56 before ADR-0318 (inline form)
-                val site = exposure.multiply(hundred).divide(limit, 2, RoundingMode.HALF_UP)
-                val policy = RoundingPolicy.RATIO_PERCENT.divide(exposure.multiply(hundred), limit)
-                assertThat(policy).describedAs("$exposure / $limit").isEqualTo(site)
-            }
-        }
-        // Exact x.xx5 ties (both signs), 0 and 100+: HALF_UP rounds away from zero.
-        val tieLimit = BigDecimal("1000")
-        // exposure -> utilisation %, against a 1000 limit
-        mapOf("123.45" to "12.35", "-123.45" to "-12.35", "123.35" to "12.34", "0" to "0.00", "15000.5" to "1500.05")
-            .forEach { (exposure, expected) ->
-                assertThat(RoundingPolicy.RATIO_PERCENT.divide(BigDecimal(exposure).multiply(hundred), tieLimit))
-                    .describedAs(exposure)
-                    .isEqualTo(BigDecimal(expected))
-            }
-        check(RoundingPolicy.RATIO_PERCENT, eur, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
-        check(RoundingPolicy.RATIO_PERCENT, jpy, tiesAt(2)) { it.setScale(2, RoundingMode.HALF_UP) }
-    }
-
-    @Test
-    fun `treasury fixed-scale policies reproduce the pre-ADR-0318 inline treasury expressions`() {
-        val tiesTwo = tiesAt(2)
-        // openbank-treasury-service Deal.counterAmountOf / Postings.accruedThrough before ADR-0318
-        tiesTwo.forEach {
-            assertThat(RoundingPolicy.TREASURY_AMOUNT.round(it)).isEqualTo(it.setScale(2, RoundingMode.HALF_UP))
-        }
-        // Quote.midRate / bid / ask and Deal.checkRate deviation (scale 4)
-        tiesAt(4).forEach {
-            assertThat(RoundingPolicy.RATE_PERCENT.round(it)).isEqualTo(it.setScale(4, RoundingMode.HALF_UP))
-        }
-        // DayCount.act360Interest: divide at 12, then 2 dp
-        val principal = BigDecimal("1000000.00")
-        listOf("3.1234", "0.0001", "12.5").map(::BigDecimal).forEach { rate ->
-            val days = BigDecimal(7)
-            val site = principal.multiply(rate).multiply(days)
-                .divide(BigDecimal(36000), 12, RoundingMode.HALF_UP).setScale(2, RoundingMode.HALF_UP)
-            val policy = RoundingPolicy.TREASURY_AMOUNT.round(
-                RoundingPolicy.TREASURY_INTEREST_WORK.divide(
-                    principal.multiply(rate).multiply(days),
-                    BigDecimal(36000),
-                ),
-            )
-            assertThat(policy).isEqualTo(site)
-        }
-        assertThat(
-            RoundingPolicy.TREASURY_AMOUNT.divide(BigDecimal("0.05"), BigDecimal(2)),
-        ).isEqualTo(BigDecimal("0.03"))
-    }
-
-    @Test
-    fun `fixed-scale round refuses a currency-scaled policy`() {
+    fun `fixed-scale operations refuse a currency-scaled policy`() {
+        assertThatThrownBy { RoundingPolicy.FEE.divide(BigDecimal.ONE, BigDecimal.TEN) }
+            .isInstanceOf(IllegalArgumentException::class.java)
         assertThatThrownBy { RoundingPolicy.LEDGER_POSTING.round(BigDecimal.ONE) }
             .isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
-    fun `divide refuses a currency-scaled policy`() {
-        assertThatThrownBy {
-            RoundingPolicy.FEE.divide(BigDecimal.ONE, BigDecimal.TEN)
-        }.isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    @Test
-    fun `every policy is pinned by a case above`() {
-        assertThat(RoundingPolicy.entries.map { it.name }).containsExactlyInAnyOrder(
-            "MONEY_SCALE", "LEDGER_POSTING", "INTEREST_DAILY_RATE", "INTEREST_ACCRUAL",
-            "FX_RATE", "FX_AMOUNT", "FEE", "TAX_WITHHOLDING", "DISPLAY", "RATIO_PERCENT",
-            "RATE_PERCENT", "TREASURY_AMOUNT", "TREASURY_INTEREST_WORK",
-        )
     }
 }
