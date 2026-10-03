@@ -31,6 +31,27 @@ def write_grants(name, doc):
     return grants
 
 
+READ_ONLY_ACCESS = ('read', 'none')
+
+
+def top_level_findings(doc):
+    """The workflow-level token must be declared and read-only (OpenSSF Scorecard TokenPermissions).
+
+    A missing block inherits the repository default, which GitHub lets an admin flip to
+    read/write without any diff here; a write at the top reaches every job, including the
+    ones that never use it. Writes therefore belong to the job that calls the write API.
+    """
+    if 'permissions' not in doc:
+        return ['missing top-level permissions: (declare `permissions: {}` or read-only scopes)']
+    permissions = doc['permissions']
+    if permissions in ({}, None, 'read-all'):
+        return []
+    if not isinstance(permissions, dict):
+        return [f'top-level permissions must be read-only, got {permissions!r}; grant writes per job']
+    return [f'top-level permission {scope}: {access} must move to the job that uses it'
+            for scope, access in permissions.items() if access not in READ_ONLY_ACCESS]
+
+
 def grant_drift(actual, expected):
     errors = []
     for grant in sorted(actual - expected):
@@ -41,7 +62,7 @@ def grant_drift(actual, expected):
 
 
 def findings(name, doc):
-    errors = []
+    errors = list(top_level_findings(doc))
     # A personal subscription credential must never be wired into CI, even if
     # an agent workflow is accidentally re-enabled or the reference moves.
     if 'CLAUDE_CODE_OAUTH_TOKEN' in str(doc):
@@ -155,7 +176,20 @@ def main():
         ]:
             print('::error::write-permission self-test did not reject stale debt')
             return 1
-        print('self-test ok: write grants are owner-scoped; new and stale grants both fail')
+        top_cases = [
+            ({'jobs': {}}, 1),
+            ({'permissions': {'contents': 'read', 'issues': 'write'}}, 1),
+            ({'permissions': 'write-all'}, 1),
+            ({'permissions': {}}, 0),
+            ({'permissions': 'read-all'}, 0),
+            ({'permissions': {'contents': 'read', 'checks': 'none'}}, 0),
+        ]
+        for doc, want in top_cases:
+            if len(top_level_findings(doc)) != want:
+                print(f'::error::top-level permission self-test misjudged {doc}')
+                return 1
+        print('self-test ok: write grants are owner-scoped; new and stale grants both fail; '
+              'top level must be declared and read-only')
         return 0
 
     paths = sorted((ROOT / '.github/workflows').glob('*.yml')) + sorted((ROOT / '.github/workflows').glob('*.yaml'))

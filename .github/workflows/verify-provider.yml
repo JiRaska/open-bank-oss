@@ -56,7 +56,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 # Collapse duplicate dispatches for the SAME provider. The reconciler
 # (.github/workflows/pact-verification-reconcile.yml) dispatches once per provider that
@@ -89,6 +88,9 @@ concurrency:
 
 jobs:
   verify:
+    permissions:
+      contents: read
+      id-token: write  # caps the called _service-ci.yml, which assumes AWS roles via OIDC
     uses: ./.github/workflows/_service-ci.yml
     with:
       service: ${{ inputs.service }}
