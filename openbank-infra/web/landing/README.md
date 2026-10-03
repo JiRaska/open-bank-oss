@@ -24,7 +24,7 @@ Open `http://127.0.0.1:8766`. Check the homepage, TestFlight form, demo dialogs,
 - `main.js`: existing demo modal and TestFlight integration, unchanged by the redesign.
 - `classic.html`, `classic.css`: previous homepage, visibly historical and excluded from indexing.
   Old links to `platform.html` now reach the current platform page.
-- `assets/app-screen.png`: existing actual app screenshot, reused without changing pixels.
+- `assets/app-screen-current.png`: current app screenshot supplied for the redesigned page, used without changing pixels. The previous `app-screen.png` remains on `classic.html`.
 - `assets/agent-control-room.webp`: lossless encoding of the supplied presentation's
   actual admin capture (slide 13, image14.png). It is a **recorded demo view**, not telemetry.
 - `assets/ob-mark.png`: existing OB mark from the supplied presentation (image5.png).

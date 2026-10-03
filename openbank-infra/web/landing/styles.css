@@ -84,7 +84,7 @@ height:auto}
 .nav nav{
   display:flex;
   gap:28px;
-margin-left:auto}
+margin-left:14px}
 .nav nav a{
   font-size:14px;
   font-weight:500;
@@ -95,7 +95,22 @@ color:var(--blue)}
 .nav nav .nav-labs{
   color:#cc1837;
   font-weight:700}
-.nav-labs span{font-size:18px;vertical-align:-1px}
+.nav-labs{display:inline-flex;align-items:center;gap:5px}
+.nav-labs img{display:inline-block;width:13px;height:17px}
+.flask-inline{display:inline-block;vertical-align:-3px;width:12px;height:15px}
+.sandbox-cta{
+  margin-left:auto;
+  padding:10px 14px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:transparent;
+  color:var(--ink);
+  font-size:12px;
+  font-weight:600;
+  line-height:1.5;
+  text-decoration:none;
+  white-space:nowrap}
+.sandbox-cta:hover{background:var(--blue-wash);border-color:var(--blue)}
 .previous{
   font-size:12px;
   white-space:nowrap;
@@ -279,8 +294,7 @@ background:radial-gradient(ellipse,var(--blue-wash),transparent 68%)}
   width:280px;
   margin:auto;
   box-shadow:0 24px 60px #17223a24;
-  border:6px solid #1a211e;
-border-radius:38px}
+border-radius:24px}
 .phone-figure figcaption{
 text-align:center}
 .app-copy>.lede{
@@ -606,7 +620,7 @@ display:none!important}
   gap:17px}
   .brand{
   font-size:25px}
-  .previous{
+  .sandbox-cta{
     font-size:11px;
   padding:8px}
   .hero{
@@ -649,7 +663,7 @@ display:none!important}
     font-size:13px;
   padding-block:5px}
   .nav nav{flex-wrap:wrap;justify-content:flex-start;gap:8px 18px}
-  .previous{
+  .sandbox-cta{
   margin-left:auto}
   .hero{
     display:flex;

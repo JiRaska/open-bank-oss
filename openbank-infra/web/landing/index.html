@@ -9,7 +9,7 @@
 <meta property="og:title" content="A bank you can look inside · OpenBank" />
 <meta property="og:description" content="Explore the OpenBank customer app, banking domains and governed AI agents. Try the public sandbox or join the iOS TestFlight beta." />
 <meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
-<link rel="icon" href="assets/ob-mark.png" />
+<link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
 <link rel="canonical" href="https://open-bank.tech/" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -20,15 +20,15 @@
 <a class="skip" href="#main">Skip to content</a>
 <header class="nav wrap">
 <a class="brand" href="index.html" aria-label="OpenBank home">
-<img src="assets/ob-mark.png" width="48" height="29" alt="" />OpenBank</a>
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
 <nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt="" /></a>
 <a href="platform.html">Platform</a>
-<a class="nav-labs" href="labs.html">Labs <span aria-hidden="true">⚗</span></a>
 <a href="index.html#app">App</a>
 <a href="index.html#agents">Agents</a>
 <a href="index.html#join">Community</a>
 </nav>
-<a class="previous" href="classic.html">Previous website ↗</a>
+<button class="sandbox-cta" data-open-demo type="button">Explore the sandbox ↗</button>
 </header>
 <main id="main">
 <section class="hero wrap" id="top">
@@ -39,11 +39,11 @@
 </h1>
 <p class="lede">Explore the app. Understand the platform.<br class="desktop" /> Help build the shared banking core.</p>
 <div class="actions">
-<button class="btn btn-primary" data-open-demo type="button">Explore the demo <span aria-hidden="true">↗</span>
+<button class="btn btn-primary" data-open-demo type="button">Try it live <span aria-hidden="true">↗</span>
 </button>
 <a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss">View the code ↗</a>
 </div>
-<p class="hero-note">Public sandbox · Reference implementation</p>
+<p class="hero-note" id="sandbox">Public sandbox · Reference implementation</p>
 <a class="text-link" href="#testflight">Try the iPhone app →</a>
 </div>
 <div class="hero-art">
@@ -53,7 +53,7 @@
 <section class="labs-teaser" id="labs">
 <div class="wrap labs-teaser-inner">
 <div>
-<p class="eyebrow">OpenBank Labs <span aria-hidden="true">⚗</span></p>
+<p class="eyebrow">OpenBank Labs <img class="flask-inline" src="assets/labs-flask.svg" width="12" height="15" alt="" /></p>
 <h2>The kernel behind<br />better banks.</h2>
 <p>Shared banking logic, built once and tested across the platform. From money and calendars to credit math and payment messages.</p>
 <a class="btn btn-labs" href="labs.html">Step inside Labs →</a>
@@ -93,7 +93,7 @@
 <div class="wrap app-grid">
 <figure class="phone-figure">
 <div class="phone-stage">
-<img src="assets/app-screen.png" width="640" height="1387" alt="Actual OpenBank app screenshot: currency pockets, Send, Request, Cards, Vault and the bot assistant." loading="lazy" />
+<img src="assets/app-screen-current.png" width="1179" height="2556" alt="Actual OpenBank app screenshot: CZK account with three currencies, Send, Request, Cards, Savings, payday forecast and the bot assistant." loading="lazy" />
 </div>
 <figcaption>Actual app screenshot · sandbox data<br />The app evolves; this is a recorded view.</figcaption>
 </figure>
@@ -206,7 +206,7 @@
 </main>
 <footer class="footer wrap">
 <a class="brand" href="index.html">
-<img src="assets/ob-mark.png" width="48" height="29" alt="" />OpenBank</a>
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
 <div>
 <p>An open banking reference implementation. Built to be explored.</p>
 <p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
