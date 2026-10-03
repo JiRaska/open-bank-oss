@@ -1,6 +1,6 @@
 # 06 — Compliance
 
-openbank-libs is **not a compliance boundary control**, but **a channel for implementing controls**. By unifying cross-cutting primitives across 27 services, a compliance audit changes from "review 27 different PII-masking implementations" to "review 1 implementation in libs".
+openbank-libs is **not a compliance boundary control**, but **a channel for implementing controls**. By unifying cross-cutting primitives across consuming services, a compliance audit changes from "review separate PII-masking implementations in every service" to "review 1 implementation in libs".
 
 ## Regulatory mapping per component
 
@@ -97,9 +97,9 @@ When the auditor asks *"how do you know every service masks email the same way?"
 2. Click the link to the source `openbank-libs-domain/src/main/kotlin/com/openbank/libs/security/PiiMasking.kt`
 3. Review 1 file, 80 lines
 4. Verify tests `openbank-libs-domain/src/test/kotlin/com/openbank/libs/security/PiiMaskTest.kt` (15 cases)
-5. Verify each of the 27 services imports `com.openbank.libs.security.PiiMask` (grep)
+5. Verify each relevant service imports `com.openbank.libs.security.PiiMask` (grep)
 
-Without libs, the same question would mean reviewing 27 different implementations with the risk that 3 of them mask PII incorrectly.
+Without libs, the same question would mean reviewing separate implementations across services with the risk that 3 of them mask PII incorrectly.
 
 ## Compliance matrix in central docs
 

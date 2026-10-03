@@ -91,6 +91,11 @@ for (const name of entries) {
   }
   const { hasOpenapi, apiVersion, apiTitle } = readOpenapi(dir)
   const isService = name.endsWith('-service') || name.endsWith('-payment') || name.endsWith('-instant')
+  // The convention plugin identifies a runnable Quarkus module more reliably
+  // than its name: risk-engine and product-catalog have no -service suffix.
+  const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
+  const runnable = buildScript.includes('openbank.quarkus-service')
+    && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")'))
   const moneyPath = gov.moneyPath.has(name)
 
   // Genuine gaps (NOT version drift, which ADR-0048 makes legitimate):
@@ -102,6 +107,7 @@ for (const name of entries) {
     name,
     short: name.replace(/^openbank-/, ''),
     kind: name === 'openbank-admin-ui' ? 'ui' : name === 'openbank-libs' ? 'library' : isService ? 'service' : 'component',
+    runnable,
     releaseVersion,
     apiVersion,
     apiTitle,

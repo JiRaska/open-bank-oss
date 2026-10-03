@@ -15,6 +15,7 @@ import com.openbank.aml.infrastructure.rest.dto.toResponse
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.RequestFingerprints
 import com.openbank.libs.idempotency.ReserveResult
@@ -82,8 +83,17 @@ class AmlCaseResource(
         // #10916: the key is bound to this request's fingerprint and claimed ATOMICALLY before any
         // side effect runs — a different body under the same key answers 409 IDEMPOTENCY_KEY_REUSED,
         // a concurrent duplicate answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS.
+        // Keys are per service and caller: another principal reusing this key is a different key.
+        val scope = IdempotencyScope(IDEMPOTENCY_SERVICE, identity.principal.name)
         val requestHash = RequestFingerprints.of(objectMapper, "POST", CASES_PATH, request)
-        when (val reservation = idempotencyStore.reserve(idempotencyKey, requestHash)) {
+        when (
+            val reservation = idempotencyStore.reserve(
+                scope,
+                idempotencyKey,
+                requestHash,
+                IdempotencyStore.DEFAULT_IN_FLIGHT_TTL_SECONDS,
+            )
+        ) {
             is ReserveResult.Replay -> return Response.status(reservation.record.statusCode)
                 .entity(reservation.record.responseBody)
                 .type(MediaType.APPLICATION_JSON)
@@ -105,17 +115,19 @@ class AmlCaseResource(
             // abandon the release mid-flight and leave the key stuck IN_PROGRESS for its full TTL.
             if (!created) {
                 withContext(NonCancellable) {
-                    runCatching { idempotencyStore.release(idempotencyKey, requestHash) }
+                    runCatching { idempotencyStore.release(scope, idempotencyKey, requestHash) }
                         .onFailure { log.warn("Failed to release idempotency key after create failure", it) }
                 }
             }
         }
         val responseBody = amlCase.toResponse()
         idempotencyStore.save(
+            scope,
             idempotencyKey,
             requestHash = requestHash,
             statusCode = 201,
             responseBody = objectMapper.writeValueAsString(responseBody),
+            ttlSeconds = IdempotencyStore.DEFAULT_RECORD_TTL_SECONDS,
         )
 
         return Response.created(URI.create("/api/v1/aml/cases/${amlCase.id}"))
@@ -163,6 +175,7 @@ class AmlCaseResource(
         Response.ok(amlCaseUseCase.updateDecision(request.toCommand(caseId)).toResponse()).build()
 
     private companion object {
+        const val IDEMPOTENCY_SERVICE = "aml-service"
         const val CASES_PATH = "/api/v1/aml/cases"
     }
 }

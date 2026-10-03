@@ -43,6 +43,7 @@ class LoanBookAssemblerTest {
         status = status,
         disbursedAt = disbursedAt,
         createdAt = disbursedAt,
+        contractNumber = "UV-2026-000042",
     )
 
     /** The loan's schedule as lending persists it, with the first [paid] installments paid on their due date. */
@@ -89,6 +90,7 @@ class LoanBookAssemblerTest {
             }.closingBalance.amount,
         )
         assertThat(c.ifrs9Stage).isEqualTo("STAGE_2")
+        assertThat(c.contractNumber).isEqualTo("UV-2026-000042") // #11107: carried to the risk engine
         assertThat(c.maturityDate).isEqualTo(LocalDate.parse("2027-01-15"))
         assertThat(book.loans.single { it.loanId == eur.id.value }.glAccountCode).isEqualTo("1201")
     }

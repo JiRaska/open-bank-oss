@@ -38,8 +38,8 @@
               "subAccountId": "11111111-1111-1111-1111-111111111111"
             },
             {
-              "amount": 15,
-              "baseAmount": 15,
+              "amount": 15.00,
+              "baseAmount": 15.00,
               "baseCurrencyCode": "CZK",
               "currencyCode": "CZK",
               "fxRate": null,

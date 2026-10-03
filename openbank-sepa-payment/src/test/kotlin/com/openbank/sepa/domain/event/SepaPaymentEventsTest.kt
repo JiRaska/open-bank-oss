@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.domain.event
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -33,8 +34,7 @@ class SepaPaymentEventsTest {
         creditorIban = "FR7630006000011234567890189",
         creditorName = "Bob Example",
         creditorBic = "DEUTDEFF",
-        amount = BigDecimal("123.45"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("123.45"), "EUR"),
         remittanceInfo = "ref",
         endToEndId = "E2E-event",
         rejectReason = rejectReason,

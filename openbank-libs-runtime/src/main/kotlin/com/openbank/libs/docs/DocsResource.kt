@@ -24,10 +24,9 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 /**
  * Self-publishes a service's bundled documentation at `/q/openbank/docs`.
  *
- * Conceptually a "management endpoint" — same pattern as `/q/health`,
- * `/q/metrics`, `/q/openapi`: served under the well-known `/q/...` prefix,
- * no app-level auth (mgmt port is network-gated), version-locked with the
- * running JAR.
+ * Served under the well-known `/q/...` prefix and version-locked with the
+ * running JAR. The actual listener depends on each service's Quarkus config;
+ * some services expose this path on their application port.
  *
  * Language handling:
  *   - `?lang=cs` query parameter is the primary signal
@@ -41,14 +40,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
  *   GET /q/openbank/docs/{slug}[?lang=cs]     → text/markdown for that slug+lang
  *
  * The contract version is published in the index payload (`schema:
- * "openbank.docs.v2"` — v2 because the items shape now carries `lang` and
- * `availableLanguages`).
+ * "openbank.docs.v3"` — v3 includes links to related service endpoints).
  *
  * Security:
  *   - Slug regex `^[a-z0-9-]{1,60}$` blocks path traversal.
  *   - Lang regex `^[a-z]{2}$` blocks header-injection.
  *   - Classpath resource lookup cannot escape the JAR even if regex bypassed.
- *   - `@PermitAll` because this endpoint is meant for the network-gated mgmt port.
+ *   - `@PermitAll` because the index contains only published service metadata.
  */
 @Path("/q/openbank/docs")
 @Produces(MediaType.APPLICATION_JSON)

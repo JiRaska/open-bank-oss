@@ -67,8 +67,8 @@ class FxConversionMathPropertyTest {
     @Test
     fun `converted amount never shrinks as the source amount grows, for a fixed rate`(): Unit = runBlocking {
         checkAll(orderedPairArb(amountArb), rateArb) { (smaller, larger), rate ->
-            val convertedSmaller = FxConversionMath.convertedAmountMinorUnits(smaller, rate)
-            val convertedLarger = FxConversionMath.convertedAmountMinorUnits(larger, rate)
+            val convertedSmaller = FxConversionMath.convertedAmountMinorUnits(smaller, "EUR", "CZK", rate)
+            val convertedLarger = FxConversionMath.convertedAmountMinorUnits(larger, "EUR", "CZK", rate)
             assertThat(convertedLarger).isGreaterThanOrEqualTo(convertedSmaller)
         }
     }
@@ -76,7 +76,9 @@ class FxConversionMathPropertyTest {
     @Test
     fun `converted amount is never negative for a non-negative source amount and rate`(): Unit = runBlocking {
         checkAll(amountArb, rateArb) { fromAmount, rate ->
-            assertThat(FxConversionMath.convertedAmountMinorUnits(fromAmount, rate)).isGreaterThanOrEqualTo(0L)
+            assertThat(
+                FxConversionMath.convertedAmountMinorUnits(fromAmount, "EUR", "CZK", rate),
+            ).isGreaterThanOrEqualTo(0L)
         }
     }
 
@@ -84,11 +86,32 @@ class FxConversionMathPropertyTest {
     fun `converting at the ask rate is never smaller than converting the same amount at the bid rate`(): Unit =
         runBlocking {
             checkAll(amountArb, bidAskArb()) { fromAmount, (bid, ask) ->
-                val atBid = FxConversionMath.convertedAmountMinorUnits(fromAmount, bid)
-                val atAsk = FxConversionMath.convertedAmountMinorUnits(fromAmount, ask)
+                val atBid = FxConversionMath.convertedAmountMinorUnits(fromAmount, "EUR", "CZK", bid)
+                val atAsk = FxConversionMath.convertedAmountMinorUnits(fromAmount, "EUR", "CZK", ask)
                 assertThat(atAsk).isGreaterThanOrEqualTo(atBid)
             }
         }
+
+    @Test
+    fun `converting into a currency with fewer minor units equals converting at equal digits then rescaling`(): Unit =
+        runBlocking {
+            // EUR(2) -> JPY(0) must be the EUR(2) -> CZK(2) result expressed in whole units, never
+            // the same NUMBER of minor units (the pre-fix defect: 100x too many yen).
+            checkAll(amountArb, rateArb) { fromAmount, rate ->
+                val inYen = FxConversionMath.convertedAmountMinorUnits(fromAmount, "EUR", "JPY", rate)
+                val exactYen = BigDecimal(fromAmount).movePointLeft(2).multiply(rate)
+                assertThat(BigDecimal(inYen).subtract(exactYen).abs()).isLessThanOrEqualTo(BigDecimal("0.5"))
+            }
+        }
+
+    @Test
+    fun `converting from a currency with fewer minor units scales the source up, not down`(): Unit = runBlocking {
+        checkAll(Arb.long(0L, 9_999_999_999L), rateArb) { yen, rate ->
+            val cents = FxConversionMath.convertedAmountMinorUnits(yen, "JPY", "EUR", rate)
+            val exactCents = BigDecimal(yen).multiply(rate).movePointRight(2)
+            assertThat(BigDecimal(cents).subtract(exactCents).abs()).isLessThanOrEqualTo(BigDecimal("0.5"))
+        }
+    }
 
     @Test
     fun `FxRate mid rate always sits between bid and ask, and spread is never negative`(): Unit = runBlocking {

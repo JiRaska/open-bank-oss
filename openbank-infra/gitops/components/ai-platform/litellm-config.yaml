@@ -198,6 +198,46 @@ data:
       # Callers authenticate to LiteLLM with this virtual key (projected from OpenBao), NOT with the
       # upstream provider key — so the DeepInfra key lives only here, never in an agent pod (ADR-0175).
       master_key: os.environ/LITELLM_MASTER_KEY
+    # ── PII masking (Presidio guardrail, #11745) ─────────────────────────────────────────────
+    #
+    # Masks PII in FREE TEXT before it leaves the cluster: what customers type into the copilot,
+    # and the logs and alert context HolmesGPT and the ops agents send. Structured tool output is
+    # already masked at its source (McpPiiMasker). Applied gateway-wide (`default_on`), so a new
+    # caller cannot ship unmasked by forgetting to opt in.
+    #
+    # FAILS CLOSED, and that is chosen, not incidental: with pii_entities_config set, the v1.99.4
+    # hook raises when the analyzer cannot answer, so the call is refused rather than sent raw.
+    # Measured locally with the analyzer stopped: HTTP 500 "Presidio PII analysis failed", model
+    # received nothing. Availability therefore rests on presidio.yaml (2 replicas + PDB each) and
+    # on AiPiiServiceUnavailable in prometheus-rules-ai-pii.yaml.
+    #
+    # MASK, not BLOCK: a customer quoting their own IBAN to ask about a payment is a legitimate
+    # request, and refusing it would be worse than answering with `<IBAN_CODE>` in its place.
+    # output_parse_pii stays off — restoring the originals into the reply would re-insert the PII
+    # into the response that Langfuse traces and the caller logs.
+    #
+    # PERSON and LOCATION are deliberately NOT masked. They come from the analyzer's English spaCy
+    # model, which neither recognises Czech names reliably nor stays quiet on ordinary Czech words,
+    # so they would add false redactions without dependable recall. The Czech-specific entities
+    # below are regex recognizers instead (presidio-recognizers.json in this ConfigMap). Measured
+    # locally against these exact digests: every positive found; zero hits on order numbers
+    # (2026/0042), dates, UUIDs, trace ids, pod names, amounts and HTTP codes. p50 413 ms on a
+    # 4.3 kB prompt.
+    guardrails:
+      - guardrail_name: presidio-pii
+        litellm_params:
+          guardrail: presidio
+          mode: pre_call
+          default_on: true
+          presidio_language: en
+          presidio_ad_hoc_recognizers: /etc/litellm/presidio-recognizers.json
+          pii_entities_config:
+            IBAN_CODE: MASK
+            CREDIT_CARD: MASK
+            EMAIL_ADDRESS: MASK
+            PHONE_NUMBER: MASK
+            CZ_BIRTH_NUMBER: MASK
+            CZ_ACCOUNT_NUMBER: MASK
     litellm_settings:
       # LLM observability (ADR-0031 D7). Server-side, so every caller already routed through this
       # gateway is traced with no application change and no second SDK in ~34 services — and a
@@ -272,3 +312,52 @@ data:
         - llama-3.3-70b-versatile: ["openai/gpt-oss-120b"]
         - openai/gpt-oss-120b: ["llama-3.3-70b-versatile"]
         - deepseek-ai/DeepSeek-V4-Pro: ["deepseek-ai/DeepSeek-V3.2"]
+  # Ad-hoc Presidio recognizers for Czech identifiers (see the guardrails block in config.yaml).
+  # Birth number: YYMMDD with the female (+50) and overflow (+20/+70) months, with or without the
+  # slash. Domestic account: (prefix-)number/bank-code, base number >= 6 digits unless prefixed —
+  # the 2-digit floor first flagged order numbers like 2026/0042.
+  presidio-recognizers.json: |
+    [
+      {
+        "name": "Czech birth number",
+        "supported_language": "en",
+        "supported_entity": "CZ_BIRTH_NUMBER",
+        "patterns": [
+          {
+            "name": "rodne cislo",
+            "regex": "\\b\\d{2}(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|5[1-9]|6[0-2]|7[1-9]|8[0-2])(?:0[1-9]|[12]\\d|3[01])/?\\d{3,4}\\b",
+            "score": 0.6
+          }
+        ],
+        "context": [
+          "rodné",
+          "rodne",
+          "číslo",
+          "cislo",
+          "rč",
+          "rc",
+          "birth",
+          "personal"
+        ]
+      },
+      {
+        "name": "Czech domestic account number",
+        "supported_language": "en",
+        "supported_entity": "CZ_ACCOUNT_NUMBER",
+        "patterns": [
+          {
+            "name": "(predcisli-)cislo/kod banky, base number >= 6 digits unless prefixed",
+            "regex": "\\b(?:\\d{1,6}-\\d{2,10}|\\d{6,10})/\\d{4}\\b",
+            "score": 0.6
+          }
+        ],
+        "context": [
+          "účet",
+          "ucet",
+          "účtu",
+          "uctu",
+          "account",
+          "číslo účtu"
+        ]
+      }
+    ]

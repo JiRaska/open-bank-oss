@@ -75,9 +75,33 @@ interface ClearingItemRepository {
 
     fun findByPaymentId(paymentId: UUID): Uni<List<ClearingItem>>
 
-    fun findPendingByRail(rail: PaymentRail, limit: Int): Uni<List<ClearingItem>>
+    /**
+     * Up to [limit] PENDING items, oldest first, restricted to [currencies] — the currencies a
+     * batch can settle (#11974). Restricting the SELECT, rather than filtering after it, is what
+     * keeps unsettleable items from occupying the [limit] window and starving settleable ones.
+     * Note: items do not persist a rail today, so [rail] does not narrow the selection.
+     */
+    fun findPendingByRail(rail: PaymentRail, currencies: Set<String>, limit: Int): Uni<List<ClearingItem>>
+
+    /** Count of PENDING items per currency for every currency NOT in [currencies]. */
+    fun countPendingOutside(currencies: Set<String>): Uni<Map<String, Long>>
 
     fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int>
+}
+
+/**
+ * Which currencies a clearing batch can settle: those for which the net-settlement journal has a
+ * GL pair (Customer Cash Clearing + Scheme Settlement). Owned by the adapter that builds the
+ * journal, so the cycle and the posting can never disagree about the set (#11974).
+ */
+fun interface SettlementAccountDirectory {
+    fun settleableCurrencies(): Set<String>
+}
+
+/** Observability port for items a cycle had to leave PENDING (#11974). */
+fun interface ClearingCycleMetrics {
+    /** The latest per-currency count of PENDING items with no settlement account; absent = 0. */
+    fun recordUnsettleablePending(countsByCurrency: Map<String, Long>)
 }
 
 /** Outbound persistence port for per-participant net settlement positions. */

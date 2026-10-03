@@ -9,6 +9,8 @@ import com.openbank.settlement.it.BalanceServiceWireMockResource
 import com.openbank.settlement.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
 import io.temporal.failure.ApplicationFailure
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
@@ -73,9 +75,48 @@ class SettlementReversalIT {
         ConfigProvider.getConfig().getValue("quarkus.datasource.password", String::class.java),
     )
 
+    @Test
+    fun `unknown balance outcome is durable and does not issue a counter-movement`() {
+        val (id, _, _) = seedSettlement("DEBITED")
+
+        activities.recordBalanceStateUnknown(id)
+        activities.recordBalanceStateUnknown(id)
+
+        assertThat(readStatus(id)).isEqualTo("BALANCE_STATE_UNKNOWN")
+        assertThat(balanceRequests()).isEmpty()
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `idempotent origination exposes the uncertain outcome in the REST contract`() {
+        val key = "unknown-outcome-${UUID.randomUUID()}"
+        val id = UUID.nameUUIDFromBytes("settlement:$key".toByteArray())
+        val (_, payer, payee) = seedSettlement("BALANCE_STATE_UNKNOWN", id)
+
+        val response = given()
+            .contentType("application/json")
+            .body(
+                mapOf(
+                    "idempotencyKey" to key,
+                    "payerAccountId" to payer,
+                    "payeeAccountId" to payee,
+                    "amount" to amount,
+                    "currency" to "CZK",
+                ),
+            )
+            .post("/api/v1/settlements")
+            .then().statusCode(201).extract().jsonPath()
+
+        assertThat(response.getString("id")).isEqualTo(id.toString())
+        assertThat(response.getString("status")).isEqualTo("PENDING")
+        assertThat(response.getBoolean("recoveryRequired")).isTrue()
+        assertThat(response.getString("recoveryReason")).isEqualTo("BALANCE_STATE_UNKNOWN")
+        assertThat(readStatus(id)).isEqualTo("BALANCE_STATE_UNKNOWN")
+        assertThat(balanceRequests()).isEmpty()
+    }
+
     /** Seeds a settlement directly with JDBC — no reactive repository involved. */
-    private fun seedSettlement(status: String): Triple<UUID, UUID, UUID> {
-        val id = UUID.randomUUID()
+    private fun seedSettlement(status: String, id: UUID = UUID.randomUUID()): Triple<UUID, UUID, UUID> {
         val payer = UUID.randomUUID()
         val payee = UUID.randomUUID()
         val now = Timestamp.from(Instant.now())

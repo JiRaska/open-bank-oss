@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: settlement-service
     app.kubernetes.io/part-of: payments
   annotations:
-    openbank.tech/policy-checksum: "9a138c6be80d1f89"
+    openbank.tech/policy-checksum: "8fc7360032d90382"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -616,11 +616,43 @@ data:
     # no verified in-repo M2M caller (see below), so almost every real call here is a human
     # operator acting through admin-ui's BFF, which forwards the operator's OWN bearer token
     # (not a service-to-service credential).
+    #
+    # settlement.create is also listed in rules.yaml four_eyes.actions (#10041): OPA flags it
+    # four_eyes_required and, where authz.four-eyes.enforce=true, the maker's request is parked with
+    # a durable approval bound to the exact instruction (endpoint + arguments, #11675).
+    #
+    # The `service-account-` exclusion makes "human operator" true: Keycloak client_credentials
+    # tokens are classified HUMAN and the realm M2M clients carry ROLE_OPERATOR in at least one
+    # realm (#3734), while this action has no verified M2M caller (see below).
     allowed_reasons contains "operator-settlement-write" if {
     	input.principal.type == "HUMAN"
     	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
     	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
     	input.action == "settlement.create"
+    }
+
+    # Checker side of the settlement four-eyes flow (ApprovalResource, PATCH
+    # /api/v1/settlements/approvals/{id}). Deciding an approval is as sensitive as originating the
+    # settlement it gates, so it is the identical human-operator grant. Self-approval is refused by
+    # the approval store, not here. settlement.approval.read (the queue and one record) is reached
+    # by base operator-read-any for human operators.
+    allowed_reasons contains "operator-settlement-approval-decide" if {
+    	input.principal.type == "HUMAN"
+    	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+    	role in input.principal.roles
+    	not startswith(input.principal.id, "service-account-")
+    	input.action == "settlement.approval.decide"
+    }
+
+    # The operator-approval queue exposes the maker, the action and the full bound instruction of
+    # every pending settlement. Base operator-read-any is role-only, and both realm M2M clients
+    # (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+    # ROLE_OPERATOR in at least one realm, so without this veto they could read it. No M2M consumer
+    # exists (admin-ui forwards the operator's own token). Identity, never principal.type, decides.
+    prohibited if {
+    	startswith(input.principal.id, "service-account-")
+    	input.action in {"settlement.approval.read", "settlement.approval.decide"}
     }
 
     # NO service-to-service (SERVICE/ROLE_SERVICE) allow rule exists here on purpose.
@@ -1433,6 +1465,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1849,7 +1882,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"
