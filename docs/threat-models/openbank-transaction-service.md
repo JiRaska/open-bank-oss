@@ -268,22 +268,21 @@ actual history (§4d, #8573).
 
 | STRIDE | Threat | Mitigation |
 | --- | --- | --- |
-| **I**nfo disclosure | The service is made to fetch cloud metadata or an internal endpoint and the attacker learns credentials or internal state | Four fences, each load-bearing alone: a host **allowlist that is empty by default** (unconfigured, the endpoint refuses everything, so no deployment acquires this by upgrading); **https only**; **every resolved address must be publicly routable**, so an allowlisted name answering `127.0.0.1`, `169.254.169.254`, `10/8`, `100.64/10` or `fd00::/7` is refused; and **redirects refused, never followed** — the allowlisted host answering `302` to the metadata service is the standard bypass |
+| **I**nfo disclosure | The service is made to fetch cloud metadata or an internal endpoint and the attacker learns credentials or internal state | Five fences: a host **allowlist that is empty by default** (unconfigured, the endpoint refuses everything); **https only**; **every resolved address must be publicly routable**, so an allowlisted name answering `127.0.0.1`, `169.254.169.254`, `10/8`, `100.64/10` or `fd00::/7` is refused; **redirects refused, never followed**; and `SafeHttpClient` resolves and re-vets every address immediately before connecting to a **pinned public IP**, with SNI, Host and certificate identity checked against the original name. A public first DNS answer followed by an internal answer is refused before any connection |
 | **I**nfo disclosure | Even a refused fetch confirms whether an internal host exists (timing, error text) | Bounded: the allowlist is checked before any resolution, so an unlisted host produces no lookup and no connection at all. A listed host is one the bank chose |
 | **T**ampering | Fetched bytes are trusted because the service fetched them itself | They are not. The body goes through exactly the same decode / dimension-check / re-encode as an upload (§4e): SVG and polyglots refused, metadata stripped, a declared oversize refused before allocation |
-| **D**oS | A source streams gigabytes, or a slow-loris fetch holds the pod | Read capped at 512 kB and **streamed**, not trusted from `Content-Length` — a source that lies about the header is the one you least want to allocate for. Connect and request timeouts are 5 s and 10 s |
+| **D**oS | A source streams gigabytes, or a slow-loris fetch holds the pod | SafeHttpClient enforces the 512 kB cap while reading the wire response, regardless of `Content-Length`, before returning a bounded byte array for the existing image decoder. Connect timeout is 5 s; the whole call, including DNS and a trickling response, is capped at 10 s |
 | **E**oP | A viewer triggers ingest | `Roles.OPERATOR`/`ADMIN` plus OPA `merchant.update`, the same gate as the upload it replaces |
 | **R**epudiation | No record of where a trademark came from | `source_url` is stored **as fetched** rather than as typed, with `licence`, `attribution` and `uploaded_by` |
 
-**Residual risk, stated rather than papered over.** Between the address check and the connection the
-name is resolved again by the JDK's own connect, so an attacker who controls an **allowlisted** name
-can still steer that second lookup (DNS rebinding). Closing it needs connecting to a pinned IP with
-SNI and Host preserved, which `java.net.http.HttpClient` does not expose. The allowlist is what
-bounds it: the attacker must already own a name this bank chose to trust, which is a materially
-different position from "any URL an operator can be talked into pasting".
+**Residual risk.** Pinning closes the re-resolution gap in the old JDK client; it does not make an
+allowlisted public host trustworthy. A compromised allowed host can observe an operator's fetch or
+serve misleading raster content. Decode/re-encode removes active image content and metadata, while
+the operator's allowlist choice and the recorded licence/attribution remain the provenance controls.
 
-**DFD update:** one NEW outbound edge — transaction-service to a public host on 443, egress-limited
-by the allowlist. Nothing else in this service makes an internet call, so a NetworkPolicy that
+**DFD update:** the existing outbound edge is transaction-service to an allowlisted public host on
+443; the connection now uses a re-vetted, pinned address with the original hostname's TLS identity.
+Nothing else in this service makes an internet call, so a NetworkPolicy that
 permits none is the environment-level backstop, and an environment that has not configured the
 allowlist needs no policy change at all.
 **Risk class:** SSRF, bounded by configuration that is absent by default.
@@ -347,6 +346,12 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
   this change is inert until a separately-approved cutover.
 
 ## 6. Change log
+
+- **2026-10-03** — `LogoFetcher` now uses `SafeHttpClient` for the operator-named logo URL
+  (§4g, PR #11741). The second DNS lookup is re-vetted and its public address pinned through
+  connect, while TLS verifies the original host. The old DNS-rebinding residual is closed; the
+  allowed host's content and provenance remain trust decisions. The 512 kB response is bounded on
+  the wire before it reaches the image decoder, and the whole call has a 10 s deadline.
 
 - **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
   checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
