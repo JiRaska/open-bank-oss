@@ -2,8 +2,8 @@
 """Release-scope-mismatch gate (rules.yaml: change_requirements.release_scope_mismatch).
 
 Release-please requires both a releasing commit type and a package path outside that
-package's `exclude-paths`. Most packages exclude `src/test` (and admin-ui excludes
-`e2e`); campaign and tax-reporting currently do not. Root files such as
+package's `exclude-paths`. Many packages exclude `src/test` (and admin-ui excludes
+`e2e`), but exclusions vary by package. Root files such as
 `<service>/openapi.yaml` are included. This gate flags a release whose
 included paths do not change the package's shipped source subtree.
 
@@ -180,12 +180,13 @@ def self_test() -> int:
     case("included root file triggers a release without shipped source",
          find_mismatches(["openbank-ledger-service/openapi.yaml"], pkgs),
          [("openbank-ledger-service", ["openbank-ledger-service/openapi.yaml"])])
+    case("test path triggers a release when not excluded",
+         find_mismatches(["openbank-other-service/src/test/kotlin/T.kt"],
+                         {"openbank-other-service": ()}),
+         [("openbank-other-service", ["openbank-other-service/src/test/kotlin/T.kt"])])
     actual = load_packages()
     case("real config excludes ledger tests",
          find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt"], actual), [])
-    case("real config includes campaign tests without an exclusion",
-         find_mismatches(["openbank-campaign-service/src/test/kotlin/T.kt"], actual),
-         [("openbank-campaign-service", ["openbank-campaign-service/src/test/kotlin/T.kt"])])
     # A real source change is release-worthy — nothing to flag.
     case("a src/main change is not a mismatch",
          find_mismatches(["openbank-ledger-service/src/main/kotlin/A.kt"], pkgs), [])

@@ -672,9 +672,9 @@ change_requirements:
     blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
   release_scope_mismatch:
     # Release-please requires BOTH a releasing type and a package path outside its
-    # exclude-paths. Most packages exclude src/test (and admin-ui also excludes e2e),
-    # so their test-only PRs do not trigger a release. Campaign and tax-reporting
-    # currently have no such exclusion; the producer reads each package's actual config.
+    # exclude-paths. Many packages exclude src/test (and admin-ui also excludes e2e),
+    # so their test-only PRs do not trigger a release. Exclusions vary by package;
+    # the producer reads each package's actual config.
     # Other root files (for example
     # <service>/openapi.yaml) are included and can trigger a version bump without
     # changing shipped source. Historical PR #547 -> release PR #551 preceded the
