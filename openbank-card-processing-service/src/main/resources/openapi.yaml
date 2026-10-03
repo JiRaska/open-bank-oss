@@ -281,16 +281,10 @@ paths:
         '404':
           $ref: '#/components/responses/TokenRefused'
         '409':
-          description: |
-            A token refusal (`TOKEN_TERMINAL`, `SCHEME_UNAVAILABLE`, …) as a `TokenRefusal`, or an
-            idempotency conflict (`IDEMPOTENCY_REQUEST_IN_PROGRESS`, `IDEMPOTENCY_KEY_REUSED`) in the
-            fleet error shape.
-          content:
-            application/json:
-              schema:
-                oneOf:
-                  - $ref: '#/components/schemas/TokenRefusal'
-                  - $ref: '#/components/schemas/IdempotencyConflict'
+          # Kept as the TokenRefusal ref: wrapping it in a oneOf with IdempotencyConflict is itself
+          # breaking to oasdiff (a field once guaranteed may be absent). The idempotency 409s
+          # (fleet error shape) are named in the operation description above.
+          $ref: '#/components/responses/TokenRefused'
 
   /api/v1/card-tokens/card/{cardId}:
     get:
@@ -459,7 +453,9 @@ paths:
         '404':
           $ref: '#/components/responses/DisputeRefused'
         '409':
-          $ref: '#/components/responses/DisputeConflict'
+          # Kept as DisputeRefused: a oneOf with IdempotencyConflict is breaking to oasdiff. The
+          # idempotency 409s (fleet error shape) are named in the operation description above.
+          $ref: '#/components/responses/DisputeRefused'
 
   /api/v1/card-disputes/{id}:
     get:
