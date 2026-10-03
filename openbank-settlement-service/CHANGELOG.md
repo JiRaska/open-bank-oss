@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.0...settlement-service-v0.10.1) (2026-10-03)
+
+
+### Security
+
+* **settlement:** durable operator approvals and least-privilege approval queues ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 10) ([#11915](https://github.com/JiRaska/open-bank-oss/issues/11915)) ([2cf126b](https://github.com/JiRaska/open-bank-oss/commit/2cf126bc21c6ca84efc3529a2ef41a6263d3b0b8))
+
 ## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.3...settlement-service-v0.10.0) (2026-10-03)
 
 

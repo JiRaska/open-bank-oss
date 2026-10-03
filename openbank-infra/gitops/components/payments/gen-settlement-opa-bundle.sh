@@ -38,11 +38,43 @@ import rego.v1
 # no verified in-repo M2M caller (see below), so almost every real call here is a human
 # operator acting through admin-ui's BFF, which forwards the operator's OWN bearer token
 # (not a service-to-service credential).
+#
+# settlement.create is also listed in rules.yaml four_eyes.actions (#10041): OPA flags it
+# four_eyes_required and, where authz.four-eyes.enforce=true, the maker's request is parked with
+# a durable approval bound to the exact instruction (endpoint + arguments, #11675).
+#
+# The `service-account-` exclusion makes "human operator" true: Keycloak client_credentials
+# tokens are classified HUMAN and the realm M2M clients carry ROLE_OPERATOR in at least one
+# realm (#3734), while this action has no verified M2M caller (see below).
 allowed_reasons contains "operator-settlement-write" if {
 	input.principal.type == "HUMAN"
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
 	input.action == "settlement.create"
+}
+
+# Checker side of the settlement four-eyes flow (ApprovalResource, PATCH
+# /api/v1/settlements/approvals/{id}). Deciding an approval is as sensitive as originating the
+# settlement it gates, so it is the identical human-operator grant. Self-approval is refused by
+# the approval store, not here. settlement.approval.read (the queue and one record) is reached
+# by base operator-read-any for human operators.
+allowed_reasons contains "operator-settlement-approval-decide" if {
+	input.principal.type == "HUMAN"
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	not startswith(input.principal.id, "service-account-")
+	input.action == "settlement.approval.decide"
+}
+
+# The operator-approval queue exposes the maker, the action and the full bound instruction of
+# every pending settlement. Base operator-read-any is role-only, and both realm M2M clients
+# (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+# ROLE_OPERATOR in at least one realm, so without this veto they could read it. No M2M consumer
+# exists (admin-ui forwards the operator's own token). Identity, never principal.type, decides.
+prohibited if {
+	startswith(input.principal.id, "service-account-")
+	input.action in {"settlement.approval.read", "settlement.approval.decide"}
 }
 
 # NO service-to-service (SERVICE/ROLE_SERVICE) allow rule exists here on purpose.
