@@ -31,8 +31,8 @@ unchanged and the source becomes the tamper-evident chain.
 signed-in person's own bearer token — it never uses its service account here. The action is
 `audit.evidence.reconstruct`, deliberately not `*.read`: measured with `opa eval` against this
 bundle, base `rest.rego`'s `operator-read-any` / `compliance-read-any` grant every `*.read` action to
-HUMAN-classified service accounts, so an `audit.evidence.read` from
-`service-account-openbank-services` was allowed. With `reconstruct`, the evidence rule — which
+HUMAN-classified service accounts, so the same route under a read-verb action name was allowed
+for `service-account-openbank-services`. With `reconstruct`, the evidence rule — which
 excludes `service-account-*` — is the only grant; the must-deny controls (lending SA with
 COMPLIANCE + CREDIT_RISK, shared SA with OPERATOR, human OPERATOR) all evaluate to deny.
 **Pre-existing, not changed here:** `audit.read` is a `*.read` action, so the same base rules allow it
