@@ -53,3 +53,26 @@ test_admin_may_simulate if {
 test_read_reason_does_not_cover_write if {
 	not "operator-card-processing-read" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.authorize"}
 }
+
+test_operator_may_manage_tokens_and_disputes if {
+	"operator-card-lifecycle-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.token"}
+	"operator-card-lifecycle-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.dispute"}
+}
+
+# The negative half, which is the half that can fail silently: a viewer must be able to READ a
+# token list and must not be able to suspend one.
+test_viewer_may_not_manage_tokens if {
+	not "operator-card-lifecycle-write" in rest.allowed_reasons with input as {"principal": viewer, "action": "cardprocessing.token"}
+	"operator-card-processing-read" in rest.allowed_reasons with input as {"principal": viewer, "action": "cardprocessing.read"}
+}
+
+test_anonymous_may_not_open_a_dispute if {
+	not "operator-card-lifecycle-write" in rest.allowed_reasons with input as {"principal": anonymous, "action": "cardprocessing.dispute"}
+}
+
+# The money-path reason must NOT stretch to the lifecycle actions: if it did, narrowing one would
+# silently narrow the other, and the separation above would be decorative.
+test_money_path_reason_does_not_cover_lifecycle_actions if {
+	not "operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.token"}
+	not "operator-cardprocessing-write" in rest.allowed_reasons with input as {"principal": operator, "action": "cardprocessing.dispute"}
+}

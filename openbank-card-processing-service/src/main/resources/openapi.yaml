@@ -5,7 +5,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Card Processing API
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Card authorisation, holds, clearing and release (ADR-0283 phase 1).
 
@@ -23,6 +23,10 @@ servers:
 tags:
   - name: Authorizations
     description: Authorise, clear, reverse and read card authorisations
+  - name: Tokens
+    description: Network tokens for a card — provision, list, change state
+  - name: Disputes
+    description: Chargeback cases against cleared card spend
   - name: Sandbox
     description: The sandbox acquirer — off unless explicitly enabled
 
@@ -178,6 +182,259 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
+  /api/v1/card-tokens:
+    post:
+      tags: [Tokens]
+      summary: Provision a network token for a card
+      description: |
+        The token is minted by the NETWORK. What this service stores is the record that it exists —
+        no token credential, no cryptogram and no PAN. Provisioning is not naturally idempotent, so
+        `Idempotency-Key` is required and is held by a unique index: a retried request returns the
+        first token rather than minting a second credential the customer can see.
+      operationId: provisionCardToken
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: Retry safety. The same key never mints a second token.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProvisionTokenRequest'
+      responses:
+        '201':
+          description: The token as the network minted it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Refused'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-tokens/{tokenReference}/status:
+    post:
+      tags: [Tokens]
+      summary: Suspend, resume or delete a network token
+      description: |
+        `DELETED` is terminal in every scheme's token lifecycle, and this service refuses a change
+        to an already-deleted token without calling the network — the rule belongs to the record,
+        not to whichever binding happens to be wired.
+      operationId: changeCardTokenStatus
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: tokenReference
+          in: path
+          required: true
+          description: The network's opaque token handle. Never a card number.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeTokenStatusRequest'
+      responses:
+        '200':
+          description: The token after the change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Token'
+        '400':
+          description: The status is not one of ACTIVE, SUSPENDED, DELETED
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Refused'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-tokens/card/{cardId}:
+    get:
+      tags: [Tokens]
+      summary: Tokens for one card, with the provenance of the answer
+      description: |
+        `source` is `NETWORK` when the scheme answered on this request and `LOCAL_MIRROR` when it
+        did not and these are the rows this bank last recorded. A client that renders the list
+        without reading `source` presents possibly-stale token states as current, which is why the
+        field is required rather than optional.
+      operationId: listCardTokens
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: The tokens, and where the answer came from
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/card-disputes:
+    post:
+      tags: [Disputes]
+      summary: Open a chargeback case with the network
+      description: |
+        Only money that actually moved may be disputed: an authorisation still holding funds is
+        released with a reversal, and the disputed amount may not exceed what cleared. Opening fails
+        CLOSED — if the network cannot be reached no case is recorded, because a local case carries
+        a respond-by date nobody is counting down while it renders as active.
+      operationId: openCardDispute
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OpenDisputeRequest'
+      responses:
+        '201':
+          description: The case the network opened
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dispute'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Refused'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-disputes/{id}/evidence:
+    post:
+      tags: [Disputes]
+      summary: File evidence against an open case
+      operationId: submitCardDisputeEvidence
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SubmitEvidenceRequest'
+      responses:
+        '200':
+          description: The case after the submission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dispute'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Refused'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-disputes/{id}/refresh:
+    post:
+      tags: [Disputes]
+      summary: Re-read the network's status and record any move
+      description: |
+        Publishes nothing when nothing moved. An event per poll would make "the case changed"
+        indistinguishable from "somebody looked at it".
+      operationId: refreshCardDispute
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      responses:
+        '200':
+          description: The case as the network now describes it
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dispute'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/Refused'
+        '409':
+          $ref: '#/components/responses/Refused'
+
+  /api/v1/card-disputes/{id}:
+    get:
+      tags: [Disputes]
+      summary: One dispute case, in both vocabularies
+      operationId: getCardDispute
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/DisputeId'
+      responses:
+        '200':
+          description: The case
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dispute'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such case
+
+  /api/v1/card-disputes/card/{cardId}:
+    get:
+      tags: [Disputes]
+      summary: Dispute cases for one card, newest first
+      operationId: listCardDisputes
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: cardId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 200
+      responses:
+        '200':
+          description: The cases
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DisputeList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
   /api/v1/sandbox/acquirer/purchase:
     post:
       tags: [Sandbox]
@@ -221,6 +478,13 @@ components:
       schema:
         type: string
         format: uuid
+    DisputeId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
 
   responses:
     BadRequest:
@@ -228,7 +492,10 @@ components:
     Forbidden:
       description: The caller may not perform this action
     Refused:
-      description: The authorisation is not in a state that accepts this presentment
+      description: |
+        The request was well formed and the state was not what it needed to be — a presentment
+        against a released hold, a token that is already deleted, a dispute against a hold that
+        cleared nothing. The reason travels as a machine-readable value.
       content:
         application/json:
           schema:
@@ -421,3 +688,179 @@ components:
           format: int64
         networkReference:
           type: string
+
+    ProvisionTokenRequest:
+      type: object
+      required: [cardId, requestorId, requestorLabel]
+      properties:
+        cardId:
+          type: string
+          format: uuid
+        requestorId:
+          type: string
+          description: The wallet or merchant asking, in the network's own requestor vocabulary.
+        requestorLabel:
+          type: string
+          description: What an operator should see. This bank's label, not the network's.
+    ChangeTokenStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: '#/components/schemas/NetworkTokenStatus'
+    NetworkTokenStatus:
+      type: string
+      description: DELETED is terminal — a deleted token cannot be resumed by any scheme.
+      enum: [ACTIVE, SUSPENDED, DELETED]
+    CardScheme:
+      type: string
+      description: |
+        Which adapter answered, not which brand the card carries. SIMULATOR is a first-class value:
+        it is the binding this repository ships for tokenisation and disputes, and naming it keeps
+        "we simulate this" distinguishable from "we integrated this" at every call site.
+      enum: [VISA, MASTERCARD, SIMULATOR]
+    Token:
+      type: object
+      required: [id, cardId, tokenReference, requestorId, requestorLabel, last4, status, scheme, provisionedAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        cardId:
+          type: string
+          format: uuid
+        tokenReference:
+          type: string
+          description: The network's opaque handle. Not a card number and not derived from one.
+        requestorId:
+          type: string
+        requestorLabel:
+          type: string
+        last4:
+          type: string
+          description: The TOKEN's display digits, as the network supplies them. Not the card's.
+        status:
+          $ref: '#/components/schemas/NetworkTokenStatus'
+        scheme:
+          $ref: '#/components/schemas/CardScheme'
+        expiry:
+          type: string
+          format: date
+          nullable: true
+        provisionedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    TokenList:
+      type: object
+      required: [tokens, source, count]
+      properties:
+        tokens:
+          type: array
+          items:
+            $ref: '#/components/schemas/Token'
+        source:
+          type: string
+          description: |
+            NETWORK means the scheme answered on this request. LOCAL_MIRROR means it did not and
+            these are the rows this bank last recorded — possibly stale, never current.
+          enum: [NETWORK, LOCAL_MIRROR]
+        degradedReason:
+          type: string
+          nullable: true
+          description: Why the network could not answer. Null on a live read.
+        count:
+          type: integer
+    OpenDisputeRequest:
+      type: object
+      required: [authorizationId, reasonCode, amountMinorUnits, currencyCode]
+      properties:
+        authorizationId:
+          type: string
+          format: uuid
+        reasonCode:
+          type: string
+          description: The scheme's own code, passed through untranslated.
+        amountMinorUnits:
+          type: integer
+          format: int64
+          description: At most what cleared on the authorisation.
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+    SubmitEvidenceRequest:
+      type: object
+      required: [documentReference]
+      properties:
+        documentReference:
+          type: string
+          description: A handle for the document. The document itself never travels here.
+        note:
+          type: string
+          nullable: true
+    DisputeStatus:
+      type: string
+      description: |
+        This BANK's lifecycle. The network's own status travels beside it on `schemeStatus` and is
+        never mapped into this enum — the two vocabularies must not be able to disagree where a
+        chargeback deadline is computed.
+      enum: [OPEN, EVIDENCE_SUBMITTED, WON, LOST, WITHDRAWN]
+    Dispute:
+      type: object
+      required: [id, authorizationId, cardId, networkCaseId, reasonCode, amountMinorUnits, currencyCode, status, scheme, schemeStatus, openedAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        authorizationId:
+          type: string
+          format: uuid
+        cardId:
+          type: string
+          format: uuid
+        networkCaseId:
+          type: string
+          description: Assigned by the network. There is no case here without one.
+        reasonCode:
+          type: string
+        amountMinorUnits:
+          type: integer
+          format: int64
+        currencyCode:
+          type: string
+          minLength: 3
+          maxLength: 3
+        status:
+          $ref: '#/components/schemas/DisputeStatus'
+        scheme:
+          $ref: '#/components/schemas/CardScheme'
+        schemeStatus:
+          type: string
+          description: The network's own status string, verbatim.
+        respondByDate:
+          type: string
+          format: date
+          nullable: true
+          description: The network's deadline, carried so a client need not re-derive it.
+        evidenceReference:
+          type: string
+          nullable: true
+        openedAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    DisputeList:
+      type: object
+      required: [disputes, count]
+      properties:
+        disputes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Dispute'
+        count:
+          type: integer
