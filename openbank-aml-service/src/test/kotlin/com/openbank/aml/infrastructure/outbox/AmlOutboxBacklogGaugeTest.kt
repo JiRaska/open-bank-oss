@@ -5,10 +5,10 @@ package com.openbank.aml.infrastructure.outbox
 
 import com.openbank.aml.infrastructure.persistence.repository.AmlOutboxRepositoryImpl
 import com.openbank.libs.observability.DomainMetrics
+import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
-import io.smallrye.mutiny.Uni
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -33,12 +33,12 @@ class AmlOutboxBacklogGaugeTest {
         // Before any refresh the cache is zero.
         assertThat(supplier.captured().toLong()).isZero()
 
-        every { repo.countProcessableUni() } returns Uni.createFrom().item(7L)
+        coEvery { repo.countProcessable() } returns 7L
         runBlocking { gauge.refresh() }
         assertThat(supplier.captured().toLong()).isEqualTo(7L)
 
         // A later, lower reading is reflected too (backlog drained).
-        every { repo.countProcessableUni() } returns Uni.createFrom().item(2L)
+        coEvery { repo.countProcessable() } returns 2L
         runBlocking { gauge.refresh() }
         assertThat(supplier.captured().toLong()).isEqualTo(2L)
     }
