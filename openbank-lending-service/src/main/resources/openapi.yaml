@@ -24,7 +24,8 @@ info:
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
   # 1.35.0 -> 1.36.0 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.36.0
+  # 1.36.0 -> 1.37.0 (#11900): additive loan evidence read from the audit chain.
+  version: 1.37.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -618,14 +619,24 @@ paths:
       operationId: getApplicationEvidence
       summary: Ordered evidence bundle for one loan application (ADR-0214)
       description: >-
-        The application lifecycle as recorded in the transactional outbox, oldest first —
-        the same events the audit chain (ADR-0133) ingests. ROLE_COMPLIANCE / ROLE_CREDIT_RISK / ROLE_ADMIN.
+        The application lifecycle as recorded in the tamper-evident audit chain (ADR-0133), oldest
+        first, read from audit-service with the caller's own token (#11900). Each event carries the
+        chain's per-entry hash status; `tampered` is true if any entry failed to recompute.
+        ROLE_COMPLIANCE / ROLE_CREDIT_RISK / ROLE_ADMIN. There is no fallback to this service's
+        outbox: when audit-service cannot be read the answer is 503, never a partial bundle.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: Ordered evidence events with attestation marker }
+        '200':
+          description: Ordered evidence events from the audit chain
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoanEvidenceBundle'
+        '401': { description: audit-service refused the caller's identity }
         '403':
           $ref: '#/components/responses/Forbidden'
+        '503': { description: The audit chain could not be read }
   /api/v1/lending/applications/{id}/advance:
     post:
       tags: [Lending]
@@ -1464,6 +1475,28 @@ components:
           schema:
             $ref: '#/components/schemas/ApiError'
   schemas:
+    LoanEvidenceBundle:
+      type: object
+      required: [applicationId, attestation, tampered, truncated, eventCount, events, requestedBy]
+      properties:
+        applicationId: { type: string, format: uuid }
+        attestation: { type: string, enum: [audit-chain] }
+        tampered: { type: boolean }
+        truncated: { type: boolean }
+        eventCount: { type: integer }
+        requestedBy: { type: string }
+        events:
+          type: array
+          items:
+            type: object
+            required: [eventId, eventType, sourceService, occurredAt, payload, hashStatus]
+            properties:
+              eventId: { type: string }
+              eventType: { type: string }
+              sourceService: { type: string }
+              occurredAt: { type: string, format: date-time }
+              payload: { type: string }
+              hashStatus: { type: string, enum: [VERIFIED, MISMATCH, LEGACY_UNVERIFIABLE, UNCHAINED] }
     LedgerBackfillRequestView:
       type: object
       properties:
