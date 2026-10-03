@@ -21,8 +21,11 @@
 #   - langfuse-ingress.yaml and langfuse-httproute.yaml route the UI to the Service langfuse-web,
 #     and NEXTAUTH_URL below is the public host;
 #   - v2 (langfuse.yaml) is scaled to 0 but NOT deleted; its tables in langfuse-db are not dropped or migrated.
-# LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS stays false in that deploy, as the guide requires; it is
-# a separate, later PR once new traces are verified in ClickHouse and S3.
+# LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS was false in that deploy, as the guide requires. It is
+# true since the follow-up PR, after langfuse-wave-b-verify.sh proved on 2026-10-03 (trace
+# 26ceaacb-8551-4f8b-bd81-54392943cdea) that a gateway call lands masked in v3, in ClickHouse and
+# in S3. The migrations copy v2 history into ClickHouse: cost backfill, then traces,
+# observations, scores, newest first.
 # Without the public route, the UI is still reachable for debugging:
 #   kubectl -n ai-platform port-forward svc/langfuse-web 3000:3000  (login redirects to NEXTAUTH_URL)
 #
@@ -67,7 +70,7 @@ data:
   # traffic: the guide forbids enabling it in the same deploy ("the migration may miss events
   # that are ingested after the new instances were started"). Flipped by a separate PR once
   # the owner's post-sync verification shows traces landing in v3 (ClickHouse + S3).
-  LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "false"
+  LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "true"
   AUTH_DISABLE_SIGNUP: "true"
   TELEMETRY_ENABLED: "false"
   LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
@@ -97,6 +100,10 @@ spec:
       app.kubernetes.io/name: langfuse-web
   template:
     metadata:
+      annotations:
+        # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
+        # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
+        openbank.io/langfuse-env-revision: "2"
       labels:
         app.kubernetes.io/name: langfuse-web
         app.kubernetes.io/part-of: ai-platform
@@ -218,6 +225,10 @@ spec:
       app.kubernetes.io/name: langfuse-worker
   template:
     metadata:
+      annotations:
+        # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
+        # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
+        openbank.io/langfuse-env-revision: "2"
       labels:
         app.kubernetes.io/name: langfuse-worker
         app.kubernetes.io/part-of: ai-platform
