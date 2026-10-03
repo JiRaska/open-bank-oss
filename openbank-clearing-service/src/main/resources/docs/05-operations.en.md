@@ -89,6 +89,9 @@ _These are design-target SLOs for a production-shaped deployment — they are no
    four bounded claims. If broker publish latency makes those claims approach the 30 s dispatcher
    timeout, reduce `openbank.outbox.batch-size`; no event or database migration rollback is needed.
 
+### Items stuck PENDING in an unsettleable currency
+`openbank_clearing_unsettleable_pending_items{currency}` > 0 (and a WARN `[clearing-cycle] … left unbatched` per cycle) means items were accepted in a currency with no settlement GL pair; the cycle deliberately leaves them PENDING (#11974). Either seed the Customer Cash Clearing + Scheme Settlement GLs for that currency (ledger migration + `NetSettlementJournalFactory`) — they settle on the next cycle — or return the payments upstream. Never hand-move them into a batch of another currency.
+
 ### Settle/trigger returns 500
 Body is `{ "error": "<message>" }`. Common cause: `settleBatch` with an unknown id → `IllegalArgumentException("Batch not found")`. Verify the batch id; reads via `GET /batches/{id}`.
 

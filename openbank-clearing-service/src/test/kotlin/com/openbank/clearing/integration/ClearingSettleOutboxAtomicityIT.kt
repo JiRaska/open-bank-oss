@@ -94,10 +94,10 @@ class ClearingSettleOutboxAtomicityIT {
                 post("/api/v1/clearing/cycle/trigger?rail=SEPA_SCT")
             } Then {
                 statusCode(200)
-                body("id", notNullValue())
-                body("status", equalTo("IN_CLEARING"))
+                body("batches[0].id", notNullValue())
+                body("batches[0].status", equalTo("IN_CLEARING"))
             }
-            ).extract().body().jsonPath().getString("id")
+            ).extract().body().jsonPath().getString("batches[0].id")
 
         Given { contentType("application/json") } When {
             post("/api/v1/clearing/batches/$batchId/settle")
