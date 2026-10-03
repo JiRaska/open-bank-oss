@@ -1,21 +1,25 @@
 # OpenBank
-> An open-source banking reference implementation you can explore.
+> An early-stage, open-source banking ecosystem and reference implementation, not a licensed bank or production service.
 
-OpenBank includes a customer app, operator portal, banking domains and governed AI tools.
-It is early-stage software, not a licensed bank and not production-ready. Use demo data only.
+OpenBank connects banking domains, shared libraries, Product Studio, test evidence, observability, customer and business relationships, a customer app and governed AI tooling. The public sandbox uses demo data. The code and its documented limits are the source of truth; a repository module list is not a live deployment report.
 
-## Explore
-- [Home](https://open-bank.tech/): Project, actual product views, community and iOS TestFlight signup
-- [Platform](https://open-bank.tech/platform.html): Complete code-derived module inventory, grouped by capability, with source revision and links
-- [Labs](https://open-bank.tech/labs.html): Shared banking kernel in openbank-libs, with module links and original artwork
-- [Source](https://github.com/JiRaska/open-bank-oss): Current implementation, licenses and roadmap
-- [Admin demo](https://admin.open-bank.tech): Authenticated operator portal
+## Start here
+- [Overview](https://open-bank.tech/): Customer experience, connected ecosystem, Product Studio, AI/MCP overview and iOS TestFlight signup.
+- [Platform](https://open-bank.tech/platform.html): Code-derived module inventory grouped by banking capability, with source and API links.
+- [Labs](https://open-bank.tech/labs.html): Shared Kotlin banking kernel and QRlessPay phone-to-phone payment descriptor SDK.
+- [QRlessPay SDK source](https://github.com/JiRaska/qrlesspay-sdk): Public Swift/Kotlin reference implementations and conformance vectors; BLE carries SPAYD payloads, UWB is optional proximity proof, NFC is future research.
+- [Source and project status](https://github.com/JiRaska/open-bank-oss): Implementation, licenses, roadmap and current limitations.
+- [Product catalog source](https://github.com/JiRaska/open-bank-oss/tree/main/openbank-product-catalog): Versioned specifications and offerings, draft review and controlled publication.
+- [MCP service source](https://github.com/JiRaska/open-bank-oss/tree/main/openbank-mcp-service): Curated, policy-gated AI tools in the sandbox.
 
-## Evidence and licensing
-The public inventory is a repository snapshot, not a deployment or health report.
-Product screenshots are recorded views. Follow portal links for current operational evidence.
-The platform is Apache-2.0; AI agent components use AGPL-3.0-only plus commercial licensing.
-Consult each component's license. Open Bank Foundation is a proposal, not an incorporated organization.
+## How to describe the project accurately
+- Bank ecosystem: Domains cover identity, products, accounts, payments, risk and operations. Shared openbank-libs rules, tests and runtime observability are intended to make behavior traceable across the platform.
+- Relationship view: Customer 360 is shipped; person-to-company links are partial and a broader wealth composition is planned. Do not describe a complete holistic view as already available.
+- Customer experience: The app and sandbox demonstrate banking products and services. Screenshots are recorded views, not live account data.
+- Product Studio: Operators can author and review versioned offers. Catalog policy and human maker-checker control publication; AI can propose or explain, not set terms.
+- AI-native and MCP-native: A customer-facing copilot and governed MCP tools exist in the sandbox. MCP reads are scoped by consent and policy; payment tools create human-reviewed proposals. External MCP access beyond the sandbox remains gated.
+- Status: Early-stage reference software. OpenBank is not a licensed bank and is not production-ready. Never send real financial or personal data to the public sandbox.
+- Licensing: The platform is Apache-2.0; AI agent components use AGPL-3.0-only plus commercial licensing. Check each component's license. Open Bank Foundation remains a proposal, not an incorporated organization.
 
 ## Contact
 - Email: hello@open-bank.tech

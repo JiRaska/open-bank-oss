@@ -108,7 +108,7 @@ sequenceDiagram
   R-->>C: 201 / 200
 
   loop every 5s (concurrentExecution = SKIP)
-    D->>DB: SELECT FROM sdd_outbox WHERE status IN (PENDING, FAILED) ORDER BY created_at LIMIT 25
+    D->>DB: claim the oldest due row per aggregate (FOR UPDATE SKIP LOCKED, status=DISPATCHING)
     D->>K: publish to openbank.sdd.event (key = aggregate_id, header ce-id = event_id)
     D->>DB: UPDATE sdd_outbox SET status = SENT
   end
@@ -116,7 +116,7 @@ sequenceDiagram
 
 **Outbox guarantees (ADR-0050 / ADR-0003):**
 
-- **Single writer (N4)** — `concurrentExecution = SKIP` prevents in-JVM overlap and the Deployment is pinned to `replicas: 1`; together they guarantee exactly one dispatcher claims a row. Rows are processed sequentially, preserving per-aggregate ordering. A `FOR UPDATE SKIP LOCKED` claim is the tracked refinement for any future multi-writer topology.
+- **Kernel outbox v2 (ADR-0327, #11874)** — the repository is the shared `AbstractPanacheOutboxRepository`. Each claim takes only the oldest due row of every aggregate (`FOR UPDATE SKIP LOCKED`, marked `DISPATCHING`), so per-aggregate order holds even with several dispatchers; distinct aggregates in one claim are published concurrently (`@Bulkhead(OutboxDispatch.SEND_CONCURRENCY)`). A tick keeps claiming until a claim dispatches nothing; failed rows back off before they are due again, and a row left `DISPATCHING` by a crashed pod is reclaimed after the stale-claim window. `concurrentExecution = SKIP` still prevents in-JVM overlap.
 - **Partition key = aggregate_id (N2)** — every event for one mandate lands on the same partition, preserving per-mandate ordering.
 - **event_id as idempotency key (N3)** — carried as Kafka headers `ce-id` / `idempotency-key` so at-least-once delivery is safely deduplicated by consumers.
 - **Poison handling (N5)** — per-row publish failures are isolated (`recoverWithUni` → `markFailed`); after `MAX_ATTEMPTS` (10) a row transitions to the terminal `DEAD` status, is excluded from the processable query and emits a WARN an operator alert can hook.
