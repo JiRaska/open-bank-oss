@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.274.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.273.0...admin-ui-v0.274.0) (2026-10-03)
+
+
+### Features
+
+* **admin-ui:** review SCA and settlement operator approvals in the inbox ([#11949](https://github.com/JiRaska/open-bank-oss/issues/11949)) ([dcdf4e2](https://github.com/JiRaska/open-bank-oss/commit/dcdf4e2706b4c8d3dde3895b81246e22fb76473a)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+* **settlement:** query a settlement's status, with an operator page ([#11935](https://github.com/JiRaska/open-bank-oss/issues/11935)) ([ec34f5a](https://github.com/JiRaska/open-bank-oss/commit/ec34f5a6fb6cb37e4170c12d522c32603b3f468b)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+
 ## [0.273.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.272.0...admin-ui-v0.273.0) (2026-10-03)
 
 
