@@ -331,6 +331,17 @@ text-align:center}
 .ecosystem-heading h2{margin-top:12px}
 .ecosystem-heading h2 span{color:var(--blue)}
 .ecosystem-heading>p:last-child{max-width:760px;margin-top:22px;color:#455356;font-size:18px;line-height:1.6}
+.bank-as-code{display:grid;grid-template-columns:.9fr 1.1fr;gap:28px;margin-bottom:20px;padding:38px;border:1px solid #224b71;border-radius:28px;background:radial-gradient(circle at 85% 15%,#174e86 0,#102e53 45%,#10263d 100%);color:#fff}
+.bank-as-code .eyebrow{color:#78d5f5}
+.bank-as-code h3{margin:16px 0;font-size:clamp(30px,3.5vw,48px);line-height:1.08}
+.bank-as-code-intro>p:not(.eyebrow){max-width:500px;color:#d8e7f1;font-size:17px;line-height:1.65}
+.bank-as-code-intro>a{display:inline-block;margin-top:23px;color:#8ce3ff;font-weight:700;text-underline-offset:4px}
+.bank-as-code-proof{display:grid;gap:8px}
+.bank-as-code-proof>div{padding:15px 18px;border:1px solid #ffffff2b;border-radius:14px;background:#ffffff0d}
+.bank-as-code-proof span{display:block;color:#86d6f5;font:700 10px/1.4 var(--mono);letter-spacing:.08em}
+.bank-as-code-proof strong{display:block;margin-top:5px;font-size:17px}
+.bank-as-code-proof p{margin-top:4px;color:#d1e0ec;font-size:13px;line-height:1.5}
+.bank-as-code-note{grid-column:1/-1;margin:0;padding-top:13px;border-top:1px solid #ffffff30;color:#b5ccdd;font-size:12px;line-height:1.5}
 .ecosystem-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
 .ecosystem-card{position:relative;display:flex;flex-direction:column;min-width:0;padding:36px;border:1px solid #d0dfe4;border-radius:28px;background:#fff;overflow:hidden}
 .ecosystem-card h3{margin-top:18px;font-size:clamp(27px,3vw,39px)}
@@ -366,8 +377,8 @@ text-align:center}
 .ai-routes span{padding:8px 11px;border-radius:999px;background:#fff;color:#163d7e;font:700 11px/1.4 var(--mono)}
 .ai-routes b{color:#1f6feb}
 .ecosystem-card .ecosystem-note{margin-top:12px;font-size:12px}
-@media(max-width:800px){.ecosystem-section{padding:65px 0}.ecosystem-grid{grid-template-columns:1fr}.ecosystem-bank,.ecosystem-relationships{grid-template-columns:1fr;gap:25px}.ecosystem-card{padding:26px}}
-@media(max-width:480px){.ecosystem-heading>p:last-child{font-size:16px}.bank-system{padding:13px}.bank-domains span{font-size:10px;padding:8px}.bank-foundations{grid-template-columns:1fr}.bank-foundations div{text-align:left;padding:9px 12px}.bank-foundations b{font-size:11px}.bank-foundations small{font-size:10px}.relationship-node{min-width:95px;padding:12px 9px;font-size:12px}.relationship-arrow{font-size:16px}}
+@media(max-width:800px){.ecosystem-section{padding:65px 0}.bank-as-code{grid-template-columns:1fr}.ecosystem-grid{grid-template-columns:1fr}.ecosystem-bank,.ecosystem-relationships{grid-template-columns:1fr;gap:25px}.ecosystem-card{padding:26px}}
+@media(max-width:480px){.ecosystem-heading>p:last-child{font-size:16px}.bank-as-code{padding:26px}.bank-as-code-intro>p:not(.eyebrow){font-size:15px}.bank-system{padding:13px}.bank-domains span{font-size:10px;padding:8px}.bank-foundations{grid-template-columns:1fr}.bank-foundations div{text-align:left;padding:9px 12px}.bank-foundations b{font-size:11px}.bank-foundations small{font-size:10px}.relationship-node{min-width:95px;padding:12px 9px;font-size:12px}.relationship-arrow{font-size:16px}}
 .app-copy>.lede{
 margin:24px 0 16px}
 .app-copy>p:not(.eyebrow){
