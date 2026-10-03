@@ -5,6 +5,11 @@ from copy import deepcopy
 
 IDENTITY = ('version', 'sha', 'ref', 'job', 'detector')
 
+
+class ShardTimeoutError(RuntimeError):
+    """A resolver process exceeded its shard cap and has been terminated."""
+
+
 def load_snapshot(path):
     def unique(pairs):
         result = {}
@@ -133,7 +138,7 @@ def run_bounded(command, repo, env, logfile, timeout=180):
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
                 process.wait()
-            raise RuntimeError('dependency shard timed out; see ' + str(logfile)) from None
+            raise ShardTimeoutError('dependency shard timed out; see ' + str(logfile)) from None
     if code:
         raise RuntimeError(f'dependency shard failed ({code}); see {logfile}')
 
@@ -192,6 +197,7 @@ def generate(repo, output, env, extra_arguments=()):
                     'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
+    retry_used = False
     for i in range(0, len(modules), 4):
         shard = output / expected[i // 4]
         shard.mkdir()
@@ -214,8 +220,25 @@ def generate(repo, output, env, extra_arguments=()):
         # Its successful hosted run took 135s; a cold run was killed at 180s
         # while still resolving projects. Keep every shard bounded, but give
         # only this extra-work shard measured cold-run headroom.
-        run_bounded(command, repo, child_env, shard / 'run.log',
-                    timeout=shard_timeout(deadline, time.monotonic(), 240 if i == 0 else 180))
+        limit = 240 if i == 0 else 180
+        try:
+            run_bounded(command, repo, child_env, shard / 'run.log',
+                        timeout=shard_timeout(deadline, time.monotonic(), limit))
+        except ShardTimeoutError:
+            if retry_used:
+                raise
+            retry_used = True
+            # A timed-out Gradle process may have written incomplete receipts or a
+            # partial graph. Preserve its log, but never allow those files to satisfy
+            # the successful retry's completeness checks.
+            import shutil
+            shutil.rmtree(reports)
+            shutil.rmtree(coverage)
+            reports.mkdir()
+            coverage.mkdir()
+            print(f'{shard.name}: timed out; retrying once within the fleet deadline', flush=True)
+            run_bounded(command, repo, child_env, shard / 'retry.log',
+                        timeout=shard_timeout(deadline, time.monotonic(), limit))
         verify_coverage(coverage, projects, sha)
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:

@@ -124,6 +124,15 @@ class RunnerTests(unittest.TestCase):
                 if case == 'second-fails' and len(calls) == 2:
                     raise RuntimeError('producer failed')
                 coverage = Path(child_env['DEPENDENCY_GRAPH_COVERAGE_DIR'])
+                reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
+                if case in ('retry-timeout', 'retry-budget-used') and len(calls) == 1:
+                    (coverage / 'stale.json').write_text('{"partial":true}')
+                    (reports / 'stale.json').write_text('{"partial":true}')
+                    raise subject.ShardTimeoutError('dependency shard timed out')
+                if case == 'retry-budget-used' and len(calls) == 3:
+                    raise subject.ShardTimeoutError('dependency shard timed out')
+                if case == 'double-timeout' and len(calls) <= 2:
+                    raise subject.ShardTimeoutError('dependency shard timed out')
                 tasks = [arg for arg in command if arg.endswith(':ForceDependencyResolutionPlugin_resolveProjectDependencies')]
                 for index, task in enumerate(tasks):
                     if case == 'missing-receipt' and index == 0:
@@ -133,7 +142,6 @@ class RunnerTests(unittest.TestCase):
                     if case == 'wrong-receipt':
                         receipt['sha'] = '2' * 40
                     (coverage / f'{index}.json').write_text(json.dumps(receipt))
-                reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
                 part = snapshot()
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
@@ -147,13 +155,17 @@ class RunnerTests(unittest.TestCase):
                      if case == 'budget-expired' else nullcontext())
             with patch.object(subject, 'run_bounded', side_effect=execute), \
                     patch('subprocess.check_output', return_value=SHA+'\n'), clock:
-                if case in ('success', 'budget-truncated'):
+                if case in ('success', 'budget-truncated', 'retry-timeout'):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
-                    self.assertEqual(len(calls), 2)
-                    self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
+                    self.assertEqual(len(calls), 3 if case == 'retry-timeout' else 2)
+                    self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else
+                                     [240, 240, 180] if case == 'retry-timeout' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
                     self.assertTrue(all('--continue' not in cmd for cmd in calls))
+                    if case == 'retry-timeout':
+                        self.assertFalse((output / 'shard-00/coverage/stale.json').exists())
+                        self.assertFalse((output / 'shard-00/reports/stale.json').exists())
                 else:
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
@@ -161,6 +173,8 @@ class RunnerTests(unittest.TestCase):
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(timeouts, [240])
+                    if case in ('double-timeout', 'retry-budget-used'):
+                        self.assertEqual(len(calls), 2 if case == 'double-timeout' else 3)
 
     def test_real_failed_process_is_not_accepted(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -178,6 +192,11 @@ class RunnerTests(unittest.TestCase):
 
     def test_complete_generation(self):
         self.run_case('success')
+
+    def test_one_timeout_retries_with_clean_outputs_and_one_fleet_wide_retry(self):
+        self.run_case('retry-timeout')
+        self.run_case('double-timeout')
+        self.run_case('retry-budget-used')
 
     def test_serial_shards_share_one_deadline(self):
         self.run_case('budget-truncated')
