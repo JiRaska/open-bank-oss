@@ -1067,11 +1067,14 @@ gates:
       - "openbank-infra/gitops/apps/loki.yaml"
       - ".github/scripts/check-loki-rules.py"
     run: |
+      set -euo pipefail
       # $BASE_REF is exported by the shard in ci.yml. A ${{ }} expression cannot appear in
       # this file: nothing expands it outside the workflow, so bash sees the literal text
       # and dies with "bad substitution" (run-gates.py now refuses to load one at all).
-      git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags || true
-      python3 .github/scripts/check-loki-rules.py --since "origin/${BASE_REF}"
+      # Gate commands run concurrently in one checkout. --refmap= disables the
+      # configured origin/main update even with an explicit destination (CI #11989).
+      git fetch -q --no-tags --no-write-fetch-head --refmap= origin "+refs/heads/${BASE_REF}:refs/gates/loki-base"
+      python3 .github/scripts/check-loki-rules.py --since refs/gates/loki-base
 
   # issue #2255. docs/runbooks/svc-*.md are GENERATED from governance.yaml + the gitops
   # manifests, and nothing checked them, so 25 of 30 had silently gone stale: they told
@@ -3886,8 +3889,8 @@ gates:
       python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
     run: |
       set -euo pipefail
-      git fetch -q origin main
-      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+      git fetch -q --no-tags --no-write-fetch-head --refmap= origin +refs/heads/main:refs/gates/four-eyes-main
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref refs/gates/four-eyes-main --enforce
 
   - id: openapi-version-not-taken
     name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
@@ -3913,8 +3916,8 @@ gates:
       python3 .github/scripts/check-openapi-version-not-taken.py --self-test
     run: |
       set -euo pipefail
-      git fetch -q origin main
-      python3 .github/scripts/check-openapi-version-not-taken.py --base "${PR_DIFF_BASE}" --base-ref origin/main --enforce
+      git fetch -q --no-tags --no-write-fetch-head --refmap= origin +refs/heads/main:refs/gates/openapi-version-main
+      python3 .github/scripts/check-openapi-version-not-taken.py --base "${PR_DIFF_BASE}" --base-ref refs/gates/openapi-version-main --enforce
 
   # ENFORCED against a declared baseline (#2314). It landed advisory because 104 findings
   # cannot be a merge blocker on day one — but an advisory check over a GENERATED comparison
