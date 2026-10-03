@@ -12,6 +12,16 @@ import yaml
 RULES = Path("openbank-libs/governance/rules.yaml")
 
 
+def parse_utc(value, name):
+    try:
+        parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if parsed.tzinfo is None:
+            raise ValueError("timezone missing")
+        return parsed.astimezone(timezone.utc)
+    except (AttributeError, TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be an ISO-8601 timestamp with timezone: {error}") from error
+
+
 def load_policy(path=RULES):
     try:
         doc = yaml.safe_load(Path(path).read_text())
@@ -26,7 +36,9 @@ def load_policy(path=RULES):
     limit = config.get("max_open_prs")
     if type(limit) is not int or limit < 1:
         raise ValueError("autonomous_agent_prs.max_open_prs must be a positive integer")
-    return tuple(prefixes), limit
+    cutoff = config.get("grandfather_created_before")
+    parse_utc(cutoff, "autonomous_agent_prs.grandfather_created_before")
+    return tuple(prefixes), limit, cutoff
 
 
 def validate_snapshot(pages):
@@ -62,18 +74,13 @@ def admit_current_pr(pages, prefixes, limit, number, grandfather_before):
         raise ValueError(f"current PR #{number} missing from snapshot")
     if not current['head']['ref'].startswith(prefixes):
         return True, 0
-    try:
-        created = datetime.fromisoformat(current['created_at'].replace('Z', '+00:00'))
-        cutoff = datetime.fromisoformat(grandfather_before.replace('Z', '+00:00'))
-        if created.tzinfo is None or cutoff.tzinfo is None:
-            raise ValueError("timestamps must include a timezone")
-    except (AttributeError, KeyError, TypeError, ValueError) as error:
-        raise ValueError(f"invalid PR creation or grandfather timestamp: {error}") from error
+    created = parse_utc(current.get('created_at'), "current PR created_at")
+    cutoff = parse_utc(grandfather_before, "grandfather cutoff")
     rank = sum(
         pr['number'] <= number and pr['head']['ref'].startswith(prefixes)
         for pr in prs
     )
-    return created.astimezone(timezone.utc) < cutoff.astimezone(timezone.utc) or rank <= limit, rank
+    return created < cutoff or rank <= limit, rank
 
 
 def main():
@@ -81,19 +88,19 @@ def main():
     try:
         if not args:
             raise ValueError("snapshot path is required")
-        prefixes, limit = load_policy()
+        prefixes, limit, cutoff = load_policy()
         pages = json.loads(Path(args[0]).read_text())
         if len(args) == 1:
             proceed, count = admit(pages, prefixes, limit)
             current_mode = False
-        elif len(args) == 4 and args[1] == '--current-pr':
+        elif len(args) == 3 and args[1] == '--current-pr':
             number = int(args[2])
             if number < 1:
                 raise ValueError("current PR number must be positive")
-            proceed, count = admit_current_pr(pages, prefixes, limit, number, args[3])
+            proceed, count = admit_current_pr(pages, prefixes, limit, number, cutoff)
             current_mode = True
         else:
-            raise ValueError("usage: agent-admission.py SNAPSHOT [--current-pr NUMBER GRANDFATHER_BEFORE]")
+            raise ValueError("usage: agent-admission.py SNAPSHOT [--current-pr NUMBER]")
     except (ValueError, OSError, IndexError) as error:
         print(f'::error::Agent admission could not verify the queue: {error}', file=sys.stderr)
         return 1

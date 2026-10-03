@@ -3697,6 +3697,7 @@ agent_case_capability_matrix:
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
   max_open_prs: 3
+  grandfather_created_before: '2026-10-03T20:00:00Z'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:

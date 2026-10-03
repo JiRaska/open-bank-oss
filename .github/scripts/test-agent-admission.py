@@ -3,6 +3,9 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Exercise admission boundaries and workflow wiring without credentials or network."""
 import importlib.util
+import json
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -40,22 +43,37 @@ class AdmissionTest(unittest.TestCase):
                 admission.admit(pages, self.prefixes, self.limit)
 
     def test_rules_are_the_prefix_authority(self):
-        prefixes, limit = admission.load_policy()
+        prefixes, limit, cutoff = admission.load_policy()
         self.assertIn('agent/', prefixes)
         self.assertIn('codex/', prefixes)
         self.assertEqual(limit, 3)
+        self.assertEqual(cutoff, '2026-10-03T20:00:00Z')
 
     def test_invalid_rules_fail_closed(self):
         import tempfile
         for content in ('{}', '[]', 'autonomous_agent_prs: {}',
                         'autonomous_agent_prs:\n  agent_branch_prefixes: []',
                         'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: 0',
-                        'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: true'):
+                        'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: true',
+                        'autonomous_agent_prs:\n  agent_branch_prefixes: [agent/]\n  max_open_prs: 3\n  grandfather_created_before: bad'):
             with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as rules:
                 rules.write(content)
                 rules.flush()
                 with self.assertRaises(ValueError):
                     admission.load_policy(rules.name)
+
+    def test_caller_cannot_supply_a_future_grandfather_cutoff(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as snapshot:
+            json.dump([[pr(1)]], snapshot)
+            snapshot.flush()
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('agent-admission.py')),
+                 snapshot.name, '--current-pr', '1', '2999-01-01T00:00:00Z'],
+                capture_output=True, text=True, check=False,
+            )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('usage:', result.stderr)
 
     def test_current_pr_first_three_win_even_with_concurrent_openings(self):
         pages = [[pr(10, draft=True), pr(11, 'codex/fix')], [pr(12), pr(13)]]
