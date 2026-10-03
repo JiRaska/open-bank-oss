@@ -463,6 +463,17 @@ simply stops existing).
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("sepa-payment", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:sepa-payment:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
 - **2026-10-02** — **Inbound amount and currency validated as kernel `Money` before the
   Idempotency-Key is reserved (#11813).** `POST /api/v1/sepa-payments` now builds a kernel `Money`
   from `amount` + `currency` at the API boundary; `SepaPayment` and `CreateSepaPaymentCommand` carry
