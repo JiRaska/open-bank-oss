@@ -287,23 +287,26 @@ class LendingService @Inject constructor(
         refusal: OriginationRefusedException,
     ): LendingOutboxMessage {
         val id = application.id.value
-        val payload = buildString {
-            append("""{"eventType":"$REFUSED_EVENT_TYPE",""")
-            append(""""aggregateType":"LOAN_APPLICATION",""")
-            append(""""aggregateId":"$id",""")
-            append(""""loanApplicationId":"$id",""")
-            append(""""partyId":"${application.partyId}",""")
-            append(""""state":"${application.status.name}",""")
-            append(""""attemptedAction":"$attempted",""")
-            append(""""outcome":"REFUSED",""")
-            append(""""code":"${refusal.code}",""")
-            append(""""actorId":"${actor.replace("\"", "'")}",""")
-            append(""""actorKind":"${OriginationActorKind.HUMAN.name}",""")
-            append(""""packVersion":${application.packVersion ?: "null"},""")
-            append(""""occurredAt":"${clock.instant()}",""")
-            append(""""correlationId":"$id",""")
-            append(""""sourceService":"lending"}""")
-        }
+        // Serialised, not concatenated: actorId is a principal name, and every field must be escaped.
+        val payload = REFUSAL_JSON.writeValueAsString(
+            linkedMapOf(
+                "eventType" to REFUSED_EVENT_TYPE,
+                "aggregateType" to "LOAN_APPLICATION",
+                "aggregateId" to id.toString(),
+                "loanApplicationId" to id.toString(),
+                "partyId" to application.partyId.toString(),
+                "state" to application.status.name,
+                "attemptedAction" to attempted,
+                "outcome" to "REFUSED",
+                "code" to refusal.code,
+                "actorId" to actor,
+                "actorKind" to OriginationActorKind.HUMAN.name,
+                "packVersion" to application.packVersion,
+                "occurredAt" to clock.instant().toString(),
+                "correlationId" to id.toString(),
+                "sourceService" to "lending",
+            ),
+        )
         return LendingOutboxMessage(aggregateId = id, eventType = REFUSED_EVENT_TYPE, payload = payload)
     }
 
@@ -1663,6 +1666,7 @@ class LendingService @Inject constructor(
 
     private companion object {
         const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
+        val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()
         const val MAX_LIST_LIMIT = 100
         const val MONTHS_PER_YEAR = 12
     }

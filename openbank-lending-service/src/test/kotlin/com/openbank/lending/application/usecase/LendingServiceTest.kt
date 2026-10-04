@@ -302,6 +302,24 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `refusal evidence is valid JSON for any principal name and round-trips it exactly`() {
+        val hostile = "ev\\il\"actor\u0001\n"
+        val app = proposedApplication(proposer = hostile)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+
+        assertThatThrownBy { service.advance(app.id, hostile).await().indefinitely() }
+            .isInstanceOf(OriginationRefusedException::class.java)
+
+        val sent = mutableListOf<LendingOutboxMessage>()
+        verify(atLeast = 1) { events.emit(capture(sent)) }
+        val tree = com.fasterxml.jackson.databind.ObjectMapper().readTree(sent.single().payload)
+        assertThat(tree.get("actorId").asText()).isEqualTo(hostile)
+        assertThat(tree.get("code").asText()).isEqualTo("FOUR_EYES_DECISION_REQUIRED")
+        assertThat(tree.get("aggregateId").asText()).isEqualTo(app.id.value.toString())
+        assertThat(tree.get("aggregateType").asText()).isEqualTo("LOAN_APPLICATION")
+    }
+
+    @Test
     fun `a refused self-decision is recorded as refusal evidence`() {
         val app = proposedApplication(proposer = "alice")
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)
