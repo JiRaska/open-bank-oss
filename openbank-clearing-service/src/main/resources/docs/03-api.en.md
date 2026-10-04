@@ -13,7 +13,7 @@ The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0
 | `GET` | `/api/v1/clearing/batches/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Get a batch by id (`404` if absent) |
 | `GET` | `/api/v1/clearing/batches/{id}/items` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | List items in a batch |
 | `POST` | `/api/v1/clearing/batches/{id}/settle` | `PAYMENTS`, `ADMIN` + `@Authorize(clearingBatch.settle)` | Settle a batch → status SETTLED, emits batch-settled |
-| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Trigger a clearing cycle for a rail |
+| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Trigger a clearing cycle for a rail; responds with a `ClearingCycleResult` holding one batch per currency (#11974) |
 | `GET` | `/api/v1/clearing/positions/{cycleId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Settlement positions for a cycle |
 | `GET` | `/api/v1/clearing/items/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Get a clearing item by id (`404` if absent) |
 | `GET` | `/api/v1/clearing/items/by-payment/{paymentId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | List clearing items for a payment |
@@ -33,7 +33,7 @@ The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0
 | `debtorBic` / `creditorBic` | string | no | up to 11 chars |
 | `amount` | number (BigDecimal) | yes | must be `> 0` (DB CHECK); at most the currency's minor-unit decimals, never rounded (#11604) |
 | `currency` | string (CHAR(3)) | no | default `EUR`; any ISO 4217 code with a minor unit, case-insensitive (`eur` is stored as `EUR`) |
-| `rail` | enum | no | default `SEPA_SCT` |
+| `rail` | enum | **yes** | no default (#12004): an absent `rail` is a 400 and no item is written — a default would clear the payment on a rail its caller did not choose |
 | `valueDate` | date | no | defaults to today if omitted |
 | `endToEndId` | string | no | up to 35 chars |
 | `remittanceInfo` | string | no | up to 140 chars |

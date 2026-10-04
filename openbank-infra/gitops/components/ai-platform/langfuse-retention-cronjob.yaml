@@ -2,29 +2,53 @@
 #
 # WHY THIS EXISTS AS A HAND-ROLLED CRONJOB. Langfuse's UI-configurable "Data Retention" feature
 # requires the Self-Hosted Enterprise Edition — verified against upstream docs before building
-# this: the OSS self-host this cluster runs (docker.io/langfuse/langfuse:2.95.11, see langfuse.yaml)
+# this: the OSS self-host this cluster runs (langfuse-v3.yaml, and v2's langfuse.yaml before it)
 # stores data indefinitely with no retention control of its own. Buying a licence for one knob
 # would break ADR-0027's in-cluster-OSS posture; the alternative upstream itself documents for
-# self-hosters without EE is exactly this — periodic DELETE statements against the Postgres tables.
+# self-hosters without EE is exactly this — periodic DELETE statements against its own tables.
 #
-# WHY POSTGRES DIRECTLY AND NOT THE LANGFUSE API. Langfuse v2 stores traces/observations/scores in
-# Postgres (v3 moves this to ClickHouse; this cluster runs v2 — see langfuse.yaml's version pin).
-# The public API's delete path is documented as asynchronous and rate-limited, which is the wrong
-# shape for a nightly sweep that needs to reason about how much it actually freed. A direct DELETE
-# against the CNPG cluster this component already owns is synchronous and countable.
+# TWO STORES SINCE ADR-0328 WAVE B (decision 3). Langfuse v3 writes traces, observations and
+# scores to its own ClickHouse (langfuse-clickhouse.yaml); the same three tables in Postgres are
+# v2's. v2 itself is gone since wave C1, but its tables stay: they are what the v2->v3 background
+# migrations copy from (and re-copy from, if a copy ever has to be repeated), they still hold
+# prompts and completions, and nothing else deletes them. They no longer grow, so the Postgres
+# sweep finds nothing once the last v2 row is older than the window (about 30 days after wave B,
+# 2026-11-02); it stays until a PR drops those tables, because removing it first would leave
+# whatever is still inside the window there indefinitely. So the job runs two sweeps, in order:
+#   1. clickhouse-sweep (initContainer) — ALTER TABLE ... DELETE on traces / observations /
+#      scores / event_log / blob_storage_file_log. If it fails, the pod never reaches step 2 and
+#      the Job fails.
+#   2. sweep (container) — the Postgres sweep over v2's tables, unchanged.
+# The S3 bucket's lifecycle rule (aws/envs/sandbox-platform/langfuse-s3.tf) expires the raw event
+# objects on the same window; this job does not touch S3.
 #
-# SCHEMA FACTS THIS DEPENDS ON (langfuse v2, verified against upstream docs and discussions before
-# writing the DELETE statements, not assumed):
-#   - `traces.timestamp`, `observations.start_time`, `scores.timestamp` are the age columns —
-#     three DIFFERENT column names, not one.
-#   - There are NO foreign-key CASCADE constraints between them (deliberate upstream design, so
-#     ingestion order and GDPR-style row deletion are never blocked by FK ordering). That means
-#     this job must delete from all three tables independently — a single CASCADE delete on
-#     `traces` would silently orphan `observations`/`scores` rows instead of removing them.
-#   - Deleting children (`observations`, `scores`) before the parent (`traces`) anyway, so a job
-#     killed mid-run leaves orphaned children rather than a trace with missing children — the
-#     safer of the two half-finished states, since the UI already tolerates a trace with no
-#     observations (a cold ingest) but not an observation with no trace.
+# WHY DIRECT DELETEs AND NOT THE LANGFUSE API. The public API's delete path is documented as
+# asynchronous and rate-limited, the wrong shape for a nightly sweep that must report how much it
+# actually freed. A direct DELETE against stores this component owns is synchronous and countable.
+#
+# CLICKHOUSE SCHEMA FACTS (Langfuse 3.29.0 and 3.225.11, packages/shared/clickhouse/migrations/
+# unclustered, read at both tags and the sweep run against the DDL each one creates on the pinned
+# server image):
+#   - age columns: traces.timestamp, observations.start_time, scores.timestamp,
+#     event_log.created_at and blob_storage_file_log.created_at. Both of the last two index the S3
+#     event files: 3.29.0 writes event_log; 3.225.11 writes blob_storage_file_log and its
+#     background migration 20250417_1737_migrate_event_log_to_blob_storage copies event_log over;
+#   - traces/observations/scores are ReplacingMergeTree(event_ts, is_deleted), so count() counts
+#     row VERSIONS, which is what a DELETE frees on disk; the sweep reports that number;
+#   - a plain ALTER ... DELETE is a mutation that returns before it runs. mutations_sync = 1 makes
+#     it block on this single-node server, and the sweep RECOUNTS afterwards: "freed" is
+#     before - after, both measured, and a non-zero remainder fails the Job instead of logging a
+#     number the database does not agree with (proven by disabling the DELETE: exit 1).
+#   - a row dated in the FUTURE can never age out, so the sweep refuses to report success while
+#     one exists. Not hypothetical: ClickHouse 26.8 read Langfuse's epoch-ms datetimes as seconds
+#     and stored 9999-12-31 for every row until the settings profile in langfuse-clickhouse.yaml
+#     (#12033). A silent sweep over such rows deletes nothing, every night, and looks green.
+#
+# POSTGRES SCHEMA FACTS (langfuse v2 tables, verified against upstream before the original sweep):
+#   - `traces.timestamp`, `observations.start_time`, `scores.timestamp` are the age columns.
+#   - There are NO foreign-key CASCADE constraints between them, so each table is swept
+#     independently; children before parent, so a job killed mid-run leaves a trace with no
+#     observations (which the UI tolerates) rather than an observation with no trace.
 #
 # RETENTION WINDOW: 30 days. Matches this cluster's shortest existing data-retention precedent
 # (Loki logs, prometheus-rules) rather than inventing a new number; traces are debugging evidence
@@ -77,6 +101,76 @@ data:
     delete_older_than scores timestamp
     delete_older_than traces timestamp
     echo "langfuse-retention: sweep complete"
+  clickhouse-sweep.sh: |
+    #!/bin/sh
+    set -eu
+
+    # ---------------------------------------------------------------------------
+    # Langfuse v3 ClickHouse retention sweep — deletes row versions older than RETENTION_DAYS.
+    # ---------------------------------------------------------------------------
+    RETENTION_DAYS="${RETENTION_DAYS:-30}"
+    case "$RETENTION_DAYS" in ''|*[!0-9]*) echo "langfuse-retention: RETENTION_DAYS must be an integer" >&2; exit 1 ;; esac
+
+    # clickhouse-client reads CLICKHOUSE_HOST/USER/PASSWORD from the environment (native port 9000).
+    ch() { clickhouse-client --host "$CH_HOST" --user "$CH_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"; }
+
+    # ONE cutoff for the whole run, fixed as a literal. Evaluating now() inside each statement would
+    # let the count and the DELETE disagree about which rows are "old" by however long the run takes.
+    CUTOFF="$(ch "SELECT toString(now64(3, 'UTC') - INTERVAL ${RETENTION_DAYS} DAY)")"
+    echo "langfuse-retention[clickhouse]: sweep start, retention=${RETENTION_DAYS}d, cutoff=${CUTOFF} UTC"
+
+    # Count, delete, count again. "Freed" is before minus after, both MEASURED — never the number we
+    # asked to delete. A non-zero remainder after a synchronous mutation fails the job: it means the
+    # DELETE did not do what this line is about to report.
+    delete_older_than() {
+      table="$1"
+      column="$2"
+      pred="${column} < toDateTime64('${CUTOFF}', 3, 'UTC')"
+      before="$(ch "SELECT count() FROM ${table} WHERE ${pred}")"
+      if [ "$before" -gt 0 ]; then
+        # ALTER ... DELETE is a mutation; mutations_sync=1 blocks until it has finished on this
+        # (single-node) server, so the recount below sees the result rather than a queued intent.
+        ch "ALTER TABLE ${table} DELETE WHERE ${pred} SETTINGS mutations_sync = 1"
+      fi
+      after="$(ch "SELECT count() FROM ${table} WHERE ${pred}")"
+      echo "langfuse-retention[clickhouse]: ${table} (${column}) -> deleted $((before - after)) row(s) older than ${RETENTION_DAYS}d (before=${before} remaining=${after})"
+      if [ "$after" -ne 0 ]; then
+        echo "langfuse-retention[clickhouse]: ${table} still holds ${after} row(s) past the cutoff after a synchronous DELETE" >&2
+        exit 1
+      fi
+    }
+
+    # Rows dated more than a day ahead are outside every window this job can express. Count them
+    # BEFORE deleting anything and fail at the end if any exist (see the header: the 9999 rows).
+    future_total=0
+    future_rows() {
+      table="$1"
+      column="$2"
+      n="$(ch "SELECT count() FROM ${table} WHERE ${column} > now64(3, 'UTC') + INTERVAL 1 DAY")"
+      if [ "$n" -ne 0 ]; then
+        echo "langfuse-retention[clickhouse]: ${table} holds ${n} row(s) with ${column} more than a day in the future; retention cannot age them out" >&2
+      fi
+      future_total=$((future_total + n))
+    }
+
+    future_rows observations start_time
+    future_rows scores timestamp
+    future_rows traces timestamp
+
+    # Children first, as in the Postgres sweep: a run killed midway leaves a trace with no
+    # observations (which the UI shows) rather than observations with no trace.
+    delete_older_than observations start_time
+    delete_older_than scores timestamp
+    delete_older_than traces timestamp
+    # event_log (3.29.0) and blob_storage_file_log (3.225.11+) index the raw event files in S3; the
+    # bucket's lifecycle rule expires the objects themselves.
+    delete_older_than event_log created_at
+    delete_older_than blob_storage_file_log created_at
+    if [ "$future_total" -ne 0 ]; then
+      echo "langfuse-retention[clickhouse]: ${future_total} future-dated row(s) remain; failing so this is seen" >&2
+      exit 1
+    fi
+    echo "langfuse-retention[clickhouse]: sweep complete"
 ---
 apiVersion: batch/v1
 kind: CronJob
@@ -96,7 +190,9 @@ spec:
   jobTemplate:
     spec:
       backoffLimit: 2
-      activeDeadlineSeconds: 600
+      # 1800, up from 600: the run now includes synchronous ClickHouse mutations, which rewrite
+      # every affected part; the deadline is the backstop, not the expected duration.
+      activeDeadlineSeconds: 1800
       template:
         metadata:
           labels:
@@ -107,7 +203,46 @@ spec:
             runAsNonRoot: true
             runAsUser: 1000
             seccompProfile: {type: RuntimeDefault}
+          initContainers:
+            # Step 1 of 2 (header): the v3 ClickHouse sweep. An initContainer, so a failure here
+            # stops the pod before the Postgres sweep and fails the Job visibly.
+            - name: clickhouse-sweep
+              # The exact image langfuse-clickhouse.yaml runs, for its clickhouse-client — so the
+              # client and server versions can never drift apart.
+              image: docker.io/clickhouse/clickhouse-server:26.8-alpine@sha256:e08c778ff91f382a15bd0ce9c0fa21e8edc9aa8acc30c4666160000d9a918454
+              imagePullPolicy: IfNotPresent
+              command: ["/bin/sh", "/scripts/clickhouse-sweep.sh"]
+              env:
+                - name: RETENTION_DAYS
+                  value: "30"
+                - name: HOME
+                  value: /tmp
+                # Native protocol (9000); the langfuse-clickhouse-ingress-allow-list admits every
+                # pod in ai-platform. Same user and secret langfuse-web/worker use.
+                - name: CH_HOST
+                  value: langfuse-clickhouse.ai-platform.svc
+                - name: CH_USER
+                  value: langfuse
+                - name: CLICKHOUSE_PASSWORD
+                  valueFrom:
+                    secretKeyRef: {name: langfuse-clickhouse-auth, key: CLICKHOUSE_PASSWORD}
+              securityContext:
+                runAsUser: 101
+                runAsGroup: 101
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: {drop: ["ALL"]}
+              resources:
+                requests: {cpu: 50m, memory: 128Mi}
+                limits: {cpu: 500m, memory: 512Mi}
+              volumeMounts:
+                - name: scripts
+                  mountPath: /scripts
+                  readOnly: true
+                - name: home
+                  mountPath: /tmp
           containers:
+            # Step 2 of 2: the Postgres sweep over v2's tables.
             - name: sweep
               # Same image family as the CNPG cluster it targets (postgres.yaml /
               # langfuse-postgres.yaml), pulled through the ECR cache (#1290) — psql client only,

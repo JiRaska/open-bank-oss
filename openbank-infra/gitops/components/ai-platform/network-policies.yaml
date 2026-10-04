@@ -59,45 +59,6 @@ spec:
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: langfuse-ingress-allow-list
-  namespace: ai-platform
-  labels:
-    app.kubernetes.io/part-of: ai-platform
-    openbank.io/derived: gen-network-policies
-spec:
-  podSelector:
-    matchLabels:
-      app.kubernetes.io/name: langfuse
-  policyTypes:
-    - Ingress
-  ingress:
-    - from:
-        - podSelector: {}
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: admin-ui
-      ports:
-        - protocol: TCP
-          port: 3000
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
-      ports:
-        - protocol: TCP
-          port: 3000
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: envoy-gateway-system
-      ports:
-        - protocol: TCP
-          port: 3000
----
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
   name: langfuse-valkey-ingress-allow-list
   namespace: ai-platform
   labels:
@@ -148,6 +109,20 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 3000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 3000
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
       ports:
         - protocol: TCP
           port: 3000

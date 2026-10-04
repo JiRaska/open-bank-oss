@@ -52,8 +52,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
-  pull-requests: write   # infracost PR comment
 
 concurrency:
   group: substrate-tofu-${{ github.ref }}
@@ -68,6 +66,9 @@ env:
 
 jobs:
   plan:
+    permissions:
+      contents: read
+      id-token: write  # OIDC -> tofu plan role
     name: tofu plan (preview)
     if: github.event_name != 'workflow_dispatch'
     runs-on: ubuntu-latest # hosted-first (public repo, free); OIDC plan role unchanged (ADR-0060)
@@ -137,6 +138,9 @@ jobs:
   # from its own cloud API (free tier). A PR changing only this workflow needs
   # no pricing call; a cost-bearing PR still reports missing pricing credentials.
   infracost:
+    permissions:
+      contents: read
+      pull-requests: write  # infracost PR comment
     name: infracost cost delta
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
@@ -193,6 +197,9 @@ jobs:
             --behavior update
 
   apply:
+    permissions:
+      contents: read
+      id-token: write  # OIDC -> tofu apply role
     name: tofu apply (manual dispatch)
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest # hosted-first; security boundary is the OIDC job_workflow_ref pin + manual dispatch (ADR-0060), not the runner

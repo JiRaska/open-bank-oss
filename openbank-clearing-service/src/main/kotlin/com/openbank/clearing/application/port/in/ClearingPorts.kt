@@ -5,6 +5,7 @@
 package com.openbank.clearing.application.port.`in`
 
 import com.openbank.clearing.domain.model.ClearingBatch
+import com.openbank.clearing.domain.model.ClearingCycleResult
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
@@ -30,7 +31,7 @@ interface GetItemUseCase {
 }
 
 interface TriggerClearingUseCase {
-    fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingBatch>
+    fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingCycleResult>
     fun settleBatch(batchId: UUID): Uni<ClearingBatch>
 }
 

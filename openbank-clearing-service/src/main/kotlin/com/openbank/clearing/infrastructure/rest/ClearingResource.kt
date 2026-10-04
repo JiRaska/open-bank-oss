@@ -79,6 +79,7 @@ class ClearingResource(
     @Operation(summary = "Submit payment for clearing")
     fun submit(request: SubmitPaymentRequest?): Uni<Response> {
         requireNotNull(request) { "request body is required" }
+        val rail = requireNotNull(request.rail) { "field 'rail' is required" }
         // #11604: Money is built HERE, before the use case looks the paymentId (the idempotency
         // key, ADR-0298) up — an amount or currency it cannot hold is a 400 problem (kernel
         // InvalidMoneyException: AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR,
@@ -92,7 +93,7 @@ class ClearingResource(
             debtorBic = request.debtorBic,
             creditorBic = request.creditorBic,
             amount = Money.parseInbound(request.amount, request.currency),
-            rail = request.rail,
+            rail = rail,
             valueDate = request.valueDate,
             endToEndId = request.endToEndId,
             remittanceInfo = request.remittanceInfo,
@@ -139,7 +140,7 @@ class ClearingResource(
     @Path("/cycle/trigger")
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.triggerCycle")
-    @Operation(summary = "Trigger a clearing cycle for a payment rail")
+    @Operation(summary = "Trigger a clearing cycle for a payment rail; one batch per currency")
     fun triggerCycle(@QueryParam("rail") @DefaultValue("SEPA_SCT") rail: String): Uni<Response> =
         triggerUseCase.triggerClearingCycle(PaymentRail.valueOf(rail))
             .map { Response.ok(it).build() }

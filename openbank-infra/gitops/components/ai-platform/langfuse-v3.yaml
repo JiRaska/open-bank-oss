@@ -1,33 +1,37 @@
-# Langfuse v3.29.0 web + worker, running ALONGSIDE v2 (langfuse.yaml) — ADR-0328 decision 1, wave A.
+# Langfuse web + worker — ADR-0328. File name kept from wave A (`langfuse-v3.yaml`, ConfigMap
+# `langfuse-v3-env`): renaming would delete and recreate the objects for no gain.
 #
-# WHY 3.29.0 AND NOT v4 DIRECTLY. Upstream's v2->v3 guide: the upgrade "is known to work well
-# between v2.92.0 and v3.29.0. Newer versions of v3 remove database entities that v2 still depends
-# on." v2 here is 2.95.11, so 3.29.0 is the version that can share langfuse-db with the running v2
-# pod. Minor-by-minor to v4 happens only after v2 is gone (wave C).
+# VERSION PATH (upstream, read 2026-10-03; the PR that moved each stop names its sources):
+#   v2.95.11 -> 3.29.0   waves A/B. The v2->v3 guide: the upgrade "is known to work well between
+#                        v2.92.0 and v3.29.0. Newer versions of v3 remove database entities that v2
+#                        still depends on" — 3.29.1 drops traces_view/observations_view
+#                        (prisma 20250221143400), which v2 reads.
+#   3.29.0 -> 3.225.11   wave C1 (this pin). The last v3 release. Only AFTER the four v2->v3
+#                        background migrations finished on 3.29.0 (and v2 is deleted in the same
+#                        change, because past 3.29.0 it cannot run against this database anyway).
+#   3.225.11 -> 4.x      wave C2. The v3->v4 guide: "Upgrade to the latest v3 release and let all
+#                        background migrations finish" first — the 3.x ones 3.225.11 adds
+#                        (event_log -> blob storage, dataset run items, billing anchors, ...). The
+#                        five 20260701_v4_step_* rows it also inserts stay pending on v3 by design:
+#                        only a v4 worker runs them (measured locally).
 #
-# SHARED POSTGRES, BY DESIGN (upstream: "You can reuse your existing Postgres instance"). On start,
-# langfuse-web applies 3.29.0's Prisma migrations to langfuse-db — which v2 keeps using — and its
-# ClickHouse migrations to langfuse-clickhouse. That is the one irreversible step in this file, so
-# the PR asks for an on-demand CNPG Backup of langfuse-db before merge. NEXTAUTH_SECRET, SALT and
-# ENCRYPTION_KEY MUST be the same values v2 uses (the existing langfuse-secrets): API keys are
-# stored salted-hashed and provider credentials encrypted in the SHARED tables, so a different SALT
-# makes every existing project key invalid for v3 and a different ENCRYPTION_KEY makes stored
-# secrets unreadable.
+# SHARED POSTGRES. langfuse-web applies its Prisma migrations to langfuse-db and its ClickHouse
+# migrations to langfuse-clickhouse at start. Forward-only, so each version step is preceded by an
+# on-demand CNPG Backup (the owner script takes it). NEXTAUTH_SECRET, SALT and ENCRYPTION_KEY are
+# the values v2 used (langfuse-secrets): project API keys are stored salted-hashed and provider
+# credentials encrypted in the shared tables, so changing either invalidates them.
 #
-# NO TRAFFIC IN THIS WAVE (ADR-0328 point 5: the Presidio guardrail, #11756/#11759, must mask before
-# the trace callback first). Four independent things keep it that way:
-#   - no Ingress / HTTPRoute for these Services;
-#   - litellm-config.yaml still points the callback at the v2 Service `langfuse`;
-#   - litellm's egress NetworkPolicy admits only pods labelled app.kubernetes.io/name=langfuse,
-#     which neither of these pods carries, so even a mistaken callback edit is DROPPED;
-#   - LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS=false, so v3 does not start copying v2 history into
-#     ClickHouse yet (the guide: until traffic shifts, or the migration misses events v2 is still
-#     ingesting).
-# The v3 UI is therefore EMPTY until wave B; that is the expected state, not a fault. To look at it:
-#   kubectl -n ai-platform port-forward svc/langfuse-web 3000:3000  (NEXTAUTH_URL matches this)
+# TRAFFIC. litellm.yaml LANGFUSE_HOST -> langfuse-web.ai-platform.svc:3000; litellm's egress
+# NetworkPolicy admits app.kubernetes.io/name=langfuse-web on 3000; langfuse-ingress.yaml and
+# langfuse-httproute.yaml route the public UI to the Service langfuse-web. v2 (langfuse.yaml, its
+# Deployment and Service) was deleted in wave C1; its TABLES in langfuse-db were not — they are
+# the background migrations' source and the retention sweep still ages them out.
+# LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS is true since #12001 (upstream's default).
+# Without the public route, the UI is still reachable for debugging:
+#   kubectl -n ai-platform port-forward svc/langfuse-web 3000:3000  (login redirects to NEXTAUTH_URL)
 #
 # No LANGFUSE_INIT_*: the org, project, keys and operator user already exist in the shared
-# database (created by v2's headless init). Re-declaring them here would make v3 upsert rows v2 owns.
+# database (created by v2's headless init).
 #
 # Placement: `stateful` NodePool, for the reason in langfuse-clickhouse.yaml (default pool is
 # 85-99 % memory-requested). ServiceAccount `langfuse` carries the EKS Pod Identity association for
@@ -35,6 +39,8 @@
 # picks the injected credentials up from the default chain when LANGFUSE_S3_*_ACCESS_KEY_ID is
 # unset. Credentials are injected at ADMISSION: if these pods start before the association is
 # applied, restart them afterwards.
+#
+# Images: multi-arch indexes (amd64 + arm64; the stateful pool is arm64), pinned by digest.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -63,13 +69,17 @@ data:
   LANGFUSE_S3_EVENT_UPLOAD_BUCKET: openbank-sandbox-langfuse
   LANGFUSE_S3_EVENT_UPLOAD_REGION: eu-north-1
   LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
-  # The upstream guide's zero-downtime switch. Flipped to "true" in wave B, AFTER traffic moves.
-  LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "false"
+  # The upstream guide's zero-downtime switch. Stays "false" in the wave-B deploy that moves the
+  # traffic: the guide forbids enabling it in the same deploy ("the migration may miss events
+  # that are ingested after the new instances were started"). Flipped by a separate PR once
+  # the owner's post-sync verification shows traces landing in v3 (ClickHouse + S3).
+  LANGFUSE_ENABLE_BACKGROUND_MIGRATIONS: "true"
   AUTH_DISABLE_SIGNUP: "true"
   TELEMETRY_ENABLED: "false"
   LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
-  # Port-forward origin while there is no public route (wave B moves this to the public host).
-  NEXTAUTH_URL: http://localhost:3000
+  # The public host since wave B (langfuse-ingress.yaml / langfuse-httproute.yaml route to
+  # langfuse-web). NextAuth builds its callback and cookie origin from this.
+  NEXTAUTH_URL: https://langfuse.open-bank.tech
   HOSTNAME: "0.0.0.0"
 ---
 apiVersion: apps/v1
@@ -93,6 +103,10 @@ spec:
       app.kubernetes.io/name: langfuse-web
   template:
     metadata:
+      annotations:
+        # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
+        # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
+        openbank.io/langfuse-env-revision: "2"
       labels:
         app.kubernetes.io/name: langfuse-web
         app.kubernetes.io/part-of: ai-platform
@@ -114,7 +128,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: langfuse-web
-          image: docker.io/langfuse/langfuse:3.29.0@sha256:726e1b081e71fffcd24c810d71dbd6ce655d351459aff26cf5c40dca2ab0d01c
+          image: docker.io/langfuse/langfuse:3.225.11@sha256:a343f64e035eb01aeea358703a0428945d909d01e19452509a5a830862dda878
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -214,6 +228,10 @@ spec:
       app.kubernetes.io/name: langfuse-worker
   template:
     metadata:
+      annotations:
+        # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
+        # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
+        openbank.io/langfuse-env-revision: "2"
       labels:
         app.kubernetes.io/name: langfuse-worker
         app.kubernetes.io/part-of: ai-platform
@@ -235,7 +253,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: langfuse-worker
-          image: docker.io/langfuse/langfuse-worker:3.29.0@sha256:0fc868c5188d0d1c672f9644ea5996a1d53bc737d002dc4207b71c425cb80b7a
+          image: docker.io/langfuse/langfuse-worker:3.225.11@sha256:8a28c946bb5401eef488153fa294db5a79bd99dd5c90db8e4d39559374c9ebd3
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

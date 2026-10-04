@@ -5,10 +5,11 @@
 # translation of langfuse-ingress.yaml. Same security posture as that file states
 # (ADR-0031 D7): the UI only, synthetic data only; trace ingestion stays in-cluster.
 #
-# NOT YET IN DNS. external-dns skips this route while it carries the controller annotation
-# below, so the name still resolves to ingress-nginx and langfuse-ingress.yaml keeps
-# serving it. The route is reachable only on the Gateway's own NLB address until the
-# cutover (steps in components/envoy-gateway/httproute-redirect.yaml).
+# IN DNS since the cutover (2026-10-03): external-dns publishes langfuse.open-bank.tech from
+# this route, pointing at the Gateway's NLB. The nginx Ingress now carries the
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` annotation instead, so
+# external-dns ignores it; it stays in place, still serving on ingress-nginx's NLB, as the
+# rollback (swap the annotation back) until it is deleted in a later change.
 #
 # Annotation mapping from langfuse-ingress.yaml:
 #   ssl-redirect            -> the Gateway's http listener redirects every host (envoy-gateway)
@@ -65,8 +66,6 @@ kind: HTTPRoute
 metadata:
   name: langfuse
   namespace: ai-platform
-  annotations:
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
@@ -95,8 +94,10 @@ spec:
                 value: "noindex, nofollow"
             remove:
               - X-Powered-By
+      # Langfuse web (langfuse-v3.yaml) since ADR-0328 wave B; the v2 Service `langfuse` was
+      # deleted in wave C1.
       backendRefs:
-        - name: langfuse
+        - name: langfuse-web
           port: 3000
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1

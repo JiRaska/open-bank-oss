@@ -41,6 +41,7 @@ management, item lifecycle. Aggregates many payments into settlement — high bl
 |---|---|---|
 | **S**poofing | Forged submit from non-payment caller | mTLS service identity allow-list |
 | **T**ampering | Alter batch items / settlement position | Immutable items once cycle starts; position recomputed, not client-supplied; audit |
+| **T**ampering | Cross-currency netting: items of different currencies summed into one batch and posted to one currency's GL (#11974) | A batch is per (rail, currency): the cycle groups by currency and sums with kernel `Money` (throws on a mix); only currencies with a settlement GL pair are selected; others stay PENDING, WARN-logged and gauged (`openbank_clearing_unsettleable_pending_items`) |
 | **R**epudiation | Deny triggering a settlement cycle | AuditEvent on submit/trigger/settle with actor |
 | **I**nfo disclosure | Cross-institution position leakage | AuthZ scoping; positions keyed by cycle, access-controlled |
 | **D**oS | Batch flooding delays a cycle | Rate limit submit; bounded batch size |
@@ -85,6 +86,18 @@ not change any existing request's outcome until explicitly flipped.
   need an additional store; not implemented in this PR.
 
 ## 6. Change log
+
+- **2026-10-03** — **A clearing batch is per (rail, currency) (#11974).** The cycle previously
+  summed every pending item into one batch labelled with the first item's currency, so a cycle
+  holding EUR and CZK items would have posted their arithmetic sum to one currency's settlement GL
+  (integrity of the net-settlement journal; latent — the sandbox held no mixed batch). It now opens
+  one batch per currency (`<cycleId>-<CCY>`, shared `cycleId`), totals each with kernel `Money`,
+  and each batch's `net_settlement.post` carries its own currency. Items in a currency with no
+  settlement GL pair are excluded from selection — left PENDING, never failed or dropped — and
+  surfaced by a per-cycle WARN and the `openbank_clearing_unsettleable_pending_items{currency}`
+  gauge; excluding them in the SELECT keeps them from starving the 1,000-item window. The
+  `cycle/trigger` response becomes a `ClearingCycleResult` (`batches[]`); no new caller, endpoint,
+  role, network edge or trust boundary, and no migration (batch references stay unique by suffix).
 
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
@@ -225,3 +238,14 @@ not change any existing request's outcome until explicitly flipped.
   is unchanged (DLQ strategy as before). **Residual:** the clearing cycle sums items across
   currencies on one rail — tracked as #11974; no currency allow-list is added here. No new
   endpoint, caller, privilege or event. Rollback: revert the commit.
+- **2026-10-03** — **Each rail's cycle clears only its own items; every cycle id fits (#12004,
+  #12005).** Items now persist the submitted `rail` (V12, nullable, no default) and
+  `findPendingByRail` filters on it, so a cycle for one rail can no longer net and settle another
+  rail's payments (**Tampering/integrity** on the money path: previously every rail's cycle swept
+  every rail's PENDING items). `POST /api/v1/clearing/submit` now enforces the contract's existing
+  `required: rail` — an absent rail is a 400 instead of a silent `SEPA_SCT` default. A pre-V12 row
+  without a rail is selected by no cycle and reported by a per-cycle WARN; it is never defaulted.
+  `cycle_id` widened to VARCHAR(64) and the id bounded to 60 characters by construction, so a
+  SEPA_SCT_INST cycle (33 characters) no longer fails on insert (**DoS** of that rail). No new
+  endpoint, caller, privilege or event; no producer outside the service submits items today.
+  Rollback: revert the commit, then the V12 rollback note.
