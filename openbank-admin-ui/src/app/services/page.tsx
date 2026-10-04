@@ -13,6 +13,7 @@ import { ServerlessLegend } from '@/components/finops/ServerlessLegend'
 import { CatalogDriftBanner } from '@/components/governance/CatalogDriftBanner'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { findService, SERVICE_REGISTRY } from '@/lib/services/registry'
+import { catalogServiceCount } from '@/lib/services/catalogCount'
 
 // Static fallback / backlog base. The live list comes from the cluster at runtime
 // (see the effect below: /api/services/health → ADR-0051 Kubernetes discovery), so a
@@ -87,25 +88,6 @@ interface DocsStatus {
 
 interface Candidate { id: string; label: string; group: string; desc?: string; catalogShort?: string }
 
-// Catalog modules that ship no runtime service: the shared libraries and the IaC
-// module. `kind: 'ui'` (admin-ui) and `kind: 'library'` (openbank-libs) are excluded
-// by kind; these four are classified `component` by generate-catalog.mjs but are not
-// fleet members. Everything else in the catalog is. Kept explicit and tiny — the
-// guard test asserts each entry is still a real catalog module, so a rename fails CI
-// rather than silently skewing the count.
-const NON_FLEET_MODULES = new Set(['infra', 'libs-domain', 'libs-runtime', 'libs-testing'])
-
-/**
- * Fleet size, derived from the code-generated catalog (ADR-0029 D3) rather than
- * hand-counted. The previous hardcoded "33" was stale by 21 services; a derived
- * count cannot drift.
- */
-function fleetSize(services: { short: string; kind: string; runnable?: boolean }[]): number {
-  return services.filter(
-    s => s.runnable === true || (s.runnable === undefined && s.kind !== 'ui' && s.kind !== 'library' && !NON_FLEET_MODULES.has(s.short)),
-  ).length
-}
-
 interface CatalogModule { name: string; short: string; kind: string; runnable?: boolean; apiTitle?: string | null }
 
 function candidateFromCatalog(catalogModule: CatalogModule): Candidate {
@@ -155,7 +137,7 @@ export default function ServicesDocsOverviewPage() {
     fetch('/api/catalog/services', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : null))
       .then((data: { services?: CatalogModule[] } | null) => {
-        if (mounted && Array.isArray(data?.services)) setFleetCount(fleetSize(data.services))
+        if (mounted && Array.isArray(data?.services)) setFleetCount(catalogServiceCount(data.services))
       })
       .catch(() => { /* catalog snapshot absent — omit the number */ })
     return () => { mounted = false }
@@ -262,10 +244,10 @@ export default function ServicesDocsOverviewPage() {
     if (svc.desc) return svc.desc
     if (svc.id !== 'libs') return undefined
     return fleetCount === null
-      ? t('Sdílená infrastrukturní knihovna pro celou flotilu mikroslužeb',
-           'Shared infrastructure library for the whole microservice fleet')
-      : t(`Sdílená infrastrukturní knihovna pro všech ${fleetCount} mikroslužeb`,
-           `Shared infrastructure library for all ${fleetCount} microservices`)
+      ? t('Sdílená infrastrukturní knihovna; počet služeb v katalogu není dostupný',
+           'Shared infrastructure library; the catalog service count is unavailable')
+      : t(`Sdílená infrastrukturní knihovna; katalog eviduje ${fleetCount} služeb`,
+           `Shared infrastructure library; the catalog lists ${fleetCount} services`)
   }
 
   return (

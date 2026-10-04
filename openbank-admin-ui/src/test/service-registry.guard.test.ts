@@ -499,22 +499,10 @@ describe('service registry drift guard', () => {
     expect(ids.length, 'duplicate id in SERVICE_REGISTRY').toBe(new Set(ids).size)
   })
 
-  it('the /services fleet-count exclusion list only names real catalog modules', () => {
-    // The libs card derives "…for all N microservices" from the catalog, minus a
-    // small NON_FLEET_MODULES set. If a module there is renamed, the exclusion
-    // silently stops matching and the rendered count skews — so pin it here.
+  it('the /services fleet count uses catalog service kinds', () => {
     const src = readFileSync(SERVICES_PAGE, 'utf-8')
-    const block = src.match(/const NON_FLEET_MODULES\s*=\s*new Set\(\[([\s\S]*?)\]\)/)
-    expect(block, 'NON_FLEET_MODULES not found in the /services page').toBeTruthy()
-    const listed = [...block![1].matchAll(/'([a-z0-9-]+)'/g)].map(m => m[1])
-    expect(listed.length, 'NON_FLEET_MODULES is empty — expected the libs/infra modules').toBeGreaterThan(0)
-    const shorts = catalogShorts()
-    const unknown = listed.filter(s => !shorts.has(s))
-    expect(
-      unknown,
-      `NON_FLEET_MODULES names modules absent from catalog.json — the derived fleet count `
-      + `on /services is now wrong: ${unknown.join(', ')}`,
-    ).toEqual([])
+    expect(src).toContain('catalogServiceCount(data.services)')
+    expect(src).not.toContain('NON_FLEET_MODULES')
   })
 
   it('every /docs/api SERVICES specId resolves to a real code-derived catalog entry', () => {
