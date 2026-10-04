@@ -145,6 +145,16 @@ simply stops existing).
 
 ## 6. Change log
 
+- **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
+  folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
+  a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
+  clean score at every layer that reads the outcome. `FraudVerdict.UNKNOWN` now names that case,
+  counted apart from real and synthetic outcomes (`result="unrecognised"`) with the degraded gauge
+  at 0, since the scorer was reachable. **No trust boundary, edge or privilege changed**; the
+  verdict is still shadow-only, so payment decisions do not change. The log line records the event;
+  the counter feeds `FraudScoringUnrecognisedVerdict`, which warns on an unreadable score.
+  Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
+  a clean `ALLOW`; red against the old mapper).
 - **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
   checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now
   delegates to shared `com.openbank.libs.approval.web.ApprovalEndpointSupport` (libs-runtime,
@@ -510,3 +520,17 @@ simply stops existing).
   refusals and the no-idempotency-record outcome. **Residual risk:** a client that compares human
   error prose could observe a change despite the stable codes; no new privilege or data-flow risk
   is introduced. Rollback: revert this parser substitution and keep the service-local validator.
+- **2026-10-03** — **Submissions refused unless the currency is EUR (#11931).** SEPA Credit Transfer
+  is a euro-only scheme, yet `POST /api/v1/sepa-payments` accepted any currency kernel `Money` could
+  hold (`USD`, `CZK`, `GBP` were 201, screened, persisted, emitted and handed to the scheme gateway
+  as a pacs.008 the scheme cannot settle). **Tampering / input validation:** the request DTO now
+  passes the parsed amount through `SctSchemeRules.requireSchemeCurrency` right after
+  `Money.parseInbound`, so a non-EUR currency answers **400 `CURRENCY_NOT_ALLOWED`** (service-owned
+  ADR-0326 code, VALIDATION category, same code and title as sepa-instant; rendered by libs-runtime
+  `DomainExceptionMapper`) before the Idempotency-Key is reserved and before any screening call,
+  row, outbox event or downstream call exists. The violation names `currency`, never the rejected
+  value. EUR (any case) is unchanged. The standing-order executor reaches the same REST boundary, so
+  a non-EUR `SEPA_CREDIT` standing order now fails its execution with this 400 instead of creating
+  an unsettleable payment. Sandbox data re-checked read-only before the change: 20 rows, all EUR, so
+  no stored row is affected. No new endpoint, caller, privilege or event. Rollback: revert the
+  commit.

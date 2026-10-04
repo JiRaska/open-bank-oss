@@ -78,6 +78,9 @@ class CardIssuanceAuthorizationPactConsumerTest {
                 o.uuid("id", UUID.fromString(PACT_CARD_ID))
                 o.uuid("accountId", UUID.fromString(PACT_ACCOUNT_ID))
                 o.uuid("partyId", UUID.fromString(PACT_PARTY_ID))
+                // The card's lifecycle state: token provisioning refuses any card that is not ACTIVE,
+                // so a renamed or dropped `status` would refuse every wallet — pinned here.
+                o.stringType("status", "ACTIVE")
             }.build(),
         )
         .toPact()
@@ -98,6 +101,7 @@ class CardIssuanceAuthorizationPactConsumerTest {
         val card = mapper.readValue<CardSummaryResponse>(raw)
         assertThat(card.accountId).isNotNull()
         assertThat(card.partyId).isNotNull()
+        assertThat(card.status).isEqualTo("ACTIVE")
     }
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)

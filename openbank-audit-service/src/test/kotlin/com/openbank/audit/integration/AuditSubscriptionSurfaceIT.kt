@@ -76,16 +76,14 @@ import java.util.function.Supplier
  *
  * WHAT THIS DOES NOT PROVE
  * ------------------------
- *  * **Not a real broker.** There is no Kafka Testcontainers or Kafka Dev Services usage anywhere
- *    in this repo — every messaging IT in the fleet uses the in-memory connector — so no test here
- *    exercises a Kafka client, a broker, or an ACL. The in-memory connector REPLACES the Kafka
- *    connector for this channel, which means the `topics:` value is read here as configuration and
- *    is not the thing the connector subscribes with.
+ *  * This test replaces Kafka with the in-memory connector, so its topic list is configuration
+ *    rather than a live broker subscription. [AuditDlqIT] separately exercises Kafka delivery and
+ *    dead-letter serialization. Production topic membership and ACLs still need their own checks.
  *  * Consequently it cannot see the two failures that need the broker: a topic absent from the
  *    `topics:` list at deploy time, and a missing Read ACL on the `audit-service` KafkaUser. Those
  *    are what `.github/scripts/check-audit-money-path-subscription.py` exists to prevent, and the
- *    two halves are deliberately complementary — the gate covers what no test in this repo can
- *    reach, and this test covers what the gate cannot: that the wiring actually runs.
+ *    two halves are complementary: the gate covers the declared production surface, and this
+ *    test covers that the in-memory wiring actually runs.
  *  * It does not assert the produced set. Whether a money-path producer's topic is IN the list is
  *    the gate's question; this test asserts that whatever is in the list works.
  *
@@ -199,6 +197,44 @@ class AuditSubscriptionSurfaceIT {
             }
         }
         assertThat(failures).`as`("issue #6035 wiring").isEmpty()
+    }
+
+    @Test
+    fun `signed SCA decision evidence reaches the audit store with credential attribution`() {
+        val topic = "openbank.sca.events"
+        assertThat(subscribedTopics()).contains(topic)
+        val id = UUID.randomUUID().toString()
+        val eventId = UUID.randomUUID().toString()
+        val credential = "test-audit-credential-${UUID.randomUUID()}"
+        val occurredAt = Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MICROS).toString()
+        val payload = """
+            {"eventId":"$eventId","eventType":"SCA_DEVICE_DECIDED","schemaVersion":1,
+             "aggregateType":"SCA_CHALLENGE","aggregateId":"$id","sourceService":"sca-service",
+             "actorId":"$credential","actorType":"DEVICE_CREDENTIAL","partyId":"${UUID.randomUUID()}",
+             "credentialId":"$credential","decision":"APPROVED","signatureB64":"dGVzdA==",
+             "signedPayloadB64":"cGF5bG9hZA==","occurredAt":"$occurredAt",
+             "expiresAt":"${Instant.parse(occurredAt).plusSeconds(60)}","challengeVersion":3}
+        """.trimIndent()
+        val source: InMemorySource<Message<String>> = connector.source(CHANNEL)
+        source.runOnVertxContext(true)
+        source.send(recordOn(topic, id, payload))
+        assertThat(awaitRows(setOf(id))[id]).isEqualTo("SCA_DEVICE_DECIDED" to "sca-service")
+        DriverManager.getConnection(jdbcUrl(), jdbcUser(), jdbcPassword()).use { connection ->
+            connection.prepareStatement(
+                "SELECT entry_id, aggregate_type, actor_id, actor_type, occurred_at " +
+                    "FROM audit_entries WHERE aggregate_id = ?",
+            ).use { query ->
+                query.setString(1, id)
+                query.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getObject(1, UUID::class.java).toString()).isEqualTo(eventId)
+                    assertThat(rows.getString(2)).isEqualTo("SCA_CHALLENGE")
+                    assertThat(rows.getString(3)).isEqualTo(credential)
+                    assertThat(rows.getString(4)).isEqualTo("DEVICE_CREDENTIAL")
+                    assertThat(rows.getTimestamp(5).toInstant()).isEqualTo(Instant.parse(occurredAt))
+                }
+            }
+        }
     }
 
     @Test

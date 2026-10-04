@@ -22,6 +22,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: rum-audit
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 2 * * 0' plus slack.
+    openbank.tech/max-success-age-seconds: "1296000"
 spec:
   # Sunday 02:00 UTC — low-traffic window, well before European business hours.
   schedule: "0 2 * * 0"

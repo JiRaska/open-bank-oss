@@ -67,7 +67,7 @@ mindmap
 
 Když vznikne nový OpenBank service `openbank-foo-service`:
 
-1. `implementation(project(":openbank-libs"))` v `build.gradle.kts` — to je vše
+1. Pro adaptéry Quarkus přidej `implementation(project(":openbank-libs-runtime"))`; pro samotné doménové primitivy `openbank-libs-domain`
 2. Auto-dostane: `/api/v1/info` s tech stackem, rate limiting, correlation ID, security headers, common exception mappers, ApiError jednotný formát
 3. Když potřebuje peníze → `import com.openbank.libs.domain.money.Money`
 4. Když potřebuje audit → `AuditEventPublisher` inject + emit event
@@ -88,7 +88,7 @@ Když vznikne nový OpenBank service `openbank-foo-service`:
 | F1 — house cleaning | ✅ done | Unified dep declaration, Jandex plugin, smazaný InfoResource/Redis duplicates |
 | F2 — domain primitives | ✅ done | Outbox, typesafe IDs, common exception mappers |
 | F3 — security foundation | ⚠️ partial | PiiMask, Roles, AuditEvent, S2S auth. `BootstrapVerifier` byl do F3 naplánován a nikdy nedodán (#8426) |
-| F4 — convention plugin | planned | `build-logic/openbank.quarkus-service` Gradle convention plugin |
+| F4 — convention plugin | ✅ done | `build-logic/openbank.quarkus-service` Gradle convention plugin |
 | F5 — Quarkus platform extension | planned | Baseline `application.yaml` jako Quarkus extension |
 
 ## Související

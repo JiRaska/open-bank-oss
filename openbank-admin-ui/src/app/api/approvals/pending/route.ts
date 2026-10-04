@@ -19,7 +19,7 @@ type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
 type InboxItem = {
   id: string
-  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill' | 'compliance-pack' | 'campaign' | 'audience' | 'identity-case'
+  domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill' | 'compliance-pack' | 'campaign' | 'audience' | 'identity-case' | 'sca' | 'settlement'
   action: string
   resourceId: string | null
   maker: string | null
@@ -177,7 +177,7 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
 }
 
 async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
-  const res = await fetch(serverSvcUrl('transaction-service', 'transaction', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
+  const res = await fetch(serverSvcUrl('transaction-service', 'payments', 8102, '/api/v1/transactions/approvals', { limit: '50' }), {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
   })
   if (!res.ok) return { items: [], state: stateFor(res.status) }
@@ -544,6 +544,35 @@ async function identityCasePending(headers: HeadersInit): Promise<SourceResult> 
   })) }
 }
 
+async function operatorApprovalsPending(
+  domain: 'sca' | 'settlement', service: string, namespace: string, port: number, path: string, headers: HeadersInit,
+): Promise<SourceResult> {
+  // sca-service (#11903) and settlement-service (#11915) serve the libs PendingApproval shape to
+  // human operators only; a compliance or service principal reads 403 and the source says so.
+  const res = await fetch(serverSvcUrl(service, namespace, port, path, { limit: '50' }), {
+    headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
+  })
+  if (!res.ok) return { items: [], state: stateFor(res.status) }
+  const rows = (await res.json()) as LendingApproval[]
+  if (!Array.isArray(rows) || rows.some(r => !r || !r.id || !r.action)) return { items: [], state: 'unavailable' }
+  // The queue is bounded at 50: a full page may hide older requests, so never report it complete.
+  return {
+    state: rows.length >= 50 ? 'unavailable' : 'ok',
+    items: rows.map(r => ({
+      id: r.id, domain, action: r.action,
+      resourceId: r.resourceId ?? null, maker: r.makerId ?? null, proposedAt: r.createdAt ?? null,
+    })),
+  }
+}
+
+async function scaPending(headers: HeadersInit): Promise<SourceResult> {
+  return operatorApprovalsPending('sca', 'sca-service', 'sca', 8110, '/api/v1/sca/approvals', headers)
+}
+
+async function settlementPending(headers: HeadersInit): Promise<SourceResult> {
+  return operatorApprovalsPending('settlement', 'settlement-service', 'payments', 8138, '/api/v1/settlements/approvals', headers)
+}
+
 async function agentPending(headers: HeadersInit): Promise<SourceResult> {
   const res = await fetch(`${agentBase()}/api/v1/proposals?state=proposed`, {
     headers, signal: AbortSignal.timeout(4000), cache: 'no-store',
@@ -566,7 +595,7 @@ export async function GET() {
   }
   const headers = { authorization: `Bearer ${session.user.accessToken}` }
   const unavailable: SourceResult = { items: [], state: 'unavailable' }
-  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, treasury, ledgerBackfill, compliancePack, campaign, audience, identityCase] = await Promise.all([
+  const [lending, sanctions, transaction, domesticPayment, clearing, fx, ledger, swift, sepaPayment, sepaInstant, notification, party, account, consent, balance, billing, delegation, agent, communication, treasury, ledgerBackfill, compliancePack, campaign, audience, identityCase, sca, settlement] = await Promise.all([
     lendingPending(headers).catch(() => unavailable),
     sanctionsPending(headers).catch(() => unavailable),
     transactionPending(headers).catch(() => unavailable),
@@ -592,8 +621,10 @@ export async function GET() {
     campaignPending(headers).catch(() => unavailable),
     audiencePending(headers).catch(() => unavailable),
     identityCasePending(headers).catch(() => unavailable),
+    scaPending(headers).catch(() => unavailable),
+    settlementPending(headers).catch(() => unavailable),
   ])
-  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items, ...compliancePack.items, ...campaign.items, ...audience.items, ...identityCase.items]
+  const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items, ...compliancePack.items, ...campaign.items, ...audience.items, ...identityCase.items, ...sca.items, ...settlement.items]
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,
@@ -623,6 +654,8 @@ export async function GET() {
       campaign: campaign.state,
       audience: audience.state,
       'identity-case': identityCase.state,
+      sca: sca.state,
+      settlement: settlement.state,
     },
   })
 }

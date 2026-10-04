@@ -20,6 +20,8 @@ on:
       - "openbank-flaky-test-hunter/**"
       - "openbank-product-catalog/**"
       - "openbank-libs*/**"
+      # Governance declarations cannot change generated consumer contracts.
+      - "!openbank-libs/governance/**"
       - "build-logic/**"
       - "gradle/**"
       - "*.gradle.kts"
@@ -44,6 +46,7 @@ on:
       - "openbank-flaky-test-hunter/**"
       - "openbank-product-catalog/**"
       - "openbank-libs*/**"
+      - "!openbank-libs/governance/**"
       - "build-logic/**"
       - "gradle/**"
       - "*.gradle.kts"

@@ -55,3 +55,10 @@ spec:
       ports:
         - protocol: TCP
           port: 9292
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
+      ports:
+        - protocol: TCP
+          port: 9292

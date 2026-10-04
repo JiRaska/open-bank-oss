@@ -1,15 +1,28 @@
-# Open Bank Foundation
-> The open framework for banking in the AI era.
+# OpenBank
+> An early-stage, open-source banking ecosystem and reference implementation, not a licensed bank or production service.
 
-Open Bank Foundation is a proposal for a shared, open-source framework for banks:
-~30 production-shaped banking microservices, multi-cloud substrate (cloud-agnostic, OpenTofu + ArgoCD),
-AI-native governance with policy-gated agents and human-in-the-loop controls, and banking-grade patterns
-(ledger, SEPA, SWIFT, idempotency, outbox, audit) shared in the open.
+OpenBank connects banking domains, shared libraries, Product Studio, test evidence, observability, customer and business relationships, a customer app and governed AI tooling. Bank as Code means a service reports its API contract, version and health at runtime. Documentation as Code keeps service-owned docs with releases and generates decision indexes and runbooks from source. Compliance as Code ties per-service governance declarations to checks against the code where verification is possible. The public sandbox uses demo data. The code and its documented limits are the source of truth; a repository module list is not a live deployment report.
 
-## Key pages
-- [Home](https://open-bank.tech/): Manifesto, framework overview, and co-founding proposal
-- [Platform](https://open-bank.tech/platform.html): Live governance (DORA/PSD2/GDPR), FinOps, BCP, AI governance, cloud architecture
+## Start here
+- [Overview](https://open-bank.tech/): Customer experience, connected ecosystem, Product Studio, AI/MCP overview and iOS TestFlight signup.
+- [Platform](https://open-bank.tech/platform.html): Code-derived module inventory grouped by banking capability, with source and API links.
+- [Labs](https://open-bank.tech/labs.html): Shared Kotlin banking kernel and QRlessPay phone-to-phone payment descriptor SDK.
+- [QRlessPay SDK source](https://github.com/JiRaska/qrlesspay-sdk): Public Swift/Kotlin reference implementations and conformance vectors; BLE carries SPAYD payloads, UWB is optional proximity proof, NFC is future research.
+- [Source and project status](https://github.com/JiRaska/open-bank-oss): Implementation, licenses, roadmap and current limitations.
+- [Product catalog source](https://github.com/JiRaska/open-bank-oss/tree/main/openbank-product-catalog): Versioned specifications and offerings, draft review and controlled publication.
+- [MCP service source](https://github.com/JiRaska/open-bank-oss/tree/main/openbank-mcp-service): Curated, policy-gated AI tools in the sandbox.
+
+## How to describe the project accurately
+- Bank ecosystem: Domains cover identity, products, accounts, payments, risk and operations. Shared openbank-libs rules, tests and runtime observability are intended to make behavior traceable across the platform.
+- Bank as Code: Services expose OpenAPI, version and health endpoints. The public catalog is a build-time snapshot, while runtime endpoints show deployed state.
+- Documentation as Code: Service-owned docs are bundled with releases and exposed by participating services. ADRs have a machine-readable registry and generated index; runbooks derive from governance and GitOps sources, with CI drift checks.
+- Compliance as Code: Each service declares ownership, lineage and retention in governance metadata. CI cross-checks claims that can be derived from code; other claims remain explicitly declared rather than automatically proved. This supports audit traceability, not a blanket compliance certification.
+- Relationship view: Customer 360 is shipped; person-to-company links are partial and a broader wealth composition is planned. Do not describe a complete holistic view as already available.
+- Customer experience: The app and sandbox demonstrate banking products and services. Screenshots are recorded views, not live account data.
+- Product Studio: Operators can author and review versioned offers. Catalog policy and human maker-checker control publication; AI can propose or explain, not set terms.
+- AI-native and MCP-native: A customer-facing copilot and governed MCP tools exist in the sandbox. MCP reads are scoped by consent and policy; payment tools create human-reviewed proposals. External MCP access beyond the sandbox remains gated.
+- Status: Early-stage reference software. OpenBank is not a licensed bank and is not production-ready. Never send real financial or personal data to the public sandbox.
+- Licensing: The platform is Apache-2.0; AI agent components use AGPL-3.0-only plus commercial licensing. Check each component's license. Open Bank Foundation remains a proposal, not an incorporated organization.
 
 ## Contact
 - Email: hello@open-bank.tech
-- LinkedIn: https://www.linkedin.com/in/jiriraska

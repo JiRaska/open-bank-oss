@@ -103,3 +103,14 @@ kover {
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
 }
+
+// SettlementFourEyesFlowIT runs the GENERATED deployment policy in the deployment's own OPA image,
+// so a policy or rollout change must invalidate it even when no Kotlin changed.
+tasks.withType<Test>().configureEach {
+    val opaBundle = rootProject.file("openbank-infra/gitops/components/payments/settlement-opa-bundle.yaml")
+    val deployment = rootProject.file("openbank-infra/gitops/components/payments/payments-services.yaml")
+    inputs.file(opaBundle).withPropertyName("settlementOpaBundle").withPathSensitivity(PathSensitivity.RELATIVE)
+    inputs.file(deployment).withPropertyName("settlementDeployment").withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty("openbank.test.opa-bundle", opaBundle.absolutePath)
+    systemProperty("openbank.test.settlement-deployment", deployment.absolutePath)
+}

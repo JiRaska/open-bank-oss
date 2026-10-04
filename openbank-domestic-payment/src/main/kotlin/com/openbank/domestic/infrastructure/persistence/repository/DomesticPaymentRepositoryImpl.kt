@@ -239,7 +239,7 @@ class DomesticPaymentRepositoryImpl(private val outboxRepository: DomesticPaymen
 
             resourceId != payment.debtorAccountId -> "debtor account is not the delegated resource"
 
-            amount.compareTo(payment.amount) != 0 -> "amount does not match the reserved amount"
+            amount.compareTo(payment.amount.amount) != 0 -> "amount does not match the reserved amount"
 
             currency != payment.currency -> "currency does not match the reserved currency"
 

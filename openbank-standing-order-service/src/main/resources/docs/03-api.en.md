@@ -98,6 +98,7 @@ The committed contract declares a minimal `ApiError` (`{ code, message }`). Mapp
 | HTTP | When |
 |---|---|
 | 400 | malformed body / invalid enum value |
+| 400 | `CURRENCY_NOT_ALLOWED` | create/edit (#11938): `paymentType` is `SEPA_CREDIT` and `currency` is not `EUR` (case-insensitive). A SEPA_CREDIT order executes as an SCT, which is euro-only, so it is refused at creation instead of failing on every due date. Nothing is created or cancelled; `violations[]` names `currency` and the rejected value is not echoed. `DOMESTIC` / `INTERNAL` orders are unaffected. |
 | 401 | missing / invalid token (when OIDC enabled) |
 | 403 | OPA denies the action (when `authz.enforce=true`) |
 | 404 | order id does not exist (`NotFoundException`) |

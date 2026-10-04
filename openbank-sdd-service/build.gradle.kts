@@ -93,3 +93,10 @@ pitest {
     threads = 4
     excludedClasses = setOf("com.openbank.sdd.domain.*Kt")
 }
+
+// The kernel outbox v2 ITs (#11874) add two Quarkus boots to this module's single forked test JVM;
+// CI's sdd test task died with OutOfMemoryError at Gradle's default 512m heap. Per-module, as
+// account-service and case-coordinator do: nothing measures test heap fleet-wide.
+tasks.withType<Test>().configureEach {
+    maxHeapSize = "1g"
+}

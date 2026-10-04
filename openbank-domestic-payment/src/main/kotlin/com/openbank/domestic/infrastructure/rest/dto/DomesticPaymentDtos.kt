@@ -13,6 +13,8 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.error.requireValid
+import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.Instant
 import java.util.UUID
@@ -25,8 +27,8 @@ data class CreateDomesticPaymentRequest(
     val creditorAccountNumber: String,
     val creditorBankCode: String,
     val creditorName: String,
-    val amount: BigDecimal,
-    val currency: String,
+    val amount: BigDecimal?,
+    val currency: String?,
     val variableSymbol: String?,
     val specificSymbol: String?,
     val constantSymbol: String?,
@@ -51,8 +53,11 @@ data class CreateDomesticPaymentRequest(
         creditorAccountNumber = creditorAccountNumber,
         creditorBankCode = creditorBankCode,
         creditorName = creditorName,
-        amount = amount,
-        currency = currency,
+        // #11604: build kernel Money here, before the use case looks up or binds the Idempotency-Key.
+        // An over-scale amount, an unsupported currency or an absent/out-of-range amount is an
+        // InvalidMoneyException (400 via libs-runtime's InvalidMoneyExceptionMapper); a zero or
+        // negative amount is a ValidationFailure (400 VALIDATION_ERROR). Nothing is persisted.
+        amount = inboundAmount(amount, currency),
         variableSymbol = variableSymbol,
         specificSymbol = specificSymbol,
         constantSymbol = constantSymbol,
@@ -65,6 +70,11 @@ data class CreateDomesticPaymentRequest(
         actorScope = actorScope,
         synthetic = synthetic,
     )
+}
+
+/** A domestic payment moves a strictly positive amount; Money itself admits zero and negatives. */
+internal fun inboundAmount(amount: BigDecimal?, currency: String?): Money = Money.parseInbound(amount, currency).also {
+    requireValid(it.isPositive(), "amount") { "amount must be greater than zero" }
 }
 
 data class TransitionDomesticPaymentStatusRequest(
@@ -123,7 +133,7 @@ fun DomesticPayment.toResponse() = DomesticPaymentResponse(
     creditorAccountNumber = creditorAccountNumber,
     creditorBankCode = creditorBankCode,
     creditorName = creditorName,
-    amount = amount,
+    amount = amount.amount,
     currency = currency,
     variableSymbol = variableSymbol,
     specificSymbol = specificSymbol,

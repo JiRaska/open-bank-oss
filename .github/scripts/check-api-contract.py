@@ -7,6 +7,10 @@ base, classify the API-contract change from the OpenAPI diff (oasdiff):
     breaking   => info.version MAJOR must move (new URL major, /api/v{N+1})
     correction => a breaking DOCUMENT diff in a PR that changes nothing else in the service:
                   the served contract is unchanged, so MINOR (see below)
+    idempotency-hardening
+               => every breaking finding is a newly REQUIRED `Idempotency-Key` header on a
+                  POST of a money-path service: MINOR (see [idempotency_hardening], ADR-0048
+                  -> ADR-0330)
     additive   => info.version MINOR (or MAJOR) must move within the same /v{N}
     editorial  => info.version PATCH (or higher) must move
 
@@ -48,6 +52,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -380,13 +385,145 @@ def oasdiff_classify(oasdiff: str, old: Path, new: Path) -> tuple[str, list[str]
     return "none", []
 
 
-REQUIRED_BUMP = {"breaking": "MAJOR", "correction": "MINOR", "additive": "MINOR", "editorial": "PATCH"}
+REQUIRED_BUMP = {
+    "breaking": "MAJOR",
+    "correction": "MINOR",
+    "idempotency-hardening": "MINOR",
+    "additive": "MINOR",
+    "editorial": "PATCH",
+}
+
+RULES_YAML = Path("openbank-libs/governance/rules.yaml")
+_IDEM_HEADER_TEXT = re.compile(r"new required `header` request parameter `([^`]+)`")
+
+
+def breaking_entries(oasdiff: str, old: Path, new: Path) -> list[dict]:
+    """The ERR-level `oasdiff breaking` entries, raw — what [idempotency_hardening] decides on."""
+    raw = sh(oasdiff, "breaking", str(old), str(new), "--format", "json", check=False)
+    if not raw.strip():
+        return []
+    try:
+        entries = json.loads(raw)
+    except json.JSONDecodeError:
+        return [{"id": "unparseable"}]
+    return [c for c in entries if str(c.get("level", "")).lower() in ("", "error", "err", "3")]
+
+
+def money_path_services(rules_text: str) -> set[str]:
+    """`money_path_services:` from rules.yaml (stdlib-only: a top-level block list of names).
+
+    Read from the HEAD tree, so a PR that ADDS a service to the list is judged as money-path —
+    the classification and the hardening it licenses land together.
+    """
+    out: set[str] = set()
+    in_block = False
+    for line in rules_text.splitlines():
+        if not in_block:
+            in_block = line.rstrip() == "money_path_services:"
+            continue
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = re.match(r"^\s+-\s+([A-Za-z0-9._-]+)", line)
+        if not m:
+            break
+        out.add(m.group(1))
+    return out
+
+
+def idempotency_hardening(entries: list[dict], money_path: bool) -> bool:
+    """True when a breaking diff is ONLY idempotency hardening on money-path POSTs.
+
+    Requiring an `Idempotency-Key` on a money-path POST that lacked one IS breaking for a client
+    that does not send it — but the alternative the plain rule demands is a whole-service move
+    to /api/v{N+1} (ADR-0048 D2), which no team takes for a duplicate-debit fix, so the fix is
+    not shipped and the endpoint keeps double-booking on retry. The enforced
+    `idempotency-coverage-money-path` gate requires exactly this header, and this gate then
+    made it unreachable for any POST that existed before the service joined the money-path
+    list (#11996). The obligation that replaces the MAJOR bump: the PR updates its in-repo
+    callers to send a key (they 400 otherwise, loudly, not silently).
+
+    Narrow by construction — ALL must hold, else the normal breaking rule applies:
+      * the service is in `money_path_services` (as of HEAD, so a PR adding it qualifies);
+      * there is at least one breaking finding, and EVERY one is
+        `new-required-request-parameter` for a HEADER named `Idempotency-Key`
+        (case-insensitive) on a POST (ADR-0330). Any other breaking change anywhere in the same spec —
+        including on the same operation — keeps requiring MAJOR.
+    """
+    if not money_path or not entries:
+        return False
+    for e in entries:
+        if e.get("id") != "new-required-request-parameter":
+            return False
+        if str(e.get("operation", "")).upper() != "POST":
+            return False
+        m = _IDEM_HEADER_TEXT.search(str(e.get("text", "")))
+        if not m or m.group(1).lower() != "idempotency-key":
+            return False
+    return True
+
+
+_MIGRATION_SECTION = re.compile(
+    r"(?ms)^## Idempotency caller migration[ \t]*\n(.*?)(?=^## |\Z)"
+)
+_MIGRATION_LINE = re.compile(
+    r"^- `(openbank-[^` ]+) POST ([^`]+)` \| callers: (.+) \| proof: `([^`]+)`$"
+)
+
+
+def migration_assertion_findings(
+    body: str, service: str, entries: list[dict], changed: set[str], repo: Path = Path("."),
+) -> list[str]:
+    """Require reviewable caller inventory and changed test evidence for each MINOR exception.
+
+    This does not claim to discover every caller. The human reviewer checks that the declared
+    inventory is complete; the gate makes its absence and an unchanged/nonexistent proof fail.
+    """
+    expected = {str(e.get("path", "")) for e in entries}
+    section = _MIGRATION_SECTION.search(body)
+    if not section:
+        return [f"{service}: add a '## Idempotency caller migration' PR section with one line "
+                "per hardened operation, e.g. - `openbank-service POST /path` | "
+                "callers: `file` (or none) | proof: `changed-test-file` (ADR-0330)"]
+    lines = [line.strip() for line in section.group(1).splitlines() if line.strip().startswith("- ")]
+    found: dict[str, tuple[str, str]] = {}
+    findings = []
+    for line in lines:
+        match = _MIGRATION_LINE.fullmatch(line)
+        if not match:
+            findings.append(f"{service}: malformed migration assertion: {line}")
+            continue
+        declared_service, path, callers, proof = match.groups()
+        if declared_service != service:
+            continue  # A different changed service checks its own entries below.
+        if path in found:
+            findings.append(f"{service}: duplicate caller migration assertion for POST {path}")
+        found[path] = (callers, proof)
+    for path in sorted(expected):
+        if path not in found:
+            findings.append(f"{service}: missing caller migration assertion for POST {path}")
+            continue
+        callers, proof = found[path]
+        if callers != "none":
+            caller_paths = re.findall(r"`([^`]+)`", callers)
+            if not caller_paths or ", ".join(f"`{p}`" for p in caller_paths) != callers:
+                findings.append(f"{service}: POST {path}: callers must be comma-separated repo paths or none")
+            for caller in caller_paths:
+                if Path(caller).is_absolute() or ".." in Path(caller).parts or not (repo / caller).is_file():
+                    findings.append(f"{service}: POST {path}: caller path does not exist: {caller}")
+        if Path(proof).is_absolute() or ".." in Path(proof).parts or not (repo / proof).is_file():
+            findings.append(f"{service}: POST {path}: proof test path does not exist: {proof}")
+        elif proof not in changed or not ("/test/" in proof or "/tests/" in proof or ".test." in proof):
+            findings.append(f"{service}: POST {path}: proof must be a test file changed in this PR: {proof}")
+    for path in sorted(set(found) - expected):
+        findings.append(f"{service}: migration assertion names unchanged operation POST {path}")
+    return findings
 
 
 def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int, int]) -> bool:
     if kind == "breaking":
         return new_v[0] > old_v[0]
-    if kind in ("additive", "correction"):
+    if kind in ("additive", "correction", "idempotency-hardening"):
         return new_v[0] > old_v[0] or (new_v[0] == old_v[0] and new_v[1] > old_v[1])
     if kind == "editorial":
         return new_v > old_v
@@ -397,13 +534,46 @@ def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int
 # not disqualify a spec correction. release-please writes both.
 BEHAVIOURLESS = {"CHANGELOG.md", "version.txt"}
 
+# Trees inside a service that cannot change what it serves either. Tests never ship, and the
+# authored docs are prose that check-service-docs-freshness.py REQUIRES alongside any src/main
+# change, openapi.yaml included — so without this the two gates were jointly unsatisfiable for a
+# correction, and a test pinning the corrected spec to the running service disqualified it (#11972).
+BEHAVIOURLESS_TREES = ("src/test/", "src/main/resources/docs/")
+
 
 def service_touched_beyond_spec(service: str, spec_rel: str, changed_all: list[str]) -> list[str]:
-    """Files in this service the PR changed other than its openapi.yaml (and derived files)."""
+    """Files in this service the PR changed other than its openapi.yaml (and behaviourless files)."""
     return [
         f for f in changed_all
-        if f.startswith(service + "/") and f != spec_rel and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+        if f.startswith(service + "/") and f != spec_rel
+        and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+        and not f[len(service) + 1:].startswith(BEHAVIOURLESS_TREES)
     ]
+
+
+def touched_beyond_spec_self_test() -> int:
+    """The behaviourless exemptions must not swallow a file that can change the served contract."""
+    svc, spec = "openbank-x", "openbank-x/src/main/resources/openapi.yaml"
+    cases = [
+        ("a test", f"{svc}/src/test/kotlin/XIT.kt", False),
+        ("authored docs", f"{svc}/src/main/resources/docs/03-api.en.md", False),
+        ("release-please output", f"{svc}/version.txt", False),
+        ("production code", f"{svc}/src/main/kotlin/X.kt", True),
+        ("application config", f"{svc}/src/main/resources/application.yaml", True),
+        ("a migration", f"{svc}/src/main/resources/db/migration/V2__x.sql", True),
+        ("the build", f"{svc}/build.gradle.kts", True),
+        ("a docs dir that is not the authored one", f"{svc}/docs/x.md", True),
+        ("another service's code", "openbank-y/src/main/kotlin/Y.kt", False),
+    ]
+    failures = 0
+    for why, path, disqualifies in cases:
+        got = bool(service_touched_beyond_spec(svc, spec, [spec, path]))
+        if got != disqualifies:
+            print(f"SELF-TEST FAIL: touched-beyond-spec: {why} ({path}) disqualifies={got}, expected {disqualifies}")
+            failures += 1
+        else:
+            print(f"ok: touched-beyond-spec: {why} disqualifies={got}")
+    return failures
 
 
 def _self_test() -> int:
@@ -544,11 +714,14 @@ def _self_test() -> int:
             print(f"ok: {name} own={sorted(got_own)} url={sorted(got_url)}")
 
     failures += classification_self_test()
+    failures += idempotency_hardening_self_test()
+    failures += migration_assertion_self_test()
+    failures += touched_beyond_spec_self_test()
 
     if failures:
         print(f"{failures} self-test case(s) failed")
         return 1
-    print(f"all {len(cases) + len(live)} self-test checks passed")
+    print("all API contract self-test groups passed")
     return 0
 
 
@@ -662,6 +835,134 @@ def classification_self_test() -> int:
     return failures
 
 
+IDEM_BASE_SPEC = """openapi: 3.0.3
+info:
+  title: fixture
+  version: "1.2.0"
+paths:
+  /api/v1/things/{id}/refresh:
+    post:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /api/v1/things/{id}:
+    get:
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: ok
+  /api/v1/other:
+    post:
+      responses:
+        "200":
+          description: ok
+"""
+
+
+def _with_header(spec: str, path_line: str, name: str) -> str:
+    """Insert a REQUIRED header parameter as the first parameter of the operation under path_line."""
+    head, tail = spec.split(path_line, 1)
+    marker = "      parameters:\n"
+    header = (
+        f"      parameters:\n        - name: {name}\n          in: header\n          required: true\n"
+        f"          schema:\n            type: string\n"
+    )
+    return head + path_line + tail.replace(marker, header, 1)
+
+
+def idempotency_hardening_self_test() -> int:
+    """Falsify [idempotency_hardening]: one must-PASS case, and every narrowing must bite."""
+    oasdiff = shutil.which("oasdiff")
+    if not oasdiff:
+        print("SELF-TEST FAIL: oasdiff not on PATH — idempotency-hardening cases did not run")
+        return 1
+    post_line = "  /api/v1/things/{id}/refresh:\n"
+    get_line = "  /api/v1/things/{id}:\n"
+    post_key = _with_header(IDEM_BASE_SPEC, post_line, "Idempotency-Key")
+    cases: list[tuple[str, str, bool, bool]] = [
+        ("MUST PASS: only a required Idempotency-Key on a money-path POST", post_key, True, True),
+        ("lower-case header name still qualifies", _with_header(IDEM_BASE_SPEC, post_line, "idempotency-key"), True, True),
+        ("MUST FAIL: the same header on a GET", _with_header(IDEM_BASE_SPEC, get_line, "Idempotency-Key"), True, False),
+        ("MUST FAIL: a different required header on a POST", _with_header(IDEM_BASE_SPEC, post_line, "X-Tenant"), True, False),
+        (
+            "MUST FAIL: Idempotency-Key plus another breaking change (an endpoint removed)",
+            post_key.replace('  /api/v1/other:\n    post:\n      responses:\n        "200":\n          description: ok\n', ""),
+            True,
+            False,
+        ),
+        ("MUST FAIL: a service that is not money-path", post_key, False, False),
+    ]
+    failures = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        old_p = Path(tmp) / "old.yaml"
+        new_p = Path(tmp) / "new.yaml"
+        old_p.write_text(IDEM_BASE_SPEC, encoding="utf-8")
+        for name, new_text, money_path, expected in cases:
+            new_p.write_text(new_text, encoding="utf-8")
+            entries = breaking_entries(oasdiff, old_p, new_p)
+            got = idempotency_hardening(entries, money_path)
+            if not entries and expected is False and money_path:
+                print(f"SELF-TEST FAIL: {name}: oasdiff reported nothing breaking — the fixture proves nothing")
+                failures += 1
+            elif got is not expected:
+                print(f"SELF-TEST FAIL: {name}: expected {expected}, got {got} ({[e.get('id') for e in entries]})")
+                failures += 1
+            else:
+                print(f"ok: {name}")
+
+    rules = "x: 1\nmoney_path_services:\n  - openbank-ledger-service\n  # a comment\n  - openbank-new-service\nnext_key:\n  - not-a-service\n"
+    got_set = money_path_services(rules)
+    if got_set != {"openbank-ledger-service", "openbank-new-service"}:
+        print(f"SELF-TEST FAIL: money_path_services parsed {sorted(got_set)}")
+        failures += 1
+    else:
+        print("ok: money_path_services reads the block list and stops at the next key")
+    return failures
+
+
+def migration_assertion_self_test() -> int:
+    entries = [{"operation": "POST", "path": "/api/v1/things/{id}/refresh"}]
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "src").mkdir()
+        (repo / "tests").mkdir()
+        (repo / "src/client.ts").write_text("// caller\n")
+        (repo / "tests/client.test.ts").write_text("// proof\n")
+        line = ("- `openbank-example POST /api/v1/things/{id}/refresh` | callers: `src/client.ts` "
+                "| proof: `tests/client.test.ts`")
+        body = f"## Idempotency caller migration\n{line}\n"
+        changed = {"src/client.ts", "tests/client.test.ts"}
+        cases = [
+            ("complete assertion", body, changed, False),
+            ("missing section", "", changed, True),
+            ("missing operation", "## Idempotency caller migration\n", changed, True),
+            ("other service cannot assert this operation", body.replace("openbank-example", "openbank-other"), changed, True),
+            ("unlisted test change", body, {"src/client.ts"}, True),
+            ("missing caller file", body.replace("src/client.ts", "src/missing.ts"), changed, True),
+            ("no in-repo callers", body.replace("`src/client.ts`", "none"), changed, False),
+        ]
+        failures = 0
+        for name, candidate, paths, must_find in cases:
+            findings = migration_assertion_findings(candidate, "openbank-example", entries, paths, repo)
+            if bool(findings) != must_find:
+                print(f"SELF-TEST FAIL: {name}: findings={findings}")
+                failures += 1
+        if not failures:
+            print("ok: caller migration assertions require each operation and changed test proof")
+        return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="git sha of the PR base (not needed with --self-test)")
@@ -714,14 +1015,12 @@ def main() -> int:
                 old_path = Path(tf.name)
             try:
                 kind, breaking = oasdiff_classify(args.oasdiff, old_path, head_path)
-            except SpecLoadError as e:
+            except SpecLoadError as e:  # old_path is removed after the reclassification below
                 findings.append(
                     f"{rel}: cannot classify — spec fails strict OpenAPI resolution "
                     f"(fix the dangling $ref): {e}"
                 )
                 kind = None
-            finally:
-                old_path.unlink(missing_ok=True)
 
             # A breaking DOCUMENT diff is not a breaking CONTRACT change when the PR changed
             # nothing else in the service: the running server is byte-identical, so no client
@@ -742,6 +1041,23 @@ def main() -> int:
             # spec diffs and the first PR has none. What the reclassification does NOT check is
             # whether the corrected document is true — that is openapi-route-conformance for the
             # route set, and still nothing for schemas.
+            if kind == "breaking":
+                rules_text = RULES_YAML.read_text(encoding="utf-8") if RULES_YAML.is_file() else ""
+                is_money_path = service in money_path_services(rules_text)
+                entries = breaking_entries(args.oasdiff, old_path, head_path)
+                if idempotency_hardening(entries, is_money_path):
+                    if os.environ.get("GITHUB_EVENT_NAME") != "push":
+                        findings.extend(migration_assertion_findings(
+                            os.environ.get("PR_BODY", ""), service, entries, set(changed_all),
+                        ))
+                    print(
+                        f"::notice::api-contract gate: {service}: every breaking change is a newly "
+                        f"required Idempotency-Key header on a money-path POST — classifying as "
+                        f"IDEMPOTENCY-HARDENING (MINOR). The PR must inventory callers and "
+                        f"change a proof test for every operation (ADR-0330)."
+                    )
+                    kind = "idempotency-hardening"
+            old_path.unlink(missing_ok=True)
             if kind == "breaking":
                 others = service_touched_beyond_spec(service, rel, changed_all)
                 if not others:

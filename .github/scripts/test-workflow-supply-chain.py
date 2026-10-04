@@ -5,6 +5,7 @@ import copy
 import json
 import subprocess
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -16,6 +17,25 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_auto_deploy_pr_discloses_carried_pins_and_contract_verdict(self):
+        workflow = yaml.safe_load((guard.ROOT / '.github/workflows/auto-deploy.yml').read_text())
+        steps = workflow['jobs']['gitops-pr']['steps']
+        rewrite = next(step for step in steps if step.get('id') == 'rewrite')['run']
+        body = next(step for step in steps if step.get('id') == 'gitops_pr')['with']['body']
+
+        def complete(rewrite_script, pr_body):
+            return (all(token in rewrite_script for token in
+                        ('CARRIED_PRS+=("#${n}")', 'carried_prs=${CARRIED_PRS[*]}',
+                         'carried_prs=none'))
+                    and 'needs.build-push.outputs.deployable_services' in pr_body
+                    and 'needs.can-i-deploy.outputs.deployable' in pr_body
+                    and 'steps.rewrite.outputs.carried_prs' in pr_body
+                    and '**Deployed services:**' not in pr_body)
+
+        self.assertTrue(complete(rewrite, body))
+        self.assertFalse(complete(rewrite.replace('CARRIED_PRS+=("#${n}")', ':'), body))
+        self.assertFalse(complete(rewrite, body.replace('steps.rewrite.outputs.carried_prs', 'none')))
+
     def test_personal_model_credential_is_rejected_in_every_workflow(self):
         for name in ('agent-review.yml', 'other.yml'):
             doc = {'jobs': {'test': {'steps': [{
@@ -26,14 +46,39 @@ class SupplyChainTest(unittest.TestCase):
 
     def test_tags_fail_for_steps_and_reusable_jobs(self):
         for job in ({'uses': 'owner/action@v1'}, {'steps': [{'uses': 'actions/checkout@v4'}]}):
-            self.assertTrue(guard.findings('example.yml', {'jobs': {'test': job}}))
+            self.assertTrue(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
 
     def test_pins_and_local_actions_pass(self):
         job = {'steps': [{'uses': './local'}, {'uses': 'actions/checkout@' + 'a' * 40}]}
-        self.assertFalse(guard.findings('example.yml', {'jobs': {'test': job}}))
+        self.assertFalse(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
+
+    def test_top_level_permissions_must_be_declared_and_read_only(self):
+        job = {'permissions': {'issues': 'write'}, 'steps': []}
+        self.assertFalse(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
+        self.assertFalse(guard.findings('example.yml', {'permissions': 'read-all', 'jobs': {}}))
+        for top in (None, {'contents': 'read', 'issues': 'write'}, 'write-all', {'id-token': 'write'}):
+            doc = {'jobs': {'test': job}}
+            if top is not None:
+                doc['permissions'] = top
+            with self.subTest(top=top):
+                self.assertTrue(guard.top_level_findings(doc))
+                self.assertTrue(guard.findings('example.yml', doc))
+
+    def test_every_real_workflow_regresses_when_a_write_moves_to_the_top(self):
+        for path in sorted((guard.ROOT / '.github/workflows').glob('*.y*ml')):
+            original = yaml.safe_load(path.read_text())
+            self.assertFalse(guard.top_level_findings(original), path.name)
+            for mutation in ('drop', 'write'):
+                doc = copy.deepcopy(original)
+                if mutation == 'drop':
+                    doc.pop('permissions')
+                else:
+                    doc['permissions'] = {'contents': 'write'}
+                with self.subTest(name=path.name, mutation=mutation):
+                    self.assertTrue(guard.top_level_findings(doc))
 
     def test_slsa_exception_cannot_spread(self):
-        doc = {'jobs': {'provenance': {'uses': guard.SLSA}}}
+        doc = {'permissions': {}, 'jobs': {'provenance': {'uses': guard.SLSA}}}
         self.assertFalse(guard.findings('release-please.yml', doc))
         self.assertTrue(guard.findings('other.yml', doc))
         doc['jobs']['provenance']['uses'] = guard.SLSA.replace('v2.1.0', 'main')
@@ -41,8 +86,9 @@ class SupplyChainTest(unittest.TestCase):
 
     def test_trigger_filter_regression(self):
         for name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):
-            self.assertTrue(guard.findings(name, {'on': {'workflow_run': {}}, 'jobs': {}}))
-            self.assertFalse(guard.findings(name, {'on': {'workflow_run': {'branches': ['main']}}, 'jobs': {}}))
+            self.assertTrue(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {}}, 'jobs': {}}))
+            self.assertFalse(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
+                                                   'jobs': {}}))
 
     def test_pull_request_workflow_requires_concurrency(self):
         path = guard.ROOT / '.github/workflows/dependency-review.yml'
@@ -100,6 +146,69 @@ class SupplyChainTest(unittest.TestCase):
         bad_rules = copy.deepcopy(rules)
         bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = []
         self.assertTrue(guard.steward_scope_findings(prompt, bad_rules, workflow))
+
+    def test_platform_image_tag_follows_scan_and_attestation(self):
+        workflow = yaml.safe_load((guard.ROOT / '.github/workflows/platform-images.yml').read_text())
+        gate_manifest = yaml.safe_load((guard.ROOT / '.github/gates/gates.yaml').read_text())
+        supply_chain_gate = next(gate for gate in gate_manifest['gates'] if gate['id'] == 'workflow-supply-chain')
+        self.assertIn('.github/workflows/platform-images.yml', supply_chain_gate['selftest_inputs'])
+
+        def defects(doc):
+            steps = doc['jobs']['build']['steps']
+            names = [step.get('name') for step in steps]
+            required = ('Build + push', 'Trivy image scan (gate fixable CRITICAL, report HIGH)',
+                        'Sign + attest (cosign + KMS, shared lib)', 'Tag attested image',
+                        'Record result')
+            if any(name not in names for name in required):
+                return ['required release step missing']
+            errors = []
+            if [names.index(name) for name in required] != sorted(names.index(name) for name in required):
+                errors.append('tag must follow scan and attestation')
+            by_name = {step.get('name'): step for step in steps}
+            def commands(name):
+                return [line.strip() for line in by_name[name]['run'].splitlines()
+                        if line.strip() and not line.lstrip().startswith('#')]
+
+            push = '\n'.join(commands('Build + push'))
+            scan = commands('Trivy image scan (gate fixable CRITICAL, report HIGH)')
+            attest = commands('Sign + attest (cosign + KMS, shared lib)')
+            tag = by_name['Tag attested image']['run']
+            if 'push-by-digest=true' not in push or re.search(r'(^|\s)-t\s+', push):
+                errors.append('build must push an untagged digest')
+            if not scan or '--exit-code 1' not in scan[-1] or '|| true' in scan[-1]:
+                errors.append('critical vulnerability scan must stop the release')
+            if not attest or not attest[-1].startswith('cosign_sign_and_attest ') or '|| true' in attest[-1]:
+                errors.append('failed signing or attestation must stop the release')
+            if '--prefer-index=false' not in tag or '[ "$got" = "$DIGEST" ]' not in tag:
+                errors.append('tag must preserve and verify the attested digest')
+            return errors
+
+        self.assertEqual(defects(workflow), [])
+        for mutation in ('early-tag', 'tagged-build', 'scan-bypass', 'attest-bypass',
+                         'index-wrap', 'no-digest-check'):
+            doc = copy.deepcopy(workflow)
+            steps = doc['jobs']['build']['steps']
+            named = {step.get('name'): step for step in steps}
+            if mutation == 'early-tag':
+                tag_step = named['Tag attested image']
+                steps.remove(tag_step)
+                steps.insert(steps.index(named['Trivy image scan (gate fixable CRITICAL, report HIGH)']), tag_step)
+            elif mutation == 'tagged-build':
+                named['Build + push']['run'] += '\ndocker buildx build -t "$IMAGE:$TAG" --push "$CONTEXT"'
+            elif mutation == 'scan-bypass':
+                named['Trivy image scan (gate fixable CRITICAL, report HIGH)']['run'] = (
+                    named['Trivy image scan (gate fixable CRITICAL, report HIGH)']['run'].replace(
+                        '--exit-code 1', '--exit-code 0'))
+            elif mutation == 'attest-bypass':
+                named['Sign + attest (cosign + KMS, shared lib)']['run'] += '\necho attestation skipped'
+            elif mutation == 'index-wrap':
+                named['Tag attested image']['run'] = named['Tag attested image']['run'].replace(
+                    '--prefer-index=false', '')
+            else:
+                named['Tag attested image']['run'] = named['Tag attested image']['run'].replace(
+                    '[ "$got" = "$DIGEST" ]', 'true')
+            with self.subTest(mutation=mutation):
+                self.assertTrue(defects(doc))
 
     def test_services_ci_dispatch_and_fail_closed_contract(self):
         original = yaml.safe_load((guard.ROOT / '.github/workflows/services-ci.yml').read_text())

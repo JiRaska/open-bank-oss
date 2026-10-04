@@ -74,6 +74,7 @@ spec:
           'ledger/ledger-db',
           'lending/lending-db',
           'payments/card-issuance-db',
+          'payments/card-processing-db',
           'payments/clearing-db',
           'payments/domestic-payment-db',
           'payments/sepa-instant-db',

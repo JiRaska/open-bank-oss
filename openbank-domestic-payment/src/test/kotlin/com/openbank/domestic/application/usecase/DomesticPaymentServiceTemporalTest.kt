@@ -13,6 +13,7 @@ import com.openbank.domestic.application.workflow.DomesticPaymentWorkflow
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
@@ -168,8 +169,7 @@ class DomesticPaymentServiceTemporalTest {
         creditorAccountNumber = " 9876543210 ",
         creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
-        amount = BigDecimal("1500.00"),
-        currency = " czk ",
+        amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
         variableSymbol = " 2026001 ",
         specificSymbol = null,
         constantSymbol = " 0308 ",

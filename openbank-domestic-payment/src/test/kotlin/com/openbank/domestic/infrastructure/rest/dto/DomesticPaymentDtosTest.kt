@@ -9,6 +9,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -53,8 +54,7 @@ class DomesticPaymentDtosTest {
         assertThat(command.creditorAccountNumber).isEqualTo("123456789")
         assertThat(command.creditorBankCode).isEqualTo("0100")
         assertThat(command.creditorName).isEqualTo("Brno Utility")
-        assertThat(command.amount).isEqualByComparingTo(BigDecimal("1234.56"))
-        assertThat(command.currency).isEqualTo("CZK")
+        assertThat(command.amount).isEqualTo(Money.of(BigDecimal("1234.56"), "CZK"))
         assertThat(command.variableSymbol).isEqualTo("2026001")
         assertThat(command.specificSymbol).isEqualTo("55")
         assertThat(command.constantSymbol).isEqualTo("0308")
@@ -138,8 +138,7 @@ class DomesticPaymentDtosTest {
             creditorAccountNumber = "2000",
             creditorBankCode = "0100",
             creditorName = "Payee",
-            amount = BigDecimal("42.000000"),
-            currency = "CZK",
+            amount = Money.of(BigDecimal("42.000000"), "CZK"),
             variableSymbol = "VS",
             specificSymbol = "SS",
             constantSymbol = "CS",
