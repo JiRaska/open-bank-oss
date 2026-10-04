@@ -5,6 +5,7 @@ import copy
 import json
 import subprocess
 import importlib.util
+import re
 import unittest
 from pathlib import Path
 
@@ -126,6 +127,53 @@ class SupplyChainTest(unittest.TestCase):
         bad_rules = copy.deepcopy(rules)
         bad_rules['autonomous_agent_prs']['agent_branch_prefixes'] = []
         self.assertTrue(guard.steward_scope_findings(prompt, bad_rules, workflow))
+
+    def test_platform_image_tag_follows_scan_and_attestation(self):
+        workflow = yaml.safe_load((guard.ROOT / '.github/workflows/platform-images.yml').read_text())
+        gate_manifest = yaml.safe_load((guard.ROOT / '.github/gates/gates.yaml').read_text())
+        supply_chain_gate = next(gate for gate in gate_manifest['gates'] if gate['id'] == 'workflow-supply-chain')
+        self.assertIn('.github/workflows/platform-images.yml', supply_chain_gate['selftest_inputs'])
+
+        def defects(doc):
+            steps = doc['jobs']['build']['steps']
+            names = [step.get('name') for step in steps]
+            required = ('Build + push', 'Trivy image scan (gate fixable CRITICAL, report HIGH)',
+                        'Sign + attest (cosign + KMS, shared lib)', 'Tag attested image',
+                        'Record result')
+            if any(name not in names for name in required):
+                return ['required release step missing']
+            errors = []
+            if [names.index(name) for name in required] != sorted(names.index(name) for name in required):
+                errors.append('tag must follow scan and attestation')
+            by_name = {step.get('name'): step for step in steps}
+            push = '\n'.join(line for line in by_name['Build + push']['run'].splitlines()
+                             if not line.lstrip().startswith('#'))
+            tag = by_name['Tag attested image']['run']
+            if 'push-by-digest=true' not in push or re.search(r'(^|\s)-t\s+', push):
+                errors.append('build must push an untagged digest')
+            if '--prefer-index=false' not in tag or '[ "$got" = "$DIGEST" ]' not in tag:
+                errors.append('tag must preserve and verify the attested digest')
+            return errors
+
+        self.assertEqual(defects(workflow), [])
+        for mutation in ('early-tag', 'tagged-build', 'index-wrap', 'no-digest-check'):
+            doc = copy.deepcopy(workflow)
+            steps = doc['jobs']['build']['steps']
+            named = {step.get('name'): step for step in steps}
+            if mutation == 'early-tag':
+                tag_step = named['Tag attested image']
+                steps.remove(tag_step)
+                steps.insert(steps.index(named['Trivy image scan (gate fixable CRITICAL, report HIGH)']), tag_step)
+            elif mutation == 'tagged-build':
+                named['Build + push']['run'] += '\ndocker buildx build -t "$IMAGE:$TAG" --push "$CONTEXT"'
+            elif mutation == 'index-wrap':
+                named['Tag attested image']['run'] = named['Tag attested image']['run'].replace(
+                    '--prefer-index=false', '')
+            else:
+                named['Tag attested image']['run'] = named['Tag attested image']['run'].replace(
+                    '[ "$got" = "$DIGEST" ]', 'true')
+            with self.subTest(mutation=mutation):
+                self.assertTrue(defects(doc))
 
     def test_services_ci_dispatch_and_fail_closed_contract(self):
         original = yaml.safe_load((guard.ROOT / '.github/workflows/services-ci.yml').read_text())
