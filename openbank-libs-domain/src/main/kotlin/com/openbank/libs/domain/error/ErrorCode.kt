@@ -117,6 +117,9 @@ enum class PlatformErrorCode(
 
     /** Not an ISO 4217 currency with a minor unit, so it cannot denominate a monetary amount. */
     CURRENCY_UNSUPPORTED(ErrorCategory.VALIDATION, "The currency is not supported"),
+
+    /** A monetary amount is zero or negative where a strictly positive one is required. */
+    AMOUNT_NOT_POSITIVE(ErrorCategory.VALIDATION, "The amount must be greater than zero"),
     ;
 
     override val code: String get() = name
