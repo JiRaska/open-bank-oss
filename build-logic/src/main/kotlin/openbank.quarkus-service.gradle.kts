@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
+import java.util.zip.ZipFile
+
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
 // Centralises the boilerplate that used to be copy-pasted across 31 build.gradle.kts
 // files: plugin applications, Kotlin/allOpen config, docker-java version pinning,
@@ -99,16 +101,22 @@ tasks.named<Copy>("processResources") {
 
 val verifyServiceDocs by tasks.registering {
     group = "verification"
-    description = "Verify that generated service documentation is packaged with the service."
-    dependsOn("processResources")
+    description = "Verify that current service documentation is packaged in the Quarkus application JAR."
+    dependsOn("quarkusBuild")
     doLast {
-        val packaged = layout.buildDirectory.file("resources/main/docs/00-build.md").get().asFile
-        val source = layout.buildDirectory.file("resources/main/openbank-service-build.properties").get().asFile
-        val commit = source.takeIf { it.isFile }?.readText()
-            ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
-        check(packaged.isFile && packaged.readText().contains(project.version.toString())
-            && commit != null && packaged.readText().contains(commit)) {
-            "${project.name}: current build facts were not packaged in build/resources/main/docs"
+        val appJars = layout.buildDirectory.dir("quarkus-app/app").get().asFile
+            .listFiles { file -> file.extension == "jar" }.orEmpty()
+        check(appJars.size == 1) { "${project.name}: expected one Quarkus application JAR" }
+        ZipFile(appJars.single()).use { jar ->
+            val facts = jar.getEntry("docs/00-build.md")?.let { jar.getInputStream(it).bufferedReader().readText() }
+            val properties = jar.getEntry("openbank-service-build.properties")
+                ?.let { jar.getInputStream(it).bufferedReader().readText() }
+            val commit = properties
+                ?.let { Regex("(?m)^git\\.commit=([0-9a-fA-F]{40})$").find(it)?.groupValues?.get(1) }
+            check(facts != null && facts.contains(project.version.toString())
+                && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()) {
+                "${project.name}: current build facts were not packaged in the Quarkus application JAR"
+            }
         }
     }
 }

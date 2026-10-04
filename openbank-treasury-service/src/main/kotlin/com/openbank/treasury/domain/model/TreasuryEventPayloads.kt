@@ -37,6 +37,11 @@ data class DealBooked(
     val fxSide: FxSide? = null,
     /** FX_SPOT only: the CZK leg (`principal` x `rate`); null for money-market deals. */
     val counterAmount: BigDecimal? = null,
+    /**
+     * ADR-0315 D4: the product limit the booking was evaluated against (a booked deal is always
+     * within it). Additive and optional, so `v1` consumers are unaffected.
+     */
+    val productLimit: ProductLimitApplied? = null,
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.deal.booked.v1"
@@ -147,5 +152,15 @@ data class NostroBreakAged(
 ) {
     companion object {
         const val EVENT_TYPE = "treasury.nostro.break-aged.v1"
+    }
+}
+
+/** The product-limit decision recorded on [DealBooked]: the mandate in the deal's currency, and that it held. */
+data class ProductLimitApplied(val decision: String, val maxPrincipal: BigDecimal?, val maxTenorDays: Long?) {
+    companion object {
+        const val WITHIN = "WITHIN_LIMIT"
+
+        fun of(limit: ProductLimit, currency: String) =
+            ProductLimitApplied(WITHIN, limit.maxPrincipal[currency], limit.maxTenorDays)
     }
 }

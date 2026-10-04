@@ -6,7 +6,8 @@
 // submit/approve, the lifecycle timeline with who acted (and as what kind of actor), and the
 // ledger journals the booking posted. Action buttons follow role and state (dealActions); the
 // approve button is withheld from the deal's own creator/submitter, and a server refusal —
-// FOUR_EYES_VIOLATION, LIMIT_BREACHED, INVALID_STATE — is rendered readably if it happens anyway.
+// FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED (ADR-0315 D4, re-checked at approval),
+// INVALID_STATE — is rendered readably, with the server's reason, if it happens anyway.
 
 'use client'
 
