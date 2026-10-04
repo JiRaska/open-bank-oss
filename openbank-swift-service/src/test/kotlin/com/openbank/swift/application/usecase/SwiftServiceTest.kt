@@ -26,6 +26,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -122,6 +124,27 @@ class SwiftServiceTest {
         // it, so #8718 adds an occurrence of an existing event, not a field.
         assertThat(payload.fieldNames().asSequence().toList())
             .containsExactlyInAnyOrderElementsOf(STATUS_CHANGED_PAYLOAD_KEYS)
+    }
+
+    /**
+     * #11604: the event `amount` is the Money at the currency's own scale. For EUR the JSON text is
+     * byte-identical to main (`10.00`); main shifted JPY and KWD by a fixed two places too.
+     */
+    @ParameterizedTest(name = "{0} {1} -> amount {2}")
+    @CsvSource("1000, EUR, 10.00", "1000, JPY, 1000", "1500, KWD, 1.500", "1500, BHD, 1.500")
+    fun `status-changed event amount uses the currency's own minor unit`(
+        minorUnits: Long,
+        currency: String,
+        wire: String,
+    ): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val outbox = slot<OutboxMessage>()
+        coEvery { repo.findById(id) } returns message(id, SwiftStatus.SENT, minorUnits, currency)
+        coEvery { repo.saveWithOutbox(any(), capture(outbox)) } answers { firstArg() }
+
+        service.acknowledge(id, "ACK-1")
+
+        assertThat(outbox.captured.payload).contains("\"amount\":$wire,\"currency\":\"$currency\"")
     }
 
     @Test
@@ -343,8 +366,7 @@ class SwiftServiceTest {
         transactionReference = "TRX-001",
         relatedReference = null,
         valueDate = valueDate,
-        currency = "EUR",
-        amountMinorUnits = 1000,
+        amount = SwiftMessage.moneyOfMinorUnits(1000, "EUR"),
         orderingCustomerAccount = "DE89370400440532013000",
         orderingCustomerAccountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
         orderingCustomerName = "Alice",
@@ -373,30 +395,30 @@ class SwiftServiceTest {
         )
     }
 
-    private fun message(id: UUID, status: SwiftStatus) = SwiftMessage(
-        id = id,
-        idempotencyKey = "idem-1",
-        messageType = SwiftMessageType.MT103,
-        senderBic = "ABCDEFGH",
-        receiverBic = "IJKLMNOP",
-        transactionReference = "TRX-001",
-        relatedReference = null,
-        valueDate = "20260527",
-        currency = "EUR",
-        amountMinorUnits = 1000,
-        orderingCustomerAccount = "DE89370400440532013000",
-        orderingCustomerAccountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
-        orderingCustomerName = "Alice",
-        beneficiaryAccount = "GB33BUKB20201555555555",
-        beneficiaryName = "Bob",
-        remittanceInfo = "Invoice 1",
-        chargeCode = "SHA",
-        priority = SwiftPriority.NORMAL,
-        status = status,
-        rawMt = null,
-        ackReceivedAt = null,
-        rejectionReason = null,
-        createdAt = Instant.parse("2026-05-27T00:00:00Z"),
-        updatedAt = Instant.parse("2026-05-27T00:00:00Z"),
-    )
+    private fun message(id: UUID, status: SwiftStatus, minorUnits: Long = 1000, currency: String = "EUR") =
+        SwiftMessage(
+            id = id,
+            idempotencyKey = "idem-1",
+            messageType = SwiftMessageType.MT103,
+            senderBic = "ABCDEFGH",
+            receiverBic = "IJKLMNOP",
+            transactionReference = "TRX-001",
+            relatedReference = null,
+            valueDate = "20260527",
+            amount = SwiftMessage.moneyOfMinorUnits(minorUnits, currency),
+            orderingCustomerAccount = "DE89370400440532013000",
+            orderingCustomerAccountId = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            orderingCustomerName = "Alice",
+            beneficiaryAccount = "GB33BUKB20201555555555",
+            beneficiaryName = "Bob",
+            remittanceInfo = "Invoice 1",
+            chargeCode = "SHA",
+            priority = SwiftPriority.NORMAL,
+            status = status,
+            rawMt = null,
+            ackReceivedAt = null,
+            rejectionReason = null,
+            createdAt = Instant.parse("2026-05-27T00:00:00Z"),
+            updatedAt = Instant.parse("2026-05-27T00:00:00Z"),
+        )
 }

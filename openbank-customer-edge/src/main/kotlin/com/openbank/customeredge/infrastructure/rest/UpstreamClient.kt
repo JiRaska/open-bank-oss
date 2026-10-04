@@ -4,11 +4,15 @@
 
 package com.openbank.customeredge.infrastructure.rest
 
+import com.openbank.libs.synthetic.SyntheticTaint
+import com.openbank.libs.web.MDC_SYNTHETIC
+import io.opentelemetry.api.baggage.Baggage
 import io.quarkus.logging.Log
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.logging.MDC
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -171,7 +175,7 @@ class UpstreamClient {
     private fun fetchToken(): Pair<String, Long> {
         val tokenUrl = "$tokenEndpointBase/protocol/openid-connect/token"
         val body = "grant_type=client_credentials&client_id=$clientId&client_secret=$clientSecret"
-        val request = HttpRequest.newBuilder()
+        val request = HttpRequest.newBuilder() // token endpoint: never tainted, see upstreamRequest()
             .uri(URI.create(tokenUrl))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .timeout(Duration.ofMillis(requestTimeoutMs))
@@ -189,6 +193,26 @@ class UpstreamClient {
         return token to expiresIn
     }
 
+    /**
+     * Every request to an upstream SERVICE starts here, so the synthetic taint (ADR-0252 phase 1,
+     * #4348) survives the edge.
+     *
+     * The edge is the one hop on a customer journey that is not a `@RegisterRestClient`, so
+     * `SyntheticTaintClientFilter` never sees its calls; without this, a canary customer would be
+     * tainted at the edge and real everywhere behind it, and every write it caused would land in
+     * the aggregates the taint exists to keep it out of.
+     *
+     * The decision is the edge's own inbound one, read from the same two signals the client filter
+     * reads (MDC, then OTel baggage). Both are set ONLY by `SyntheticTaintRequestFilter` after the
+     * caller's principal was found in `openbank.synthetic.trusted-principals`, and both are
+     * cleared for every other request. A client-supplied header is never copied: an untrusted
+     * claim was already refused before this runs. The token endpoint is the one call that does not
+     * start here: Keycloak is not a service the taint means anything to.
+     */
+    private fun upstreamRequest(): HttpRequest.Builder = HttpRequest.newBuilder().also { builder ->
+        if (currentRequestIsSynthetic()) builder.header(SyntheticTaint.KAFKA_HEADER, SyntheticTaint.headerValue())
+    }
+
     /** Preserve the one response header that is durable evidence rather than proxy metadata. */
     private fun jsonResponse(response: HttpResponse<String>): Response {
         val builder = Response.status(response.statusCode())
@@ -201,7 +225,7 @@ class UpstreamClient {
     }
 
     fun get(url: String, partyId: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -228,7 +252,7 @@ class UpstreamClient {
      * through unchanged regardless of the media type.
      */
     fun getRaw(url: String, partyId: String, accept: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -254,7 +278,7 @@ class UpstreamClient {
      * enhancement can let the mobile client supply a stable key for safe retries.
      */
     fun postAnonymous(url: String, body: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header("Content-Type", "application/json")
@@ -275,7 +299,7 @@ class UpstreamClient {
      * upstream endpoint is intentionally service-authenticated but carries no customer party id.
      */
     fun postRaw(url: String, body: String, accept: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header("Content-Type", "application/json")
@@ -293,7 +317,7 @@ class UpstreamClient {
 
     /** PATCH (no body) with the M2M token + party header — e.g. mark a notification read. */
     fun patch(url: String, partyId: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -310,7 +334,7 @@ class UpstreamClient {
 
     /** PATCH with a JSON body + M2M token + party header — e.g. update marketing consent. */
     fun patch(url: String, partyId: String, body: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -328,7 +352,7 @@ class UpstreamClient {
 
     /** PUT with a JSON body + M2M token + party header — e.g. set a savings goal (ADR-0153). */
     fun put(url: String, partyId: String, body: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -352,7 +376,7 @@ class UpstreamClient {
         idempotencyKey: String?,
         extraHeaders: Map<String, String>,
     ): Response = try {
-        val builder = HttpRequest.newBuilder()
+        val builder = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -373,7 +397,7 @@ class UpstreamClient {
 
     /** DELETE with the M2M operator token + party header (e.g. cancel a standing order). */
     fun delete(url: String, partyId: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -388,9 +412,26 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 
+    /** DELETE with the selected principal plus authenticated human actor for business-profile writes. */
+    fun deleteWithHeaders(url: String, partyId: String, extraHeaders: Map<String, String>): Response = try {
+        val builder = upstreamRequest()
+            .uri(validatedUri(url))
+            .header("Authorization", "Bearer ${serviceToken()}")
+            .header(PARTY_HEADER, partyId)
+            .header("Accept", "application/json")
+            .timeout(Duration.ofMillis(requestTimeoutMs))
+        extraHeaders.forEach { (k, v) -> builder.header(k, v) }
+        val r = http.send(builder.DELETE().build(), HttpResponse.BodyHandlers.ofString())
+        Response.status(r.statusCode()).entity(r.body()).type(MediaType.APPLICATION_JSON).build()
+    } catch (e: Exception) {
+        Log.error("upstream DELETE to $url failed: ${e::class.qualifiedName}: ${e.message}", e)
+        Response.status(502).entity("""{"error":"upstream unavailable"}""")
+            .type(MediaType.APPLICATION_JSON).build()
+    }
+
     /** DELETE carrying a JSON body (e.g. consent revoke, which requires a { reason }). */
     fun delete(url: String, partyId: String, body: String): Response = try {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -410,7 +451,7 @@ class UpstreamClient {
     // e.g. domestic-payment) so an app retry replays rather than duplicates. A blank/absent key
     // falls back to a generated one so the upstream contract is always satisfied.
     private fun post(uri: URI, partyId: String, body: String, idempotencyKey: String?): Response {
-        val request = HttpRequest.newBuilder()
+        val request = upstreamRequest()
             .uri(uri)
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -457,7 +498,7 @@ class UpstreamClient {
         idempotencyKey: String?,
         extraHeaders: Map<String, String>,
     ): Response = try {
-        val builder = HttpRequest.newBuilder()
+        val builder = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
             .header(PARTY_HEADER, partyId)
@@ -475,3 +516,10 @@ class UpstreamClient {
             .type(MediaType.APPLICATION_JSON).build()
     }
 }
+
+/**
+ * The edge's own inbound taint decision for the current request: the same two signals
+ * `SyntheticTaintClientFilter` reads, so the edge and every `@RegisterRestClient` hop agree.
+ */
+internal fun currentRequestIsSynthetic(): Boolean = MDC.get(MDC_SYNTHETIC) == "true" ||
+    SyntheticTaint.isTainted(Baggage.current().getEntryValue(SyntheticTaint.BAGGAGE_KEY))

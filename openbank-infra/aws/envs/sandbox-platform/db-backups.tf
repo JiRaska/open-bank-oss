@@ -58,6 +58,43 @@ data "aws_iam_policy_document" "db_backups_policy" {
       values   = ["false"]
     }
   }
+  # Recovery points must survive a compromised database pod. Versioning (below) turns the
+  # backup role's DeleteObject/PutObject into "add a delete marker / a new version"; this
+  # statement makes sure the same principal can never purge the older versions or switch
+  # versioning and lifecycle off. It lives in the BUCKET policy, not the role policy, so a
+  # later broadening of the role's own grants cannot quietly undo it.
+  statement {
+    sid    = "DenyBackupRoleRecoveryPointErasure"
+    effect = "Deny"
+    actions = [
+      "s3:DeleteObjectVersion",
+      "s3:PutBucketVersioning",
+      "s3:PutLifecycleConfiguration",
+      "s3:PutBucketPolicy",
+      "s3:DeleteBucketPolicy",
+      "s3:PutBucketObjectLockConfiguration",
+    ]
+    resources = [
+      aws_s3_bucket.db_backups.arn,
+      "${aws_s3_bucket.db_backups.arn}/*",
+    ]
+    principals {
+      type        = "*"
+      identifiers = ["*"]
+    }
+    condition {
+      test     = "ArnEquals"
+      variable = "aws:PrincipalArn"
+      values   = [aws_iam_role.db_backups.arn]
+    }
+  }
+}
+
+resource "aws_s3_bucket_versioning" "db_backups" {
+  bucket = aws_s3_bucket.db_backups.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_policy" "db_backups" {
@@ -67,13 +104,21 @@ resource "aws_s3_bucket_policy" "db_backups" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "db_backups" {
-  bucket = aws_s3_bucket.db_backups.id
+  bucket     = aws_s3_bucket.db_backups.id
+  depends_on = [aws_s3_bucket_versioning.db_backups]
   rule {
     id     = "sandbox-expiry"
     status = "Enabled"
     filter {}
     expiration {
       days = 35
+    }
+    # With versioning on, an expired or barman-deleted object becomes NONCURRENT instead of
+    # gone. Seven days is the window to notice a destructive compromise and restore the prior
+    # versions; after it the storage is reclaimed as before. Steady-state cost: roughly one
+    # week of churn (~0.7 GB/day measured 2026-10 on a ~23 GB bucket) ≈ 5 GB extra.
+    noncurrent_version_expiration {
+      noncurrent_days = 7
     }
     abort_incomplete_multipart_upload {
       days_after_initiation = 3
@@ -97,17 +142,85 @@ resource "aws_iam_role" "db_backups" {
   tags               = { Project = "openbank", ManagedBy = "opentofu", Adr = "0035" }
 }
 
+# Least privilege across clusters. Every CNPG cluster shares this ONE role, so the boundary
+# between them is drawn with the session tags EKS Pod Identity attaches to every credential it
+# issues (kubernetes-namespace, kubernetes-service-account, eks-cluster-name, …; set by EKS,
+# not by the pod). CNPG names the instance ServiceAccount after the Cluster, and every
+# barmanObjectStore here writes to s3://<bucket>/<cluster-name> — so the SA tag IS the
+# cluster's prefix, and a pod can only touch its own archive. That equality is load-bearing:
+# a cluster whose destinationPath prefix differs from its SA would be denied, and a denied
+# archive is easy to miss. check-db-backup-prefix-scope.py enforces it.
+#
+# `$${...}` is HCL's escape for a literal `${...}` — the IAM policy variable, resolved by AWS
+# per request, not by OpenTofu.
+locals {
+  db_backup_own_prefix = "$${aws:PrincipalTag/kubernetes-service-account}"
+}
+
 data "aws_iam_policy_document" "db_backups" {
   statement {
-    sid       = "BucketOps"
-    actions   = ["s3:ListBucket", "s3:GetBucketLocation"]
+    sid       = "BucketLocation"
+    actions   = ["s3:GetBucketLocation"]
     resources = [aws_s3_bucket.db_backups.arn]
   }
   statement {
-    sid = "ObjectOps"
-    # barman-cloud needs delete for its retention sweep of expired base backups.
+    sid       = "ListOwnPrefix"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.db_backups.arn]
+    # IfExists: barman-cloud HEADs the bucket before archiving (HeadBucket is authorised as
+    # s3:ListBucket and carries no s3:prefix). Denying that would stop every WAL archive. The
+    # price is that an unprefixed listing returns key NAMES bucket-wide; object CONTENT stays
+    # scoped by ObjectOps below.
+    condition {
+      test     = "StringLikeIfExists"
+      variable = "s3:prefix"
+      values   = [local.db_backup_own_prefix, "${local.db_backup_own_prefix}/*"]
+    }
+  }
+  statement {
+    sid = "ObjectOpsOwnPrefix"
+    # barman-cloud needs delete for its retention sweep of expired base backups. With bucket
+    # versioning that delete only adds a delete marker; DeleteObjectVersion is denied in the
+    # bucket policy.
     actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"]
-    resources = ["${aws_s3_bucket.db_backups.arn}/*"]
+    resources = ["${aws_s3_bucket.db_backups.arn}/${local.db_backup_own_prefix}/*"]
+  }
+  # The one deliberate cross-prefix grant: the restore-drill cluster (runbook-0003) recovers
+  # FROM ledger-db's archive. Read-only, and only for that exact (namespace, SA) pair.
+  statement {
+    sid       = "LedgerDrillReadsLedgerArchive"
+    actions   = ["s3:GetObject"]
+    resources = ["${aws_s3_bucket.db_backups.arn}/ledger-db/*"]
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalTag/kubernetes-service-account"
+      values   = ["ledger-db-drill"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalTag/kubernetes-namespace"
+      values   = ["ledger"]
+    }
+  }
+  statement {
+    sid       = "LedgerDrillListsLedgerArchive"
+    actions   = ["s3:ListBucket"]
+    resources = [aws_s3_bucket.db_backups.arn]
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["ledger-db", "ledger-db/*"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalTag/kubernetes-service-account"
+      values   = ["ledger-db-drill"]
+    }
+    condition {
+      test     = "StringEquals"
+      variable = "aws:PrincipalTag/kubernetes-namespace"
+      values   = ["ledger"]
+    }
   }
 }
 
@@ -128,8 +241,9 @@ resource "aws_eks_pod_identity_association" "db_backups_statements" {
 }
 
 # Fleet rollout (critical money-path + compliance DBs). One association per CNPG cluster;
-# the SA is named after the Cluster. All share the bucket-wide db_backups role (each cluster
-# writes to its own s3://.../<cluster>-db prefix). The matching gitops backup stanza +
+# the SA is named after the Cluster. All share the db_backups role, whose grants are scoped by
+# the kubernetes-service-account session tag to s3://.../<sa>/ — so the SA name here MUST equal
+# the cluster's destinationPath prefix (check-db-backup-prefix-scope.py). The matching gitops backup stanza +
 # ScheduledBackup live in openbank-infra/gitops/components/<svc>/postgres.yaml.
 locals {
   db_backup_clusters = {
@@ -159,6 +273,13 @@ locals {
     pact-broker      = { namespace = "pact-broker", sa = "pact-broker-db" }
     party            = { namespace = "party", sa = "party-db" }
     card-issuance    = { namespace = "payments", sa = "card-issuance-db" }
+    # ADR-0283 phase 1 (#8809). Added in the same PR as the cluster, which is the WRONG order:
+    # GitOps created the Cluster ~4 min after merge, this association existed only after a later
+    # `tofu apply`, and EKS Pod Identity injects credentials at pod ADMISSION — so the primary
+    # archived no WAL for ~8.7 h ("Unable to locate credentials") until it was recreated.
+    # check-db-backup-associations.py --base now rejects that shape: association first (merged
+    # and applied), backup config in a later gitops PR.
+    card-processing  = { namespace = "payments", sa = "card-processing-db" }
     settlement       = { namespace = "payments", sa = "settlement-service-db" }
     swift-service    = { namespace = "payments", sa = "swift-service-db" }
     transaction      = { namespace = "payments", sa = "transaction-db" }

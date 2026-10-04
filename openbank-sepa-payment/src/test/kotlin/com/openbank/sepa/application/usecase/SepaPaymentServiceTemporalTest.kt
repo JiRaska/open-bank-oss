@@ -4,6 +4,7 @@
 
 package com.openbank.sepa.application.usecase
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
 import com.openbank.sepa.application.port.out.ReversalPort
@@ -84,8 +85,7 @@ class SepaPaymentServiceTemporalTest {
         creditorIban = "FR7630006000011234567890189",
         creditorName = "Bob Example",
         creditorBic = "DEUTDEFF",
-        amount = BigDecimal("205.45"),
-        currency = "EUR",
+        amount = Money.of(BigDecimal("205.45"), "EUR"),
         remittanceInfo = "Invoice 2026-01",
         endToEndId = null,
     )

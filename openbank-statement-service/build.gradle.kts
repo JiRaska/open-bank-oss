@@ -6,6 +6,11 @@ plugins {
     id("openbank.quarkus-service")
 }
 
+tasks.test {
+    // Quarkus and Testcontainers exhaust the default 512 MiB heap in the v2 outbox IT suite.
+    maxHeapSize = "2g"
+}
+
 dependencies {
     implementation(enforcedPlatform(libs.quarkus.bom))
     implementation(libs.quarkus.kotlin)

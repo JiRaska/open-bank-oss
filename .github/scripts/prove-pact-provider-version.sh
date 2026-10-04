@@ -34,6 +34,8 @@ set -euo pipefail
 
 LEDGER_SERVICE='openbank-ledger-service'
 LEDGER_FIXTURE='openbank-ledger-service/src/test/kotlin/com/openbank/ledger/contract/LedgerPactBrokerProviderVerificationTest.kt'
+BALANCE_SERVICE='openbank-balance-service'
+BALANCE_FIXTURE='openbank-balance-service/src/test/kotlin/com/openbank/balance/contract/BalancePactProviderVerificationTest.kt'
 
 refuse() { printf 'REFUSE\t%s\n' "$1" >&2; exit 1; }
 commit_exists() { git rev-parse -q --verify "$1^{commit}" >/dev/null 2>&1; }
@@ -82,8 +84,12 @@ overlay_equivalent_test_tree() {
 }
 
 prepare_overlay() {
-  local service="$1" provider="$2" fixture="$3" main_ref="$4" current
+  local service="$1" provider="$2" fixture="$3" main_ref="$4" current approved_fixture=""
   [[ "$service" =~ ^openbank-[a-z0-9-]+$ ]] || refuse "service '$service' is not an openbank-* module name"
+  case "$service" in
+    "$LEDGER_SERVICE") approved_fixture="$LEDGER_FIXTURE" ;;
+    "$BALANCE_SERVICE") approved_fixture="$BALANCE_FIXTURE" ;;
+  esac
   [ "$provider" = "$(canonical_commit "$provider")" ] \
     || refuse "provider version must be a canonical 40-character SHA"
   [ "$fixture" = "$(canonical_commit "$fixture")" ] \
@@ -100,19 +106,19 @@ prepare_overlay() {
     || refuse "checkout ${current:0:8} is not provider version ${provider:0:8}; refusing to attest different runtime"
 
   overlay_equivalent_test_tree "$service" "$provider" "$fixture" && return 0
-  [ "$service" = "$LEDGER_SERVICE" ] \
+  [ -n "$approved_fixture" ] \
     || refuse "$service is not byte-identical in its production build inputs at ${provider:0:8} and ${fixture:0:8} (see NOT_EQUIVALENT above), and no single-fixture overlay is approved for it"
-  regular_blob_at "$provider" "$LEDGER_FIXTURE"
-  regular_blob_at "$fixture" "$LEDGER_FIXTURE"
+  regular_blob_at "$provider" "$approved_fixture"
+  regular_blob_at "$fixture" "$approved_fixture"
 
   # git show reads one named blob from F; no checkout, merge or diff can import another F path.
-  git show "$fixture:$LEDGER_FIXTURE" > "$LEDGER_FIXTURE"
+  git show "$fixture:$approved_fixture" > "$approved_fixture"
   printf 'OVERLAY_READY\tmode=single-fixture provider=%s fixture=%s path=%s\n' \
-    "$provider" "$fixture" "$LEDGER_FIXTURE"
+    "$provider" "$fixture" "$approved_fixture"
 }
 
 selftest() {
-  local script repo_root workflow tmp provider fixture side symlink missing fail=0 runtime_before pacts_before libs_before workflow_before
+  local script repo_root workflow tmp provider fixture side symlink missing fail=0 runtime_before balance_runtime_before pacts_before libs_before workflow_before
   unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES
   script="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
   repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -126,33 +132,38 @@ selftest() {
     git config user.email selftest@example.invalid
     git config user.name selftest
     git config commit.gpgsign false
-    mkdir -p "$(dirname "$LEDGER_FIXTURE")" openbank-ledger-service/src/main/resources \
+    mkdir -p "$(dirname "$LEDGER_FIXTURE")" "$(dirname "$BALANCE_FIXTURE")" openbank-balance-service/src/main openbank-ledger-service/src/main/resources \
       openbank-libs-domain/src/main pacts .github/workflows config
     printf 'old fixture\n' > "$LEDGER_FIXTURE"
+    printf 'old balance fixture\n' > "$BALANCE_FIXTURE"
     printf 'provider runtime P\n' > openbank-ledger-service/src/main/Ledger.kt
+    printf 'balance runtime P\n' > openbank-balance-service/src/main/Balance.kt
     printf 'provider config P\n' > openbank-ledger-service/src/main/resources/application.yaml
     printf 'libs P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'pact P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
     printf 'workflow P\n' > .github/workflows/provider.yml
     printf 'config P\n' > config/detekt.yml
     printf 'plugins {}\n' > openbank-ledger-service/build.gradle.kts
-    git add openbank-ledger-service openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-libs-domain pacts .github config
     git commit -qm provider
   ) || { echo 'selftest FAIL: fixture setup failed' >&2; return 1; }
   provider="$(git -C "$tmp" rev-parse HEAD)"
   runtime_before="$(git -C "$tmp" show "$provider:openbank-ledger-service/src/main/Ledger.kt")"
+  balance_runtime_before="$(git -C "$tmp" show "$provider:openbank-balance-service/src/main/Balance.kt")"
   pacts_before="$(git -C "$tmp" show "$provider:pacts/openbank-finrep-service-openbank-ledger-service.json")"
   libs_before="$(git -C "$tmp" show "$provider:openbank-libs-domain/src/main/Domain.kt")"
   workflow_before="$(git -C "$tmp" show "$provider:.github/workflows/provider.yml")"
   (
     cd "$tmp"
     printf 'approved fixture F\n' > "$LEDGER_FIXTURE"
+    printf 'approved balance fixture F\n' > "$BALANCE_FIXTURE"
     printf 'runtime F must not enter P\n' > openbank-ledger-service/src/main/Ledger.kt
+    printf 'balance runtime F must not enter P\n' > openbank-balance-service/src/main/Balance.kt
     printf 'pact F must not enter P\n' > pacts/openbank-finrep-service-openbank-ledger-service.json
     printf 'libs F must not enter P\n' > openbank-libs-domain/src/main/Domain.kt
     printf 'workflow F must not enter P\n' > .github/workflows/provider.yml
     printf 'config F must not enter P\n' > config/detekt.yml
-    git add openbank-ledger-service openbank-libs-domain pacts .github config
+    git add openbank-ledger-service openbank-balance-service openbank-libs-domain pacts .github config
     git commit -qm fixture
   )
   fixture="$(git -C "$tmp" rev-parse HEAD)"
@@ -185,6 +196,16 @@ selftest() {
   expect 'approved Ledger overlay' pass --prepare-overlay "$LEDGER_SERVICE" "$provider" "$fixture" main
   [ "$(<"$tmp/$LEDGER_FIXTURE")" = 'approved fixture F' ] \
     || { echo 'selftest FAIL: approved fixture not overlaid' >&2; fail=1; }
+  git -C "$tmp" checkout -f -q "$provider"
+  expect 'approved Balance overlay' pass --prepare-overlay "$BALANCE_SERVICE" "$provider" "$fixture" main
+  [ "$(<"$tmp/$BALANCE_FIXTURE")" = 'approved balance fixture F' ] \
+    || { echo 'selftest FAIL: approved balance fixture not overlaid' >&2; fail=1; }
+  [ "$(<"$tmp/$LEDGER_FIXTURE")" = 'old fixture' ] \
+    || { echo 'selftest FAIL: Balance overlay modified Ledger fixture' >&2; fail=1; }
+  [ "$(<"$tmp/openbank-balance-service/src/main/Balance.kt")" = "$balance_runtime_before" ] \
+    || { echo 'selftest FAIL: Balance runtime from F entered P' >&2; fail=1; }
+  git -C "$tmp" checkout -f -q "$provider"
+  expect 'approved Ledger overlay' pass --prepare-overlay "$LEDGER_SERVICE" "$provider" "$fixture" main
   [ "$(<"$tmp/openbank-ledger-service/src/main/Ledger.kt")" = "$runtime_before" ] \
     || { echo 'selftest FAIL: runtime from F entered P' >&2; fail=1; }
   [ "$(<"$tmp/pacts/openbank-finrep-service-openbank-ledger-service.json")" = "$pacts_before" ] \
@@ -263,7 +284,7 @@ selftest() {
     echo 'selftest FAIL: workflow does not preserve a trusted proof runner outside the P checkout' >&2
     fail=1
   fi
-  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Ledger single-fixture fallback preserves P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P.'
+  [ "$fail" -eq 0 ] && echo 'selftest OK: equivalent-tree overlay takes F test tree wholesale (changed/added/deleted) and only it; src/main, libs, version.txt, symlink and reversed ancestry refuse; Ledger and Balance single-fixture fallbacks preserve P runtime, pacts, libs and workflow; wrong provider, ancestry, symlink and missing fixture reject; short SHA/ref canonicalize; trusted runner + equivalence stay outside P.'
   return "$fail"
 }
 

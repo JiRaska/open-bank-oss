@@ -4,6 +4,7 @@
 
 package com.openbank.libs.security
 
+import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.core.SecurityContext
 import org.jboss.logging.MDC
 import java.util.UUID
@@ -29,7 +30,9 @@ val SecurityContext.actorName: String
  * The single most-specific role held by the principal, e.g. `"ROLE_COMPLIANCE"`.
  * Used for audit `actorType` so audit logs distinguish operator-initiated vs service-initiated.
  *
- * Order matters: returns the most privileged role first (ADMIN > SUPERVISOR > COMPLIANCE > …).
+ * Returns the FIRST held role in [Roles.ALL] declaration order (ADMIN, OPERATOR, VIEWER,
+ * COMPLIANCE, …). That order is not a privilege ranking — e.g. OPERATOR precedes SUPERVISOR —
+ * and changing it would change the `actorType` of existing audit records, so it is fixed.
  */
 val SecurityContext.actorType: String
     get() = Roles.ALL.firstOrNull { isUserInRole(it) } ?: "anonymous"
@@ -38,9 +41,12 @@ val SecurityContext.actorType: String
 val correlationId: String
     get() = (MDC.get("correlationId") as? String) ?: "no-correlation-id"
 
-/** Throws [SecurityException] if no role from [required] is present. */
+/**
+ * Throws [ForbiddenException] (HTTP 403 via the shared mapper) if no role from [required] is
+ * present. A plain `SecurityException` would reach the last-resort mapper as a 500.
+ */
 fun SecurityContext.requireAnyRole(vararg required: String) {
     if (required.none { isUserInRole(it) }) {
-        throw SecurityException("requires one of ${required.toList()}; principal has none")
+        throw ForbiddenException("requires one of ${required.toList()}; principal has none")
     }
 }

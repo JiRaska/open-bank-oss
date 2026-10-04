@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# HTTP -> HTTPS for every host on the shared Gateway (ADR-0324): the Gateway API form of
+# ingress-nginx's `ssl-redirect`. One route, attached only to the plain `http` listener,
+# no hostnames, so it matches every host the NLB receives on :80 and routes nothing to a
+# backend. With no hostname it gives external-dns nothing to publish.
+#
+# Status code: 301. nginx answers 308, but Envoy Gateway v1.9.1 accepts only 301/302 on a
+# RequestRedirect and sets the route Accepted=False (UnsupportedValue) for anything else,
+# even though the CRD schema admits the value (internal/gatewayapi/filters.go).
+#
+# ── Phase-1 cutover, for the follow-up PR (per host, one at a time) ──────────────────
+# The routes are live on this Gateway's NLB but DNS still names ingress-nginx's. Verify a
+# host first, against the Gateway's own address:
+#   GW=$(kubectl -n envoy-gateway-system get gateway edge -o jsonpath='{.status.addresses[0].value}')
+#   IP=$(dig +short "$GW" | head -1)
+#   curl -sSI --resolve pact.open-bank.tech:443:$IP https://pact.open-bank.tech/diagnostic/status/heartbeat
+#   curl -sSI --resolve pact.open-bank.tech:80:$IP  http://pact.open-bank.tech/   # expect 301 -> https
+# then, in ONE change:
+#   1. Take the Certificate out of the Ingress's hands. cert-manager runs with
+#      --enable-certificate-owner-ref=true, so the TLS Secret is owned by its Certificate,
+#      and an Ingress-shim Certificate is owned by its Ingress: deleting the Ingress would
+#      garbage-collect the Secret this Gateway's listener serves (and, for rum, the pinned
+#      key with it). Declare an explicit `Certificate` with the same name, secretName and
+#      issuer (rum: privateKey.rotationPolicy: Never) and drop the Ingress's
+#      cert-manager.io/cluster-issuer annotation, so the Certificate outlives the Ingress.
+#   2. Remove `external-dns.kubernetes.io/controller` from the host's HTTPRoute and ADD the
+#      same annotation to the old Ingress, so exactly one source publishes the name.
+#      external-dns runs --policy=upsert-only, so the record is UPDATED to this NLB and
+#      never deleted in between.
+#   3. Watch DNS resolve to this Gateway's NLB and traffic appear in
+#      envoy_http_downstream_rq_xx, and retarget the edge-5xx alerts (#2677) for the host,
+#      before deleting the Ingress in a later change; until then the old Ingress keeps the
+#      nginx path warm as the rollback.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: https-redirect
+  namespace: envoy-gateway-system
+spec:
+  parentRefs:
+    - name: edge
+      sectionName: http
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301

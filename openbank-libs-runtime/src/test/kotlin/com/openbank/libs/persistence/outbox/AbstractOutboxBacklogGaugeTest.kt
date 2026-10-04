@@ -76,4 +76,34 @@ class AbstractOutboxBacklogGaugeTest {
 
         assertThat(callCount).isEqualTo(2)
     }
+
+    @Test
+    fun `a failing refresh does not throw, keeps the last good value and counts the failure`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val supplier = slot<() -> Number>()
+        every { metrics.registerOutboxBacklog("sca", capture(supplier)) } returns Unit
+        var fail = false
+        val gauge = TestGauge("sca", metrics) {
+            if (fail) throw java.net.ConnectException("Connection refused") else 9L
+        }
+        gauge.register()
+        runBlocking { gauge.refresh() }
+
+        fail = true
+        // Falsifying: without the catch this throws out of the scheduler tick (sandbox: 192x in 48h).
+        runBlocking { gauge.refresh() }
+
+        assertThat(supplier.captured().toLong()).isEqualTo(9L)
+        verify(exactly = 1) { metrics.outboxGaugeRefreshFailed("sca", "backlog") }
+    }
+
+    @Test
+    fun `cancellation is not swallowed`() {
+        val metrics = mockk<DomainMetrics>(relaxed = true)
+        val gauge = TestGauge("sca", metrics) { throw kotlinx.coroutines.CancellationException("stop") }
+
+        org.assertj.core.api.Assertions.assertThatThrownBy { runBlocking { gauge.refresh() } }
+            .isInstanceOf(java.util.concurrent.CancellationException::class.java)
+        verify(exactly = 0) { metrics.outboxGaugeRefreshFailed(any(), any()) }
+    }
 }

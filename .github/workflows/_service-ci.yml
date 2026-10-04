@@ -269,8 +269,8 @@ jobs:
           python3 .github/scripts/check-testcontainers-registry-failure.py \
             --service "${{ inputs.service }}"
 
-      # rules.yaml: openapi_request_schema_conformance (advisory).
-      - name: "openapi request-schema conformance (advisory)"
+      # rules.yaml: openapi_request_schema_conformance (enforced).
+      - name: "openapi request-schema conformance"
         run: |
           SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
           if [ ! -f "$SPEC" ]; then
@@ -279,13 +279,17 @@ jobs:
           fi
           python3 .github/scripts/check-openapi-request-schema-conformance.py \
             --service "${{ inputs.service }}" \
-            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml" \
+            --enforce
 
       # Coverage upload is tokenless for this public repository. It is advisory only —
       # never gates the build — and deliberately must not regain an OIDC token in this
       # untrusted PR-code execution job.
       # koverVerify stays the enforcement mechanism (ratchet-only, rules.yaml).
       #
+      # Consume the enforcing build's coverage, never produce a second test run here.
+      # Different invocation properties can invalidate `test` and overwrite the verified
+      # test.ic before this advisory report, even when both Gradle invocations succeed.
       - name: Generate Kover XML report
         continue-on-error: true
         # This is advisory evidence, never a second mandatory build. Keep it daemonless
@@ -293,7 +297,8 @@ jobs:
         # hold a fleet runner after the enforcing build has already completed (#6734).
         # Account's real Testcontainers suite needs more than the old three-minute limit:
         # preserve its money-path coverage proof while retaining a firm ten-minute ceiling.
-        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --build-cache --console=plain -x test
+        # Test execution belongs to the enforcing build above; this step only renders it.
+        run: timeout --kill-after=10s 600s ./gradlew --no-daemon :${{ inputs.service }}:koverXmlReport --exclude-task :${{ inputs.service }}:test --exclude-task :${{ inputs.service }}:providerPactTest --exclude-task :${{ inputs.service }}:quarkusIntTest --exclude-task :${{ inputs.service }}:testNative --build-cache --console=plain -Dquarkus.smallrye-openapi.store-schema-directory=build/openapi-generated
 
       # The envelope is built even after a failing suite. A missing envelope is not a
       # passing zero: the projection renders it as absent evidence. The collector only
@@ -388,8 +393,30 @@ jobs:
 
       # Compatibility projection for the image build: the latest envelope remains
       # separate from immutable attempts above, so a re-run cannot erase history.
-      - name: Upload Test Intelligence evidence
+      # A failed advisory collector may still leave JUnit/Kover files. Uploading those
+      # under the compatibility name makes the deploy select an incomplete newest
+      # artifact and fail even when an older complete main artifact exists (#11850).
+      - name: Check Test Intelligence compatibility evidence
+        id: test-intelligence-compatibility
         if: always()
+        env:
+          SERVICE: ${{ inputs.service }}
+          EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if python3 .github/scripts/check-test-intelligence-compatibility.py \
+            "${SERVICE}/build/test-intelligence/run.json" \
+            --component "${SERVICE}" \
+            --commit "${GITHUB_SHA}" \
+            --branch "${EXPECTED_BRANCH}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::Skipping incomplete Test Intelligence compatibility artifact"
+          fi
+
+      - name: Upload Test Intelligence evidence
+        if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -466,6 +493,12 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: ${{ inputs.ref == '' && inputs.provider_version == '' && 1 || 0 }}
 
+      - name: Stage trusted Pact Broker retry helper
+        run: |
+          set -euo pipefail
+          cp .github/scripts/pact-broker-post.sh "$RUNNER_TEMP/pact-broker-post.sh"
+          bash "$RUNNER_TEMP/pact-broker-post.sh" --self-test
+
       - name: Check out a requested provider version only after proving it is on main
         if: inputs.ref != '' || inputs.provider_version != ''
         env:
@@ -503,8 +536,8 @@ jobs:
             FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
             # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
             # are byte-identical in every production build input of SERVICE, it replaces
-            # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger's original
-            # single-fixture overlay, kept as the fallback (#11597).
+            # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger and Balance,
+            # whose single approved provider fixture from F is kept as the fallback (#11597).
             bash "$PROOF_RUNNER" --prepare-overlay \
               "$SERVICE" "$PROVIDER_VERSION" "$FIXTURE_VERSION" origin/main
           else
@@ -760,12 +793,14 @@ jobs:
             --argjson contracts "$contracts" \
             '{pacticipantName:$name, pacticipantVersionNumber:$ver, branch:$branch, tags:[$branch], buildUrl:$build, contracts:$contracts}')"
           echo "Publishing ${#files[@]} pact(s) for ${{ inputs.service }} @ ${GITHUB_SHA::8} (branch ${BRANCH})"
-          code="$(curl -sS -o /tmp/pact-publish.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' \
-            "${PACT_BROKER_URL%/}/contracts/publish" --data-binary "$body")"
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "${PACT_BROKER_URL%/}/contracts/publish" "$body_file" /tmp/pact-publish.json \
+            'application/hal+json, application/json')"
           jq -r '.notices[]?.text // empty' /tmp/pact-publish.json 2>/dev/null || cat /tmp/pact-publish.json
-          [ "$code" -lt 300 ] || { echo "::error::pact publish failed (HTTP $code)"; exit 1; }
+          echo "Pact publication accepted (HTTP $code)."
 
       # A full-fleet run discovers every Gradle module, including consumer-only modules such as
       # analytics-sink that intentionally do not apply openbank.quarkus-service and therefore
@@ -822,19 +857,12 @@ jobs:
           set -euo pipefail
           endpoint="${PACT_BROKER_URL%/}/pacts/provider/${SERVICE}/for-verification"
           body='{"consumerVersionSelectors":[{"mainBranch":true}],"includePendingStatus":false}'
-          http_code="$(curl -sS -o /tmp/pact-preflight.json -w '%{http_code}' -X POST \
-            -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
-            -H 'Content-Type: application/json' -H 'Accept: application/hal+json, application/json' \
-            "$endpoint" --data-binary "$body" || echo "curl_failed")"
-
-          if [ "$http_code" = "curl_failed" ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: could not reach $endpoint at all (connection/DNS/TLS failure). This is a broker-reachability problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
-          if [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
-            echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code from $endpoint. The broker rejected or failed the selector request before verification could start — this is a broker-side problem, not a ${SERVICE} contract regression."
-            exit 1
-          fi
+          body_file=$(mktemp)
+          trap 'rm -f "$body_file"' EXIT
+          printf '%s' "$body" > "$body_file"
+          http_code="$(bash "$RUNNER_TEMP/pact-broker-post.sh" \
+            "$endpoint" "$body_file" /tmp/pact-preflight.json \
+            'application/hal+json, application/json')"
           if ! jq empty /tmp/pact-preflight.json 2>/dev/null; then
             byte_count="$(wc -c < /tmp/pact-preflight.json | tr -d ' ')"
             echo "::error::Pact Broker preflight for ${SERVICE}: HTTP $http_code but the body ($byte_count bytes) is not valid JSON. pact-jvm's HalClient cannot parse this either — expect a downstream NullPointerException in fetchConsumersWithSelectorsV2 if this preflight is bypassed. This is a broker-side malformed-response problem, not a ${SERVICE} contract regression."

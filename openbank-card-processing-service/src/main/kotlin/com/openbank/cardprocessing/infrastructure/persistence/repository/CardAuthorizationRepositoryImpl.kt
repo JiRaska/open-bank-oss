@@ -1,0 +1,307 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.cardprocessing.infrastructure.persistence.repository
+
+import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
+import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
+import com.openbank.cardprocessing.application.port.out.RecordedClearing
+import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
+import com.openbank.cardprocessing.domain.model.AuthorizationStatus
+import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.cardprocessing.domain.model.CountedSpend
+import com.openbank.cardprocessing.domain.model.PresentmentChannel
+import com.openbank.cardprocessing.domain.model.SpendWindow
+import com.openbank.cardprocessing.infrastructure.persistence.entity.CardAuthorizationEntity
+import com.openbank.cardprocessing.infrastructure.persistence.entity.CardClearingEntity
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.persistence.OptimisticLockException
+import org.hibernate.StaleObjectStateException
+import org.hibernate.StaleStateException
+import java.time.Instant
+import java.util.UUID
+
+@ApplicationScoped
+@Suppress(
+    // The aggregate's whole persistence surface, plus its entity mappers. The clearing record is
+    // written in the SAME transaction as the authorisation it decrements, so splitting it into a
+    // second repository would split one transaction across two classes for a metric.
+    "TooManyFunctions",
+)
+class CardAuthorizationRepositoryImpl(private val outbox: CardProcessingOutboxRepositoryImpl) :
+    CardAuthorizationRepository,
+    PanacheRepository<CardAuthorizationEntity> {
+
+    /**
+     * The authorisation row and its outbox row commit together or not at all (ADR-0050).
+     *
+     * The update path mutates the **managed** entity rather than persisting a rebuilt one: the id is
+     * application-assigned, and Panache reactive `persist()` on a non-null assigned id is
+     * INSERT-only — Hibernate cannot tell transient from detached, so every state transition would
+     * fail on `duplicate key value violates ..._pkey` at flush. That is exactly how consent-service's
+     * revoke/reject/activate all 500'd (ADR-0126 D3, #1521).
+     */
+    override suspend fun save(
+        authorization: CardAuthorization,
+        event: OutboxMessage,
+        idempotencyKey: String,
+    ): CardAuthorization = translatingWriteFailures {
+        Panache.withTransaction {
+            find("id", authorization.id).firstResult().flatMap { existing ->
+                val persisted: Uni<CardAuthorizationEntity> = if (existing != null) {
+                    // Same gate as saveClearing: a reversal or expiry computed from a snapshot a
+                    // concurrent clearing has since moved on must not overwrite that clearing.
+                    if (existing.version != authorization.version) throw StaleAuthorizationException()
+                    existing.applyFrom(authorization)
+                    Uni.createFrom().item(existing)
+                } else {
+                    // The command's idempotency key is what the UNIQUE index protects. It is not a
+                    // field of the aggregate — the domain has no opinion about acquirer retries — so it
+                    // is carried on the row, written once here and never rewritten.
+                    persist(authorization.toEntity(idempotencyKey))
+                }
+                persisted.chain { _ -> outbox.persistInTransaction(event) }.replaceWith(authorization)
+            }
+        }.awaitSuspending()
+    }
+
+    /**
+     * The authorisation update, the clearing record and the outbox row in ONE transaction.
+     *
+     * The clearing row is flushed FIRST, before the authorisation is touched: a concurrent duplicate
+     * blocks on `ux_card_clearings_authorization_key` until the winner commits, then fails 23505,
+     * and its whole transaction — hold decrement and event included — rolls back. The flush also
+     * makes the failure surface inside this call rather than at some later commit, which is what
+     * lets it be translated into [DuplicateClearingException] here.
+     */
+    override suspend fun saveClearing(
+        authorization: CardAuthorization,
+        event: OutboxMessage,
+        clearing: RecordedClearing,
+    ): CardAuthorization = translatingWriteFailures {
+        Panache.withTransaction {
+            Panache.getSession()
+                .chain { session -> session.persist(clearing.toEntity()).chain { _ -> session.flush() } }
+                .chain { _ -> find("id", authorization.id).firstResult() }
+                .chain { existing ->
+                    checkNotNull(existing) { "authorisation ${authorization.id} vanished while being cleared" }
+                    // Computed from an older read: a concurrent clearing already moved the row on.
+                    if (existing.version != authorization.version) throw StaleAuthorizationException()
+                    existing.applyFrom(authorization)
+                    outbox.persistInTransaction(event)
+                }
+                .replaceWith(authorization)
+        }.awaitSuspending()
+    }
+
+    /**
+     * Translates a write's failure into the two outcomes the use case acts on, whatever shape it
+     * arrives in.
+     *
+     * Caught BROADLY on purpose: reactive Hibernate surfaces the same database event differently
+     * depending on where it happens — the pre-check's own [StaleAuthorizationException], a
+     * flush-time `PersistenceException`, or a COMMIT-time `StaleObjectStateException` /
+     * `OptimisticLockException` that need not be wrapped in a `PersistenceException` at all.
+     * Catching only one type turned the other shapes into a 500. Dispatch is on the cause chain;
+     * anything that is neither case is rethrown unchanged.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun <T> translatingWriteFailures(write: suspend () -> T): T = try {
+        write()
+    } catch (e: StaleAuthorizationException) {
+        throw e
+    } catch (e: DuplicateClearingException) {
+        throw e
+    } catch (e: RuntimeException) {
+        when {
+            e.isClearingKeyViolation() -> throw DuplicateClearingException(e)
+            // Both read the same version; the loser's `UPDATE ... WHERE version = ?` matched no row.
+            e.isStaleRow() -> throw StaleAuthorizationException(e)
+            else -> throw e
+        }
+    }
+
+    override suspend fun findClearing(authorizationId: UUID, idempotencyKey: String): RecordedClearing? =
+        Panache.withSession {
+            Panache.getSession().chain { session ->
+                session.createQuery(
+                    "from CardClearingEntity where authorizationId = :authorizationId and idempotencyKey = :key",
+                    CardClearingEntity::class.java,
+                )
+                    .setParameter("authorizationId", authorizationId)
+                    .setParameter("key", idempotencyKey)
+                    .singleResultOrNull
+            }
+        }.awaitSuspending()?.toDomain()
+
+    override suspend fun findById(id: UUID): CardAuthorization? =
+        Panache.withSession { find("id", id).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findByNetworkReference(networkReference: String): CardAuthorization? =
+        Panache.withSession { find("networkReference", networkReference).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findByIdempotencyKey(key: String): CardAuthorization? =
+        Panache.withSession { find("idempotencyKey", key).firstResult() }.awaitSuspending()?.toDomain()
+
+    override suspend fun findByCardId(cardId: UUID, limit: Int): List<CardAuthorization> = Panache.withSession {
+        find("cardId = ?1 order by authorizedAt desc", cardId).range(0, limit.coerceAtLeast(1) - 1).list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    /**
+     * The counters, computed over the rows themselves.
+     *
+     * The `CASE` mirrors [CardAuthorization.effectiveSpendMinorUnits] exactly: a hold counts in full
+     * until it clears, a cleared authorisation counts what cleared, and a released one counts
+     * nothing. Two expressions of one rule is a drift risk, and the domain one is the readable copy.
+     */
+    override suspend fun countSpend(cardId: UUID, window: SpendWindow, category: String): CountedSpend =
+        Panache.withSession {
+            Panache.getSession().chain { session ->
+                session.createNativeQuery(SPEND_SQL, Array<Any>::class.java)
+                    .setParameter("cardId", cardId)
+                    .setParameter("dayStart", window.dayStart)
+                    .setParameter("monthStart", window.monthStart)
+                    .setParameter("category", category)
+                    .singleResult
+            }
+        }.awaitSuspending().let { row ->
+            CountedSpend(
+                todayMinorUnits = (row[0] as? Number)?.toLong() ?: 0L,
+                thisMonthMinorUnits = (row[1] as? Number)?.toLong() ?: 0L,
+                thisMonthInCategoryMinorUnits = (row[2] as? Number)?.toLong() ?: 0L,
+            )
+        }
+
+    override suspend fun findExpiredHolds(now: Instant, limit: Int): List<CardAuthorization> = Panache.withSession {
+        find(
+            "status in (?1, ?2) and expiresAt <= ?3 order by expiresAt asc",
+            AuthorizationStatus.APPROVED.name,
+            AuthorizationStatus.PARTIALLY_CLEARED.name,
+            now,
+        ).range(0, limit.coerceAtLeast(1) - 1).list()
+    }.awaitSuspending().map { it.toDomain() }
+
+    private fun CardAuthorizationEntity.toDomain() = CardAuthorization(
+        id = id,
+        cardId = cardId,
+        accountId = accountId,
+        partyId = partyId,
+        amountMinorUnits = amountMinorUnits,
+        currencyCode = currencyCode,
+        channel = PresentmentChannel.valueOf(channel),
+        mcc = mcc,
+        merchantName = merchantName,
+        merchantCountry = merchantCountry,
+        status = AuthorizationStatus.valueOf(status),
+        category = category,
+        declineReason = declineReason,
+        clearedAmountMinorUnits = clearedAmountMinorUnits,
+        networkReference = networkReference,
+        authorizedAt = authorizedAt,
+        expiresAt = expiresAt,
+        updatedAt = updatedAt,
+        version = version,
+    )
+
+    private fun CardAuthorization.toEntity(idempotencyKey: String) = CardAuthorizationEntity().also {
+        it.applyFrom(this)
+        it.idempotencyKey = idempotencyKey
+    }
+
+    /**
+     * The mutable half of the aggregate. Identity, amount, merchant and the authorisation instant
+     * are written once at insert and never rewritten — an authorisation whose amount or merchant can
+     * change is not a record of what the acquirer asked.
+     */
+    private fun CardAuthorizationEntity.applyFrom(a: CardAuthorization) {
+        id = a.id
+        cardId = a.cardId
+        accountId = a.accountId
+        partyId = a.partyId
+        amountMinorUnits = a.amountMinorUnits
+        currencyCode = a.currencyCode
+        channel = a.channel.name
+        mcc = a.mcc
+        merchantName = a.merchantName
+        merchantCountry = a.merchantCountry
+        status = a.status.name
+        category = a.category
+        declineReason = a.declineReason
+        clearedAmountMinorUnits = a.clearedAmountMinorUnits
+        networkReference = a.networkReference
+        authorizedAt = a.authorizedAt
+        expiresAt = a.expiresAt
+        updatedAt = a.updatedAt
+    }
+
+    private fun RecordedClearing.toEntity() = CardClearingEntity().also {
+        it.id = id
+        it.authorizationId = authorizationId
+        it.idempotencyKey = idempotencyKey
+        it.requestFingerprint = requestFingerprint
+        it.amountMinorUnits = amountMinorUnits
+        it.currencyCode = currencyCode
+        it.appliedAt = appliedAt
+    }
+
+    private fun CardClearingEntity.toDomain() = RecordedClearing(
+        id = id,
+        authorizationId = authorizationId,
+        idempotencyKey = idempotencyKey,
+        requestFingerprint = requestFingerprint,
+        amountMinorUnits = amountMinorUnits,
+        currencyCode = currencyCode,
+        appliedAt = appliedAt,
+    )
+
+    /**
+     * Matched by constraint NAME anywhere in the cause chain: Hibernate wraps the driver's
+     * `PgException` differently on flush and on commit, and only the name says it is this
+     * constraint and not, say, the outbox's `event_id` UNIQUE — which must stay a 500.
+     */
+    private fun Throwable.isStaleRow(): Boolean = generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+        it is OptimisticLockException ||
+            it is StaleObjectStateException ||
+            it is StaleStateException ||
+            it is StaleAuthorizationException
+    }
+
+    private fun Throwable.isClearingKeyViolation(): Boolean =
+        generateSequence(this) { it.cause }.take(MAX_CAUSE_DEPTH).any {
+            it.message?.contains(CLEARING_KEY_CONSTRAINT) == true
+        }
+
+    companion object {
+        const val CLEARING_KEY_CONSTRAINT = "ux_card_clearings_authorization_key"
+        private const val MAX_CAUSE_DEPTH = 10
+
+        /**
+         * `COALESCE` on every aggregate: `SUM` over no rows is NULL, and a NULL read as a Kotlin
+         * `Long` is either an exception or, worse, a silent zero that looks measured. A card with no
+         * spend today must answer 0 by construction.
+         */
+        private const val SPEND_SQL = """
+            SELECT
+              COALESCE(SUM(CASE WHEN authorized_at >= :dayStart THEN effective END), 0) AS today,
+              COALESCE(SUM(effective), 0)                                               AS this_month,
+              COALESCE(SUM(CASE WHEN category = :category THEN effective END), 0)       AS this_month_category
+            FROM (
+              SELECT authorized_at, category,
+                     CASE status
+                       WHEN 'APPROVED'          THEN amount_minor_units
+                       WHEN 'PARTIALLY_CLEARED' THEN amount_minor_units
+                       WHEN 'CLEARED'           THEN cleared_amount_minor_units
+                       ELSE 0
+                     END AS effective
+              FROM card_authorizations
+              WHERE card_id = :cardId AND authorized_at >= :monthStart
+            ) counted
+        """
+    }
+}

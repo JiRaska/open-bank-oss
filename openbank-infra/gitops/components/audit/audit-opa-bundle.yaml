@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "49bf8fca808379dd"
+    openbank.tech/policy-checksum: "3ae3062e86fc5eac"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -619,6 +619,18 @@ data:
     #       {list, read} set entirely. Both gaps are closed by the single oversight-read rule below.
     #       The `service-account-` exclusion keeps an M2M identity classified HUMAN out of the
     #       audit-oversight surface (no service reads another service's audit chain here).
+    #
+    #   audit.evidence.reconstruct  (GET /api/v1/audit/evidence/{aggregateId})  @RolesAllowed AUDITOR/ADMIN/
+    #       COMPLIANCE/CREDIT_RISK — the ADR-0214 D3 evidence bundle (#11900). Called by lending-service's
+    #       GET /applications/{id}/evidence, which FORWARDS THE SIGNED-IN PERSON'S OWN TOKEN: the caller
+    #       reaching this rule is still that human, never lending's service account. ROLE_CREDIT_RISK is
+    #       granted this one action only — credit-risk staff could already read the same bundle from
+    #       lending; the source moved, the audience did not. The verb is `reconstruct`, NOT `read`, on
+    #       purpose: base rest.rego's compliance-read-any / operator-read-any grant every `*.read`
+    #       action to any HUMAN-classified principal holding those roles — service accounts included
+    #       (measured with opa eval against this bundle: an `audit.evidence.read` from
+    #       service-account-openbank-services was allowed via operator-read-any). Outside {list, read},
+    #       this rule is the ONLY way in, and its service-account exclusion is load-bearing.
     # ---------------------------------------------------------------------------------------
 
     package openbank.rest
@@ -631,6 +643,14 @@ data:
     	some role in {"ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE"}
     	role in input.principal.roles
     	input.action in {"audit.read", "audit.verify"}
+    }
+
+    allowed_reasons contains "evidence-bundle-read" if {
+    	input.principal.type == "HUMAN"
+    	not startswith(input.principal.id, "service-account-")
+    	some role in {"ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_CREDIT_RISK"}
+    	role in input.principal.roles
+    	input.action == "audit.evidence.reconstruct"
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1349,6 +1369,17 @@ data:
                                                 # without the cardholder's SCA today — add a verb here when one ships.
                                                 # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                                # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                                # a journal through ledger's POST /api/v1/journals. Threat model:
+                                                # docs/threat-models/openbank-treasury-service.md.
+                                                # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                                # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                                # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                                # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                                # needs an X-Approval-Id round-trip the deal's own
+                                                # PENDING_APPROVAL state already is. Writes are human-only in
+                                                # treasury_rest_ext.rego.
+      - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1426,6 +1457,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1842,7 +1874,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

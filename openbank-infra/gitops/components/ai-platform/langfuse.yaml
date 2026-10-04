@@ -28,7 +28,11 @@ metadata:
     app.kubernetes.io/name: langfuse
     app.kubernetes.io/part-of: ai-platform
 spec:
-  replicas: 1
+  # ADR-0328 wave B: traffic (LiteLLM callback, Ingress, HTTPRoute) is on langfuse-web, v3.29.0.
+  # Zero, not deleted: the manifest and langfuse-db stay as the rollback until v3 is verified and
+  # its background migration has copied v2's history (wave C deletes this file). Rollback is
+  # `replicas: 1` here plus reverting LANGFUSE_HOST and the two route backends.
+  replicas: 0
   # Terminate-first, for the reason litellm.yaml documents: with one replica the default
   # maxSurge 1 / maxUnavailable 0 needs room for two pods, and on a full cluster the rollout never
   # completes while reporting 1/1 READY.

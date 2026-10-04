@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.17.2](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.17.1...standing-order-service-v0.17.2) (2026-10-03)
+
+
+### Bug Fixes
+
+* **standing-order:** refuse non-EUR SEPA standing orders at creation ([#11957](https://github.com/JiRaska/open-bank-oss/issues/11957)) ([6013336](https://github.com/JiRaska/open-bank-oss/commit/60133364b982a48037503da97193051672685b70)), closes [#11938](https://github.com/JiRaska/open-bank-oss/issues/11938)
+
 ## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/standing-order-service-v0.17.0...standing-order-service-v0.17.1) (2026-09-29)
 
 

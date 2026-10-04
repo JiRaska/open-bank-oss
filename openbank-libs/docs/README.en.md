@@ -1,45 +1,29 @@
 # openbank-libs — Documentation
 
-> **What it is:** a shared infrastructure library for all 27 OpenBank Quarkus microservices. **What it is NOT:** a generic Kotlin utility library, nor a Quarkus extension.
+> **What it is:** the shared OpenBank library family. `openbank-libs-domain` holds framework-free domain primitives; `openbank-libs-runtime` holds Quarkus adapters and the self-published documentation endpoint. `openbank-libs` is a compatibility umbrella that re-exports both. It is not a running service.
 
-This directory is the entry point for per-service documentation, following the **arc42-lite + C4 + Backstage TechDocs file layout** standard. Every service is expected to mirror the same structure at `openbank-<service>/docs/`.
+This directory is bundled into the Admin UI image as a snapshot. Runnable services publish documentation from their own build at `/q/openbank/docs`; authored chapters live in each service's `src/main/resources/docs/`. See the running service's version and commit in its documentation index. The service count is derived from the build catalog, not maintained here.
 
 ## Contents
 
 | Section | Audience | What you'll find |
 |---|---|---|
-| [01 — Overview](./01-overview.md) | Product, audit, management | Why libs exists, the value it brings to a fleet of 27 services, key capabilities |
+| [01 — Overview](./01-overview.md) | Product, audit, management | Why shared libraries exist and their capabilities |
 | [02 — Architecture](./02-architecture.md) | Engineering, tech leads | C4 diagrams, package map, Jandex discovery, dependency strategy |
 | [03 — API & contracts](./03-api.md) | Service developers | Per-package consumption patterns with code snippets (Money, Iban, BuildInfo, IdempotencyStore, …) |
 | [04 — Data](./04-data.md) | Data, analytics | (libs holds no data — pointer to per-service docs) |
 | [05 — Operations](./05-operations.md) | DevOps, release engineers | Build, test, release, JDK/Kotlin/Quarkus compatibility matrix |
 | [06 — Compliance](./06-compliance.md) | Compliance, audit, GRC | Mapping to DORA, GDPR, PSD2, NIS2 (per component) |
 
-## Package map in one sentence
+## Module map
 
-```
-com.openbank.libs/
-├── api/               REST-side primitives — error model (ApiError), pagination (CursorPage), common exception mappers
-├── audit/             AuditEvent envelope + AuditEventPublisher port (GDPR Art. 30, DORA Art. 17)
-├── domain/
-│   ├── money/         Money + CurrencyCode value objects (ISO 4217)
-│   ├── account/       Iban + Bic value objects (ISO 13616, 9362)
-│   ├── case/          Case state machine primitives (KYC, AML, dispute workflows)
-│   ├── event/         DomainEvent envelope base
-│   └── identifiers/   Typesafe ID value objects (AccountId, TransactionId, …) + JPA converters
-├── idempotency/       IdempotencyStore port + Redis-backed implementation
-├── persistence/
-│   └── outbox/        Generic transactional outbox primitives (entity, dispatcher, ports)
-├── security/          PiiMask, Roles, SecurityContext extensions, BearerTokenClientHeadersFactory
-├── util/              BuildInfo (runtime tech-stack snapshot via Gradle stamping)
-└── web/               JAX-RS filters: CorrelationIdFilter, RateLimitFilter, ApiVersionResponseFilter, ServiceInfoResource, ServiceConfigResource
-```
+| Module | Responsibility |
+|---|---|
+| `openbank-libs-domain` | Shared domain values and ports without Quarkus or CDI imports |
+| `openbank-libs-runtime` | Quarkus adapters, web resources, observability and `/q/openbank/docs` |
+| `openbank-libs` | Compatibility umbrella re-exporting domain and runtime |
 
-`security/` does **not** contain a `BootstrapVerifier` — this line used to list one, and that was wrong.
-ADR-0017 prescribes a startup fail-fast guard against dev-placeholder secrets, but it was never written
-(`git grep BootstrapVerifier -- '*.kt'` returns 0), and that ADR's own delivery note says so. Dev
-placeholders are kept out of prod by ESO/OpenBao `secretKeyRef` secret injection (ADR-0007), not by
-anything in this library (#8426).
+For a concrete service, the running `/q/openbank/docs` and `/api/v1/info` report the build that is actually deployed. The source code in the two modules above is authoritative for their current packages and APIs.
 
 ## Related documents
 

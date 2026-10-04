@@ -18,6 +18,9 @@ metadata:
   name: pact-broker
   namespace: pact-broker
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml, 2026-10-04). This makes external-dns
+    # ignore the Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/custom-headers: pact-broker/pact-broker-edge-headers-v1

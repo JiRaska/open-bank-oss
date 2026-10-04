@@ -4,6 +4,7 @@
 
 package com.openbank.libs.docs
 
+import com.openbank.libs.util.Hex
 import java.security.MessageDigest
 
 /**
@@ -152,7 +153,6 @@ open class DocsCatalog(rawDocs: Map<String, Map<String, String>>) {
         private fun parseTitle(content: String): String? =
             TITLE_RE.find(content)?.groupValues?.get(1)?.trim()?.takeIf { it.isNotEmpty() }
 
-        private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
-            .joinToString("") { "%02x".format(it) }
+        private fun sha256(bytes: ByteArray): String = Hex.lower(MessageDigest.getInstance("SHA-256").digest(bytes))
     }
 }

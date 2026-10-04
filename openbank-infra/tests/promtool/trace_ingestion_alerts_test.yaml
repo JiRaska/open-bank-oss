@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# TempoTraceIngestionStalled / TempoMetricsAbsent (2026-09-30). The absent case is the one
+# that was true for the cluster's whole life before servicemonitor-tempo.yaml; the stalled
+# case must fire on a flat counter and must NOT fire on a counter reset (a pod roll).
+rule_files:
+  - prometheus-rules-trace-ingestion.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "a distributor counter that stops moving fires after 10m window + 15m dwell"
+    input_series:
+      # Climbs for 10 minutes, then flat for 30.
+      - series: 'tempo_distributor_spans_received_total{tenant="single-tenant",instance="10.0.0.1:3200"}'
+        values: "0+750x10 7500x30"
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TempoTraceIngestionStalled
+        exp_alerts: []
+      - eval_time: 40m
+        alertname: TempoTraceIngestionStalled
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+            exp_annotations:
+              subject_period: continuous
+              summary: "Tempo has received no spans for 10m — traces, RED metrics and span-based SLOs are blind"
+              description: "Tempo's distributor has accepted zero spans over 10 minutes, sustained for 15. Every `traces_spanmetrics_*` series stops moving with it, so the service map and the Pyrra money-path SLOs report nothing rather than a failure. Check the OTel collector first (it forwards to tempo.observability.svc:4317), then Tempo itself: kubectl -n observability get pods -l app.kubernetes.io/name=otel-collector && kubectl -n observability logs tempo-0 | tail"
+      - eval_time: 40m
+        alertname: TempoMetricsAbsent
+        exp_alerts: []
+
+  - interval: 1m
+    name: "a pod roll (counter reset, ingestion resumes) stays silent"
+    input_series:
+      - series: 'tempo_distributor_spans_received_total{tenant="single-tenant",instance="10.0.0.1:3200"}'
+        values: "0+750x15 0+750x25"
+    alert_rule_test:
+      - eval_time: 40m
+        alertname: TempoTraceIngestionStalled
+        exp_alerts: []
+
+  - interval: 1m
+    name: "no series at all is the absent case, not the stalled one"
+    input_series: []
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: TempoMetricsAbsent
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              team: platform
+            exp_annotations:
+              summary: "Tempo is not reporting ingestion metrics — trace pipeline health is unverifiable"
+              description: "No `tempo_distributor_spans_received_total` series for 15 minutes. Tempo is down, or its scrape is broken (see servicemonitor-tempo.yaml). TempoTraceIngestionStalled cannot fire while this is true, because a comparison over an absent series matches nothing — so this is the alert that means \"the trace pipeline's health is unknown\". Check: kubectl -n observability get pods,servicemonitor -l app.kubernetes.io/name=tempo"
+      - eval_time: 20m
+        alertname: TempoTraceIngestionStalled
+        exp_alerts: []

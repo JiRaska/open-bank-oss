@@ -86,7 +86,10 @@ class EodSnapshotSchedulerVertxContextIT {
     @Test
     fun `the scheduled EOD snapshot records a run for today's Prague business date`() {
         ledger.inputs = Fixtures.tiedOut()
-        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
 
         val recorded = await {
             onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf }
@@ -113,7 +116,10 @@ class EodSnapshotSchedulerVertxContextIT {
     @Test
     fun `a second tick after the first replays instead of duplicating`() {
         ledger.inputs = Fixtures.tiedOut()
-        val expectedAsOf = ZonedDateTime.now(ZoneId.of("Europe/Prague")).toLocalDate()
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
 
         // Let at least two ticks (every 2s) pass.
         await { onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf } }
@@ -128,6 +134,32 @@ class EodSnapshotSchedulerVertxContextIT {
                     "create a second one",
             )
             .hasSize(1)
+    }
+
+    @Test
+    fun `the scheduled run's limit breach reaches the outbox exactly once, however many ticks replay it`() {
+        // Fixtures.tiedOut(): a nostro is not HQLA, so the LCR is 0 against retail outflows — lcr-min
+        // BREACHES; NSFR is OK; capital, IRRBB and large exposures are NOT_EVALUABLE (no own funds,
+        // no curve set) and so emit nothing.
+        ledger.inputs = Fixtures.tiedOut()
+        // The scheduler reads the injected Clock (FixedClockForIntegrationTests in every @QuarkusTest),
+        // never the wall clock — the expected business date must come from the same source.
+        val expectedAsOf = ZonedDateTime.ofInstant(
+            FixedClockForIntegrationTests.BUSINESS_NOW,
+            ZoneId.of("Europe/Prague"),
+        ).toLocalDate()
+        await { onEventLoop { snapshotRepository.listRecent(10) }.any { it.asOf == expectedAsOf } }
+        val runId = onEventLoop { snapshotRepository.listRecent(10) }.first { it.asOf == expectedAsOf }.id
+        val breachRows = "SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId' " +
+            "AND event_type = 'risk.limit.breach.v1' AND payload LIKE '%\"limitId\":\"lcr-min\"%'"
+
+        assertThat(await { TestDb.count(breachRows) == 1 })
+            .describedAs("the EOD tick must write the lcr-min breach of its own run to risk_outbox")
+            .isTrue()
+        Thread.sleep(EXTRA_SETTLE_MILLIS) // further ticks replay the run and re-evaluate it
+        assertThat(TestDb.count("SELECT count(*) FROM risk_outbox WHERE aggregate_id = '$runId'"))
+            .describedAs("a replayed run is re-evaluated but writes nothing new (dedup on run, limit, set version)")
+            .isEqualTo(1)
     }
 
     private companion object {

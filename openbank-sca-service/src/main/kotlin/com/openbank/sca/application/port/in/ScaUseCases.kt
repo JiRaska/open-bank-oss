@@ -73,6 +73,7 @@ data class ConsumeScaCommand(
     val amount: String?,
     val currency: String?,
     val creditor: String?,
+    val reference: String? = null,
     val documentSha256: String? = null,
     val ceremonyId: String? = null,
     val cardId: String? = null,
@@ -87,6 +88,12 @@ data class ConsumeScaCommand(
  */
 interface ConsumeScaUseCase {
     suspend fun consume(command: ConsumeScaCommand): ScaChallenge
+}
+
+data class RevokeDeviceCommand(val partyId: UUID, val deviceId: UUID, val actorId: String)
+
+interface RevokeDeviceUseCase {
+    suspend fun revoke(command: RevokeDeviceCommand)
 }
 
 data class ListDevicesQuery(val partyId: UUID)

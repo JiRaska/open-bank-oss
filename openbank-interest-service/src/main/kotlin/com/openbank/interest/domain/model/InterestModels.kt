@@ -6,9 +6,11 @@ package com.openbank.interest.domain.model
 
 import com.openbank.interest.domain.tax.TaxProfile
 import java.math.BigDecimal
+import java.math.RoundingMode
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.UUID
+import com.openbank.libs.domain.calendar.DayCount as KernelDayCount
 
 enum class InterestRateType { FIXED, VARIABLE, TIERED }
 
@@ -26,7 +28,37 @@ enum class RateIndex { CZEONIA, PRIBOR_1M, PRIBOR_3M, PRIBOR_6M, ESTR, EURIBOR_3
  * `REVERSED`/`SUSPENDED` are declared but have no writer yet.
  */
 enum class AccrualStatus { ACCRUING, CAPITALIZING, CAPITALIZED, REVERSED, SUSPENDED }
-enum class DayCount { ACT_365, ACT_360, ACT_ACT, THIRTY_360 }
+enum class DayCount {
+    ACT_365,
+    ACT_360,
+    ACT_ACT,
+    THIRTY_360,
+    ;
+
+    /** The kernel convention this product vocabulary means (ISDA 2006 §4.16). */
+    val convention: KernelDayCount
+        get() = when (this) {
+            ACT_365 -> KernelDayCount.ACT_365_FIXED
+            ACT_360 -> KernelDayCount.ACT_360
+            ACT_ACT -> KernelDayCount.ACT_ACT_ISDA
+            THIRTY_360 -> KernelDayCount.THIRTY_360_BOND_BASIS
+        }
+
+    /**
+     * Rate for the one-day accrual period `[accrualDate, accrualDate + 1)`:
+     * `annualRate × yearFraction`, rounded once to 10 places HALF_UP. For ACT_365/ACT_360 this is
+     * exactly the former `annualRate / 365|360`; ACT_ACT uses 1/366 on a leap-year day, and
+     * THIRTY_360 books 0 on the 31st and 3 (2 in a leap year) days on the last day of February,
+     * so a month's accruals sum to 30/360.
+     */
+    fun dailyRate(annualRate: BigDecimal, accrualDate: LocalDate): BigDecimal =
+        convention.yearFraction(accrualDate, accrualDate.plusDays(1))
+            .applyTo(annualRate, DAILY_RATE_SCALE, RoundingMode.HALF_UP)
+
+    private companion object {
+        const val DAILY_RATE_SCALE = 10
+    }
+}
 
 data class InterestRateConfig(
     val id: UUID = UUID.randomUUID(),

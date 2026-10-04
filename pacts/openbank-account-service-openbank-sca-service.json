@@ -1,0 +1,87 @@
+{
+  "consumer": {
+    "name": "openbank-account-service"
+  },
+  "interactions": [
+    {
+      "description": "GET the savings-withdrawal approval challenge by id",
+      "providerStates": [
+        {
+          "name": "a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sca/challenges/5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a"
+      },
+      "response": {
+        "body": {
+          "id": "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a",
+          "partyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "purpose": "SAVINGS_WITHDRAW_APPROVAL",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "POST consume the savings-withdrawal approval challenge for its party",
+      "providerStates": [
+        {
+          "name": "a COMPLETED SAVINGS_WITHDRAW_APPROVAL SCA challenge exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/sca/challenges/5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a/consume"
+      },
+      "response": {
+        "body": {
+          "id": "5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a",
+          "partyId": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+          "purpose": "SAVINGS_WITHDRAW_APPROVAL",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET the approval challenge with no M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/sca/challenges/5a5a5a5a-5a5a-4a5a-8a5a-5a5a5a5a5a5a"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-sca-service"
+  }
+}
