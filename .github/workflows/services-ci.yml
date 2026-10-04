@@ -194,8 +194,8 @@ jobs:
               # The safe direction is still over-build: the moment a changed path is NOT cleanly
               # attributable to a module or a pact pair, fall back to full-fleet. Never under-build
               # the Pact graph.
-              #   - code-global input (openbank-libs*, gradle, build-logic) -> full-fleet (any
-              #     service's compile/test inputs may change).
+              #   - code-global input (core libs, gradle, build-logic) -> full-fleet.
+              #     libs-lending and libs-iso20022 follow their declared Gradle consumers.
               #     Lib test-only paths excepted (filter-lib-test-only-paths.py).
               #   - pacts/<consumer>-<provider>.json changed -> build both Gradle modules. The
               #     Admin UI consumer is not a Gradle module: its separate trusted Pact workflow
@@ -205,7 +205,7 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -220,7 +220,7 @@ jobs:
                         if grep -qE "(^| )${p}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $p"; else SCOPE_OK=0; fi
                       done <<< "$modules" ;;
                     openbank-libs/governance/*) : ;;
-                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
+                    .github/workflows/services-ci.yml|.github/workflows/_service-ci.yml|.github/scripts/service-ci-pact-modules.sh|.github/scripts/service-ci-library-dependents.py|.github/scripts/await-admin-ui-pact-publication.py|.github/scripts/test-await-admin-ui-pact-publication.py) : ;;
                     openbank-*/*)
                       m="${f%%/*}"
                       if grep -qE "(^| )${m}( |$)" <<< " $ALL "; then CHANGED="$CHANGED $m"; else SCOPE_OK=0; fi ;;
@@ -231,6 +231,8 @@ jobs:
                   echo "Decision: a changed path is not cleanly attributable -> full-fleet (safety)."
                   CHANGED="$ALL"
                 else
+                  # Include direct and transitive consumers of the small shared libraries.
+                  CHANGED="$CHANGED $(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE" | python3 .github/scripts/service-ci-library-dependents.py "$ALL")"
                   # (No dedup here: the matrix JSON below is built with `sort -u`, so a service
                   # named by both its src and a pact edge collapses to one job downstream.)
                   # DST-harness edge (ADR-0115/#267) — same as the PR path.
@@ -247,7 +249,7 @@ jobs:
                   fi
                   # Recipe-only change -> one canary (same as the PR path).
                   if [ -z "${CHANGED// /}" ] \
-                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                     && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                     CHANGED="openbank-libs"
                   fi
                   echo "Decision: scoped main-push build -> ${CHANGED:-<none>}"
@@ -316,7 +318,7 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
@@ -327,6 +329,7 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
+              CHANGED="$CHANGED $(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE" | python3 .github/scripts/service-ci-library-dependents.py "$ALL")"
               # A changed pact builds BOTH sides, exactly as the main-push path above already
               # does. Without this the PR path attributes files ONLY by `^<module>/`, so a
               # pact-only PR matched no module, built nothing, and merged green — then broke the
@@ -396,7 +399,7 @@ jobs:
               # Skip the canary if a real service is already in the matrix (it validates
               # the recipe too).
               if [ -z "${CHANGED// /}" ] \
-                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
+                 && grep -qE '^(\.github/workflows/(services-ci|_service-ci)\.yml|\.github/scripts/(service-ci-pact-modules\.sh|service-ci-library-dependents\.py|(test-)?await-admin-ui-pact-publication\.py))$' <<< "$FILES"; then
                 echo "Decision: recipe-only change -> build canary openbank-libs."
                 CHANGED="openbank-libs"
               fi

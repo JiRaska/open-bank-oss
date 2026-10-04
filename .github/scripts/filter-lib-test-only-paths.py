@@ -33,7 +33,7 @@ CONSUMER = re.compile(r'testFixtures\(\s*project\(\s*"(:[^"]+)"')
 # Mirrors the code-global regex in services-ci.yml; used by --self-test only.
 CODE_GLOBAL = re.compile(
     r"^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/"
-    r"|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts"
+    r"|gradle/|settings\.gradle\.kts"
     r"|build\.gradle\.kts|gradle\.properties|build-logic/)"
 )
 
