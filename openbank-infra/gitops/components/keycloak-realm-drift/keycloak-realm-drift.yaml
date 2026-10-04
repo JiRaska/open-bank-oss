@@ -120,6 +120,9 @@ metadata:
   labels:
     app.kubernetes.io/name: keycloak-realm-drift
     app.kubernetes.io/part-of: iam
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '40 3 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 03:40 UTC daily — after sbom-drift-scanner's 03:10, so the two in-cluster drift reports do
   # not contend for the same window.

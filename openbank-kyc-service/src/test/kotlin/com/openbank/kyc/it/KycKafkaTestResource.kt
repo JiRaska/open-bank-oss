@@ -28,7 +28,7 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
             broker = kafka
             kafka.start()
             started = true
-            TestInfrastructureEvidence.record("kafka", kafka.dockerImageName, "started")
+            TestInfrastructureEvidence.record("redpanda", kafka.dockerImageName, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(
                     listOf(TOPIC, "openbank.kyc.events", "openbank.dlq.kyc.party-events-in").map {
@@ -61,7 +61,7 @@ class KycKafkaTestResource : QuarkusTestResourceLifecycleManager {
         try {
             broker?.let {
                 it.stop()
-                if (started) TestInfrastructureEvidence.record("kafka", it.dockerImageName, "stopped")
+                if (started) TestInfrastructureEvidence.record("redpanda", it.dockerImageName, "stopped")
             }
             started = false
             broker = null

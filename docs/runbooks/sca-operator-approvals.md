@@ -26,9 +26,19 @@ the party id; no policy change is involved. The service has no blanket exemption
 
 The admin approval inbox lists this queue (source `sca`) and links each item to
 `/approvals/sca/{id}`, open to operators and administrators only, as the service is. The page shows
-the action, the maker and the bound party (or challenge); the exact device of an enrollment or
-revocation is bound by the request fingerprint, which the service does not publish, so confirm it
-with the maker. Approval needs an explicit review tick and a separate confirmation. The maker is
+the action, the maker, the bound party (or challenge) and the service's `summary` of what the
+approval binds, rendered once when it was issued:
+
+- enrollment — credential handle (first 8 characters), algorithm and `keySha256`, the first 8 hex
+  of the SHA-256 of the device public key (ask the maker for the same 8 hex from the device's
+  registration, never for the key);
+- revocation — device handle (first 8 characters of its id), credential handle, algorithm and
+  enrolment date, or `target=not-a-device-of-this-party`;
+- consume — challenge purpose, amount, currency and the creditor masked to its last 4 characters.
+
+A value shown as `invalid` was supplied in an unexpected shape: reject unless the maker can explain
+it. An approval issued before this rendering existed shows no summary; confirm its device with the
+maker. The request fingerprint, not the summary, decides which retry an approval unlocks. Approval needs an explicit review tick and a separate confirmation. The maker is
 not offered a decision on their own request (the service refuses it anyway). If a response is
 lost, the page refuses another decision until the state is reloaded; it never retries the
 business operation.

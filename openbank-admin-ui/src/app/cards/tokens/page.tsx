@@ -17,6 +17,7 @@ import { hasPermission } from '@/lib/auth/roles'
 import { svcUrl } from '@/lib/services/bff'
 import { useServiceResource } from '@/lib/services/useServiceResource'
 import type { NetworkTokenStatus, TokenListResponse } from '@/lib/cards/lifecycleTypes'
+import { tokenStatusRequest } from '@/lib/cards/lifecycleRequests'
 
 /**
  * Card Center — network tokens for one card (ADR-0283 phase 3, issue #8811).
@@ -55,14 +56,10 @@ export default function CardTokensPage() {
     setBusy(tokenReference)
     setActionError(null)
     try {
-      const res = await fetch(
-        svcUrl('card-processing-service', `/api/v1/card-tokens/${encodeURIComponent(tokenReference)}/status`),
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status }),
-        },
-      )
+      // A fresh Idempotency-Key per click: the service requires one and never reaches the network
+      // twice for the same key.
+      const request = tokenStatusRequest(tokenReference, status)
+      const res = await fetch(svcUrl('card-processing-service', request.path), request.init)
       if (!res.ok) {
         // The service answers 409 with a machine-readable reason. Showing the reason rather than
         // the status code is what lets an operator tell "this token is deleted, which is final"

@@ -7,12 +7,18 @@
 # would break ADR-0027's in-cluster-OSS posture; the alternative upstream itself documents for
 # self-hosters without EE is exactly this — periodic DELETE statements against its own tables.
 #
-# TWO STORES SINCE ADR-0328 WAVE B (decision 3). Langfuse v3.29.0 writes traces, observations
-# and scores to its own ClickHouse (langfuse-clickhouse.yaml); the same three tables in Postgres
-# are v2's, kept for the background migration and the rollback, and no longer grow. So the job
-# runs two sweeps, in order, in one pod:
-#   1. clickhouse-sweep (initContainer) — ALTER TABLE ... DELETE on traces / observations /
-#      scores / event_log. If it fails, the pod never reaches step 2 and the Job fails.
+# TWO STORES SINCE ADR-0328 WAVE B (decision 3). Langfuse v3 writes traces, observations and
+# scores to its own ClickHouse (langfuse-clickhouse.yaml); the same three tables in Postgres are
+# v2's. v2 itself is gone since wave C1, but its tables stay: they are what the v2->v3 background
+# migrations copy from (and re-copy from, if a copy ever has to be repeated), they still hold
+# prompts and completions, and nothing else deletes them. They no longer grow, so the Postgres
+# sweep finds nothing once the last v2 row is older than the window (about 30 days after wave B,
+# 2026-11-02); it stays until a PR drops those tables, because removing it first would leave
+# whatever is still inside the window there indefinitely. So the job runs two sweeps, in order:
+#   1. clickhouse-sweep (initContainer) — ALTER TABLE ... DELETE on events_core / events_full
+#      (v4's store) and traces / observations / scores / blob_storage_file_log (v3's, still read
+#      for history and still holding it). If it fails, the pod never reaches step 2 and the Job
+#      fails.
 #   2. sweep (container) — the Postgres sweep over v2's tables, unchanged.
 # The S3 bucket's lifecycle rule (aws/envs/sandbox-platform/langfuse-s3.tf) expires the raw event
 # objects on the same window; this job does not touch S3.
@@ -21,16 +27,26 @@
 # asynchronous and rate-limited, the wrong shape for a nightly sweep that must report how much it
 # actually freed. A direct DELETE against stores this component owns is synchronous and countable.
 #
-# CLICKHOUSE SCHEMA FACTS (Langfuse 3.29.0, packages/shared/clickhouse/migrations/unclustered,
-# read at the v3.29.0 tag and the sweep run against that DDL on the pinned server image):
-#   - age columns: traces.timestamp, observations.start_time, scores.timestamp, and
-#     event_log.created_at (event_log indexes the S3 event files);
+# CLICKHOUSE SCHEMA FACTS (Langfuse 4.50.0, read off the tables 4.50.0 creates on the pinned server
+# image after 3.29.0 -> 3.225.11 -> 4.50.0, and the sweep run against them):
+#   - age columns: events_full.start_time and events_core.start_time (v4; ReplacingMergeTree,
+#     PARTITION BY toYYYYMM(start_time)), traces.timestamp, observations.start_time,
+#     scores.timestamp, blob_storage_file_log.created_at (indexes the S3 event files);
+#   - events_core is fed from events_full by the materialized view events_core_mv, which fires on
+#     INSERT only, so a DELETE on events_full leaves events_core untouched: both are swept;
+#   - event_log is DROPPED by v4 (ClickHouse migration 0044), so it is no longer swept — naming a
+#     missing table would fail every run. observations_batch_staging carries its own 48 h TTL and
+#     observations_pid_tid_sorting is dropped by background migration step 5 (see langfuse-v3.yaml);
 #   - traces/observations/scores are ReplacingMergeTree(event_ts, is_deleted), so count() counts
 #     row VERSIONS, which is what a DELETE frees on disk; the sweep reports that number;
 #   - a plain ALTER ... DELETE is a mutation that returns before it runs. mutations_sync = 1 makes
 #     it block on this single-node server, and the sweep RECOUNTS afterwards: "freed" is
 #     before - after, both measured, and a non-zero remainder fails the Job instead of logging a
 #     number the database does not agree with (proven by disabling the DELETE: exit 1).
+#   - a row dated in the FUTURE can never age out, so the sweep refuses to report success while
+#     one exists. Not hypothetical: ClickHouse 26.8 read Langfuse's epoch-ms datetimes as seconds
+#     and stored 9999-12-31 for every row until the settings profile in langfuse-clickhouse.yaml
+#     (#12033). A silent sweep over such rows deletes nothing, every night, and looks green.
 #
 # POSTGRES SCHEMA FACTS (langfuse v2 tables, verified against upstream before the original sweep):
 #   - `traces.timestamp`, `observations.start_time`, `scores.timestamp` are the age columns.
@@ -128,13 +144,39 @@ data:
       fi
     }
 
+    # Rows dated more than a day ahead are outside every window this job can express. Count them
+    # BEFORE deleting anything and fail at the end if any exist (see the header: the 9999 rows).
+    future_total=0
+    future_rows() {
+      table="$1"
+      column="$2"
+      n="$(ch "SELECT count() FROM ${table} WHERE ${column} > now64(3, 'UTC') + INTERVAL 1 DAY")"
+      if [ "$n" -ne 0 ]; then
+        echo "langfuse-retention[clickhouse]: ${table} holds ${n} row(s) with ${column} more than a day in the future; retention cannot age them out" >&2
+      fi
+      future_total=$((future_total + n))
+    }
+
+    future_rows events_core start_time
+    future_rows events_full start_time
+    future_rows observations start_time
+    future_rows scores timestamp
+    future_rows traces timestamp
+
     # Children first, as in the Postgres sweep: a run killed midway leaves a trace with no
     # observations (which the UI shows) rather than observations with no trace.
+    delete_older_than events_core start_time
+    delete_older_than events_full start_time
     delete_older_than observations start_time
     delete_older_than scores timestamp
     delete_older_than traces timestamp
-    # event_log indexes the raw event files in S3; the bucket's lifecycle rule expires the objects.
-    delete_older_than event_log created_at
+    # blob_storage_file_log indexes the raw event files in S3; the bucket's lifecycle rule expires
+    # the objects themselves.
+    delete_older_than blob_storage_file_log created_at
+    if [ "$future_total" -ne 0 ]; then
+      echo "langfuse-retention[clickhouse]: ${future_total} future-dated row(s) remain; failing so this is seen" >&2
+      exit 1
+    fi
     echo "langfuse-retention[clickhouse]: sweep complete"
 ---
 apiVersion: batch/v1
@@ -144,6 +186,9 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '15 3 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 03:15 UTC daily — outside the litellm-db-daily (04:49) and langfuse-db-daily (04:19) backup
   # windows in postgres.yaml/langfuse-postgres.yaml, so a large delete's WAL churn does not

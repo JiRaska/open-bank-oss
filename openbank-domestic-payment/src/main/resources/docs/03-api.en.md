@@ -137,10 +137,18 @@ Errors use `openbank-libs` `ApiError` (`{ correlationId, status, code, message }
 | HTTP | code | When |
 |---|---|---|
 | 400 | (validation) | missing `Idempotency-Key`, malformed body / enum |
+| 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | `amount` + `currency` cannot be a kernel `Money` (more decimals than the currency allows, e.g. `100.005 CZK`; not an ISO 4217 code with a minor unit; absent or out of range), or the amount is zero or negative (#11604). Refused before the `Idempotency-Key` is looked up: nothing is persisted and a corrected retry under the same key succeeds |
 | 401 | unauthorized | missing / invalid token |
 | 403 | forbidden | role missing for the endpoint (or OPA deny in enforce mode) |
 | 404 | `NOT_FOUND` | payment id does not exist (`DomesticPaymentNotFoundException`) |
 | 409 | `CONFLICT` | illegal status transition (`InvalidDomesticPaymentStateTransitionException`) |
+
+### Amount scale on reads (#11604)
+
+The `amount` column stays `NUMERIC(20,6)`; the service reads it into a kernel `Money` at the
+currency's minor-unit scale. Responses, the `domestic.payment.*` events and the payment confirmation
+therefore carry `100.50` where they previously showed the column scale (`100.500000`) or the request's
+own spelling (`100.5`). The values are numerically equal; only the text representation changes.
 
 ## Events
 

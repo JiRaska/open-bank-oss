@@ -20,6 +20,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: analytics
     app.kubernetes.io/component: ci-gate-observability
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/30 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "7200"
 spec:
   schedule: "*/30 * * * *"
   concurrencyPolicy: Forbid

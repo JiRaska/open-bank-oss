@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.1](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.5.0...card-processing-service-v0.5.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **card-processing:** apply each clearing once per key ([#11990](https://github.com/JiRaska/open-bank-oss/issues/11990)) ([1c65c8e](https://github.com/JiRaska/open-bank-oss/commit/1c65c8e76b311b35998fbffc53c687efff413a8a))
+
 ## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.4.0...card-processing-service-v0.5.0) (2026-10-03)
 
 
