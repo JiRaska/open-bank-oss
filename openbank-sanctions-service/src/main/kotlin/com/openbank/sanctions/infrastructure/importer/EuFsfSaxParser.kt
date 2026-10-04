@@ -4,10 +4,10 @@
 
 package com.openbank.sanctions.infrastructure.importer
 
+import com.openbank.libs.xml.SecureXml
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.InputStream
-import javax.xml.parsers.SAXParserFactory
 
 /**
  * One parsed `sanctionEntity` from the official EU Financial Sanctions File (FSF) —
@@ -49,10 +49,7 @@ object EuFsfSaxParser {
 
     fun parse(input: InputStream): List<EuFsfEntity> {
         val handler = FsfHandler()
-        SAXParserFactory.newInstance()
-            .apply { isNamespaceAware = false }
-            .newSAXParser()
-            .parse(input, handler)
+        SecureXml.saxParse(input, handler, namespaceAware = false)
         return handler.entities
     }
 
