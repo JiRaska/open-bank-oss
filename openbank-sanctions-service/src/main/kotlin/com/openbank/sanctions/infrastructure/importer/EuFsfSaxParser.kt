@@ -49,7 +49,7 @@ object EuFsfSaxParser {
 
     fun parse(input: InputStream): List<EuFsfEntity> {
         val handler = FsfHandler()
-        SecureXml.saxParser(namespaceAware = false).parse(input, handler)
+        SecureXml.saxParse(input, handler, namespaceAware = false)
         return handler.entities
     }
 

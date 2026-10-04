@@ -210,7 +210,7 @@ class SanctionsImportService(
         val allEntries = mutableListOf<SanctionsEntry>()
 
         // Remote list content: parsed only through the fleet-wide hardened SAX parser.
-        SecureXml.saxParser(namespaceAware = false).parse(
+        SecureXml.saxParse(
             inputStream,
             object : DefaultHandler() {
                 private var inEntry = false
@@ -308,6 +308,7 @@ class SanctionsImportService(
                     }
                 }
             },
+            namespaceAware = false,
         )
 
         Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)

@@ -46,7 +46,7 @@ class SecureXmlTest {
             }
         }
         assertThatThrownBy {
-            SecureXml.saxParser(namespaceAware = false).parse(externalEntity(dir).byteInputStream(), handler)
+            SecureXml.saxParse(externalEntity(dir).byteInputStream(), handler, namespaceAware = false)
         }.hasMessageContaining("DOCTYPE")
         assertThat(seen.toString()).doesNotContain(MARKER)
     }

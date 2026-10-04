@@ -8,6 +8,7 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
@@ -109,7 +110,11 @@ class SafeHttpClient private constructor(
         try {
             raw.soTimeout = boundedTimeoutMs(deadline)
             val wire = Wire(pinned, head, request, deadline)
-            return if (target.scheme == "https") overTls(raw, target, wire) else exchange(raw, wire)
+            return if (target.scheme == "https") {
+                overTls(raw, target, wire)
+            } else {
+                exchange(raw, raw.getOutputStream(), raw.getInputStream(), wire)
+            }
         } finally {
             // Every path — handshake failure, timeout, parse error — releases the raw socket too.
             runCatching { raw.close() }
@@ -156,13 +161,17 @@ class SafeHttpClient private constructor(
     /** What one request needs on the wire, so [exchange] can run on the plain or the TLS socket. */
     private class Wire(val pinned: InetAddress, val head: ByteArray, val request: EgressRequest, val deadline: Long)
 
-    private fun exchange(socket: Socket, wire: Wire): EgressResponse {
+    /**
+     * Writes the request and reads the response. The streams are opened by the CALLER, so on the TLS
+     * path they come from the very `SSLSocket` whose endpoint identification [overTls] configured
+     * (and whose handshake it completed) in the same scope; this function never opens a stream.
+     */
+    private fun exchange(socket: Socket, out: OutputStream, rawIn: InputStream, wire: Wire): EgressResponse {
         check(socket.inetAddress == wire.pinned) { "connected address differs from the vetted one" }
-        val out = socket.getOutputStream()
         out.write(wire.head)
         wire.request.body?.let(out::write)
         out.flush()
-        val input = BufferedInputStream(DeadlineInputStream(socket, wire.deadline, readTimeout.toMillis()))
+        val input = BufferedInputStream(DeadlineInputStream(socket, rawIn, wire.deadline, readTimeout.toMillis()))
         return readResponse(input, wire.request.method.uppercase())
     }
 
@@ -187,7 +196,7 @@ class SafeHttpClient private constructor(
             // name mismatch; this re-checks the negotiated session explicitly, so a JSSE provider
             // or future edit that drops the parameter still cannot send a byte to the wrong peer.
             PeerHostnameVerifier.verify(target.host, tls.session)
-            return exchange(tls, wire)
+            return exchange(tls, tls.outputStream, tls.inputStream, wire)
         } finally {
             runCatching { tls.close() }
         }
@@ -344,10 +353,10 @@ class SafeHttpClient private constructor(
     /** Arms each read with min(readTimeout, time left on the call deadline). */
     private class DeadlineInputStream(
         private val socket: Socket,
+        private val inner: InputStream,
         private val deadline: Long,
         private val readTimeoutMs: Long,
     ) : InputStream() {
-        private val inner = socket.getInputStream()
 
         private fun arm() {
             socket.soTimeout = minOf(readTimeoutMs, boundedTimeoutMs(deadline).toLong()).toInt()
