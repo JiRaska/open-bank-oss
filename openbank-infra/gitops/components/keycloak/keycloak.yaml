@@ -213,6 +213,9 @@ metadata:
   name: keycloak
   namespace: iam
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Security headers: HSTS with preload (2-year max-age per preload list requirement)
@@ -265,6 +268,9 @@ metadata:
   name: keycloak-admin-block
   namespace: iam
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
 spec:

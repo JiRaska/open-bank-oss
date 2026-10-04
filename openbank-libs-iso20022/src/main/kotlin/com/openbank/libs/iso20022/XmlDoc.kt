@@ -4,13 +4,11 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Document
 import org.w3c.dom.Element
 import java.io.StringWriter
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.OutputKeys
-import javax.xml.transform.TransformerFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.transform.stream.StreamResult
 
@@ -38,10 +36,7 @@ internal class XmlDoc private constructor(private val namespace: String, val doc
 
     /** Serialises the document to indented, UTF-8 XML with an XML declaration. */
     fun serialize(): String {
-        val transformer = TransformerFactory.newInstance().apply {
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "")
-        }.newTransformer().apply {
+        val transformer = SecureXml.transformerFactory().newTransformer().apply {
             setOutputProperty(OutputKeys.OMIT_XML_DECLARATION, "no")
             setOutputProperty(OutputKeys.ENCODING, "UTF-8")
             setOutputProperty(OutputKeys.INDENT, "yes")
@@ -52,14 +47,6 @@ internal class XmlDoc private constructor(private val namespace: String, val doc
     }
 
     companion object {
-        fun create(namespace: String): XmlDoc {
-            val factory = DocumentBuilderFactory.newInstance().apply {
-                isNamespaceAware = true
-                setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-                setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-                setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-            }
-            return XmlDoc(namespace, factory.newDocumentBuilder().newDocument())
-        }
+        fun create(namespace: String): XmlDoc = XmlDoc(namespace, SecureXml.documentBuilder().newDocument())
     }
 }
