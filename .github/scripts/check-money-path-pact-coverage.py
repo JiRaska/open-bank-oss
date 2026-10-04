@@ -51,10 +51,14 @@ KEY_ALIASES = {
     "sepa-payment-service": "openbank-sepa-payment",
     "product-catalog-api": "openbank-product-catalog",
     "tpp-registry": "openbank-tpp-registry-service",
+    "card-issuance-api": "openbank-card-issuance-service",
+    "fraud-api": "openbank-fraud-service",
+    "transaction-api": "openbank-transaction-service",
 }
 
 # Providers outside this repository. A pact against them would verify nothing here.
-EXTERNAL_KEYS = {"cnb-feed"}
+# Card-scheme sandboxes (Visa, Mastercard) are vendor APIs reached by card-processing (ADR-0283).
+EXTERNAL_KEYS = {"cnb-feed", "mastercard-api", "visa-api"}
 
 CONFIG_KEY = re.compile(r'@RegisterRestClient\s*\([^)]*configKey\s*=\s*"([a-z0-9-]+)"')
 
