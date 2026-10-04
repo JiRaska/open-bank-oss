@@ -18,7 +18,7 @@ class LimitNoteTest {
     fun `the note a submit writes parses back to the check's figures`() {
         val d = placement()
         val check = withinLimit(d)
-        val submitted = d.submit(dealer, check, NOW)
+        val submitted = d.submit(dealer, check, NOW, DealFixtures.withinProduct)
 
         val snapshot = LimitNote.parse(submitted.history.last().note)
 
@@ -39,7 +39,7 @@ class LimitNoteTest {
     @Test
     fun `the API carries the structured figures next to the unchanged note`() {
         val d = placement()
-        val submitted = d.submit(dealer, withinLimit(d), NOW)
+        val submitted = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
 
         val last = DealResponse.from(submitted).history.last()
 
