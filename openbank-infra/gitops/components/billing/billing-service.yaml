@@ -192,7 +192,7 @@ spec:
         # all @Authorize-annotated endpoints in billing-service (billing.*).
         # Bundle mounted from billing-opa-bundle ConfigMap (gen-billing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
