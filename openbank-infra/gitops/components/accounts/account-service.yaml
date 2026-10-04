@@ -259,7 +259,7 @@ spec:
         # account-service (account.create/read/list/search/update/close/freeze/
         # unfreeze/authorize). Bundle mounted from account-opa-bundle ConfigMap.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

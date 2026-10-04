@@ -30,7 +30,9 @@ per directory rather than one for the namespace):
   - ingress-nginx allowed where an Ingress backend declares it,
   - envoy-gateway-system (the shared Gateway's Envoy proxy, ADR-0324) allowed
     where an HTTPRoute backendRef names the Service — the Gateway API twin of
-    the Ingress rule, so a host moved off ingress-nginx stays reachable,
+    the Ingress rule, so a host moved off ingress-nginx stays reachable — and
+    where a SecurityPolicy's extAuth names it (the proxy calls the auth service
+    itself, e.g. the ADR-0234 tool gate on admin-ui),
   - the keda namespace (KEDA HTTP add-on interceptor) allowed on the HTTP port
     of any workload fronted by an HTTPScaledObject (T1 scale-to-zero) — the
     interceptor is the one making the actual inbound connection once the
@@ -225,6 +227,33 @@ def httproute_backends(doc: dict) -> list[tuple[str, str, int | None]]:
     return out
 
 
+
+def securitypolicy_extauth_backends(doc: dict) -> list[tuple[str, str, int | None]]:
+    """(namespace, service, port) for every Service an Envoy Gateway SecurityPolicy's extAuth
+    names (ADR-0324 Phase 2, the ADR-0234 tool gate).
+
+    The proxy in the Gateway's namespace makes the authorization call itself, so the auth
+    service must admit that namespace exactly as an HTTPRoute backend does. Both service
+    flavours (`http`, `grpc`) and both spellings (`backendRefs`, the deprecated singular
+    `backendRef`) are read; a non-Service ref yields no edge, as for routes.
+    """
+    meta = doc.get("metadata", {}) or {}
+    pol_ns = meta.get("namespace")
+    ext = ((doc.get("spec", {}) or {}).get("extAuth") or {})
+    out = []
+    for flavour in ("http", "grpc"):
+        svc = ext.get(flavour) or {}
+        refs = list(svc.get("backendRefs") or [])
+        if svc.get("backendRef"):
+            refs.append(svc["backendRef"])
+        for ref in refs:
+            if (ref.get("group") or "") != "" or (ref.get("kind") or "Service") != "Service":
+                continue
+            ns = ref.get("namespace") or pol_ns
+            if ns and ref.get("name"):
+                out.append((ns, ref["name"], ref.get("port")))
+    return out
+
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
 
@@ -309,6 +338,18 @@ def self_test() -> int:
     case("httproute backendRefs resolve namespace and skip non-Service kinds",
          httproute_backends(route),
          [("pact-broker", "pact-broker", 9292), ("other", "x", 80)])
+
+    # extAuth backends (ADR-0324 Phase 2): the proxy dials the auth service itself.
+    sp = {"kind": "SecurityPolicy", "metadata": {"namespace": "observability"}, "spec": {
+        "extAuth": {"http": {"backendRefs": [
+            {"name": "admin-ui", "namespace": "admin-ui", "port": 3000},
+            {"group": "gateway.envoyproxy.io", "kind": "Backend", "name": "ext"},
+        ]}, "grpc": {"backendRef": {"name": "authz", "port": 9000}}}}}
+    case("securitypolicy extAuth backends resolve namespace, read both flavours, skip non-Service",
+         securitypolicy_extauth_backends(sp),
+         [("admin-ui", "admin-ui", 3000), ("observability", "authz", 9000)])
+    case("a SecurityPolicy with no extAuth (e.g. CORS only) names no backend",
+         securitypolicy_extauth_backends({"kind": "SecurityPolicy", "spec": {"cors": {}}}), [])
 
     # The datastore-port convention: these names mark ports that must NOT be opened to the
     # whole namespace. An empty set here would quietly widen every policy that consults it.
@@ -530,6 +571,10 @@ def main():
 
         elif kind == "HTTPRoute" and ns:
             for bns, svc, port in httproute_backends(doc):
+                gateway_backends[(bns, svc)].add(port)
+
+        elif kind == "SecurityPolicy" and ns:
+            for bns, svc, port in securitypolicy_extauth_backends(doc):
                 gateway_backends[(bns, svc)].add(port)
 
         elif kind == "HTTPScaledObject" and ns:
