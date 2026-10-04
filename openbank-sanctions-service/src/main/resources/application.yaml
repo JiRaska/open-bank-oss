@@ -141,6 +141,11 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  # First-request warm-up (#11890, libs-runtime StartupWarmup): the unauthenticated self-call
+  # hits a real @RolesAllowed endpoint, so the 401 path runs the same security filters a
+  # customer request does.
+  warmup:
+    protected-path: /api/v1/sanctions/pending
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:

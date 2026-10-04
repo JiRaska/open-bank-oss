@@ -65,6 +65,7 @@ Trust boundaries:
 | S-2 | Attacker replays a captured customer token | Short `accessTokenLifespan: 300s`. Keycloak session binding. Token revocation via `revokeRefreshToken: true`. | Low |
 | S-3 | Attacker presents operator-realm token to customer edge | Quarkus OIDC validates `iss` = `openbank-customers` realm only. Cross-realm token rejected with 401. | Negligible |
 | S-4 | Attacker spoofs `X-Customer-Party-Id` header to upstream | Header is set by the edge from the validated JWT — never from the request. Upstream services never read this header from untrusted clients (only from the M2M token's ROLE_OPERATOR caller). | Low |
+| S-5 | Customer sends `x-openbank-synthetic: true` so their real activity is tainted and drops out of FINREP/COREP, the ledger's real-only scope and analytics (ADR-0252) | The edge's `SyntheticTaintRequestFilter` honours the header only for a principal listed in `openbank.synthetic.trusted-principals` (empty by default) and treats every other claim as real. `UpstreamClient.upstreamRequest()` forwards only that inbound decision, never the client's header, so an untrusted claim cannot reach any upstream. Proven by `UpstreamClientSyntheticTaintTest`. | Low — the trust list is the whole control; adding a principal to it is a reviewed config change |
 
 ### 3.2 Tampering
 
@@ -74,6 +75,7 @@ Trust boundaries:
 | T-2 | Attacker injects `partyId` in `POST /onboarding/account` body to open account for another party | `partyId` is taken from JWT `party_id` claim, not from request body. Request-body `partyId` field is ignored and replaced. | Negligible — by design |
 | T-3 | Attacker modifies upstream response body | In-cluster mTLS. Response is passed through unmodified; no integrity checks on response body (acceptable — response content is the service's responsibility). | Medium — no response signing |
 | T-4 | Attacker injects `partyId` in `POST /sca/challenges` body to raise a challenge for another party | `partyId` is injected from the JWT `party_id` claim (edge appends it to the body); any client-supplied value is overridden (last-key-wins). Same pattern as T-2 / device enrolment. | Negligible — by design |
+| T-5 | Customer labels their own declared holding as an expert appraisal or market reference, so net worth presents an unchecked figure as a verified one (#11966) | `CustomerHoldingsResource` builds the upstream valuation itself and always sets `source = CUSTOMER_DECLARED`; any `source`, `appraiserReference` or `ownerPartyId` in the body is dropped. A customer revaluation of an appraised holding therefore downgrades its label. Proven by `CustomerHoldingsResourceTest`. | Negligible — by design |
 
 ### 3.3 Repudiation
 
@@ -114,6 +116,7 @@ Trust boundaries:
 | E-7 | Under `X-Acting-For` (ADR-0284 D4) one mandate holder approves, or is credited with, another's SCA — or the approval is attributable only to the company | Every SCA route binds to the token's HUMAN, never the acting-for entity: `POST /sca/challenges` injects the human's `partyId`, `/sca/pending` lists the human's challenges, device enrolment accepts only the human's `partyId`, `POST /sca/challenges/{id}/decision` is forwarded and audited (`SCA_DECISION_RECORDED.partyId`) as the human with `actingForPartyId` as context, and the payment/card `consume` expects the human. `X-Acting-For` is still verified first by `ActingForResolver`, fail-closed 403 (`ScaActingForBindingTest`). | Medium — devices already enrolled to an ENTITY party before this change can still approve entity-bound challenges in sca-service, and neither the mandate's `authority` (SOLE/JOINT) nor `requiredSignatures` is enforced on a business payment yet (#10281). |
 
 | E-8 | A JOINT representative moves company money alone, a co-signature is replayed onto another instruction, the initiator counts twice, or a held payment reaches the rail twice (#10281) | With `openbank.edge.business-approvals.enforce` on, every payment POST under `X-Acting-For` (domestic, SEPA, SCT Inst, SWIFT) asks delegation-service to evaluate the entity's signing policy first. When it needs more than one signature, the initiator's SCA is consumed (amount/currency/creditor-linked), an approval request carries the frozen rail body, and the edge answers 202 without calling the rail. If the policy cannot be evaluated, the edge refuses with 503 and does not fall back to one signature. `required == 1` is byte-identical to before (`BusinessPaymentSingleSignatureRegressionTest`). The signer is always the token's human, and a consume whose recorded decider is someone else is refused. Signing consumes an APPROVAL challenge linked to approvalId + payloadSha256 (+ amount/currency/creditor for a payment). A payment's initiator cannot co-sign, nobody signs twice, and a policy or payee change takes no co-signature until its initiator has signed it (AWAITING_INITIATOR). Release takes a single-use claim and calls the rail once, with `Idempotency-Key` = approval id. A lost claim never reaches the rail, and a rail refusal is reported as RELEASE_FAILED. The rail URL comes from a closed enum, never from the payload. | Medium: the hold is OFF by default until delegation-service serves the signing API. While it is off, a JOINT mandate is still enforceable only by policy, as before. The edge relies on delegation-service's live mandate re-check and its compare-and-set release claim. |
+| E-9 | Customer reads, revalues or withdraws ANOTHER party's declared holding by guessing or replaying its id (#11966) | wealth-service acts on a holding id alone and trusts its M2M caller, so the edge enforces ownership: every `/customer/v1/holdings/{holdingId}` route first reads the holding and answers 404 unless `ownerPartyId` equals the caller's resolved party (token claim, merge-followed, verified `X-Acting-For`). An unknown id, a malformed id and another party's id give the same 404, and nothing is written in any of them. Only the canonical UUID goes upstream. Upstream error bodies are never forwarded (one names the pledging loan). Proven by `CustomerHoldingsResourceTest`; removing the ownership check fails it. | Low — enforced by the edge only; a direct M2M caller bypasses it, the same class as the open risk on account/balance-service below |
 ---
 
 ## 4. Open Risks (pre-GA gate)
@@ -150,6 +153,14 @@ Trust boundaries:
 | Mobile certificate pinning | 🔲 ADR-0064 Phase F2 |
 
 ## 6. Change log
+
+- **2026-10-04** — **Synthetic taint survives the edge (ADR-0252 phase 1, #4348).** `UpstreamClient` builds every upstream request through `upstreamRequest()`, which forwards the edge's own trusted taint decision as `x-openbank-synthetic`. Before this the marker died at the edge, so a canary customer would have been real to every service behind it. New threat S-5.
+
+- **2026-10-03** — **Declared holdings write routes (#11966, ADR-0301 D1).** New customer routes
+  `/customer/v1/holdings` (list, declare, read, revalue, withdraw, valuation history) proxying
+  wealth-service over the existing edge→wealth call path that `GET /net-worth` already uses, so no
+  network policy changes. New threats T-5 (valuation-source tampering) and E-9 (cross-party access by
+  id). Routing behind the customer realm is proven over real HTTP by `CustomerHoldingsRoutingIT`.
 
 - **2026-09-21** — Standing orders and SDD mandates follow the business signing policy (#10281,
   ADR-0312 addendum). `POST /customer/v1/standing-orders` and `POST /customer/v1/sdd/mandates`

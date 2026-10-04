@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.infrastructure.scheduler
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
@@ -17,7 +18,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.Duration
-import java.time.LocalDate
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -67,7 +67,7 @@ class NostroBreakScheduler(
     )
     suspend fun run() {
         if (!enabled) return
-        runCatching { breaks.sweep(LocalDate.now(clock)) }
+        runCatching { breaks.sweep(AccountingClock.bank(clock).today()) }
             .onSuccess { r ->
                 openCount.set(r.open.toDouble())
                 agedCount.set(r.aged.toDouble())

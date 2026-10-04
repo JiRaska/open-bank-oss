@@ -130,6 +130,7 @@ Unified via `openbank-libs` `ApiError` (`correlationId`, `status`, `code`, `mess
 | HTTP | code | When |
 |---|---|---|
 | 400 | (bad request) | blank `Idempotency-Key`, invalid enum value |
+| 400 | `CURRENCY_NOT_ALLOWED` | create only (#11931): `currency` is a valid ISO 4217 code but not `EUR`. SCT is a euro-only scheme (ISO 20022 equivalent reason `AM03` NotAllowedCurrency), so `USD`, `CZK`, `GBP` and every other non-EUR currency are refused after the `Money` check and before the Idempotency-Key is reserved — nothing is persisted, screened or emitted, and the key stays free. `violations[]` names `currency`; the rejected value is not echoed. `eur` is normalised to `EUR`. |
 | 401 | unauthorized | missing / invalid token |
 | 403 | forbidden | role missing, or OPA deny (enforce mode) |
 | 404 | `NOT_FOUND` | payment id does not exist (`SepaPaymentNotFoundMapper`) |

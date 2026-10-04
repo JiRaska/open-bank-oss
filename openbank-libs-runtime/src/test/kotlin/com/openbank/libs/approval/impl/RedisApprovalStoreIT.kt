@@ -5,12 +5,14 @@
 package com.openbank.libs.approval.impl
 
 import com.openbank.libs.approval.ApprovalStatus
+import com.openbank.libs.approval.ApprovalStore
+import com.openbank.libs.approval.ApprovalStoreContractTest
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.InvalidApprovalStateException
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.mockk.every
 import io.mockk.mockk
 import io.quarkus.redis.datasource.ReactiveRedisDataSource
-import io.quarkus.redis.datasource.value.ReactiveValueCommands
 import io.quarkus.redis.runtime.datasource.ReactiveRedisDataSourceImpl
 import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -40,24 +42,38 @@ import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * Runs the REAL [RedisApprovalStore] — and its compare-and-set Lua script — against a real Valkey.
+ * The production [ApprovalStore] bound to the shared contract (#3349), against a REAL Valkey — the
+ * image the fleet's service test resources use — so the Lua scripts that make every transition
+ * atomic are what is under test, not a Kotlin imitation of them.
  *
- * The race tests do not rely on scheduling luck: [readBarrier] holds every racer's GET until all
- * [RACE] of them have read the same snapshot, which is exactly the interleaving a check-then-SET
- * store cannot survive. Measured negative case (2026-10-01): against the pre-CAS store (GET, check
- * status in Kotlin, unconditional `SET ... EX`) three tests here go red — 8 of 8 racing consumers
- * spent one approval, 2 of 8 racing checkers were each told their (contradictory) decision was
- * recorded, and a write after expiry resurrected the evicted approval.
+ * `RedisApprovalStore.decide` refusing `decidedBy == makerId` is the fleet-wide enforcement point
+ * for segregation of duties on a four-eyes action, and the contract's self-approval cases are what
+ * make deleting it go red here.
+ *
+ * Without Docker this class is skipped locally, and FAILS when `CI=true`: a skipped run of the only
+ * test of these invariants must not read as a pass where it matters.
+ *
+ * Negative cases, measured on the previous GET-then-SET implementation against this container:
+ * 3 of 5 concurrent `markExecuted` calls succeeded, an approve racing a reject both succeeded, and a
+ * second service's store listed and decided the first service's approval.
+ *
+ * The race tests below (from #11770) do not rely on scheduling luck: [writeBarrier] holds every
+ * racer's first write until all [RACE] of them have finished reading, which is exactly the
+ * interleaving a check-then-write store cannot survive. Measured against the pre-CAS store: 8 of 8
+ * racing consumers spent one approval, 2 of 8 racing checkers were each told their (contradictory)
+ * decision was recorded, and a write after expiry resurrected the evicted approval.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-class RedisApprovalStoreIT {
+class RedisApprovalStoreIT : ApprovalStoreContractTest() {
 
     private val valkey: GenericContainer<*> = GenericContainer(DockerImageName.parse("valkey/valkey:7.2-alpine"))
         .withExposedPorts(6379)
 
     @BeforeAll
     fun start() {
-        assumeTrue(DockerClientFactory.instance().isDockerAvailable, "Docker is required for this IT")
+        val docker = DockerClientFactory.instance().isDockerAvailable
+        check(docker || System.getenv("CI") != "true") { "Docker is required for RedisApprovalStoreIT in CI" }
+        assumeTrue(docker, "Docker is required for this IT")
         valkey.start()
     }
 
@@ -73,14 +89,12 @@ class RedisApprovalStoreIT {
     }
     private val ds by lazy { ReactiveRedisDataSourceImpl(vertx, client, RedisAPI.api(client)) }
     private val clock = Clock.fixed(Instant.parse("2026-10-01T10:00:00Z"), ZoneOffset.UTC)
-    private val store by lazy { RedisApprovalStore(ds, clock) }
 
-    private companion object {
-        const val RACE = 8
-    }
+    override fun newStore(namespace: String, maxPendingPerMakerAction: Int): ApprovalStore =
+        RedisApprovalStore(ds, clock, namespace, maxPendingPerMakerAction)
 
     @BeforeEach
-    fun flush(): Unit = runBlocking { ds.execute("FLUSHALL").awaitSuspending() }
+    fun flush(): Unit = runBlocking { cmd("FLUSHALL") }
 
     @AfterAll
     fun close() {
@@ -89,31 +103,106 @@ class RedisApprovalStoreIT {
         valkey.stop()
     }
 
-    private suspend fun ttl(id: String) = ds.execute("TTL", "approval:$id").awaitSuspending()!!.toLong()
+    private suspend fun cmd(vararg args: String): String? =
+        ds.execute(args[0], *args.drop(1).toTypedArray()).awaitSuspending()?.toString()
+
+    @Test
+    fun `records live under the service namespace with the approval TTL, and findPending reads the index`(): Unit =
+        runBlocking {
+            val store = newStore(namespace = "openbank-interest-service")
+            val pending = store.create("interest.create", null, "maker-1", ttlSeconds = 600)
+
+            assertThat(cmd("TYPE", "approval-v2:openbank-interest-service:${pending.id}")).isEqualTo("hash")
+            assertThat(cmd("TTL", "approval-v2:openbank-interest-service:${pending.id}")!!.toLong()).isBetween(1L, 600L)
+            assertThat(cmd("ZCARD", "approval-v2:openbank-interest-service:pending")).isEqualTo("1")
+            assertThat(cmd("EXISTS", "approval:${pending.id}")).isEqualTo("0")
+
+            // A value planted outside the index is not listed: nothing scans the keyspace any more.
+            cmd("HSET", "approval-v2:openbank-interest-service:planted", "status", "PENDING")
+            assertThat(store.findPending(100).map { it.id }).containsExactly(pending.id)
+        }
+
+    @Test
+    fun `a decided approval leaves the pending index`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create("interest.create", null, "maker-1")
+        store.decide(pending.id, "checker-1", approve = true)
+
+        assertThat(store.findPending(100)).isEmpty()
+        assertThat(cmd("ZCARD", "approval-v2:svc-a:pending")).isEqualTo("0")
+    }
+
+    @Test
+    fun `verified maker kind survives the hash and decision transitions`(): Unit = runBlocking {
+        val store = newStore()
+        val pending = store.create("agent.propose", "case-1", "agent:reviewer", makerActorKind = MakerActorKind.AI_AGENT)
+
+        assertThat(cmd("HGET", "approval-v2:svc-a:${pending.id}", "actorKind")).isEqualTo("AI_AGENT")
+        assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.findPending(100).single().makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.decide(pending.id, "checker-1", approve = true)?.makerActorKind)
+            .isEqualTo(MakerActorKind.AI_AGENT)
+        assertThat(store.markExecuted(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)
+    }
+
+    @Test
+    fun `a record in the previous layout is found, decided and consumed by id, without a binding`(): Unit =
+        runBlocking {
+            val store = newStore()
+            val id = "0199a000-0000-7000-8000-000000000001"
+            cmd("SET", "approval:$id", "savings.withdraw.execute|p-1|maker-1|PENDING|2026-10-01T09:00Z||", "EX", "3600")
+
+            assertThat(store.find(id)?.status).isEqualTo(ApprovalStatus.PENDING)
+            assertThat(store.find(id)?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+            assertThat(store.findPending(100)).`as`("previous-layout records are not listed").isEmpty()
+
+            val decided = store.decide(id, "checker-1", approve = true)
+            assertThat(decided?.status).isEqualTo(ApprovalStatus.APPROVED)
+            assertThat(decided?.requestFingerprint).isNull()
+            assertThat(decided?.makerActorKind).isEqualTo(MakerActorKind.UNKNOWN)
+            assertThat(cmd("EXISTS", "approval:$id")).isEqualTo("0")
+            assertThat(cmd("TTL", "approval-v2:svc-a:$id")!!.toLong()).isPositive()
+
+            assertThat(store.markExecuted(id)?.status).isEqualTo(ApprovalStatus.EXECUTED)
+        }
+
+    @Test
+    fun `an id that is not an approval id is never looked up`(): Unit = runBlocking {
+        val store = newStore()
+        store.create("interest.create", null, "maker-1")
+
+        assertThat(store.find("pending")).isNull()
+        assertThat(store.find("*")).isNull()
+        assertThat(store.decide("pending", "checker-1", approve = true)).isNull()
+    }
+
+    /** The default-namespace store the #11770 cases below run against. */
+    private val store by lazy { newStore() }
+
+    private suspend fun ttl(id: String) = ds.execute("TTL", "$NS_KEY$id").awaitSuspending()!!.toLong()
 
     /**
-     * A data source whose `GET` only completes once [parties] callers have issued one — forcing
-     * every racer to read the same pre-transition record before any of them writes.
+     * A data source whose first write command per racer (the `EVAL` of a transition script, or the
+     * `SET`/`HSET` of a read-then-write implementation) only proceeds once [parties] callers have
+     * issued one — forcing every racer to finish reading the pre-transition record before any of
+     * them writes. Reads pass straight through.
      */
-    private fun readBarrier(parties: Int): ReactiveRedisDataSource {
-        val actual = ds.value(String::class.java)
+    private fun writeBarrier(parties: Int): ReactiveRedisDataSource {
         val arrived = AtomicInteger()
         val gate = CompletableFuture<Unit>()
-        val values = mockk<ReactiveValueCommands<String, String>>()
-        every { values.get(any()) } answers {
-            val key = firstArg<String>()
-            if (arrived.incrementAndGet() >= parties) gate.complete(Unit)
-            actual.get(key).call { _ -> Uni.createFrom().completionStage(gate) }
-        }
-        every { values.set(any<String>(), any<String>(), any()) } answers {
-            actual.set(firstArg<String>(), secondArg<String>(), thirdArg())
-        }
         val wrapped = mockk<ReactiveRedisDataSource>()
-        every { wrapped.value(String::class.java) } returns values
+        every { wrapped.hash(String::class.java) } returns ds.hash(String::class.java)
+        every { wrapped.value(String::class.java) } returns ds.value(String::class.java)
         every { wrapped.key(String::class.java) } returns ds.key(String::class.java)
         every { wrapped.execute(any<String>(), *anyVararg()) } answers {
-            @Suppress("UNCHECKED_CAST")
-            ds.execute(firstArg<String>(), *(secondArg<Array<String>>()))
+            val command = firstArg<String>()
+            val args = secondArg<Array<String>>()
+            if (command in WRITES && !gate.isDone) {
+                if (arrived.incrementAndGet() >= parties) gate.complete(Unit)
+                Uni.createFrom().completionStage(gate).chain { _ -> ds.execute(command, *args) }
+            } else {
+                ds.execute(command, *args)
+            }
         }
         return wrapped
     }
@@ -170,13 +259,14 @@ class RedisApprovalStoreIT {
     fun `an unknown or expired approval is null and is never recreated`(): Unit = runBlocking {
         assertThat(store.decide("missing", "checker", approve = true)).isNull()
         assertThat(store.markExecuted("missing")).isNull()
+        assertThat(ds.execute("EXISTS", "${NS_KEY}missing").awaitSuspending()!!.toInteger()).isZero()
         assertThat(ds.execute("EXISTS", "approval:missing").awaitSuspending()!!.toInteger()).isZero()
     }
 
     @Test
     fun `racing checkers - exactly one decision is acknowledged and it is the one stored`(): Unit = runBlocking {
         val created = store.create("ledger.post", "acc-1", "maker")
-        val racing = RedisApprovalStore(readBarrier(RACE), clock)
+        val racing = RedisApprovalStore(writeBarrier(RACE), clock, NS, POOL_LIMIT)
 
         val outcomes = (1..RACE).map { i ->
             async(Dispatchers.IO) { runCatching { racing.decide(created.id, "checker-$i", approve = i % 2 == 0) } }
@@ -194,7 +284,7 @@ class RedisApprovalStoreIT {
     fun `racing consumers - an approval is spent exactly once`(): Unit = runBlocking {
         val created = store.create("ledger.post", "acc-1", "maker")
         store.decide(created.id, "checker", approve = true)
-        val racing = RedisApprovalStore(readBarrier(RACE), clock)
+        val racing = RedisApprovalStore(writeBarrier(RACE), clock, NS, POOL_LIMIT)
 
         val outcomes = (1..RACE).map {
             async(Dispatchers.IO) { runCatching { racing.markExecuted(created.id) } }
@@ -214,18 +304,33 @@ class RedisApprovalStoreIT {
             if (approved) store.decide(created.id, "checker", approve = true)
             // Evict between the store's GET and its write — the TTL-expiry window.
             val evicting = mockk<ReactiveRedisDataSource>()
+            every { evicting.hash(String::class.java) } returns ds.hash(String::class.java)
             every { evicting.value(String::class.java) } returns ds.value(String::class.java)
             every { evicting.key(String::class.java) } returns ds.key(String::class.java)
             every { evicting.execute(any<String>(), *anyVararg()) } answers {
+                val command = firstArg<String>()
                 val argv = secondArg<Array<String>>()
-                ds.execute("DEL", argv[2]).chain { _ -> ds.execute(firstArg<String>(), *argv) }
+                // EVAL <script> <numkeys> <item key> ...: delete the item just before the write.
+                if (command == "EVAL") {
+                    ds.execute("DEL", argv[2]).chain { _ -> ds.execute(command, *argv) }
+                } else {
+                    ds.execute(command, *argv)
+                }
             }
-            val late = RedisApprovalStore(evicting, clock)
+            val late = RedisApprovalStore(evicting, clock, NS, POOL_LIMIT)
 
             val result = if (approved) late.markExecuted(created.id) else late.decide(created.id, "checker", true)
 
             assertThat(result).isNull()
             assertThat(store.find(created.id)).isNull()
         }
+    }
+
+    private companion object {
+        const val RACE = 8
+        const val NS = "svc-a"
+        const val NS_KEY = "approval-v2:$NS:"
+        const val POOL_LIMIT = 20
+        val WRITES = setOf("EVAL", "EVALSHA", "SET", "HSET")
     }
 }

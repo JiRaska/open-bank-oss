@@ -16,6 +16,24 @@ erDiagram
     timestamptz created_at "DEFAULT NOW(), immutable"
     timestamptz updated_at "DEFAULT NOW(), bumped on every transition"
   }
+  SETTLEMENT_OPERATOR_APPROVALS {
+    uuid id PK "approval id returned in the 202 body"
+    text action "settlement.create"
+    text maker_id "operator who parked the request"
+    varchar status "PENDING|APPROVED|REJECTED|EXECUTED"
+    timestamptz expires_at "authorization deadline"
+    text decided_by "checker, never the maker (CHECK)"
+    timestamptz claimed_at "set once when the approved retry executes"
+    varchar request_fingerprint "SHA-256 of the exact bound request"
+    varchar summary "redacted rendering shown to the checker"
+  }
+  SETTLEMENT_OUTBOX {
+    bigint id PK
+    uuid aggregate_id "settlement or approval id"
+    varchar event_type "SETTLEMENT_STATE_CHANGED or SETTLEMENT_OPERATOR_APPROVAL_CHANGED"
+    uuid settlement_ref FK "generated, set only for state events"
+  }
+  SETTLEMENTS ||--o{ SETTLEMENT_OUTBOX : "state events"
 ```
 
 `status` and `updated_at` are the only mutable columns — the rest of the row is `updatable = false` in `SettlementEntity`, because a settlement's parties and amount are fixed at creation and only its lifecycle moves.
@@ -31,6 +49,7 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start=true`). **
 | Script | What it does | Rollback note |
 |---|---|---|
 | `V1__create_settlements.sql` | Table `settlements`: application-assigned UUID PK, payer/payee account ids, `NUMERIC(19,4)` amount, ISO-4217 currency, lifecycle `status`, `created_at`/`updated_at` with `DEFAULT NOW()` | `DROP TABLE settlements;` — the table is standalone (no FKs in either direction, no sequences, no dependent views), so the drop is complete and needs no ordering. Destroys all settlement history: take a logical dump first (`pg_dump -t settlements`), because the settlement rows are the only record of which payment legs were booked, and the 7-year `retentionPolicy` applies to them. |
+| `V6__durable_operator_approvals.sql` | Table `settlement_operator_approvals` (durable four-eyes approvals, request binding, pending/maker/retention indexes); `settlement_outbox` gains the generated `settlement_ref` FK and an event-type CHECK, and drops the plain `aggregate_id` FK so approval events can be stored | Do **not** drop: the table and its outbox events are authorisation evidence. Roll back by setting `AUTHZ_FOUR_EYES_ENFORCE=false` and letting live approvals expire. Old pods claim outbox rows with `RETURNING *`, so pause their dispatch before migrating. |
 
 ## Indexes
 
@@ -41,10 +60,38 @@ Flyway, immutable historical scripts, forward-only (`migrate-at-start=true`). **
 | Table | Retention | Reason |
 |---|---|---|
 | `settlements` | 7 years (declared `retentionPolicy`) | payment-record retention; the row is the evidence that a settlement leg was booked |
+| `settlement_operator_approvals` | 1826 days after `expires_at` (`openbank.settlement.approval-retention-days`) | authorisation evidence (AMLD Art. 40); deleted daily by `OperatorApprovalPurgeScheduler` in bounded batches, any status once expired; a live approval never matches |
+| `settlement_outbox` approval events | not purged | the retained evidence of maker, checker and claim after the approval row is gone |
 
 `evidenceExported: true` in `governance.yaml` — settlement lifecycle events are exported as audit evidence to `audit-service` over Kafka.
 
-> There is **no outbox table** in this schema. The service publishes its audit events directly rather than through a transactional outbox (ADR-0050), so a status transition and its event are not committed atomically: a crash between the two loses the event with no retry, and nothing reports it. Settlement's orchestration runs on Temporal (`SettlementWorkflow`), which covers workflow-level retries but not this specific dual-write window.
+> State transitions and their events commit **atomically** through the `settlement_outbox` transactional outbox (`SettlementAuditWriter`, dispatched by `SettlementOutboxDispatcher` to `openbank.settlement.events`). The same outbox carries `SETTLEMENT_OPERATOR_APPROVAL_CHANGED`, written in the transaction of every approval transition.
+
+## Operator approvals (four-eyes)
+
+`settlement.create` is in `rules.yaml` `four_eyes.actions`. With `AUTHZ_FOUR_EYES_ENFORCE=true` (default `false`) the interceptor parks an operator's `POST /api/v1/settlements` with **202** and a PENDING row in `settlement_operator_approvals`, bound to the exact instruction by `request_fingerprint`; nothing is created. A different operator reads `GET /api/v1/settlements/approvals` (queue) or `GET /api/v1/settlements/approvals/{id}` (any status, with the `summary`) and decides with `PATCH /api/v1/settlements/approvals/{id}`. The maker repeats the identical request with `X-Approval-Id`; it executes once. A changed instruction is parked again. Each transition writes a `SETTLEMENT_OPERATOR_APPROVAL_CHANGED` outbox event.
+
+Reading and deciding the queue is **human-operator only**: the OPA policy denies every `service-account-*` principal on `settlement.approval.*`, and `settlement.create` is no longer granted to service accounts.
+
+```mermaid
+sequenceDiagram
+  participant M as Maker (operator)
+  participant S as settlement-service
+  participant C as Checker (operator)
+  M->>S: POST /api/v1/settlements
+  S-->>M: 202 approvalId (PENDING, nothing created)
+  C->>S: GET /api/v1/settlements/approvals/{id}
+  C->>S: PATCH /api/v1/settlements/approvals/{id} approve=true
+  S-->>C: 200 APPROVED
+  M->>S: POST /api/v1/settlements with X-Approval-Id
+  S-->>M: 201 settlement (approval EXECUTED, single use)
+  M->>S: GET /api/v1/settlements/{id}
+  S-->>M: 200 persisted status (read-only, no-store)
+```
+
+### Settlement status query
+
+`GET /api/v1/settlements/{id}` returns the persisted settlement for reconciliation and never starts, resumes or retries the workflow. It uses the same v1 status vocabulary as origination: only `BOOKED` confirms completion, and an uncertain balance movement reads as `PENDING` with `recoveryRequired=true` (`recoveryReason=BALANCE_STATE_UNKNOWN`). `amount` is exact decimal text and the response is `Cache-Control: no-store`. Access is `ROLE_OPERATOR`/`ROLE_ADMIN` plus OPA `settlement.read` (shared `operator-read-any`); any `service-account-*` principal is refused with 403 by the resource. A malformed id is 400, an unknown one 404, and a 404 does not prove that a timed-out origination had no effect. Use the transfer id from the origination response, not an `approvalId`. The admin UI exposes it at `/settlements` (`settlements:view`).
 
 ## PII fields (GDPR)
 

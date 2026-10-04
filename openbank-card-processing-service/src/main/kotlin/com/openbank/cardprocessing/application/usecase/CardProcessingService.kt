@@ -13,10 +13,13 @@ import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.CardProcessingMetricsPort
+import com.openbank.cardprocessing.application.port.out.DuplicateClearingException
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.application.port.out.LedgerPostingPort
 import com.openbank.cardprocessing.application.port.out.PostingOutcome
+import com.openbank.cardprocessing.application.port.out.RecordedClearing
+import com.openbank.cardprocessing.application.port.out.StaleAuthorizationException
 import com.openbank.cardprocessing.domain.event.CardAuthorised
 import com.openbank.cardprocessing.domain.event.CardCleared
 import com.openbank.cardprocessing.domain.event.CardDeclined
@@ -29,7 +32,12 @@ import com.openbank.cardprocessing.domain.model.PresentmentOutcome
 import com.openbank.cardprocessing.domain.model.PresentmentRefusal
 import com.openbank.cardprocessing.domain.model.SpendWindow
 import com.openbank.cardprocessing.domain.policy.AuthorizationLifecycle
+import com.openbank.libs.domain.cards.scheme.MerchantDataPort
+import com.openbank.libs.domain.cards.scheme.MerchantDescriptor
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
+import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -77,6 +85,7 @@ class CardProcessingService(
     private val issuerPolicy: CardIssuancePolicyPort,
     private val ledger: LedgerPostingPort,
     private val fraud: FraudScoringPort,
+    private val merchants: MerchantDataPort,
     private val metrics: CardProcessingMetricsPort,
     private val mapper: ObjectMapper,
     private val clock: Clock,
@@ -96,7 +105,7 @@ class CardProcessingService(
         }
 
         val decision = decide(command)
-        val authorization = record(command, ownership, decision)
+        val authorization = record(command, ownership, decision, resolveMerchantName(command))
         val saved = repository.save(
             authorization,
             outboxMessage(authorization.id, eventTypeFor(authorization), eventFor(authorization)),
@@ -141,10 +150,35 @@ class CardProcessingService(
         counted = counted,
     )
 
+    /**
+     * Asks the configured card network what the acquirer's descriptor actually names (ADR-0283 D1).
+     *
+     * **Fails open, on purpose.** A merchant name is what the customer reads on a statement, not a
+     * control: if the network cannot answer, the raw descriptor is kept and the authorisation
+     * proceeds unchanged. The opposite choice would let a third-party lookup decline a card
+     * transaction, which is the reverse of the issuer call's fail-CLOSED and for the reverse reason
+     * — that one authorises, this one only labels.
+     *
+     * Nothing is called when the acquirer sent no descriptor: there is nothing to resolve, and a
+     * lookup on an empty string is a request that can only fail.
+     */
+    private suspend fun resolveMerchantName(command: AuthorizationCommand): String? {
+        val descriptor = command.merchantName?.takeIf { it.isNotBlank() } ?: return null
+        val resolved = merchants.identify(
+            MerchantDescriptor(
+                descriptor = descriptor,
+                mcc = command.mcc,
+                countryCode = command.merchantCountry,
+            ),
+        )
+        return resolved.valueOrNull()?.name ?: descriptor
+    }
+
     private fun record(
         command: AuthorizationCommand,
         ownership: CardOwnership,
         decision: IssuerDecision,
+        merchantName: String?,
     ): CardAuthorization {
         val now = Instant.now(clock)
         return CardAuthorization(
@@ -159,7 +193,7 @@ class CardProcessingService(
             currencyCode = command.currencyCode.uppercase(),
             channel = command.channel,
             mcc = command.mcc,
-            merchantName = command.merchantName,
+            merchantName = merchantName,
             merchantCountry = command.merchantCountry,
             status = if (decision.approved) AuthorizationStatus.APPROVED else AuthorizationStatus.DECLINED,
             category = decision.category,
@@ -206,7 +240,48 @@ class CardProcessingService(
         )
     }
 
+    /**
+     * Applies a clearing presentment **once per clearing key**.
+     *
+     * The acquirer retries, and a network can deliver one presentment twice. Before this guard the
+     * key was carried but never looked up, so a repeat that still fitted inside the remaining hold
+     * was applied again: a second hold decrement and a second debit of the cardholder, with only
+     * the ledger posting (keyed `card-clearing:<key>`) deduplicated downstream.
+     *
+     * - Same key, same amount and currency: the first result is replayed — nothing is re-applied,
+     *   no second event, no second ledger posting.
+     * - Same key, different body: [IdempotencyKeyReusedException], which libs-runtime maps to
+     *   409 `IDEMPOTENCY_KEY_REUSED` — the fleet's answer, the same as every other rail.
+     * - Two concurrent duplicates: both miss the lookup, and the database decides. The UNIQUE
+     *   constraint on `(authorization_id, idempotency_key)` lets exactly one commit; the loser's
+     *   transaction rolls back whole and it replays the winner.
+     *
+     * A REFUSED presentment records nothing, so a retry is evaluated afresh — refusing is not
+     * applying, and there is nothing to deduplicate.
+     *
+     * Concurrent clearings under DIFFERENT keys on one authorisation are the other race: both read
+     * the same cleared amount. The write carries the version it was computed from, so the loser
+     * gets [StaleAuthorizationException] with nothing written, and is re-evaluated once against the
+     * real remaining hold — where it is applied, replayed, or refused (e.g. exceeds the hold). If it
+     * loses again it answers 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS` (retry later). Either way it is
+     * never applied past the authorised amount, and every caller gets a definite answer.
+     */
     override suspend fun clear(command: PresentmentCommand): PresentmentOutcome {
+        repeat(WRITE_ATTEMPTS) {
+            try {
+                return clearOnce(command)
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+            }
+        }
+        throw IdempotencyRequestInProgressException()
+    }
+
+    private suspend fun clearOnce(command: PresentmentCommand): PresentmentOutcome {
+        val fingerprint = clearingFingerprint(command)
+        repository.findClearing(command.authorizationId, command.idempotencyKey)?.let {
+            return replayClearing(it, fingerprint)
+        }
         val existing = repository.findById(command.authorizationId)
             ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
         val outcome = AuthorizationLifecycle.clear(existing, command.amountMinorUnits, command.currencyCode, clock)
@@ -225,11 +300,26 @@ class CardProcessingService(
             category = cleared.category,
             occurredAt = Instant.now(clock),
         )
-        val saved = repository.save(
-            cleared,
-            outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event),
-            command.idempotencyKey,
-        )
+        val saved = try {
+            repository.saveClearing(
+                cleared,
+                outboxMessage(cleared.id, CardCleared.EVENT_TYPE, event),
+                RecordedClearing(
+                    id = Ids.newId(),
+                    authorizationId = cleared.id,
+                    idempotencyKey = command.idempotencyKey,
+                    requestFingerprint = fingerprint,
+                    amountMinorUnits = command.amountMinorUnits,
+                    currencyCode = command.currencyCode.uppercase(),
+                    appliedAt = Instant.now(clock),
+                ),
+            )
+        } catch (e: DuplicateClearingException) {
+            // Lost the race to a concurrent duplicate: our transaction rolled back whole, so the
+            // winner's row is the only one, and it is what this caller gets.
+            val winner = repository.findClearing(command.authorizationId, command.idempotencyKey) ?: throw e
+            return replayClearing(winner, fingerprint)
+        }
         metrics.presentmentApplied(fullyCleared)
 
         // Deliberately AFTER the commit, and not rolled back on failure: the clearing is a fact the
@@ -249,10 +339,43 @@ class CardProcessingService(
         return PresentmentOutcome.Accepted(saved)
     }
 
-    override suspend fun reverse(authorizationId: UUID): PresentmentOutcome {
-        val existing = repository.findById(authorizationId)
+    private suspend fun replayClearing(recorded: RecordedClearing, fingerprint: String): PresentmentOutcome {
+        if (recorded.requestFingerprint != fingerprint) throw IdempotencyKeyReusedException()
+        // The current state of the authorisation, exactly as an authorisation replay answers: the
+        // presentment is already part of it, and nothing about it is applied a second time.
+        val current = repository.findById(recorded.authorizationId)
             ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
-        return releaseHold(existing, RELEASE_KIND_REVERSAL) { AuthorizationLifecycle.reverse(it, clock) }
+        return PresentmentOutcome.Accepted(current)
+    }
+
+    /**
+     * The libs [RequestFingerprint] over what makes two presentments the same request: the
+     * authorisation (in the path), the amount and the currency. Currency is upper-cased because the
+     * domain compares it case-insensitively, so `czk` and `CZK` are one request, not a key reuse.
+     */
+    private fun clearingFingerprint(command: PresentmentCommand): String = RequestFingerprint.of(
+        "POST",
+        "/api/v1/card-authorizations/${command.authorizationId}/clearing",
+        "${command.amountMinorUnits}|${command.currencyCode.uppercase()}",
+    )
+
+    /**
+     * Releases the remaining hold. Shares the clearing's optimistic lock: a reversal computed from
+     * a snapshot a concurrent clearing has moved on is re-read and re-evaluated once (so it releases
+     * what is ACTUALLY still held, or is refused if the clearing finished it), then answers 409
+     * `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Never a 500, never an overwrite of the clearing.
+     */
+    override suspend fun reverse(authorizationId: UUID): PresentmentOutcome {
+        repeat(WRITE_ATTEMPTS) {
+            val existing = repository.findById(authorizationId)
+                ?: return PresentmentOutcome.Refused(PresentmentRefusal.NOT_HOLDING_FUNDS)
+            try {
+                return releaseHold(existing, RELEASE_KIND_REVERSAL) { AuthorizationLifecycle.reverse(it, clock) }
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+            }
+        }
+        throw IdempotencyRequestInProgressException()
     }
 
     override suspend fun findById(id: UUID): CardAuthorization? = repository.findById(id)
@@ -264,12 +387,32 @@ class CardProcessingService(
         val due = repository.findExpiredHolds(Instant.now(clock), limit)
         var released = 0
         for (authorization in due) {
-            val outcome = releaseHold(authorization, RELEASE_KIND_EXPIRY) {
-                AuthorizationLifecycle.expire(it, clock)
-            }
-            if (outcome is PresentmentOutcome.Accepted) released++
+            if (expireOne(authorization) is PresentmentOutcome.Accepted) released++
         }
         return released
+    }
+
+    /**
+     * One expiry, under the same optimistic lock as clearing: a hold a concurrent clearing touched
+     * is re-read and re-evaluated once (it may now be fully cleared and have nothing to expire);
+     * losing twice SKIPS it — the next sweep picks it up — rather than failing the whole sweep.
+     */
+    private suspend fun expireOne(snapshot: CardAuthorization): PresentmentOutcome? {
+        var current: CardAuthorization? = snapshot
+        repeat(WRITE_ATTEMPTS) {
+            val authorization = current ?: return null
+            try {
+                return releaseHold(authorization, RELEASE_KIND_EXPIRY) { AuthorizationLifecycle.expire(it, clock) }
+            } catch (_: StaleAuthorizationException) {
+                metrics.clearingConflict()
+                current = repository.findById(snapshot.id)
+            }
+        }
+        log.warnf(
+            "hold expiry for authorization %s lost two concurrent-write races; left for the next sweep",
+            snapshot.id,
+        )
+        return null
     }
 
     private suspend fun releaseHold(
@@ -319,6 +462,9 @@ class CardProcessingService(
     companion object {
         const val RELEASE_KIND_REVERSAL = "REVERSAL"
         const val RELEASE_KIND_EXPIRY = "EXPIRY"
+
+        /** The first try plus one re-evaluation after losing a concurrent-write race. */
+        private const val WRITE_ATTEMPTS = 2
 
         /** Card-issuance's own name for an MCC it has no category for. */
         const val UNMAPPED_CATEGORY = "UNMAPPED"

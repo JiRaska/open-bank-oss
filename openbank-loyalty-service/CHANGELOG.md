@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.4.0...loyalty-service-v0.4.1) (2026-10-03)
+
+
+### Performance
+
+* **loyalty,engagement,notification,aml,statement:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11754](https://github.com/JiRaska/open-bank-oss/issues/11754)) ([3c804ab](https://github.com/JiRaska/open-bank-oss/commit/3c804ab9e0ec6cb46a1d6edaa472ee552d0a61c6))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/loyalty-service-v0.3.1...loyalty-service-v0.4.0) (2026-10-02)
 
 

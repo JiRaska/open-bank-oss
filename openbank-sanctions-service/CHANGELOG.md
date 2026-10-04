@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.0...sanctions-service-v0.15.1) (2026-10-03)
+
+
+### Performance
+
+* **libs:** warm the JVM before reporting ready ([#11894](https://github.com/JiRaska/open-bank-oss/issues/11894)) ([49bf354](https://github.com/JiRaska/open-bank-oss/commit/49bf3545d95e01b14d0ffe1ede3dc827b1106667))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.14.1...sanctions-service-v0.15.0) (2026-09-29)
 
 

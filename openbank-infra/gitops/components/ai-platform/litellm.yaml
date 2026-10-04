@@ -35,7 +35,7 @@ spec:
         # would leave agent-service's repointed call failing "model not found" with a green,
         # in-sync ArgoCD — the same silent-degradation shape as an `optional: true` secret ref.
         # BUMP THIS whenever litellm-config.yaml changes; that is what rolls the pod.
-        openbank.tech/litellm-config-revision: "15"
+        openbank.tech/litellm-config-revision: "17"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -44,6 +44,34 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      initContainers:
+        # Trust bundle for the Presidio TLS edge (presidio.yaml). The image already points
+        # SSL_CERT_FILE at the system bundle, and LiteLLM uses that one file for EVERYTHING —
+        # its httpx provider client (custom_httpx/http_handler.py) and the presidio hook's bare
+        # aiohttp.ClientSession() alike. Pointing it at openbank-ca alone would therefore break the
+        # provider calls; this appends openbank-ca to the same system bundle instead, so the public
+        # roots the gateway trusts today are unchanged and exactly one private CA is added.
+        - name: ca-bundle
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-litellm:v1.99.4@sha256:06f2f9ec0d2ffb412beca44ec4338e6793d0bee7b88ac8293fa6d1804cdaaa53
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c", "cat /etc/ssl/certs/ca-certificates.crt /mnt/openbank-ca/ca.crt > /ca-bundle/ca-certificates.crt"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: openbank-ca
+              mountPath: /mnt/openbank-ca
+              readOnly: true
+            - name: ca-bundle
+              mountPath: /ca-bundle
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
       containers:
         - name: litellm
           # Our own build of upstream v1.99.4 (openbank-infra/docker/litellm), pinned by digest,
@@ -120,8 +148,20 @@ spec:
                   name: langfuse-secrets
                   key: LANGFUSE_SECRET_KEY
                   optional: true
+            # Presidio PII services (presidio.yaml) for the presidio guardrail in litellm-config.yaml.
+            # HTTPS: this edge carries the unmasked prompt, so it is TLS from openbank-ca rather than
+            # a new plaintext line in .github/asvs-l3-baseline.txt (ASVS V9.1).
+            - name: PRESIDIO_ANALYZER_API_BASE
+              value: https://presidio-analyzer.ai-platform.svc:3000
+            - name: PRESIDIO_ANONYMIZER_API_BASE
+              value: https://presidio-anonymizer.ai-platform.svc:3000
+            # System roots + openbank-ca, assembled by the ca-bundle initContainer.
+            - name: SSL_CERT_FILE
+              value: /etc/ssl/openbank/ca-certificates.crt
+            # Langfuse web (langfuse-v3.yaml) since ADR-0328 wave B; the v2 Service `langfuse`
+            # was deleted in wave C1.
             - name: LANGFUSE_HOST
-              value: http://langfuse.ai-platform.svc:3000
+              value: http://langfuse-web.ai-platform.svc:3000
             # prisma-python caches its downloaded query engine under $HOME. Without this it
             # resolves to "/" and the pod dies on
             # FileNotFoundError: '/.cache/prisma-python/binaries/...'.
@@ -145,6 +185,9 @@ spec:
               readOnly: true
             - name: tmp
               mountPath: /tmp
+            - name: ca-bundle
+              mountPath: /etc/ssl/openbank
+              readOnly: true
           resources:
             requests:
               cpu: 100m
@@ -173,6 +216,15 @@ spec:
             name: litellm-config
         # $HOME for the prisma engine cache (~90 MB downloaded on first start).
         - name: tmp
+          emptyDir: {}
+        # Only ca.crt is projected: the gateway needs the issuing CA, never Presidio's private key.
+        - name: openbank-ca
+          secret:
+            secretName: presidio-internal-tls
+            items:
+              - key: ca.crt
+                path: ca.crt
+        - name: ca-bundle
           emptyDir: {}
 ---
 apiVersion: v1

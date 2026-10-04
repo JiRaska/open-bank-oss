@@ -23,8 +23,10 @@ info:
   # with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
   # 1.12 -> 1.13 (#11642): additive — create documents 400 AMOUNT_SCALE_EXCEEDED /
   # CURRENCY_UNSUPPORTED (amount + currency are built into a kernel Money, never rounded).
-  # 1.13 -> 1.14 (#11588): additive verified makerActorKind on approval responses.
-  version: 1.14.0
+  # 1.13 -> 1.14 (#11931): additive — create documents 400 CURRENCY_NOT_ALLOWED (SCT is
+  # euro-only; any non-EUR currency is refused at the boundary).
+  # 1.14 -> 1.15 (#11588): additive verified makerActorKind on approval responses.
+  version: 1.15.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -315,7 +317,9 @@ components:
         CURRENCY_UNSUPPORTED — `currency` is not an ISO 4217 code with a minor unit (unknown codes,
         wrong length, metals such as XAU). Case and surrounding blanks are ignored (`eur` is EUR).
         VALIDATION_ERROR — any other invalid field, including an amount outside the supported
-        magnitude. Nothing is created and the Idempotency-Key is not consumed. The offending field
+        magnitude. CURRENCY_NOT_ALLOWED (#11931) — `currency` is a valid ISO 4217 code but not EUR;
+        SCT is a euro-only scheme (ISO 20022 equivalent reason AM03 NotAllowedCurrency).
+        Nothing is created and the Idempotency-Key is not consumed. The offending field
         is named in `violations[].field` and its code in `violations[].code`; the rejected value is
         never echoed.
       content:
@@ -415,6 +419,9 @@ components:
         currency:
           type: string
           example: EUR
+          description: >-
+            Must be EUR (case-insensitive) — SCT is euro-only; any other currency is a 400
+            CURRENCY_NOT_ALLOWED (#11931).
         remittanceInfo:
           type: string
         endToEndId:

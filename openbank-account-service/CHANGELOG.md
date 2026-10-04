@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.33.1](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.33.0...account-service-v0.33.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **libs:** scope idempotency keys per service and caller ([#11677](https://github.com/JiRaska/open-bank-oss/issues/11677)) ([f3a062a](https://github.com/JiRaska/open-bank-oss/commit/f3a062aba3d89a07d4a36b5118b1fda6d3012a93))
+
 ## [0.33.0](https://github.com/JiRaska/open-bank-oss/compare/account-service-v0.32.1...account-service-v0.33.0) (2026-10-02)
 
 

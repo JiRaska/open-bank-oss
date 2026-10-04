@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   backfillActions, bankToday, capEffects, cumulativeGap, ratioPercent, gapRows, isIsoDate, ladderRows, parseQuotes, parseTier1, principalNameFromToken,
+  curveSetCurrencies, curveSetLabel, formatMoney, formatTier1Input, outlierVerdict, runRequesterLabel,
 } from '@/components/balance-sheet/model'
 import { backfillPlanSchema, cashFlowsSchema, snapshotListSchema, type CurrencyLiquidity } from '@/components/balance-sheet/contracts'
 import type { BackfillRequest } from '@/components/balance-sheet/contracts'
@@ -142,5 +143,41 @@ describe('LCR / NSFR derivations', () => {
       nsfr: { asf: [], rsf: [], totalAsf: 0, totalRsf: 0, ratio: null },
     } as CurrencyLiquidity
     expect(capEffects(c)).toEqual([{ cap: 'level2', amount: 33.33 }, { cap: 'inflow', amount: 125 }])
+  })
+})
+
+describe('run and curve-set descriptions, Tier 1 formatting, outlier verdict', () => {
+  it('labels a curve set by currency, date, source and provenance — never its id', () => {
+    const label = curveSetLabel({ asOf: '2026-09-30', source: 'desk', provenance: 'synthetic', indices: ['ESTR', 'CZEONIA', 'PRIBOR_3M'] }, 'cs')
+    expect(label).toBe('CZK + EUR · k 30. 9. 2026 · desk · ukázková data')
+    expect(curveSetLabel({ asOf: '2026-09-30', source: 'ČNB', provenance: 'production', indices: ['CZEONIA'] }, 'en'))
+      .toBe('CZK · as of 30/09/2026 · ČNB · production data')
+    expect(curveSetCurrencies(['UNKNOWN', 'EURIBOR_3M'])).toEqual(['EUR'])
+  })
+
+  it('formats Tier 1 with thousands separators and leaves invalid input alone', () => {
+    expect(formatTier1Input('1250000000', 'cs').replace(/\s/g, ' ')).toBe('1 250 000 000')
+    expect(formatTier1Input('1250000000,5', 'cs').replace(/\s/g, ' ')).toBe('1 250 000 000,5')
+    expect(formatTier1Input('1250000000', 'en')).toBe('1,250,000,000')
+    expect(formatTier1Input('-5', 'cs')).toBe('-5')
+    // A formatted value parses back to the same number the engine receives.
+    expect(parseTier1(formatTier1Input('1250000000', 'cs'))).toBe('1250000000')
+  })
+
+  it('formats money with its currency', () => {
+    expect(formatMoney(1234.5, 'CZK', 'cs').replace(/\s/g, ' ')).toBe('1 234,50 Kč')
+    expect(formatMoney(-20, 'EUR', 'en')).toBe('-€20.00')
+  })
+
+  it('states the outlier verdict in words, and nothing without a ratio', () => {
+    expect(outlierVerdict(0.2, 0.15, 'cs')).toMatch(/NAD prahem 15 %.*odlehlou institucí/)
+    expect(outlierVerdict(0.05, 0.15, 'cs')).toMatch(/pod prahem 15 %: test odlehlé hodnoty .* je splněn/)
+    expect(outlierVerdict(null, 0.15, 'cs')).toBeNull()
+  })
+
+  it('describes the requester in words', () => {
+    expect(runRequesterLabel('system:risk-engine-eod-snapshot', 'cs')).toBe('plánovaný denní běh')
+    expect(runRequesterLabel('jana', 'en')).toBe('requested by jana')
+    expect(runRequesterLabel(null, 'cs')).toBe('zadavatel nezaznamenán')
   })
 })

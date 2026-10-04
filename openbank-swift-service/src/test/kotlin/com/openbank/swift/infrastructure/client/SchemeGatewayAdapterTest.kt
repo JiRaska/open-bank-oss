@@ -19,6 +19,8 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
@@ -89,16 +91,48 @@ class SchemeGatewayAdapterTest {
         adapter.submit(message(chargeCode = "SHA"))
     }
 
+    /**
+     * #11604: the pacs.008 `IntrBkSttlmAmt` is the message's Money at the currency's OWN minor
+     * unit. Main shifted every currency by a fixed two places, so 1000 JPY minor units (= 1000 yen)
+     * went out as `10.00` JPY and 1500 KWD fils (= 1.500 dinar) as `15.00` KWD.
+     */
+    @ParameterizedTest(name = "{0} {1} -> IntrBkSttlmAmt {2}")
+    @CsvSource(
+        "10000, EUR, 100.00",
+        "1000, JPY, 1000",
+        "1500, KWD, 1.500",
+        "1500, BHD, 1.500",
+    )
+    fun `pacs008 settlement amount uses the currency's own minor unit`(
+        minorUnits: Long,
+        currency: String,
+        wire: String,
+    ): Unit = runBlocking {
+        var xml = ""
+        every { client.submitCreditTransfer(any()) } answers { call ->
+            xml = call.invocation.args[0] as String
+            Uni.createFrom().item(pacs002(PaymentStatus.ACSC))
+        }
+
+        val outcome = adapter.submit(message(minorUnits = minorUnits, currency = currency))
+
+        assertThat(outcome.accepted).isTrue()
+        assertThat(xml).contains("""<IntrBkSttlmAmt Ccy="$currency">$wire</IntrBkSttlmAmt>""")
+        assertThat(outcome.rawMt).isEqualTo(xml)
+    }
+
     private fun message(
         chargeCode: String = "SHA",
         orderingCustomerAccount: String? = "DE89370400440532013000",
         orderingCustomerName: String? = "Alice",
+        minorUnits: Long = 100_00L,
+        currency: String = "EUR",
     ) = SwiftMessage(
         id = UUID.fromString("55555555-5555-5555-5555-555555555555"),
         idempotencyKey = "test", messageType = SwiftMessageType.MT103,
         senderBic = "ABCDEFGH", receiverBic = "IJKLMNOP",
         transactionReference = "TRX-001", relatedReference = null,
-        valueDate = "20260622", currency = "EUR", amountMinorUnits = 100_00L,
+        valueDate = "20260622", amount = SwiftMessage.moneyOfMinorUnits(minorUnits, currency),
         orderingCustomerAccount = orderingCustomerAccount, orderingCustomerAccountId = null,
         orderingCustomerName = orderingCustomerName,
         beneficiaryAccount = "GB33BUKB20201555555555", beneficiaryName = "Bob",

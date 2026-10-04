@@ -74,17 +74,15 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
-    fun `legacy record without a fingerprint is treated as a match`(): Unit = runBlocking {
+    fun `legacy record without a fingerprint is refused, never replayed`(): Unit = runBlocking {
         store.save("legacy", 200, """{"a":"b|c"}""")
         backing["idempotency:old"] = "201|2026-09-01T00:00Z|{\"x\":1}"
 
-        val viaNew = store.lookup("legacy", other)
-        val viaRaw = store.lookup("old", other)
-
-        assertThat(viaNew!!.requestHash).isNull()
-        assertThat(viaNew.responseBody).isEqualTo("""{"a":"b|c"}""")
-        assertThat(viaRaw!!.statusCode).isEqualTo(201)
-        assertThat(viaRaw.responseBody).isEqualTo("{\"x\":1}")
+        assertThatThrownBy { runBlocking { store.lookup("legacy", other) } }
+            .isInstanceOf(IdempotencyKeyReusedException::class.java)
+        assertThatThrownBy { runBlocking { store.lookup("old", first) } }
+            .isInstanceOf(IdempotencyKeyReusedException::class.java)
+        assertThat(store.get("old")!!.statusCode).isEqualTo(201)
     }
 
     @Test
@@ -196,6 +194,13 @@ class RedisIdempotencyStoreTest {
             RedisIdempotencyStore.SAVE_SCRIPT ->
                 if (cur == null || cur.startsWith(argv[0]) || cur.startsWith(argv[1])) {
                     backing[key] = argv[2]
+                    "1"
+                } else {
+                    "0"
+                }
+            RedisIdempotencyStore.SAVE_IF_ABSENT_SCRIPT ->
+                if (cur == null) {
+                    backing[key] = argv[0]
                     "1"
                 } else {
                     "0"

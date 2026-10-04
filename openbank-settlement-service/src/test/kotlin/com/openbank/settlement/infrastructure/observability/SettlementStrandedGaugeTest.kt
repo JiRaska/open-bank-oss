@@ -43,6 +43,7 @@ class SettlementStrandedGaugeTest {
         override suspend fun create(settlement: com.openbank.settlement.domain.model.Settlement) = error("unused")
         override suspend fun findById(id: UUID) = error("unused")
         override suspend fun updateStatus(id: UUID, status: SettlementStatus) = error("unused")
+        override suspend fun recordProjectionUncertainty(id: UUID, status: SettlementStatus) = error("unused")
         override suspend fun claimForProcessing(id: UUID): Boolean = error("unused")
     }
 
@@ -127,6 +128,7 @@ class SettlementStrandedGaugeTest {
             // #6037's two new outcomes. REVERSAL_FAILED is the one that matters: the money moved
             // and did NOT come back, and it was the only money-path state with no age series.
             "REVERSAL_FAILED",
+            "BALANCE_STATE_UNKNOWN",
             "LEDGER_REVERSAL_UNSUPPORTED",
             // #6410's two. The ledger compensation only became reachable with that issue, and it
             // now reports which of three situations the general ledger is in rather than assuming

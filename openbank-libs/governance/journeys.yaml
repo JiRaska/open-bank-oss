@@ -348,6 +348,29 @@ journeys:
       read-only k6 pod has no Chromium runtime; adding one without a separate security and
       credential boundary would turn a monitoring gap into a privileged browser foothold.
 
+  - id: wealth-declared-holding
+    title: "Declared holding appears in net worth"
+    capability: >-
+      A customer can declare an off-platform holding through the public edge and read it back
+      in their net worth, labelled with its valuation source and age, with every revaluation
+      kept in the holding's valuation history.
+    status: planned
+    severity: ticket
+    money_moving: false
+    target_schedule: "*/5 * * * *"
+    falsification: >-
+      Point the edge's wealth-service URL at a dead host, or make a revaluation replace the
+      previous valuation: the journey must fail on the declared-holdings branch reported as
+      missing, or on the lost history entry, not pass because the net-worth call returned 200
+      with a partial answer. Calling wealth-service on its ClusterIP instead of the edge must
+      also fail, since that proves the service answers and not that a customer can reach it.
+    blocked_by: >-
+      Two independent blockers. customer-edge exposes only GET /net-worth and no route to
+      declare a holding (#11966), so no customer surface can write the holding this journey
+      reads. And ADR-0252 phase 1 (#4348) has no bank-owned synthetic persona yet, so a
+      production write would land in a real party's wealth data with no taint to keep it out
+      of their view and out of derived aggregates (#9829).
+
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
 #
@@ -425,6 +448,15 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-card-processing-service
+      note: >-
+        ADR-0283 phase 1 (#8809). The card money path: authorise (hold) → clear → posted CARD-rail
+        journal through transaction-service. The journey for it is the one named above for
+        card-issuance, and it is blocked by the default blocker: a clearing posts a real debit, so
+        it cannot run until the SYNTHETIC taint reaches the ledger. Its in-repo sandbox acquirer is
+        off in every deployed environment. When the journey lands it should assert the posted
+        transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
+        — a SKIPPED_DISABLED posting also answers 200.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal
