@@ -6,6 +6,8 @@
 # The gate is an EDGE control and says nothing about the in-cluster path, so each
 # routed workload also needs the ingress-nginx controller admitted to its pod —
 # and nothing else new. Grafana's equivalent lives in networkpolicy-grafana.yaml.
+# While ADR-0324 runs both edges, the shared Gateway's proxy (envoy-gateway-system) is
+# admitted next to ingress-nginx; the nginx peer goes in Phase 5 with the Ingresses.
 #
 # HAND-WRITTEN, like the others in this directory. `network-policies.yaml` is
 # emitted by gen-network-policies.py from the declared GitOps edges of
@@ -49,6 +51,12 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
+    # The shared Gateway's Envoy proxy (ADR-0324 Phase 2, httproute-tools-gate.yaml) — gated
+    # by the extAuth SecurityPolicy before it proxies, as nginx is by auth_request.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
 ---
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
@@ -75,3 +83,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
+    # The shared Gateway's Envoy proxy (ADR-0324 Phase 2, httproute-tools-gate.yaml) — gated
+    # by the extAuth SecurityPolicy before it proxies, as nginx is by auth_request.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
