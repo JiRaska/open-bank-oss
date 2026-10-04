@@ -1,0 +1,95 @@
+{
+  "consumer": {
+    "name": "openbank-card-processing-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a CARD shadow score without an M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "amount": 25.00,
+          "counterpartyId": null,
+          "currency": "CZK",
+          "rail": "CARD"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "status": 401
+      }
+    },
+    {
+      "description": "POST a CARD authorisation for shadow fraud scoring",
+      "providerStates": [
+        {
+          "name": "the fraud scoring engine is available"
+        }
+      ],
+      "request": {
+        "body": {
+          "accountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "amount": 25.00,
+          "counterpartyId": null,
+          "currency": "CZK",
+          "rail": "CARD"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/fraud/score"
+      },
+      "response": {
+        "body": {
+          "score": 10,
+          "verdict": "ALLOW"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.score": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.verdict": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "type"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-fraud-service"
+  }
+}

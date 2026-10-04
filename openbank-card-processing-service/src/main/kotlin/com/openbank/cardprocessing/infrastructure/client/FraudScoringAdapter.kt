@@ -8,6 +8,8 @@ import com.openbank.cardprocessing.application.port.out.FraudScore
 import com.openbank.cardprocessing.application.port.out.FraudScoringOutcome
 import com.openbank.cardprocessing.application.port.out.FraudScoringPort
 import com.openbank.cardprocessing.domain.model.CardAuthorization
+import com.openbank.libs.domain.money.CurrencyCode
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.web.SyntheticTaintClientFilter
 import io.quarkus.oidc.client.filter.OidcClientFilter
 import jakarta.enterprise.context.ApplicationScoped
@@ -36,18 +38,17 @@ interface FraudServiceClient {
     suspend fun score(request: FraudScoreRequest): FraudScoreResponse
 }
 
+/** Matches fraud-service's ScoreFraudRequest; amount is in major currency units. */
 data class FraudScoreRequest(
-    val transactionId: UUID,
-    val accountId: UUID,
-    val partyId: UUID,
     val amount: BigDecimal,
-    val currencyCode: String,
-    val channel: String,
-    val countryCode: String?,
-    val merchantCategory: String?,
+    val currency: String,
+    val rail: String,
+    val accountId: UUID?,
+    val counterpartyId: UUID?,
 )
 
-data class FraudScoreResponse(val score: Double? = null, val decision: String? = null)
+/** A missing verdict is a broken provider response, not a successful shadow score. */
+data class FraudScoreResponse(val score: Double, val verdict: String)
 
 /**
  * Shadow scoring for card authorisations.
@@ -74,19 +75,21 @@ class FraudScoringAdapter(
     override suspend fun score(authorization: CardAuthorization): FraudScore {
         if (!scoringEnabled) return FraudScore(FraudScoringOutcome.SKIPPED_DISABLED, null, null)
         return try {
+            val currency = CurrencyCode.of(authorization.currencyCode)
+            val amount = Money(
+                BigDecimal.valueOf(authorization.amountMinorUnits, currency.defaultFractionDigits),
+                currency,
+            ).amount
             val response = client.score(
                 FraudScoreRequest(
-                    transactionId = authorization.id,
+                    amount = amount,
+                    currency = currency.code,
+                    rail = "CARD",
                     accountId = authorization.accountId,
-                    partyId = authorization.partyId,
-                    amount = BigDecimal.valueOf(authorization.amountMinorUnits),
-                    currencyCode = authorization.currencyCode,
-                    channel = authorization.channel.name,
-                    countryCode = authorization.merchantCountry,
-                    merchantCategory = authorization.category,
+                    counterpartyId = null,
                 ),
             )
-            FraudScore(FraudScoringOutcome.SCORED, response.score, response.decision)
+            FraudScore(FraudScoringOutcome.SCORED, response.score, response.verdict)
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
             // Deliberately broad: a shadow control must not be able to fail the path it is
             // shadowing, and the authorisation this describes is already decided and committed.

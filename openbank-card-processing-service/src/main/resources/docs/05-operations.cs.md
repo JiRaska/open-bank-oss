@@ -126,9 +126,9 @@ Rezervace klíče uvízla v `PENDING`: požadavek selhal poté, co se ptala sí�
 
 ## Testy a CI
 
-- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest` a jeden test na každý simulátor.
+- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `FraudScoringAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest` a jeden test na každý simulátor.
 - Integrační: `CardLifecycleIdempotencyIT` (souběžné požadavky se stejným klíčem za latchí, stav karty, historie důkazů) a `CardAuthorizationOutboxIT` proti PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` spouští skutečný cron. Zaúčtování a fraud skórování jsou v `%test` vypnuté.
-- Kontrakt: `CardIssuanceAuthorizationPactConsumerTest` (consumer pact vůči card-issuance).
+- Kontrakty: `CardIssuanceAuthorizationPactConsumerTest`, `CardClearingTransactionPactConsumerTest` a `CardAuthorizationFraudPactConsumerTest`. Transaction-service a fraud-service přehrávají úspěšné interakce i odpověď 401 bez identity z uložených Pactů. Fraud skórování posílá částku v hlavních jednotkách s poli `currency` a `rail = CARD` a čte vrácený `verdict`.
 - Generovaný runbook: `docs/runbooks/svc-card-processing.md`.
 
 ## Nasazení / release

@@ -1,0 +1,98 @@
+{
+  "consumer": {
+    "name": "openbank-card-processing-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a CARD clearing debit",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 25.00,
+          "currencyCode": "CZK",
+          "description": "CARD clearing pact",
+          "idempotencyKey": "card-clearing-pact-001",
+          "instructionType": "ONE_OFF",
+          "rail": "CARD",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "targetAccountId": null,
+          "type": "DEBIT",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          "status": "COMPLETED"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a CARD clearing debit without an M2M identity",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 25.00,
+          "currencyCode": "CZK",
+          "description": "CARD clearing pact",
+          "idempotencyKey": "card-clearing-pact-001",
+          "instructionType": "ONE_OFF",
+          "rail": "CARD",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "targetAccountId": null,
+          "type": "DEBIT",
+          "valueDate": "2026-01-20"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

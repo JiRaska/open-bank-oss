@@ -126,9 +126,9 @@ The key's reservation is stuck `PENDING`: a request failed after the network was
 
 ## Testing & CI
 
-- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest`, and one test per simulator.
+- Unit: `AuthorizationLifecycleTest`, `CardProcessingServiceTest`, `CardIssuanceAdapterTest`, `TransactionLedgerPostingAdapterTest`, `FraudScoringAdapterTest`, `MastercardOAuthSignerTest`, `CardTokenServiceTest`, `CardDisputeServiceTest`, `SchemeAdapterFailureTest`, and one test per simulator.
 - Integration: `CardLifecycleIdempotencyIT` (parallel same-key requests behind a latch, card state, evidence history) and `CardAuthorizationOutboxIT` against PostgreSQL (`openbank_card_processing_it`), `HoldExpirySweepVertxContextIT` drives the real cron. Ledger posting and fraud scoring are switched off in `%test`.
-- Contract: `CardIssuanceAuthorizationPactConsumerTest` (consumer pact against card-issuance).
+- Contract: `CardIssuanceAuthorizationPactConsumerTest`, `CardClearingTransactionPactConsumerTest`, and `CardAuthorizationFraudPactConsumerTest`. The transaction and fraud providers replay both the success and unauthenticated 401 interactions from committed pacts. Fraud scoring sends a major-unit amount with `currency` and `rail = CARD`, and reads the returned `verdict`.
 - Generated runbook: `docs/runbooks/svc-card-processing.md`.
 
 ## Deploy / release
