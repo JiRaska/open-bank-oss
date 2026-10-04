@@ -12,6 +12,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
@@ -54,8 +55,7 @@ object DomesticPaymentStatusPactFixture {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "2010",
         creditorName = "Pact payee",
-        amount = BigDecimal("1500.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("1500.00"), "CZK"),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,

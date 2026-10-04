@@ -370,7 +370,7 @@ allowed_reasons contains "edge-service-engagement" if {
 # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
 # audit-service.
 #
-# Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
+# Deliberately a DISTINCT action from `audit.trail.inspect`, not the `audit.` family: that is the
 # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
 # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
 # behind a service account. `audit.customerRead` reaches only the metadata projection.

@@ -6,6 +6,7 @@ package com.openbank.copilot.infrastructure.rest
 
 import com.openbank.copilot.application.port.out.ProposalTokenStore
 import com.openbank.copilot.application.port.out.ToolPolicyPort
+import com.openbank.copilot.domain.ProposalToken
 import io.quarkus.security.Authenticated
 import io.quarkus.security.identity.SecurityIdentity
 import jakarta.enterprise.context.ApplicationScoped
@@ -89,8 +90,8 @@ class ActionConfirmResource {
 
         if (token.customerId != customerId) {
             log.warnf(
-                "ActionConfirmResource: ownership mismatch token=%s jwt_sub=%s token_customer=%s",
-                tokenId,
+                "ActionConfirmResource: ownership mismatch token_ref=%s jwt_sub=%s token_customer=%s",
+                ProposalToken.logRef(tokenId),
                 customerId,
                 token.customerId,
             )
@@ -111,8 +112,8 @@ class ActionConfirmResource {
 
         val actionId = UUID.randomUUID()
         log.infof(
-            "ActionConfirmResource: confirmed token=%s tool=%s customer=%s actionId=%s",
-            tokenId,
+            "ActionConfirmResource: confirmed token_ref=%s tool=%s customer=%s actionId=%s",
+            ProposalToken.logRef(tokenId),
             token.toolName,
             customerId,
             actionId,
@@ -129,8 +130,8 @@ class ActionConfirmResource {
         val decision = opaGate.authorize(toolName, customerId, null)
         if (decision.allow) return null
         log.warnf(
-            "ActionConfirmResource: OPA denied confirm for token=%s tool=%s customer=%s reason=%s",
-            tokenId,
+            "ActionConfirmResource: OPA denied confirm for token_ref=%s tool=%s customer=%s reason=%s",
+            ProposalToken.logRef(tokenId),
             toolName,
             customerId,
             decision.reason,
