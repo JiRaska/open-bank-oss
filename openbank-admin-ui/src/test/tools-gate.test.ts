@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { NextRequest } from 'next/server'
+import { parseAllDocuments } from 'yaml'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
@@ -299,6 +300,52 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect(expr).toMatch(/ROLE_DEMO/)
     expect(expr!.indexOf('ROLE_DEMO')).toBeLessThan(expr!.indexOf('ROLE_ADMIN'))
     expect(expr).toMatch(/ROLE_DEMO'\)\s*&&\s*'Viewer'/)
+  })
+
+  // ADR-0324 Phase 2: the same boundary on the Envoy Gateway. The SecurityPolicy's
+  // `extAuth.http.path` is what names the tool there, so it has to agree with the gate and
+  // the Ingress exactly as the Ingress's `?tool=` does.
+  describe('the Envoy Gateway SecurityPolicies (httproute-tools-gate.yaml)', () => {
+    const docs = parseAllDocuments(
+      readFileSync('../openbank-infra/gitops/components/observability/httproute-tools-gate.yaml', 'utf8'),
+    ).map(d => d.toJS()).filter(Boolean)
+    const policies = docs.filter(d => d.kind === 'SecurityPolicy')
+    const routes = docs.filter(d => d.kind === 'HTTPRoute')
+
+    it('declares one policy and one route per Ingress tool', () => {
+      // Guards the per-policy assertions below from passing over an empty list.
+      expect(policies.length).toBe(ingressTools.length)
+      expect(routes.length).toBe(ingressTools.length)
+    })
+
+    it.each(ingressTools)('%s: its route is gated by a policy naming the same tool', tool => {
+      const route = routes.find(r =>
+        r.spec.rules.some((rule: { matches?: { path?: { value?: string } }[] }) =>
+          (rule.matches ?? []).some(m => m.path?.value === `/tools/${tool}`)))
+      expect(route, `no HTTPRoute for /tools/${tool}`).toBeDefined()
+      const policy = policies.find(p =>
+        p.spec.targetRefs.some((t: { kind: string; name: string }) =>
+          t.kind === 'HTTPRoute' && t.name === route.metadata.name))
+      expect(policy, `no SecurityPolicy targets ${route.metadata.name}`).toBeDefined()
+      expect(policy.spec.extAuth.http.path).toBe(`/api/gate/${tool}`)
+      expect(gateTools).toContain(tool)
+    })
+
+    it.each(policies.map(p => [p.metadata.name, p]))(
+      '%s forwards the session cookie, fails closed and copies nothing to the backend',
+      (_, p) => {
+        const ext = p.spec.extAuth
+        expect(ext.headersToExtAuth.map((h: string) => h.toLowerCase())).toContain('cookie')
+        expect(ext.failOpen).not.toBe(true)
+        // The identity-header trust model ADR-0234 rejects, as auth-response-headers on nginx.
+        expect(ext.http.headersToBackend).toBeUndefined()
+        expect(ext.http.backendRefs).toEqual([{ name: 'admin-ui', namespace: 'admin-ui', port: 3000 }])
+      },
+    )
+
+    it('no route rewrites the sub-path the tools are configured to serve', () => {
+      expect(JSON.stringify(routes)).not.toMatch(/URLRewrite/)
+    })
   })
 
   it('the Ingress does not forward gate response headers into the upstream', () => {

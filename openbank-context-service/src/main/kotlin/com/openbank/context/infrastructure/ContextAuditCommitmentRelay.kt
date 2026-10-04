@@ -42,7 +42,7 @@ class ContextAuditCommitmentRelay(
         if (enabled) liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
     }
 
-    @Scheduled(every = "5s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
+    @Scheduled(every = "5s", delayed = "10s", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     suspend fun dispatch() {
         if (!enabled) return
         refreshPending()

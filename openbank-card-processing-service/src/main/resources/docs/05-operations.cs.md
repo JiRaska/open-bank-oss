@@ -64,6 +64,8 @@ Obě jsou `suspend fun`; v `%test` je plánovač vypnutý a testy je spouštěj�
 | `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
+Stínové fraud skórování posílá fraud-service jeho skutečný kontrakt `POST /api/v1/fraud/score`: `accountId`, `amount` v hlavních jednotkách podle počtu desetinných míst měny, `currency` a `rail = "CARD"`. Čte `verdict` a celočíselné `score`. Autorizaci nikdy neblokuje. Selhání (jakékoli 4xx/5xx, timeout nebo nečitelné tělo) se počítá jako `outcome=FAILED` a loguje na úrovni WARN, nejvýš jednou za minutu s počtem potlačených selhání. Do 2026-10-04 klient posílal `currencyCode`, žádné `rail` a částky v nejmenších jednotkách a četl `decision`, takže každé stínové skórování tiše selhalo. Pacty `pacts/openbank-card-processing-service-openbank-fraud-service.json` a `…-openbank-transaction-service.json` teď obě volání ukotvují, včetně zaznamenané odpovědi 401.
+
 | `openbank.card.token.provisions` | `scheme`, `refusal` |
 | `openbank.card.token.status.changes` | `scheme`, `status`, `refusal` |
 | `openbank.card.token.reads` | `source` (`NETWORK` / `LOCAL_MIRROR`) |

@@ -248,8 +248,16 @@ data:
       # `failure_callback` is not a duplicate of `success_callback`: without it a provider outage is
       # invisible in Langfuse, and the trace view then shows a quiet, healthy-looking gateway during
       # exactly the incident someone is opening it to investigate.
-      success_callback: ["langfuse"]
-      failure_callback: ["langfuse"]
+      #
+      # `langfuse_otel`, not `langfuse`, since ADR-0328 wave C2: the `langfuse` callback drives the
+      # bundled Python SDK 2.59.7, which posts to the legacy /api/public/ingestion that Langfuse v4
+      # rejects (400) in events_only mode. `langfuse_otel` exports OTLP to
+      # $LANGFUSE_HOST/api/public/otel with the same LANGFUSE_PUBLIC_KEY/SECRET_KEY, after the
+      # pre_call presidio guardrail above, like the old callback. Measured on 4.50.0: the span lands
+      # in events_full and S3 (events/otel/...). Its trace id is LiteLLM's own OTel id —
+      # metadata.trace_id is not honoured by this callback.
+      success_callback: ["langfuse_otel"]
+      failure_callback: ["langfuse_otel"]
       # Fail fast to the caller's deterministic fallback rather than hanging an agent's Temporal
       # activity; the agents already treat a null/again response as "no model".
       request_timeout: 60

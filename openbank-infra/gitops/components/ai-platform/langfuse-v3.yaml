@@ -6,14 +6,25 @@
 #                        v2.92.0 and v3.29.0. Newer versions of v3 remove database entities that v2
 #                        still depends on" — 3.29.1 drops traces_view/observations_view
 #                        (prisma 20250221143400), which v2 reads.
-#   3.29.0 -> 3.225.11   wave C1 (this pin). The last v3 release. Only AFTER the four v2->v3
+#   3.29.0 -> 3.225.11   wave C1. The last v3 release. Only AFTER the four v2->v3
 #                        background migrations finished on 3.29.0 (and v2 is deleted in the same
 #                        change, because past 3.29.0 it cannot run against this database anyway).
-#   3.225.11 -> 4.x      wave C2. The v3->v4 guide: "Upgrade to the latest v3 release and let all
-#                        background migrations finish" first — the 3.x ones 3.225.11 adds
-#                        (event_log -> blob storage, dataset run items, billing anchors, ...). The
-#                        five 20260701_v4_step_* rows it also inserts stay pending on v3 by design:
-#                        only a v4 worker runs them (measured locally).
+#   3.225.11 -> 4.50.0   wave C2 (this pin). The v3->v4 guide: "Upgrade to the latest v3 release
+#                        and let all background migrations finish" first — the 3.x ones 3.225.11
+#                        adds (event_log -> blob storage, dataset run items, billing anchors, ...).
+#                        The five 20260701_v4_step_* rows it also inserts stay pending on v3 by
+#                        design: only a v4 worker runs them (measured locally). A direct jump to
+#                        the latest v4 is what the guide describes; there is no per-minor stop.
+#
+# v4 IN `events_only` (upstream's default, set explicitly below so a reviewer sees it). Writes go
+# to the new events_full / events_core tables only, and the legacy ingestion API answers 400 for
+# trace/span/generation events — which is why litellm-config.yaml moves the gateway from the
+# `langfuse` callback (Python SDK 2.59.7, legacy /api/public/ingestion; measured: 400 on 4.50.0)
+# to `langfuse_otel` (OTLP to /api/public/otel) in the same change. The legacy read endpoints
+# (/api/public/traces, /api/public/observations) answer 404; reads go through
+# /api/public/v2/observations. v4 needs ClickHouse >= 25.12 (26.8 here), Postgres >= 15 (CNPG
+# 18), Redis >= 7.0 (Valkey 8.1), no new service. The ClickHouse grants the guide lists are
+# covered: CLICKHOUSE_USER is the image-created user with access management.
 #
 # SHARED POSTGRES. langfuse-web applies its Prisma migrations to langfuse-db and its ClickHouse
 # migrations to langfuse-clickhouse at start. Forward-only, so each version step is preceded by an
@@ -77,6 +88,14 @@ data:
   AUTH_DISABLE_SIGNUP: "true"
   TELEMETRY_ENABLED: "false"
   LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "false"
+  # v4 data model (see the header). events_only is upstream's default; explicit here.
+  LANGFUSE_MIGRATION_V4_WRITE_MODE: events_only
+  # The v4 backfill (20260701_v4_step_2) copies every observation into a transient
+  # observations_pid_tid_sorting table to rewrite it into events_full. Step 5 drops that copy only
+  # when this is true (upstream default false). Without it, a second copy of every prompt and
+  # completion sits outside the retention sweep indefinitely. Measured locally: with true, step 5
+  # finishes and the table is gone.
+  LANGFUSE_BACKGROUND_MIGRATION_V4_DROP_PID_TID_SORTING_TABLES: "true"
   # The public host since wave B (langfuse-ingress.yaml / langfuse-httproute.yaml route to
   # langfuse-web). NextAuth builds its callback and cookie origin from this.
   NEXTAUTH_URL: https://langfuse.open-bank.tech
@@ -106,7 +125,8 @@ spec:
       annotations:
         # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
         # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
-        openbank.io/langfuse-env-revision: "2"
+        # 3 = v4 write mode + pid/tid table drop (wave C2).
+        openbank.io/langfuse-env-revision: "3"
       labels:
         app.kubernetes.io/name: langfuse-web
         app.kubernetes.io/part-of: ai-platform
@@ -128,7 +148,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: langfuse-web
-          image: docker.io/langfuse/langfuse:3.225.11@sha256:a343f64e035eb01aeea358703a0428945d909d01e19452509a5a830862dda878
+          image: docker.io/langfuse/langfuse:4.50.0@sha256:3d2ae888a0e6edb41fdba6e7d5baca5e4baede3a870dac7970dadd9d925b018e
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -235,7 +255,8 @@ spec:
       annotations:
         # envFrom ConfigMap langfuse-v3-env: a ConfigMap edit never reaches running pods, so a
         # change to it bumps this. 2 = background migrations enabled (ADR-0328 wave B).
-        openbank.io/langfuse-env-revision: "2"
+        # 3 = v4 write mode + pid/tid table drop (wave C2).
+        openbank.io/langfuse-env-revision: "3"
       labels:
         app.kubernetes.io/name: langfuse-worker
         app.kubernetes.io/part-of: ai-platform
@@ -257,7 +278,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: langfuse-worker
-          image: docker.io/langfuse/langfuse-worker:3.225.11@sha256:8a28c946bb5401eef488153fa294db5a79bd99dd5c90db8e4d39559374c9ebd3
+          image: docker.io/langfuse/langfuse-worker:4.50.0@sha256:52f7fd41ded2f1a6acab13ff7cb1832d36dfe2cbf44adea402b7a09cfa4ce800
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

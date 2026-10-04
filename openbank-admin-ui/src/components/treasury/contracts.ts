@@ -142,7 +142,7 @@ export type Positions = z.infer<typeof positionsSchema>
 export type PositionBasis = z.infer<typeof positionBasisSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */
-export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
+export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'PRODUCT_LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
 
 // Nostro reconciliation (ADR-0315 D7, #10896): NostroResource + the NostroStatement* /
 // NostroReconciliation schemas in openapi.yaml (1.4.0). The ledger balances, the differences and
