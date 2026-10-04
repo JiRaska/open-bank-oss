@@ -80,13 +80,22 @@ so 1100 does not refill under the old rules. A DB `UPDATE` is forbidden: it woul
 hash-chained journal and break reconciliation.
 
 D5. **Risk-engine classification.** `"1010": hqla-l1-cash-or-reserves` in the LCR/NSFR GL map
-and `central-bank` in the counterparty map, like 1510. **POLICY CHOICE (minimum reserve):**
+and `central-bank` in the counterparty map, like 1510; in the minimum-reserve classification
+1010 is `reserve-holding`, which makes holdings/surplus stated for the first time (today they
+are not stated because no account is mapped). **POLICY CHOICE (minimum reserve):**
 Art. 10(1)(b)(iii) admits reserves only to the extent withdrawable in stress; whether the ČNB
-releases the requirement in stress is not something this repo can evidence. So the engine
-deducts the current maintenance period's **minimum reserve requirement** (from treasury's
-reserve tracking, ADR-0315 D8) from the 1010 balance when counting HQLA, and reports the
-deduction on the result. If the requirement is unknown, the whole 1010 balance is excluded and
-the result carries a note — never the optimistic reading. 1100 keeps `technical-or-clearing`.
+releases the requirement in stress is not something this repo can evidence. So the LCR deducts
+the **minimum reserve requirement the risk engine itself computes** for the maintenance period
+containing the as-of date — `MinimumReserves` over the snapshot at that period's base-reference
+date, the same figure `GET /api/v1/risk/min-reserves/periods/{periodId}` serves (ADR-0315 D8,
+#11546 reserve averaging) — from the 1010 balance, and reports the deduction and the period id
+on the result. The requirement is not an input anyone publishes: the engine already derives it
+from the ledger (reserve base) and the ratio effective at that date (D8). **Fail-closed only
+when that computation is NOT_EVALUABLE** — i.e. the engine states no requirement (an
+unclassified liability in the CZK book, no maintenance period covering as-of, or no reserve
+ratio effective at as-of per D8). Then the whole 1010 balance is excluded from HQLA and the
+result carries the engine's own reason, never the optimistic reading. 1100 keeps
+`technical-or-clearing`.
 
 D6. **Reconciliation and alert.** An end-of-day check asserts `balance(1100) == 0` per
 currency; a non-zero balance raises `LedgerClearingNotNetted` with the amount and the
@@ -104,6 +113,45 @@ D7. **Rollout order, each behind a flag defaulting off:**
 7. D4 opening journal on the sandbox, then D6 alert enabled.
 
 Flags are removed once the sandbox has run a full reserve maintenance period on the new path.
+
+D8. **ČNB policy parameters are ingested facts, never constants.** The reserve ratio, the
+minimum-reserve remuneration rate and the ČNB policy rates the platform uses — 2W repo rate,
+discount rate (the deposit-facility rate, GL 1510 accrual), lombard rate (the marginal lending
+facility, GL 2320) — are not written into `application.yaml`, code or this ADR as operative
+values. They are fetched periodically (daily and on startup) from official ČNB machine-readable
+sources and stored as versioned facts keyed by `(instrument, effective_from)` with provenance:
+source URL, fetch time and the SHA-256 of the fetched document. A consumer reads the value
+effective at its as-of date (latest `effective_from <= as-of`); if none is effective the
+consumer's result is NOT_EVALUABLE (D5), never a default. Ingestion reuses the existing ČNB
+pattern: fx-service already owns ČNB ingestion (`CnbRateIngestionScheduler`, ADR-0046,
+ADR-0299 idempotency on the natural key) and publishes facts the risk engine consumes
+(`fx.fixing.published.v1`, ADR-0314 D5); policy rates follow the same route — fx-service
+ingests, stores and serves them, and publishes an event the risk engine persists. Staleness is
+visible: workflow-liveness gauge plus an alert when no successful fetch for more than 3
+business days. Sources, in order of preference:
+- **Policy rates — keyless official text files** (pipe-separated, `PLATNA_OD|<rate>`, dates
+  `yyyyMMdd`, decimal comma, UTF-8 with BOM): `https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_repo_historie.txt`,
+  `…/vyvoj_diskontni_historie.txt`, `…/vyvoj_lombard_historie.txt`.
+- **Minimum reserves — no clean machine feed.** The ČNB publishes the ratio, base and
+  remuneration per year in `PMR_historie_zmen.xlsx` on the minimum-reserves page
+  (`https://www.cnb.cz/cs/financni-trhy/penezni-trh/povinne-minimalni-rezervy/`) as prose cells
+  ("4 % ze základny"). Facts are taken from it with provenance; where parsing cannot be made
+  robust, the fact is entered as a cited, reviewed migration row (same table, same provenance
+  fields, source = the legal act) and automated parsing is the follow-up — still a dated fact,
+  never a config constant.
+- **ARAD** (ČNB time-series database) has a REST API, but every call requires a per-user
+  `api_key` generated in an ARAD account, and the ČNB may block a user for excessive load. Not
+  used while the keyless files suffice; if ever adopted, the key lives in Vault/OpenBao via the
+  existing secret path and is never committed.
+
+**Dated observation, not operative values** (retrieved 2026-10-04 from the sources above):
+2W repo 3.75 %, discount 2.75 %, lombard 4.75 %, each effective from 2026-06-19; minimum
+reserve ratio **4 %** of the base (0 % on liabilities from repo operations) effective from the
+maintenance period starting 2025-01-02 (ČNB press release of 2024-10-10; legal basis Vyhláška
+č. 253/2013 Sb. as amended by Vyhláška č. 323/2024 Sb.), previously 2 %; reserves unremunerated
+(0 %) since 2023-10-05 (Věstník ČNB 14/2023). The risk engine's `min-reserves.rate: 0.02` on
+`main` at the time of writing is therefore stale since 2025-01-02 — the defect D8 exists to
+make impossible.
 
 ## Alternatives considered
 
@@ -123,11 +171,12 @@ Flags are removed once the sandbox has run a full reserve maintenance period on 
 
 ## Consequences
 
-- LCR becomes meaningful. **Sandbox estimate:** HQLA moves from 0 to
-  `22.4M − MRR` CZK, where MRR = 2% × reserve base (ČNB rate, POLICY CHOICE to deduct it; the
-  reserve base is the primary-deposit balance from the ledger snapshot). Net outflows are
-  unchanged by this ADR, so LCR = (22.4M − MRR) / net outflows; with MRR unknown on day one
-  the conservative D5 rule keeps LCR at 0 until treasury publishes the requirement.
+- LCR becomes meaningful. **Sandbox estimate:** HQLA moves from 0 to `22.4M − MRR` CZK, where
+  MRR is the risk engine's computed requirement for the current maintenance period (reserve
+  base from the ledger snapshot × the ratio effective per D8 — 4 % on the 2026-10-04
+  observation). Net outflows are unchanged by this ADR, so LCR = (22.4M − MRR) / net outflows
+  from the first snapshot after the D4 journal. LCR falls back to excluding 1010 only on a
+  snapshot whose requirement is NOT_EVALUABLE, and says why.
 - NSFR improves: 22.4M leaves 1100 (100% RSF) for 1010 (0% RSF as central-bank reserves), so
   RSF falls by ~22.4M CZK; ASF is unchanged.
 - 1100 becomes a control: a non-zero end-of-day balance is a visible break instead of a
@@ -138,10 +187,11 @@ Flags are removed once the sandbox has run a full reserve maintenance period on 
 - Gate: none new for the decision itself. D6 is a runtime alert; the posting rules are
   covered by each service's posting tests. A follow-up may add a chart-consistency check that
   every GL code posted by a service exists in the ledger seed.
-- **Follow-up — nostro overdraft alert:** treasury can place more at 1510 / with banks than
-  its nostro or 1010 holds (it posts the deal without a funding check). Add a pre-booking
-  funding check and a `TreasuryFundingExceeded` alert when the contra account would go
-  negative. Tracked as a follow-up issue to #11107.
+- **Follow-up — treasury funding check:** treasury can place more at 1510 / with banks than
+  its nostro or 1010 holds (it posts the deal without a funding check). A pre-booking funding
+  check and a `TreasuryFundingExceeded` alert are tracked in #12115.
+- **Follow-up — policy-rate ingestion (D8):** implemented in its own PR (fx-service ingestion,
+  risk-engine consumption replacing `min-reserves.rate` / `remuneration-rate`).
 
 ### Delivery check
 
@@ -150,6 +200,8 @@ git grep -n "'1010'" openbank-ledger-service/src/main/resources/db/migration   #
 grep -n '"1010": hqla-l1-cash-or-reserves' openbank-risk-engine/src/main/resources/application.yaml
 git grep -n '1010' openbank-clearing-service/src/main openbank-transaction-service/src/main \
   openbank-domestic-payment/src/main openbank-treasury-service/src/main   # each non-empty
+# D8: no ratio constant left under openbank.risk.min-reserves (expect no output)
+grep -nE '^      (rate|remuneration-rate):' openbank-risk-engine/src/main/resources/application.yaml
 ```
 On the sandbox: `balance(1100)` at end of day is 0 and `balance(1010)` equals the simulated
 ČNB statement. Until all of these hold, the honest status is `planned`/`partial`.
@@ -158,7 +210,8 @@ On the sandbox: `balance(1100)` at end of day is 0 and `balance(1010)` equals th
 
 - CNB / EBA: LCR per Delegated Regulation (EU) 2015/61 Art. 10(1)(b)(iii); NSFR per CRR
   Part Six Title IV (exact RSF article for central-bank reserves UNVERIFIED in this repo, the
-  same caveat the risk-engine config carries). ČNB minimum reserve rules govern D5.
+  same caveat the risk-engine config carries). ČNB minimum reserves: Vyhláška č. 253/2013 Sb. as amended by č. 323/2024 Sb.
+  govern D5/D8; policy-rate sources per D8.
 - PCI, DORA, GDPR, PSD2: not engaged.
 
-Refs #11107, #11546, ADR-0108, ADR-0281, ADR-0313, ADR-0314, ADR-0315.
+Refs #11107, #11546, #12115, ADR-0046, ADR-0299, ADR-0108, ADR-0281, ADR-0313, ADR-0314, ADR-0315.
