@@ -114,10 +114,14 @@ questions — VoP warns, this authorises.
 `POST /api/v1/card-tokens`, `POST /api/v1/card-disputes` and `POST /api/v1/card-disputes/{id}/evidence`
 each make a call to a card network that is NOT idempotent at the network: asking twice mints a second
 wallet credential, opens a second chargeback or files the evidence twice.
+`POST /api/v1/card-tokens/{tokenReference}/status` and `POST /api/v1/card-disputes/{id}/refresh` reach
+the network too and take the same reservation: a replayed SUSPEND arriving after a RESUME would
+silently re-suspend a credential the customer was just given back.
 
 | Threat | STRIDE | Mitigation |
 |---|---|---|
 | Two concurrent requests with one `Idempotency-Key` both reach the network (duplicate credential / chargeback), the loser 500s | T, D | `LifecycleIdempotencyRepositoryImpl.reserve` — an `INSERT ... ON CONFLICT DO NOTHING` into `card_lifecycle_idempotency` committed BEFORE the network call; the loser replays the winner (`Reservation.Completed`) or gets 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Completion flips the row in the same transaction as the result row and its outbox event (`completeInTransaction`). Proven by `CardLifecycleIdempotencyIT` (two requests released by one latch, network held open). |
+| A token status change or dispute refresh retried (or double-clicked) reaches the network twice | T, D | Both now require `Idempotency-Key` (absent → 400, before any lookup) and reserve it exactly like provisioning (`TOKEN_STATUS_CHANGE`, `DISPUTE_REFRESH`); a refresh that moved nothing, or of a CLOSED case, completes the reservation standalone (`LifecycleIdempotencyPort.complete`) so a retry replays the stored case. Proven by `CardLifecycleIdempotencyIT` (latch race, replay, reuse). |
 | A crash after the network acted, then a retry, acts twice | T | A PENDING reservation never expires; it is released only when the network was provably not asked or refused. A stuck key answers 409 until an operator reconciles it (`ix_card_lifecycle_idempotency_pending`). |
 | The same key replayed for a different request returns someone else's result | I, T | The reservation stores a SHA-256 request fingerprint; a mismatch is 409 `IDEMPOTENCY_KEY_REUSED`. |
 | A network token minted for a blocked/suspended/expired card — a working credential for a card the bank stopped | E, S | `CardTokenService.refuseBeforeNetwork` refuses any card whose card-issuance `status` is not `ACTIVE` (an absent status counts as not active), 409 `CARD_NOT_ACTIVE`, before the network is asked. Pinned by the consumer pact (`status` type matcher). |
@@ -159,6 +163,10 @@ wallet credential, opens a second chargeback or files the evidence twice.
   (compared as Money); closed cases are terminal on refresh; evidence history is append-only and
   idempotent; network-seen tokens are adopted into the mirror with stable ids and mirror-only ones
   are flagged `absentAtNetwork`.
+- **2026-10-03** — Idempotency keys on token status change and dispute refresh (Refs #11996): the two
+  POSTs #8864 left without a key now require `Idempotency-Key` and reuse the `card_lifecycle_idempotency`
+  reservation (no new migration — `operation` is unconstrained `VARCHAR(32)`). Closes the gap the
+  `idempotency-coverage-money-path` gate reports once the service is classified money-path.
 - **2026-10-03** — Duplicate presentment (STRIDE-T/R). Found while documenting the service (#8858):
   the clearing request carried an `Idempotency-Key` that was never looked up, so a repeated
   presentment that still fitted inside the remaining hold was applied again — a second hold

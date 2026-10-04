@@ -32,10 +32,10 @@ on:
 
 permissions:
   contents: read
+  # Write scopes are granted per job, never here (check-workflow-supply-chain.py).
   # The whole point of the reconciler over the webhook: the only credential that can
-  # start a workflow is this one, it exists for the length of this job, and nothing
-  # outside GitHub ever holds it.
-  actions: write
+  # start a workflow is the job's `actions: write` GITHUB_TOKEN, it exists for the
+  # length of that job, and nothing outside GitHub ever holds it.
 
 concurrency:
   group: pact-verification-reconcile
@@ -43,6 +43,9 @@ concurrency:
 
 jobs:
   reconcile:
+    permissions:
+      contents: read
+      actions: write  # the only credential that can dispatch verify-provider
     name: reconcile
     # The broker is reachable over its public ingress (pact.open-bank.tech), so this does
     # NOT need the self-hosted pool — which matters, because the pool being saturated is

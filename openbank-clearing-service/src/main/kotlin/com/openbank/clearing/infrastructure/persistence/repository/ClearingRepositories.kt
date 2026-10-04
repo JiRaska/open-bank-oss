@@ -206,9 +206,11 @@ class ClearingItemRepositoryImpl @Inject constructor(
         } else {
             sf.withSession { s ->
                 s.createQuery(
-                    "FROM ClearingItemEntity WHERE status = 'PENDING' AND currency IN (:ccys) ORDER BY createdAt ASC",
+                    "FROM ClearingItemEntity WHERE status = 'PENDING' AND rail = :rail " +
+                        "AND currency IN (:ccys) ORDER BY createdAt ASC",
                     ClearingItemEntity::class.java,
                 )
+                    .setParameter("rail", rail)
                     .setParameter("ccys", currencies)
                     .setMaxResults(limit).resultList
             }.map { it.map(mapper::toDomain) }
@@ -224,6 +226,14 @@ class ClearingItemRepositoryImpl @Inject constructor(
         if (currencies.isNotEmpty()) q.setParameter("ccys", currencies)
         q.resultList
     }.map { rows -> rows.associate { (it[0] as String) to (it[1] as Number).toLong() } }
+
+    @WithSession
+    override fun countPendingWithoutRail(): Uni<Long> = sf.withSession { s ->
+        s.createQuery(
+            "SELECT count(*) FROM ClearingItemEntity WHERE status = 'PENDING' AND rail IS NULL",
+            Long::class.javaObjectType,
+        ).singleResult
+    }
 
     @WithTransaction
     override fun updateStatus(id: UUID, status: ClearingStatus, errorCode: String?, errorMessage: String?): Uni<Int> =

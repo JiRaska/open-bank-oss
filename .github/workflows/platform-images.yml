@@ -245,9 +245,13 @@ jobs:
     if: always() && github.event_name != 'pull_request' && needs.build.result != 'skipped'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Read-only GITHUB_TOKEN: the branch push and the PR are made with the GitOps App
+    # token, never this one. The old `|| secrets.GITHUB_TOKEN` fallback was the only
+    # reason this job held contents/pull-requests: write, and a PR it opened could not
+    # run required checks anyway (GITHUB_TOKEN events trigger no workflows) — so a
+    # missing App now fails the job loudly instead of producing a PR that never goes green.
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
     env:
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
     steps:
@@ -261,9 +265,14 @@ jobs:
           path: ${{ runner.temp }}/results
           merge-multiple: true
 
+      - name: Require the GitOps App
+        if: env.GITOPS_APP_ID == ''
+        run: |
+          echo "::error::GITOPS_APP_ID is not set; the gitops PR needs the App token (this job's GITHUB_TOKEN is read-only)."
+          exit 1
+
       - name: Mint a GitHub App installation token
         id: app_token
-        if: env.GITOPS_APP_ID != ''
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:
           app-id: ${{ secrets.GITOPS_APP_ID }}
@@ -306,7 +315,7 @@ jobs:
         if: steps.rewrite.outputs.changed == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
-          token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app_token.outputs.token }}
           sign-commits: true
           add-paths: |
             openbank-infra/gitops/**

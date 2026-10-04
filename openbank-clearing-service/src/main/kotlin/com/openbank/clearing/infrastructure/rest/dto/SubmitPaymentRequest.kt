@@ -11,7 +11,7 @@ import java.util.UUID
 
 /**
  * The `POST /api/v1/clearing/submit` body — the same members, names and `currency` default
- * (`EUR`) the endpoint has always accepted. [amount] is nullable so an absent amount reaches
+ * (`EUR`) the endpoint has always accepted, except that `rail` is no longer defaulted (#12004). [amount] is nullable so an absent amount reaches
  * `Money.parseInbound` and is answered as a named-field 400 rather than a Jackson error.
  */
 data class SubmitPaymentRequest(
@@ -23,7 +23,12 @@ data class SubmitPaymentRequest(
     val creditorBic: String? = null,
     val amount: BigDecimal? = null,
     val currency: String? = "EUR",
-    val rail: PaymentRail = PaymentRail.SEPA_SCT,
+    /**
+     * Required by the contract (`required: [paymentId, rail, amount, currency]`). Nullable here
+     * only so an absent rail is a named 400 in the resource instead of a silent default (#12004):
+     * defaulting to SEPA_SCT would settle an instant or SWIFT payment on the SCT rail.
+     */
+    val rail: PaymentRail? = null,
     val valueDate: LocalDate? = null,
     val endToEndId: String? = null,
     val remittanceInfo: String? = null,

@@ -101,6 +101,10 @@ class ClearingItemEntity : PanacheEntityBase() {
     @Column(name = "currency", length = 3)
     var currency: String = "EUR"
 
+    @Column(name = "rail")
+    @Enumerated(EnumType.STRING)
+    var rail: com.openbank.clearing.domain.model.PaymentRail? = null
+
     @Column(name = "status")
     @Enumerated(EnumType.STRING)
     var status: com.openbank.clearing.domain.model.ClearingStatus =

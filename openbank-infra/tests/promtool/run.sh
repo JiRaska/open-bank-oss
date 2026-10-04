@@ -13,19 +13,24 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../../.." && pwd)"
 RULES_DIR="$REPO/openbank-infra/gitops/components/observability"
+PAYMENTS_RULES="$REPO/openbank-infra/gitops/components/payments/prometheus-rules.yaml"
 
 command -v promtool >/dev/null || { echo "promtool not on PATH"; exit 127; }
 
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-python3 - "$RULES_DIR" "$WORK" <<'PY'
+python3 - "$RULES_DIR" "$PAYMENTS_RULES" "$WORK" <<'PY'
 import sys, pathlib, yaml
-src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+src, payments, dst = map(pathlib.Path, sys.argv[1:])
 for f in sorted(src.glob("prometheus-rules-*.yaml")):
     for doc in yaml.safe_load_all(f.read_text()):
         if isinstance(doc, dict) and doc.get("kind") == "PrometheusRule":
             (dst / f.name).write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
+for doc in yaml.safe_load_all(payments.read_text()):
+    if isinstance(doc, dict) and doc.get("kind") == "PrometheusRule":
+        name = doc["metadata"]["name"]
+        (dst / f"payments-{name}.yaml").write_text(yaml.safe_dump(doc["spec"], sort_keys=False))
 PY
 
 # Sanity: promtool must accept every unwrapped file before any test runs. A test that
