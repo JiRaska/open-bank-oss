@@ -137,6 +137,16 @@ mp:
         key.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%prod":
   quarkus:
+    http:
+      # East-west mTLS: the 8443 listener must VALIDATE the caller's certificate, not merely offer
+      # TLS. `quarkus.http.ssl.client-auth` is BUILD TIME, so the container env cannot set it; it
+      # lives here, under %prod (the quarkusBuild profile) so dev and @QuarkusTest never see it.
+      # Same shape as ledger-service.
+      ssl:
+        client-auth: required
+      # Keep the plain-HTTP port: with client-auth REQUIRED Quarkus otherwise drops the HTTP
+      # listener, and the readiness probe plus admin-ui BFF discovery still use 8117.
+      insecure-requests: enabled
     # The onboarding screening reconciler reads party-service's party list. Production uses a named
     # TLS bucket over party-service's private-CA mTLS listener (8443, client auth REQUIRED), the
     # same shape as sca-service and delegation-service. Local/test fixtures speak plain HTTP.
