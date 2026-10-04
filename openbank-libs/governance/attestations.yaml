@@ -51,6 +51,7 @@ consent:
 # --- zbytek zatím prázdný: žádná další M-dimenze není dosvědčena (a to je pravda) ---
 # Pozn. k `by:` u automatizovaných běhů — atestant je scheduled CI lane, ne člověk:
 #   ci-schemathesis = api-fuzz.yml (weekly Tue+Thu; consent-service je v default fuzz setu)
-#   ci-zap-baseline = dast-zap-baseline.yml (weekly; target = ledger-service v docker-compose)
+#   ci-zap-baseline = dast-zap-baseline.yml (weekly; ledger-service, autentizovaný ZAP API scan nad openapi.yaml;
+#                     `ops:` = `exercised` ze zap-reports/<svc>-ops.json, #12097)
 # TTL 21 dní je záměrně krátké: když lane umře, atestace vyprší a dimenze spadne zpět
 # na derived skóre — zelená přežije jen živou lane.
