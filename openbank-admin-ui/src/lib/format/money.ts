@@ -18,8 +18,8 @@ export function formatMoneyExact(amount: number, currency: string, locale: strin
 
 export function formatMoneyCompact(amount: number, currency: string, locale: string): string {
   try {
-    return amount.toLocaleString(locale, { style: 'currency', currency, notation: 'compact', maximumFractionDigits: 2 })
+    return amount.toLocaleString(locale, { style: 'currency', currency, notation: 'compact', minimumFractionDigits: 0, maximumFractionDigits: 2 })
   } catch {
-    return `${amount.toLocaleString(locale, { notation: 'compact', maximumFractionDigits: 2 })} ${currency}`
+    return `${amount.toLocaleString(locale, { notation: 'compact', minimumFractionDigits: 0, maximumFractionDigits: 2 })} ${currency}`
   }
 }

@@ -18,6 +18,7 @@ export default function ServiceConfigPage() {
   const [snapshots, setSnapshots] = useState<ServiceConfigSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [refreshFailed, setRefreshFailed] = useState(false)
   const { t, language } = useLanguage()
   const dateLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
 
@@ -26,6 +27,7 @@ export default function ServiceConfigPage() {
       const data = await fetchAllServiceConfigSnapshots()
       setSnapshots(data)
       setLastRefresh(new Date())
+      setRefreshFailed(false)
     } catch (e) {
       // The BFF is unreachable (in the sandbox most of the fleet isn't deployed),
       // which is expected, not exceptional. Keep the last-known-good snapshots and
@@ -33,6 +35,7 @@ export default function ServiceConfigPage() {
       // state. Without this catch the rejection escaped the effect entirely as an
       // unhandled promise rejection on every failed poll.
       console.error('Failed to load service config snapshots', e)
+      setRefreshFailed(true)
     } finally {
       setLoading(false)
     }
@@ -47,8 +50,9 @@ export default function ServiceConfigPage() {
   const toggle = (name: string) => setExpanded(p => p === name ? null : name)
 
   const upCount = snapshots.filter(s => s.reachable && s.health?.status === 'UP').length
-  const downCount = snapshots.filter(s => !s.reachable || s.health?.status === 'DOWN').length
-  const degradedCount = snapshots.filter(s => s.reachable && s.health && s.health.status !== 'UP' && s.health.status !== 'DOWN').length
+  const idleCount = snapshots.filter(s => s.scaledToZero).length
+  const downCount = snapshots.filter(s => !s.scaledToZero && (!s.reachable || s.health?.status === 'DOWN')).length
+  const degradedCount = snapshots.filter(s => !s.scaledToZero && s.reachable && s.health && s.health.status !== 'UP' && s.health.status !== 'DOWN').length
 
   return (
     <div>
@@ -62,7 +66,7 @@ export default function ServiceConfigPage() {
           </div>}
         title={t('Konfigurace služeb', 'Service Configuration')}
         icon={<Shield aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
-        subtitle={t('Živé resilience politiky načtené z každé služby přes', 'Live resilience policies fetched from each service via') + ' /api/v1/config. ' + t('Automatická obnova každých', 'Auto-refreshes every') + ` ${POLL_INTERVAL / 1000}s.`}
+        subtitle={t('Stav nasazení z Kubernetes a nastavení odolnosti načtené přes /api/v1/config. Chybějící odpověď není důkaz výchozí konfigurace.', 'Kubernetes deployment state and resilience settings fetched via /api/v1/config. A missing response does not prove default configuration.') + ' ' + t('Automatická obnova každých', 'Auto-refreshes every') + ` ${POLL_INTERVAL / 1000}s.`}
         actions={<div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           {lastRefresh && (
             <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
@@ -85,10 +89,16 @@ export default function ServiceConfigPage() {
           </button>
         </div>}
       />
+      {refreshFailed && <p role="status" style={{ color: 'var(--warning-text)', fontSize: '12px', marginBottom: '12px' }}>
+        {lastRefresh
+          ? t('Obnova selhala; zobrazen je poslední známý stav, který už nemusí platit.', 'Refresh failed; showing the last known state, which may be stale.')
+          : t('Konfigurace služeb se nepodařilo načíst.', 'Service configuration could not be loaded.')}
+      </p>}
       {/* Status summary */}
       <div style={{ display: 'flex', gap: '10px', marginBottom: '16px' }}>
         <StatusPill color="var(--success-text)" bg="var(--success-bg)" count={upCount} label={t('V pořádku', 'Healthy')} />
         {degradedCount > 0 && <StatusPill color="var(--warning-text)" bg="var(--warning-bg)" count={degradedCount} label={t('Zhoršené', 'Degraded')} />}
+        {idleCount > 0 && <StatusPill color="var(--text-secondary)" bg="var(--surface-3)" count={idleCount} label={t('Uspáno', 'Scaled to zero')} />}
         {downCount > 0 && <StatusPill color="var(--danger-text)" bg="var(--danger-bg)" count={downCount} label={t('Nedostupné', 'Unreachable')} />}
       </div>
 
@@ -114,7 +124,7 @@ export default function ServiceConfigPage() {
           const cfg = snap.config
           const isOpen = expanded === snap.name
           const panelId = `service-config-${snap.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`
-          const healthStatus = !snap.reachable ? 'down' : snap.health?.status === 'UP' ? 'up' : snap.health?.status === 'DOWN' ? 'down' : 'degraded'
+          const healthStatus = snap.scaledToZero ? 'idle' : !snap.reachable ? 'down' : snap.health?.status === 'UP' ? 'up' : snap.health?.status === 'DOWN' ? 'down' : 'degraded'
           const hasCustomConfig = cfg && (cfg.rateLimit || cfg.circuitBreaker || cfg.retry || cfg.timeout)
 
           return (
@@ -160,15 +170,16 @@ export default function ServiceConfigPage() {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  {!snap.reachable && (
+                  {snap.scaledToZero && <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>{t('Uspáno', 'Scaled to zero')}</span>}
+                  {!snap.reachable && !snap.scaledToZero && (
                     <span style={{ fontSize: '11px', color: 'var(--danger-text)', fontWeight: 600 }}>{t('Nedostupné', 'Unreachable')}</span>
                   )}
                   {cfg?.rateLimit     && <PolicyBadge color="var(--accent-text)" bg="var(--accent-bg)" icon={<Zap size={10}/>}      label={`${cfg.rateLimit.maxConcurrent} concurrent`} />}
                   {cfg?.circuitBreaker && <PolicyBadge color="var(--info-text)" bg="var(--info-bg)" icon={<Shield size={10}/>}   label="Circuit Breaker" />}
                   {cfg?.retry         && <PolicyBadge color="var(--success-text)" bg="var(--success-bg)" icon={<RefreshCw size={10}/>} label={`${cfg.retry.maxRetries}× retry`} />}
                   {cfg?.timeout       && <PolicyBadge color="var(--warning-text)" bg="var(--warning-bg)" icon={<Clock size={10}/>}     label={`${cfg.timeout.valueMs / 1000}s timeout`} />}
-                  {snap.reachable && !hasCustomConfig && (
-                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{t('pouze výchozí', 'defaults only')}</span>
+                  {snap.reachable && cfg && !hasCustomConfig && (
+                    <span style={{ fontSize: '11px', color: 'var(--text-tertiary)', fontStyle: 'italic' }}>{t('bez uvedených politik', 'no declared policies')}</span>
                   )}
                 </div>
               </button>
@@ -176,7 +187,9 @@ export default function ServiceConfigPage() {
               {/* Expanded detail */}
               {isOpen && (
                 <div id={panelId} role="region" aria-label={t('Detail konfigurace služby', 'Service configuration details')} style={{ padding: '16px', background: 'var(--surface)' }}>
-                  {!snap.reachable ? (
+                  {snap.scaledToZero ? (
+                    <div style={{ color: 'var(--text-secondary)', fontSize: '13px', padding: '8px 0' }}>{t('Služba je záměrně uspána (scale-to-zero). Konfiguraci lze ověřit až po jejím probuzení.', 'This service is intentionally scaled to zero. Its configuration can be checked after it wakes.')}</div>
+                  ) : !snap.reachable ? (
                     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger-text)', fontSize: '13px', padding: '8px 0' }}>
                       <Circle size={10} fill="var(--danger-text)" stroke="none" />
                       {t('Služba je nedostupná — nelze načíst živou konfiguraci.', 'Service is unreachable — cannot fetch live configuration.')}
@@ -306,8 +319,8 @@ function StatusPill({ color, bg, count, label }: { color: string; bg: string; co
   )
 }
 
-function HealthDot({ status }: { status: 'up' | 'down' | 'degraded' }) {
-  const color = status === 'up' ? 'var(--success-text)' : status === 'down' ? 'var(--danger-text)' : 'var(--warning-text)'
+function HealthDot({ status }: { status: 'up' | 'down' | 'degraded' | 'idle' }) {
+  const color = status === 'up' ? 'var(--success-text)' : status === 'down' ? 'var(--danger-text)' : status === 'idle' ? 'var(--text-secondary)' : 'var(--warning-text)'
   return (
     <span style={{ display: 'flex', position: 'relative' }}>
       <Circle size={8} fill={color} stroke="none" />

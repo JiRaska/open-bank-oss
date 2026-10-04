@@ -99,7 +99,7 @@ async function probeService(svc: ServiceDef) {
 // reach each service on its real Service DNS, take readiness from the K8s control
 // plane (a sibling pod can't hit the management /q/health port), and enrich the
 // live resilience policy from /api/v1/config on the business port.
-async function probeDiscovered(d: { name: string; namespace: string; port: number; ready: boolean; readyReplicas: number }) {
+async function probeDiscovered(d: { name: string; namespace: string; port: number; ready: boolean; readyReplicas: number; scaledToZero: boolean }) {
   const base = `http://${d.name}.${d.namespace}.svc:${d.port}`
   const start = Date.now()
   const [config, health] = await Promise.all([
@@ -109,7 +109,7 @@ async function probeDiscovered(d: { name: string; namespace: string; port: numbe
   const latencyMs = Date.now() - start
   // Readiness verdict comes from the control plane; /q/health (often on a separate,
   // non-Service-exposed management port) only enriches the per-check breakdown.
-  const status = d.ready ? 'UP' : 'DOWN'
+  const status = d.ready ? 'UP' : d.scaledToZero ? 'UNKNOWN' : 'DOWN'
   return {
     name: d.name,
     port: d.port,
@@ -117,6 +117,7 @@ async function probeDiscovered(d: { name: string; namespace: string; port: numbe
     health: { status, checks: health?.checks ?? [] },
     latencyMs,
     reachable: d.readyReplicas > 0,
+    scaledToZero: d.scaledToZero,
   }
 }
 

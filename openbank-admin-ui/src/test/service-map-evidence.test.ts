@@ -1,9 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from 'vitest'
-import { parseMapGovernance, parseMapHealth, parseServiceMapGraph } from '@/lib/governance/service-map-evidence'
+import { parseMapGovernance, parseMapHealth, parseServiceMapGraph, parseMapCatalog } from '@/lib/governance/service-map-evidence'
 
 describe('Service Map evidence parsers', () => {
+  it('counts only runnable catalog modules and rejects malformed or duplicate entries', () => {
+    expect(parseMapCatalog({ available: true, services: [
+      { name: 'openbank-account-service', short: 'account-service', runnable: true, apiTitle: 'Accounts' },
+      { name: 'openbank-libs', short: 'libs', runnable: false, apiTitle: null },
+    ] })).toEqual([{ name: 'openbank-account-service', short: 'account-service', apiTitle: 'Accounts' }])
+    expect(parseMapCatalog({ available: false, services: [] })).toBeNull()
+    expect(parseMapCatalog({ available: true, services: [{ name: 'x', short: 'x', runnable: true }, { name: 'x', short: 'x', runnable: true }] })).toBeNull()
+  })
+
   it('validates health entries and rejects duplicate ports', () => {
     expect(parseMapHealth({ services: [{ port: 8100, status: 'UP' }] })).toEqual([{ port: 8100, status: 'UP' }])
     expect(parseMapHealth({ services: [{ port: 8100, status: 'BROKEN' }] })).toBeNull()

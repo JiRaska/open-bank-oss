@@ -3,6 +3,7 @@
 import type { GovernanceManifestEntry } from '@/lib/governance/manifest'
 
 export type MapHealthEntry = { port: number; status: 'UP' | 'DOWN' | 'UNKNOWN' }
+export type MapCatalogService = { name: string; short: string; apiTitle: string | null }
 export type MapEdge = { from: string; to: string; via: string; type: 'rest' | 'kafka' }
 export type MapNode = { name: string; dependsOn?: number; dependedOnBy?: number }
 export type MapInfraNode = { id: string; kind: 'infra'; tech: string; label: string }
@@ -37,6 +38,20 @@ export function parseMapHealth(value: unknown): MapHealthEntry[] | null {
   })
   if (!services || new Set(services.map(item => item.port)).size !== services.length) return null
   return services
+}
+
+export function parseMapCatalog(value: unknown): MapCatalogService[] | null {
+  const envelope = record(value)
+  if (!envelope || envelope.available !== true || !Array.isArray(envelope.services) || envelope.services.length > 500) return null
+  const runnable: MapCatalogService[] = []
+  for (const raw of envelope.services) {
+    const item = record(raw)
+    if (!item || !text(item.name) || !text(item.short) || typeof item.runnable !== 'boolean' ||
+      !(item.apiTitle === null || item.apiTitle === undefined || text(item.apiTitle))) return null
+    if (item.runnable) runnable.push({ name: item.name, short: item.short, apiTitle: (item.apiTitle ?? null) as string | null })
+  }
+  if (new Set(runnable.map(service => service.name)).size !== runnable.length) return null
+  return runnable
 }
 
 export function parseMapGovernance(value: unknown): { available: boolean; byService: Record<string, GovernanceManifestEntry> } | null {

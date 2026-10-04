@@ -63,6 +63,13 @@ describe('production readiness recovery states', () => {
     expect(screen.getAllByText('GO')).toHaveLength(2)
   })
 
+  it('does not present an old baked scorecard as live readiness', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => response(REPORT)))
+    await renderPage()
+    expect(await screen.findByText(/This report is over two days old/)).toBeInTheDocument()
+    expect(screen.getByText(/not live service health/)).toBeInTheDocument()
+  })
+
   it('recovers after an explicit retry', async () => {
     const fetchMock = vi.fn()
       .mockRejectedValueOnce(new Error('offline'))

@@ -15,6 +15,7 @@ import { useFlowAnimation } from '@/components/topology/useFlowAnimation'
 import { NodeShadow, ArrowMarker } from '@/components/topology/TopologyDefs'
 import { layoutBands } from '@/components/topology/layout'
 import { PageHeader, StatusBadge, statusTone } from '@/components/ui'
+import Link from 'next/link'
 
 // ---------------------------------------------------------------------------
 // Infrastructure topology (ADR-0027/0029). A companion to the code-derived
@@ -249,10 +250,15 @@ export default function InfraTopologyPage() {
       <PageHeader
         icon={<Network size={18} aria-hidden="true" />}
         title={t('Topologie infrastruktury', 'Infrastructure Topology')}
-        subtitle={t('Jak jsou platformní komponenty zapojené — architektura toku dat s živým stavem. Hrany jsou zdokumentovaná architektura (ne odvozená data); uzly nesou živý stav z prób.',
-          'How the platform components are wired — a data-flow architecture with live status. Edges are the documented architecture (not derived data); nodes carry live probe status.')}
+        subtitle={t('Schéma vybraných platforemních vazeb. Hrany jsou dokumentované, ne živě objevené; stav mají jen uzly se sondou. Úplný seznam doménových služeb je v mapě služeb.',
+          'Selected platform relationships. Edges are documented, not discovered live; only probed nodes have health. The full domain-service inventory is in the service map.')}
         breadcrumb={<div className="breadcrumb"><span>OpenBank</span><span className="breadcrumb-sep">/</span><span>{t('Infrastruktura', 'Infrastructure')}</span><span className="breadcrumb-sep">/</span><span className="breadcrumb-current">{t('Topologie', 'Topology')}</span></div>}
       />
+
+      <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+        {t('Hledáte chybějící bankovní službu nebo její závislosti? ', 'Looking for a banking service or its dependencies? ')}
+        <Link href="/docs/service-map" style={{ color: 'var(--accent)' }}>{t('Otevřít mapu služeb →', 'Open the service map →')}</Link>
+      </p>
 
       {/* Controls */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>

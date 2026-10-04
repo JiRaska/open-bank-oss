@@ -69,7 +69,7 @@ async function readJson<T>(envVar: string, fallbackFile: string): Promise<T | nu
 
 // Mirrors the Service DNS used by /api/infra/status. Each returns the running version
 // string or null (honest unknown). Build-info endpoints, short timeouts, fail soft.
-const VERSION_PROBES: Record<string, { url: string; pick: (j: unknown) => string | null }> = {
+const VERSION_PROBES: Record<string, { url: string; pick?: (j: unknown) => string | null; pickText?: (body: string) => string | null }> = {
   openbao: {
     // OpenBao replaced Vault (runbook 0005). /sys/health is API-compatible and
     // self-reports a clean version (e.g. "2.5.4"); Service is openbao.vault.svc.
@@ -98,6 +98,15 @@ const VERSION_PROBES: Record<string, { url: string; pick: (j: unknown) => string
     url: 'http://tempo.observability.svc:3200/api/status/buildinfo',
     pick: j => (j as { version?: string })?.version ?? null,
   },
+  pyroscope: {
+    url: 'http://pyroscope.observability.svc:4040/api/v1/status/buildinfo',
+    pick: j => (j as { data?: { version?: string } })?.data?.version ?? null,
+  },
+  alloy: {
+    // Alloy publishes its build version in the Prometheus metric, not JSON build-info.
+    url: 'http://alloy.observability.svc:12345/metrics',
+    pickText: body => body.match(/^alloy_build_info\{[^\n]*\bversion="([^"]+)"/m)?.[1] ?? null,
+  },
 }
 
 async function probeVersion(id: string): Promise<string | null> {
@@ -109,7 +118,7 @@ async function probeVersion(id: string): Promise<string | null> {
     const res = await fetch(probe.url, { signal: ctrl.signal, cache: 'no-store' })
     clearTimeout(timer)
     if (!res.ok) return null
-    const v = probe.pick(await res.json())
+    const v = probe.pickText ? probe.pickText(await res.text()) : probe.pick?.(await res.json())
     return v ? String(v).replace(/^v/, '').trim() : null
   } catch {
     return null
