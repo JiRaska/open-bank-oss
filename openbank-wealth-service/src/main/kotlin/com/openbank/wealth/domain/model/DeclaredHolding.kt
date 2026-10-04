@@ -118,6 +118,12 @@ data class DeclaredHolding(
     val pledgedToLoanId: UUID? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /**
+     * Declared by a bank-owned canary (ADR-0252 phase 1). Fixed at declaration and carried by
+     * `copy()` through every later transition, so a revalue or withdraw of a synthetic holding is
+     * synthetic too, whoever triggers it. Default false: anything unmarked is a real customer's.
+     */
+    val synthetic: Boolean = false,
 ) {
     init {
         require(label.isNotBlank()) { "label must not be blank" }

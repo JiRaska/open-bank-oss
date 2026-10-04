@@ -10,6 +10,7 @@ This documentation is published by the service at the management endpoint `/q/op
 - **Ports:** 8154 (app), 8090 (management)
 - **Events:** transactional outbox (ADR-0003) to `openbank.wealth.events`; synthetic traffic is tainted in the outbox (ADR-0252)
 - **Auth:** M2M only, `ROLE_API`, `ROLE_OPERATOR` or `ROLE_ADMIN`. The owner arrives in the `X-Customer-Party-Id` header.
+- **Synthetic taint (ADR-0252):** a holding declared by a trusted canary principal is stored with `synthetic = true`, and every event about it carries the `x-openbank-synthetic` Kafka header, revalue and withdraw included. The flag belongs to the holding, not to the request that touched it.
 - **Trust boundary:** by-id routes act on the holding id alone and do NOT check the owner. Customers reach this service only through customer-edge, which proves ownership before every by-id call.
 
 ## API
