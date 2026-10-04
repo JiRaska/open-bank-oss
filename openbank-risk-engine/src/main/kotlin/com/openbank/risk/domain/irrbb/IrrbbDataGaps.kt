@@ -12,7 +12,6 @@ import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.model.Instrument
-import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
 import java.math.BigDecimal
@@ -45,7 +44,10 @@ enum class IrrbbGapCode {
     /** Discounted flows carry the full contractual rate; commercial margins are not stripped out. */
     COMMERCIAL_MARGIN_INCLUDED,
 
-    /** Instruments of the run that the IRRBB projection does not read (treasury money-market deals). */
+    /**
+     * Instruments of the run whose kind the IRRBB projection does not read (anything other than
+     * loans and treasury money-market deals). Absent while every instrument is projected.
+     */
     INSTRUMENTS_NOT_PROJECTED,
 }
 
@@ -84,7 +86,7 @@ object IrrbbDataGaps {
                 it.outstanding.signum() != 0
         }
         val deposits = positions.filter { it.kind == PositionKind.SUB_LEDGER }
-        val deals = instruments.filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL }
+        val unprojected = instruments.filter { it.kind !in Irrbb.PROJECTED_KINDS }
         val extrapolated = evaluated.flatMap { extrapolation(it, baseFlows[it].orEmpty(), loans, curves) }
         val behavioural = buildList {
             if (loans.isNotEmpty()) {
@@ -115,13 +117,15 @@ object IrrbbDataGaps {
                     ),
                 )
             }
-            if (deals.isNotEmpty()) {
+            if (unprojected.isNotEmpty()) {
+                val byKind = unprojected.groupingBy { it.kind.name }.eachCount().toSortedMap()
+                    .entries.joinToString(", ") { "${it.value} ${it.key}" }
                 add(
                     IrrbbDataGap(
                         code = IrrbbGapCode.INSTRUMENTS_NOT_PROJECTED,
-                        count = deals.size,
-                        detail = "${deals.size} treasury money-market deal(s) of the run are not in the repricing " +
-                            "gap, EVE or NII.",
+                        count = unprojected.size,
+                        detail = "${unprojected.size} instrument(s) of the run are not in the repricing gap, EVE " +
+                            "or NII: $byKind.",
                     ),
                 )
             }
