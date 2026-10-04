@@ -1,0 +1,69 @@
+{
+  "consumer": {
+    "name": "openbank-lending-service"
+  },
+  "interactions": [
+    {
+      "description": "GET assigned lending loan candidates without a shared match",
+      "providerStates": [
+        {
+          "name": "a lending investigator is assigned to the requested loan"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000003",
+          "X-Investigation-Purpose": "LENDING_EXPOSURE_REVIEW"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/lending-loans/f0c8d9e0-0000-4000-8000-000000000003/assigned-candidates"
+      },
+      "response": {
+        "body": {
+          "ids": [
+
+          ],
+          "truncated": false
+        },
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET data-free access for an assigned lending loan",
+      "providerStates": [
+        {
+          "name": "a lending investigator is assigned to the requested loan"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000003",
+          "X-Investigation-Purpose": "LENDING_EXPOSURE_REVIEW"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/lending-loans/f0c8d9e0-0000-4000-8000-000000000003/access"
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 204
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-context-service"
+  }
+}
