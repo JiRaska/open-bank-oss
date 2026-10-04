@@ -250,4 +250,4 @@ FAIL=0
 jq -e '.realm_access.roles | index("ROLE_CUSTOMER")' <<<"$PAYLOAD" >/dev/null || { echo "!! ROLE_CUSTOMER missing"; FAIL=1; }
 [[ "$(jq -r .preferred_username <<<"$PAYLOAD")" == "$SA_USER" ]] || { echo "!! preferred_username is not $SA_USER"; FAIL=1; }
 [[ $FAIL == 0 ]] || exit 1
-echo "OK — $SA_USER is a SYNTHETIC customer (party $SYNTHETIC_PARTY_ID); customer-edge already trusts it."
+echo "OK — $SA_USER is a SYNTHETIC customer (party $SYNTHETIC_PARTY_ID). customer-edge honours its taint wherever OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS lists it (customer-edge.yaml), once that manifest is deployed."
