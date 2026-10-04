@@ -32,8 +32,7 @@ LIB_TEST = re.compile(r"^(openbank-libs[^/]*)/src/(test|testFixtures)/")
 CONSUMER = re.compile(r'testFixtures\(\s*project\(\s*"(:[^"]+)"')
 # Mirrors the code-global regex in services-ci.yml; used by --self-test only.
 CODE_GLOBAL = re.compile(
-    r"^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/"
-    r"|openbank-libs-lending/|openbank-libs-iso20022/|gradle/|settings\.gradle\.kts"
+    r"^(openbank-libs[^/]*/|gradle/|settings\.gradle\.kts"
     r"|build\.gradle\.kts|gradle\.properties|build-logic/)"
 )
 
@@ -69,6 +68,7 @@ def decide(paths: list[str], modules: list[str], consumed: set[str]) -> list[str
 
 def self_test() -> int:
     mods = ["openbank-libs", "openbank-libs-runtime", "openbank-libs-testing",
+            "openbank-libs-future",
             "openbank-card-processing-service", "openbank-ledger-service"]
     with tempfile.TemporaryDirectory() as d:
         root = Path(d)
@@ -79,6 +79,8 @@ def self_test() -> int:
     cases = [
         (["openbank-libs-runtime/src/test/x/FooTest.kt"], ["openbank-libs-runtime"]),
         (["openbank-libs-runtime/src/main/x/Foo.kt"], mods),
+        (["openbank-libs-future/src/main/x/Foo.kt"], mods),
+        (["openbank-libs-future/src/test/x/FooTest.kt"], ["openbank-libs-future"]),
         (["build.gradle.kts"], mods),
         (["openbank-libs-runtime/src/test/x/FooTest.kt",
           "openbank-card-processing-service/src/main/x/A.kt"],
