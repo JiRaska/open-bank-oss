@@ -157,10 +157,10 @@ services:
 
   # ─────────────────────────────────────────────
   # OpenBao (dev mode for local) — same LF/MPL-2.0 fork production runs
-  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.5.5).
+  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.7.1).
   # ─────────────────────────────────────────────
   openbao:
-    image: quay.io/openbao/openbao:2.5.5
+    image: quay.io/openbao/openbao:2.7.1
     container_name: openbank-openbao
     restart: unless-stopped
     environment:
