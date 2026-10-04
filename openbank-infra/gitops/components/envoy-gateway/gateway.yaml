@@ -148,7 +148,7 @@ spec:
         mode: Terminate
         certificateRefs:
           - kind: Secret
-            name: pact-broker-tls
+            name: pact-edge-tls
             namespace: pact-broker
       allowedRoutes:
         namespaces:

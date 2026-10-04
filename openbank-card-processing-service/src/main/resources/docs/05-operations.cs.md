@@ -59,6 +59,7 @@ Obě jsou `suspend fun`; v `%test` je plánovač vypnutý a testy je spouštěj�
 |---|---|
 | `openbank.card.processing.authorizations` | `approved`, `reason` |
 | `openbank.card.processing.presentments` | `fully_cleared` |
+| `openbank.card.processing.clearing.conflicts` | — (clearingy, reverzace a expirace, které prohrály souběh zápisů a byly znovu vyhodnoceny; expirace, která prohraje dvakrát, počká na další sweep) |
 | `openbank.card.processing.hold.releases` | `kind` (`REVERSAL` / `EXPIRY`) |
 | `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
@@ -88,7 +89,7 @@ Definované v `openbank-infra/gitops/components/observability/prometheus-rules-c
 
 ### Zaúčtování FAILED
 
-Clearing je zaznamenán, účetnictví ne. Hledejte řádek logu `ledger posting FAILED for authorization …` a counter `outcome=FAILED`. Ověřte dosažitelnost transaction-service a token client credentials. Zaúčtování nese idempotenční klíč `card-clearing:<klíč>`, takže opakování přes transaction-service nemůže zaúčtovat dvakrát.
+Clearing je zaznamenán, účetnictví ne. Hledejte řádek logu `ledger posting FAILED for authorization …` a counter `outcome=FAILED`. Ověřte dosažitelnost transaction-service a token client credentials. Zaúčtování nese idempotenční klíč `card-clearing:<idAutorizace>:h:<base64url(SHA-256(klíč))>` (viz 03 — API), takže opakování přes transaction-service nemůže zaúčtovat dvakrát. Opakování stejného clearingu acquirerem zaúčtování **nezkusí znovu**: klíč clearingu je už započten a vrátí replay bez sáhnutí na účetnictví, takže zaúčtování `FAILED` je nutné znovu spustit vědomě.
 
 ### Každá autorizace je zamítnuta
 
