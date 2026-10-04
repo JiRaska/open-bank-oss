@@ -82,6 +82,10 @@ class LifecycleIdempotencyRepositoryImpl(private val clock: Clock) :
         }.awaitSuspending()
     }
 
+    override suspend fun complete(claim: IdempotencyClaim, resultId: UUID) {
+        Panache.withTransaction { completeInTransaction(claim, resultId) }.awaitSuspending()
+    }
+
     /**
      * Completes [claim] inside the CALLER's transaction — chained by the token and dispute repositories
      * after the result row and the outbox row, so all three commit together.

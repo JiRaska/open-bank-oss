@@ -1,21 +1,15 @@
 #!/usr/bin/env python3
 """Release-scope-mismatch gate (rules.yaml: change_requirements.release_scope_mismatch).
 
-CLAUDE.md rule 2 says a `<service>/version.txt` bump is only warranted when a change
-touches `<service>/src/main/**` (the deployable artifact). But release-please attributes
-a commit to a component by the FILES IT TOUCHES under that component's directory,
-REGARDLESS of the commit's typed scope (RELEASE.md) — so a `feat`/`fix`/`perf`/`security`
-(or breaking-marked) commit that only touches `<service>/src/test/**`, a root file like
-`<service>/openapi.yaml`, or gitops/docs outside the service dir entirely still proposes a
-release, because release-please only ever looks at "was *a* file under this dir touched"
-and "what was the commit type", never the sub-path.
+Release-please requires both a releasing commit type and a package path outside that
+package's `exclude-paths`. Many packages exclude `src/test` (and admin-ui excludes
+`e2e`), but exclusions vary by package. Root files such as
+`<service>/openapi.yaml` are included. This gate flags a release whose
+included paths do not change the package's shipped source subtree.
 
-Observed live: PR #547 (`feat(finrep): register ArgoCD Application ...`) touched only a new
-`src/test/**` boot-smoke test inside `openbank-finrep-service/` plus gitops/docs files
-outside it — no `src/main/**` change at all — and release-please still opened PR #551
-proposing finrep-service 0.4.0. Harmless (the rebuilt artifact is byte-identical to 0.3.3,
-just re-tagged) but noisy, and the same mechanism misfires for any test-only `fix:` or an
-`openapi.yaml`-only editorial `fix:`.
+PR #547 once led to release PR #551 after a test-only change. The current
+`release-please-config.json` excludes that path, so historical behavior is not evidence
+that a test-only PR releases now.
 
 This gate flags that pattern on the ORIGINATING PR (not the release-please PR, which is
 generated and shouldn't be hand-edited per rule 3): a release-triggering commit type whose
@@ -65,9 +59,12 @@ PACKAGE_RELEASE_PREFIX_OVERRIDE = {
 }
 
 
-def load_packages() -> list[str]:
+def load_packages() -> dict[str, tuple[str, ...]]:
     data = json.loads(CONFIG.read_text(encoding="utf-8"))
-    return sorted(data.get("packages", {}).keys())
+    return {
+        package: tuple(config.get("exclude-paths", ()))
+        for package, config in data.get("packages", {}).items()
+    }
 
 
 def changed_files(base: str) -> list[str]:
@@ -100,11 +97,16 @@ def classify(title: str, has_breaking_footer: bool) -> tuple[str | None, bool]:
     return ctype, triggering
 
 
-def find_mismatches(changed: list[str], packages: list[str]) -> list[tuple[str, list[str]]]:
+def find_mismatches(
+    changed: list[str], packages: dict[str, tuple[str, ...]],
+) -> list[tuple[str, list[str]]]:
     findings = []
-    for pkg in packages:
+    for pkg, excluded_dirs in packages.items():
         pkg_prefix = f"{pkg}/"
-        touched = [f for f in changed if f.startswith(pkg_prefix)]
+        touched = [
+            f for f in changed if f.startswith(pkg_prefix)
+            and not any(f == excluded or f.startswith(excluded + "/") for excluded in excluded_dirs)
+        ]
         if not touched:
             continue
         release_prefix = pkg_prefix + PACKAGE_RELEASE_PREFIX_OVERRIDE.get(pkg, DEFAULT_RELEASE_PREFIX)
@@ -118,9 +120,8 @@ def self_test() -> int:
     """Falsify the commit classifier and the release-scope comparison.
 
     release-please needs BOTH axes to cut a release: a releasing TYPE and a touched path
-    inside the package's release subtree. This gate catches the combination that produces a
-    version bump for an artifact that did not change — a feat/fix PR touching only src/test,
-    docs or gitops under a package directory.
+    inside the package but outside its excluded directories. This gate catches an
+    included path that produces a version bump without changing shipped source.
 
     Both halves classify strings, and both have a lenient direction that reports clean: a
     type the regex fails to parse is "not releasing", and a package prefix that matches too
@@ -164,12 +165,28 @@ def self_test() -> int:
         case(f"classify({junk!r}) is unparseable", classify(junk, False), (None, False))
 
     # --- the scope comparison -------------------------------------------------------------
-    pkgs = ["openbank-ledger-service", "openbank-admin-ui"]
+    pkgs = {
+        "openbank-ledger-service": ("openbank-ledger-service/src/test",),
+        "openbank-admin-ui": ("openbank-admin-ui/src/test", "openbank-admin-ui/e2e"),
+    }
 
-    # THE DEFECT: a package touched only outside its release subtree.
-    case("test-only changes under a package are a mismatch",
-         find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt"], pkgs),
-         [("openbank-ledger-service", ["openbank-ledger-service/src/test/kotlin/T.kt"])])
+    case("excluded service test does not trigger a release",
+         find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt"], pkgs), [])
+    case("excluded admin UI e2e does not trigger a release",
+         find_mismatches(["openbank-admin-ui/e2e/login.spec.ts"], pkgs), [])
+    case("exclude-path matches a directory, not a same-prefix sibling",
+         find_mismatches(["openbank-ledger-service/src/test-helper/T.kt"], pkgs),
+         [("openbank-ledger-service", ["openbank-ledger-service/src/test-helper/T.kt"])])
+    case("included root file triggers a release without shipped source",
+         find_mismatches(["openbank-ledger-service/openapi.yaml"], pkgs),
+         [("openbank-ledger-service", ["openbank-ledger-service/openapi.yaml"])])
+    case("test path triggers a release when not excluded",
+         find_mismatches(["openbank-other-service/src/test/kotlin/T.kt"],
+                         {"openbank-other-service": ()}),
+         [("openbank-other-service", ["openbank-other-service/src/test/kotlin/T.kt"])])
+    actual = load_packages()
+    case("real config excludes ledger tests",
+         find_mismatches(["openbank-ledger-service/src/test/kotlin/T.kt"], actual), [])
     # A real source change is release-worthy — nothing to flag.
     case("a src/main change is not a mismatch",
          find_mismatches(["openbank-ledger-service/src/main/kotlin/A.kt"], pkgs), [])
@@ -189,7 +206,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: release-scope-mismatch is falsifiable (21 cases)")
+    print("self-test ok: release-scope-mismatch is falsifiable (26 cases)")
     return 0
 
 
@@ -235,7 +252,8 @@ def main() -> int:
         print(
             f"::{level}::release-scope-mismatch gate: PR title type '{ctype}' will make release-please "
             f"propose a release for '{pkg}', but no changed file is under '{release_prefix}' — only "
-            f"{sample}. release-please attributes by directory, not by src/main vs. the rest (RELEASE.md), "
+            f"{sample}. These paths are inside the package and outside its release-please "
+            f"exclude-paths (release-please-config.json), "
             f"so this still proposes a version bump for an unchanged deployable artifact. If this PR "
             f"doesn't actually change {pkg}'s shipped code, re-type the commit (test:/docs:/chore:/"
             f"refactor:/build:/ci:) instead of feat/fix/perf/security."

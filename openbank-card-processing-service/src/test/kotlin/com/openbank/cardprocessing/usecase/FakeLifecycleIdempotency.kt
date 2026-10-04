@@ -12,8 +12,9 @@ import java.util.UUID
 
 /**
  * In-memory [LifecycleIdempotencyPort] with the same semantics as the Postgres adapter: first reserve
- * wins, the same fingerprint replays or is in progress, a different one is a mismatch. Completion is
- * done by the test (the real adapter completes inside the repository's transaction).
+ * wins, the same fingerprint replays or is in progress, a different one is a mismatch. Completion inside a
+ * repository write is done by the test (the real adapter completes inside that transaction);
+ * [complete] is the standalone completion a no-write outcome uses.
  */
 class FakeLifecycleIdempotency : LifecycleIdempotencyPort {
     private data class Row(val fingerprint: String, var resultId: UUID?)
@@ -40,7 +41,15 @@ class FakeLifecycleIdempotency : LifecycleIdempotencyPort {
         released += claim
     }
 
-    fun complete(claim: IdempotencyClaim, resultId: UUID) {
+    val completedStandalone = mutableListOf<Pair<IdempotencyClaim, UUID>>()
+
+    override suspend fun complete(claim: IdempotencyClaim, resultId: UUID) {
+        completedStandalone += claim to resultId
+        completeNow(claim, resultId)
+    }
+
+    /** Non-suspending completion for mockk `answers {}` blocks standing in for a repository write. */
+    fun completeNow(claim: IdempotencyClaim, resultId: UUID) {
         rows.getValue("${claim.operation}:${claim.key}").resultId = resultId
     }
 
