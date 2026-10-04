@@ -224,7 +224,7 @@
 | **Repudiation** | Mitigated | Maker/checker identities and sensitive reads audit-logged; write-off attribution now server-derived. |
 | **Information disclosure** | Mitigated | Role-gated GDPR-class reads; analytics only via the outbox stream. |
 | **Denial of service** | Partially mitigated | `LedgerCallGuard` (`@Retry`/`@Timeout`/`@CircuitBreaker`) bounds ledger calls; per-tenant rate limiting is a gateway-layer roadmap item. |
-| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination, disbursement, and (issue #621) collateral registration from reducing reported ECL. |
+| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination, disbursement, and (issue #621) collateral registration from reducing reported ECL. Origination decision states are left only through a decision: the generic `advance` does not apply to `FOUR_EYES` (409 `FOUR_EYES_DECISION_REQUIRED`), and the state machine's standard policy itself requires a four-eyes decision by a principal other than the proposer on `FOUR_EYES -> OFFERED/DECLINED`. Every post-decision state fails closed without a recorded decider (409 `FOUR_EYES_DECISION_MISSING` on advance and disburse), the disburser must differ from both proposer and approver, and refused commands are recorded as `credit.application.transition.refused` outbox evidence. |
 
 ## 5. Maturity / roadmap (tracked, not yet built)
 

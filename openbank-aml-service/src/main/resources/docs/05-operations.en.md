@@ -24,6 +24,7 @@
 | Path | Port | Purpose |
 |---|---|---|
 | `/api/v1/aml/cases/...` | 8117 | business REST API |
+| `/api/v1/aml/cases/...` | 8443 | private-CA mTLS listener for in-cluster callers |
 | `/api/v1/info` | 8117 | ServiceInfoResource (build metadata) |
 | `/api/docs` | 8117 | Swagger UI |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (this documentation) |
@@ -32,6 +33,8 @@
 | `/q/metrics` | 8085 | Prometheus (Micrometer) |
 
 Management interface is on a **separate port 8085** (`quarkus.management.enabled=true`, root-path `/q`). It is disabled under `%test`.
+
+In production, port 8443 requires a client certificate trusted by the private CA. Its server certificate and trust bundle are mounted from the `aml-service-internal-tls` Certificate; the service uses TLS 1.3. The listener is deployed before callers move to it. Port 8117 stays available for the existing readiness and admin UI paths during that transition. Verify that the Certificate is Ready and that 8443 accepts an authorized client before switching callers; if the listener fails, leave callers on 8117 and restore the previous deployment.
 
 ## Configuration
 
