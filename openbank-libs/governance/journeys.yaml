@@ -354,23 +354,24 @@ journeys:
       A customer can declare an off-platform holding through the public edge and read it back
       in their net worth, labelled with its valuation source and age, with every revaluation
       kept in the holding's valuation history.
-    status: planned
+    status: active
     severity: ticket
     money_moving: false
-    target_schedule: "*/5 * * * *"
+    cronjob: openbank-infra/gitops/components/observability/cronjob-journey-wealth-declared-holding.yaml
+    schedule: "*/15 * * * *"
+    runtime_note: >-
+      Authenticates as the canary customer openbank-synthetic-retail (ADR-0331) through the
+      public token endpoint and the public customer edge. The identity was provisioned on
+      2026-10-04 with provision-synthetic-customer.sh and its claims verified; should its
+      secret ever be missing, the script logs "credential absent" and fails every check, which
+      is missing identity evidence and not a wealth or edge result. Each run writes and then
+      withdraws one tainted holding.
     falsification: >-
       Point the edge's wealth-service URL at a dead host, or make a revaluation replace the
       previous valuation: the journey must fail on the declared-holdings branch reported as
       missing, or on the lost history entry, not pass because the net-worth call returned 200
-      with a partial answer. Calling wealth-service on its ClusterIP instead of the edge must
-      also fail, since that proves the service answers and not that a customer can reach it.
-    blocked_by: >-
-      ADR-0252 phase 1 (#4348): no bank-owned synthetic customer identity exists yet. The write
-      routes (#11991), the edge->wealth contract (#11998), the taint across the edge (#12050) and
-      wealth's own taint persistence are built; what is missing is a canary that can obtain a
-      customers-realm token headlessly, a SYNTHETIC party behind it, and its principal in
-      openbank.synthetic.trusted-principals. Until then a production write would land in a real
-      party's wealth data (#9829).
+      with a partial answer. Setting CUSTOMER_BASE to wealth-service's ClusterIP must also
+      fail, since that proves the service answers and not that a customer can reach it.
 
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
