@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.25.0](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.24.1...audit-service-v0.25.0) (2026-10-04)
+
+
+### Features
+
+* **audit:** serve the ADR-0214 evidence bundle from the tamper-evident chain ([#11950](https://github.com/JiRaska/open-bank-oss/issues/11950)) ([6ba2a5b](https://github.com/JiRaska/open-bank-oss/commit/6ba2a5b47d9f4781b4c7041105a2bfa4513540c1))
+
+
+### Security
+
+* **audit:** refuse service accounts for audit trail reads at the OPA decision ([#11952](https://github.com/JiRaska/open-bank-oss/issues/11952)) ([3faadf2](https://github.com/JiRaska/open-bank-oss/commit/3faadf2df41916a7f07b522e18cec3c7b84c1bea))
+
 ## [0.24.1](https://github.com/JiRaska/open-bank-oss/compare/audit-service-v0.24.0...audit-service-v0.24.1) (2026-10-03)
 
 
