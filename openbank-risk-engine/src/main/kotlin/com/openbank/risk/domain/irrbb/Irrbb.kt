@@ -14,6 +14,7 @@ import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.curve.Curve
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.model.Instrument
+import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
 import java.math.BigDecimal
@@ -64,8 +65,25 @@ data class IrrbbResult(
     val worstLoss: BigDecimal?,
     /** Worst scenario per evaluated currency, by that currency's own loss; absent when it loses under none. */
     val worstByCurrency: Map<String, ShockScenario>,
+    /** The treasury money-market deals' share of each currency's gap and ΔEVE; empty without deals. */
+    val treasury: List<TreasuryContribution> = emptyList(),
     /** What the figures do not capture ([IrrbbDataGaps]); never empty for a book with loans or deposits. */
     val dataGaps: List<IrrbbDataGap> = emptyList(),
+)
+
+/**
+ * What a currency's treasury money-market deals contribute: their repricing notional (placements
+ * and ČNB deposits as assets, borrowings and lombard as liabilities, magnitudes), their base PV
+ * and their ΔEVE per scenario. Already INCLUDED in the gap and scenario figures — this is the
+ * breakdown, not an addition. [basePv] and [deltaEve] are null for a currency not evaluated.
+ */
+data class TreasuryContribution(
+    val currency: String,
+    val deals: Int,
+    val placements: BigDecimal,
+    val borrowings: BigDecimal,
+    val basePv: BigDecimal?,
+    val deltaEve: Map<ShockScenario, BigDecimal>,
 )
 
 /**
@@ -74,7 +92,7 @@ data class IrrbbResult(
  *
  * **ΔEVE.** For each currency with shock sizes and a discounting curve, every flow of the book
  * (behavioural NMD run-off, lending's contractual FIXED schedules, FLOATING loans projected from
- * their index curve) is projected and discounted under the base curve set and under the set with
+ * their index curve, treasury money-market deals as principal plus ACT/360 interest at maturity) is projected and discounted under the base curve set and under the set with
  * that currency's curves shocked. FLOATING flows are RE-PROJECTED on the shocked index curve, so a
  * floating loan's value moves only until its next reset — the repricing behaviour, not an
  * approximation of it. Run-off balance sheet, as d368 prescribes for EVE.
@@ -90,6 +108,9 @@ data class IrrbbResult(
 object Irrbb {
 
     const val NII_HORIZON_MONTHS = 12L
+
+    /** Instrument kinds the projection reads; any other kind on a run is reported, never dropped silently. */
+    val PROJECTED_KINDS = SnapshotCashFlowProjection.LOAN_KINDS + InstrumentKind.MONEY_MARKET_DEAL
     val NII_SCENARIOS = setOf(ShockScenario.PARALLEL_UP, ShockScenario.PARALLEL_DOWN)
     const val AGGREGATION_NOTE =
         "d368 Annex 2: per scenario the currency losses (EVE_0 − EVE_i > 0) are summed and gains dropped; the " +
@@ -108,7 +129,7 @@ object Irrbb {
         val repricing = RepricingGap.amounts(positions, instruments, asOf, model)
         val bookCurrencies = (
             positions.filter { it.kind == PositionKind.SUB_LEDGER }.map { it.currency } +
-                instruments.filter { it.kind in SnapshotCashFlowProjection.LOAN_KINDS }.map { it.currency }
+                instruments.filter { it.kind in PROJECTED_KINDS }.map { it.currency }
             ).toSortedSet()
         val gaps = bookCurrencies.map { RepricingGap.gap(it, repricing, asOf) }
         val unpriced = bookCurrencies.filter { curves.discountCurveFor(it) == null }
@@ -159,9 +180,48 @@ object Irrbb {
             worstScenario = worst?.scenario,
             worstLoss = worst?.aggregateLoss,
             worstByCurrency = worstByCurrency,
+            treasury = treasury(instruments, curves, evaluated, params),
             dataGaps = IrrbbDataGaps.of(positions, instruments, curves, baseFlows, evaluated),
         )
     }
+
+    private fun treasury(
+        instruments: List<Instrument>,
+        curves: CurveSet,
+        evaluated: List<String>,
+        params: IrrbbParameters,
+    ): List<TreasuryContribution> = instruments
+        .filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL && it.outstanding.signum() != 0 }
+        .groupBy { it.currency }
+        .toSortedMap()
+        .map { (currency, deals) ->
+            val flows = deals.flatMap { SnapshotCashFlowProjection.moneyMarketFlows(it) }
+            val priced = currency in evaluated
+            val base = if (priced) pv(flows, curves, currency) else null
+            TreasuryContribution(
+                currency = currency,
+                deals = deals.size,
+                placements = deals.filter { it.outstanding.signum() > 0 }
+                    .fold(BigDecimal.ZERO) { a, d -> a.add(d.outstanding) },
+                borrowings = deals.filter { it.outstanding.signum() < 0 }
+                    .fold(BigDecimal.ZERO) { a, d -> a.add(d.outstanding.negate()) },
+                basePv = base,
+                deltaEve = if (base == null) {
+                    emptyMap()
+                } else {
+                    ShockScenario.entries.associateWith { scenario ->
+                        val shocked = SupervisoryShocks.shock(
+                            curves,
+                            currency,
+                            scenario,
+                            params.shockSizes.getValue(currency),
+                            params.floor,
+                        )
+                        pv(flows, shocked, currency).subtract(base)
+                    }
+                },
+            )
+        }
 
     /** `Σ amount · (r_shocked(t) − r_base(t)) · (1 − t)` over repricings inside the horizon. */
     fun deltaNii(
@@ -206,6 +266,10 @@ object Irrbb {
         val loans = instruments
             .filter { it.kind in SnapshotCashFlowProjection.LOAN_KINDS && (only == null || it.currency == only) }
             .flatMap { SnapshotCashFlowProjection.loanFlows(it, curves) }
-        return (deposits + loans).groupBy { it.currency }
+        // Fixed-rate to maturity: the flows do not depend on the curves, only their discounting does.
+        val deals = instruments
+            .filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL && (only == null || it.currency == only) }
+            .flatMap { SnapshotCashFlowProjection.moneyMarketFlows(it) }
+        return (deposits + loans + deals).groupBy { it.currency }
     }
 }

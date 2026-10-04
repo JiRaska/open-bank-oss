@@ -401,7 +401,7 @@ def start_opa(name: str, component: str) -> int:
         destination.write_text(value)
     _, host_port = docker(
         f"{name}-opa",
-        "openpolicyagent/opa:1.17.0",
+        "openpolicyagent/opa:1.21.1",
         8181,
         args=("run", "--server", "--addr=0.0.0.0:8181", "--bundle", "/bundle"),
         mount=f"{bundle_dir}:/bundle:ro",

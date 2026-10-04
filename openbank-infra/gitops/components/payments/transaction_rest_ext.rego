@@ -9,6 +9,7 @@
 #   transaction.read    — get transaction by id (#transactionId)
 #   transaction.create  — initiate a transaction (resource = "")
 #   transaction.reverse — reverse a completed transaction, R-transaction return path (resource = "")
+#   transaction.sweep   — identity-merge balance sweep, four-eyes (resource = #request.idempotencyKey)
 #
 # Base rest.rego already grants operator-read-any for *.list / *.read to any HUMAN with
 # ROLE_OPERATOR/ROLE_ADMIN — covers transaction.list and transaction.read. This extension
@@ -91,6 +92,20 @@ allowed_reasons contains "operator-transaction-write" if {
 		"transaction.search",
 		"transaction.reverse",
 	}
+}
+
+# Identity-merge sweep (POST /transactions/merge-sweep, ADR-0179, #4754). transaction.sweep is a
+# four-eyes verb (rules.yaml four_eyes.verbs); without an allow reason the decision is a deny, which
+# carries no response_attributes, so four_eyes_required could never reach AuthorizeInterceptor and
+# enforce mode would 403 every sweep. Human-only ON PURPOSE, unlike operator-transaction-write above:
+# the shared M2M identities (service-account-openbank-edge / -services) hold ROLE_OPERATOR and would
+# match that rule, but no in-repo M2M caller ever sweeps -- the endpoint is operator-console-only.
+allowed_reasons contains "operator-transaction-sweep" if {
+	input.principal.type == "HUMAN"
+	not startswith(input.principal.id, "service-account-")
+	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+	role in input.principal.roles
+	input.action == "transaction.sweep"
 }
 
 # Read-only viewer path (see note above) — RBAC already admits ROLE_VIEWER on

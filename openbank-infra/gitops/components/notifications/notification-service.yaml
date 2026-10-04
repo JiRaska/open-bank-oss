@@ -281,7 +281,7 @@ spec:
         # OpaSidecarPolicyDecisionPoint gets connection-refused on localhost:8181 →
         # 503 for the whole customer notification center + push-device registry.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
