@@ -79,7 +79,7 @@ spec:
           # Non-alpine tag: it is multi-arch (incl. linux/arm64); the -alpine
           # variant resolved to amd64 only → "exec format error" on the Graviton
           # (arm64) nodes. valkey:8-alpine is multi-arch, hence redis stayed up.
-          image: docker.io/oliver006/redis_exporter:v1.62.0
+          image: docker.io/oliver006/redis_exporter:v1.92.1
           args: ["--redis.addr=redis://localhost:6379"]
           ports:
             - name: redis-metrics

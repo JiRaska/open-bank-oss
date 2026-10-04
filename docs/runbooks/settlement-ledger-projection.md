@@ -23,9 +23,13 @@ calls the legacy direct debit, credit or reversal operations.
 
 ## Uncertain outcomes
 
-An exhausted activity retry does not establish whether its remote write committed. Cover remains
-reserved when the outcome is unknown. Reconcile by settlement ID against the hold reference,
+An exhausted activity retry does not establish whether its remote write committed. The settlement
+workflow never releases cover on that uncertainty alone. If the ledger did commit, its confirmed
+journal event can still project the movement and atomically consume the matching cover while the
+settlement remains `LEDGER_STATE_UNKNOWN`. Otherwise the cover remains reserved. Reconcile by
+settlement ID against the hold reference,
 ledger transaction ID, projection markers and outbox delivery before any approved correction.
+The local proof `--drop-cover-responses` exercises five lost replies after a real hold commits: one active hold remains, no journal activity starts, and the row is `BALANCE_STATE_UNKNOWN`. By contrast, `--reject-cover` exercises insufficient funds with no hold created. Both currently produce the same uncertainty state; operators must inspect the actual hold and workflow history rather than infer reservation existence from that status.
 Never release a hold merely because the caller timed out. Never reissue the transfer under a new
 idempotency key to clear a stalled row. `BOOKED` confirms the journal, not completion of asynchronous
 projection on both balance pockets.
@@ -56,6 +60,45 @@ The legacy uncertainty guard uses a Temporal version marker. Existing histories 
 previous command sequence; the guard cannot repair already completed settlements. Keep compatible
 workers while old executions remain and reconcile pre-existing ambiguous cases separately.
 
+## Local response-loss proof
+
+The isolated three-service harness at `openbank-infra/scripts/settlement-real-services-e2e.py`
+exercises real OIDC/OPA, Temporal, journal posting and Kafka balance projection. Its
+`--drop-ledger-response` mode loses one reply after the ledger returns `POSTED` and requires the
+retry to resolve to the same journal. `--drop-ledger-response 5` loses all five activity replies and
+requires `LEDGER_STATE_UNKNOWN` with exactly one journal, correctly projected balances and consumed
+cover. These modes verify safe uncertainty handling, not completed operator reconciliation or
+sandbox rollout acceptance. See the adjacent harness README for prerequisites and evidence.
+
+## Recover a confirmed posting after exhausted replies
+
+This procedure is limited to `LEDGER_PROJECTION` settlements in `LEDGER_STATE_UNKNOWN` where the
+original journal is positively established as `POSTED`. It does not authorize financial corrections,
+new transfers, legacy saga recovery, or reset of an in-flight execution.
+
+1. Use the approved operator access to inspect the exact settlement and its Temporal run. Retain
+   the completed original history. Confirm the execution is closed and no original activity is
+   still outstanding.
+2. Read the ledger by the original settlement transaction ID. Require exactly one `POSTED` journal
+   with the intended payer/payee subaccounts, currency, amount and balanced legs. Reconcile both
+   projected balances, the matching hold and projection/outbox delivery. Missing or contradictory
+   evidence requires investigation; a timeout or an empty lookup does not authorize a reset.
+3. In the original history, locate the `ActivityTaskScheduled` event whose activity type is
+   `BookToLedger`. Use its `workflowTaskCompletedEventId` as the reset point. The successful cover
+   reservation must precede this point. Do not select the first workflow task or reset a different
+   workflow type merely because its name looks similar.
+4. Through the existing authorized Temporal operator interface, reset that exact workflow ID and
+   original run ID at the selected event, recording the recovery reason. Preserve history and use
+   the compatible worker binary. Do not change the settlement, idempotency key, or stored protocol.
+5. Verify the new run completes, the durable settlement becomes `BOOKED`, and its transition audit
+   is present. Verify the same single journal ID and unchanged customer balances; the recovery
+   must not create another journal or release any unrelated reservation. If it fails, retain the
+   new evidence and investigate rather than repeatedly resetting.
+
+The harness option `--drop-ledger-response 5 --recover-after-loss` exercises the same history-based
+reset with isolated infrastructure. The runtime has no automatic reset loop. Access control for the
+operator interface and approval evidence must be verified separately in the deployment environment.
+
 ## Worker process loss
 
 New ledger-projection activity schedules use a one-minute Start-To-Close timeout within the
@@ -64,3 +107,20 @@ worker dies without reporting completion; the total deadline alone previously ga
 attempt the full two hours, leaving no budget for recovery after it timed out. Retry retains the
 same settlement identity and relies on the original hold/journal idempotency keys. A timeout
 never establishes whether a remote write committed.
+
+`--crash-worker-after-ledger-commit` verifies same-run recovery after killing the local worker
+once the ledger confirms POSTED but before its reply reaches settlement. This exercises the
+new workflow only. Already scheduled activities retain the timeouts in their Temporal history;
+upgrading a worker does not shorten those timers or repair a legacy saga. Inspect the recorded
+activity deadlines and preserve the existing reconciliation procedure for those histories.
+
+## Read a settlement's status before recovery
+
+A human operator or administrator can read `GET /api/v1/settlements/{id}` (admin UI:
+`/settlements`). It returns the persisted settlement without starting a workflow or consuming an
+approval. Only `BOOKED` records a completed booking. `PENDING` with `recoveryRequired=true` and
+`recoveryReason=BALANCE_STATE_UNKNOWN` is the uncertain-movement case above. Compensation states
+require their own reconciliation, and a historical `LEDGER_REVERSED` is not proof of a reversal.
+Refresh performs one read and never retries origination. A 404 or a failed read is not evidence
+that a timed-out origination had no effect. Use the transfer id from the origination response,
+not an approval id. Service-account identities are refused with 403 by design.

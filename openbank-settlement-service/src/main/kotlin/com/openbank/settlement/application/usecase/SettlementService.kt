@@ -59,6 +59,8 @@ class SettlementService(
 
     // Moved to the shared com.openbank.libs.security.sanitizeForLog (#10907), imported above.
 
+    override suspend fun findById(settlementId: UUID): Settlement? = settlementRepository.findById(settlementId)
+
     override suspend fun originate(command: OriginateSettlementCommand): Settlement {
         // Idempotency: derive the settlement id deterministically from the caller's key, so a
         // retried request resolves to the same row (the UUID primary key is the hard duplicate

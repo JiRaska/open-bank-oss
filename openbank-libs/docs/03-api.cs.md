@@ -1,5 +1,7 @@
 # 03 — API & contracts
 
+Sdílená doménová API jsou v `openbank-libs-domain`; adaptéry Quarkus a HTTP resource v `openbank-libs-runtime`. Kořenový `openbank-libs` je reexportuje kvůli kompatibilitě. Přesnou verzi v nasazené službě ukazují její `/q/openbank/docs` a `/q/openapi`.
+
 Jak služby konzumují každý balíček libs. Příklady jsou zkrácené ale spustitelné.
 
 ## domain/money — Money + CurrencyCode

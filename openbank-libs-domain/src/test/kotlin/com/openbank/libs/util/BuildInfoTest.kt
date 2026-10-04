@@ -8,8 +8,8 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 
 /**
- * `openbank-build-info.properties` is stamped by Gradle's `processResources` in a service module
- * (from `libs.versions.toml`); `openbank-libs-domain` itself never generates it, so under this
+ * `openbank-service-build.properties` is stamped by the service Gradle convention;
+ * `openbank-libs-domain` itself never generates it, so under this
  * module's own test classpath the resource stream is absent and every build-time property falls
  * back to its documented default. That fallback path — never letting a missing resource surface as
  * an empty string or a thrown exception — is exactly what these assertions pin.
