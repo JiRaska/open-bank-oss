@@ -114,3 +114,7 @@ Never edit an applied migration. If a checksum mismatch blocks startup, set `QUA
 - Unit: `AmlCaseServiceTest`, `AmlCaseTest` (state machine), `AmlOutboxDispatchTest`.
 - Integration: `AmlOutboxDispatchIT` with `PostgresRedisTestResource` (Testcontainers — isolated Postgres + Valkey per test JVM, CI infra sweep #578). Under `%test` the scheduler is disabled so the IT drives `dispatchScheduledBatch()` explicitly.
 - Coverage is ratchet-only (Kover, ADR-0020) — never lower it.
+
+## Internal mTLS listener
+
+In production the AML service requires a client certificate on its TLS listener at port 8443. The existing HTTP listener at port 8117 remains enabled for readiness and Admin UI discovery; it is a separate path from caller mTLS. During rollout, verify that callers present certificates from the trusted private CA to 8443 and that readiness still probes 8117. A ready pod or a successful HTTP probe does not establish that the client-authenticated listener works. The client-auth requirement is build-time Quarkus configuration, so it belongs to the production profile rather than a deployment environment override.
