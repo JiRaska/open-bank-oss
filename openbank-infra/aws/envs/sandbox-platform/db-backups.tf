@@ -273,10 +273,12 @@ locals {
     pact-broker      = { namespace = "pact-broker", sa = "pact-broker-db" }
     party            = { namespace = "party", sa = "party-db" }
     card-issuance    = { namespace = "payments", sa = "card-issuance-db" }
-    # ADR-0283 phase 1 (#8809). Added in the same PR as the cluster: an association created later
-    # does nothing for a pod that is already running — EKS Pod Identity injects credentials at
-    # ADMISSION — so the database would archive nothing until someone deleted the pod, while
-    # `ContinuousArchiving=True` and `pg_stat_archiver` both reported success.
+    # ADR-0283 phase 1 (#8809). Added in the same PR as the cluster, which is the WRONG order:
+    # GitOps created the Cluster ~4 min after merge, this association existed only after a later
+    # `tofu apply`, and EKS Pod Identity injects credentials at pod ADMISSION — so the primary
+    # archived no WAL for ~8.7 h ("Unable to locate credentials") until it was recreated.
+    # check-db-backup-associations.py --base now rejects that shape: association first (merged
+    # and applied), backup config in a later gitops PR.
     card-processing  = { namespace = "payments", sa = "card-processing-db" }
     settlement       = { namespace = "payments", sa = "settlement-service-db" }
     swift-service    = { namespace = "payments", sa = "swift-service-db" }

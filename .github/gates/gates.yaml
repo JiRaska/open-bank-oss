@@ -1233,8 +1233,16 @@ gates:
     selftest_inputs: ["openbank-infra/scripts/check-db-backup-associations.py"]
     selftest: python3 openbank-infra/scripts/check-db-backup-associations.py --self-test
     selftest_expect: pass
+    needs_base: optional
     run: |
-      python3 openbank-infra/scripts/check-db-backup-associations.py --enforce
+      # --base adds the SAME-DIFF rule: a PR may not add a cluster's barmanObjectStore AND its
+      # pod-identity association together. GitOps deploys the Cluster minutes after merge, the
+      # association exists only after `tofu apply`, and Pod Identity injects credentials at pod
+      # ADMISSION — so the pod archives nothing until recreated (pricing-db 2026-09-28,
+      # card-processing-db #8837, ~8.7h with zero WAL archived). Optional base: on a push to main
+      # there is none, `--base ""` is read as "no base", and the tree-wide pairing still runs.
+      python3 openbank-infra/scripts/check-db-backup-associations.py --enforce \
+        --base "${PR_DIFF_BASE:-}"
 
   # The sibling of the gate above, for the case that gate CANNOT see.
   #
