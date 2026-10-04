@@ -153,3 +153,17 @@ spec:
               non-mutating Product Catalog journey is deleted, renamed, or has never completed
               successfully. This is separate from the public-edge probe: it exercises the
               catalog HTTP handler and its backing datastore path.
+        - alert: JourneyWealthDeclaredHoldingMissing
+          expr: |
+            absent(kube_cronjob_status_last_successful_time{namespace="observability", cronjob="journey-wealth-declared-holding"})
+          for: 30m
+          labels:
+            severity: warning
+          annotations:
+            summary: "The wealth-declared-holding journey has never succeeded, or its CronJob is gone"
+            description: >-
+              No kube-state-metrics series exists for journey-wealth-declared-holding. The
+              canary customer's declare / net-worth / revalue / withdraw path through the public
+              customer edge is deleted, renamed, or has never completed successfully. Check the
+              canary identity first (ADR-0331, provision-synthetic-customer.sh): a missing secret
+              shows in the Job log as "credential absent".

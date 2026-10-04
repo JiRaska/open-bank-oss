@@ -74,9 +74,9 @@ class LendingEventIdentityTest {
     }
 
     @Test
-    fun `the eleven event types are the ones this test speaks for`() {
+    fun `the twelve event types are the ones this test speaks for`() {
         // A new event type must consciously join this list, which is what makes the scan above a
-        // ratchet rather than a snapshot. Nine are literals; two arrive as a parameter.
+        // ratchet rather than a snapshot. Ten are literals; two arrive as a parameter.
         val publisher = Path.of(
             "src/main/kotlin/com/openbank/lending/infrastructure/outbox/KafkaLendingOutboxEventPublisher.kt",
         )
@@ -85,6 +85,7 @@ class LendingEventIdentityTest {
             .map { it.value.trim('"') }.toSet()
         assertThat(literals).containsExactlyInAnyOrder(
             "credit.application.transition",
+            "credit.application.transition.refused",
             "credit.decision.evaluated",
             "credit.loan.transition",
             "loan.disbursed",

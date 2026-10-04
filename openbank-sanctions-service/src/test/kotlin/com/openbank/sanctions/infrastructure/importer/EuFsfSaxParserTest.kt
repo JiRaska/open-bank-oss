@@ -5,7 +5,11 @@
 package com.openbank.sanctions.infrastructure.importer
 
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import java.nio.file.Files
+import java.nio.file.Path
 
 /**
  * Issue #8362: the first-party EU FSF parser. The fixtures mirror the real FSF v1.1 element
@@ -159,5 +163,17 @@ class EuFsfSaxParserTest {
 
         assertThat(entities.single().nationalities).containsExactly("CZ")
         assertThat(entities.single().programmes).containsExactly("XYZ")
+    }
+
+    @Test
+    fun `a list carrying a DTD is refused before any entity is resolved`(@TempDir dir: Path) {
+        val secret = dir.resolve("secret.txt")
+        Files.writeString(secret, "xxe-marker-must-never-be-read")
+        val xml = "<?xml version=\"1.0\"?><!DOCTYPE export [<!ENTITY e SYSTEM \"${secret.toUri()}\">]>" +
+            "<export><sanctionEntity logicalId=\"1\"><nameAlias wholeName=\"&e;\"/></sanctionEntity></export>"
+
+        assertThatThrownBy { EuFsfSaxParser.parse(xml.byteInputStream()) }
+            .hasMessageContaining("DOCTYPE")
+            .hasMessageNotContaining("xxe-marker")
     }
 }

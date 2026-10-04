@@ -4,6 +4,7 @@
 
 package com.openbank.fx.infrastructure.persistence.entity
 
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
@@ -19,7 +20,7 @@ import java.util.UUID
 class CnbPolicyRateEntity {
     @Id
     @Column(name = "id")
-    var id: UUID = UUID.randomUUID()
+    var id: UUID = Ids.newId()
 
     @Column(name = "instrument")
     var instrument: String = ""

@@ -4,6 +4,7 @@
 
 package com.openbank.fx.domain.cnb
 
+import com.openbank.libs.xml.SecureXml
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.util.zip.ZipInputStream
@@ -82,11 +83,7 @@ object SafeXlsxReader {
         return buf.toByteArray()
     }
 
-    private val factory: XMLInputFactory = XMLInputFactory.newFactory().apply {
-        setProperty(XMLInputFactory.SUPPORT_DTD, false)
-        setProperty(XMLInputFactory.IS_SUPPORTING_EXTERNAL_ENTITIES, false)
-        setProperty(XMLInputFactory.IS_REPLACING_ENTITY_REFERENCES, false)
-    }
+    private val factory: XMLInputFactory = SecureXml.xmlInputFactory()
 
     private fun <T> parse(xml: ByteArray, block: (XMLStreamReader) -> T): T {
         val r = factory.createXMLStreamReader(ByteArrayInputStream(xml))

@@ -11,7 +11,8 @@
 -- multiplies by. `published_at` is NULL until the row's event is in fx_outbox: ingestion and the
 -- outbox row commit in one transaction, so a NULL here means "no event yet", never "event lost".
 --
--- Forward-only. Rollback (only before any row has been published downstream):
+-- Forward-only.
+-- Rollback: Only before any row has been published downstream, drop the table:
 --   DROP TABLE IF EXISTS cnb_policy_rate;
 -- After publication the risk engine holds copies; dropping this table orphans them silently.
 CREATE TABLE cnb_policy_rate (

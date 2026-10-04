@@ -33,7 +33,8 @@ import java.util.concurrent.ConcurrentHashMap
  *
  * ## It never mints anything PAN-shaped
  *
- * [NetworkToken.tokenReference] is a UUID and `last4` is a fixed simulated value. Nothing here
+ * [NetworkToken.tokenReference] carries no decimal digit at all (see [opaqueReference]) and `last4`
+ * is a fixed simulated value. Nothing here
  * derives from, resembles, or could be mistaken for a card number — the ports were designed so no
  * signature accepts a PAN, and the simulator must not smuggle one in through the back door.
  */
@@ -51,7 +52,7 @@ class SimulatedTokenisationAdapter(private val clock: Clock) : TokenisationPort 
             // the call site, and this is the random half — an opaque reference nothing indexes or
             // sorts by, standing in for a handle the network would mint. `Ids.newId()` (UUIDv7) is
             // for durable, indexed keys, which a simulated token reference is not.
-            tokenReference = "sim-tok-${Ids.randomId()}",
+            tokenReference = opaqueReference(),
             last4 = SIMULATED_LAST4,
             status = NetworkTokenStatus.ACTIVE,
             expiry = LocalDate.now(clock).plusYears(TOKEN_VALIDITY_YEARS),
@@ -97,6 +98,17 @@ class SimulatedTokenisationAdapter(private val clock: Clock) : TokenisationPort 
     }
 
     private companion object {
+        /**
+         * A random reference with no decimal digit in it, so it can never contain a PAN-shaped run.
+         *
+         * A bare UUID can: its final group is 12 hex characters, all of them `0-9` with probability
+         * (10/16)^12 ≈ 0.36 %, and then the reference holds a 12-digit run. Shifting each digit
+         * onto `g-p` is a bijection that keeps all 122 random bits and the UUID layout, while
+         * making "contains no digit" true by construction rather than by luck.
+         */
+        fun opaqueReference(): String =
+            "sim-tok-" + Ids.randomId().toString().map { if (it in '0'..'9') 'g' + (it - '0') else it }.joinToString("")
+
         /** Fixed and obviously simulated. Nothing here is derived from a card number. */
         const val SIMULATED_LAST4 = "0000"
         const val TOKEN_VALIDITY_YEARS = 3L

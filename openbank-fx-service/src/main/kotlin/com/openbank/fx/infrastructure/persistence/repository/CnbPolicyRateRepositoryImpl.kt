@@ -23,7 +23,6 @@ import org.hibernate.reactive.mutiny.Mutiny
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
-import java.util.UUID
 
 /**
  * `cnb_policy_rate` with its outbox rows. Updates go through MANAGED entities loaded in the same
@@ -117,7 +116,6 @@ class CnbPolicyRateRepositoryImpl(private val clock: Clock) : CnbPolicyRateRepos
         provenance: CnbPolicyRateProvenance,
         now: Instant,
     ) = CnbPolicyRateEntity().also {
-        it.id = UUID.randomUUID()
         it.instrument = instrument.name
         it.effectiveFrom = o.effectiveFrom
         it.rate = o.rate

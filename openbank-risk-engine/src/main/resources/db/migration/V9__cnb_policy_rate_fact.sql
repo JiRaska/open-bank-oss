@@ -7,7 +7,8 @@
 -- Keyed by (instrument, effective_from), the consumer's idempotency key: a redelivery is a no-op,
 -- a different rate for a stored key is fx-service's revision and overwrites (revised = true).
 --
--- Forward-only. Rollback: DROP TABLE IF EXISTS cnb_policy_rate_fact; — the consumer group then
+-- Forward-only.
+-- Rollback: DROP TABLE IF EXISTS cnb_policy_rate_fact; — the consumer group then
 -- has to be reset to `earliest` to rebuild it from the compacted topic.
 CREATE TABLE cnb_policy_rate_fact (
     instrument     VARCHAR(40)   NOT NULL,

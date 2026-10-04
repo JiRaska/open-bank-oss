@@ -139,7 +139,7 @@ quarkus:
   openbank:
     cnb:
       policy-rates:
-        ingestion-cron: "off"
+        ingestion-cron: "0 0 0 1 1 ? 2099"
         startup-every: "off"
   quarkus:
     management:
