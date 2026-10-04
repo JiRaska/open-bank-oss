@@ -38,7 +38,7 @@ spec:
         image:
           registry: public.ecr.aws/d7v4f3x6
           repository: alloy
-          tag: v1.20.0
+          tag: v1.20.1
         # Pin the config-reloader sidecar straight at the ECR pull-through cache rather
         # than letting Kyverno's rewrite-ghcr rule do it. That policy is a mutating
         # webhook with failurePolicy: Ignore — it FAILS OPEN, so a pod admitted while
