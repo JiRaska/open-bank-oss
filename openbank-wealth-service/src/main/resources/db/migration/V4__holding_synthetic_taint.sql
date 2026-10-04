@@ -1,0 +1,12 @@
+-- ADR-0252 phase 1 (#4348): the synthetic taint belongs to the HOLDING, not to a request.
+--
+-- A holding declared by a canary is synthetic for its whole life. Its later events (revalue,
+-- withdraw, and the pledge/release that will arrive as lending events with no HTTP request at all)
+-- must carry the taint too, and only a stored flag can give it to them. The outbox column from V2
+-- carries it onto Kafka; this one is where it comes from.
+--
+-- DEFAULT FALSE is the fail-to-real direction: every existing row is a real customer's.
+--
+-- Rollback:
+--   ALTER TABLE declared_holdings DROP COLUMN synthetic;
+ALTER TABLE declared_holdings ADD COLUMN synthetic BOOLEAN NOT NULL DEFAULT FALSE;

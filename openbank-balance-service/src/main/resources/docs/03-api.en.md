@@ -86,11 +86,43 @@ PATCH /api/v1/balances/{accountId}/overdraft
 { "currency": "EUR", "arrangedOverdraftLimit": "2000.00" }
 ```
 
+## Amount and currency at the boundary (#11604)
+
+Every money-carrying input is built into a kernel `Money` (`Money.parseInbound`) before anything
+else happens — before the hold's `(accountId, currency, referenceId)` replay lookup (ADR-0287), the
+credit/debit `referenceId` movement marker (V8), any write, and any outbox event. Applies to
+`POST /holds`, `/credit`, `/debit` (`amount` + `currency`), `/initialize` (`initialAmount`,
+`arrangedOverdraftLimit` + `currency`) and `PUT /{currency}/overdraft-limit` (`arrangedOverdraftLimit`).
+
+| Input | Answer |
+|---|---|
+| more decimals than the currency allows (`10.005 EUR`, `1000.5 JPY`, `1.2345 KWD`) | 400 `AMOUNT_SCALE_EXCEEDED` |
+| not an ISO 4217 code with a minor unit (`XYZ`, `EURO`, `XAU`, blank) | 400 `CURRENCY_UNSUPPORTED` |
+| absent amount/currency, more than 19 integer digits | 400 `VALIDATION_ERROR` |
+| hold/credit/debit `amount` of zero or less; negative overdraft limit | 400 `VALIDATION_ERROR` |
+
+The body is the platform RFC 9457 `ProblemDetail`; `violations[].field` names the field and the
+rejected value is never echoed. Nothing is reserved, booked or announced and the `referenceId`
+stays free, so a corrected retry applies. Never rounded: trailing zeros are fine (`10.5000 EUR` is
+`10.50`), case and blanks in the currency are ignored (`eur` is `EUR`).
+
+Valid input stores the same `NUMERIC(19,4)` value as before. The hold response and the
+`HOLD_PLACED` / `BALANCE_UPDATED` event `amount` now carry the currency scale (`10.50` for a
+request of `10.5`, `250.00` for `250`); balance reads still come from the `NUMERIC(19,4)` columns
+unchanged, and no read path builds `Money`, so stored rows cannot fail to load.
+
+**Kafka consumers.** `ledger-events-in` builds the `AccountBookedChanged` `delta` as `Money`;
+`balance-init-in` builds the `AccountCreated` currency as a kernel `CurrencyCode`. A refusal is
+rethrown, so the channel's `failure-strategy: dead-letter-queue` parks the record on
+`openbank.dlq.balance.ledger-events-in` / `openbank.dlq.balance.balance-init-in` (with the original
+String payload) and the channel continues — no dedup marker, pocket, balance change or event is
+written. Zero and negative deltas remain valid (they are posted ledger facts).
+
 ## Error model (unified `openbank-libs.api.ApiError`)
 
 | HTTP | code | When |
 |---|---|---|
-| 400 | `validation-failed` | DTO check (negative amount, missing currency) |
+| 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | amount + currency are not a kernel `Money`, or a non-positive movement (see above) |
 | 404 | `balance-not-found` | `(accountId,currency)` does not exist |
 | 404 | `hold-not-found` | holdId does not exist |
 | 409 | `idempotency-key-mismatch` | replay with a different body |

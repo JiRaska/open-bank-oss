@@ -100,6 +100,9 @@ metadata:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: journey
     openbank.tech/journey: public-edge
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/5 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "1800"
 spec:
   # Every 5 minutes. The alert window in prometheus-rules-journey.yaml is derived from this
   # interval — change one and the other has to move with it.

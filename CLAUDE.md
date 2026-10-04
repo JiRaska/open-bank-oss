@@ -549,6 +549,13 @@ These are real, repeatable gotchas — worth knowing before they cost you a debu
   check fails on a stale declaration in either direction, so a new debt cannot quietly become
   permanent. What this buys you: a NEW pact for a provider with no `@PactFolder` replay is red at PR
   time, instead of being discovered by a later audit.
+- **A deployed provider can be verified with LATER test code only when its production inputs are
+  provably identical.** `verify-provider.yml` with `provider_version=P ref=F` checks out P and
+  replaces `<svc>/src/test` (only) with F's, and only if `pact-version-tree-equivalent.sh
+  --own-test-overlay` proves P and F byte-identical in everything else that builds the service —
+  the rest of `<svc>/` including `version.txt`, every `openbank-libs*` `src/main`, `build-logic`,
+  `gradle/` and the root build files. Anything else refuses; widening that set needs its own
+  argument, not a convenient exception (#11597).
 - **A test excluded from CI is a place where two artefacts drift with nothing to notice.** The last
   ungated pact was swift's, and it stayed ungated because the module excluded its own consumer tests
   when `CI=true` — so the pact was never regenerated, and the drift gate declared it out of scope for
