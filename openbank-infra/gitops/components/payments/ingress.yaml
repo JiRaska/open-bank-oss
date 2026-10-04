@@ -15,6 +15,10 @@ metadata:
   name: payments-api
   namespace: payments
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml), together with the three other
+    # api.open-bank.tech Ingresses. This makes external-dns ignore this Ingress; it stays as the
+    # rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Per-client rate limiting for the public sandbox API (auth-gated, but bound flood/cost).
