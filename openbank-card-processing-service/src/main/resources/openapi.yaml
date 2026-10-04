@@ -97,6 +97,16 @@ paths:
       description: |
         Applies the presented amount and posts it to the books. Partial presentments are supported;
         cumulative clearing may never exceed the authorised amount.
+
+        Idempotent per authorisation on the Idempotency-Key header: a clearing key is applied at most
+        once to an authorisation, enforced by a database UNIQUE constraint on (authorisation, key).
+        A retry with the same amount and currency replays the authorisation without applying the
+        presentment again (no second hold decrement, no second event, no second ledger posting);
+        reusing the key with a different amount or currency is refused with 409
+        IDEMPOTENCY_KEY_REUSED (libs ApiError body). A refused presentment is not recorded, so its
+        retry is evaluated afresh. Concurrent clearings under different keys on one authorisation
+        are serialised: a clearing that loses the race is re-evaluated once against the remaining
+        hold, and answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (retry later) if it loses again.
       operationId: clearCardAuthorization
       security:
         - bearerAuth: []

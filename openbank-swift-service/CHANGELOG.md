@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.7...swift-service-v0.12.0) (2026-10-03)
+
+
+### Features
+
+* **swift:** build kernel Money at the submit boundary ([#11971](https://github.com/JiRaska/open-bank-oss/issues/11971)) ([d5c8c73](https://github.com/JiRaska/open-bank-oss/commit/d5c8c73cf5f935c55d0b59bfbe3a2af46d5a6937)), closes [#11604](https://github.com/JiRaska/open-bank-oss/issues/11604)
+
 ## [0.11.7](https://github.com/JiRaska/open-bank-oss/compare/swift-service-v0.11.6...swift-service-v0.11.7) (2026-10-03)
 
 

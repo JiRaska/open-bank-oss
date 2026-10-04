@@ -5,7 +5,7 @@
 `openbank-clearing-service` je **engine pro clearing a zúčtování (settlement)** platformy OpenBank. Stojí *za* iniciací plateb a *před* (nebo souběžně s) účtováním v ledgeru a zodpovídá za seskupování plateb do zúčtovacích dávek a jejich provedení zúčtovacím cyklem. Drží tři agregáty:
 
 - **ClearingItem** — jednotlivá platba předaná ke clearingu: `paymentId`, `paymentReference`, IBAN dlužníka/věřitele + volitelné BIC, `amount`, `currency`, `rail`, `valueDate`, `endToEndId`, `remittanceInfo` a `status` (PENDING / IN_CLEARING / SETTLED / FAILED / REVERSED).
-- **ClearingBatch** — zúčtovací cyklus pro daný platební rail: `batchReference`, `rail`, `settlementType` (GROSS / NET / DEFERRED_NET, výchozí NET), souhrnné `totalDebit` / `totalCredit` / `netPosition`, `currency`, `itemCount`, `cycleId`, `settlementDate`, `settledAt` a `status`.
+- **ClearingBatch** — podíl jedné měny na zúčtovacím cyklu daného platebního railu (dávka je per rail **a** měna, #11974): `batchReference`, `rail`, `settlementType` (GROSS / NET / DEFERRED_NET, výchozí NET), souhrnné `totalDebit` / `totalCredit` / `netPosition`, `currency`, `itemCount`, `cycleId`, `settlementDate`, `settledAt` a `status`.
 - **SettlementPosition** — čistá pozice za účastníka v rámci cyklu: `participantBic`, `currency`, `cycleId`, `grossDebit`, `grossCredit`, `netPosition`, příznak `settled`.
 
 Podporované platební raily: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, `INTERNAL`.
@@ -45,7 +45,7 @@ Podporované platební raily: `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`, 
 | Případ užití | API | Událost / efekt |
 |---|---|---|
 | Předání platby ke clearingu | `POST /api/v1/clearing/submit` | nový `ClearingItem` (status PENDING), placeholder batch id do cyklu |
-| Spuštění zúčtovacího cyklu pro rail | `POST /api/v1/clearing/cycle/trigger?rail=…` | vytvoří `ClearingBatch`, připne pending položky, status IN_CLEARING (nebo SETTLED, pokud prázdný) |
+| Spuštění zúčtovacího cyklu pro rail | `POST /api/v1/clearing/cycle/trigger?rail=…` | vytvoří jednu `ClearingBatch` pro každou měnu, připne každou pending položku k dávce její měny, status IN_CLEARING (nebo jedna SETTLED dávka, pokud prázdný) |
 | Zúčtování dávky | `POST /api/v1/clearing/batches/{id}/settle` | status dávky → SETTLED, událost `publishBatchSettled` |
 | Výpis / detail dávek | `GET /api/v1/clearing/batches`, `…/{id}`, `…/{id}/items` | čtení |
 | Pozice zúčtování pro cyklus | `GET /api/v1/clearing/positions/{cycleId}` | čtení |
