@@ -631,11 +631,12 @@ not change any existing request's outcome until explicitly flipped.
   test HTTP fixtures retain their old transport. **STRIDE-S/T/I:** the TLS handshake
   authenticates the caller and server and protects requests and responses in transit;
   a missing, expired or wrong-CA certificate must fail the connection rather than fall
-  back to plaintext. **Residual boundary:** AML keeps its HTTP listener on port 8117
-  for readiness and Admin UI discovery, and its current namespace network policy still
-  admits 8117 from several caller namespaces. This change moves this client's configured
-  path to mTLS but does not itself close the legacy HTTP path to every peer. A successful
-  readiness probe or local HTTP test therefore does not prove the production handshake.
+  back to plaintext. **Residual boundary:** AML keeps HTTP 8117 for readiness, Admin UI discovery and
+  the security scanner. Its opt-in per-port NetworkPolicy admits migrated caller
+  namespaces only on 8443; Admin UI and the scanner still reach 8117, and same-namespace
+  traffic remains permitted. This enforces the migrated cross-namespace path but does
+  not make every AML HTTP access mTLS. A successful readiness probe or local HTTP test
+  therefore does not prove the production handshake.
   Rollout verification must exercise this caller against 8443 with valid and invalid
   client certificates and check that failures do not reroute to HTTP. Rollback restores
   the previous client URL/configuration while the AML listener remains available.

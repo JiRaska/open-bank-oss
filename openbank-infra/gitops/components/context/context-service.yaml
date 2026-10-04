@@ -6,7 +6,6 @@ metadata:
   name: context-service
   namespace: context
   labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
-  annotations: { openbank.io/service-dependencies: aml/aml-service }
 spec:
   replicas: 1
   strategy:

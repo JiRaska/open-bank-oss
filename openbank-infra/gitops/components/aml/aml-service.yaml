@@ -6,6 +6,10 @@ kind: Deployment
 metadata:
   name: aml-service
   namespace: aml
+  annotations:
+    # All cross-namespace AML callers declare their target port; keep HTTP 8117
+    # available to admin-ui and security-scanner while pinning migrated callers to 8443.
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: aml-service
     app.kubernetes.io/part-of: aml
