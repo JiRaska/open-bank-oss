@@ -10,7 +10,6 @@ import com.openbank.domestic.application.port.out.SettlementPort
 import com.openbank.domestic.application.port.out.SettlementUnavailableException
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import com.openbank.libs.domain.money.RoundingPolicy
 import io.quarkus.oidc.client.NamedOidcClient
 import io.quarkus.oidc.client.OidcClient
 import io.smallrye.mutiny.coroutines.awaitSuspending
@@ -24,7 +23,6 @@ import org.jboss.logging.Logger
 import java.time.Clock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Currency
 import java.util.UUID
 
 /**
@@ -75,13 +73,12 @@ class SettlementAdapter(
         val valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val description = buildDescription(payment)
 
-        // transaction-service rejects an amount whose scale exceeds the currency's fraction digits
-        // ("Amount scale 6 exceeds currency CZK fraction digits 2") — and payment.amount is persisted
-        // with a wider scale (e.g. 123.000000), which made every settlement 400 and stick in
-        // SENT_TO_CLEARING. Normalise to the currency's minor units before booking.
-        val fractionDigits = runCatching { Currency.getInstance(payment.currency).defaultFractionDigits }
-            .getOrDefault(2).coerceAtLeast(0)
-        val settlementAmount = payment.amount.setScale(fractionDigits, RoundingPolicy.LEDGER_POSTING.mode)
+        // transaction-service rejects an amount whose scale exceeds the currency's fraction digits.
+        // payment.amount is a kernel Money (#11604), built at the inbound boundary without rounding,
+        // so it is already at exactly the currency's minor-unit scale (123.000000 in the column reads
+        // back as 123.00). The previous setScale(LEDGER_POSTING) here was a no-op for every amount
+        // Money can hold and silently rounded the sub-minor-unit amounts the boundary now refuses.
+        val settlementAmount = payment.amount.amount
 
         // Credit leg: for an in-house transfer (payer + payee both at our bank) resolve the payee's
         // internal accountId and send it as targetAccountId, so transaction-service books a two-sided
