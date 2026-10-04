@@ -78,15 +78,22 @@ class CardTokenResource(private val useCase: CardTokenUseCase) {
     @Operation(summary = "Suspend, resume or delete a network token")
     suspend fun changeStatus(
         @PathParam("tokenReference") tokenReference: String,
+        @HeaderParam("Idempotency-Key") idempotencyKey: String?,
         request: ChangeTokenStatusRequestDto,
     ): Response {
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
+        IdempotencyKeys.requireValid(idempotencyKey)
         val status = runCatching { NetworkTokenStatus.valueOf(request.status.uppercase()) }.getOrNull()
         // A bad enum value is the CLIENT's mistake, so it is a 400 naming the accepted values —
         // not an IllegalArgumentException from valueOf carrying Java's own wording.
         requireNotNull(status) {
             "status must be one of ${NetworkTokenStatus.entries.joinToString(", ") { it.name }}"
         }
-        return when (val outcome = useCase.changeStatus(ChangeTokenStatusCommand(tokenReference, status))) {
+        return when (
+            val outcome = useCase.changeStatus(
+                ChangeTokenStatusCommand(tokenReference, status, idempotencyKey),
+            )
+        ) {
             is TokenOutcome.Changed -> Response.ok(TokenResponseDto.of(outcome.registration)).build()
             is TokenOutcome.Provisioned -> Response.ok(TokenResponseDto.of(outcome.registration)).build()
             is TokenOutcome.Refused -> refusal(outcome)

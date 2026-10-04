@@ -227,12 +227,24 @@ spec:
                 // pipeline. Verify after deploy with
                 //   sum(count_over_time({namespace="ledger"} | trace_id != "" [1h]))
                 // which must be > 0 while the service takes traffic.
+                //
+                // ...and then the shape moved under it. #11630 (2026-10-01) replaced the
+                // JSON-shaped *format pattern* (which wrote the ids top-level) with the real
+                // quarkus-logging-json encoder, which nests every MDC value under `"mdc":{}`
+                // — and that PR's own comment in openbank-libs-runtime's
+                // microprofile-config.properties names `mdc.traceId` as the contract. The two
+                // PRs crossed within a day, so from the first rebuilt service on, trace_id was
+                // empty again: measured 2026-10-03, every traceId-carrying line in the fleet
+                // was `"mdc":{"traceId":...}` and `| trace_id != ""` matched 0 lines.
+                // The encoder is the contract now; the top-level fallback keeps a pod still
+                // running a pre-#11630 image linked until its next rollout. JMESPath `||`
+                // takes the first non-null, so neither shape can shadow the other.
                 stage.json {
                   expressions = {
                     level         = "level",
-                    trace_id      = "traceId",
-                    span_id       = "spanId",
-                    correlationId = "correlationId",
+                    trace_id      = "mdc.traceId || traceId",
+                    span_id       = "mdc.spanId || spanId",
+                    correlationId = "mdc.correlationId || correlationId",
                   }
                 }
 

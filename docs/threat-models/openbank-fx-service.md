@@ -52,6 +52,16 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
+  folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
+  a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
+  clean score at every layer that reads the outcome. `FraudVerdict.UNKNOWN` now names that case,
+  counted apart from real and synthetic outcomes (`result="unrecognised"`) with the degraded gauge
+  at 0, since the scorer was reachable. **No trust boundary, edge or privilege changed**; the
+  verdict is still shadow-only, so payment decisions do not change. The log line records the event;
+  the counter feeds `FraudScoringUnrecognisedVerdict`, which warns on an unreadable score.
+  Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
+  a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into

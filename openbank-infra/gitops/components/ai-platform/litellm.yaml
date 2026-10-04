@@ -158,8 +158,8 @@ spec:
             # System roots + openbank-ca, assembled by the ca-bundle initContainer.
             - name: SSL_CERT_FILE
               value: /etc/ssl/openbank/ca-certificates.crt
-            # Langfuse v3 web (langfuse-v3.yaml) since ADR-0328 wave B. The v2 Service `langfuse`
-            # is scaled to zero; pointing back at it is half of the wave-B rollback.
+            # Langfuse web (langfuse-v3.yaml) since ADR-0328 wave B; the v2 Service `langfuse`
+            # was deleted in wave C1.
             - name: LANGFUSE_HOST
               value: http://langfuse-web.ai-platform.svc:3000
             # prisma-python caches its downloaded query engine under $HOME. Without this it

@@ -103,6 +103,7 @@ class RunnerTests(unittest.TestCase):
             output = root / 'output'
             env = dict(os.environ, GITHUB_DEPENDENCY_GRAPH_SHA=SHA,
                        GITHUB_DEPENDENCY_GRAPH_REF=IDENTITY['ref'],
+                       GITHUB_REF='refs/pull/123/merge', GITHUB_HEAD_REF='example',
                        GITHUB_DEPENDENCY_GRAPH_JOB_ID='123',
                        GITHUB_DEPENDENCY_GRAPH_JOB_CORRELATOR=IDENTITY['job']['correlator'],
                        GITHUB_DEPENDENCY_GRAPH_WORKSPACE=str(root),
@@ -114,6 +115,8 @@ class RunnerTests(unittest.TestCase):
                 env['GITHUB_DEPENDENCY_GRAPH_SHA'] = '2' * 40
             if case == 'filtered':
                 env['DEPENDENCY_GRAPH_INCLUDE_PROJECTS'] = ':only-one'
+            if case == 'merge-ref':
+                env['GITHUB_DEPENDENCY_GRAPH_REF'] = env['GITHUB_REF']
             calls = []
 
             timeouts = []
@@ -185,7 +188,7 @@ class RunnerTests(unittest.TestCase):
 
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
-                     'wrong-receipt', 'wrong-snapshot', 'duplicate-snapshot'):
+                     'wrong-receipt', 'wrong-snapshot', 'duplicate-snapshot', 'merge-ref'):
             with self.subTest(case=case):
                 self.run_case(case)
 
@@ -194,6 +197,7 @@ class RunnerTests(unittest.TestCase):
         self.assertIn('dependency-graph: generate\n', source)
         self.assertNotIn('dependency-graph: generate-and-submit', source)
         self.assertIn('ref: ${{ github.event.pull_request.head.sha || github.sha }}', source)
+        self.assertIn("GITHUB_DEPENDENCY_GRAPH_REF: ${{ github.head_ref && format('refs/heads/{0}', github.head_ref) || github.ref }}", source)
         self.assertLess(source.index('name: Resolve and validate fleet'), source.index('name: Submit complete fleet'))
         submission = source.split('name: Submit complete fleet snapshot', 1)[1].split('\n      - name:', 1)[0]
         self.assertNotIn('always()', submission)
