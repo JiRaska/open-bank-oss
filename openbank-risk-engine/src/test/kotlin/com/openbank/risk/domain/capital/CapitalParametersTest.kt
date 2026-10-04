@@ -40,7 +40,7 @@ class CapitalParametersTest {
     @Test
     fun `the parameter set is identified, versioned and scoped to BCBS d424`() {
         assertThat(p.id).isEqualTo("bcbs-d424-sa")
-        assertThat(p.version).isEqualTo("2")
+        assertThat(p.version).isEqualTo("3")
         assertThat(p.source).contains("d424").contains("EU CRR Part Three Title II Chapter 2 not applied")
         assertThat(CapitalFactor.entries.filter { it.kind == FactorKind.RISK_WEIGHT }.map { it.citation })
             .allMatch { it.startsWith("BCBS d424 ¶") }
@@ -93,7 +93,8 @@ class CapitalParametersTest {
         assertThat(c.bankScraGrade).describedAs("unrated banks: Grade C (d424 ¶23, ¶26)").isEqualTo(ScraGrade.C)
         assertThat(c.domesticCurrency).isEqualTo("CZK")
         assertThat(c.glAccounts["1510"]).isEqualTo(CapitalGlClass.CENTRAL_BANK)
-        assertThat(listOf("1001", "1002", "1500", "1501").map { c.glAccounts[it] }).containsOnly(CapitalGlClass.BANK)
+        assertThat(listOf("1500", "1501").map { c.glAccounts[it] }).containsOnly(CapitalGlClass.BANK)
+        assertThat(listOf("1001", "1002").map { c.glAccounts[it] }).containsOnly(CapitalGlClass.NOSTRO)
         assertThat(c.glAccounts["6040"]).isEqualTo(CapitalGlClass.OWN_FUNDS_CET1_DEDUCTION)
         assertThat(c.glAccounts["6060"]).isEqualTo(CapitalGlClass.OWN_FUNDS_TIER2)
         assertThat(
