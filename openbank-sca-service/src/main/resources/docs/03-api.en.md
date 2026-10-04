@@ -90,3 +90,8 @@ Errors use the shared `ApiError` (libs): `{ traceId, status, code, message }`.
 ## Versioning
 
 API changes follow the OpenAPI-diff (`oasdiff`) classification, independent of the release version (ADR-0048). The release version lives in `version.txt` (currently `0.4.0`); the API-contract version lives in `openapi.yaml:info.version` and must be brought back in sync with the code as part of the contract-regeneration follow-up.
+
+
+## Operator approvals (four-eyes)
+
+`GET /api/v1/sca/approvals` and `GET /api/v1/sca/approvals/{id}` (operator/admin) return each approval with `decidedAt` and a `summary` of what it binds, rendered by `ScaApprovalSummaryRenderer` when the approval is created and stored with it: for `device.enroll` the credential handle, algorithm and the first 8 hex of the public key SHA-256 (never the key); for `device.revoke` the device and credential handles, algorithm and enrolment date; for `scaChallenge.consume` the purpose, amount, currency and the creditor masked to its last 4 characters. The summary is informational; the request fingerprint decides which retry an approval unlocks.
