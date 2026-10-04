@@ -29,6 +29,25 @@ interface CardAuthorizationRepository {
      */
     suspend fun save(authorization: CardAuthorization, event: OutboxMessage, idempotencyKey: String): CardAuthorization
 
+    /**
+     * Applies a clearing: the updated authorisation, its event **and** the [clearing] record commit in
+     * one transaction. The record's `(authorizationId, idempotencyKey)` is UNIQUE in the database, so
+     * a concurrent duplicate cannot also commit — it fails with [DuplicateClearingException] and its
+     * hold decrement and event roll back with it.
+     *
+     * [authorization] must carry the version of the row it was computed from: if the stored row has
+     * moved on (a concurrent clearing under another key), nothing is written and
+     * [StaleAuthorizationException] is thrown.
+     */
+    suspend fun saveClearing(
+        authorization: CardAuthorization,
+        event: OutboxMessage,
+        clearing: RecordedClearing,
+    ): CardAuthorization
+
+    /** The clearing already applied under [idempotencyKey] for this authorisation, if any. */
+    suspend fun findClearing(authorizationId: UUID, idempotencyKey: String): RecordedClearing?
+
     suspend fun findById(id: UUID): CardAuthorization?
 
     /** The acquirer's own reference, which is how a reversal arrives when it carries no id of ours. */
@@ -51,6 +70,32 @@ interface CardAuthorizationRepository {
     /** Holds past their expiry instant, oldest first. Drives the release sweep. */
     suspend fun findExpiredHolds(now: Instant, limit: Int): List<CardAuthorization>
 }
+
+/**
+ * A clearing presentment that has been applied, as the idempotency record for its key.
+ * [requestFingerprint] binds the key to the presented amount and currency, so the same key with a
+ * different body is detectable as reuse instead of being replayed as the first one.
+ */
+data class RecordedClearing(
+    val id: UUID,
+    val authorizationId: UUID,
+    val idempotencyKey: String,
+    val requestFingerprint: String,
+    val amountMinorUnits: Long,
+    val currencyCode: String,
+    val appliedAt: Instant,
+)
+
+/** A concurrent request already applied a clearing under the same key; this one was rolled back. */
+class DuplicateClearingException(cause: Throwable) :
+    RuntimeException("a clearing with this key was already applied to the authorisation", cause)
+
+/**
+ * The authorisation changed between the read a clearing was computed from and its write (a
+ * concurrent clearing under another key). Nothing was written; re-read and re-evaluate.
+ */
+class StaleAuthorizationException(cause: Throwable? = null) :
+    RuntimeException("the authorisation was modified concurrently", cause)
 
 /** Outbox port: the libs [OutboxRepository] plus an in-transaction write. */
 interface CardProcessingOutboxRepository : OutboxRepository {
@@ -151,6 +196,9 @@ interface CardProcessingMetricsPort {
     fun authorizationDecided(approved: Boolean, reason: String?)
 
     fun presentmentApplied(fullyCleared: Boolean)
+
+    /** A clearing lost a race to a concurrent clearing on the same authorisation and was re-evaluated. */
+    fun clearingConflict()
 
     fun holdReleased(kind: String)
 
