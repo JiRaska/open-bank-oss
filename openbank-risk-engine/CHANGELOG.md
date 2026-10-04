@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.24.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.23.1...risk-engine-v0.24.0) (2026-10-03)
+
+
+### Features
+
+* **risk-engine:** sandbox reference curve sets, CZK IRRBB aggregate, usable IRRBB/forecast pages ([#11719](https://github.com/JiRaska/open-bank-oss/issues/11719)) ([9cfbc7a](https://github.com/JiRaska/open-bank-oss/commit/9cfbc7a882d7de062c165977e239dc09c343c6d9))
+
+## [0.23.1](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.23.0...risk-engine-v0.23.1) (2026-10-02)
+
+
+### Bug Fixes
+
+* **risk-engine:** reject a snapshot as-of after the current business date ([#11718](https://github.com/JiRaska/open-bank-oss/issues/11718)) ([a56389b](https://github.com/JiRaska/open-bank-oss/commit/a56389b05fd559348f5717c3a657d6feb1e0ec6c))
+
 ## [0.23.0](https://github.com/JiRaska/open-bank-oss/compare/risk-engine-v0.22.0...risk-engine-v0.23.0) (2026-10-02)
 
 

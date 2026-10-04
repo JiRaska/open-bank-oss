@@ -66,7 +66,7 @@ jobs:
             docker run --rm \
               --user "$(id -u):$(id -g)" \
               --volume "$PWD/synthetic-evidence:/evidence" \
-              docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+              docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
               inspect "/evidence/${journey}.js"
           done < <(python3 .github/scripts/check-journey-catalog.py --root . --active-ids)
           # public-edge is internet-reachable and therefore gets an actual CI execution;
@@ -85,7 +85,7 @@ jobs:
             --env API_BASE=http://127.0.0.1:9 \
             --env CUSTOMER_BASE=http://127.0.0.1:9 \
             --env ADMIN_BASE=http://127.0.0.1:9 \
-            docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+            docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
             run --quiet \
             --summary-export /evidence/public-edge-negative-summary.json \
             /evidence/journey.js
@@ -106,7 +106,7 @@ jobs:
           docker run --rm \
             --user "$(id -u):$(id -g)" \
             --volume "$PWD/synthetic-evidence:/evidence" \
-            docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc \
+            docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34 \
             run --quiet --summary-export /evidence/summary.json /evidence/journey.js
 
       - name: Build synthetic Test Intelligence envelope

@@ -111,6 +111,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.agent-audit-events-in
+          # Preserve the String payload; JSON serialization would quote the whole event again.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # group.id / auto.offset.reset are deliberately NOT set as YAML keys here — see
       # openbank-infra/gitops/components/audit/audit-service-msg-override.yaml (a properties-file
@@ -152,6 +155,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.audit.audit-events-in
+          # Preserve the String payload; JSON serialization would quote the whole event again.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         client.id: audit-service-${quarkus.uuid}
         # clearing.batch.event / security.ict.incident / security.scan.event added (ADR-0160 #996
@@ -233,7 +239,7 @@ mp:
         # subscribe, which is the intended audit behaviour.
         # openbank.card.processing.events — ADR-0283 phase 1: card-processing-service. New
         # topic, no committed offset: same first-subscribe-from-retention-start behaviour.
-        topics: openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.card.processing.events
+        topics: openbank.settlement.events,openbank.accounts.account.created,openbank.transactions.transaction.initiated,openbank.balance.events,openbank.party.events,openbank.kyc.events,openbank.consent.events,openbank.customer.audit,openbank.clearing.batch.event,openbank.security.ict.incident,openbank.cards.events,openbank.dispute.events,openbank.domestic.payment.events,openbank.sepa.payment.events,openbank.statement.event,openbank.sanctions.screening.event,openbank.sepa.instant.events,openbank.fx.conversion.completed,openbank.fx.fixing.published,openbank.documents.document.event,openbank.payments.swift.event,openbank.lending.events,openbank.sca.events,openbank.delegation.events,openbank.delegation.spend-reservation-state,openbank.delegation.approval-events,openbank.delegation.approval-group-revisions,openbank.ledger.journal.posted,openbank.sdd.event,openbank.interest.accrual.event,openbank.fraud.hold.changed,openbank.billing.fee.event,openbank.standing-orders.order.event,openbank.treasury.deal.events,openbank.card.processing.events
         value.deserializer: org.apache.kafka.common.serialization.StringDeserializer
 "%dev":
   quarkus:
@@ -254,6 +260,12 @@ mp:
       anchor:
         enabled: false
 openbank:
+  # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer. Without a PDP bean an
+  # enforced @Authorize request fails closed (pdp_unconfigured) and advisory mode never consults
+  # the policy at all, so the sidecar alone does not authorize anything.
+  authz:
+    opa-pdp-producer:
+      enabled: true
   rate-limit:
     enabled: true
     max-concurrent-requests: 200
@@ -299,3 +311,9 @@ openbank:
       # suspected incident, or widen it if the log grows enough for the walk to cost real time —
       # openbank_audit_chain_verify_duration_seconds is what tells them which.
       cron: ${AUDIT_CHAIN_VERIFY_CRON:0 0 * * * ?}
+
+# Read by the libs-runtime OpaPolicyDecisionPointProducer enabled under openbank.authz above.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"

@@ -1,265 +1,219 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Open Bank Foundation · The open framework for banking in the AI era</title>
-  <meta name="description" content="A shared, open-source framework for banks in the AI era. The patterns are known: microservices, multi-cloud, AI. Let's build the common core together, in the open." />
-  <meta property="og:title" content="Open Bank Foundation" />
-  <meta property="og:description" content="The open framework for banking in the AI era. Microservices, multi-cloud, AI, shared in the open." />
-  <meta property="og:image" content="assets/openbank-logo.png" />
-  <meta name="theme-color" content="#0a0e27" />
-  <link rel="icon" type="image/png" href="assets/openbank-logo.png" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css" />
-  <link rel="canonical" href="https://open-bank.tech/" />
-  <script type="application/ld+json">
-  [
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenBank | Open-source banking ecosystem &amp; reference platform</title>
+<meta name="description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
+<meta name="theme-color" content="#f8f6f1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="OpenBank" />
+<meta property="og:url" content="https://open-bank.tech/" />
+<meta property="og:title" content="OpenBank | Open-source banking ecosystem &amp; reference platform" />
+<meta property="og:description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
+<meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
+<meta property="og:image:width" content="1536" />
+<meta property="og:image:height" content="1024" />
+<meta property="og:image:alt" content="OpenBank lion, lioness and bot" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
+<link rel="canonical" href="https://open-bank.tech/" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
     {
-      "@context": "https://schema.org",
       "@type": "WebSite",
-      "name": "Open Bank Foundation",
-      "url": "https://open-bank.tech"
+      "@id": "https://open-bank.tech/#website",
+      "url": "https://open-bank.tech/",
+      "name": "OpenBank",
+      "description": "Open-source banking ecosystem and reference implementation connecting bank domains, shared foundations and customer experiences.",
+      "inLanguage": "en"
     },
     {
-      "@context": "https://schema.org",
-      "@type": "Organization",
-      "name": "Open Bank Foundation",
-      "url": "https://open-bank.tech",
-      "logo": "https://open-bank.tech/assets/openbank-logo.png",
-      "description": "A shared, open-source framework for banks in the AI era. Banking-grade microservices, multi-cloud substrate, AI-native governance.",
-      "founder": {
-        "@type": "Person",
-        "name": "Jiří Raška",
-        "sameAs": "https://www.linkedin.com/in/jiriraska"
-      },
-      "sameAs": [
-        "https://www.linkedin.com/in/jiriraska",
-        "https://github.com/JiRaska/open-bank-oss"
+      "@type": "SoftwareSourceCode",
+      "@id": "https://open-bank.tech/#project",
+      "name": "OpenBank",
+      "url": "https://open-bank.tech/",
+      "codeRepository": "https://github.com/JiRaska/open-bank-oss",
+      "description": "Early-stage open-source banking reference implementation connecting customer and business identity, banking domains, shared libraries, Product Studio, test evidence, observability and governed AI tools. Not a licensed bank or production-ready service.",
+      "programmingLanguage": [
+        "Kotlin",
+        "TypeScript"
       ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://open-bank.tech/#webpage",
+      "url": "https://open-bank.tech/",
+      "name": "OpenBank | Open-source banking ecosystem & reference platform",
+      "description": "Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools.",
+      "isPartOf": {
+        "@id": "https://open-bank.tech/#website"
+      },
+      "about": {
+        "@id": "https://open-bank.tech/#project"
+      },
+      "inLanguage": "en"
     }
   ]
-  </script>
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- background ambience -->
-  <div class="bg-grid" aria-hidden="true"></div>
-  <div class="bg-blob blob-a" aria-hidden="true"></div>
-  <div class="bg-blob blob-b" aria-hidden="true"></div>
-
-  <!-- NAV -->
-  <header class="nav">
-    <a class="nav-brand" href="#top">
-      <img src="assets/openbank-logo.png" alt="Open Bank Foundation logo" />
-      <span>Open Bank <strong>Foundation</strong></span>
-    </a>
-    <nav class="nav-links">
-      <a href="#manifesto">Manifesto</a>
-      <a href="#framework">Framework</a>
-      <a href="platform.html">Platform</a>
-      <a href="#app">App</a>
-      <a href="#why-open">Why open</a>
-      <a href="#join">Join</a>
-    </nav>
-    <button class="btn btn-ghost nav-cta" data-open-demo type="button"><span class="play">▶</span> Live demo</button>
-  </header>
-
-  <!-- HERO -->
-  <section class="hero" id="top">
-    <div class="hero-copy reveal">
-      <span class="eyebrow"><span class="dot"></span> An idea, not an institution (yet)</span>
-      <h1>The open framework for banking in the <span class="grad">AI era</span>.</h1>
-      <p class="lede">
-        Banks became software houses. The hard patterns are microservices, multi-cloud
-        and AI between us. They're already known and re-solved behind every closed wall.
-        It's time to share the common core in the open, the way it makes sense for everyone.
-        It already runs: a ~37-service reference bank in a live AWS sandbox, with an AI
-        agent fleet and a customer app on the same open core.
-      </p>
-      <p class="proposal-note">
-        <strong>The Open Bank Foundation doesn't exist yet.</strong> This page is a proposal,
-        a vision I'm putting out to find people who want to help co-found it.
-      </p>
-      <div class="hero-cta">
-        <a class="btn btn-primary" href="#join">Help co-found it</a>
-        <a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">Browse the code · Apache-2.0</a>
-        <button class="btn btn-ghost" data-open-demo type="button">
-          <span class="play">▶</span> Try the live demo
-        </button>
-      </div>
-      <ul class="hero-stats">
-        <li><b>~37</b><span>backend microservices</span></li>
-        <li><b>8 AI agents</b><span>policy-gated, in the fleet</span></li>
-        <li><b>iOS + Android</b><span>one Kotlin app, live edge</span></li>
-      </ul>
-    </div>
-    <div class="hero-visual reveal">
-      <div class="logo-glow"></div>
-      <img class="hero-logo" src="assets/openbank-logo.png" alt="OpenBank Framework" />
-    </div>
-  </section>
-
-  <!-- MANIFESTO -->
-  <section class="section manifesto" id="manifesto">
-    <div class="section-head reveal">
-      <span class="kicker">Manifesto</span>
-      <h2>Banks already became software houses.<br />Now let's act like one community.</h2>
-    </div>
-    <div class="manifesto-grid">
-      <p class="reveal">
-        Every modern bank runs hundreds of engineers solving the <em>same</em> problems:
-        ledgers, payments rails, SEPA, sanctions screening, idempotency, audit, outbox,
-        multi-currency. The architecture is no longer a secret. The patterns are known.
-      </p>
-      <p class="reveal">
-        Yet each one re-implements the undifferentiated core behind a closed wall, at full cost,
-        with full risk. That made sense when software was the moat. In the AI era, the moat is
-        your <strong>product and your customers</strong>, not your outbox table.
-      </p>
-      <p class="reveal">
-        The <strong>Open Bank Foundation</strong> is the proposal: a place to share what is common
-        to all of us: a banking-grade, opinionated, production-shaped framework that any bank can
-        adopt, audit, and contribute back to. Open the floor that everyone keeps rebuilding,
-        and compete where it actually matters.
-      </p>
-    </div>
-  </section>
-
-  <!-- FRAMEWORK -->
-  <section class="section framework" id="framework">
-    <div class="section-head reveal">
-      <span class="kicker">The shared framework</span>
-      <h2>The known patterns, made open and production-shaped.</h2>
-      <p class="sub">A reference implementation of how a bank is actually built. Not slideware, but running services, contracts and gates.</p>
-    </div>
-    <div class="cards">
-      <article class="card reveal">
-        <div class="card-ico">⬡</div>
-        <h3>Microservices &amp; hexagonal</h3>
-        <p>~37 banking microservices with a strict hexagonal architecture, all deployed to the AWS sandbox. A domain layer with zero framework imports: portable, testable, boring on purpose.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">☁</div>
-        <h3>Multi-cloud substrate</h3>
-        <p>Cloud-agnostic by design: stateful concerns run as in-cluster OSS, provisioned with OpenTofu and reconciled by GitOps. No lock-in, any region.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">✦</div>
-        <h3>AI-native</h3>
-        <p>AI between us, not bolted on. A fleet of policy-gated agents (FinOps, DevOps, governance, release, docs), a deployed customer-facing LLM copilot, human-in-the-loop controls and AI-attributed audit. All first-class, all deny-by-default.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">⇄</div>
-        <h3>Event-driven &amp; durable</h3>
-        <p>Outbox, idempotency, versioned backward-compatible events, and Temporal durable workflows for the flows that must not lose their place. The money-path primitives every bank needs and nobody should write twice.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">▣</div>
-        <h3>Governance as code</h3>
-        <p>Versioning, releases, contracts and a service catalog derived from the code and enforced in CI. Compliance you can diff, not a binder on a shelf.</p>
-      </article>
-      <article class="card reveal">
-        <div class="card-ico">🛡</div>
-        <h3>Security &amp; compliance baked in</h3>
-        <p>Zero-trust authz, threat models for money-path services, sanctions screening and audit trails: the regulated parts, shared and reviewed in the open.</p>
-      </article>
-    </div>
-  </section>
-
-  <!-- WHY OPEN -->
-  <section class="section why" id="why-open">
-    <div class="why-inner">
-      <div class="section-head reveal">
-        <span class="kicker">Why open source</span>
-        <h2>Shared, it gets safer, not riskier.</h2>
-      </div>
-      <div class="why-prose">
-        <p class="reveal">A money-path that thousands of people review is harder to break than one every bank hides and hopes about. And once the boring core is shared, nobody pays full price to rebuild the same ledger, outbox and SEPA plumbing again; that budget goes to customers instead.</p>
-        <p class="reveal">Shared patterns also give engineers, auditors and regulators one vocabulary across institutions. And in the AI era a well-shaped, documented codebase is exactly the substrate agents build on, so opening the substrate multiplies everyone's leverage.</p>
-      </div>
-    </div>
-  </section>
-
-  <!-- PROOF / PLATFORM TEASER -->
-  <section class="section proof" id="proof">
-    <div class="section-head reveal">
-      <span class="kicker">Not slideware</span>
-      <h2>This already runs. And you can inspect it.</h2>
-      <p class="sub">The framework ships as a running European bank: governance mapped to the regulation, the real cost of every business process, continuity, AI governance and live cloud architecture. All observable, in real time, and the whole thing is <b>public on GitHub under Apache-2.0</b>.</p>
-    </div>
-    <div class="proof-grid">
-      <a class="proof-card reveal" href="platform.html#governance">
-        <div class="proof-ico">§</div>
-        <h3>Regulatory coverage</h3>
-        <p>Every control traced to a named article: DORA, PSD2, GDPR, PCI DSS, 5AMLD, CNB, EBA, eIDAS 2.0, EU AI Act.</p>
-        <span class="proof-go">See the coverage map →</span>
-      </a>
-      <a class="proof-card reveal" href="platform.html#finops">
-        <div class="proof-ico">€</div>
-        <h3>Real-time FinOps</h3>
-        <p>Run-cost attributed to the business flow that spends it, fully-loaded, this month.</p>
-        <span class="proof-go">See the cost breakdown →</span>
-      </a>
-      <a class="proof-card reveal" href="platform.html#bcp">
-        <div class="proof-ico">⛨</div>
-        <h3>Business continuity</h3>
-        <p>Recovery tiers with live health and RTO/RPO per DORA Art.11-12 and CNB §20d.</p>
-        <span class="proof-go">See the recovery plan →</span>
-      </a>
-      <a class="proof-card reveal" href="platform.html#aiops">
-        <div class="proof-ico">✦</div>
-        <h3>AI governance</h3>
-        <p>Agents under the same gates as humans: read / propose / deny tiers, deny-by-default.</p>
-        <span class="proof-go">See the AI posture →</span>
-      </a>
-      <a class="proof-card reveal" href="platform.html#cloud">
-        <div class="proof-ico">☁</div>
-        <h3>Live cloud architecture</h3>
-        <p>Target state with a live health overlay from the running EKS sandbox cluster.</p>
-        <span class="proof-go">See the live map →</span>
-      </a>
-      <a class="proof-card reveal" href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">
-        <div class="proof-ico">⌥</div>
-        <h3>Read the source</h3>
-        <p>The full monorepo, ~37 services, ADRs and governance-as-code, public on GitHub under Apache-2.0. Clone it, audit it, fork it.</p>
-        <span class="proof-go">github.com/JiRaska/open-bank-oss →</span>
-      </a>
-      <a class="proof-card reveal proof-cta-card" href="platform.html">
-        <h3>Explore the whole platform</h3>
-        <p>Five live surfaces, one running bank.</p>
-        <span class="proof-go strong">Open the deep dive →</span>
-      </a>
-    </div>
-  </section>
-
-  <!-- CUSTOMER APP + TESTFLIGHT -->
-  <section class="section appsec" id="app">
-    <div class="section-head reveal">
-      <span class="kicker">The customer app</span>
-      <h2>One Kotlin app. Real edge. Now in beta.</h2>
-      <p class="sub">A cross-platform retail banking app on the same open core: <b>Kotlin Multiplatform + Compose</b>, one codebase for iOS and Android. It talks to the live customer edge already: accounts, balances, transaction history, notifications and profile from real data.</p>
-    </div>
-
-    <div class="app-grid">
-      <div class="app-phone reveal">
-        <div class="app-phone-glow" aria-hidden="true"></div>
-        <img src="assets/app-screen.png" alt="OpenBank customer app home screen — multi-currency balance, quick actions, AI assistant and payday predictor" loading="lazy" />
-        <span class="app-phone-cap">Home screen · balance, AI assistant &amp; payday predictor</span>
-      </div>
-
-      <div class="app-right">
-      <div class="app-feats reveal">
-        <p>Home, balances, history, notifications and profile render from the running customer edge, not from fakes. Login is a real Authorization-Code + PKCE flow against a dedicated <code>openbank-customers</code> Keycloak realm, with proactive token refresh.</p>
-        <p>Payments are approved by biometrics and signed by an on-device key: Secure Enclave on iOS, StrongBox/TEE Keystore on Android, with PSD2 RTS Art.5 dynamic linking. Tokens live in the Keychain or AndroidKeyStore, TLS is SPKI-pinned, and PII is stripped on the device before any diagnostics ever leave the phone.</p>
-      </div>
-
-      <div class="app-cta-card reveal">
-        <span class="tf-tag"><span class="live-dot"></span> iOS TestFlight beta</span>
-        <h3>Help test the app on your iPhone</h3>
-        <p>Drop the Apple ID email your TestFlight uses and we'll send an invite. That's the only thing we ask for.</p>
-        <form class="tf-form" id="tf-form" action="https://api.web3forms.com/submit" method="POST">
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand" href="index.html" aria-label="OpenBank home">
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt="" /></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<button class="sandbox-cta" data-open-demo type="button">Explore the sandbox ↗</button>
+</header>
+<main id="main">
+<section class="hero wrap" id="top">
+<div class="hero-copy">
+<p class="eyebrow">Open source. Open possibilities.</p>
+<h1>A bank you can<br />
+<span>look inside.</span>
+</h1>
+<p class="lede">Explore the app. Understand the platform.<br class="desktop" /> Help build the shared banking core.</p>
+<div class="actions">
+<button class="btn btn-primary" data-open-demo type="button">Try it live <span aria-hidden="true">↗</span>
+</button>
+<a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss">View the code ↗</a>
+<a class="btn btn-iphone" href="#testflight" aria-label="Get the iPhone beta on TestFlight">
+<svg aria-hidden="true" viewBox="0 0 20 24" fill="none"><rect x="4" y="1.5" width="12" height="21" rx="2.8" stroke="currentColor" stroke-width="1.7"/><path d="M8 4.5h4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><circle cx="10" cy="19" r=".8" fill="currentColor"/></svg>
+<span>Get iPhone beta</span><span aria-hidden="true">↗</span>
+</a>
+</div>
+<p class="hero-note" id="sandbox">Public sandbox · Reference implementation</p>
+</div>
+<div class="hero-art">
+<img src="assets/explorers-hero.webp" width="1536" height="1024" fetchpriority="high" alt="OpenBank’s lion and lioness explore together, with their little bot beside them." />
+</div>
+</section>
+<section class="labs-teaser" id="labs">
+<div class="wrap labs-teaser-inner">
+<div>
+<p class="eyebrow">OpenBank Labs <img class="flask-inline" src="assets/labs-flask.svg" width="12" height="15" alt="" /></p>
+<h2>The kernel behind<br />better banks.</h2>
+<p>Shared banking logic, built once and tested across the platform. From money and calendars to credit math and payment messages.</p>
+<a class="btn btn-labs" href="labs.html">Step inside Labs →</a>
+</div>
+<a class="labs-teaser-art" href="labs.html" aria-label="Explore OpenBank Labs">
+<img src="assets/openbank-labs-kernel.jpg" width="1223" height="1285" alt="OpenBank Labs illustration: a lioness scientist and bot beside the shared banking kernel." loading="lazy" />
+</a>
+</div>
+</section>
+<section class="intro wrap" id="framework">
+<div class="section-heading">
+<p class="eyebrow">Choose your way in</p>
+<h2>One open core.<br />A whole bank to explore.</h2>
+<p>OpenBank is an open-source banking reference implementation: connected domains, a customer app, shared banking libraries, Product Studio and governed AI tools. Follow the architecture, the evidence and the experience from one place.</p>
+</div>
+<div class="entry-grid">
+<a class="entry" href="#app">
+<span class="index">01 / THE APP</span>
+<h3>Banking, in your hands. <span>↗</span>
+</h3>
+<p>See the real customer experience, then join the iPhone beta.</p>
+</a>
+<a class="entry" href="platform.html">
+<span class="index">02 / THE PLATFORM</span>
+<h3>Go behind the screen. <span>↗</span>
+</h3>
+<p>Explore the domains, services and contracts that make it work.</p>
+</a>
+<a class="entry" href="#agents">
+<span class="index">03 / THE AGENTS</span>
+<h3>Meet the crew. <span>↗</span>
+</h3>
+<p>Clear roles, bounded tools and a human responsible for impact.</p>
+</a>
+</div>
+</section>
+<section class="ecosystem-section" id="ecosystem">
+<div class="wrap">
+<div class="ecosystem-heading">
+<p class="eyebrow">The bank as one system</p>
+<h2>One bank.<br /><span>Every connection counts.</span></h2>
+<p>OpenBank is an open-source banking ecosystem for the work inside a bank and the relationships it serves outside. Explore the domains together, follow the evidence behind them and see how a shared core keeps the experience coherent.</p>
+</div>
+<div class="bank-as-code" id="bank-as-code">
+<div class="bank-as-code-intro">
+<p class="eyebrow">Bank as Code</p>
+<h3>The bank explains itself.</h3>
+<p>A running service exposes its own API contract, version and health. Its documentation travels with its release, so teams can inspect what is deployed and trace it back to the code.</p>
+<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0019-docs-as-service.md">See docs-as-service in the source →</a>
+</div>
+<div class="bank-as-code-proof">
+<div><span>01 / SERVICE</span><strong>Self-describing services</strong><p>Live endpoints report the deployed version, API contract and health.</p></div>
+<div><span>02 / DOCUMENTATION</span><strong>Documentation as Code</strong><p>Service-owned docs ship with the release; generated decisions and runbooks are checked for drift.</p></div>
+<div><span>03 / GOVERNANCE</span><strong>Compliance as Code</strong><p>Each service declares ownership, lineage and retention. CI cross-checks claims that the code can verify.</p></div>
+<div><span>04 / EVIDENCE</span><strong>Ready to examine</strong><p>Link a change to its contract, tests and operational signals, giving reviewers a path from a claim to its evidence.</p></div>
+</div>
+<p class="bank-as-code-note">The public catalog is a code-derived snapshot, not a live deployment report. Running-service endpoints and operational views show current state.</p>
+</div>
+<div class="ecosystem-grid">
+<article class="ecosystem-card ecosystem-bank">
+<div class="ecosystem-card-copy"><span class="ecosystem-index">01 / INSIDE THE BANK</span><h3>From a customer need<br />to the whole bank.</h3><p>Identity, products, accounts, payments, risk and operations are separate domains with visible contracts. Follow how they work together instead of treating each service as an island.</p><a href="platform.html#domains">Explore every banking domain →</a></div>
+<div class="bank-system" role="group" aria-label="Conceptual map of OpenBank domains and shared engineering foundations">
+<div class="bank-system-core"><span>OpenBank</span><small>one connected architecture</small></div>
+<div class="bank-domains"><span>Identity &amp; relationships</span><span>Products &amp; pricing</span><span>Accounts &amp; payments</span><span>Risk &amp; compliance</span><span>Treasury &amp; wealth</span><span>Operations &amp; AI</span></div>
+<div class="bank-foundations"><div><b>openbank-libs</b><small>Shared rules &amp; contracts</small></div><div><b>Test evidence</b><small>Unit · contract · journeys</small></div><div><b>Observability</b><small>Traces · metrics · liveness</small></div></div>
+<p class="bank-feedback">The loop: shared rules → tests that exercise them → operational signals that show what actually happened.</p>
+</div>
+</article>
+<article class="ecosystem-card ecosystem-relationships">
+<div class="ecosystem-card-copy"><span class="ecosystem-index">02 / THE RELATIONSHIP</span><h3>See the person.<br />Understand the context.</h3><p>A holistic bank view starts with identity: one person may act for companies, hold different products and eventually bring a wider wealth picture into view. Each connection needs a source, permission and purpose.</p><a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0303-banking-context-graph-and-authorized-hybrid-retrieval.md">Explore the context-graph design →</a><p class="ecosystem-note">Customer 360 is shipped; person–company links are partial and the broader wealth view is planned.</p></div>
+<div class="relationship-flow" role="group" aria-label="Roadmap from a person and their companies to a permission-scoped financial picture"><div class="relationship-node">Person<small>verified identity</small></div><span class="relationship-arrow" aria-hidden="true">↔</span><div class="relationship-node">Companies<small>roles &amp; mandates</small></div><span class="relationship-arrow" aria-hidden="true">→</span><div class="relationship-node">Wealth view<small>planned composition</small></div></div>
+</article>
+<article class="ecosystem-card ecosystem-studio">
+<span class="ecosystem-index">03 / PRODUCT STUDIO</span>
+<h3>Ideas become<br />real products.</h3>
+<p>Design specifications and contextual offers, review a versioned draft, then publish through maker-checker controls. The catalog keeps the approved terms clear and reproducible.</p>
+<div class="studio-flow" role="group" aria-label="Product Studio workflow"><span>Define</span><span>Compose</span><span>Review</span><span>Publish</span></div>
+<a href="https://admin.open-bank.tech/product-studio">Open Product Studio ↗</a>
+<p class="ecosystem-note">Operator sign-in required · <a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-product-catalog">explore the source</a></p>
+</article>
+<article class="ecosystem-card ecosystem-ai">
+<span class="ecosystem-index">04 / AI-NATIVE · MCP-NATIVE</span>
+<h3>Banking context,<br />ready for AI.</h3>
+<p>A customer-facing copilot and governed MCP tools let AI work with banking context in the public sandbox. Access follows consent, policy and audit; payment actions remain proposals for human review.</p>
+<div class="ai-routes"><span>Customer <b>→</b> Copilot</span><span>Bank team <b>→</b> Governed MCP</span></div>
+<a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-mcp-service">Explore the MCP source →</a>
+<p class="ecosystem-note">External MCP access beyond the sandbox is not yet enabled.</p>
+</article>
+</div>
+</div>
+</section>
+<section class="app-section" id="app">
+<div class="wrap app-grid">
+<figure class="phone-figure">
+<div class="phone-stage">
+<img src="assets/app-screen-current.png" width="1179" height="2556" alt="Actual OpenBank app screenshot: CZK account with three currencies, Send, Request, Cards, Savings, payday forecast and the bot assistant." loading="lazy" />
+</div>
+<figcaption>Actual app screenshot · sandbox data<br />The app evolves; this is a recorded view.</figcaption>
+</figure>
+<div class="app-copy">
+<p class="eyebrow">The customer app</p>
+<h2>Your money.<br />Your way in.</h2>
+<p class="lede">A familiar app with a curious little bot. Explore balances, currency pockets and everyday banking on the same open core.</p>
+<p>Kotlin Multiplatform and Compose connect the iOS and Android experience. The screenshot is from the app itself, with its real controls and visual language.</p>
+<div class="app-cta-card" id="testflight">
+<span class="tf-tag">iOS TestFlight beta</span>
+<h3>Take OpenBank for a spin.</h3>
+<p>Drop the Apple ID email your TestFlight uses and we'll send an invite. That's the only thing we ask for.</p>
+<form class="tf-form" id="tf-form" action="https://api.web3forms.com/submit" method="POST">
           <input type="hidden" name="access_key" value="063e67e4-2534-4790-93be-83225f0b3fa0" />
           <input type="hidden" name="subject" value="New OpenBank iOS beta signup" />
           <input type="hidden" name="from_name" value="OpenBank beta signup" />
@@ -272,41 +226,104 @@
             <input type="checkbox" name="consent" value="Consented (GDPR Art.6(1)(a))" required />
             <span>I consent to OpenBank storing my Apple ID email solely to send me an Apple TestFlight invite. The sandbox holds no real banking data; my email is never shared and can be deleted anytime via <a href="mailto:hello@open-bank.tech">hello@open-bank.tech</a>. (GDPR Art.6(1)(a).)</span>
           </label>
-          <div class="h-captcha" data-sitekey="50b2fe65-b00b-4b9e-ad62-3ba471098be2" data-theme="dark"></div>
+          <div class="h-captcha" data-sitekey="50b2fe65-b00b-4b9e-ad62-3ba471098be2" data-theme="light"></div>
           <button class="btn btn-primary tf-submit" type="submit">Request my invite →</button>
           <p class="tf-status" id="tf-status" role="status" aria-live="polite"></p>
         </form>
-        <p class="tf-fine">No account, no card, no tracking. Your email is used only to send the TestFlight invite, with your explicit consent, and deleted when the beta ends. <a href="#tf-privacy" data-open-tf>What exactly we collect ↓</a></p>
-      </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- JOIN -->
-  <section class="section join" id="join">
-    <div class="join-card reveal">
-      <span class="join-tag">The proposal stage</span>
-      <h2>Let's build the bank everyone can stand on.</h2>
-      <p>The Open Bank Foundation doesn't exist yet. This is the call to start it. If you build, run, audit or regulate banking software, and you believe the common core belongs in the open, I'd love to talk about co-founding it together. The code is already out there, <b>public on GitHub under Apache-2.0</b>.</p>
-      <div class="join-cta">
-        <a class="btn btn-primary" href="mailto:hello@open-bank.tech?subject=Open%20Bank%20Foundation%3A%20count%20me%20in">Reach out</a>
-        <a class="btn btn-ghost" href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">View on GitHub</a>
-        <a class="btn btn-ghost" href="https://www.linkedin.com/in/jiriraska" target="_blank" rel="noopener">Follow on LinkedIn</a>
-      </div>
-    </div>
-  </section>
-
-  <!-- FOOTER -->
-  <footer class="footer">
-    <div class="footer-brand">
-      <img src="assets/openbank-logo.png" alt="" />
-      <span>Open Bank <strong>Foundation</strong></span>
-    </div>
-    <p class="footer-note">An open framework for banking in the AI era. Patterns shared, not hoarded. Source: <a href="https://github.com/JiRaska/open-bank-oss/" target="_blank" rel="noopener">github.com/JiRaska/open-bank-oss</a> · Apache-2.0.</p>
-    <p class="footer-fine">© <span id="year"></span> · A proposal by <a href="https://www.linkedin.com/in/jiriraska" target="_blank" rel="noopener">Jiří Raška</a>. The Open Bank Foundation is not yet an incorporated organization.</p>
-  </footer>
-
-  <!-- DEMO MODAL -->
+<p class="tf-fine">No account, no card, no tracking. Your email is used only to send the TestFlight invite, with your explicit consent, and deleted when the beta ends. <a href="#tf-privacy" data-open-tf>What exactly we collect ↓</a>
+</p>
+</div>
+</div>
+</div>
+</section>
+<section class="section wrap" id="platform">
+<div class="section-heading split">
+<div>
+<p class="eyebrow">Inside the platform</p>
+<h2>There’s a whole bank<br />behind that balance.</h2>
+</div>
+<p>Accounts are just the beginning. Follow payments, identity, credit, treasury, risk, customer relationships and the platform that connects them.</p>
+</div>
+<div class="domain-teaser">
+<a href="platform.html#core">Accounts &amp; ledger ↗</a>
+<a href="platform.html#payments">Payments &amp; settlement ↗</a>
+<a href="platform.html#identity">Identity &amp; onboarding ↗</a>
+<a href="platform.html#cards">Cards &amp; disputes ↗</a>
+<a href="platform.html#lending">Lending &amp; credit risk ↗</a>
+<a href="platform.html#treasury">Treasury &amp; wealth ↗</a>
+<a href="platform.html#compliance">Financial crime &amp; audit ↗</a>
+<a href="platform.html#reporting">Regulatory reporting ↗</a>
+<a href="platform.html#engagement">Customer engagement ↗</a>
+<a href="platform.html#open-banking">Open banking ↗</a>
+<a href="platform.html#products">Products &amp; pricing ↗</a>
+<a href="platform.html#operations">Operations &amp; AI ↗</a>
+</div>
+<a class="btn btn-primary" href="platform.html#domains">Explore every area and module →</a>
+<p class="fine">A repository inventory shows what is implemented in code, not what is running right now.</p>
+</section>
+<section class="agents-section" id="agents">
+<div class="wrap agents-grid">
+<div>
+<p class="eyebrow">Meet the crew</p>
+<h2>Helpful by design.<br />Bounded by policy.</h2>
+<p class="lede">Our lions help you explore. Our bot helps you understand. Agent roles have their own tools, permissions and limits.</p>
+<p>Inspect the charters, follow a proposal and see where a human takes over. A friendly face never stands in for approval authority.</p>
+<div class="actions">
+<a class="btn btn-primary" href="https://admin.open-bank.tech/iaops">Open the agent control room ↗</a>
+<a class="text-link" href="https://github.com/JiRaska/open-bank-oss/blob/main/openbank-libs/governance/agents.yaml">Read the charters ↗</a>
+</div>
+</div>
+<figure>
+<img class="crew" src="assets/agent-crew.webp" width="1536" height="1024" alt="The OpenBank agent crew, the same original robot illustration used in the admin portal." loading="lazy" />
+<figcaption>Original OpenBank agent artwork · roles and permissions live in code.</figcaption>
+</figure>
+</div>
+</section>
+<section class="section wrap evidence-section">
+<div class="section-heading">
+<p class="eyebrow">Open the actual product</p>
+<h2>See the work.<br />Follow the evidence.</h2>
+</div>
+<figure class="portal-shot">
+<a href="assets/agent-control-room.webp" aria-label="Enlarge the actual Agent Control Room screenshot">
+<img src="assets/agent-control-room.webp" width="1600" height="1000" alt="Actual OpenBank admin interface: Agent Control Room, agent collaboration and links to reviewed roles." loading="lazy" />
+</a>
+<figcaption>Admin portal capture supplied in the OpenBank presentation. Recorded demonstration view; not a live status feed.</figcaption>
+</figure>
+<div class="evidence-links">
+<a href="platform.html#governance">Governance &amp; evidence ↗</a>
+<a href="platform.html#finops">FinOps ↗</a>
+<a href="platform.html#bcp">Continuity ↗</a>
+<a href="platform.html#cloud">Architecture ↗</a>
+</div>
+</section>
+<section class="join-section" id="join">
+<div class="wrap join-inner">
+<p class="eyebrow">Open mind. Open source. Open bank.</p>
+<h2>The common core<br />should belong to everyone.</h2>
+<p>Build, test, challenge or contribute. Help turn a reference implementation into a shared foundation for better banking software.</p>
+<div class="actions">
+<a class="btn btn-primary" href="https://github.com/JiRaska/open-bank-oss/blob/main/CONTRIBUTING.md">Start contributing ↗</a>
+<a class="btn btn-ghost" href="mailto:hello@open-bank.tech">Let’s talk →</a>
+</div>
+<p class="fine" id="manifesto">The Open Bank Foundation remains a proposal, not an incorporated organization.</p>
+<p class="fine" id="why-open">Share the common core. Keep your customer experience your own.</p>
+</div>
+</section>
+</main>
+<footer class="footer wrap">
+<a class="brand" href="index.html">
+<img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<div>
+<p>An open banking reference implementation. Built to be explored.</p>
+<p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p>
+<p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a>
+</p>
+<p class="fine">© <span id="year">
+</span> OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a>
+</p>
+</div>
+</footer>    <!-- DEMO MODAL -->
   <dialog id="demo-modal" class="modal" aria-labelledby="demo-title">
     <div class="modal-card">
       <button class="modal-close" data-close-demo aria-label="Close">&times;</button>
@@ -356,6 +373,7 @@
     </div>
   </dialog>
 
-  <script src="main.js"></script>
+<script src="main.js">
+</script>
 </body>
 </html>

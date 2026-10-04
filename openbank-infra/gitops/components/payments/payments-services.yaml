@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "7652d4e99b2cb137" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "e09e20bbff0ed5e5" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -53,7 +53,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: transaction-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-transaction-service:sandbox-49bf3545
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -240,7 +240,7 @@ spec:
         # @Authorize-annotated endpoints in transaction-service (transaction.*). Bundle
         # mounted from transaction-opa-bundle ConfigMap (gen-transaction-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -437,7 +437,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-payment-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "7b59c3241f0f3da4"
+        openbank.tech/policy-checksum: "89652eb5d146b2f0"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -464,7 +464,7 @@ spec:
         - name: sepa-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-9f7d3085
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-payment:sandbox-6b42d4de
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -646,7 +646,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-payment (sepaPayment.*).
         # Bundle mounted from sepa-payment-opa-bundle ConfigMap (gen-sepa-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -829,7 +829,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-domestic-payment-opa-bundle.sh via the trailing marker
         # comment (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "fefb1589db2ab969" # domestic-payment-opa-bundle
+        openbank.tech/policy-checksum: "2d7e344d5bba7f81" # domestic-payment-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -842,7 +842,7 @@ spec:
         - name: domestic-payment
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-951dcbab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-domestic-payment:sandbox-3e9ab3c6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1009,7 +1009,7 @@ spec:
         # Bundle mounted from domestic-payment-opa-bundle ConfigMap
         # (gen-domestic-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1189,7 +1189,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-sepa-instant-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a3a669a7c3c2bcb7"
+        openbank.tech/policy-checksum: "b6a1fd1a49e13eed"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1202,7 +1202,7 @@ spec:
         - name: sepa-instant
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-951dcbab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-sepa-instant:sandbox-3e9ab3c6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -1343,7 +1343,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-instant (sctInstPayment.*).
         # Bundle mounted from sepa-instant-opa-bundle ConfigMap (gen-sepa-instant-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1520,7 +1520,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-clearing-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "0461f196b84d808a" # clearing-opa-bundle
+        openbank.tech/policy-checksum: "310a256a7c806274" # clearing-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1531,7 +1531,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-service:sandbox-6da79798
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1654,7 +1654,7 @@ spec:
         # all @Authorize-annotated endpoints in clearing-service (clearingBatch.*).
         # Bundle mounted from clearing-opa-bundle ConfigMap (gen-clearing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1844,7 +1844,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes (ADR-0034). Value is stamped by
         # gen-standing-order-opa-bundle.sh — do not hand-edit.
-        openbank.tech/policy-checksum: "3682b83151c3b394" # standing-order-opa-bundle
+        openbank.tech/policy-checksum: "b1aaff836b8e6799" # standing-order-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -1855,7 +1855,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: standing-order-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-e5db570e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-standing-order-service:sandbox-4ab038d9
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -1995,7 +1995,7 @@ spec:
         # endpoint). Bundle mounted from standing-order-opa-bundle ConfigMap
         # (gen-standing-order-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2133,7 +2133,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-issuance-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "2386baf1c0423030"
+        openbank.tech/policy-checksum: "1752b7f6a6e89abe"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2144,7 +2144,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: card-issuance-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-issuance-service:sandbox-49bf3545
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2289,7 +2289,7 @@ spec:
         # card-issuance-service (card.*). Bundle mounted from card-issuance-opa-bundle
         # ConfigMap (gen-card-issuance-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2427,7 +2427,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-card-processing-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "fa77db4aada3b918"
+        openbank.tech/policy-checksum: "d849b116569de337"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2443,7 +2443,7 @@ spec:
           # is UNVERIFIABLE forever rather than merely stale. No image carries this tag yet; the
           # first auto-deploy run rewrites the line, and until then the Deployment does not admit,
           # which is the honest state for a service whose image has never been built.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-c111ba4dc
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-card-processing-service:sandbox-1851c09a
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2562,7 +2562,7 @@ spec:
         # cardprocessing.* actions. Bundle from the card-processing-opa-bundle ConfigMap
         # (gen-card-processing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2689,7 +2689,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-settlement-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "9a138c6be80d1f89" # settlement-opa-bundle
+        openbank.tech/policy-checksum: "b6a349706076baf8" # settlement-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -2700,7 +2700,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: settlement-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-e5db570e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-settlement-service:sandbox-db41b33c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -2732,13 +2732,29 @@ spec:
             # enough; safe to leave briefly, repair is a no-op once checksums already match).
             - name: QUARKUS_FLYWAY_REPAIR_AT_START
               value: "true"
-            # `KAFKA_BOOTSTRAP_SERVERS: …:9092` stood here and was dead (issue #3393):
-            # openbank-settlement-service has no `mp.messaging` config and no Kafka client
-            # anywhere under src/main, so it opened no connection and the value was never read.
-            # It mattered only because it made settlement-service read as a plaintext-listener
-            # client in every audit of who is still on :9092 — including
-            # `gen-network-policies.py`, which derives the broker allow-list from exactly this
-            # kind of env URL and so admitted `payments` on 9092 partly on its account.
+            # Durable settlement audit producer, using the shared mTLS pattern.
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: openbank-cluster-kafka-bootstrap.messaging.svc:9093
+            - name: KAFKA_SECURITY_PROTOCOL
+              value: SSL
+            - name: KAFKA_SSL_KEYSTORE_LOCATION
+              value: /mnt/kafka/keystore/user.p12
+            - name: KAFKA_SSL_KEYSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_KEYSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: settlement-service-kafka-keystore
+                  key: user.password
+            - name: KAFKA_SSL_TRUSTSTORE_LOCATION
+              value: /mnt/kafka/truststore/ca.p12
+            - name: KAFKA_SSL_TRUSTSTORE_TYPE
+              value: PKCS12
+            - name: KAFKA_SSL_TRUSTSTORE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: kafka-cluster-ca-truststore
+                  key: ca.password
             - name: QUARKUS_OIDC_AUTH_SERVER_URL
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: OIDC_CLIENT_SECRET
@@ -2821,6 +2837,12 @@ spec:
               drop:
                 - ALL
           volumeMounts:
+            - name: kafka-keystore
+              mountPath: /mnt/kafka/keystore
+              readOnly: true
+            - name: kafka-truststore
+              mountPath: /mnt/kafka/truststore
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           resources:
@@ -2834,7 +2856,7 @@ spec:
         # the @Authorize-annotated endpoint in settlement-service (settlement.create).
         # Bundle mounted from settlement-opa-bundle ConfigMap (gen-settlement-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2905,6 +2927,12 @@ spec:
               cpu: 100m
               memory: 64Mi
       volumes:
+        - name: kafka-keystore
+          secret:
+            secretName: settlement-service-kafka-keystore
+        - name: kafka-truststore
+          secret:
+            secretName: kafka-cluster-ca-truststore
         - name: tmp
           emptyDir: {}
         - name: opa-tmp
@@ -3019,7 +3047,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: clearing-simulator
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-ccdbef8e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-clearing-simulator:sandbox-d5c8c73c
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -3125,7 +3153,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-swift-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "896fd7f7601a3dbe"
+        openbank.tech/policy-checksum: "79a1a3052d735b2a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3138,7 +3166,7 @@ spec:
         - name: swift-service
 
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-swift-service:sandbox-7d9286c6
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3264,7 +3292,7 @@ spec:
         # all @Authorize-annotated endpoints in swift-service (swift.*). Bundle
         # mounted from swift-opa-bundle ConfigMap (gen-swift-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -3449,7 +3477,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-vop-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "e2437599ebca7144"
+        openbank.tech/policy-checksum: "c3b5327e3e49eb88"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -3461,7 +3489,7 @@ spec:
       containers:
         - name: vop-service
 
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-85a0be3e
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-vop-service:sandbox-49bf3545
 
           imagePullPolicy: IfNotPresent
           ports:
@@ -3560,7 +3588,7 @@ spec:
         # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
         # vop.verify. Bundle mounted from vop-opa-bundle ConfigMap (gen-vop-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

@@ -92,12 +92,12 @@ class RemediationProposalAdapterTest {
             Triple("/git/ref/heads/main", 200, """{"object":{"sha":"abc123"}}"""),
             Triple("/git/refs", 201, "{}"),
             Triple("/contents/", 201, "{}"),
-            Triple("/pulls", 201, """{"html_url":"https://github.com/JiRaska/open-bank/pull/99"}"""),
+            Triple("/pulls", 201, """{"html_url":"https://github.com/JiRaska/open-bank-oss/pull/99"}"""),
         )
         config = mockk()
         every { config.githubApiUrl() } returns "http://127.0.0.1:${server.address.port}"
         every { config.githubOwner() } returns "JiRaska"
-        every { config.githubRepo() } returns "open-bank"
+        every { config.githubRepo() } returns "open-bank-oss"
         every { config.githubProposalDir() } returns "docs/devops-proposals"
         mockkStatic(ConfigProvider::class)
         token("ghp-test")
@@ -126,12 +126,12 @@ class RemediationProposalAdapterTest {
     fun `the happy path walks ref then branch then contents then pulls and returns the PR url`(): Unit = runBlocking {
         val url = adapter().openProposalPr(finding, "Add openbank-batch to reregister-runner.sh")
 
-        assertThat(url).isEqualTo("https://github.com/JiRaska/open-bank/pull/99")
+        assertThat(url).isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/99")
         assertThat(calls).containsExactly(
-            "GET /repos/JiRaska/open-bank/git/ref/heads/main",
-            "POST /repos/JiRaska/open-bank/git/refs",
-            "PUT /repos/JiRaska/open-bank/contents/docs/devops-proposals/${finding.id}.md",
-            "POST /repos/JiRaska/open-bank/pulls",
+            "GET /repos/JiRaska/open-bank-oss/git/ref/heads/main",
+            "POST /repos/JiRaska/open-bank-oss/git/refs",
+            "PUT /repos/JiRaska/open-bank-oss/contents/docs/devops-proposals/${finding.id}.md",
+            "POST /repos/JiRaska/open-bank-oss/pulls",
         )
     }
 
@@ -139,7 +139,7 @@ class RemediationProposalAdapterTest {
     fun `the new branch is cut from main's head sha`(): Unit = runBlocking {
         adapter().openProposalPr(finding, "remediation")
 
-        val body = bodies.getValue("/repos/JiRaska/open-bank/git/refs")
+        val body = bodies.getValue("/repos/JiRaska/open-bank-oss/git/refs")
         assertThat(body).contains("\"sha\":\"abc123\"")
         assertThat(body).contains("refs/heads/devops-agent/proposal-6f1c0b5e")
     }
@@ -149,7 +149,7 @@ class RemediationProposalAdapterTest {
         adapter().openProposalPr(finding, "Add openbank-batch to reregister-runner.sh")
 
         val put = ObjectMapper().readTree(
-            bodies.getValue("/repos/JiRaska/open-bank/contents/docs/devops-proposals/${finding.id}.md"),
+            bodies.getValue("/repos/JiRaska/open-bank-oss/contents/docs/devops-proposals/${finding.id}.md"),
         )
         val markdown = Base64.getDecoder().decode(put["content"].asText()).decodeToString()
         assertThat(markdown).contains("The batch scale set has no online runner pods.")
@@ -181,7 +181,7 @@ class RemediationProposalAdapterTest {
         route("/git/refs", 422, """{"message":"Reference already exists"}""")
 
         assertThat(adapter().openProposalPr(finding, "remediation"))
-            .isEqualTo("https://github.com/JiRaska/open-bank/pull/99")
+            .isEqualTo("https://github.com/JiRaska/open-bank-oss/pull/99")
     }
 
     @Test
@@ -227,7 +227,7 @@ class RemediationProposalAdapterTest {
 
         adapter().openProposalPr(long, "remediation")
 
-        val title = ObjectMapper().readTree(bodies.getValue("/repos/JiRaska/open-bank/pulls"))["title"].asText()
+        val title = ObjectMapper().readTree(bodies.getValue("/repos/JiRaska/open-bank-oss/pulls"))["title"].asText()
         assertThat(title).isEqualTo("devops-agent proposal: " + "x".repeat(80))
     }
 }

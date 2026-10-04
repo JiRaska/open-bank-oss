@@ -79,6 +79,13 @@ object NetSettlementJournalFactory {
         )
     }
 
+    /**
+     * The currencies with a complete GL pair — the only currencies a clearing batch may be
+     * opened in (#11974). The clearing cycle reads this through `SettlementAccountDirectory`, so
+     * the set that decides batching and the set that decides posting are one map.
+     */
+    val settleableCurrencies: Set<String> = CASH_CLEARING_GL.keys.intersect(SCHEME_SETTLEMENT_GL.keys)
+
     /** Test and audit seam: the GL pair a currency's leg posts between. */
     fun glPairFor(currency: String): Pair<UUID?, UUID?> = CASH_CLEARING_GL[currency] to SCHEME_SETTLEMENT_GL[currency]
 }

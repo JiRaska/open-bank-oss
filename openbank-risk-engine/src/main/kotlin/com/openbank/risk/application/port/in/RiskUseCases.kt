@@ -14,9 +14,12 @@ import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
 import com.openbank.risk.domain.irrbb.IrrbbParameters
+import com.openbank.risk.domain.irrbb.IrrbbReportingAggregate
 import com.openbank.risk.domain.irrbb.IrrbbResult
+import com.openbank.risk.domain.limits.LimitDefinition
 import com.openbank.risk.domain.limits.LimitEvaluation
 import com.openbank.risk.domain.limits.LimitSet
+import com.openbank.risk.domain.limits.MetricInput
 import com.openbank.risk.domain.liquidity.LiquidityForecastResult
 import com.openbank.risk.domain.liquidity.LiquidityParameters
 import com.openbank.risk.domain.liquidity.LiquidityResult
@@ -62,11 +65,15 @@ data class CreateCurveSetCommand(
 )
 
 interface CurveSetUseCase {
-    suspend fun list(limit: Int): List<CurveSetSummary>
+    /** Newest first; only the sets as of [asOf] when given (a run's reads need its own date). */
+    suspend fun list(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     suspend fun create(command: CreateCurveSetCommand): CurveSet
 
     suspend fun get(id: UUID): CurveSet
+
+    /** The newest set recorded as of exactly [asOf], or null; a neighbouring day's set is never offered. */
+    suspend fun latestIdFor(asOf: LocalDate): UUID?
 }
 
 /** A run's flows, with the run and the curve set they were derived from. */
@@ -84,13 +91,25 @@ data class IrrbbAnalysis(
     val model: BehaviouralModel,
     val parameters: IrrbbParameters,
     val result: IrrbbResult,
-    /** Operator-supplied Tier 1 capital, in the aggregation currency; never fetched or defaulted. */
+    /** Operator-supplied Tier 1 capital, in the aggregation currency; null when not supplied. */
     val tier1Capital: BigDecimal?,
+    /** The multi-currency book's CZK aggregate at ČNB fixings; null for a single-currency book. */
+    val reporting: IrrbbReportingAggregate? = null,
+    /**
+     * Tier 1 from the run's own-funds lines (CZK) — the same figure the `irrbb-eve-outlier` limit
+     * uses — or the gap that prevents it. Used only when the caller supplied none.
+     */
+    val ownFundsTier1: MetricInput? = null,
+    /** The declared `irrbb-eve-outlier` limit, when the active limit set has one. */
+    val outlierLimit: LimitDefinition? = null,
 )
 
 interface IrrbbUseCase {
-    /** Same 404 / 409 / 400 rules as [CashFlowUseCase.project]. */
-    suspend fun analyse(runId: UUID, curveSetId: UUID, tier1Capital: BigDecimal?): IrrbbAnalysis
+    /**
+     * Same 404 / 409 / 400 rules as [CashFlowUseCase.project]. A null [curveSetId] means the newest
+     * set recorded as of the run's own date; 400 when there is none.
+     */
+    suspend fun analyse(runId: UUID, curveSetId: UUID?, tier1Capital: BigDecimal?): IrrbbAnalysis
 }
 
 /** LCR and NSFR of a run under a versioned parameter set (ADR-0313 phase 1). */

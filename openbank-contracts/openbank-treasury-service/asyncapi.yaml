@@ -9,10 +9,14 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.5.0
+  version: 1.6.0
   description: |
     Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
     ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
+
+    1.6.0 (additive): `DealBooked.productLimit` (ADR-0315 D4) — the product limit the booking was
+    evaluated against at approval (decision WITHIN_LIMIT, the maximum principal in the deal's
+    currency and the maximum tenor). Null only on events emitted before this version.
 
     1.5.0 (additive): `treasury.nostro.break-aged.v1` (ADR-0315 D7) on the same topic — an open
     nostro reconciliation break passed the configured age and amount threshold. Keyed by the
@@ -140,6 +144,13 @@ components:
         sourceService: { $ref: '#/components/schemas/SourceService' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
+        productLimit:
+          type: [object, 'null']
+          description: "ADR-0315 D4: `ProductLimitApplied` — the product limit re-checked at approval."
+          properties:
+            decision: { type: string, enum: [WITHIN_LIMIT] }
+            maxPrincipal: { type: [number, 'null'], description: "In the deal's currency" }
+            maxTenorDays: { type: [integer, 'null'], description: 'Null = no tenor cap (FX_SPOT)' }
 
     DealConfirmed:
       type: object

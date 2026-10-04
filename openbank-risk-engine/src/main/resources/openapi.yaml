@@ -54,7 +54,20 @@ info:
   #        per limit OK / EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input.
   # 1.21.0 -> 1.21.1: behaviour/description only — POST /snapshots answers 400 for an `asOf` after
   #        the current business date (Europe/Prague); no schema change.
-  version: 1.21.1
+  # 1.21.1 -> 1.22.0: additive — GET /curve-sets takes an optional `asOf` filter, so a run's reads
+  #        can offer exactly the sets they accept (a set must be as of the run's own date); the
+  #        IRRBB read states a multi-currency book's aggregate in CZK at ČNB fixings
+  #        (Irrbb.reportingAggregate), so the outlier test is computed for such a book too.
+  # 1.22.0 -> 1.23.0: additive — GET /snapshots/{id}/irrbb: `curveSetId` is optional (newest set as
+  #        of the run's date); `dataGaps[]` states what the figures do not capture (flat curve
+  #        extrapolation past the last pillar, no prepayment, simplified NMD, margins, deals not
+  #        projected); `outlierTest` falls back to the run's own-funds Tier 1 and is evaluated
+  #        against the declared `irrbb-eve-outlier` limit (status, earlyWarning, limitId).
+  # 1.23.0 -> 1.24.0 (#11107): additive — the IRRBB read projects the run's treasury money-market
+  #        deals (fixed rate, principal + ACT/360 interest at maturity) into the repricing gap,
+  #        ΔEVE and ΔNII, and breaks their share out in `treasury[]`; INSTRUMENTS_NOT_PROJECTED is
+  #        now raised only for instrument kinds still not projected, named in its detail.
+  version: 1.24.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -275,13 +288,16 @@ paths:
         Annex 2 scenarios (`deltaEve = PV(shocked) − PV(base)`, negative is a loss), ΔNII over 12
         months under parallel up/down, the worst case, and the assumptions that produced them.
         Shock sizes are configuration: a currency without them is listed in `shockNotConfigured`
-        and gets no scenarios. `tier1Capital` is optional and only ever the caller's; without it
-        the supervisory outlier ratio is not computed. Derived on request, never stored.
+        and gets no scenarios. `tier1Capital` is optional; without it the run's own-funds Tier 1
+        (CZK) is used — the figure the `irrbb-eve-outlier` limit uses — and only for a CZK
+        aggregate. `dataGaps` lists what the figures do not capture, notably curves extrapolated
+        flat beyond their last pillar. Derived on request, never stored.
       parameters:
         - $ref: '#/components/parameters/RunId'
         - name: curveSetId
           in: query
-          required: true
+          required: false
+          description: Defaults to the newest curve set recorded as of the run's own date (400 when none).
           schema:
             type: string
             format: uuid
@@ -300,7 +316,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Irrbb'
         '400':
-          description: Missing or malformed `curveSetId` / `tier1Capital`, or a curve set for another as-of date
+          description: Malformed `curveSetId` / `tier1Capital`, no curve set as of the run's date, or a curve set for another as-of date
         '401':
           description: Unauthenticated
         '403':
@@ -608,8 +624,17 @@ paths:
       summary: The most recently recorded curve sets, newest first
       description: |
         Curve sets without their pillars (`indices` names the curves each holds). Requires
-        ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN.
+        ROLE_RISK, ROLE_FINANCE, ROLE_OPERATOR or ROLE_ADMIN. In the sandbox, every recent
+        snapshot date also carries an illustrative reference set (provenance `synthetic`, source
+        text "NOT market data").
       parameters:
+        - name: asOf
+          in: query
+          required: false
+          description: Only the sets as of this date (YYYY-MM-DD) — the ones a run of that date accepts.
+          schema:
+            type: string
+            format: date
         - name: limit
           in: query
           required: false
@@ -627,7 +652,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CurveSetList'
         '400':
-          description: '`limit` outside 1..100'
+          description: '`limit` outside 1..100, or `asOf` not an ISO date'
         '401':
           description: Unauthenticated
         '403':
@@ -1297,6 +1322,41 @@ components:
         niiHorizonMonths: {type: integer}
         currencyAggregation: {type: string}
 
+    IrrbbDataGap:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          x-extensible-enum: [CURVE_EXTRAPOLATED_FLAT, PREPAYMENT_NOT_MODELLED, NMD_BEHAVIOUR_SIMPLIFIED,
+            COMMERCIAL_MARGIN_INCLUDED, INSTRUMENTS_NOT_PROJECTED]
+        currency: {type: [string, 'null']}
+        curveIndex: {type: [string, 'null']}
+        lastPillarDate: {type: [string, 'null'], format: date}
+        lastFlowDate: {type: [string, 'null'], format: date}
+        flowsBeyond: {type: [integer, 'null']}
+        basePvBeyond: {type: [number, 'null'], description: Base PV of the flows beyond the last pillar}
+        count: {type: [integer, 'null']}
+        detail: {type: string}
+
+    IrrbbTreasuryContribution:
+      type: object
+      required: [currency, deals, placements, borrowings, scenarios]
+      properties:
+        currency: {type: string}
+        deals: {type: integer}
+        placements: {type: number, description: Principal of asset-side deals (repricing at maturity)}
+        borrowings: {type: number, description: Principal of liability-side deals, as a magnitude}
+        basePv: {type: [number, 'null'], description: Base PV of the deals' flows; null when the currency is not evaluated}
+        scenarios:
+          type: array
+          items:
+            type: object
+            required: [scenario, deltaEve]
+            properties:
+              scenario: {type: string}
+              deltaEve: {type: number}
+
     Irrbb:
       type: object
       required: [runId, asOf, provenance, curveSetId, curveSetProvenance, curveSetSource, gaps, scenarios,
@@ -1328,13 +1388,33 @@ components:
           type: object
           required: [tier1Supplied, threshold, note]
           properties:
-            tier1Supplied: {type: boolean}
+            tier1Supplied: {type: boolean, description: True only when the caller passed tier1Capital}
             tier1Capital: {type: [number, 'null']}
+            tier1Source:
+              type: [string, 'null']
+              x-extensible-enum: [caller, own-funds]
+            tier1Gap: {type: [string, 'null'], description: Why no Tier 1 is usable}
             currency: {type: [string, 'null']}
-            threshold: {type: number}
+            threshold: {type: number, description: The declared irrbb-eve-outlier limit, else 0.15}
+            earlyWarning: {type: [number, 'null']}
+            limitId: {type: [string, 'null']}
+            status:
+              type: string
+              x-extensible-enum: [OK, EARLY_WARNING, BREACH, NOT_EVALUABLE]
             ratio: {type: [number, 'null']}
             breached: {type: [boolean, 'null']}
             note: {type: string}
+        treasury:
+          type: array
+          description: |
+            Per currency, the treasury money-market deals frozen on the run (placements and ČNB
+            deposits as assets, borrowings and ČNB lombard as liabilities) — their share of the gap
+            and ΔEVE, ALREADY included in `gaps` and `scenarios`. Empty when the run has no deals.
+          items: {$ref: '#/components/schemas/IrrbbTreasuryContribution'}
+        dataGaps:
+          type: array
+          description: What the figures do not capture. Never silently omitted.
+          items: {$ref: '#/components/schemas/IrrbbDataGap'}
         shockNotConfigured:
           type: array
           items: {type: string}
@@ -1342,6 +1422,37 @@ components:
           type: array
           items: {type: string}
         assumptions: {$ref: '#/components/schemas/IrrbbAssumptions'}
+        reportingAggregate:
+          description: |
+            Only for a multi-currency book (a single-currency book's aggregate is `worstCase`): per
+            scenario the currency EVE losses (gains dropped, d368 Annex 2) converted to CZK at the ČNB
+            fixing in effect on asOf and summed; the outlier test then compares its worst loss with
+            Tier 1 in CZK. All or nothing — `notStated` says why when no total is given.
+          type: [object, 'null']
+          required: [currency, scenarios, fxRates]
+          properties:
+            currency: {type: string}
+            scenarios:
+              type: array
+              items:
+                type: object
+                required: [scenario, loss]
+                properties:
+                  scenario: {type: string}
+                  loss: {type: number}
+            worstScenario: {type: [string, 'null']}
+            worstLoss: {type: [number, 'null']}
+            fxRates:
+              type: array
+              items:
+                type: object
+                required: [currency, rate, fixingDate, source]
+                properties:
+                  currency: {type: string}
+                  rate: {type: number}
+                  fixingDate: {type: string, format: date}
+                  source: {type: string}
+            notStated: {type: [string, 'null']}
 
     LiquidityLine:
       type: object

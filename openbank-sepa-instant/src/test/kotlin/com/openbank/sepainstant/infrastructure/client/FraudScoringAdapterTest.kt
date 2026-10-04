@@ -73,10 +73,28 @@ class FraudScoringAdapterTest {
     }
 
     @Test
-    fun `an unknown remote verdict defaults to ALLOW in shadow`() {
+    fun `an unrecognised remote verdict is UNKNOWN, never a clean ALLOW`() {
         every { client.score(any()) } returns Uni.createFrom().item(response("QUARANTINE"))
 
-        assertThat(adapter.score(command()).await().indefinitely().verdict).isEqualTo(FraudVerdict.ALLOW)
+        val outcome = adapter.score(command()).await().indefinitely()
+
+        // #4403: fraud-service answered with a word this rail cannot read. Coercing that to ALLOW
+        // manufactured a clean score out of an unreadable one; an enforcing caller must not see it.
+        assertThat(outcome.verdict).isEqualTo(FraudVerdict.UNKNOWN)
+        // Not an outage either — the scorer was reachable, so neither synthetic nor degraded.
+        assertThat(outcome.synthetic).isFalse()
+        assertThat(metrics.degradedValue()).isZero()
+        assertThat(counter(FraudScoringMetrics.RESULT_UNRECOGNISED)).isEqualTo(1.0)
+        assertThat(counter(FraudScoringMetrics.RESULT_REAL))
+            .describedAs("an unreadable answer must not be tallied as a scored payment")
+            .isZero()
+    }
+
+    @Test
+    fun `a blank remote verdict is UNKNOWN as well`() {
+        every { client.score(any()) } returns Uni.createFrom().item(response(""))
+
+        assertThat(adapter.score(command()).await().indefinitely().verdict).isEqualTo(FraudVerdict.UNKNOWN)
     }
 
     @Test

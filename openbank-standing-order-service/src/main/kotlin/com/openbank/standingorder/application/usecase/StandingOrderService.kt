@@ -10,6 +10,7 @@ import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.standingorder.application.port.`in`.CreateStandingOrderCommand
 import com.openbank.standingorder.application.port.`in`.StandingOrderUseCase
 import com.openbank.standingorder.application.port.out.StandingOrderRepository
+import com.openbank.standingorder.domain.error.SepaCreditSchemeRules
 import com.openbank.standingorder.domain.model.StandingOrder
 import com.openbank.standingorder.domain.model.StandingOrderStatus
 import jakarta.enterprise.context.ApplicationScoped
@@ -27,6 +28,10 @@ class StandingOrderService(
 ) : StandingOrderUseCase {
 
     override suspend fun create(cmd: CreateStandingOrderCommand): StandingOrder {
+        // #11938: a SEPA_CREDIT order executes as an SCT, which is euro-only. Refused here — before
+        // the idempotency lookup and before any row — so it covers both a new order and an edit
+        // (replacesStandingOrderId), and never reaches a due date only to fail at sepa-payment.
+        SepaCreditSchemeRules.requireRailCurrency(cmd.paymentType, cmd.currency)
         repo.findByIdempotencyKey(cmd.idempotencyKey)?.let { return it }
         val now = Instant.now(clock)
         val order = StandingOrder(

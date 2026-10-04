@@ -24,8 +24,8 @@ class InMemoryProposalTokenStore(private val clock: Clock) : ProposalTokenStore 
         evictExpired()
         store[token.id] = token
         log.debugf(
-            "InMemoryProposalTokenStore: stored token=%s tool=%s customer=%s",
-            token.id,
+            "InMemoryProposalTokenStore: stored token_ref=%s tool=%s customer=%s",
+            ProposalToken.logRef(token.id),
             token.toolName,
             token.customerId,
         )
@@ -35,7 +35,7 @@ class InMemoryProposalTokenStore(private val clock: Clock) : ProposalTokenStore 
         val token = store[id] ?: return null
         if (Instant.now(clock).isAfter(token.expiresAt)) {
             store.remove(id)
-            log.debugf("InMemoryProposalTokenStore: token=%s expired, evicted", id)
+            log.debugf("InMemoryProposalTokenStore: token_ref=%s expired, evicted", ProposalToken.logRef(id))
             return null
         }
         return token
@@ -43,7 +43,7 @@ class InMemoryProposalTokenStore(private val clock: Clock) : ProposalTokenStore 
 
     override fun delete(id: UUID) {
         store.remove(id)
-        log.debugf("InMemoryProposalTokenStore: deleted token=%s", id)
+        log.debugf("InMemoryProposalTokenStore: deleted token_ref=%s", ProposalToken.logRef(id))
     }
 
     private fun evictExpired() {

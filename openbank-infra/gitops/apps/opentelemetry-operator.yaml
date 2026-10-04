@@ -18,7 +18,7 @@ spec:
   source:
     repoURL: https://open-telemetry.github.io/opentelemetry-helm-charts
     chart: opentelemetry-operator
-    targetRevision: 0.123.1
+    targetRevision: 0.124.1
     helm:
       valuesObject:
         # This operator OWNS its CRDs: the Instrumentation in `accounts` (and any future
@@ -40,7 +40,10 @@ spec:
           # (accounts, payments) failed to diff. It cannot heal itself: without the API it cannot
           # rewrite the policy. The namespace has no default-deny, so without this policy egress
           # is simply open, like every other observability workload. operand.networkpolicy (for
-          # collectors) is unaffected.
+          # collectors) is unaffected. Operator 0.160.0 (chart 0.124.x) moved both
+          # network-policy gates back to alpha, disabled by default; the gate is still
+          # registered, so this explicit opt-out stays valid and keeps a future default flip
+          # from silently re-arming the stale-IP policy.
           featureGatesMap:
             operator.networkpolicy: false
           # The default collector image the operator stamps into injected

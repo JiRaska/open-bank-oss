@@ -81,8 +81,7 @@ class SwiftMessagePactProviderVerificationTest {
             transactionReference = "saga-ref-001",
             relatedReference = null,
             valueDate = "20260101",
-            currency = "EUR",
-            amountMinorUnits = 100_000L, // 1000.00 EUR
+            amount = SwiftMessage.moneyOfMinorUnits(100_000L, "EUR"), // 1000.00 EUR
             orderingCustomerAccount = null,
             orderingCustomerAccountId = null,
             orderingCustomerName = null,

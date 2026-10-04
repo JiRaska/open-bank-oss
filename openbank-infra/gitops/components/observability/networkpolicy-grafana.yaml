@@ -53,3 +53,9 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: admin-ui
+    # The shared Gateway's Envoy proxy (ADR-0324 Phase 2, httproute-tools-gate.yaml) — gated
+    # by the extAuth SecurityPolicy before it proxies, as nginx is by auth_request.
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system

@@ -5,12 +5,14 @@
 package com.openbank.cardprocessing.infrastructure.client
 
 import com.openbank.cardprocessing.application.port.out.CardIssuancePolicyPort
+import com.openbank.cardprocessing.application.port.out.CardIssuerUnavailableException
 import com.openbank.cardprocessing.application.port.out.CardLookupPort
 import com.openbank.cardprocessing.application.port.out.CardOwnership
 import com.openbank.cardprocessing.application.port.out.IssuerDecision
 import com.openbank.cardprocessing.domain.model.CountedSpend
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.ws.rs.ProcessingException
 import jakarta.ws.rs.WebApplicationException
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.rest.client.inject.RestClient
@@ -49,14 +51,20 @@ class CardIssuanceAdapter(
             // the real answer and arrives with ADR-0283 phase 2. Until then the configured issuing
             // currency is used, and it is stated here rather than hidden in a literal.
             currencyCode = card.currencyCode ?: defaultCurrency,
+            status = card.status,
         )
     } catch (e: WebApplicationException) {
         if (e.response?.status == NOT_FOUND) {
             null
         } else {
             log.warnf(e, "card lookup failed for %s", cardId)
-            throw e
+            throw CardIssuerUnavailableException(e)
         }
+    } catch (e: ProcessingException) {
+        // Connection refused, DNS, timeout: the REST client raises these as ProcessingException, not
+        // WebApplicationException, and they are the most likely shape of an outage.
+        log.warnf(e, "card-issuance unreachable for card %s", cardId)
+        throw CardIssuerUnavailableException(e)
     }
 
     override suspend fun decide(

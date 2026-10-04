@@ -49,13 +49,13 @@ class EuCapitalParametersTest {
     fun `the default set is the EU CRR set, version 1, and the BCBS set stays selectable`() {
         val default = CapitalTestParameters.shipped()
         assertThat(default.id).isEqualTo("eu-crr3-sa")
-        assertThat(default.version).isEqualTo("1")
+        assertThat(default.version).isEqualTo("2")
         assertThat(default.regime).isEqualTo(CapitalRegime.EU)
         assertThat(default.source).contains("575/2013").contains("2019/876").contains("2024/1623")
 
         val bcbs = CapitalTestParameters.bcbs()
         assertThat(bcbs.id).isEqualTo("bcbs-d424-sa")
-        assertThat(bcbs.version).isEqualTo("2")
+        assertThat(bcbs.version).isEqualTo("3")
         assertThat(bcbs.regime).isEqualTo(CapitalRegime.BCBS)
         assertThat(bcbs.citation(RW_OTHER_ASSET)).startsWith("BCBS d424 ¶")
     }
