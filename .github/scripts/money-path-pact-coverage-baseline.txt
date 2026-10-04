@@ -10,3 +10,5 @@ openbank-domestic-payment -> openbank-clearing-simulator  # sandbox scheme simul
 openbank-lending-service -> openbank-analytics-sink  # credit-profile read for offers; no provider replay exists yet — #8345
 openbank-sepa-instant -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
 openbank-sepa-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
+openbank-card-processing-service -> openbank-fraud-service  # card-processing joined money_path_services in #11996 after the pair existed; shadow fraud scoring (verdict changes nothing) — consumer pact tracked in #12064
+openbank-card-processing-service -> openbank-transaction-service  # card-processing joined money_path_services in #11996 after the pair existed; CARD-rail clearing posting — consumer pact tracked in #12064
