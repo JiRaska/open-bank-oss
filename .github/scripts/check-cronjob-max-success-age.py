@@ -35,6 +35,7 @@ import datetime as dt
 import pathlib
 import re
 import sys
+import tempfile
 
 import yaml
 
@@ -138,9 +139,9 @@ def check_one(where: str, schedule: str | None, value, tiers: set[int]) -> list[
 _KIND_CRONJOB = re.compile(r"(?m)^kind:\s*CronJob\s*$")
 
 
-def scan_gitops(root: pathlib.Path) -> list[tuple[str, str | None, object]]:
+def scan_gitops(root: pathlib.Path, repo: pathlib.Path = REPO) -> list[tuple[str, str | None, object]]:
     found = []
-    for f in sorted(root.rglob("*.yaml")):
+    for f in sorted((*root.rglob("*.yaml"), *root.rglob("*.yml"))):
         text = f.read_text()
         if not _KIND_CRONJOB.search(text):
             continue
@@ -151,7 +152,7 @@ def scan_gitops(root: pathlib.Path) -> list[tuple[str, str | None, object]]:
         for d in docs:
             if isinstance(d, dict) and d.get("kind") == "CronJob":
                 md = d.get("metadata") or {}
-                where = f"{f.relative_to(REPO)} {md.get('namespace', '?')}/{md.get('name', '?')}"
+                where = f"{f.relative_to(repo)} {md.get('namespace', '?')}/{md.get('name', '?')}"
                 found.append((where, (d.get("spec") or {}).get("schedule"),
                               (md.get("annotations") or {}).get(ANNOTATION)))
     return found
@@ -224,6 +225,15 @@ def self_test() -> int:
     if any(s[1] is None for s in subjects):
         print("self-test FAILED: a CronJob was found without a schedule (scanner reads the wrong field)")
         return 1
+    with tempfile.TemporaryDirectory() as tmp:
+        fixture = pathlib.Path(tmp)
+        (fixture / "uncovered.yml").write_text(
+            'kind: CronJob\nmetadata:\n  name: uncovered\nspec:\n  schedule: "*/10 * * * *"\n',
+        )
+        yml_subjects = scan_gitops(fixture, repo=fixture)
+        if len(yml_subjects) != 1 or len(check_one(*yml_subjects[0], real_tiers)) != 1:
+            print("self-test FAILED: an unannotated .yml CronJob escaped the gate")
+            return 1
     if bad:
         return 1
     print(f"self-test OK ({len(cases)} cases, {len(real_tiers)} tiers, {len(subjects)} real CronJobs scanned)")
