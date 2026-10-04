@@ -63,10 +63,6 @@ class TreasuryOutboxAtomicityIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    // The service defaults tradeDate to the bank (Europe/Prague) day; the UTC date lags it by one
-    // between 22:00 and 24:00 UTC in summer, and a valueDate before tradeDate is a 400.
-    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
-
     @Test
     @Order(1)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
@@ -145,13 +141,16 @@ class TreasuryOutboxAtomicityIT {
     }
 
     private fun draftAndSubmit(principal: String): String {
+        // Keep both dates on the same bank day even if this ordered IT crosses midnight.
+        val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
         val id: String = given()
             .contentType("application/json")
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(
                 """
                 {"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK",
-                 "principal":$principal,"rate":4.25,"valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
+                 "principal":$principal,"rate":4.25,"tradeDate":"$today",
+                 "valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
                 """.trimIndent(),
             )
             .`when`().post("/api/v1/treasury/deals")
