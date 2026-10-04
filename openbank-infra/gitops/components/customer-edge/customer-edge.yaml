@@ -29,11 +29,20 @@ metadata:
 spec:
   progressDeadlineSeconds: 600
   progressDeadlineAbort: true
-  replicas: 1
+  # Two replicas: this is the public entry point of the customer app, and at one replica every
+  # rollout, eviction and spot move was a customer-visible outage (journey-public-edge probe,
+  # 2026-10-03 04:40Z, during a 43 s pod rotation). Every piece of state a later request reads
+  # lives in Redis since #12090 (nearby-pay sessions were the last per-pod map), so any replica
+  # serves any request. The PDB below and the hostname spread keep the two apart and keep one up.
+  replicas: 2
   strategy:
     canary:
       stableService: customer-edge
       canaryService: customer-edge-canary
+      # Surge one canary pod, never drop below two ready: a rollout never removes capacity
+      # before its replacement is ready.
+      maxSurge: 1
+      maxUnavailable: 0
       analysis:
         templates:
           - clusterScope: true
@@ -47,11 +56,11 @@ spec:
           - name: canary-hash
             valueFrom:
               podTemplateHashValue: Canary
+      # Without trafficRouting a weight is pods-out-of-pods, so two replicas can express 50 and
+      # 100 and nothing between (#3806). The old 10/30 steps meant 100% at one replica; 50 is
+      # one canary pod beside one stable pod, observed by the analysis for 5 minutes.
       steps:
-        - setWeight: 10
-        - pause:
-            duration: 5m
-        - setWeight: 30
+        - setWeight: 50
         - pause:
             duration: 5m
   selector:
@@ -72,6 +81,22 @@ spec:
       # feedback-screenshots.tf. Running as `default` would either lose the credentials
       # entirely or, if associated, hand them to Redis and the OPA sidecar too.
       serviceAccountName: customer-edge
+      # Two replicas on one node are one replica with extra steps: a spot reclaim takes both.
+      # Hard on the node, soft on the zone (Karpenter can always add a node; a zone may be short
+      # of spot capacity, and a Pending replica would stall the rollout).
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: customer-edge
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: customer-edge
       securityContext:
         runAsNonRoot: true
         runAsUser: 100
@@ -460,6 +485,23 @@ spec:
         - name: campaign-tls-trust
           secret:
             secretName: customer-edge-internal-tls
+---
+# A node drain (Karpenter consolidation, drift, spot interruption) evicts through this budget, so
+# it can never take both replicas at once. maxUnavailable rather than minAvailable: during a
+# canary there are three pods and one may still go, and a drain is never blocked outright.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: customer-edge
+  namespace: customer-edge
+  labels:
+    app.kubernetes.io/name: customer-edge
+    app.kubernetes.io/part-of: customer-edge
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: customer-edge
 ---
 apiVersion: v1
 kind: Service
