@@ -1,0 +1,266 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# ADR-0234's identity-aware tool gate on the shared Gateway (ADR-0324 Phase 2) — the Gateway
+# API translation of components/admin-ui/tools-gate.yaml. Same three tools, same sub-paths of
+# admin.open-bank.tech, same admin-UI session check; only the edge that asks changes.
+#
+# IN DNS since the Phase 3 cutover: external-dns publishes admin.open-bank.tech from these
+# routes and the console route (admin-ui/httproute.yaml), pointing at the Gateway's NLB. All four
+# nginx Ingresses (admin-ui.yaml + tools-gate.yaml) now carry `external-dns.kubernetes.io/
+# controller: gateway-api-cutover-pending` and keep serving on ingress-nginx as the rollback
+# (swap the annotation back on all four routes and all four Ingresses together).
+#
+# WHY HERE, in `observability`, and not in `admin-ui` as the Ingresses are. An Ingress can name
+# only Services in its own namespace, which is what forced the ExternalName indirection in
+# tools-gate.yaml. An HTTPRoute can live next to its backend, so the ExternalNames are not
+# carried over and no Service ReferenceGrant is needed. It also puts every tool route in the
+# namespace the Kyverno gate policy watches (require-gated-or-declared-tool-httproute-cel):
+# an HTTPRoute in `observability` with no extAuth SecurityPolicy targeting it is denied.
+#
+# Annotation mapping from tools-gate.yaml:
+#   auth-url .../api/gate?tool=<t>
+#       -> SecurityPolicy extAuth.http, backend admin-ui:3000, path /api/gate/<t>. Envoy
+#          APPENDS the original path+query, so the gate sees /api/gate/<t>/tools/<t>/...; the
+#          tool is still fixed by this file, never by the caller (the nginx `?tool=` property).
+#          The gate answers this contract at openbank-admin-ui/src/app/api/gate/[tool]/[[...uri]].
+#   (auth_request forwards the browser's cookies)
+#       -> headersToExtAuth: [cookie]. An HTTP ext_authz call otherwise carries only Host,
+#          Method, Path, Content-Length and Authorization (EG v1.9.1 ext_auth_types.go).
+#   auth-signin .../auth/login?callbackUrl=$escaped_request_uri
+#       -> no Envoy Gateway field exists for it. Envoy relays a DENIAL's status and headers to
+#          the browser verbatim, so the gate answers an unauthenticated check with that same
+#          302 itself, deep link included. Measured with envoy v1.39.1 (the digest the live
+#          proxy runs) and a stub gate: no cookie -> 302 Location
+#          /auth/login?callbackUrl=%2Ftools%2Fgrafana%2Fd%2Fabc%3ForgId%3D1..., tool not called.
+#   (204 -> proxy)
+#       -> the gate answers 200: Envoy treats any other status as a denial (the nginx route's
+#          204 reached the browser as an empty 204 and the tool was never called).
+#   (no auth-response-headers, on purpose)
+#       -> no headersToBackend, on purpose: the identity-header trust model ADR-0234 rejects.
+#   auth_request fails CLOSED (500)
+#       -> failOpen: false; an unreachable gate answers 403 (Envoy's default status_on_error),
+#          measured, never the tool.
+#   ssl-redirect            -> the Gateway's http listener (envoy-gateway/httproute-redirect.yaml)
+#   custom-headers admin-ui-tools-edge-headers-v1 (Referrer-Policy) + the controller's HSTS
+#   and nosniff             -> ResponseHeaderModifier, same values; still no X-Frame-Options,
+#                              the tools set their own framing policy
+#   upstream-vhost admin.open-bank.tech
+#                           -> nothing: the Gateway forwards the browser's Host unchanged, so
+#                              Grafana's root_url stays on admin.open-bank.tech
+#   (no rewrite-target)     -> no URLRewrite: each tool serves under its own /tools/<t> prefix
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                           -> BackendTrafficPolicy below
+#
+# ONE ROUTE AND ONE POLICY PER TOOL, for the reason tools-gate.yaml gives one Ingress per tool:
+# the gate's allow-list is keyed by the tool the edge names, so two tools under one policy
+# would both be checked as whichever tool it named.
+#
+# ORDER. The SecurityPolicies are wave -1 and the routes wave 0, so in one sync a route never
+# exists without the policy that gates it; the Kyverno policy would deny it otherwise.
+#
+# ── Cutover (Phase 3, with the admin-ui route; done, kept as the procedure) ──────────────────
+#   GW=$(kubectl -n envoy-gateway-system get gateway edge -o jsonpath='{.status.addresses[0].value}')
+#   IP=$(dig +short "$GW" | head -1)
+#   curl -sSI --resolve admin.open-bank.tech:443:$IP https://admin.open-bank.tech/tools/grafana/
+#       # expect 302 Location: /auth/login?callbackUrl=%2Ftools%2Fgrafana%2F (no session)
+#   then, in ONE change: remove the cutover-pending annotation from these routes AND the admin-ui
+#   route, add it to all four Ingresses (admin-ui + tools-gate.yaml), so exactly one source
+#   publishes the name (external-dns --policy=upsert-only updates, never deletes). Note #12037:
+#   Argo's server-side diff may not remove an annotation it no longer renders — confirm with
+#   `kubectl get httproute -o yaml` that it is actually gone. Delete the Ingresses, the three
+#   ExternalName Services and the ingress-nginx netpol peers only in a later change.
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tools-gate-grafana
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-grafana
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [cookie]
+    http:
+      backendRefs:
+        - name: admin-ui
+          namespace: admin-ui
+          port: 3000
+      path: /api/gate/grafana
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tools-gate-alertmanager
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-alertmanager
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [cookie]
+    http:
+      backendRefs:
+        - name: admin-ui
+          namespace: admin-ui
+          port: 3000
+      path: /api/gate/alertmanager
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: SecurityPolicy
+metadata:
+  name: tools-gate-pyrra
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-pyrra
+  extAuth:
+    failOpen: false
+    headersToExtAuth: [cookie]
+    http:
+      backendRefs:
+        - name: admin-ui
+          namespace: admin-ui
+          port: 3000
+      path: /api/gate/pyrra
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tools-grafana
+  namespace: observability
+  labels:
+    app.kubernetes.io/component: tools-gate
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    # NOT rewritten: Grafana runs with root_url=https://admin.open-bank.tech/tools/grafana and
+    # serve_from_sub_path=true, so it expects the prefix.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /tools/grafana
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+      backendRefs:
+        - name: kube-prometheus-stack-grafana
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tools-alertmanager
+  namespace: observability
+  labels:
+    app.kubernetes.io/component: tools-gate
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    # Alertmanager serves its whole surface under routePrefix /tools/alertmanager.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /tools/alertmanager
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+      backendRefs:
+        - name: kube-prometheus-stack-alertmanager
+          port: 9093
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: tools-pyrra
+  namespace: observability
+  labels:
+    app.kubernetes.io/component: tools-gate
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    # Pyrra serves under --route-prefix=/tools/pyrra.
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /tools/pyrra
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+      backendRefs:
+        - name: pyrra-api
+          port: 9099
+---
+# nginx's defaults on the Ingresses this replaces: a 1 MiB request body and a 60 s upstream
+# read. Envoy otherwise has no body cap and a 15 s route timeout, which a slow Grafana
+# dashboard query would hit.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: tools-gate
+  namespace: observability
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-grafana
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-alertmanager
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: tools-pyrra
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s

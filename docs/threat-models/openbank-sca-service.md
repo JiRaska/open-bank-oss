@@ -62,6 +62,28 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-10-03** — **Operator approvals publish what they bind (`summary`).** `GET
+  /api/v1/sca/approvals` and `/{id}` now return a `summary` rendered by `ScaApprovalSummaryRenderer`
+  (through the new optional libs-runtime `ApprovalSummaryRenderer` hook) from the same arguments the
+  #11675 fingerprint covers, once, when the approval is issued, and stored in the existing V15
+  `summary` column — so it is the summary of what was bound, never re-derived (a later revocation
+  does not rewrite it; `ScaFourEyesFlowIT` proves it on an executed approval). **STRIDE-I (what it
+  reveals, and why):** to OPERATOR/ADMIN only (`scaChallenge.approval.read`), the party id (already
+  the approval's `resourceId`), an 8-character credential handle and device-id handle, the
+  algorithm, the enrolment date, the first 8 hex of the SHA-256 of an enrolling public key, and for
+  a consume the challenge purpose (only when the challenge belongs to the stated party), amount,
+  currency and the creditor masked to its last 4 alphanumerics. That is the minimum a checker needs
+  to recognise the target and compare it with what the maker claims; without it the checker
+  approved blind. It never carries the public key, a full IBAN or any secret: caller-supplied
+  values are shape-checked (amount, ISO currency, card action, SHA-256 hex) or shortened, so a
+  crafted field cannot be echoed or impersonate another `key=value`. Before this change the shared
+  generic summary — the full argument dump, public key and creditor IBAN included — was stored but
+  never served; for these three actions it is no longer stored either. The `summary` is not in the
+  `SCA_OPERATOR_APPROVAL_CHANGED` event (payload unchanged). A renderer failure refuses the call
+  (503) rather than issuing an approval with the generic dump. **Tampering:** none — the summary is
+  informational, the fingerprint alone decides a match. **Residual:** the two shared M2M
+  service-accounts that can read the queue (see the slice 9b entry) now also read the summary.
+  **Rollback:** revert the binary; stored summaries are inert text and need no data change.
 - **2026-10-03** — **Durable challenge and device lifecycle** (#10041 slice 9a). Four changes,
   one risk class: integrity and non-repudiation of the decoupled-approval ceremony.
   (1) Optimistic `version` on `sca_challenges` (V12): every lifecycle write, including the
@@ -281,3 +303,40 @@ is the **authentication assurance gate** for payments and consent — defeating 
   rest-client, so no caller changes posture. **Risk class:** authentication of east-west callers —
   restored to what the design always stated. Rollback: revert the property (and expect the listener
   to return to server-only TLS).
+
+- **2026-10-03** — **Durable four-eyes for SCA operator actions (#10041 slice 9b).** New surface:
+  `GET /api/v1/sca/approvals`, `GET /api/v1/sca/approvals/{id}` and `PATCH /api/v1/sca/approvals/{id}`
+  (`@RolesAllowed(ROLE_OPERATOR, ROLE_ADMIN)`, `@Authorize("scaChallenge.approval.read"/".decide")`,
+  admitted by the existing `operator-sca-write` (decide; excludes `service-account-*`) and base
+  `operator-read-any` (read) rules — no rego or `rules.yaml` change). SCA now wires an `ApprovalStore`
+  bean, so with `authz.four-eyes.enforce=true` (default false, unset in every manifest) the gated
+  actions `device.enroll`, `device.revoke` and `scaChallenge.consume` park with 202 instead of
+  failing closed with 503. **Four-eyes:** the paused request runs only on a retry carrying an
+  `APPROVED` approval for the same action and maker whose request fingerprint (SHA-256 of endpoint +
+  arguments, #11675) equals the retry's; the claim is one-use. So an approval for one device cannot
+  revoke another, and one for an enrollment cannot enrol a different credential, key or algorithm.
+  **Self-approval prevention:** `PostgresApprovalStore.decide` refuses `decidedBy == makerId` before
+  the status check, under a row lock, and V15 repeats it as a table CHECK
+  (`decided_by <> maker_id`), so neither a REST-layer omission nor a direct writer can record one.
+  **Identity of the decider:** the checker id is the authenticated `principal.name`, resolved by
+  `ApprovalEndpointSupport` after the body check, never taken from the request body — the same
+  representation the interceptor records as the maker, so the comparison is between like values;
+  `ScaOidcApprovalIT` proves it with real Keycloak tokens rather than injected identities. Every
+  transition commits in one transaction with an `SCA_OPERATOR_APPROVAL_CHANGED` outbox event naming
+  its actor, so who made, who decided and who claimed survive the authorization's expiry (a failed
+  audit insert rolls the transition back). **Risk class:** segregation of duties on device
+  credentials and settlement-gate consumption. **Residual:** the shared M2M client still classifies
+  as HUMAN with `ROLE_OPERATOR` in some realms. Measured with `opa eval` on the generated bundle
+  (2026-10-03): `service-account-openbank-services` and `-edge` are DENIED
+  `scaChallenge.approval.decide` but ALLOWED `scaChallenge.approval.read` via `operator-read-any`,
+  so they can see the queue (action, party id, maker id — not the request summary or fingerprint; the summary since the `summary` entry above)
+  but cannot decide it (least-privilege restriction deferred to slice 10). **Retention:**
+  `OperatorApprovalPurgeScheduler` (`suspend` `@Scheduled`, daily `0 45 3 * * ?`, bounded batches
+  and a per-run cap, liveness `sca-operator-approval-purge` and counter
+  `openbank.sca.operator.approval.purged` registered only when enabled) deletes approvals whose
+  authorization expired more than `openbank.sca.approval-retention-days` (default 1826, AMLD Art. 40
+  — the approval is part of the authorisation evidence for the operation it gated) ago, via V15
+  `idx_sca_operator_approvals_retention`. Expiry, not status, makes a row terminal: an expired
+  PENDING approval can never be decided or claimed, so it ages out on the same clock. A still-live
+  approval never matches, because the cutoff lies in the past. The outbox events are not touched. A legal hold is `openbank.sca.approval-purge.enabled=false`. **Rollback:** revert
+  the binary with four-eyes enforcement off; keep `sca_operator_approvals` and its outbox rows.

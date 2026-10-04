@@ -40,10 +40,28 @@ spec:
     #
     # The generator cannot derive this one. gen-network-policies.py emits INGRESS from declared
     # env URLs; the caller side of a new in-cluster edge is hand-written, and this file is where.
+    #
+    # `langfuse-web` only since ADR-0328 wave C1: the v2 Deployment (app.kubernetes.io/name=
+    # langfuse) is deleted, so its selector would admit nothing but a future pod reusing the label.
     - to:
         - podSelector:
             matchLabels:
-              app.kubernetes.io/name: langfuse
+              app.kubernetes.io/name: langfuse-web
+      ports:
+        - protocol: TCP
+          port: 3000
+    # Presidio PII services (presidio.yaml), called by the gateway's presidio guardrail before
+    # every model call and before the Langfuse callback sees the request. Same namespace; port 3000
+    # on both, serving TLS from the openbank-ca ClusterIssuer (presidio-internal-tls), so the raw
+    # PII this edge exists to carry is never on the wire in plaintext. Hand-written for the same
+    # reason as the Langfuse rule above: the generator emits ingress, not the caller's egress.
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-analyzer
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-anonymizer
       ports:
         - protocol: TCP
           port: 3000

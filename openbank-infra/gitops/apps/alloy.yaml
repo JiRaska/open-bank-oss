@@ -38,7 +38,7 @@ spec:
         image:
           registry: public.ecr.aws/d7v4f3x6
           repository: alloy
-          tag: v1.20.0
+          tag: v1.20.1
         # Pin the config-reloader sidecar straight at the ECR pull-through cache rather
         # than letting Kyverno's rewrite-ghcr rule do it. That policy is a mutating
         # webhook with failurePolicy: Ignore — it FAILS OPEN, so a pod admitted while
@@ -164,9 +164,22 @@ spec:
                 // that already live in the GitHub Actions UI. None of it belongs in
                 // the bank's log store, and it buries the actual service logs. This
                 // is also the dind volume that forced the alloy 512Mi memory bump.
+                //
+                // Exception: arc-stuck-runner-reaper is a CONTROL that runs in
+                // arc-runners (every 10 min, a few lines per run). With the whole
+                // namespace dropped, its failed run on 2026-10-03 01:40 was
+                // undiagnosable once the pod was GC'd. Mark it, then drop only
+                // unmarked pods.
                 rule {
-                  source_labels = ["__meta_kubernetes_namespace"]
-                  regex         = "arc-runners|gradle-build-cache"
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  regex         = "arc-stuck-runner-reaper-.*"
+                  target_label  = "__tmp_keep"
+                  replacement   = "1"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace", "__tmp_keep"]
+                  separator     = ";"
+                  regex         = "(arc-runners|gradle-build-cache);"
                   action        = "drop"
                 }
 
@@ -214,12 +227,24 @@ spec:
                 // pipeline. Verify after deploy with
                 //   sum(count_over_time({namespace="ledger"} | trace_id != "" [1h]))
                 // which must be > 0 while the service takes traffic.
+                //
+                // ...and then the shape moved under it. #11630 (2026-10-01) replaced the
+                // JSON-shaped *format pattern* (which wrote the ids top-level) with the real
+                // quarkus-logging-json encoder, which nests every MDC value under `"mdc":{}`
+                // — and that PR's own comment in openbank-libs-runtime's
+                // microprofile-config.properties names `mdc.traceId` as the contract. The two
+                // PRs crossed within a day, so from the first rebuilt service on, trace_id was
+                // empty again: measured 2026-10-03, every traceId-carrying line in the fleet
+                // was `"mdc":{"traceId":...}` and `| trace_id != ""` matched 0 lines.
+                // The encoder is the contract now; the top-level fallback keeps a pod still
+                // running a pre-#11630 image linked until its next rollout. JMESPath `||`
+                // takes the first non-null, so neither shape can shadow the other.
                 stage.json {
                   expressions = {
                     level         = "level",
-                    trace_id      = "traceId",
-                    span_id       = "spanId",
-                    correlationId = "correlationId",
+                    trace_id      = "mdc.traceId || traceId",
+                    span_id       = "mdc.spanId || spanId",
+                    correlationId = "mdc.correlationId || correlationId",
                   }
                 }
 

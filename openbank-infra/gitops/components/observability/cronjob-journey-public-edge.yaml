@@ -100,6 +100,9 @@ metadata:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: journey
     openbank.tech/journey: public-edge
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/5 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "1800"
 spec:
   # Every 5 minutes. The alert window in prometheus-rules-journey.yaml is derived from this
   # interval — change one and the other has to move with it.
@@ -142,11 +145,9 @@ spec:
               type: RuntimeDefault
           containers:
             - name: k6
-              # 1.2.0, not 0.58.0: the `0.58.0` tag's binary self-reports `k6 v1.0.0-rc1`
-              # (measured with `docker run grafana/k6:0.58.0 version`), so that pin runs a
-              # release candidate in a production monitor while reading as the last stable
-              # 0.x. `1.2.0` reports `k6 v1.2.0`.
-              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+              # A stable release, never an rc: the `0.58.0` tag's binary self-reported
+              # `k6 v1.0.0-rc1`. `2.3.0` reports `k6 v2.3.0` (measured with `version`).
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
@@ -155,7 +156,7 @@ spec:
               # Measured against this image, read-only rootfs and UID 12345, before pinning:
               # a failing threshold exits 99 and a passing run exits 0, which is the entire
               # signal these alerts read. `-o experimental-prometheus-rw` is accepted by
-              # 1.2.0 (it is still the flag name, not yet promoted out of experimental).
+              # 2.3.0 (it is still the flag name, not yet promoted out of experimental).
               args:
                 - run
                 - --quiet

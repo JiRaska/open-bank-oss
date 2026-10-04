@@ -83,6 +83,41 @@ class SettlementResourceAuthzTest {
         }
     }
 
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `a malformed instruction is a 400 from deserialisation, before authorization`() {
+        // Validation lives in CreateSettlementRequest's constructor (#10041 slice 10) so a bad
+        // instruction can never park a four-eyes approval; it must still answer 400, not 500.
+        for (body in listOf(
+            VALID_REQUEST.replace("\"10.00\"", "\"-1\""),
+            VALID_REQUEST.replace("\"CZK\"", "\"czk\""),
+            VALID_REQUEST.replace("\"authz-test-key-1\"", "\" \""),
+            VALID_REQUEST.replace("000000000011", "000000000010"),
+        )) {
+            Given {
+                contentType("application/json")
+                body(body)
+            } When {
+                post("/api/v1/settlements")
+            } Then {
+                statusCode(400)
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_OPERATOR"])
+    fun `a null body is a 400`() {
+        Given {
+            contentType("application/json")
+            body("null")
+        } When {
+            post("/api/v1/settlements")
+        } Then {
+            statusCode(400)
+        }
+    }
+
     private companion object {
         const val VALID_REQUEST = """
             {

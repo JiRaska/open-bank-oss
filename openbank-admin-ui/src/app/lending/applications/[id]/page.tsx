@@ -34,6 +34,8 @@ import { PageHeader, StatusBadge } from '@/components/ui'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { OriginationFlow, STATE_LABELS, type StepFact } from '@/components/lending/OriginationFlow'
 import { currencyCode, formatMoney, type WireMoney } from '@/lib/lending/money'
+import { EvidenceIntegrityNotice } from '@/components/lending/EvidenceIntegrityNotice'
+import { evidenceIntegrity, hashBadge, hashStatusOf, type EvidenceIntegrity } from '@/lib/lending/evidenceIntegrity'
 
 type Application = {
   id: string
@@ -60,7 +62,7 @@ type TransitionPayload = {
   packVersion?: number | null
 }
 
-type EvidenceEvent = { eventId: string; eventType: string; occurredAt: string; payload: string }
+type EvidenceEvent = { eventId: string; eventType: string; occurredAt: string; payload: string; hashStatus?: string }
 
 type ReadState = 'ok' | 'forbidden' | 'unavailable'
 
@@ -76,6 +78,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
 
   const [app, setApp] = useState<Application | null>(null)
   const [events, setEvents] = useState<EvidenceEvent[]>([])
+  const [integrity, setIntegrity] = useState<EvidenceIntegrity>(() => evidenceIntegrity(null))
   const [appState, setAppState] = useState<ReadState>('ok')
   const [evidenceState, setEvidenceState] = useState<ReadState>('ok')
   const [loading, setLoading] = useState(true)
@@ -98,9 +101,11 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
       if (evRes.ok) {
         const body = await evRes.json()
         setEvents(Array.isArray(body?.events) ? body.events : [])
+        setIntegrity(evidenceIntegrity(body))
         setEvidenceState('ok')
       } else {
         setEvents([])
+        setIntegrity(evidenceIntegrity(null))
         setEvidenceState(readStateFor(evRes.status))
       }
       setError(null)
@@ -118,8 +123,8 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
 
   /** Rebuild the path walked from the transition envelopes. A malformed payload is skipped rather
    *  than failing the page — the flow degrades to "no timestamp on this node", not to a blank screen. */
-  const history: StepFact[] = useMemo(() => {
-    const out: StepFact[] = []
+  const rows: { fact: StepFact; badge: ReturnType<typeof hashBadge> }[] = useMemo(() => {
+    const out: { fact: StepFact; badge: ReturnType<typeof hashBadge> }[] = []
     for (const e of events) {
       if (e.eventType !== 'credit.application.transition') continue
       let p: TransitionPayload
@@ -130,15 +135,19 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
       }
       if (!p.toState) continue
       out.push({
-        state: p.toState,
-        at: p.occurredAt ?? e.occurredAt,
-        actor: p.actorId,
-        actorKind: p.actorKind,
-        reason: p.reason,
+        fact: {
+          state: p.toState,
+          at: p.occurredAt ?? e.occurredAt,
+          actor: p.actorId,
+          actorKind: p.actorKind,
+          reason: p.reason,
+        },
+        badge: hashBadge(hashStatusOf(e.hashStatus)),
       })
     }
     return out
   }, [events])
+  const history: StepFact[] = useMemo(() => rows.map((r) => r.fact), [rows])
 
   const stateLabel = (s?: string) =>
     s ? (STATE_LABELS[s] ? (language === 'cs' ? STATE_LABELS[s].cs : STATE_LABELS[s].en) : s) : '—'
@@ -245,6 +254,7 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
                   : t('Auditní stopu se nepodařilo načíst.', 'The evidence trail could not be loaded.')}
               </div>
             )}
+            {evidenceState === 'ok' && <EvidenceIntegrityNotice integrity={integrity} />}
             {evidenceState === 'ok' && history.length === 0 && (
               <div data-testid="evidence-empty" style={{ padding: 16, fontSize: 13, color: 'var(--text-tertiary)' }}>
                 {t('Zatím žádný zaznamenaný přechod.', 'No recorded transition yet.')}
@@ -261,13 +271,23 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((h, i) => (
+                  {rows.map(({ fact: h, badge }, i) => (
                     <tr key={`${h.state}-${h.at}-${i}`} style={{ borderTop: '1px solid var(--border)' }}>
                       <td style={{ padding: '10px 14px', color: 'var(--text-tertiary)', fontSize: 12 }}>
                         {h.at ? new Date(h.at).toLocaleString(dateLocale) : '—'}
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         <span title={h.state}>{stateLabel(h.state)}</span>
+                        {badge === 'altered' && (
+                          <span data-testid="evidence-row-altered" className="pill" style={{ marginLeft: 6, fontSize: 10, color: 'var(--danger)', background: 'var(--danger-bg)' }}>
+                            {t('změněno', 'altered')}
+                          </span>
+                        )}
+                        {badge === 'unverifiable' && (
+                          <span data-testid="evidence-row-unverifiable" className="pill" style={{ marginLeft: 6, fontSize: 10 }} title={t('Záznam nelze ověřit (z doby před řetězcem nebo starý formát hashe).', 'Cannot be verified (written before the chain existed, or in the old hash form).')}>
+                            {t('neověřitelné', 'unverifiable')}
+                          </span>
+                        )}
                       </td>
                       <td style={{ padding: '10px 14px' }}>
                         {h.actor ?? '—'}

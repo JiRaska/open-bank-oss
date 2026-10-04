@@ -5,6 +5,7 @@
 package com.openbank.sanctions.application.usecase
 
 import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.xml.SecureXml
 import com.openbank.sanctions.application.port.out.ListImportOutcome
 import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsEntryRepository
@@ -33,7 +34,6 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
-import javax.xml.parsers.SAXParserFactory
 
 private suspend fun SanctionsEntryRepository.upsertForRefresh(
     entries: List<SanctionsEntry>,
@@ -245,8 +245,8 @@ class SanctionsImportService(
             val inputStream = httpGetStream(url)
             val allEntries = mutableListOf<SanctionsEntry>()
 
-            val saxFactory = SAXParserFactory.newInstance().apply { isNamespaceAware = false }
-            saxFactory.newSAXParser().parse(
+            // Remote list content: parsed only through the fleet-wide hardened SAX parser.
+            SecureXml.saxParse(
                 inputStream,
                 object : DefaultHandler() {
                     private var inEntry = false
@@ -286,7 +286,6 @@ class SanctionsImportService(
                             "dateOfBirthItem" -> inDobItem = true
                         }
                     }
-
                     override fun characters(ch: CharArray, start: Int, length: Int) {
                         text.append(ch, start, length)
                     }
@@ -344,6 +343,7 @@ class SanctionsImportService(
                         }
                     }
                 },
+                namespaceAware = false,
             )
 
             Log.infof("SAX-parsed %d OFAC SDN entries", allEntries.size)

@@ -222,7 +222,7 @@ open class DomesticPaymentActivitiesImpl(
             }
             customerNotificationPort.notifyPaymentFailed(
                 partyId = ownerPartyId,
-                amount = payment.amount,
+                amount = payment.amount.amount,
                 currency = payment.currency,
                 reason = customerSafeReason(reason),
             )
@@ -236,7 +236,7 @@ open class DomesticPaymentActivitiesImpl(
             ?: error("Payment $paymentId not found during fraud score activity")
         val outcome = fraudScoringPort.score(
             FraudScoreCommand(
-                amount = payment.amount,
+                amount = payment.amount.amount,
                 currency = payment.currency,
                 rail = "DOMESTIC",
                 accountId = payment.debtorAccountId,

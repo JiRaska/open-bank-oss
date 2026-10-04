@@ -6,8 +6,8 @@ package com.openbank.customeredge
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
-import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -35,7 +35,7 @@ class CustomerEdgeCardsTest {
     private fun resourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
-        PaymentSessionStore(),
+        inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
         Clock.systemUTC(),

@@ -6,10 +6,11 @@ package com.openbank.swift.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
-import com.openbank.swift.application.port.`in`.SendSwiftCommand
 import com.openbank.swift.application.port.`in`.SwiftUseCase
 import com.openbank.swift.domain.model.SwiftStatus
+import com.openbank.swift.infrastructure.rest.dto.SendSwiftRequest
 import com.openbank.swift.infrastructure.rest.dto.toResponse
+import com.openbank.swift.infrastructure.rest.dto.toView
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
 import jakarta.ws.rs.GET
@@ -29,12 +30,17 @@ class SwiftResource(private val useCase: SwiftUseCase) {
     @POST
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.send", resource = "")
-    suspend fun send(cmd: SendSwiftCommand?): Response {
+    suspend fun send(request: SendSwiftRequest?): Response {
         // A JSON `null` body deserialises to null despite the non-nullable Kotlin type, so the
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
-        requireNotNull(cmd) { "request body is required" }
-        return Response.status(201).entity(useCase.send(cmd)).build()
+        requireNotNull(request) { "request body is required" }
+        // #11604: the kernel Money is built here, BEFORE the use case looks up the idempotency
+        // key — a refused amount/currency consumes no key and persists nothing. The refusal is
+        // libs-runtime's InvalidMoneyExceptionMapper (400 AMOUNT_SCALE_EXCEEDED /
+        // CURRENCY_UNSUPPORTED / VALIDATION_ERROR, field named, value never echoed).
+        val command = request.toCommand()
+        return Response.status(201).entity(useCase.send(command).toView()).build()
     }
 
     @GET
@@ -47,25 +53,26 @@ class SwiftResource(private val useCase: SwiftUseCase) {
     @Path("/{id}")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.read", resource = "#id")
-    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id) ?: throw NotFoundException()
+    suspend fun get(@PathParam("id") id: UUID) = useCase.getById(id)?.toView() ?: throw NotFoundException()
 
     @GET
     @Path("/status/{status}")
     @RolesAllowed(Roles.VIEWER, Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.list", resource = "")
-    suspend fun listByStatus(@PathParam("status") status: SwiftStatus) = useCase.listByStatus(status)
+    suspend fun listByStatus(@PathParam("status") status: SwiftStatus) =
+        useCase.listByStatus(status).map { it.toView() }
 
     @POST
     @Path("/{id}/ack")
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.acknowledge", resource = "#id")
     suspend fun ack(@PathParam("id") id: UUID, body: Map<String, String>?) =
-        useCase.acknowledge(id, body?.get("ackRef") ?: "")
+        useCase.acknowledge(id, body?.get("ackRef") ?: "").toView()
 
     @POST
     @Path("/{id}/reject")
     @RolesAllowed(Roles.OPERATOR, Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "swift.reject", resource = "#id")
     suspend fun reject(@PathParam("id") id: UUID, body: Map<String, String>?) =
-        useCase.reject(id, body?.get("reason") ?: "")
+        useCase.reject(id, body?.get("reason") ?: "").toView()
 }

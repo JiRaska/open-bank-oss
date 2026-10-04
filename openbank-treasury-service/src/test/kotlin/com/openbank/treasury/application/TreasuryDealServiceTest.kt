@@ -7,17 +7,14 @@ package com.openbank.treasury.application
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
 import com.openbank.treasury.application.port.`in`.PositionBasis
-import com.openbank.treasury.application.port.out.CommandKey
 import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.CurveSetPort
-import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
-import com.openbank.treasury.application.port.out.LedgerJournalRef
-import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
@@ -29,7 +26,6 @@ import com.openbank.treasury.domain.model.CurveSetView
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealState
 import com.openbank.treasury.domain.model.FxSide
-import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitBreachedException
 import com.openbank.treasury.domain.model.MarketCurve
 import com.openbank.treasury.domain.model.PostingEvent
@@ -72,7 +68,10 @@ class TreasuryDealServiceTest {
     }
     private var quotes: SimulatedQuoteService? = null
     private val service get() =
-        TreasuryDealService(deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes)
+        TreasuryDealService(
+            deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes,
+            DealFixtures.permissiveProductLimits,
+        )
 
     /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
     private fun quotesOn() {
@@ -171,6 +170,27 @@ class TreasuryDealServiceTest {
         service.runSimulatedMarket()
         assertThat(deals.findById(b.id)!!.state).isEqualTo(DealState.SETTLED)
         assertThat(ledger.entryDates["treasury:${b.id}:settled"]).isEqualTo(prague)
+    }
+
+    /**
+     * Pins the shape `TreasuryOutboxAtomicityIT` used to get wrong: a value date taken from the UTC
+     * wall clock is the PREVIOUS day between 22:00 and 24:00 UTC in summer, so a draft defaulting
+     * its trade date to the Prague day rejects it. The bank-zone date is the one callers must send.
+     */
+    @Test
+    fun `a value date taken from the UTC date after 22 00 UTC precedes the Prague trade date`(): Unit = runBlocking {
+        clock = Clock.fixed(java.time.Instant.parse("2026-07-22T22:30:00Z"), ZoneOffset.UTC)
+        val utcDate = LocalDate.now(clock)
+        val bankDate = AccountingClock.bank(clock).today()
+        assertThat(utcDate).isEqualTo(LocalDate.parse("2026-07-22"))
+        assertThat(bankDate).isEqualTo(LocalDate.parse("2026-07-23"))
+
+        val fromUtc = cmd(maturity = utcDate.plusDays(30)).copy(tradeDate = null, valueDate = utcDate)
+        assertThatThrownBy { runBlocking { service.draft(fromUtc, DealFixtures.dealer) } }
+            .hasMessageContaining("valueDate must not precede tradeDate")
+
+        val fromBank = cmd(maturity = bankDate.plusDays(30)).copy(tradeDate = null, valueDate = bankDate)
+        assertThat(service.draft(fromBank, DealFixtures.dealer).tradeDate).isEqualTo(bankDate)
     }
 
     private suspend fun bookOnPragueDay(at: java.time.Instant, prague: LocalDate): Deal {
@@ -672,61 +692,5 @@ class TreasuryDealServiceTest {
         val noDate = cmd().copy(valueDate = null)
         assertThatThrownBy { runBlocking { service.draft(noDate, DealFixtures.dealer) } }
             .isInstanceOf(IllegalArgumentException::class.java)
-    }
-
-    private class RecordingLedger : LedgerPostingPort {
-        val posted = mutableListOf<JournalSpec>()
-        val entryDates = mutableMapOf<String, LocalDate>()
-        var failFor: UUID? = null
-        override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
-            if (spec.dealId == failFor) error("ledger unavailable")
-            posted += spec
-            entryDates[spec.idempotencyKey] = entryDate
-            return UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray())
-        }
-    }
-
-    private class InMemoryDeals : DealRepository {
-        val rows = linkedMapOf<UUID, Deal>()
-        val journals = mutableListOf<LedgerJournalRef>()
-        val events = mutableListOf<DealEvent>()
-
-        val commands = mutableMapOf<String, CommandKey>()
-
-        override suspend fun save(
-            deal: Deal,
-            journal: LedgerJournalRef?,
-            event: DealEvent?,
-            command: CommandKey?,
-        ): Deal {
-            rows[deal.id] = deal
-            journal?.let { journals += it }
-            event?.let { events += it }
-            command?.let { commands[it.key] = it }
-            return deal
-        }
-
-        override suspend fun findCommand(key: String) = commands[key]
-
-        override suspend fun findById(dealId: UUID) = rows[dealId]
-        override suspend fun list(state: DealState?) = rows.values.filter { state == null || it.state == state }
-        override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>) =
-            rows.values.filter { it.state in states && !it.valueDate.isAfter(today) }
-        override suspend fun dueForMaturity(today: LocalDate) = rows.values.filter {
-            it.state == DealState.SETTLED && !it.maturityDate.isAfter(today) && it.product != ProductType.FX_SPOT
-        }
-        override suspend fun exposure(counterpartyId: String, currency: String, excludeDealId: UUID?) =
-            rows.values.filter {
-                it.counterpartyId == counterpartyId &&
-                    it.limitCurrency == currency &&
-                    it.consumesLimit &&
-                    it.id != excludeDealId
-            }.sumOf { it.limitAmount }
-        override suspend fun pendingLimitOverrides() =
-            rows.values.filter { it.state == DealState.PENDING_APPROVAL && it.limitOverride != null }
-        override suspend fun journals(dealId: UUID) = journals.filter { it.dealId == dealId }
-        override suspend fun recordJournal(journal: LedgerJournalRef) {
-            if (journals.none { it.idempotencyKey == journal.idempotencyKey }) journals += journal
-        }
     }
 }

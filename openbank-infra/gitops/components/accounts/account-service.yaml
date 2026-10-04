@@ -37,7 +37,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-account-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "476c4f1257a12c1e"
+        openbank.tech/policy-checksum: "195e8bede14a3ae6"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -259,7 +259,7 @@ spec:
         # account-service (account.create/read/list/search/update/close/freeze/
         # unfreeze/authorize). Bundle mounted from account-opa-bundle ConfigMap.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

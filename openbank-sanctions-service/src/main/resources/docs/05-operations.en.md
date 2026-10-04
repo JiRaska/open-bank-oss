@@ -44,6 +44,8 @@ What actually holds the property: `openbank-infra/gitops/components/sanctions-se
 
 ## Health checks
 
+At startup the shared warm-up calls `/api/v1/sanctions/pending` without credentials to exercise the real unauthenticated security path; it does not fetch pending reviews. Its JSON, optional database, and HTTP steps are best-effort. The startup-warmup readiness check stays DOWN until they finish or the 20-second default cap expires. If first-request latency rises after a rollout, check warm-up step failures and cap warnings in application logs. The selected path is configured by `openbank.warmup.protected-path`.
+
 - **Liveness:** `/q/health/live` — JVM + ArC running. Pod restart on failure.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer + Redis.
 
@@ -148,3 +150,12 @@ Per-service CI pipeline (`.github/workflows/ci-sanctions-service.yml`):
 3. CycloneDX SBOM generation
 4. Docker image build → push to registry
 5. CD: ArgoCD picks up the new tag from the GitOps manifest
+
+
+## Startup warm-up (#11890)
+
+sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so the libs-runtime warm-up (see openbank-libs docs, 05-operations) exercises this endpoint's security path before the pod reports ready. Measured on this service: first authenticated `GET /api/v1/sanctions/pending` after readiness, median 2622 ms without the warm-up, 967 ms with it; later requests 15–60 ms either way.
+
+## XML feed rejection
+
+OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.

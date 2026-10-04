@@ -21,7 +21,7 @@ spec:
   source:
     repoURL: https://prometheus-community.github.io/helm-charts
     chart: kube-prometheus-stack
-    targetRevision: 91.8.1
+    targetRevision: 91.9.0
     helm:
       valuesObject:
         # Alerting plane (ADR-0082 / ADR-0077 Phase 4). Enabled with a lean
@@ -301,8 +301,24 @@ spec:
             # 30d before compaction gains. gp3 at that size is ~$8/month.
             # `retentionSize` is the hard ceiling below the PVC so a cardinality
             # regression evicts old blocks instead of filling the disk.
+            #
+            # 85GB -> 150GB (2026-10-03). The sizing above multiplied wrong:
+            # 4.6 per day x 30d is ~138, not 85, and size-based retention wins
+            # over time-based, so at 85GB the store would have started evicting at
+            # ~day 20 and every `window: 30d` SLO would again be computed over data
+            # that does not exist -- just 20 days of it instead of 12 hours.
+            # Measured on the 30d store itself (blocks are already compacted, so
+            # this is net of compaction): prometheus_tsdb_storage_blocks_bytes
+            # 5.0 GB -> 11.9 GB between 10-02T05Z and 10-03T17Z = 4.6 GB/day,
+            # 1.73 bytes/sample at 27.2k samples/s, 870k head series. 30d = ~138e9
+            # bytes = ~129 GiB. Prometheus reads this unit as base-2 (the old 85GB
+            # reads back as prometheus_tsdb_retention_limit_bytes = 91.3e9), so
+            # 150GB = 150 GiB leaves ~16% for series growth. If the history is ever cut short
+            # by size anyway, PrometheusHistoryTruncatedBySize
+            # (prometheus-rules-prometheus-retention.yaml) says so instead of the
+            # SLO numbers quietly shrinking their window.
             retention: 30d
-            retentionSize: 85GB
+            retentionSize: 150GB
             # Pin to the on-demand observability node pool (ADR-0082): spot
             # reclamation was killing Prometheus mid-WAL-replay every ~15-30 min.
             nodeSelector:
@@ -357,10 +373,15 @@ spec:
                       # not resize a live PVC: after merge, patch it once —
                       #   kubectl -n observability patch pvc prometheus-kube-prometheus-stack-prometheus-db-prometheus-kube-prometheus-stack-prometheus-0 -p '{"spec":{"resources":{"requests":{"storage":"100Gi"}}}}'
                       # gp3 allowVolumeExpansion is true; the filesystem grows online.
-                      storage: 100Gi
+                      # 2026-10-03: 100Gi -> 180Gi for retentionSize 150GB (see above):
+                      # 150 GB blocks + ~1 GB WAL + room for the largest compaction
+                      # (a 10%-of-retention block, ~14 GB, is rewritten beside the
+                      # old ones) = ~165 GB. Same one-time patch after merge, with
+                      # "180Gi" in place of "100Gi".
+                      storage: 180Gi
         grafana:
           enabled: true
-          # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.
+          # ADR-0079 lifecycle: 13.0.2 -> 13.2.3 (latest 13.2.x; kps subchart default is 13.2.2).
           # Pull from our ECR Public mirror, not Docker Hub: grafana/grafana is not
           # a Docker Official Image, so the anonymous docker-hub ECR pull-through
           # rate-limited it to NotFound on fresh nodes (2026-06-27, stuck rollout).
@@ -369,7 +390,7 @@ spec:
           image:
             registry: public.ecr.aws/d7v4f3x6
             repository: grafana
-            tag: "13.0.2"
+            tag: "13.2.3"
           defaultDashboardsTimezone: browser
           # STILL NO GRAFANA INGRESS. Grafana is reached at
           # https://admin.open-bank.tech/tools/grafana, and that path is served by
@@ -644,6 +665,16 @@ spec:
         kubeProxy:
           enabled: false
         kube-state-metrics:
+          # Exports each CronJob's declared success budget as a label on
+          # kube_cronjob_annotations, which CronJobSuccessStale reads
+          # (components/observability/prometheus-rules-jobs.yaml). A plain allowlist
+          # flag, NOT customResourceState: a CRS config error takes down every kube_*
+          # series (see openbank-infra/CLAUDE.md). Verified 2026-10-03 against KSM
+          # v2.20.0: the key renders as annotation_openbank_tech_max_success_age_seconds,
+          # and a CronJob without it still emits the series with no such label.
+          # Dropping this flag makes CronJobMaxSuccessAgeUndeclared fire for every CronJob.
+          metricAnnotationsAllowList:
+            - cronjobs=[openbank.tech/max-success-age-seconds]
           resources:
             requests:
               cpu: 20m

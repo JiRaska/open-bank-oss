@@ -207,6 +207,10 @@ export function refusalText(res: WriteResult<unknown>, action: string, t: T): st
       return t(`${action}: server odmítl podle pravidla čtyř očí — schválit musí jiná osoba, než která obchod vytvořila či předložila${detail}`, `${action}: refused under the four-eyes rule — a different person from the one who created or submitted the deal must approve${detail}`)
     case 'LIMIT_BREACHED':
       return t(`${action}: překročen limit protistrany${detail}`, `${action}: counterparty limit breached${detail}`)
+    case 'PRODUCT_LIMIT_BREACHED':
+      // ADR-0315 D4: the server re-checks the product limit at approval; the message names the
+      // rule broken (currency, maximum principal or tenor). Not overridable, so no override hint.
+      return t(`${action}: obchod je mimo produktový limit, nelze jej přepsat${detail}`, `${action}: outside the product limit, which cannot be overridden${detail}`)
     case 'ACTOR_NOT_PERMITTED':
       return t(`${action}: tento krok smí provést jen člověk${detail}`, `${action}: only a person may take this step${detail}`)
     case 'INVALID_STATE':
