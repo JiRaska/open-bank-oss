@@ -49,6 +49,7 @@ class DeclaredHoldingService(
             documentIds = command.documentIds,
             createdAt = now,
             updatedAt = now,
+            synthetic = command.synthetic,
         )
 
         val payload = objectMapper.writeValueAsString(

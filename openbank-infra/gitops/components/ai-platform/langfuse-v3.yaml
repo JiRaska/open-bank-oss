@@ -182,6 +182,10 @@ spec:
                 secretKeyRef:
                   name: langfuse-clickhouse-auth
                   key: CLICKHOUSE_PASSWORD
+            # 3.225.11 OOMs at Node's default old-space (~500 MB under a 1Gi limit): measured
+            # 2026-10-04, "Ineffective mark-compacts near heap limit". Heap 1.5 GB under a 2Gi limit.
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -190,10 +194,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 512Mi
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: 1Gi
+              memory: 2Gi
           # The first start runs Prisma + ClickHouse migrations; give it room before liveness.
           startupProbe:
             httpGet:
@@ -308,6 +312,10 @@ spec:
                 secretKeyRef:
                   name: langfuse-clickhouse-auth
                   key: CLICKHOUSE_PASSWORD
+            # 3.225.11 OOMs at Node's default old-space (~500 MB under a 1Gi limit): measured
+            # 2026-10-04, "Ineffective mark-compacts near heap limit". Heap 1.5 GB under a 2Gi limit.
+            - name: NODE_OPTIONS
+              value: "--max-old-space-size=1536"
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
@@ -317,10 +325,10 @@ spec:
           resources:
             requests:
               cpu: 100m
-              memory: 512Mi
+              memory: 1Gi
             limits:
               cpu: "1"
-              memory: 1Gi
+              memory: 2Gi
           startupProbe:
             httpGet:
               path: /api/health

@@ -33,8 +33,8 @@ class RedisProposalTokenStore @Inject constructor(
             values.set(key(token.id), json, args).awaitSuspending()
         }
         log.debugf(
-            "RedisProposalTokenStore: saved token=%s tool=%s customer=%s ttl=%ds",
-            token.id,
+            "RedisProposalTokenStore: saved token_ref=%s tool=%s customer=%s ttl=%ds",
+            ProposalToken.logRef(token.id),
             token.toolName,
             token.customerId,
             ProposalTokenStore.TOKEN_TTL_SECONDS,
@@ -44,14 +44,14 @@ class RedisProposalTokenStore @Inject constructor(
     override fun find(id: UUID): ProposalToken? {
         val json = runBlocking { values.get(key(id)).awaitSuspending() } ?: return null
         return runCatching { mapper.readValue(json, ProposalToken::class.java) }.getOrElse { e ->
-            log.warnf(e, "RedisProposalTokenStore: failed to deserialise token=%s", id)
+            log.warnf(e, "RedisProposalTokenStore: failed to deserialise token_ref=%s", ProposalToken.logRef(id))
             null
         }
     }
 
     override fun delete(id: UUID) {
         runBlocking { values.getdel(key(id)).awaitSuspending() }
-        log.debugf("RedisProposalTokenStore: deleted token=%s", id)
+        log.debugf("RedisProposalTokenStore: deleted token_ref=%s", ProposalToken.logRef(id))
     }
 
     private fun key(id: UUID) = "copilot:proposal:$id"

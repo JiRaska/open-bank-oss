@@ -75,6 +75,9 @@ class DeclaredHoldingEntity : PanacheEntity() {
 
     @Column(name = "updated_at", nullable = false)
     lateinit var updatedAt: Instant
+
+    @Column(name = "synthetic", nullable = false)
+    var synthetic: Boolean = false
 }
 
 /**
