@@ -20,6 +20,15 @@ PROJECT = re.compile(r'project\(\s*"(:openbank-[^"]+)"\s*\)')
 
 
 def affected(root: Path, changed: list[str], buildable: set[str]) -> set[str]:
+    # The workflow's code-global regex names the established core libraries. New
+    # shared libraries must remain fleet-wide until their consumer graph is reviewed.
+    if any(
+        path.split("/", 1)[0].startswith("openbank-libs")
+        and path.split("/", 1)[0] not in SCOPED
+        for path in changed
+        if "/" in path
+    ):
+        return buildable
     seeds = {path.split("/", 1)[0] for path in changed if "/" in path} & SCOPED
     if not seeds:
         return set()
@@ -65,14 +74,17 @@ def self_test() -> int:
             "openbank-risk-engine": 'testImplementation(project(":openbank-libs-lending"))',
             "openbank-simulation": 'implementation(project(":openbank-risk-engine"))',
             "openbank-unrelated": "",
+            "openbank-libs-future": "",
         }
         for name, source in scripts.items():
             (root / name).mkdir()
             (root / name / "build.gradle.kts").write_text(source)
         all_modules = set(scripts)
         changed = ["openbank-libs-lending/src/main/kotlin/X.kt"]
-        expected = all_modules - {"openbank-unrelated"}
+        expected = all_modules - {"openbank-unrelated", "openbank-libs-future"}
         assert affected(root, changed, all_modules) == expected
+        assert affected(root, ["openbank-libs-future/src/main/kotlin/X.kt"], all_modules) == all_modules
+        assert affected(root, changed + ["openbank-libs-future/build.gradle.kts"], all_modules) == all_modules
         assert affected(root, changed + ["openbank-lending-service/build.gradle.kts"], all_modules) == all_modules
         assert affected(root, ["openbank-libs-lending/src/test/kotlin/X.kt"], all_modules) == expected
         assert affected(root, ["openbank-unrelated/src/main/kotlin/X.kt"], all_modules) == set()
