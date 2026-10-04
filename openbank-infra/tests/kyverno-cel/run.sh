@@ -107,6 +107,50 @@ print(f"{len(keys)} rows, {fails} v1 denials, {bad} divergent")
 sys.exit(1 if bad or not fails else 0)
 PY
 
+# ── require-gated-or-declared-tool-httproute (ADR-0324 Phase 2) ──────────────────────
+# A NEW policy, not a v1 port: there is no v1 verdict to compare with, so the expected
+# verdicts are pinned here by design — five must-reject, three must-admit, and an
+# out-of-namespace route that must not be matched at all. Its own context and CRD stub
+# (context-gateway.yaml): the 1.19.1 CLI registers only the first CRD it is handed.
+# Its sibling protect-tool-httproute-gate-cel matches only UPDATE/DELETE, which the CLI
+# cannot drive; it was exercised against a real Kyverno 1.19.1 webhook instead (PR text).
+GW=$(docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$K/cel-validating-policies.yaml" \
+  -r "$T/resources-gateway.yaml" -f "$T/values.yaml" --context-file "$T/context-gateway.yaml" \
+  --crd-paths "$T/securitypolicy-crd-stub.yaml" --policy-report 2>&1 || true)
+python3 - "$GW" <<'PY'
+import sys, yaml
+txt = sys.argv[1]
+i = max(txt.find('apiVersion: wgpolicyk8s'), txt.find('apiVersion: openreports'))
+if i < 0:
+    print(txt[-2000:]); sys.exit("gateway run: no policy report in CLI output")
+got = {}
+for d in yaml.safe_load_all(txt[i:]):
+    for r in (d or {}).get('results') or []:
+        if r['policy'] == 'require-gated-or-declared-tool-httproute-cel':
+            for res in r['resources']:
+                got[(res.get('namespace', ''), res['name'])] = r['result']
+WANT = {
+    ('observability', 'route-gated'): 'pass',
+    ('observability', 'route-explicit-closed'): 'pass',
+    ('observability', 'route-fail-open'): 'fail',
+    ('observability', 'route-declared'): 'pass',
+    ('observability', 'route-ungated'): 'fail',
+    ('observability', 'route-cors-only'): 'fail',
+    ('observability', 'route-gated-by-name-only'): 'fail',
+    ('observability', 'route-empty-declaration'): 'fail',
+    ('default', 'route-ungated-elsewhere'): '-',  # not matched: admitted
+}
+bad = 0
+for k, want in WANT.items():
+    g = got.get(k, '-')
+    bad += g != want
+    print(f"{'OK  ' if g == want else 'DIFF'} require-gated-or-declared-tool-httproute  {k[0] + '/' + k[1]:42} want={want:4} got={g}")
+extra = set(got) - set(WANT)
+if extra:
+    print(f"unexpected results: {sorted(extra)}"); bad += 1
+sys.exit(1 if bad else 0)
+PY
+
 # ── Mutation parity: ecr-pull-through-rewrite (v1, pinned) vs -cel ───────────────
 # The v1 ClusterPolicy was deleted when its CEL port was enabled (#11437). Its output
 # image per (namespace, pod, list, container) is pinned in V1_IMAGES, measured with this

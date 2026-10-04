@@ -11,6 +11,7 @@ import com.openbank.treasury.application.port.out.StatementNotFoundException
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
+import com.openbank.treasury.domain.model.ProductLimitBreachedException
 import com.openbank.treasury.domain.model.QuoteUnavailableException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
@@ -23,6 +24,8 @@ import org.jboss.resteasy.reactive.server.ServerExceptionMapper
  * Four-eyes and limit breaches are 422: the request is well-formed and the deal is in the right
  * state, but a business rule refuses it. A non-human principal attempting a person's step is 403.
  */
+// TooManyFunctions: one mapper per owned exception type is the RESTEasy idiom; splitting the class only scatters them.
+@Suppress("TooManyFunctions")
 class ExceptionMappers {
 
     @ServerExceptionMapper
@@ -55,6 +58,20 @@ class ExceptionMappers {
 
     @ServerExceptionMapper
     fun limit(e: LimitBreachedException): Response = error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    /**
+     * ADR-0315 D4: outside the product mandate, at submit or at approval. `breaches` lists each rule
+     * broken with the limit and the deal's figure, so a client need not parse [message].
+     */
+    @ServerExceptionMapper
+    fun productLimit(e: ProductLimitBreachedException): Response = Response.status(UNPROCESSABLE).entity(
+        mapOf(
+            "error" to "PRODUCT_LIMIT_BREACHED",
+            "message" to e.message,
+            "breaches" to
+                e.check.breaches.map { mapOf("rule" to it.rule.name, "limit" to it.limit, "actual" to it.actual) },
+        ),
+    ).build()
 
     @ServerExceptionMapper
     fun notPermitted(e: ActorNotPermittedException): Response =

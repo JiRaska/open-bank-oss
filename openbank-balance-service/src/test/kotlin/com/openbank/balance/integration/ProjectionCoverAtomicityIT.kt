@@ -6,6 +6,7 @@ package com.openbank.balance.integration
 import com.openbank.balance.application.port.`in`.AccountBookedChange
 import com.openbank.balance.application.port.`in`.LedgerProjectionUseCase
 import com.openbank.balance.it.PostgresRedpandaTestResource
+import com.openbank.libs.domain.money.Money
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -119,8 +120,7 @@ class ProjectionCoverAtomicityIT {
 
     private fun change(account: UUID, transaction: UUID, delta: String) = AccountBookedChange(
         account,
-        "CZK",
-        BigDecimal(delta),
+        Money.of(BigDecimal(delta), "CZK"),
         UUID.randomUUID(),
         transaction,
         LocalDate.of(2026, 1, 1),

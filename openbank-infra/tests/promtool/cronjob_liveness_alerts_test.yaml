@@ -1,0 +1,133 @@
+# SPDX-License-Identifier: Apache-2.0
+# CronJobSuccessStale / CronJobMaxSuccessAgeUndeclared (prometheus-rules-jobs.yaml).
+#
+# time() starts at the unix epoch in promtool, so every case is evaluated at 60h
+# (t = 216000 s). That is past every budget used below; at an early eval_time a
+# "does not fire" case would pass for the wrong reason.
+#
+# Subjects (namespace "t"):
+#   fresh       tier 180000, last success 20h ago             -> quiet
+#   stale       tier 180000, last success 51.7h ago           -> CronJobSuccessStale
+#   never       tier 3600, never succeeded, created at t=0    -> CronJobSuccessStale
+#   new         tier 3600, never succeeded, created 1000s ago -> quiet
+#   sentinel    tier 3600, last_successful_time = 0, created 2000s ago -> quiet
+#               (with the `> 0` guard removed, the age reads 60h and it fires)
+#   undeclared  no annotation                                  -> CronJobMaxSuccessAgeUndeclared
+#   badtier     annotation "12345" (not a tier)                -> CronJobMaxSuccessAgeUndeclared
+rule_files:
+  - prometheus-rules-jobs.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="fresh",annotation_openbank_tech_max_success_age_seconds="180000"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="stale",annotation_openbank_tech_max_success_age_seconds="180000"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="never",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="new",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="sentinel",annotation_openbank_tech_max_success_age_seconds="3600"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="undeclared"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="badtier",annotation_openbank_tech_max_success_age_seconds="12345"}'
+        values: '1x3600'
+
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="t",cronjob="fresh"}'
+        values: '144000x3600'
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="t",cronjob="stale"}'
+        values: '30000x3600'
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="t",cronjob="sentinel"}'
+        values: '0x3600'
+
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="fresh"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="stale"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="never"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="new"}'
+        values: '215000x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="sentinel"}'
+        values: '214000x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="undeclared"}'
+        values: '0x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="badtier"}'
+        values: '0x3600'
+
+    promql_expr_test:
+      - expr: openbank:cronjob_max_success_age_seconds
+        eval_time: 60h
+        exp_samples:
+          - labels: 'openbank:cronjob_max_success_age_seconds{namespace="t",cronjob="fresh"}'
+            value: 180000
+          - labels: 'openbank:cronjob_max_success_age_seconds{namespace="t",cronjob="stale"}'
+            value: 180000
+          - labels: 'openbank:cronjob_max_success_age_seconds{namespace="t",cronjob="never"}'
+            value: 3600
+          - labels: 'openbank:cronjob_max_success_age_seconds{namespace="t",cronjob="new"}'
+            value: 3600
+          - labels: 'openbank:cronjob_max_success_age_seconds{namespace="t",cronjob="sentinel"}'
+            value: 3600
+
+    alert_rule_test:
+      - alertname: CronJobSuccessStale
+        eval_time: 60h
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: stale
+            exp_annotations:
+              summary: "CronJob t/stale has not succeeded for 2d 3h 40m 0s"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled, or the CronJob may be suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob stale -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: never
+            exp_annotations:
+              summary: "CronJob t/never has not succeeded for 2d 12h 0m 0s"
+              description: "Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded. The latest run may have failed, hung, been skipped or never been scheduled, or the CronJob may be suspended. If it is a control (a drift scanner, verifier or probe), nothing it guards has been checked for that long. Start with kubectl -n t get cronjob never -o wide and kubectl -n t get jobs --sort-by=.status.startTime"
+      - alertname: CronJobMaxSuccessAgeUndeclared
+        eval_time: 60h
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: undeclared
+            exp_annotations:
+              summary: "CronJob t/undeclared is not covered by CronJobSuccessStale"
+              description: "It has no openbank.tech/max-success-age-seconds annotation, or the value (\"\") is not one of the tiers in prometheus-rules-jobs.yaml, so nobody would notice if it stopped succeeding. If EVERY CronJob reports this at once, kube-state-metrics has lost its metricAnnotationsAllowList flag."
+          - exp_labels:
+              severity: warning
+              team: platform
+              namespace: t
+              cronjob: badtier
+              annotation_openbank_tech_max_success_age_seconds: "12345"
+            exp_annotations:
+              summary: "CronJob t/badtier is not covered by CronJobSuccessStale"
+              description: "It has no openbank.tech/max-success-age-seconds annotation, or the value (\"12345\") is not one of the tiers in prometheus-rules-jobs.yaml, so nobody would notice if it stopped succeeding. If EVERY CronJob reports this at once, kube-state-metrics has lost its metricAnnotationsAllowList flag."
+
+  # Negative: a healthy declared CronJob that succeeded 10 minutes ago stays quiet.
+  - interval: 1m
+    input_series:
+      - series: 'kube_cronjob_annotations{job="kube-state-metrics",namespace="t",cronjob="ok",annotation_openbank_tech_max_success_age_seconds="900"}'
+        values: '1x3600'
+      - series: 'kube_cronjob_status_last_successful_time{job="kube-state-metrics",namespace="t",cronjob="ok"}'
+        values: '0+60x3600'
+      - series: 'kube_cronjob_created{job="kube-state-metrics",namespace="t",cronjob="ok"}'
+        values: '0x3600'
+    alert_rule_test:
+      - alertname: CronJobSuccessStale
+        eval_time: 60h
+        exp_alerts: []
+      - alertname: CronJobMaxSuccessAgeUndeclared
+        eval_time: 60h
+        exp_alerts: []

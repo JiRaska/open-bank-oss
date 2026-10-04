@@ -261,16 +261,16 @@ change_requirements:
       - "every property a request-body schema declares exists on the DTO the resource parses"
       - "every property the DTO has is declared on the request-body schema"
     gate: openapi-request-schema-conformance
-    enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-31 (#11682): findings burned down 122 -> 0 (#8828), but under
-    # --enforce a missing generated document still returns 0 as "Not a finding", so a flip
-    # would enforce a check that can silently examine nothing. Fix that, re-scan, then flip.
+    enforced: enforce
+    # Graduated after the missing-document path began failing closed under --enforce (#11682).
+    # A clean 60-service quarkusBuild on 2026-10-02 generated all 60 documents; the checker
+    # compared 156 request schemas with 0 findings and 0 missing artifacts.
     target_enforce_date: "2026-10-31"
     ci_producer: ".github/scripts/check-openapi-request-schema-conformance.py"
-    # MEASURED 2026-09-05 — this gate is a NO-OP today, and its own "Not a finding" wording is
-    # what hides that. It compares the committed openapi.yaml against the schema Quarkus emits
+    # HISTORICAL MEASUREMENT 2026-09-05 — this gate was a NO-OP then, and its own "Not a finding"
+    # wording hid that. It compares the committed openapi.yaml against the schema Quarkus emits
     # during the build (`-Dquarkus.smallrye-openapi.store-schema-directory`, _service-ci.yml).
-    # That generated document is not being produced. Across three independent CI runs and every
+    # At that time the expected generated document was absent. Across three independent CI runs and every
     # service that REACHES the script — one with no committed openapi.yaml is skipped a step
     # earlier by the workflow's own guard (openbank-simulation, run 33949966927) — billing,
     # interest, swift (run 33949966927),
@@ -671,21 +671,18 @@ change_requirements:
     target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
     blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
   release_scope_mismatch:
-    # The inverse failure mode of service_code_change above: release-please attributes a
-    # commit to a component by the FILES IT TOUCHES under that component's directory,
-    # regardless of the typed scope (RELEASE.md) — so a feat/fix/perf/security (or
-    # breaking-marked) commit that only touches <service>/src/test/**, a root file like
-    # <service>/openapi.yaml, or gitops/docs outside the service dir entirely still makes
-    # release-please propose a release, even though only <service>/src/main/** should
-    # (rule 2). Observed live: PR #547 (feat(finrep): register ArgoCD Application — touched
-    # only a src/test boot-smoke test + gitops/docs outside the package dir) -> PR #551
-    # (finrep-service 0.4.0 proposed for an unchanged artifact). Harmless SemVer inflation,
-    # not a broken invariant — but the same mechanism misfires for any test-only or
-    # openapi.yaml-only PR typed feat/fix, so it is worth catching at PR time rather than
-    # correcting release-please output by hand (which rule 3 forbids anyway).
-    detect: ["<service>/** changed", "PR title type in {feat,fix,perf,security} or a breaking marker/footer", "no changed file under <service>/src/main/** (or openbank-admin-ui/src/**)"]
+    # Release-please requires BOTH a releasing type and a package path outside its
+    # exclude-paths. Many packages exclude src/test (and admin-ui also excludes e2e),
+    # so their test-only PRs do not trigger a release. Exclusions vary by package;
+    # the producer reads each package's actual config.
+    # Other root files (for example
+    # <service>/openapi.yaml) are included and can trigger a version bump without
+    # changing shipped source. Historical PR #547 -> release PR #551 preceded the
+    # current exclusions, so do not use it to classify today's test-only changes.
+    # Catch included non-source paths at PR time; do not hand-edit release artifacts.
+    detect: ["<service>/** changed outside release-please exclude-paths", "PR title type in {feat,fix,perf,security} or a breaking marker/footer", "no changed file under <service>/src/main/** (or openbank-admin-ui/src/**)"]
     require:
-      - "use a non-releasing type (test/docs/chore/refactor/build/ci) when the PR doesn't touch the release-worthy subtree"
+      - "use a non-releasing type (test/docs/chore/refactor/build/ci) when an included package path changes without shipped source"
       - "or split the src/main change and the non-src/main change into separate commits/PRs when both a release and a non-releasing change are intended"
     gate: release-scope-mismatch
     enforced: advisory
@@ -3167,7 +3164,6 @@ authz:
         - account.read
         - anacredit.list
         - anacredit.read
-        - audit.read
         - card.list
         - card.read
         - device.list
@@ -3300,7 +3296,7 @@ authz:
       grant:
         - account.read
         - anacredit.read
-        - audit.read
+        - audit.trail.inspect
         - card.read
         - dispatch.read
         - fx.read
@@ -3344,7 +3340,7 @@ authz:
         - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
-        - audit.read
+        - audit.trail.inspect
         - audit.verify
     ROLE_SUPERVISOR:
       grant:
@@ -3698,6 +3694,8 @@ agent_case_capability_matrix:
 # blast radius without being money-path by that list's definition. The gate's SCOPE is not
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
+  max_open_prs: 3
+  grandfather_created_before: '2026-10-03T20:00:00Z'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:

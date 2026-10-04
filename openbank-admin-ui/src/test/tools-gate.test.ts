@@ -20,6 +20,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { NextRequest } from 'next/server'
+import { parseAllDocuments } from 'yaml'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/auth', () => ({ auth: vi.fn() }))
@@ -123,8 +124,105 @@ describe('GET /api/gate — nginx auth_request contract', () => {
   })
 })
 
+// ADR-0324 Phase 2 — the same gate, answered in Envoy Gateway's ext_authz contract.
+// Envoy appends the original request path to the SecurityPolicy's `extAuth.http.path`
+// (`/api/gate/<tool>`), treats ONLY a 200 as allow, and forwards a denial's status and
+// headers to the browser verbatim. So: 200 / 302-to-login / 403, never 204.
+async function envoyRoute() {
+  return import('@/app/api/gate/[tool]/[[...uri]]/route')
+}
+const envoyReq = (path: string, method = 'GET') =>
+  new NextRequest(`http://admin.open-bank.tech${path}`, { method })
+const ctx = (tool: string) => ({ params: Promise.resolve({ tool }) })
+
+describe('/api/gate/<tool>/<uri> — Envoy ext_authz contract', () => {
+  beforeEach(() => vi.resetModules())
+  afterEach(() => vi.restoreAllMocks())
+
+  it('answers 200, not 204, for an entitled operator', async () => {
+    // Envoy's HTTP ext_authz treats every status but 200 as a DENIAL and relays it to
+    // the client: a 204 here reached the browser as an empty 204 and the tool was never
+    // called (measured against envoy v1.39.1, the proxy Envoy Gateway v1.9.1 pins).
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_OPERATOR']))
+    const res = await (await envoyRoute()).GET(envoyReq('/api/gate/grafana/tools/grafana/d/x'), ctx('grafana'))
+    expect(res.status).toBe(200)
+    expect(res.headers.get('location')).toBeNull()
+  })
+
+  it('302s an unauthenticated request to login, carrying the deep link', async () => {
+    // The auth-signin equivalent: Envoy relays this Location to the browser.
+    vi.mocked(auth).mockResolvedValue(null as never)
+    const res = await (await envoyRoute()).GET(
+      envoyReq('/api/gate/grafana/tools/grafana/d/abc?orgId=1&from=now-1h'), ctx('grafana'))
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe(
+      '/auth/login?callbackUrl=' + encodeURIComponent('/tools/grafana/d/abc?orgId=1&from=now-1h'))
+    expect(res.headers.get('cache-control')).toBe('no-store')
+  })
+
+  it('302s when the Keycloak refresh failed or the session decode throws — fail closed', async () => {
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_ADMIN'], 'RefreshAccessTokenError'))
+    expect((await (await envoyRoute()).GET(envoyReq('/api/gate/grafana/tools/grafana/'), ctx('grafana'))).status).toBe(302)
+    vi.mocked(auth).mockRejectedValue(new Error('jwt decrypt failed'))
+    expect((await (await envoyRoute()).GET(envoyReq('/api/gate/grafana/tools/grafana/'), ctx('grafana'))).status).toBe(302)
+  })
+
+  it.each([
+    ['another tool', '/api/gate/grafana/tools/alertmanager/'],
+    ['the console', '/api/gate/grafana/dashboard'],
+    ['a protocol-relative URL', '/api/gate/grafana//evil.example/x'],
+    ['a prefix look-alike', '/api/gate/grafana/tools/grafanax'],
+  ])('never turns the deep link into a redirect to %s', async (_, path) => {
+    // The URI arrives from the browser; it may only send the operator back to the tool
+    // the policy named.
+    vi.mocked(auth).mockResolvedValue(null as never)
+    const res = await (await envoyRoute()).GET(envoyReq(path), ctx('grafana'))
+    expect(res.status).toBe(302)
+    expect(res.headers.get('location')).toBe('/auth/login')
+  })
+
+  it('403s the demo account on alertmanager and an unknown tool — never a login loop', async () => {
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_ADMIN', 'ROLE_OPERATOR', 'ROLE_DEMO']))
+    const am = await (await envoyRoute()).GET(envoyReq('/api/gate/alertmanager/tools/alertmanager/'), ctx('alertmanager'))
+    expect(am.status).toBe(403)
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_ADMIN']))
+    const unknown = await (await envoyRoute()).GET(envoyReq('/api/gate/glitchtip/tools/glitchtip/'), ctx('glitchtip'))
+    expect(unknown.status).toBe(403)
+    // An inherited Object property is not a tool.
+    const proto = await (await envoyRoute()).GET(envoyReq('/api/gate/constructor/x'), ctx('constructor'))
+    expect(proto.status).toBe(403)
+  })
+
+  it('answers every method — Envoy checks with the ORIGINAL method', async () => {
+    // Grafana and Alertmanager POST/PUT/DELETE through the same route; a missing handler
+    // would be a 405 denial on every write.
+    const mod = await envoyRoute()
+    vi.mocked(auth).mockResolvedValue(session(['ROLE_OPERATOR']))
+    for (const m of ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'] as const) {
+      const res = await mod[m](envoyReq('/api/gate/grafana/tools/grafana/api/x', m), ctx('grafana'))
+      expect(res.status, m).toBe(200)
+    }
+  })
+
+  it('agrees with the nginx contract on every decision', async () => {
+    // One decision, two spellings: allow 204|200, unauthenticated 401|302, forbidden 403|403.
+    const spell: Record<number, number> = { 204: 200, 401: 302, 403: 403 }
+    const cases: [string, string[] | null][] = [
+      ['grafana', ['ROLE_ADMIN']], ['grafana', ['ROLE_VIEWER']], ['grafana', null],
+      ['alertmanager', ['ROLE_ADMIN', 'ROLE_DEMO']], ['pyrra', ['ROLE_OPERATOR']], ['nope', ['ROLE_ADMIN']],
+    ]
+    for (const [tool, roles] of cases) {
+      vi.mocked(auth).mockResolvedValue(roles ? session(roles) : (null as never))
+      const nginx = (await (await route()).GET(req(`?tool=${tool}`))).status
+      const envoy = (await (await envoyRoute()).GET(envoyReq(`/api/gate/${tool}/tools/${tool}/`), ctx(tool))).status
+      expect(envoy, `${tool} / ${roles}`).toBe(spell[nginx])
+    }
+  })
+})
+
 describe('ADR-0234 wiring — the halves of the boundary agree', () => {
-  const routeSrc = readFileSync('src/app/api/gate/route.ts', 'utf8')
+  // The allow-list lives in the shared decision module both edge contracts call.
+  const routeSrc = readFileSync('src/lib/auth/toolGate.ts', 'utf8')
   const ingressSrc = readFileSync(
     '../openbank-infra/gitops/components/admin-ui/tools-gate.yaml', 'utf8',
   )
@@ -202,6 +300,52 @@ describe('ADR-0234 wiring — the halves of the boundary agree', () => {
     expect(expr).toMatch(/ROLE_DEMO/)
     expect(expr!.indexOf('ROLE_DEMO')).toBeLessThan(expr!.indexOf('ROLE_ADMIN'))
     expect(expr).toMatch(/ROLE_DEMO'\)\s*&&\s*'Viewer'/)
+  })
+
+  // ADR-0324 Phase 2: the same boundary on the Envoy Gateway. The SecurityPolicy's
+  // `extAuth.http.path` is what names the tool there, so it has to agree with the gate and
+  // the Ingress exactly as the Ingress's `?tool=` does.
+  describe('the Envoy Gateway SecurityPolicies (httproute-tools-gate.yaml)', () => {
+    const docs = parseAllDocuments(
+      readFileSync('../openbank-infra/gitops/components/observability/httproute-tools-gate.yaml', 'utf8'),
+    ).map(d => d.toJS()).filter(Boolean)
+    const policies = docs.filter(d => d.kind === 'SecurityPolicy')
+    const routes = docs.filter(d => d.kind === 'HTTPRoute')
+
+    it('declares one policy and one route per Ingress tool', () => {
+      // Guards the per-policy assertions below from passing over an empty list.
+      expect(policies.length).toBe(ingressTools.length)
+      expect(routes.length).toBe(ingressTools.length)
+    })
+
+    it.each(ingressTools)('%s: its route is gated by a policy naming the same tool', tool => {
+      const route = routes.find(r =>
+        r.spec.rules.some((rule: { matches?: { path?: { value?: string } }[] }) =>
+          (rule.matches ?? []).some(m => m.path?.value === `/tools/${tool}`)))
+      expect(route, `no HTTPRoute for /tools/${tool}`).toBeDefined()
+      const policy = policies.find(p =>
+        p.spec.targetRefs.some((t: { kind: string; name: string }) =>
+          t.kind === 'HTTPRoute' && t.name === route.metadata.name))
+      expect(policy, `no SecurityPolicy targets ${route.metadata.name}`).toBeDefined()
+      expect(policy.spec.extAuth.http.path).toBe(`/api/gate/${tool}`)
+      expect(gateTools).toContain(tool)
+    })
+
+    it.each(policies.map(p => [p.metadata.name, p]))(
+      '%s forwards the session cookie, fails closed and copies nothing to the backend',
+      (_, p) => {
+        const ext = p.spec.extAuth
+        expect(ext.headersToExtAuth.map((h: string) => h.toLowerCase())).toContain('cookie')
+        expect(ext.failOpen).not.toBe(true)
+        // The identity-header trust model ADR-0234 rejects, as auth-response-headers on nginx.
+        expect(ext.http.headersToBackend).toBeUndefined()
+        expect(ext.http.backendRefs).toEqual([{ name: 'admin-ui', namespace: 'admin-ui', port: 3000 }])
+      },
+    )
+
+    it('no route rewrites the sub-path the tools are configured to serve', () => {
+      expect(JSON.stringify(routes)).not.toMatch(/URLRewrite/)
+    })
   })
 
   it('the Ingress does not forward gate response headers into the upstream', () => {

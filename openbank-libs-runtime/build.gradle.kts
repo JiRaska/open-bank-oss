@@ -79,6 +79,9 @@ dependencies {
     compileOnly("io.micrometer:micrometer-core:1.17.0")
     compileOnly("io.quarkus:quarkus-security:3.33.2")
     compileOnly("io.quarkus:quarkus-arc:3.33.2")
+    // Startup warm-up (HibernateReactiveWarmup): VertxContextSupport supplies the Vert.x context
+    // Hibernate Reactive needs off the event loop. Every service already ships quarkus-vertx.
+    compileOnly("io.quarkus:quarkus-vertx:3.33.2")
     // StartupWarmup (#11890): the readiness check implements MicroProfile Health, which every
     // consuming service already ships via quarkus-smallrye-health. (The reactive Pool ping is
     // reflective on purpose: the sql-client's transitive POMs are not in verification-metadata,

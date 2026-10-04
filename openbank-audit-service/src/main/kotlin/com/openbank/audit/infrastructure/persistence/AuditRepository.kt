@@ -6,6 +6,9 @@ package com.openbank.audit.infrastructure.persistence
 
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.EntryHashStatus
+import com.openbank.audit.domain.model.EvidenceBundle
+import com.openbank.audit.domain.model.EvidenceEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
@@ -386,6 +389,35 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 find("aggregateId in ?1 ORDER BY occurredAt DESC", ids).page(0, limit).list()
             }
         }.awaitSuspending().map { it.toDomain() }
+    }
+
+    /**
+     * ADR-0214 D3 reconstruction query: every entry about [aggregateId], OLDEST first (the order a
+     * supervisor reads a loan's life in), each with its own `record_hash` recomputed. Fetches one
+     * row beyond [EvidenceBundle.MAX_ENTRIES] so a longer history reports `truncated` instead of
+     * reading as complete. Exactly [aggregateId] — no merge-index widening, which exists for party
+     * merges and would mix another subject's history into a loan's evidence.
+     */
+    suspend fun evidenceFor(aggregateId: String): EvidenceBundle {
+        val rows = Panache.withSession {
+            find("aggregateId = ?1 ORDER BY occurredAt ASC, id ASC", aggregateId)
+                .page(0, EvidenceBundle.MAX_ENTRIES + 1).list()
+        }.awaitSuspending()
+        val kept = rows.take(EvidenceBundle.MAX_ENTRIES)
+        return EvidenceBundle(
+            aggregateId = aggregateId,
+            entries = kept.map { e ->
+                val domain = e.toDomain()
+                val status = when {
+                    e.recordHash == null -> EntryHashStatus.UNCHAINED
+                    isLegacyHashVersion(e) -> EntryHashStatus.LEGACY_UNVERIFIABLE
+                    chainHash(e.prevHash ?: GENESIS_HASH, domain) == e.recordHash -> EntryHashStatus.VERIFIED
+                    else -> EntryHashStatus.MISMATCH
+                }
+                EvidenceEntry(domain, e.recordHash, e.prevHash, status)
+            },
+            truncated = rows.size > EvidenceBundle.MAX_ENTRIES,
+        )
     }
 
     /**

@@ -50,6 +50,7 @@ class ContextAuditCommitmentRelay(
 
     @Scheduled(
         every = "1s",
+        delayed = "10s",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
         skipExecutionIf = Scheduled.ApplicationNotRunning::class,
     )

@@ -15,7 +15,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "5e61e91b7e1383f7" }
+      annotations: { openbank.tech/policy-checksum: "9d616a7757521f7a" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -48,8 +48,8 @@ spec:
             - { name: QUARKUS_OIDC_AUTH_SERVER_URL, value: http://keycloak.iam.svc:8080/realms/openbank }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: context-service-oidc, key: OIDC_CLIENT_SECRET } }
-            - name: AML_CASE_SOURCE_URL
-              valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
+            # A plain in-cluster Service address, like every other aml-service caller in this tree.
+            - { name: AML_CASE_SOURCE_URL, value: "http://aml-service.aml.svc:8117" }
             # Fraud case source: HTTPS, CA from context-fraud-trust (%prod fraud-source TLS).
             - { name: FRAUD_CASE_SOURCE_URL, value: "https://fraud-service.fraud.svc:8443" }
             # Lending graph source (#10266) over lending-service's private-CA mTLS listener.

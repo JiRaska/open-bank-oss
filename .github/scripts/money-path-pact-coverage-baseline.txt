@@ -1,0 +1,12 @@
+# Known-debt BASELINE for check-money-path-pact-coverage.py — SHRINK-ONLY (issue #8345).
+#
+# Every entry is a (consumer -> provider) pair where a money_path_services member calls an
+# in-repo provider over REST (@RegisterRestClient) and no `pacts/<consumer>-<provider>.json`
+# exists. The gate fails on any NEW pair and on any entry whose pair gains a pact, so this
+# list can only shrink. Regenerate a candidate list with `--print-baseline`; keep the reasons.
+#
+# format: <consumer> -> <provider>  # <reason>
+openbank-domestic-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
+openbank-lending-service -> openbank-analytics-sink  # credit-profile read for offers; no provider replay exists yet — #8345
+openbank-sepa-instant -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
+openbank-sepa-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact

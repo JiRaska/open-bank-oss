@@ -199,6 +199,46 @@ class ScaFourEyesFlowIT {
         given().get("/api/v1/sca/approvals/${UUID.randomUUID()}").then().statusCode(404)
     }
 
+    @Test
+    @Order(15)
+    @TestSecurity(user = "sca-test-checker", roles = ["ROLE_OPERATOR"])
+    fun `the summary a checker reads is the one bound at creation, not re-derived after execution`() {
+        requireApproval()
+        // Rendered while the device was active; it has since been revoked by this approval, and the
+        // stored summary must still describe the target as the checker saw it.
+        val revoke: String = given().get("/api/v1/sca/approvals/$approvalId").then().statusCode(200)
+            .body("status", equalTo("EXECUTED")).extract().path("summary")
+        assertThat(revoke).startsWith(
+            "action=device.revoke party=$party device=${firstDevice.toString().take(8)}… " +
+                "credential=flow-${firstDevice.toString().take(3)}… algorithm=ES256 enrolledAt=",
+        ).matches(".*enrolledAt=\\d{4}-\\d{2}-\\d{2}$")
+        val enroll: String = given().get("/api/v1/sca/approvals/$enrollmentApprovalId").then().statusCode(200)
+            .extract().path("summary")
+        assertThat(enroll)
+            .startsWith("action=device.enroll party=$party credential=flow-enr… algorithm=ES256 keySha256=")
+            .doesNotContain(enrollment.getValue("publicKey"))
+            .doesNotContain(enrollment.getValue("publicKey").take(24))
+            .matches(".*keySha256=[0-9a-f]{8}$")
+    }
+
+    @Test
+    @Order(16)
+    @TestSecurity(user = "sca-test-maker", roles = ["ROLE_OPERATOR"])
+    fun `a parked consume shows the creditor masked to its last four characters`() {
+        val iban = "CZ6508000000192000145399"
+        val parked: String = given().contentType("application/json")
+            .body(mapOf("partyId" to party, "amount" to "1250.50", "currency" to "CZK", "creditor" to iban))
+            .post("/api/v1/sca/challenges/${UUID.randomUUID()}/consume").then().statusCode(202)
+            .extract().path("approvalId")
+        val listed: List<String?> = given().get("/api/v1/sca/approvals?limit=200").then().statusCode(200)
+            .extract().path("summary")
+        val summary: String = given().get("/api/v1/sca/approvals/$parked").then().statusCode(200)
+            .header("Cache-Control", equalTo("no-store")).extract().path("summary")
+        assertThat(listed).contains(summary)
+        assertThat(summary).contains("amount=1250.50 CZK").contains("creditor=…5399")
+            .doesNotContain(iban).doesNotContain(iban.dropLast(4))
+    }
+
     private fun enrolled(): Boolean = dataSource.connection.use { connection ->
         connection.prepareStatement("SELECT EXISTS (SELECT 1 FROM sca_enrolled_devices WHERE credential_id = ?)")
             .use { query ->

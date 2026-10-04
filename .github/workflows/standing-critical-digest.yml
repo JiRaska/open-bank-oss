@@ -7,10 +7,12 @@ on:
 
 permissions:
   contents: read
-  issues: write
 
 jobs:
   digest:
+    permissions:
+      contents: read
+      issues: write  # gh issue create for the digest
     name: Query Alertmanager and publish digest
     runs-on: ubuntu-latest
     timeout-minutes: 10
