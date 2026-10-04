@@ -958,4 +958,74 @@ class AuthorizeInterceptorTest {
         assertThat(result).isEqualTo("ok")
         assertThat(store.created).isEmpty()
     }
+
+    private fun wireRenderer(renderer: ApprovalSummaryRenderer) {
+        interceptor.summaryRenderer = mockk {
+            every { isResolvable } returns true
+            every { get() } returns renderer
+        }
+    }
+
+    @Test
+    fun `four-eyes enforced, a service summary renderer replaces the generic summary and is bounded`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        var seen: Map<String, Any?> = emptyMap()
+        wireRenderer(
+            object : ApprovalSummaryRenderer {
+                override suspend fun render(action: String, resourceId: String?, arguments: Map<String, Any?>): String {
+                    seen = arguments
+                    return "account ${(arguments["request"] as SecretRequest).accountId}\n" + "x".repeat(5000)
+                }
+            },
+        )
+
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedSecretMethod, SecretRequest("ACC-1", "hunter2", "note")))
+        }
+
+        val created = store.created.single()
+        assertThat(seen.values.single()).isEqualTo(SecretRequest("ACC-1", "hunter2", "note"))
+        assertThat(created.summary).startsWith("account ACC-1 ").doesNotContain("endpoint=").doesNotContain("\n")
+        assertThat(created.summary!!.length).isEqualTo(ApprovalRequestBinding.MAX_SUMMARY_LENGTH)
+    }
+
+    @Test
+    fun `four-eyes enforced, a renderer returning null keeps the generic summary`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        wireRenderer(
+            object : ApprovalSummaryRenderer {
+                override suspend fun render(action: String, resourceId: String?, arguments: Map<String, Any?>) = null
+            },
+        )
+
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedSecretMethod, SecretRequest("ACC-1", "hunter2", "note")))
+        }
+
+        assertThat(store.created.single().summary).contains("endpoint=").contains("ACC-1")
+    }
+
+    @Test
+    fun `four-eyes enforced, a failing renderer refuses the call instead of issuing an approval`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+        wireRenderer(
+            object : ApprovalSummaryRenderer {
+                override suspend fun render(action: String, resourceId: String?, arguments: Map<String, Any?>) =
+                    error("lookup failed")
+            },
+        )
+        val ctx = makeCtx(annotatedSecretMethod, SecretRequest("ACC-1", "hunter2", "note"))
+
+        assertThatThrownBy { interceptor.authorize(ctx) }
+            .isInstanceOf(PolicyDecisionException::class.java)
+            .hasMessageContaining("summary")
+        assertThat(store.created).isEmpty()
+        io.mockk.verify(exactly = 0) { ctx.proceed() }
+    }
 }

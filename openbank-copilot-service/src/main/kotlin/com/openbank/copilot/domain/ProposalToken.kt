@@ -4,6 +4,7 @@
 // See LICENSES/AGPL-3.0-only.txt or https://www.gnu.org/licenses/agpl-3.0.html for details.
 package com.openbank.copilot.domain
 
+import java.security.MessageDigest
 import java.time.Instant
 import java.util.UUID
 
@@ -38,4 +39,19 @@ data class ProposalToken(
     val params: Map<String, Any>,
     val expiresAt: Instant,
     val customerId: String,
-)
+) {
+    companion object {
+        private const val LOG_REF_HEX_CHARS = 12
+
+        /**
+         * A stable, non-reversible reference to a proposal token for log lines. The token id is a
+         * one-time capability (presented by the owning customer, it confirms the action), so it
+         * never goes to a log in the clear; this SHA-256 prefix still correlates the store,
+         * confirm and policy lines of one proposal.
+         */
+        fun logRef(id: UUID): String {
+            val digest = MessageDigest.getInstance("SHA-256").digest(id.toString().toByteArray(Charsets.UTF_8))
+            return "ptk_" + digest.joinToString("") { "%02x".format(it) }.take(LOG_REF_HEX_CHARS)
+        }
+    }
+}

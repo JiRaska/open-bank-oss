@@ -53,7 +53,7 @@ class AuditResource {
     // service account carries ROLE_OPERATOR — @RolesAllowed(ROLE_API) alone 403'd every call
     // before OPA was ever consulted. ROLE_OPERATOR is also held by real staff, so the narrowing
     // is OPA's job: `audit.customerRead` is a DISTINCT action from the auditor-facing
-    // `audit.read`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
+    // `audit.trail.inspect`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
     // `service-account-openbank-edge` principal id and nothing else. The payload is deliberately
     // not projected: the app gets event metadata, not event internals.
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -141,9 +141,13 @@ class AuditResource {
     // The audit trail is regulated evidence (SOX/DORA): read-only and role-gated.
     // AUDITOR is the dedicated read-only audit role; ADMIN and COMPLIANCE also need it
     // for investigations. Never @PermitAll — an unauthenticated audit log is itself an
-    // audit finding (K7).
+    // audit finding (K7). The action is deliberately NOT a `*.read`: base rest.rego's
+    // operator-read-any / compliance-read-any grant every `.read` to any HUMAN-classified
+    // ROLE_OPERATOR / ROLE_COMPLIANCE holder, Keycloak service accounts included. The verb
+    // `inspect` is outside that set, so only audit_rest_ext.rego's oversight rule (which
+    // excludes `service-account-*`) can permit it.
     @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
-    @Authorize(action = "audit.read", resource = "#aggregateId")
+    @Authorize(action = "audit.trail.inspect", resource = "#aggregateId")
     @Operation(summary = "Get audit trail for an aggregate (account, party, transaction, etc.)")
     suspend fun getAuditTrail(
         @PathParam("aggregateId") aggregateId: String,
@@ -172,7 +176,7 @@ class AuditResource {
     // Same regulated-evidence gate as the aggregate trail above; JAX-RS prefers this literal
     // "by-actor" segment over the {aggregateId} template, so the two routes never collide.
     @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
-    @Authorize(action = "audit.read", resource = "#actorId")
+    @Authorize(action = "audit.trail.inspect", resource = "#actorId")
     @Operation(
         summary = "Get audit entries for one actor across all ingress channels (ADR-0226) — " +
             "the forensic 'what did person X do' query, optionally narrowed by ?channel=ui|mcp|api",

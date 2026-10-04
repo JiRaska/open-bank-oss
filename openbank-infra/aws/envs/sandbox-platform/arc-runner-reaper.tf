@@ -221,6 +221,13 @@ resource "kubernetes_cron_job_v1" "arc_reaper" {
   metadata {
     name      = "arc-stuck-runner-reaper"
     namespace = kubernetes_namespace.arc_runners[0].metadata[0].name
+    # Budget for CronJobSuccessStale (gitops/components/observability/
+    # prometheus-rules-jobs.yaml): two missed 10-minute runs plus slack. Must be
+    # one of the rule's tiers and exceed the schedule's longest gap
+    # (.github/scripts/check-cronjob-max-success-age.py).
+    annotations = {
+      "openbank.tech/max-success-age-seconds" = "3600"
+    }
   }
   spec {
     schedule                      = var.arc_reaper_schedule

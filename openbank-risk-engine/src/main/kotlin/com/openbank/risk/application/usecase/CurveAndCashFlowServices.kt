@@ -50,6 +50,8 @@ class CurveSetService(private val repository: CurveSetRepository, private val cl
     override suspend fun list(limit: Int, asOf: LocalDate?): List<CurveSetSummary> = repository.listRecent(limit, asOf)
 
     override suspend fun get(id: UUID): CurveSet = repository.findById(id) ?: throw CurveSetNotFoundException(id)
+
+    override suspend fun latestIdFor(asOf: LocalDate): UUID? = repository.latestIdFor(asOf)
 }
 
 /**
