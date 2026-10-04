@@ -243,10 +243,10 @@ def load(root: pathlib.Path, path: str = MANIFEST):
                 )
                 sys.exit(2)
             for decl in inputs:
-                if decl in UNIVERSAL_SELFTEST_INPUTS:
+                if decl in (*UNIVERSAL_SELFTEST_INPUTS, MANIFEST):
                     sys.stderr.write(
                         f"::error::gate {g['id']}: `selftest_inputs` names `{decl}`, which is "
-                        f"already universal — every gate's self-test re-runs when it changes. "
+                        f"already tracked by the runner's manifest or universal diff. "
                         f"Listing it hides that fact from the next reader.\n"
                     )
                     sys.exit(2)
@@ -485,10 +485,48 @@ def last_subject_count(out: str):
 # selftest command and its expected verdict; run-gates.py decides what a verdict MEANS; gatelib
 # is imported by most checkers. Anything else is per-gate and must be declared.
 UNIVERSAL_SELFTEST_INPUTS = (
-    ".github/gates/gates.yaml",
     ".github/scripts/run-gates.py",
     ".github/scripts/gatelib.py",
 )
+
+
+def manifest_gate_changes(before: str, after: str) -> set[str] | None:
+    """Gate ids whose manifest definitions changed; unknown means run every self-test."""
+    try:
+        old_doc, new_doc = yaml.safe_load(before), yaml.safe_load(after)
+        if not all(isinstance(doc, dict) and set(doc) == {"gates"} for doc in (old_doc, new_doc)):
+            return None
+        old_gates, new_gates = old_doc["gates"], new_doc["gates"]
+        if not all(isinstance(gates, list) and gates for gates in (old_gates, new_gates)):
+            return None
+        if not all(isinstance(g, dict) and isinstance(g.get("id"), str)
+                   for g in old_gates + new_gates):
+            return None
+        old = {g["id"]: g for g in old_gates}
+        new = {g["id"]: g for g in new_gates}
+        if len(old) != len(old_gates) or len(new) != len(new_gates):
+            return None
+        # Removal and reordering can change the runner's behaviour beyond one definition.
+        if not old.keys() <= new.keys() or [g["id"] for g in old_gates] != [
+                g["id"] for g in new_gates if g["id"] in old]:
+            return None
+        return {gate_id for gate_id, definition in new.items()
+                if gate_id not in old or old[gate_id] != definition}
+    except (TypeError, ValueError, yaml.YAMLError):
+        return None
+
+
+def changed_manifest_gates(root: pathlib.Path, base: str) -> set[str] | None:
+    if not base:
+        return None
+    try:
+        prior = subprocess.run(["git", "show", f"{base}:{MANIFEST}"], cwd=root,
+                               capture_output=True, text=True, check=False, timeout=60)
+        if prior.returncode != 0:
+            return None
+        return manifest_gate_changes(prior.stdout, (root / MANIFEST).read_text())
+    except (OSError, subprocess.SubprocessError):
+        return None
 
 
 def changed_paths(root: pathlib.Path, base: str):
@@ -513,7 +551,7 @@ def changed_paths(root: pathlib.Path, base: str):
     return {line.strip() for line in out.stdout.splitlines() if line.strip()}
 
 
-def selftest_is_needed(gate, changed):
+def selftest_is_needed(gate, changed, manifest_changes=None):
     """(needed, reason). Whether this gate's self-test must run on THIS pull request.
 
     A self-test proves the gate's red path is reachable. That is a property of the gate's own
@@ -528,8 +566,9 @@ def selftest_is_needed(gate, changed):
       * every push to main runs every self-test unconditionally (`changed` is None off a pull
         request), so a self-test broken by anything at all is caught on the merge commit that
         introduced it, not a day later;
-      * any pull request touching a gate's declared inputs, the manifest, or the runner itself
-        falsifies that gate before it is allowed to gate the change;
+      * any pull request touching a gate's declared inputs or definition, or the runner itself,
+        falsifies that gate before it is allowed to gate the change; an unreadable or ambiguous
+        manifest diff runs every self-test;
       * a gate that declares no `selftest_inputs` keeps today's behaviour exactly.
     """
     if not gate.get("selftest"):
@@ -540,6 +579,10 @@ def selftest_is_needed(gate, changed):
     if changed is None:
         return True, "the changed-file set could not be established"
     for path in changed:
+        if path == MANIFEST:
+            if manifest_changes is None or gate.get("id") in manifest_changes:
+                return True, "this gate's manifest definition changed (or the diff is unknown)"
+            continue
         if path in UNIVERSAL_SELFTEST_INPUTS:
             return True, f"`{path}` changed (universal self-test input)"
         for decl in inputs:
@@ -548,7 +591,8 @@ def selftest_is_needed(gate, changed):
     return False, "no declared input changed on this pull request"
 
 
-def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None) -> Result:
+def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, changed=None,
+            manifest_changes=None) -> Result:
     r = Result(gate)
     if gate["when"] == "pull_request" and not is_pr:
         r.status = "skipped"
@@ -579,7 +623,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
     buf = []
 
     selftest = gate.get("selftest")
-    needed, why = selftest_is_needed(gate, changed)
+    needed, why = selftest_is_needed(gate, changed, manifest_changes)
     if selftest and not needed:
         # Skipped, and SAID SO in the gate's own output — a falsification that silently did not
         # happen would be indistinguishable from one that passed, which is the failure mode this
@@ -589,7 +633,7 @@ def execute(gate, root: pathlib.Path, is_pr: bool, timeout: int, index=None, cha
             f"--- self-test SKIPPED on this pull request: {why} ---\n"
             "[run-gates] the gate below still runs. Its self-test runs unconditionally on every\n"
             "push to main, and on any pull request touching its declared `selftest_inputs`,\n"
-            "gates.yaml, run-gates.py or gatelib.py.\n"
+            "this gate's manifest definition, run-gates.py or gatelib.py.\n"
         )
         selftest = None
     if selftest:
@@ -884,6 +928,13 @@ def main(argv=None):
     if changed is not None:
         print(f"[run-gates] pull request changed {len(changed)} paths; self-tests whose declared "
               f"inputs are untouched will be skipped")
+    manifest_changes = None
+    if changed is not None and MANIFEST in changed and args.manifest == MANIFEST:
+        manifest_changes = changed_manifest_gates(root, os.environ.get("PR_DIFF_BASE", ""))
+        if manifest_changes is None:
+            print("[run-gates] manifest diff unavailable or ambiguous; running every self-test")
+        else:
+            print(f"[run-gates] {len(manifest_changes)} gate definition(s) changed in the manifest")
 
     index = git_index_path(root)
     # One YAML parse cache for the whole invocation. The gates are separate processes over one
@@ -896,7 +947,8 @@ def main(argv=None):
     os.environ[PARSE_CACHE_ENV] = cache
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed): g["id"] for g in sel}
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed,
+                              manifest_changes): g["id"] for g in sel}
             done = {}
             # Emit a line PER GATE as it finishes, rather than nothing until the end
             # (#6068). Combined with unbuffer() this is what makes a run that is killed
@@ -1520,6 +1572,67 @@ def self_test():
             got, _why = selftest_is_needed(dict(frag), changed_set)
             if got != want:
                 bad.append(f"selftest scoping [{label}]: want needed={want}, got {got}")
+
+        original = "gates:\n  - id: a\n    run: true\n  - id: b\n    run: false\n"
+        edited = "gates:\n  - id: a\n    run: true\n  - id: b\n    run: changed\n"
+        if manifest_gate_changes(original, "# comment\n" + original) != set():
+            bad.append("manifest comments changed the semantic gate set")
+        if manifest_gate_changes(original, edited) != {"b"}:
+            bad.append("manifest diff did not isolate the edited gate")
+        if manifest_gate_changes(original, original + "  - id: c\n    run: true\n") != {"c"}:
+            bad.append("manifest diff did not identify the new gate")
+        if manifest_gate_changes(original, "gates:\n  - id: a\n    run: true\n") is not None:
+            bad.append("removed gate must make manifest scoping fail closed")
+        if manifest_gate_changes(original, "gates: [broken") is not None:
+            bad.append("malformed manifest must make scoping fail closed")
+        for gate_id, expected in (("a", False), ("b", True)):
+            gate = {"id": gate_id, "selftest": "true", "selftest_inputs": ["a/b.py"]}
+            needed, _why = selftest_is_needed(gate, {MANIFEST}, {"b"})
+            if needed != expected:
+                bad.append(f"manifest scoping gate {gate_id}: expected {expected}, got {needed}")
+            needed, _why = selftest_is_needed(gate, {MANIFEST}, None)
+            if not needed:
+                bad.append(f"unknown manifest diff skipped gate {gate_id}'s self-test")
+
+        # Drive the actual git-base comparison through the runner. An untouched gate's
+        # intentionally broken self-test is skipped; the edited gate and an unknown base
+        # must both run it and refuse a green verdict.
+        manifest_repo = tmp / "manifest-diff-repo"
+        (manifest_repo / ".github" / "gates").mkdir(parents=True)
+        (manifest_repo / "fixture.txt").write_text("fixture\n")
+        manifest_file = manifest_repo / MANIFEST
+        manifest_file.write_text(
+            "gates:\n"
+            "  - id: a\n    name: a\n    selftest_inputs: [fixture.txt]\n"
+            "    selftest: 'exit 1'\n    run: 'echo gate-a-ran'\n"
+            "  - id: b\n    name: b\n    selftest_inputs: [fixture.txt]\n"
+            "    selftest: 'exit 1'\n    run: 'echo gate-b-ran'\n"
+        )
+        subprocess.run(["git", "init", "-q", str(manifest_repo)], check=True,
+                       capture_output=True)
+        subprocess.run(["git", "-C", str(manifest_repo), "add", MANIFEST, "fixture.txt"],
+                       check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(manifest_repo), "-c", "user.name=Gate Test",
+                        "-c", "user.email=gate-test@example.invalid",
+                        "-c", "commit.gpgsign=false", "commit", "-qm", "baseline"],
+                       check=True, capture_output=True)
+        base_sha = subprocess.check_output(
+            ["git", "-C", str(manifest_repo), "rev-parse", "HEAD"], text=True).strip()
+        manifest_file.write_text(manifest_file.read_text().replace(
+            "run: 'echo gate-b-ran'", "run: 'echo gate-b-edited'"))
+        for gate_id, ref, want_pass in (("a", base_sha, True),
+                                        ("b", base_sha, False),
+                                        ("a", "missing-base", False)):
+            proc = subprocess.run(
+                [sys.executable, str(pathlib.Path(__file__).resolve()), "--root",
+                 str(manifest_repo), "--only", gate_id, "--jobs", "1"],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, "GITHUB_EVENT_NAME": "pull_request", "PR_DIFF_BASE": ref},
+            )
+            if (proc.returncode == 0) != want_pass or (
+                    "self-test SKIPPED" in proc.stdout) != want_pass:
+                bad.append(f"manifest integration gate {gate_id} base={ref}: "
+                           f"unexpected rc={proc.returncode} or self-test selection")
 
         # And end to end through execute(), because the predicate agreeing is not the same as
         # the runner acting on it: a skipped self-test must still RUN THE GATE, must say in its
