@@ -139,7 +139,7 @@ class ClearingResource(
     @Path("/cycle/trigger")
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.triggerCycle")
-    @Operation(summary = "Trigger a clearing cycle for a payment rail")
+    @Operation(summary = "Trigger a clearing cycle for a payment rail; one batch per currency")
     fun triggerCycle(@QueryParam("rail") @DefaultValue("SEPA_SCT") rail: String): Uni<Response> =
         triggerUseCase.triggerClearingCycle(PaymentRail.valueOf(rail))
             .map { Response.ok(it).build() }

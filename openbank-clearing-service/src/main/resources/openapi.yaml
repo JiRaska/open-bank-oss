@@ -14,7 +14,7 @@ info:
   # 1.5.1 -> 1.6.0 (#11604): additive — submit documents 400 AMOUNT_SCALE_EXCEEDED /
   # CURRENCY_UNSUPPORTED / VALIDATION_ERROR (amount + currency are built into a kernel Money at
   # the boundary, never rounded).
-  version: 1.6.0
+  version: 1.7.0
   description: Payment clearing and settlement — batch submission, cycle triggering, position management.
   license:
     name: Apache-2.0
@@ -122,7 +122,15 @@ paths:
             default: SEPA_SCT
       responses:
         '200':
-          description: Cycle triggered
+          description: >-
+            Cycle triggered. A clearing batch is per (rail, currency) (#11974): the result holds
+            one batch per currency found pending (or one empty SETTLED batch), all sharing the
+            cycleId. Items in a currency with no settlement account stay PENDING and are counted
+            in unsettleablePending.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ClearingCycleResult'
         '403':
           description: Forbidden — OPA policy denied clearingBatch.triggerCycle (ADR-0034 Phase 5)
 
@@ -294,6 +302,60 @@ components:
             type: object
 
   schemas:
+    ClearingCycleResult:
+      type: object
+      required: [cycleId, rail, batches, unsettleablePending]
+      properties:
+        cycleId:
+          type: string
+        rail:
+          type: string
+          enum: [SEPA_SCT, SEPA_SCT_INST, SWIFT, DOMESTIC, INTERNAL]
+        batches:
+          type: array
+          description: One batch per currency; batchReference is "<cycleId>-<currency>".
+          items:
+            $ref: '#/components/schemas/ClearingBatch'
+        unsettleablePending:
+          type: object
+          description: PENDING item count per currency that has no settlement account.
+          additionalProperties:
+            type: integer
+            format: int64
+    ClearingBatch:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        batchReference:
+          type: string
+        rail:
+          type: string
+        settlementType:
+          type: string
+          enum: [GROSS, NET, DEFERRED_NET]
+        status:
+          type: string
+          enum: [PENDING, IN_CLEARING, SETTLED, FAILED, REVERSED]
+        totalDebit:
+          type: number
+        totalCredit:
+          type: number
+        netPosition:
+          type: number
+        currency:
+          type: string
+        itemCount:
+          type: integer
+        cycleId:
+          type: string
+        settlementDate:
+          type: string
+          format: date
+        settledAt:
+          type: string
+          format: date-time
     SubmitPaymentRequest:
       type: object
       required: [paymentId, rail, amount, currency]

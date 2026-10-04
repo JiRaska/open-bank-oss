@@ -32,6 +32,22 @@ data class ClearingBatch(
     val updatedAt: OffsetDateTime,
 )
 
+/**
+ * What one clearing cycle produced (#11974). A clearing batch is per (rail, currency): the cycle
+ * partitions the rail's pending items by currency and nets each currency in its own [batches]
+ * entry, because netting and the net-settlement journal are only meaningful within one currency.
+ *
+ * [unsettleablePending] counts, per currency, items left PENDING because no settlement GL pair
+ * exists for that currency — they are not batched (a batch could never post its settlement leg),
+ * not failed (seeding the GL makes them settle on the next cycle), and are reported, not dropped.
+ */
+data class ClearingCycleResult(
+    val cycleId: String,
+    val rail: PaymentRail,
+    val batches: List<ClearingBatch>,
+    val unsettleablePending: Map<String, Long> = emptyMap(),
+)
+
 data class ClearingItem(
     val id: UUID = UUID.randomUUID(),
     val batchId: UUID,
