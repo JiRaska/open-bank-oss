@@ -170,7 +170,7 @@ spec:
         # interceptor has nothing to ask and fails closed (503/422) — issue #1797, and
         # exactly the state #4054 left this workload in.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

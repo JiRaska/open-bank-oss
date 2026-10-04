@@ -306,7 +306,7 @@ spec:
         # document-service-opa-bundle ConfigMap (gen-document-service-opa-bundle.sh) —
         # rest.rego plus document_rest_ext.rego.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
