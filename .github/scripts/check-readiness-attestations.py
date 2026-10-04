@@ -148,7 +148,6 @@ def spec_operation_count(module: pathlib.Path) -> int | None:
 # a new ci-* pentest entry without ops fails, and a baselined entry that gains ops
 # (or leaves the file) is reported so the exemption cannot rot into permanence.
 PENTEST_OPS_DEBT: dict[str, str] = {
-    "ledger.pentest": "predates R8 (#5769): ci-zap-baseline run 32173390301; add ops from the run artifact on next renewal",
 }
 
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -245,6 +244,49 @@ def ref_resolves(repo: pathlib.Path, ref: str) -> bool:
     if "/" in ref:
         return (repo / ref.rstrip("/")).exists()
     return False
+
+
+def cliff_date(date: dt.date, ttl: int, stale_fail_days: int) -> dt.date:
+    """First day on which an entry is an ERROR (age - ttl > stale_fail_days)."""
+    return date + dt.timedelta(days=ttl + stale_fail_days + 1)
+
+
+def horizon(
+    repo: pathlib.Path,
+    file_rel: str,
+    today: dt.date,
+    warn_days: int,
+    stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS,
+) -> tuple[list[str], int]:
+    """Entries whose ERROR cliff lands within warn_days (or already passed).
+
+    Report-only, for governance-horizon-watch: the line format matches the grep there
+    (`  due in` / `  ALREADY PASSED`). Never an exit code -- the enforcing lane is check().
+    """
+    path = repo / file_rel
+    if not path.is_file():
+        return ([f"  ALREADY PASSED: {file_rel} not found -- nothing could be scanned"], 0)
+    lines: list[str] = []
+    n = 0
+    for rec in parse(path.read_text(encoding="utf-8")):
+        f = rec["fields"]
+        try:
+            date = dt.date.fromisoformat(f.get("date", ""))
+            ttl = int(f.get("ttl_days", ""))
+        except ValueError:
+            continue  # malformed entries are check()'s business, and fail it already
+        n += 1
+        cliff = cliff_date(date, ttl, stale_fail_days)
+        left = (cliff - today).days
+        what = (
+            f"{rec['service']}.{rec['key']} ({file_rel}:{rec['lineno']}, attested {(today - date).days}d ago, ttl {ttl}d "
+            f"+ {stale_fail_days}d grace, by {f.get('by', '?')})"
+        )
+        if left <= 0:
+            lines.append(f"  ALREADY PASSED on {cliff}: {what} -- readiness-attestation-format fails every PR")
+        elif left <= warn_days:
+            lines.append(f"  due in {left}d on {cliff}: {what} -- re-attest a real run or delete the entry")
+    return (lines, n)
 
 
 def check(
@@ -437,6 +479,14 @@ def check(
                 f"({date} + {ttl}d); the collector no longer counts it, but the file still "
                 f"reads as a live claim"
             )
+            if -remaining <= stale_fail_days:
+                # Say WHEN it stops being a warning. "EXPIRED n days ago" read the same for
+                # 30 days and then reddened every PR in the repo (consent #8449, ledger
+                # 2026-10-09); the date is the only part of this line anyone can act on.
+                msg += (
+                    f" -- becomes a build ERROR on every PR on {cliff_date(date, ttl, stale_fail_days)}: "
+                    f"re-attest a real run or delete the entry before then"
+                )
             if -remaining > stale_fail_days:
                 errors.append(
                     msg + f" -- expired for more than {stale_fail_days} days: delete the "
@@ -776,6 +826,42 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
             EXERCISE_REF_DEBT.clear()
             EXERCISE_REF_DEBT.update(_saved)
 
+        # Scope guard: the CLIFF. 2026-08-18 + 21d expires 2026-09-08; with a 30-day grace
+        # the last warning day is 2026-10-08 and the first ERROR day 2026-10-09 -- the real
+        # ledger.pentest dates that would have frozen every PR. Both sides must hold, or
+        # the countdown the warning prints is a date the gate does not actually use.
+        (tmp / rel).write_text(
+            f"ledger:\n  pentest: {{ date: 2026-08-18, ttl_days: 21, by: ext, ref: {good_ref} }}\n",
+            encoding="utf-8",
+        )
+        cliff = cliff_date(dt.date(2026, 8, 18), 21, stale_fail_days)
+        e_before, w_before, _ = check(tmp, rel, cliff - dt.timedelta(days=1), stale_fail_days=stale_fail_days)
+        e_on, _, _ = check(tmp, rel, cliff, stale_fail_days=stale_fail_days)
+        if e_before or not e_on or not any(str(cliff) in w for w in w_before):
+            print(
+                f"::error::self-test: cliff {cliff} is not where the gate turns red, or the "
+                f"warning does not name it -- before={e_before} {w_before} on={e_on}"
+            )
+            failures += 1
+        else:
+            print(f"  ok  [error] the day before {cliff} warns and names it; {cliff} itself fails")
+
+        # Scope guard: the HORIZON must discriminate. Same input, two windows, two answers;
+        # a warner that only ever says "0 due" is indistinguishable from one that read nothing.
+        probe = cliff - dt.timedelta(days=10)
+        near, n_near = horizon(tmp, rel, probe, 14, stale_fail_days)
+        far, _ = horizon(tmp, rel, probe, 7, stale_fail_days)
+        past, _ = horizon(tmp, rel, cliff, 7, stale_fail_days)
+        if (n_near != 1 or len(near) != 1 or "due in 10d" not in near[0] or far
+                or len(past) != 1 or "ALREADY PASSED" not in past[0]):
+            print(
+                f"::error::self-test: horizon does not discriminate -- 14d={near} 7d={far} "
+                f"at-cliff={past} n={n_near}"
+            )
+            failures += 1
+        else:
+            print("  ok  [warn ] horizon: due within 14d, not within 7d, ALREADY PASSED at the cliff")
+
         # Scope guard: an empty file must report zero, and zero must be visible.
         (tmp / rel).write_text("# nothing attested\n", encoding="utf-8")
         errors, warnings, n = check(tmp, rel, _TODAY)
@@ -796,7 +882,7 @@ def _self_test(stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS) -> int:
     if failures:
         print(f"::error::self-test: {failures} case(s) failed")
         return 1
-    print(f"self-test: all {len(cases) + 5} cases passed (both directions)")
+    print(f"self-test: all {len(cases) + 7} cases passed (both directions)")
     return 0
 
 
@@ -816,12 +902,26 @@ def main() -> int:
         default=DEFAULT_STALE_FAIL_DAYS,
         help="an attestation expired longer than this is an ERROR, not a warning",
     )
+    ap.add_argument(
+        "--warn-days",
+        type=int,
+        help="horizon report: list entries whose ERROR cliff lands within N days; always exits 0",
+    )
     args = ap.parse_args()
 
     if args.self_test:
         return _self_test(stale_fail_days=args.stale_fail_days)
 
     today = dt.date.fromisoformat(args.today) if args.today else dt.date.today()
+    if args.warn_days is not None:
+        lines, n = horizon(REPO, FILE_REL, today, args.warn_days, args.stale_fail_days)
+        for line in lines:
+            print(line)
+        print(
+            f"check-readiness-attestations --warn-days {args.warn_days}: {len(lines)} of {n} "
+            f"attestation(s) reach the ERROR cliff on or before {today + dt.timedelta(days=args.warn_days)}."
+        )
+        return 0
     errors, warnings, n = check(
         REPO, FILE_REL, today, args.warn_within_days, args.stale_fail_days
     )

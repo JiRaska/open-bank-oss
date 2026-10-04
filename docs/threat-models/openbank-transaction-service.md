@@ -130,7 +130,7 @@ independent reasons, both structural:
 
 | STRIDE | Threat | Mitigation |
 |---|---|---|
-| **E**oP | An M2M caller uses the sweep to move funds between arbitrary accounts, bypassing the payment rails' SCA and rail controls | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` — no `Roles.SERVICE`; the new `sweep` verb is in `rules.yaml: four_eyes.verbs`, so it is maker-checker gated once `authz.four-eyes.enforce` flips (still `false`, as for `transaction.reverse` above) |
+| **E**oP | An M2M caller uses the sweep to move funds between arbitrary accounts, bypassing the payment rails' SCA and rail controls | `@RolesAllowed(Roles.OPERATOR, Roles.ADMIN)` is only the outer gate: shared M2M identities also carry `ROLE_OPERATOR`. With `AUTHZ_ENFORCE=true`, `transaction_rest_ext.rego` grants `transaction.sweep` only to a HUMAN operator/admin whose id does not start with `service-account-`; its policy tests deny both shared M2M identities. The separate `sweep` verb is in `rules.yaml: four_eyes.verbs`, so it is maker-checker gated once `authz.four-eyes.enforce` flips (still `false`, as for `transaction.reverse` above). The OPA deny, not the dormant four-eyes check, is the current M2M boundary |
 | **T**ampering | An operator sweeps to an account belonging to a third party, laundering a balance out of the duplicate under cover of a merge | `sourcePartyId`/`survivingPartyId` are recorded in the journal description, so the posting itself states the identity claim it was justified by; party-service's merge endpoint independently refuses to retire a party that still owns a non-CLOSED account, so a sweep to a wrong target cannot be completed into a merge without leaving the source account open and visible |
 | **R**epudiation | The money movement cannot be tied back to the merge that authorised it | `mergeReference` is required and mint into the description; the party-service `party.merge` audit event carries the same reference in `approval_reference`, so either end resolves the other |
 | **S**poofing | A caller forges `initiatedByPartyId` to make a bank correction look customer-initiated | The endpoint hard-codes `initiatedByPartyId = null` and drops any SCA fields — the request DTO has no such field to supply |
@@ -349,6 +349,12 @@ Numbered 4h: #8874 took §4d, self-hosted merchant logos took §4e, and main has
 ## 6. Change log
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `transaction_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
+
+- **2026-10-03** — `transaction.sweep` gets an explicit human-only allow reason in
+  `transaction_rest_ext.rego` (PR #11601). Shared M2M identities have `ROLE_OPERATOR`, so
+  `@RolesAllowed` alone never excluded them; the enforced OPA rule now rejects their
+  `service-account-` ids, with positive human and negative M2M policy tests. Four-eyes enforcement
+  remains a separate, disabled rollout and must not be credited for this boundary (§4b).
 
 - **2026-09-27** — `ApprovalResource`'s body (limit clamping, null-body 400, unknown-id 404,
   checker id resolution from `SecurityIdentity`, self-approval propagation, wire DTOs) now

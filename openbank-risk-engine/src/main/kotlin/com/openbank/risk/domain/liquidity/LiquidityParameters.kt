@@ -249,6 +249,23 @@ enum class GlClass(val wire: String, val description: String) {
             "0% outflow (d238 ¶114-115), 0% ASF (d295 ¶25); pledged collateral not modelled",
     ),
     CURRENT_YEAR_RESULT("current-year-result", "Income / expense not yet closed to equity: 0% ASF (d295 ¶25(a))"),
+
+    /**
+     * POLICY CHOICE (#11107). A clearing, FX-position or technical balance whose counterparty, maturity
+     * and even direction are not recorded (GL 1100 customer cash clearing, 1990/1991 FX position,
+     * 1995 FX counter-value, #11107). Treated by the SIGN of its balance, each side at the most
+     * conservative factor the engine has, so that neither side can ever improve a ratio:
+     *  - debit (asset): not HQLA (EU 2015/61 Art. 10 not evidenced; d238 ¶50), no LCR inflow (an inflow
+     *    needs a contractual claim, EU 2015/61 Art. 32(1); d238 ¶142), 100% RSF ([LiquidityFactor.NSFR_RSF_OTHER_ASSET]).
+     *  - credit (liability): 100% LCR outflow ([LiquidityFactor.LCR_OTHER_CONTRACTUAL_OUTFLOW]) and 0% ASF
+     *    ([LiquidityFactor.NSFR_ASF_OTHER]), as an obligation of unknown nature due within 30 days.
+     * Unlike [OTHER_ASSET], a credit balance never becomes a NEGATIVE RSF line that reduces the RSF.
+     */
+    TECHNICAL_OR_CLEARING(
+        "technical-or-clearing",
+        "Clearing / FX-position / technical balance, no counterparty or maturity recorded (POLICY CHOICE, #11107): " +
+            "debit = not HQLA, no inflow, 100% RSF (d295 ¶43(c)); credit = 100% outflow (d238 ¶141), 0% ASF (d295 ¶25)",
+    ),
     ;
 
     val isHqla: Boolean get() = this in HQLA_CLASSES

@@ -166,7 +166,7 @@ spec:
         # probes reach /health (the image is scratch — no shell for an exec probe); reachability
         # is fenced by the pod network, and OPA serves only policy decisions, no secrets.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
