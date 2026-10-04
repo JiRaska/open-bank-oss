@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.cardprocessing.application.port.`in`.OpenDisputeCommand
+import com.openbank.cardprocessing.application.port.`in`.RefreshDisputeCommand
 import com.openbank.cardprocessing.application.port.`in`.SubmitEvidenceCommand
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.CardDisputeCaseRepository
@@ -88,7 +89,7 @@ class CardDisputeServiceTest {
         val saved = slot<CardDisputeCase>()
         val event = slot<OutboxMessage>()
         coEvery { cases.save(capture(saved), capture(event), any(), any()) } answers {
-            arg<IdempotencyClaim?>(3)?.let { idempotency.complete(it, saved.captured.id) }
+            arg<IdempotencyClaim?>(3)?.let { idempotency.completeNow(it, saved.captured.id) }
             saved.captured
         }
 
@@ -190,7 +191,7 @@ class CardDisputeServiceTest {
             CardScheme.SIMULATOR,
         )
 
-        val outcome = service(port).refreshStatus(existing.id)
+        val outcome = service(port).refreshStatus(RefreshDisputeCommand(existing.id, UUID.randomUUID().toString()))
 
         assertThat((outcome as DisputeOutcome.Accepted).case).isEqualTo(existing)
         // An event per poll would make "the case changed" indistinguishable from "somebody looked".
@@ -210,7 +211,7 @@ class CardDisputeServiceTest {
             CardScheme.SIMULATOR,
         )
 
-        val outcome = service(port).refreshStatus(existing.id)
+        val outcome = service(port).refreshStatus(RefreshDisputeCommand(existing.id, UUID.randomUUID().toString()))
 
         val updated = (outcome as DisputeOutcome.Accepted).case
         assertThat(updated.status).isEqualTo(DisputeStatus.WON)
@@ -230,7 +231,13 @@ class CardDisputeServiceTest {
             CardScheme.SIMULATOR,
         )
 
-        val updated = (service(port).refreshStatus(existing.id) as DisputeOutcome.Accepted).case
+        val updated = (
+            service(
+                port,
+            ).refreshStatus(
+                RefreshDisputeCommand(existing.id, UUID.randomUUID().toString()),
+            ) as DisputeOutcome.Accepted
+            ).case
 
         // Guessing a bank status from an unknown scheme string is how the two vocabularies end up
         // disagreeing where a deadline is computed. The string still reaches the operator verbatim.
@@ -275,7 +282,7 @@ class CardDisputeServiceTest {
         coEvery { cases.findLiveByAuthorization(authorizationId) } returns null
         val saved = slot<CardDisputeCase>()
         coEvery { cases.save(capture(saved), any(), any(), any()) } answers {
-            arg<IdempotencyClaim?>(3)?.let { idempotency.complete(it, saved.captured.id) }
+            arg<IdempotencyClaim?>(3)?.let { idempotency.completeNow(it, saved.captured.id) }
             saved.captured
         }
         val port = mockk<DisputePort>()
@@ -315,7 +322,7 @@ class CardDisputeServiceTest {
             coEvery { cases.findById(existing.id) } returns existing
             val record = slot<DisputeEvidenceRecord>()
             coEvery { cases.recordEvidence(any(), capture(record), any(), any()) } answers {
-                idempotency.complete(arg(3), record.captured.id)
+                idempotency.completeNow(arg(3), record.captured.id)
                 firstArg()
             }
             val port = mockk<DisputePort>()
@@ -346,7 +353,7 @@ class CardDisputeServiceTest {
         val a = case(DisputeStatus.OPEN)
         coEvery { cases.findById(a.id) } returns a
         coEvery { cases.recordEvidence(any(), any(), any(), any()) } answers {
-            idempotency.complete(arg(3), UUID.randomUUID())
+            idempotency.completeNow(arg(3), UUID.randomUUID())
             firstArg()
         }
         val port = mockk<DisputePort>()
@@ -375,7 +382,7 @@ class CardDisputeServiceTest {
             CardScheme.SIMULATOR,
         )
 
-        val outcome = service(port).refreshStatus(closed.id)
+        val outcome = service(port).refreshStatus(RefreshDisputeCommand(closed.id, UUID.randomUUID().toString()))
 
         assertThat((outcome as DisputeOutcome.Accepted).case).isEqualTo(closed)
         coVerify(exactly = 0) { cases.save(any(), any(), any(), any()) }
@@ -395,10 +402,96 @@ class CardDisputeServiceTest {
                 SchemeResult.Unanswered(SchemeFailure.UNAVAILABLE, CardScheme.SIMULATOR, "down"),
             )
 
-            assertThat((service(port).refreshStatus(closed.id) as DisputeOutcome.Accepted).case).isEqualTo(closed)
-            assertThat((service(port).refreshStatus(closed.id) as DisputeOutcome.Accepted).case).isEqualTo(closed)
+            assertThat(
+                (
+                    service(
+                        port,
+                    ).refreshStatus(
+                        RefreshDisputeCommand(closed.id, UUID.randomUUID().toString()),
+                    ) as DisputeOutcome.Accepted
+                    ).case,
+            ).isEqualTo(closed)
+            assertThat(
+                (
+                    service(
+                        port,
+                    ).refreshStatus(
+                        RefreshDisputeCommand(closed.id, UUID.randomUUID().toString()),
+                    ) as DisputeOutcome.Accepted
+                    ).case,
+            ).isEqualTo(closed)
             coVerify(exactly = 0) { metrics.disputeTerminalMismatch(any(), any(), any()) }
             coVerify(exactly = 0) { cases.save(any(), any(), any(), any()) }
+        }
+
+    @Test
+    fun `a refresh retried under the same key replays the case and asks the network once`(): Unit = runBlocking {
+        val existing = case(DisputeStatus.EVIDENCE_SUBMITTED)
+        coEvery { cases.findById(existing.id) } returns existing
+        val saved = slot<CardDisputeCase>()
+        coEvery { cases.save(capture(saved), any(), any(), any()) } answers {
+            arg<IdempotencyClaim?>(3)?.let { idempotency.completeNow(it, saved.captured.id) }
+            saved.captured
+        }
+        val port = mockk<DisputePort>()
+        coEvery { port.status(existing.networkCaseId) } returns SchemeResult.Answered(
+            schemeDispute(existing.networkCaseId, "RESOLVED_WON"),
+            CardScheme.SIMULATOR,
+        )
+        val command = RefreshDisputeCommand(existing.id, "idem-refresh-1")
+
+        val first = service(port).refreshStatus(command)
+        val replay = service(port).refreshStatus(command)
+
+        assertThat((first as DisputeOutcome.Accepted).case.id).isEqualTo(existing.id)
+        assertThat((replay as DisputeOutcome.Accepted).case.id).isEqualTo(existing.id)
+        coVerify(exactly = 1) { port.status(any()) }
+        coVerify(exactly = 1) { cases.save(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a refresh that finds nothing moved, or a closed case, still completes the reservation`(): Unit = runBlocking {
+        val open = case(DisputeStatus.OPEN).copy(networkCaseId = "case-open")
+        val closed = case(DisputeStatus.WON).copy(networkCaseId = "case-closed")
+        coEvery { cases.findById(open.id) } returns open
+        coEvery { cases.findById(closed.id) } returns closed
+        val port = mockk<DisputePort>()
+        coEvery { port.status(open.networkCaseId) } returns
+            SchemeResult.Answered(schemeDispute(open.networkCaseId, "OPEN"), CardScheme.SIMULATOR)
+        coEvery { port.status(closed.networkCaseId) } returns
+            SchemeResult.Answered(schemeDispute(closed.networkCaseId, "WON"), CardScheme.SIMULATOR)
+
+        service(port).refreshStatus(RefreshDisputeCommand(open.id, "idem-refresh-open"))
+        service(port).refreshStatus(RefreshDisputeCommand(closed.id, "idem-refresh-closed"))
+        // The terminal case's stored outcome is what a retry replays.
+        val replay = service(port).refreshStatus(RefreshDisputeCommand(closed.id, "idem-refresh-closed"))
+
+        assertThat((replay as DisputeOutcome.Accepted).case).isEqualTo(closed)
+        assertThat(idempotency.completedStandalone.map { it.second }).containsExactly(open.id, closed.id)
+        coVerify(exactly = 1) { port.status(closed.networkCaseId) }
+        coVerify(exactly = 0) { cases.save(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `a refresh key reused for another case is a reuse conflict, and an unknown case frees the key`(): Unit =
+        runBlocking {
+            val existing = case(DisputeStatus.OPEN)
+            coEvery { cases.findById(existing.id) } returns existing
+            val missing = UUID.randomUUID()
+            coEvery { cases.findById(missing) } returns null
+
+            val refused = service().refreshStatus(RefreshDisputeCommand(missing, "idem-refresh-x"))
+            assertThat((refused as DisputeOutcome.Refused).reason).isEqualTo(DisputeRefusal.CASE_NOT_FOUND)
+            assertThat(idempotency.isPending(LifecycleOperation.DISPUTE_REFRESH, "idem-refresh-x")).isFalse()
+
+            val port = mockk<DisputePort>()
+            coEvery { port.status(any()) } returns
+                SchemeResult.Answered(schemeDispute(existing.networkCaseId, "OPEN"), CardScheme.SIMULATOR)
+            service(port).refreshStatus(RefreshDisputeCommand(existing.id, "idem-refresh-y"))
+            assertThatThrownBy {
+                runBlocking { service(port).refreshStatus(RefreshDisputeCommand(UUID.randomUUID(), "idem-refresh-y")) }
+            }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+            coVerify(exactly = 1) { port.status(any()) }
         }
 
     private fun schemeDispute(networkCaseId: String, status: String) = SchemeDispute(

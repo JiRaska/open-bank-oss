@@ -63,17 +63,29 @@ class FraudScoringAdapterTest {
     }
 
     @Test
-    fun `an unrecognised remote verdict defaults to ALLOW and is still a REAL answer`() {
+    fun `an unrecognised remote verdict is UNKNOWN, never a clean ALLOW`() {
         every { client.score(any()) } returns
             Uni.createFrom().item(FraudScoreClientResponse(verdict = "QUARANTINE", score = 0))
 
         val outcome = runBlocking { adapter.score(command()) }
 
-        // fraud-service answered; we did not understand the word. That is not an outage, and
-        // conflating the two would make the degraded gauge fire on a vocabulary drift.
-        assertThat(outcome.verdict).isEqualTo(FraudVerdict.ALLOW)
+        // #4403: fraud-service answered with a word this rail cannot read. Coercing that to ALLOW
+        // manufactured a clean score out of an unreadable one; an enforcing caller must not see it.
+        assertThat(outcome.verdict).isEqualTo(FraudVerdict.UNKNOWN)
+        // Not an outage either — the scorer was reachable, so neither synthetic nor degraded.
         assertThat(outcome.synthetic).isFalse()
         assertThat(metrics.degradedValue()).isZero()
+        assertThat(counter(FraudScoringMetrics.RESULT_UNRECOGNISED)).isEqualTo(1.0)
+        assertThat(counter(FraudScoringMetrics.RESULT_REAL))
+            .describedAs("an unreadable answer must not be tallied as a scored payment")
+            .isZero()
+    }
+
+    @Test
+    fun `a blank remote verdict is UNKNOWN as well`() {
+        every { client.score(any()) } returns Uni.createFrom().item(FraudScoreClientResponse(verdict = "", score = 0))
+
+        assertThat(runBlocking { adapter.score(command()) }.verdict).isEqualTo(FraudVerdict.UNKNOWN)
     }
 
     @Test

@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
   # Read-only, for the "Assert the dependency diff had a valid basis" step: it queries the
   # Checks API (`commits/{sha}/check-runs`, issue #5066) instead of the Actions "list workflow
   # runs" endpoint, and that call needs `checks: read` explicitly once any `permissions:` key
@@ -23,6 +22,10 @@ concurrency:
 
 jobs:
   dependency-review:
+    permissions:
+      contents: read
+      checks: read  # see the top-level note
+      pull-requests: write  # dependency-review-action comment-summary-in-pr
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
     # Sized from an end-to-end measurement on a real dependency-touching PR, not from the
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
