@@ -261,10 +261,9 @@ class CardTokenService(
                 idempotency.release(claim)
             } else {
                 log.errorf(
-                    e,
-                    "token status change for %s failed after the network was called; idempotency key left " +
+                    "token status change failed after the network was called (%s); idempotency key left " +
                         "PENDING so a retry cannot repeat the network call — reconcile with the scheme",
-                    command.tokenReference,
+                    e.javaClass.name,
                 )
             }
             throw e
