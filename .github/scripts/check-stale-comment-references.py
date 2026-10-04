@@ -94,6 +94,8 @@ import os
 import re
 import subprocess
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # --------------------------------------------------------------------------- waiver
@@ -190,12 +192,23 @@ def c_comments(text: str) -> list[tuple[int, str]]:
             i += 1
             continue
         if in_str:
+            if in_str == '"""':
+                if text.startswith('"""', i):
+                    in_str = None
+                    i += 3
+                else:
+                    i += 1
+                continue
             if ch == "\\":
                 i += 2
                 continue
             if ch == in_str:
                 in_str = None
             i += 1
+            continue
+        if text.startswith('"""', i):
+            in_str = '"""'
+            i += 3
             continue
         if ch in ('"', "'"):
             in_str = ch
@@ -328,6 +341,15 @@ def resolve_repo(slug: str) -> tuple[str, str]:
     return ("archived", "repository is ARCHIVED") if archived else ("ok", "")
 
 
+def resolve_repos(slugs: set[str], resolver=resolve_repo) -> dict[str, tuple[str, str]]:
+    """Bound the independent network probes while preserving each slug's verdict."""
+    ordered = sorted(slugs)
+    if not ordered:
+        return {}
+    with ThreadPoolExecutor(max_workers=min(4, len(ordered))) as pool:
+        return dict(zip(ordered, pool.map(resolver, ordered)))
+
+
 # --------------------------------------------------------------------------- scanning
 
 # DERIVED artifacts are not scanned. Every `*-opa-bundle*.yaml` embeds rules.yaml verbatim,
@@ -432,9 +454,9 @@ def run(root: Path, want_network: bool) -> list[Finding]:
     findings = [x for x in raw if not (x.rule == "path" and x.ref in ignored)]
 
     # R2: resolve each distinct slug ONCE, then attribute.
-    state: dict[str, tuple[str, str]] = {}
-    for slug in sorted(slugs):
-        state[slug] = resolve_repo(slug) if want_network else ("unknown", "network skipped")
+    state = resolve_repos(slugs) if want_network else {
+        slug: ("unknown", "network skipped") for slug in sorted(slugs)
+    }
     # `invisible` is surfaced too, not silently dropped: a reader who sees only "OK" would
     # reasonably assume every slug was checked, and one of them was not.
     unknown = [s for s, (st, _) in state.items() if st in ("unknown", "invisible")]
@@ -535,6 +557,9 @@ _REPO_FLAG = {
 }
 _REPO_NO_FLAG = {
     "live repo": ("a.yml", "# see JiRaska/open-bank-oss\n", {"open-bank-oss": ("ok", "")}),
+    "repo URL inside Kotlin raw string is code": (
+        "A.kt", 'val response = """{"url":"https://github.com/JiRaska/open-bank/pull/99"}"""\n',
+        {"open-bank": ("archived", "repository is ARCHIVED")}),
     "unresolved never fails": ("a.yml", "# see JiRaska/open-bank\n",
                                {"open-bank": ("unknown", "no network")}),
     # THE CI REGRESSION, pinned. `JiRaska/openbank-app` is private and alive; a job's
@@ -552,6 +577,19 @@ _REPO_NO_FLAG = {
 
 def self_test() -> int:
     failures = 0
+    barrier = threading.Barrier(4, timeout=5)
+
+    def concurrent_verdict(slug: str) -> tuple[str, str]:
+        barrier.wait()
+        return "ok", slug
+
+    try:
+        verdicts = resolve_repos({"a", "b", "c", "d"}, concurrent_verdict)
+        if verdicts != {slug: ("ok", slug) for slug in "abcd"}:
+            raise AssertionError("repository verdicts changed during concurrent resolution")
+    except (AssertionError, threading.BrokenBarrierError) as exc:
+        print(f"SELF-TEST FAIL: repository probes must run concurrently: {exc}")
+        failures += 1
     for label, (name, text) in _MUST_FLAG.items():
         if not scan_text(name, text, _TOP, _resolver_for_selftest):
             print(f"SELF-TEST FAIL: should have flagged — {label}")
