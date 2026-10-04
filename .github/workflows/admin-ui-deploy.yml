@@ -1040,8 +1040,7 @@ jobs:
           # Safe because the rewrite is deterministic — set `image:` to the tag just built — so
           # recomputing it against a newer main is always correct. It is what a human does when
           # resolving this by hand.
-          git fetch origin main
-          git reset --hard origin/main
+          bash .github/scripts/refresh-gitops-pr-base.sh
           TAG="${{ steps.build.outputs.tag }}"
           IMAGE="${ECR_REGISTRY}/${ECR_REPO}"
 

@@ -2,10 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 import copy
-import json
-import subprocess
 import importlib.util
+import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -17,6 +19,68 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_gitops_pr_refreshes_its_actual_base_before_rewriting(self):
+        def refreshed_before_pr(doc):
+            for job in doc['jobs'].values():
+                steps = job.get('steps', [])
+                creator = next((i for i, step in enumerate(steps)
+                                if step.get('uses', '').startswith('peter-evans/create-pull-request@')), None)
+                if creator is None:
+                    continue
+                return any('bash .github/scripts/refresh-gitops-pr-base.sh' in step.get('run', '')
+                           for step in steps[:creator])
+            return False
+
+        for name in ('auto-deploy.yml', 'admin-ui-deploy.yml'):
+            doc = yaml.safe_load((guard.ROOT / '.github/workflows' / name).read_text())
+            self.assertTrue(refreshed_before_pr(doc), name)
+            mutated = copy.deepcopy(doc)
+            for job in mutated['jobs'].values():
+                for step in job.get('steps', []):
+                    if 'run' in step:
+                        step['run'] = step['run'].replace(
+                            'bash .github/scripts/refresh-gitops-pr-base.sh',
+                            'git reset --hard origin/main')
+            self.assertFalse(refreshed_before_pr(mutated), name)
+
+        # Reproduce a push landing after the workflow checked out an old commit.
+        # The bot commit must have the *new* main as its sole parent and touch only
+        # the manifest it rewrote, rather than carry intervening fleet tag changes.
+        env = dict(os.environ, GIT_CONFIG_GLOBAL=os.devnull)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            remote, writer, runner = (root / name for name in ('remote.git', 'writer', 'runner'))
+
+            def git(cwd, *args):
+                return subprocess.check_output(['git', *args], cwd=cwd, env=env, text=True).strip()
+
+            git(root, 'init', '--bare', '--initial-branch=main', str(remote))
+            git(root, 'clone', str(remote), str(writer))
+            (writer / 'manifest.yaml').write_text('image: old\n')
+            git(writer, 'add', 'manifest.yaml')
+            git(writer, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-m', 'initial')
+            git(writer, 'push', 'origin', 'main')
+            git(root, 'clone', str(remote), str(runner))
+            git(runner, 'checkout', '--detach')
+            (writer / 'unrelated.yaml').write_text('image: later\n')
+            git(writer, 'add', 'unrelated.yaml')
+            git(writer, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-m', 'intervening deploy')
+            git(writer, 'push', 'origin', 'main')
+            latest = git(writer, 'rev-parse', 'HEAD')
+
+            subprocess.check_call(['bash', str(guard.ROOT / '.github/scripts/refresh-gitops-pr-base.sh')],
+                                  cwd=runner, env=env, stdout=subprocess.DEVNULL)
+            self.assertEqual(git(runner, 'symbolic-ref', '--short', 'HEAD'), 'main')
+            self.assertEqual(git(runner, 'rev-parse', 'HEAD'), latest)
+            (runner / 'manifest.yaml').write_text('image: new\n')
+            git(runner, 'add', 'manifest.yaml')
+            git(runner, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid',
+                '-c', 'commit.gpgsign=false', 'commit', '-m', 'bot rewrite')
+            self.assertEqual(git(runner, 'rev-parse', 'HEAD^'), latest)
+            self.assertEqual(git(runner, 'diff', '--name-only', 'HEAD^', 'HEAD'), 'manifest.yaml')
+
     def test_personal_model_credential_is_rejected_in_every_workflow(self):
         for name in ('agent-review.yml', 'other.yml'):
             doc = {'jobs': {'test': {'steps': [{
