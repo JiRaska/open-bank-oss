@@ -116,9 +116,63 @@ class ContextPactProviderVerificationTest {
         }
     }
 
+    @State("a Fraud investigator is assigned to the requested case")
+    fun fraudCaseAssignment() {
+        val config = org.eclipse.microprofile.config.ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    "DELETE FROM context_case_assignments WHERE principal_id = 'pact-operator' AND case_id = '$FRAUD_CASE_ID'",
+                )
+                statement.executeUpdate(
+                    """INSERT INTO context_case_assignments
+                        (assignment_id, bank_scope, principal_id, case_id, purpose, root_ref, valid_from, valid_to, created_at)
+                        VALUES ('${UUID.randomUUID()}', 'openbank-cz', 'pact-operator', '$FRAUD_CASE_ID',
+                        'FRAUD_INVESTIGATION', 'fraud-case:$FRAUD_CASE_ID',
+                        now() - interval '1 hour', now() + interval '1 hour', now())
+                    """.trimIndent(),
+                )
+            }
+        }
+    }
+
+    @State("a Fraud investigator is not assigned to the requested case")
+    fun noFraudCaseAssignment() {
+        val config = org.eclipse.microprofile.config.ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    "DELETE FROM context_case_assignments WHERE principal_id = 'pact-operator' AND case_id = '$FRAUD_CASE_ID'",
+                )
+            }
+        }
+    }
+
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verify(context: PactVerificationContext) {
+        if (context.interaction.description in setOf(
+                "GET Fraud case access for an assigned investigator",
+                "GET assigned Fraud case candidates",
+                "GET Fraud case access without an assignment",
+            )
+        ) {
+            val principal = mockk<JsonWebToken> {
+                io.mockk.every { name } returns "pact-operator"
+                io.mockk.every { rawToken } returns "pact-token"
+            }
+            testIdentityAssociation.setTestIdentity(
+                QuarkusSecurityIdentity.builder().setPrincipal(principal).addRole("ROLE_ADMIN").build(),
+            )
+        }
         if (context.interaction.description == "GET assigned lending loan candidates without a shared match") {
             val principal = mockk<JsonWebToken> {
                 io.mockk.every { name } returns "pact-operator"
@@ -134,5 +188,6 @@ class ContextPactProviderVerificationTest {
 
     private companion object {
         const val LENDING_LOAN_ID = "f0c8d9e0-0000-4000-8000-000000000003"
+        const val FRAUD_CASE_ID = "f0c8d9e0-0000-4000-8000-000000000004"
     }
 }

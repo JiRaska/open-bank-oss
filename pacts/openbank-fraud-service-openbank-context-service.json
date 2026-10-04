@@ -1,0 +1,94 @@
+{
+  "consumer": {
+    "name": "openbank-fraud-service"
+  },
+  "interactions": [
+    {
+      "description": "GET Fraud case access for an assigned investigator",
+      "providerStates": [
+        {
+          "name": "a Fraud investigator is assigned to the requested case"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Authorization": "Bearer pact-token",
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000004",
+          "X-Investigation-Purpose": "FRAUD_INVESTIGATION"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/fraud-cases/f0c8d9e0-0000-4000-8000-000000000004/access"
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 204
+      }
+    },
+    {
+      "description": "GET assigned Fraud case candidates",
+      "providerStates": [
+        {
+          "name": "a Fraud investigator is assigned to the requested case"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Authorization": "Bearer pact-token",
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000004",
+          "X-Investigation-Purpose": "FRAUD_INVESTIGATION"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/fraud-cases/f0c8d9e0-0000-4000-8000-000000000004/assigned-candidates"
+      },
+      "response": {
+        "body": {
+          "ids": [
+
+          ],
+          "truncated": false
+        },
+        "headers": {
+          "Cache-Control": "no-store",
+          "Content-Type": "application/json"
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET Fraud case access without an assignment",
+      "providerStates": [
+        {
+          "name": "a Fraud investigator is not assigned to the requested case"
+        }
+      ],
+      "request": {
+        "headers": {
+          "Authorization": "Bearer pact-token",
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000004",
+          "X-Investigation-Purpose": "FRAUD_INVESTIGATION"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/fraud-cases/f0c8d9e0-0000-4000-8000-000000000004/access"
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 403
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-context-service"
+  }
+}
