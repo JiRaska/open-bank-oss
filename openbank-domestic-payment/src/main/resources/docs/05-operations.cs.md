@@ -123,3 +123,7 @@ Volající zkusil přechod, který stavový automat zakazuje (viz [03 — API](.
 - Release přes release-please z Conventional Commits; needitovat ručně `version.txt` (aktuálně `0.3.0`) ani `CHANGELOG.md`.
 - **Money-path:** vyžaduje 2 schválení + threat model (`docs/threat-models/openbank-domestic-payment.md`); nikdy se neauto-merguje.
 - CD: ArgoCD vyzvedne bump image tagu v GitOps manifestech.
+
+## Produkční mTLS volání AML služby
+
+Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.

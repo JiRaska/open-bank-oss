@@ -49,3 +49,13 @@ spec:
               app.kubernetes.io/name: keycloak
       ports:
         - { protocol: TCP, port: 8080 }
+    # aml-service's private-CA mTLS listener: the AML case source-status read.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: aml
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: aml-service
+      ports:
+        - { protocol: TCP, port: 8443 }
