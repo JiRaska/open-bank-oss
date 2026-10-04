@@ -117,6 +117,9 @@ is imported from Vault on cold start only. Provisioning is an owner step:
    `party_id` is the SYNTHETIC party, `realm_access.roles` is exactly `["ROLE_CUSTOMER"]`, and
    `preferred_username` is `service-account-openbank-synthetic-retail`.
 
+`openbank-infra/scripts/provision-synthetic-customer.sh` does steps 1-5 in order, asks hidden for
+the tokens it needs, and never prints the secret or the token.
+
 The taint switches on when that principal is honoured by customer-edge's
 `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS`. It is already listed, inert until step 2 exists.
 Removing it from that list switches the canary back to real, which is the containment lever.
