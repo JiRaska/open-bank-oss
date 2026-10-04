@@ -114,8 +114,11 @@ concurrency:
   # when main advanced solely through
   # this workflow's own image-pin commit; otherwise that harmless commit can starve the source that
   # produced it and leave newer UI code undeployed.
+  # A failed/cancelled upstream workflow_run is skipped by deploy-source. It must not
+  # replace a pending successful source before that job can evaluate its `if:`; repeated
+  # non-verdict completions for one SHA otherwise starve the actual deploy.
   group: >-
-    admin-ui-deploy-${{ github.event.workflow_run.head_sha || github.sha }}
+    admin-ui-deploy-${{ github.event.workflow_run.head_sha || github.sha }}-${{ github.event_name == 'workflow_run' && github.event.workflow_run.conclusion != 'success' && 'nonverdict' || 'eligible' }}
   cancel-in-progress: false
 
 jobs:
