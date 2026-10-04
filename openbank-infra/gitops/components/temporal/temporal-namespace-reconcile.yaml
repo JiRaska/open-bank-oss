@@ -44,6 +44,9 @@ metadata:
     app.kubernetes.io/part-of: temporal
     app.kubernetes.io/component: namespace-registration
     openbank.io/derived: gitops-manual
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '10 4 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 04:10 UTC daily — after keycloak-realm-drift's 03:40 and sbom-drift-scanner's
   # 03:10, so the in-cluster drift detectors do not contend for one window.

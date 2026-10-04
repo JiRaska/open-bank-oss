@@ -33,6 +33,7 @@ import com.openbank.domestic.domain.screening.ScreeningMatchStatus
 import com.openbank.domestic.domain.screening.ScreeningResult
 import com.openbank.domestic.domain.screening.ScreeningRole.CREDITOR
 import com.openbank.domestic.domain.screening.ScreeningRole.DEBTOR
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.coEvery
@@ -389,7 +390,7 @@ class DomesticPaymentActivitiesImplTest {
             accountLookupPort.findPartyByAccountId(validated.debtorAccountId)
             customerNotificationPort.notifyPaymentFailed(
                 ownerPartyId,
-                validated.amount,
+                validated.amount.amount,
                 validated.currency,
                 customerSafeReason(DomesticRejectReason.INSUFFICIENT_FUNDS),
             )
@@ -803,8 +804,7 @@ class DomesticPaymentActivitiesImplTest {
         creditorAccountNumber = "9876543210",
         creditorBankCode = "0100",
         creditorName = "Brno Utility",
-        amount = BigDecimal("1500.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("1500.00"), "CZK"),
         variableSymbol = "2026001",
         specificSymbol = null,
         constantSymbol = "0308",

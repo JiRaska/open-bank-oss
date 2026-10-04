@@ -141,6 +141,9 @@ metadata:
   labels:
     app.kubernetes.io/name: argocd-sync-verifier
     app.kubernetes.io/part-of: argocd
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '25 */6 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "46800"
 spec:
   # Every 6h, not daily: the failure this detects is a deploy that silently did not happen, and
   # the cost of finding out is proportional to how long people keep merging into it. Daily was
