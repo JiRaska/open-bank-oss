@@ -277,9 +277,16 @@ data class Deal(
     /** Interest at maturity, ACT/360, rounded half-up to the currency's 2 minor units. */
     val interest: BigDecimal get() = DayCount.act360Interest(principal, rate, valueDate, maturityDate)
 
-    fun submit(actor: Actor, check: LimitCheck, at: Instant): Deal {
+    /**
+     * ADR-0315 D4: the counterparty check is RECORDED here (a breach may still book under a senior
+     * override); the product limit is ENFORCED — a deal outside its product mandate never reaches
+     * an approver's queue. [productCheck] is required, never defaulted: a missing check must not
+     * read as a passed one.
+     */
+    fun submit(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "submit")
         requireState(DealState.DRAFT, "submit")
+        if (productCheck.breached) throw ProductLimitBreachedException(productCheck)
         return transition(DealState.PENDING_APPROVAL, actor, at, limitNote(check))
             .copy(submittedBy = actor, limitCheck = check)
     }
@@ -289,10 +296,14 @@ data class Deal(
      * enforcing would otherwise silently allow self-approval. Order matters — the agent check
      * runs first, so an agent is refused as an agent even when it is also the creator.
      */
-    fun approve(actor: Actor, check: LimitCheck, at: Instant): Deal {
+    fun approve(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "approve")
         requireState(DealState.PENDING_APPROVAL, "approve")
         requireSecondPerson(actor)
+        // ADR-0315 D4: the product limit is re-evaluated at approval — the declared mandate may have
+        // been tightened since submission. Not overridable (see ProductLimit); the senior override
+        // below covers the counterparty limit only.
+        if (productCheck.breached) throw ProductLimitBreachedException(productCheck)
         // ADR-0315 D4: a breach blocks booking unless a second, senior approver recorded an override
         // with a reason that still covers it. The booking approver is yet another person.
         if (check.breached) requireOverrideCovers(actor, check)
