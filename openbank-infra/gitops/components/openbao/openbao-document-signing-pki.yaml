@@ -128,6 +128,8 @@ metadata:
     openbank.io/plane: platform
     openbank.io/adr: "0162"
   annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '30 2 * * 0' plus slack.
+    openbank.tech/max-success-age-seconds: "1296000"
     openbank.tech/description: "ADR-0162 D4 continued: re-asserts the OpenBao document-signing PKI config weekly"
     openbank.tech/runbook: "docs/runbooks/0008-openbao-document-signing-pki.md"
 spec:
