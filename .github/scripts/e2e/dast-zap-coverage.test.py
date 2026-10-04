@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-SCRIPT = Path(__file__).with_name("dast-zap-coverage.py")
+SCRIPT = Path(__file__).resolve().parents[1] / "dast-zap-coverage.py"
 SERVICE = "openbank-ledger-service"
 SPEC = {"paths": {"/api/v1/items": {"get": {}}, "/api/v1/items/{id}": {"get": {}}}}
 
