@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sanctions-service
     app.kubernetes.io/part-of: sanctions
   annotations:
-    openbank.tech/policy-checksum: "9b04d151ae01e1b8"
+    openbank.tech/policy-checksum: "03f91d9a08f7e2d9"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1355,6 +1355,17 @@ data:
                                                 # without the cardholder's SCA today — add a verb here when one ships.
                                                 # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                                # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                                # a journal through ledger's POST /api/v1/journals. Threat model:
+                                                # docs/threat-models/openbank-treasury-service.md.
+                                                # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                                # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                                # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                                # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                                # needs an X-Approval-Id round-trip the deal's own
+                                                # PENDING_APPROVAL state already is. Writes are human-only in
+                                                # treasury_rest_ext.rego.
+      - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
