@@ -13,6 +13,25 @@ internal object TestDb {
         connect().use { conn -> conn.createStatement().use { it.executeUpdate(sql) } }
     }
 
+    /**
+     * The two cited ČNB minimum-reserve facts fx-service publishes (its V9): ratio 4 % from
+     * 2025-01-02 and remuneration 0 from 2023-10-05. Idempotent.
+     */
+    fun seedReserveFacts() {
+        execute(
+            "INSERT INTO cnb_policy_rate_fact (instrument, effective_from, rate, source_url, fetched_at, " +
+                "content_sha256, note, received_at) VALUES " +
+                "('MIN_RESERVE_RATIO', DATE '2025-01-02', 0.04, '$PMR_URL', now(), '$PMR_SHA', " +
+                "'Vyhláška č. 323/2024 Sb.', now()), " +
+                "('MIN_RESERVE_REMUNERATION', DATE '2023-10-05', 0, '$PMR_URL', now(), '$PMR_SHA', null, now()) " +
+                "ON CONFLICT (instrument, effective_from) DO NOTHING",
+        )
+    }
+
+    const val PMR_URL =
+        "https://www.cnb.cz/export/sites/cnb/cs/financni-trhy/.galleries/penezni_trh/download/PMR_historie_zmen.xlsx"
+    const val PMR_SHA = "43ffa8b5bedfd02d28970eacd7ea41cee83434373fb07856c6483c6383526e38"
+
     /** The first column of the first row of a `SELECT count(*)`. */
     fun count(sql: String): Int = connect().use { conn -> conn.createStatement().use { countOf(it, sql) } }
 

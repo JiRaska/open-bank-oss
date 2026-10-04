@@ -5,6 +5,7 @@
 package com.openbank.risk.infrastructure.rest
 
 import com.openbank.risk.application.port.`in`.MaintenancePeriodNotFoundException
+import com.openbank.risk.application.port.`in`.MinReservesNotEvaluableException
 import com.openbank.risk.application.port.out.CurveSetNotFoundException
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.UntiedSnapshotException
@@ -44,4 +45,21 @@ class ExceptionMappers {
     fun untied(e: UntiedSnapshotException): Response = Response.status(Response.Status.CONFLICT)
         .entity(UntiedResponse(error = "UNTIED", runId = e.runId, mismatches = e.mismatches.map { it.toDto() }))
         .build()
+
+    /**
+     * No ČNB reserve ratio / remuneration fact is in effect on the run's as-of date. The requirement
+     * is NOT_EVALUABLE — a 409 with the reason, never a number computed at a default rate.
+     */
+    @ServerExceptionMapper
+    fun minReservesNotEvaluable(e: MinReservesNotEvaluableException): Response =
+        Response.status(Response.Status.CONFLICT)
+            .entity(
+                mapOf(
+                    "error" to "NOT_EVALUABLE",
+                    "runId" to e.runId.toString(),
+                    "asOf" to e.asOf.toString(),
+                    "reason" to e.reason,
+                ),
+            )
+            .build()
 }
