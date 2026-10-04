@@ -426,7 +426,7 @@ jobs:
 
   build:
     needs: [changes, publication-ready]
-    if: always() && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped')
+    if: always() && needs.changes.result == 'success' && needs.changes.outputs.any == 'true' && (needs.publication-ready.result == 'success' || needs.publication-ready.result == 'skipped')
     # The reusable workflow assumes openbank-arc-build-runner via GitHub OIDC for ECR auth
     # (needed on the Hetzner pool, which has no ambient AWS creds). A job that calls a reusable
     # workflow must grant the token here; the callee cannot elevate beyond the caller.

@@ -80,8 +80,11 @@ def findings(name, doc):
                 errors.append('issue worker must depend on successful queue admission')
     if name == 'services-ci.yml':
         changes = jobs.get('changes', {})
+        build = jobs.get('build', {})
         verification = jobs.get('verification-metadata', {})
         aggregate = jobs.get('all-green', {})
+        if "needs.changes.result == 'success'" not in build.get('if', ''):
+            errors.append('service builds must wait for a successful changed-service verdict')
         output = changes.get('outputs', {}).get('verification-modules', '')
         if 'steps.detect.outputs.verification-modules' not in output:
             errors.append('changes must export the module verification plan from its detector')

@@ -106,12 +106,16 @@ class SupplyChainTest(unittest.TestCase):
         self.assertFalse(guard.findings('services-ci.yml', original))
         for mutation in ('missing-plan-output', 'missing-matrix-output', 'unsharded-verifier',
                          'fail-fast-verifier', 'wrong-shard-target', 'unbounded-verifier',
-                         'detector-failure-passes', 'missing-shard-verdict-passes'):
+                         'detector-failure-passes', 'missing-shard-verdict-passes',
+                         'build-after-detector-failure'):
             doc = copy.deepcopy(original)
             if mutation == 'missing-plan-output':
                 doc['jobs']['changes']['outputs'].pop('verification-modules')
             elif mutation == 'missing-matrix-output':
                 doc['jobs']['changes']['outputs'].pop('verification-modules-json')
+            elif mutation == 'build-after-detector-failure':
+                doc['jobs']['build']['if'] = doc['jobs']['build']['if'].replace(
+                    "needs.changes.result == 'success' && ", '')
             elif mutation == 'unsharded-verifier':
                 doc['jobs']['verification-metadata']['strategy']['matrix']['module'] = '[]'
             elif mutation == 'fail-fast-verifier':
