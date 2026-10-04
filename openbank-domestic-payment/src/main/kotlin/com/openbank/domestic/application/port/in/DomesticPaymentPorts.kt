@@ -11,7 +11,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
-import java.math.BigDecimal
+import com.openbank.libs.domain.money.Money
 import java.time.Instant
 import java.util.UUID
 
@@ -24,8 +24,8 @@ data class CreateDomesticPaymentCommand(
     val creditorAccountNumber: String,
     val creditorBankCode: String,
     val creditorName: String,
-    val amount: BigDecimal,
-    val currency: String,
+    /** Built by [com.openbank.libs.domain.money.Money.parseInbound] at the REST boundary, strictly positive. */
+    val amount: Money,
     val variableSymbol: String?,
     val specificSymbol: String?,
     val constantSymbol: String?,

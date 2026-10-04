@@ -4,7 +4,7 @@
 
 package com.openbank.domestic.domain.model
 
-import java.math.BigDecimal
+import com.openbank.libs.domain.money.Money
 import java.time.Clock
 import java.time.Instant
 import java.util.UUID
@@ -46,8 +46,8 @@ data class DomesticPayment(
     val creditorAccountNumber: String,
     val creditorBankCode: String,
     val creditorName: String,
-    val amount: BigDecimal,
-    val currency: String,
+    /** Always a valid, strictly positive kernel [Money] built at the inbound boundary (#11604). */
+    val amount: Money,
     val variableSymbol: String?,
     val specificSymbol: String?,
     val constantSymbol: String?,
@@ -94,6 +94,9 @@ data class DomesticPayment(
     /** Database-backed ordering token for replay-safe downstream lifecycle projections. */
     val aggregateRevision: Long = 1,
 ) {
+    /** ISO 4217 code of [amount], the spelling every outbound contract and the column carry. */
+    val currency: String get() = amount.currency.code
+
     init {
         require((delegationId == null) == (reservationId == null)) {
             "delegationId and reservationId must either both be present or both be absent"

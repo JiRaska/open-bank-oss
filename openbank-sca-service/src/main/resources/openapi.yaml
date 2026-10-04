@@ -11,7 +11,9 @@ info:
   # 1.13 -> 1.14 (#10041 slice 9b): additive — the operator approval queue
   # (/api/v1/sca/approvals), the optional X-Approval-Id header and the 202 PENDING_APPROVAL
   # response on the four-eyes-gated enroll, revoke and consume operations.
-  version: 1.14.0
+  # 1.14 -> 1.15: additive — ApprovalResponse.summary (what the approval binds, rendered once
+  # at creation: device handle, key fingerprint, masked creditor) and decidedAt on the GET views.
+  version: 1.15.0
   description: >-
     Strong Customer Authentication — initiate and verify SCA challenges (OTP, TOTP, push,
     biometric). Decoupled device approval per ADR-0021: enrol a device credential and record a
@@ -473,6 +475,21 @@ components:
         makerId: {type: [string, 'null']}
         createdAt: {type: [string, 'null'], format: date-time}
         decidedBy: {type: [string, 'null']}
+        decidedAt:
+          type: [string, 'null']
+          format: date-time
+          description: When the checker decided. Present on the list and read views.
+        summary:
+          type: [string, 'null']
+          maxLength: 1024
+          description: >-
+            What the approval binds, rendered once when it was issued and stored with it — never
+            re-derived. device.enroll: party, a short credential handle, algorithm and the first 8
+            hex of the SHA-256 of the public key (never the key). device.revoke: party, the device
+            as a short handle, credential handle, algorithm and enrolment date. scaChallenge.consume:
+            purpose, amount, currency and the creditor masked to its last 4 characters. Informational
+            only; the request fingerprint decides whether a retry matches. Present on the list and
+            read views; null for an action without a rendering.
     InitiateScaRequest:
       type: object
       required: [partyId, purpose]
