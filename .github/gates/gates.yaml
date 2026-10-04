@@ -1546,11 +1546,9 @@ gates:
     name: "governance-script unit tests"
     group: supplychain
     mode: enforced
-    budget_seconds: 120   # a real test suite
+    budget_seconds: 120   # three independent suites run concurrently; retain headroom under load
     run: |
-      python3 -m unittest discover -s openbank-infra/scripts -p '*_test.py' -v
-      python3 -m unittest discover -s .github/scripts -p '*_test.py' -v
-      python3 -m unittest discover -s .github/scripts/tests -p 'test_*.py' -v
+      python3 .github/scripts/run_governance_script_tests.py
 
   # CLAUDE.md rule 3 / ADR-0029: a module is a released component iff it has
   # a version.txt, and must be registered in release-please-config.json AND

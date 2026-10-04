@@ -61,7 +61,9 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -420,31 +422,38 @@ def _run(cmd: str, cwd: pathlib.Path, extra_env: dict, timeout: int, index: path
         shutil.copyfile(index, scratch.name)
         env["GIT_INDEX_FILE"] = scratch.name
     try:
-        p = subprocess.run(
+        p = subprocess.Popen(
             ["bash", "-euo", "pipefail", "-c", cmd],
             cwd=cwd,
             env=env,
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=timeout,
+            start_new_session=True,
         )
-        return p.returncode, p.stdout + p.stderr
-    except subprocess.TimeoutExpired as exc:
-        # Decode each stream INDEPENDENTLY, before concatenating. Even with text=True,
-        # TimeoutExpired can carry one stream as str and the other as bytes, so the obvious
-        # `(exc.stdout or "") + (exc.stderr or "")` raises `TypeError: can't concat str to
-        # bytes` — swallowing the real output and turning a timeout into a stack trace that
-        # takes the whole shard down. Reached only on an actual timeout with output on both
-        # streams, which is why the `slow` self-test case below now writes to both.
-        def _text(stream):
-            if not stream:
-                return ""
-            if isinstance(stream, (bytes, bytearray)):
-                return stream.decode("utf-8", "replace")
-            return stream
+        try:
+            stdout, stderr = p.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            # The shell may have spawned Python/Gradle children. Killing only the shell
+            # leaves them consuming the runner after this gate has reported a timeout.
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = p.communicate()
+            # TimeoutExpired can carry bytes even with text=True. communicate() after
+            # termination normally returns the complete streams, but retain the first
+            # observation if a platform returns an empty stream on this path.
+            def _text(stream):
+                if not stream:
+                    return ""
+                if isinstance(stream, (bytes, bytearray)):
+                    return stream.decode("utf-8", "replace")
+                return stream
 
-        got = _text(exc.stdout) + _text(exc.stderr)
-        return 124, got + f"\n[run-gates] TIMEOUT after {timeout}s\n"
+            got = _text(stdout or exc.stdout) + _text(stderr or exc.stderr)
+            return 124, got + f"\n[run-gates] TIMEOUT after {timeout}s\n"
+        return p.returncode, stdout + stderr
     finally:
         if scratch is not None:
             try:
@@ -1045,6 +1054,16 @@ def self_test():
         os.environ["CI"] = "true"  # budgets are enforced on the runner only
         results = [execute(g, tmp, is_pr=False, timeout=2) for g in gates]
         bad = []
+        ready = tmp / "timeout-child-started"
+        marker = tmp / "timeout-child-survived"
+        rc_child, _ = _run(
+            f"touch {shlex.quote(str(ready))}; "
+            f"(sleep 2; touch {shlex.quote(str(marker))}) & wait",
+            tmp, {}, 1,
+        )
+        time.sleep(2.2)
+        if rc_child != 124 or not ready.is_file() or marker.exists():
+            bad.append("timeout must stop the gate's child processes, not only its shell")
         for r in results:
             want = EXPECTED[r.id]
             mark = "ok " if r.status == want else "BAD"
