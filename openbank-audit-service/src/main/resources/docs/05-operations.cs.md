@@ -22,6 +22,7 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
 | Kafka bootstrap | `localhost:29092` (lokálně) | `quarkus.smallrye-reactive-messaging.kafka` |
 | Vstupní kanál | `audit-events-in`, group `audit-service`, `auto.offset.reset=earliest` | `mp.messaging.incoming` |
+| Reference grafu úvěrů | Topic `openbank.lending.graph.references` je součástí `audit-events-in`; po zapnutí zápisu grafu sledujte zpoždění stejné consumer group | `mp.messaging.incoming.audit-events-in.topics` |
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | zapnuto, max 200 concurrent | `openbank.rate-limit` |

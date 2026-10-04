@@ -22,6 +22,7 @@ Build is fast-jar (never uber-jar — see root CLAUDE.md GitOps rules). Generic 
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
 | Kafka bootstrap | `localhost:29092` (local) | `quarkus.smallrye-reactive-messaging.kafka` |
 | Inbound channel | `audit-events-in`, group `audit-service`, `auto.offset.reset=earliest` | `mp.messaging.incoming` |
+| Lending graph references | `openbank.lending.graph.references` is included in `audit-events-in`; monitor the same consumer group for lag after enabling the graph writer | `mp.messaging.incoming.audit-events-in.topics` |
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | enabled, max 200 concurrent | `openbank.rate-limit` |

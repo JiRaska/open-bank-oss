@@ -19,8 +19,11 @@ Všechny endpointy vyžadují **Keycloak Bearer token** (realm `openbank`). Role
 | `PATCH /parties/{id}` | `ROLE_OPERATOR`, `ROLE_ADMIN` (+ `@Authorize(action="party.update")` přes OPA, advisory) |
 | `PUT /parties/{id}/kyc-status` | `ROLE_ADMIN`, `ROLE_KYC` |
 | `DELETE /parties/{id}` | `ROLE_ADMIN` |
+| `POST /parties/lending-guarantor-identity/verify` | `ROLE_LENDING_GRAPH_PROOF` a samostatná identita služby lending-graph |
 
 OPA autorizace (ADR-0034) běží v **advisory režimu** (`authz.enforce=false`): zamítnutí z `@Authorize` se logují na WARN, ale request pokračuje. Překlopení do enforce je pozdější fáze.
+
+Endpoint pro ověření ručitele vrací pouze `verified`. Hodnota je pravdivá jen pro aktivního zákazníka se schváleným KYC a dokončeným AML; neznámá strana vrací false. Kontrola vyhrazené identity zůstává povinná i při poradním režimu OPA, takže endpoint nezpřístupňuje osobní údaje sdíleným backendovým přihlašovacím údajům.
 
 ## Idempotence & deduplikace
 

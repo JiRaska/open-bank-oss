@@ -24,6 +24,8 @@ The resource class is role-gated; the **acting principal is always the authentic
 | `/loans/{id}/collateral` | `GET` | (class roles) | List collateral |
 | `/loans/{id}/provisioning` | `GET` | `ROLE_CREDIT_RISK`, `ROLE_COMPLIANCE`, `ROLE_ADMIN` | IFRS 9 staging + ECL. Optional `asOf` (date). 200 / 404 |
 
+The source-owned lending graph uses `/api/v1/lending/graph/loans/{loanId}`. Its proposal and decision routes require a human actor, a bounded `Idempotency-Key`, and separate maker/checker roles; `LENDING_GRAPH_WRITER_ENABLED` is false by default. Approved-guarantee history and shared-guarantor candidate reads require `ROLE_CREDIT_RISK` or `ROLE_ADMIN`, purpose `LENDING_EXPOSURE_REVIEW`, a matching case ID, and a live Context assignment check. `openbank.lending.graph.source-read-enabled` is false by default. A denied assignment returns 403; an unavailable dependency returns 503. The candidate read rechecks each related loan before returning facts; neither read calculates shared exposure.
+
 The scheduled monthly IFRS 9 provisioning cycle (ADR-0028 Phase 3, `ProvisioningCycleScheduler`) is **not** REST-triggered in this increment — it runs only on `lending.provisioning.cycle.every`. `GET /loans/{id}/provisioning` remains the on-demand, non-persisted read; the persisted per-period history it does not yet expose lives in `loan_provisioning` (no read endpoint over it yet — a natural small follow-up).
 
 ## Four-eyes / segregation of duties

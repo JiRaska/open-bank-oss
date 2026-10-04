@@ -17,6 +17,8 @@ Every runnable service using `openbank.quarkus-service` gets a generated `00-bui
 
 The Gradle `verifyServiceDocs` task checks the packaged build facts and runs through `check` in CI. The PR gate requires an authored documentation change when production service inputs change. A generated build page proves provenance and availability; the authored chapters explain behavior and must be reviewed with code.
 
+The lending-graph rollout adds the writer, proof clients and guarantee repository to `security_sensitive_paths` in `governance/rules.yaml`. Keep that declaration aligned with the security boundary when those files move or new proof paths are added; the governance change is reviewed alongside the lending and proof-service docs.
+
 `openbank-libs` has no running endpoint of its own. Its `docs/` directory is copied into the Admin UI image. That page is therefore a snapshot of the Admin UI build, while service pages come from the running service images.
 
 ## Releases and diagnosis

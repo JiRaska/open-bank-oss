@@ -25,6 +25,7 @@ This documentation is published directly by the service at the management endpoi
   schema `documents_schema`.
 - **Outbox:** `document_outbox` → Kafka topic `openbank.documents.document.event`.
 - **Data classification:** `restricted`; retention **10 years**.
+- **Lending guarantee proof:** `POST /api/v1/documents/lending-guarantee-evidence/verify` returns only `matches`; it checks a signed document's loan, guarantor, deployment bank scope and sealed SHA-256. It requires `ROLE_LENDING_GRAPH_PROOF` and the dedicated lending-graph service principal; `DOCUMENT_BANK_SCOPE` sets the deployment scope.
 - **Money-path:** **No** — event-emitting, never a synchronous fund-release gate. It IS a trust-boundary
   change ⇒ a threat model is required (`docs/threat-models/document-service.md`).
 - **Placeholders (behind ports):** template rendering (logic-less `{{token}}`, ADR-0162), PDF rendering

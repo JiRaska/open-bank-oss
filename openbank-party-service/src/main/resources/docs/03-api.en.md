@@ -19,8 +19,11 @@ All endpoints require a **Keycloak Bearer token** (realm `openbank`). Per-endpoi
 | `PATCH /parties/{id}` | `ROLE_OPERATOR`, `ROLE_ADMIN` (+ `@Authorize(action="party.update")` via OPA, advisory) |
 | `PUT /parties/{id}/kyc-status` | `ROLE_ADMIN`, `ROLE_KYC` |
 | `DELETE /parties/{id}` | `ROLE_ADMIN` |
+| `POST /parties/lending-guarantor-identity/verify` | `ROLE_LENDING_GRAPH_PROOF` and the dedicated lending-graph service principal |
 
 OPA authorization (ADR-0034) runs in **advisory mode** (`authz.enforce=false`): `@Authorize`-annotated denies are logged at WARN but the request proceeds. The flip to enforce is a later phase.
+
+The guarantor proof route returns only `verified`. It is true only for an active customer with approved KYC and cleared AML; an unknown party returns false. The dedicated principal check remains mandatory while OPA is advisory, so this route does not expose party details to a shared backend credential.
 
 ## Idempotency & de-duplication
 

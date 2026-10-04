@@ -25,6 +25,7 @@ Tato dokumentace je publikována přímo službou na management endpointu `/q/op
   `documents_schema`.
 - **Outbox:** `document_outbox` → Kafka topic `openbank.documents.document.event`.
 - **Klasifikace dat:** `restricted`; retence **10 let**.
+- **Ověření důkazu o záruce:** `POST /api/v1/documents/lending-guarantee-evidence/verify` vrací pouze `matches`; kontroluje vazbu podepsaného dokumentu na úvěr, ručitele, bankovní rozsah nasazení a SHA-256 pečeti. Vyžaduje `ROLE_LENDING_GRAPH_PROOF` a samostatnou identitu služby lending-graph; rozsah nastavuje `DOCUMENT_BANK_SCOPE`.
 - **Platební cesta:** **Ne** — vydává události, není synchronní bránou uvolnění prostředků. JE to změna
   hranice důvěry ⇒ vyžaduje threat model (`docs/threat-models/document-service.md`).
 - **Zástupné adaptéry (za porty):** renderování šablon (bezlogické `{{token}}`, ADR-0162), generování PDF

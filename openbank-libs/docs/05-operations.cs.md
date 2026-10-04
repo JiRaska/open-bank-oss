@@ -17,6 +17,8 @@ Každá běžící služba s `openbank.quarkus-service` dostane při `processRes
 
 Gradle úloha `verifyServiceDocs` kontroluje zabalené údaje a v CI běží přes `check`. PR kontrola vyžaduje změnu ručně psané dokumentace při změně produkčních vstupů služby. Generovaná stránka dokládá původ a dostupnost; ručně psané kapitoly vysvětlují chování a musí se revidovat s kódem.
 
+Zavedení úvěrového grafu přidává zapisovací endpoint, klienty ověřování a repozitář záruk do `security_sensitive_paths` v `governance/rules.yaml`. Při přesunu těchto souborů nebo přidání dalších cest ověřování udržujte deklaraci v souladu s bezpečnostní hranicí; změna pravidel se reviduje společně s dokumentací úvěrové služby a služeb ověřujících důkazy.
+
 `openbank-libs` nemá vlastní běžící endpoint. Jeho složka `docs/` se kopíruje do image Admin UI. Tato stránka je proto snímkem buildu Admin UI, zatímco stránky služeb pocházejí z jejich běžících image.
 
 ## Vydávání a diagnostika
