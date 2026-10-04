@@ -137,10 +137,19 @@ Chyby používají `ApiError` z `openbank-libs` (`{ correlationId, status, code,
 | HTTP | code | Kdy |
 |---|---|---|
 | 400 | (validace) | chybějící `Idempotency-Key`, vadné tělo / enum |
+| 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | `amount` + `currency` nelze sestavit jako kernel `Money` (více desetinných míst, než měna dovoluje, např. `100.005 CZK`; není kód ISO 4217 s dílčí jednotkou; chybí nebo je mimo rozsah), nebo je částka nulová či záporná (#11604). Odmítnuto před vyhledáním `Idempotency-Key`: nic se neuloží a opravený požadavek se stejným klíčem projde |
 | 401 | unauthorized | chybějící / neplatný token |
 | 403 | forbidden | chybí role pro endpoint (nebo OPA deny v enforce módu) |
 | 404 | `NOT_FOUND` | id platby neexistuje (`DomesticPaymentNotFoundException`) |
 | 409 | `CONFLICT` | nelegální přechod stavu (`InvalidDomesticPaymentStateTransitionException`) |
+
+
+### Škála částky při čtení (#11604)
+
+Sloupec `amount` zůstává `NUMERIC(20,6)`; služba jej načítá do kernel `Money` ve škále dílčí jednotky
+měny. Odpovědi, události `domestic.payment.*` i potvrzení platby proto nesou `100.50` tam, kde dříve
+ukazovaly škálu sloupce (`100.500000`) nebo zápis z požadavku (`100.5`). Hodnoty jsou číselně shodné;
+mění se jen textová podoba.
 
 ## Události
 
