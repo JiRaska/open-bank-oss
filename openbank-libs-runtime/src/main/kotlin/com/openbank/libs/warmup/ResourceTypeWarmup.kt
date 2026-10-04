@@ -47,7 +47,7 @@ internal object ResourceTypeWarmup {
 
     /** Resource classes = beans whose class carries `@Path` (RESTEasy Reactive makes them beans). */
     fun resourceClasses(beanClasses: Collection<Class<*>>): List<Class<*>> =
-        beanClasses.filter { it.isAnnotationPresent(Path::class.java) }.distinct()
+        beanClasses.filter { bean -> bean.annotations.any { it.annotationClass.java == Path::class.java } }.distinct()
 
     /** The (response, request-body) types of every HTTP-method endpoint on [resource]. */
     fun endpointTypes(resource: Class<*>): Pair<Set<Type>, Set<Type>> {
@@ -96,7 +96,9 @@ internal object ResourceTypeWarmup {
     private fun Method.isEndpoint(): Boolean = Modifier.isPublic(modifiers) &&
         !isSynthetic &&
         !isBridge &&
-        annotations.any { it.annotationClass.java.isAnnotationPresent(HttpMethod::class.java) }
+        annotations.any { annotation ->
+            annotation.annotationClass.java.annotations.any { it.annotationClass.java == HttpMethod::class.java }
+        }
 
     /** Kotlin `suspend fun x(): T` compiles to `x(Continuation<? super T>): Object`. */
     private fun responseType(m: Method): Type? {
