@@ -9,6 +9,9 @@ metadata:
   name: copilot
   namespace: platform
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Mobile app in foreground does < 5 req/s; a chat turn is one request.
