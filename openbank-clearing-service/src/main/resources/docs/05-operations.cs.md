@@ -89,6 +89,9 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
    omezené claimy. Pokud se kvůli latenci brokeru blíží 30s timeoutu dispatcheru, sniž
    `openbank.outbox.batch-size`; není potřeba vracet event ani databázovou migraci.
 
+### Položky visí PENDING v nevypořádatelné měně
+`openbank_clearing_unsettleable_pending_items{currency}` > 0 (a WARN `[clearing-cycle] … left unbatched` v každém cyklu) znamená, že byly přijaty položky v měně bez settlement GL páru; cyklus je záměrně nechává PENDING (#11974). Buď založte GL Customer Cash Clearing + Scheme Settlement pro danou měnu (migrace ledgeru + `NetSettlementJournalFactory`) — vypořádají se v dalším cyklu — nebo platby vraťte upstream. Nikdy je ručně nepřesouvejte do dávky jiné měny.
+
 ### Settle/trigger vrací 500
 Tělo je `{ "error": "<zpráva>" }`. Častá příčina: `settleBatch` s neznámým id → `IllegalArgumentException("Batch not found")`. Ověř id dávky; čtení přes `GET /batches/{id}`.
 

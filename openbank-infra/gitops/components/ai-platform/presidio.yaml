@@ -1,0 +1,293 @@
+# Microsoft Presidio — PII detection (analyzer) and replacement (anonymizer) for the LiteLLM
+# gateway's `presidio` guardrail (#11745 Tier 1).
+#
+# WHY AT THE GATEWAY: structured tool output is already masked where it is produced
+# (McpPiiMasker for MCP reads), but free text is not — what a customer types into the copilot,
+# and the logs and alert context HolmesGPT and the ops agents send. Every LLM call leaves the
+# cluster through the one LiteLLM pod (ADR-0174/0175), so masking there covers every caller and
+# BOTH destinations at once: the provider, and the Langfuse traces.
+#
+# THIS FILE ONLY DEPLOYS THE SERVICE. The guardrail is switched on in litellm-config.yaml by a
+# separate, later change, and that ordering is load-bearing: with `pii_entities_config` set, the
+# LiteLLM presidio hook FAILS CLOSED. Measured locally against v1.99.4 with the analyzer stopped:
+# HTTP 500 "Presidio PII analysis failed: ClientConnectorDNSError", and the model received nothing.
+# Enabling the guardrail before these pods serve would therefore stop every LLM call in the
+# estate. Same reason for two replicas and a PDB each: once enabled, this IS the gateway's
+# availability.
+#
+# IMAGE: pulled from mcr.microsoft.com pinned by digest (2.2.362, the newest tag MCR carries;
+# multi-arch incl. arm64, verified against the registry index). Not mirrored into ECR yet, so it
+# is outside the openbank-* SBOM-attestation policy, which matches only our own ECR repositories;
+# mirroring through platform-images.yml is the follow-up. Both images run as uid 1001 (`presidio`).
+#
+# TLS (ASVS V9.1): this edge carries the raw PII the guardrail exists to remove, so it is not added
+# to the plaintext baseline. Both services serve HTTPS on 3000 with a certificate from the fleet's
+# openbank-ca ClusterIssuer (presidio-internal-tls below, same shape as every *-internal-tls.yaml),
+# via gunicorn's own --certfile/--keyfile through GUNICORN_CMD_ARGS. Server-auth only, not mTLS:
+# LiteLLM's presidio hook opens a bare aiohttp.ClientSession() with no client-certificate hook, so
+# who may call is bounded by the ingress NetworkPolicies instead. LiteLLM trusts openbank-ca through
+# SSL_CERT_FILE (see litellm.yaml).
+#
+# SIZING (measured locally, single worker, en spaCy model loaded): analyzer ~906 MiB resident,
+# anonymizer ~48 MiB. A 4.3 kB prompt through LiteLLM + both services: p50 413 ms, p95 553 ms.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: presidio-internal-tls
+  namespace: ai-platform
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: presidio-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - presidio-analyzer.ai-platform.svc
+    - presidio-analyzer.ai-platform.svc.cluster.local
+    - presidio-anonymizer.ai-platform.svc
+    - presidio-anonymizer.ai-platform.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presidio-analyzer
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: presidio-analyzer
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-analyzer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: presidio-analyzer
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-analyzer
+      containers:
+        - name: presidio-analyzer
+          image: mcr.microsoft.com/presidio-analyzer:2.2.362@sha256:286e3fa7f3a7426e775e8564fe1870f1ba8f999d3ab8bbb8cc46a44355d9d6e9
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 3000
+          env:
+            # Gunicorn 25.1 creates its control socket `gunicorn.ctl` in the working directory
+            # (/app), which a read-only root filesystem refuses: "[ERROR] Control server error:
+            # [Errno 30] Read-only file system", and the analyzer never reports healthy. Measured
+            # locally; moving the socket to the /tmp emptyDir fixes it without giving up
+            # readOnlyRootFilesystem. HOME points poetry's cache at the same volume.
+            # --certfile/--keyfile: HTTPS-only listener on 3000 (see TLS in the header).
+            - name: GUNICORN_CMD_ARGS
+              value: "--control-socket /tmp/gunicorn.ctl --certfile /mnt/internal-tls/tls.crt --keyfile /mnt/internal-tls/tls.key"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
+          # The spaCy model loads at start; /health answers only once the app is serving.
+          startupProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 5
+            failureThreshold: 36
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 1Gi
+            limits:
+              memory: 1536Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: presidio-internal-tls
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: presidio-anonymizer
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: presidio-anonymizer
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-anonymizer
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: presidio-anonymizer
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: presidio-anonymizer
+      containers:
+        - name: presidio-anonymizer
+          image: mcr.microsoft.com/presidio-anonymizer:2.2.362@sha256:a10a12a2a613d13cf29d3ad3641e3258444dd8c90403dd644a0a114c472c2483
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: https
+              containerPort: 3000
+          env:
+            # Gunicorn 25.1 creates its control socket `gunicorn.ctl` in the working directory
+            # (/app), which a read-only root filesystem refuses: "[ERROR] Control server error:
+            # [Errno 30] Read-only file system", and the analyzer never reports healthy. Measured
+            # locally; moving the socket to the /tmp emptyDir fixes it without giving up
+            # readOnlyRootFilesystem. HOME points poetry's cache at the same volume.
+            # --certfile/--keyfile: HTTPS-only listener on 3000 (see TLS in the header).
+            - name: GUNICORN_CMD_ARGS
+              value: "--control-socket /tmp/gunicorn.ctl --certfile /mnt/internal-tls/tls.crt --keyfile /mnt/internal-tls/tls.key"
+            - name: HOME
+              value: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: https
+              scheme: HTTPS
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 96Mi
+            limits:
+              memory: 256Mi
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: presidio-internal-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presidio-analyzer
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: presidio-analyzer
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  selector:
+    app.kubernetes.io/name: presidio-analyzer
+  ports:
+    - name: https
+      port: 3000
+      targetPort: https
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: presidio-anonymizer
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: presidio-anonymizer
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  selector:
+    app.kubernetes.io/name: presidio-anonymizer
+  ports:
+    - name: https
+      port: 3000
+      targetPort: https
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: presidio-analyzer
+  namespace: ai-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-analyzer
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: presidio-anonymizer
+  namespace: ai-platform
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: presidio-anonymizer

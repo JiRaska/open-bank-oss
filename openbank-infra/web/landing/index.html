@@ -4,13 +4,13 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>OpenBank | Open-source banking ecosystem &amp; reference platform</title>
-<meta name="description" content="Explore OpenBank: an open-source banking ecosystem connecting domains, shared libraries, Product Studio, testing, observability and governed AI/MCP tools." />
+<meta name="description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
 <meta name="theme-color" content="#f8f6f1" />
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="OpenBank" />
 <meta property="og:url" content="https://open-bank.tech/" />
 <meta property="og:title" content="OpenBank | Open-source banking ecosystem &amp; reference platform" />
-<meta property="og:description" content="Explore OpenBank: an open-source banking ecosystem connecting domains, shared libraries, Product Studio, testing, observability and governed AI/MCP tools." />
+<meta property="og:description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
 <meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
 <meta property="og:image:width" content="1536" />
 <meta property="og:image:height" content="1024" />
@@ -47,7 +47,7 @@
       "@id": "https://open-bank.tech/#webpage",
       "url": "https://open-bank.tech/",
       "name": "OpenBank | Open-source banking ecosystem & reference platform",
-      "description": "Explore OpenBank: an open-source banking ecosystem connecting domains, shared libraries, Product Studio, testing, observability and governed AI/MCP tools.",
+      "description": "Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools.",
       "isPartOf": {
         "@id": "https://open-bank.tech/#website"
       },
@@ -147,6 +147,21 @@
 <p class="eyebrow">The bank as one system</p>
 <h2>One bank.<br /><span>Every connection counts.</span></h2>
 <p>OpenBank is an open-source banking ecosystem for the work inside a bank and the relationships it serves outside. Explore the domains together, follow the evidence behind them and see how a shared core keeps the experience coherent.</p>
+</div>
+<div class="bank-as-code" id="bank-as-code">
+<div class="bank-as-code-intro">
+<p class="eyebrow">Bank as Code</p>
+<h3>The bank explains itself.</h3>
+<p>A running service exposes its own API contract, version and health. Its documentation travels with its release, so teams can inspect what is deployed and trace it back to the code.</p>
+<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0019-docs-as-service.md">See docs-as-service in the source →</a>
+</div>
+<div class="bank-as-code-proof">
+<div><span>01 / SERVICE</span><strong>Self-describing services</strong><p>Live endpoints report the deployed version, API contract and health.</p></div>
+<div><span>02 / DOCUMENTATION</span><strong>Documentation as Code</strong><p>Service-owned docs ship with the release; generated decisions and runbooks are checked for drift.</p></div>
+<div><span>03 / GOVERNANCE</span><strong>Compliance as Code</strong><p>Each service declares ownership, lineage and retention. CI cross-checks claims that the code can verify.</p></div>
+<div><span>04 / EVIDENCE</span><strong>Ready to examine</strong><p>Link a change to its contract, tests and operational signals, giving reviewers a path from a claim to its evidence.</p></div>
+</div>
+<p class="bank-as-code-note">The public catalog is a code-derived snapshot, not a live deployment report. Running-service endpoints and operational views show current state.</p>
 </div>
 <div class="ecosystem-grid">
 <article class="ecosystem-card ecosystem-bank">
