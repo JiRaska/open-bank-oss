@@ -334,7 +334,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0327](0327-kernel-owned-outbox-v2.md) | Kernel-owned outbox v2: shared repository, indexed claim, backoff, ordering, retention | Proposed | Planned | libs,kafka,database,resilience | — |
 | [0328](0328-upgrade-self-hosted-langfuse-from-the-unmaintained-v2-line-to-v4.md) | Upgrade self-hosted Langfuse from the unmaintained v2 line to v4 | Proposed | Planned | observability,ai-agents,security,privacy-gdpr | — |
 | [0330](0330-classify-a-required-idempotency-key-on-a-money-path-post-as-a-minor-api-change.md) | Classify a required Idempotency-Key on a money-path POST as a MINOR API change | Accepted | Shipped | api-contract,governance,ci | — |
-| [0331](0331-bank-owned-synthetic-customer-identity-a-customers-realm-service-account-bound-to-one-synthetic-party.md) | Bank-owned synthetic customer identity: a customers-realm service account bound to one SYNTHETIC party | Proposed | Planned | authn,customer-edge,testing,security | — |
+| [0331](0331-bank-owned-synthetic-customer-identity-a-customers-realm-service-account-bound-to-one-synthetic-party.md) | Bank-owned synthetic customer identity: a customers-realm service account bound to one SYNTHETIC party | Proposed | Partial | authn,customer-edge,testing,security | — |
 | [0332](0332-cnb-settlement-and-reserve-account-in-the-ledger-chart.md) | ČNB settlement and reserve account in the ledger chart | Proposed | Planned | ledger,payments,regulatory-reporting,accounting-close | — |
 
 ## By tag

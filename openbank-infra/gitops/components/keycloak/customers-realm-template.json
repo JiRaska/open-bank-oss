@@ -160,6 +160,89 @@
       "attributes": {
         "client_credentials.use_refresh_token": "false"
       }
+    },
+    {
+      "clientId": "openbank-synthetic-retail",
+      "name": "OpenBank Synthetic Customer: retail",
+      "description": "Bank-owned canary customer (ADR-0331, ADR-0252). Its service-account user IS the customer: ROLE_CUSTOMER and the party_id of one SYNTHETIC party. client_credentials only; no browser, password or implicit flow.",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "__SYNTHETIC_RETAIL_CLIENT_SECRET__",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "client_credentials.use_refresh_token": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "preferred-username",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "username",
+            "claim.name": "preferred_username",
+            "jsonType.label": "String",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "party-id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "user.attribute": "party_id",
+            "claim.name": "party_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "jsonType.label": "String",
+            "multivalued": "false",
+            "aggregate.attrs": "false"
+          }
+        },
+        {
+          "name": "sub",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-sub-mapper",
+          "consentRequired": false,
+          "config": {
+            "access.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        },
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String",
+            "multivalued": "true",
+            "id.token.claim": "false",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "false"
+          }
+        },
+        {
+          "name": "openbank-edge-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "openbank-edge",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "clientScopes": [
@@ -404,5 +487,20 @@
   "webAuthnPolicyPasswordlessAttestationConveyancePreference": "none",
   "webAuthnPolicyPasswordlessAuthenticatorAttachment": "platform",
   "webAuthnPolicyPasswordlessRequireResidentKey": "Yes",
-  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required"
+  "webAuthnPolicyPasswordlessUserVerificationRequirement": "required",
+  "users": [
+    {
+      "username": "service-account-openbank-synthetic-retail",
+      "enabled": true,
+      "serviceAccountClientId": "openbank-synthetic-retail",
+      "realmRoles": [
+        "ROLE_CUSTOMER"
+      ],
+      "attributes": {
+        "party_id": [
+          "__SYNTHETIC_RETAIL_PARTY_ID__"
+        ]
+      }
+    }
+  ]
 }

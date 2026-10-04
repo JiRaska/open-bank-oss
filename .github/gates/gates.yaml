@@ -5198,6 +5198,28 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
+  # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
+  # service-account user holding only ROLE_CUSTOMER plus one SYNTHETIC party_id. And the
+  # synthetic taint may be trusted only from those clients at customer-edge, and only from the
+  # edge's relay identity downstream: any other trusted principal could drop real activity out
+  # of the regulatory aggregates by sending one header. Falsified on the real tree in both
+  # halves before wiring: enabling the canary's password grant, and adding a second principal
+  # to wealth-service's list, each exit 2 naming the file.
+  - id: synthetic-customer-identity
+    name: "synthetic customer identity keeps the ADR-0331 shape and trust list (enforced)"
+    group: security
+    mode: enforced
+    rationale: "A canary customer with a password grant or an extra role, or a trust list naming any other caller, would let that caller drop real activity out of the regulatory aggregates; the JSON and manifests are the only place either is visible before it is live."
+    review_after: "2027-04-04"
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-synthetic-customer-identity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-synthetic-customer-identity.py"]
+    min_subjects: 3  # 2026-10-04: 1 canary client + 2 trusted-principal declarations (customer-edge, wealth)
+    run: |
+      python3 .github/scripts/check-synthetic-customer-identity.py --root .
+
   # Importability alone does not reject an operator client with a password grant,
   # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
   - id: ops-cli-client-contract

@@ -63,6 +63,11 @@ spec:
               value: "http://tempo.observability.svc:4317"
             - name: OTEL_TRACES_SAMPLER_ARG
               value: "0.1"
+            # ADR-0331 / ADR-0252: trust the taint only from customer-edge, which forwards it
+            # after its own trusted-principal decision (UpstreamClient). Held to that one
+            # relay identity by check-synthetic-customer-identity.py.
+            - name: OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS
+              value: "service-account-openbank-edge"
             # Reactive + JDBC (Flyway) legs onto the same CNPG primary. The service's
             # application.yaml hardcodes localhost for both; these env vars override it, since an
             # env source outranks application.yaml in SmallRye's ordinal.
