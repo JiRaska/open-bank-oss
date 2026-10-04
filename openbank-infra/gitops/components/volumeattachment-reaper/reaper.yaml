@@ -62,6 +62,9 @@ metadata:
   namespace: volumeattachment-reaper
   labels:
     app.kubernetes.io/part-of: volumeattachment-reaper
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/2 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "900"
 spec:
   schedule: "*/2 * * * *"
   concurrencyPolicy: Forbid

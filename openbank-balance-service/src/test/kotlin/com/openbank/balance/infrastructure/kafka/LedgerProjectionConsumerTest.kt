@@ -75,7 +75,7 @@ class LedgerProjectionConsumerTest {
         assertEquals(accountId, change.accountId)
         assertEquals(journalEntryId, change.journalEntryId)
         assertEquals(transactionId, change.transactionId)
-        assertEquals(0, change.delta.compareTo(BigDecimal("-40.00")))
+        assertEquals(0, change.delta.amount.compareTo(BigDecimal("-40.00")))
         assertEquals("CZK", change.currency)
     }
 

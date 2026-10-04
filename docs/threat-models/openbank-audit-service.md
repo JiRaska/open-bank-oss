@@ -15,6 +15,35 @@ sidecar.
 
 ## Change log
 
+### 2026-10-03 — evidence bundle route, and a fourth reader role (#11900)
+
+New `GET /api/v1/audit/evidence/{aggregateId}` (ADR-0214 D3): every entry about one aggregate,
+oldest first, with each entry's hash recomputed at read time (`VERIFIED` / `MISMATCH` /
+`LEGACY_UNVERIFIABLE` / `UNCHAINED`). Read-only; no new write path.
+
+**New reader (STRIDE-I).** `ROLE_CREDIT_RISK` may call this one route, and only this one
+(`/entries`, `/integrity` and the anchors stay AUDITOR/ADMIN/COMPLIANCE — asserted by
+`AuditEvidenceBundleIT` and the rego tests). Credit-risk staff already read the same loan evidence
+from lending-service; lending now sources it here instead of from its own outbox, so the audience is
+unchanged and the source becomes the tamper-evident chain.
+
+**New caller, same principal (STRIDE-S/E).** lending-service calls this route, forwarding the
+signed-in person's own bearer token — it never uses its service account here. The action is
+`audit.evidence.reconstruct`, deliberately not `*.read`: measured with `opa eval` against this
+bundle, base `rest.rego`'s `operator-read-any` / `compliance-read-any` grant every `*.read` action to
+HUMAN-classified service accounts, so the same route under a read-verb action name was allowed
+for `service-account-openbank-services`. With `reconstruct`, the evidence rule — which
+excludes `service-account-*` — is the only grant; the must-deny controls (lending SA with
+COMPLIANCE + CREDIT_RISK, shared SA with OPERATOR, human OPERATOR) all evaluate to deny.
+**Pre-existing, not changed here:** `audit.read` is a `*.read` action, so the same base rules allow it
+for a service account at the OPA layer; only `@RolesAllowed` (AUDITOR/ADMIN/COMPLIANCE, which the
+realm service accounts do not hold) stops one. The rule comment claiming its service-account
+exclusion keeps M2M out is therefore not what enforces it.
+
+**Tampering (STRIDE-T/R).** An edited row is reported as `MISMATCH` and the bundle as `tampered`.
+Per-entry recomputation cannot detect a deleted or re-ordered row; the response points at
+`/api/v1/audit/integrity` for that, and says so in its contract.
+
 ### 2026-10-03 — policy decision point wiring
 
 The service now opts in to the shared libs-runtime `OpaPolicyDecisionPointProducer`
@@ -80,3 +109,22 @@ acknowledgement-on-failure is unsafe. See `docs/runbooks/audit-ingestion-recover
 Residual: unsigned coherent checkpoints and unavailable historical keys remain UNVERIFIED. These
 checks do not establish external custody, completeness of an export or retention guarantees;
 independent verification remains necessary.
+
+### 2026-10-03 — trail reads refuse service accounts at the policy decision
+
+- **Information disclosure / Elevation of privilege:** the trail reads (`/entries/{aggregateId}`,
+  `/entries/by-actor/{actorId}`) were authorized as `audit.read`. Ending in `.read`, that action was
+  granted by base `rest.rego`'s `operator-read-any` / `compliance-read-any` to any HUMAN-classified
+  principal holding ROLE_OPERATOR / ROLE_COMPLIANCE — and Keycloak client_credentials tokens are
+  classified HUMAN. Measured with `opa eval` against the audit OPA bundle:
+  `service-account-openbank-services` (ROLE_API, ROLE_OPERATOR) was allowed with reason
+  `operator-read-any`. The audit extension rule's `service-account-` exclusion was therefore not
+  load-bearing; only `@RolesAllowed` stopped a machine caller. The action is now
+  `audit.trail.inspect`, outside base's `{list, read}` verbs, and the role-action matrix no longer
+  lists the old name. Against the regenerated bundle, service accounts with ROLE_OPERATOR,
+  ROLE_COMPLIANCE or ROLE_AUDITOR are denied; human AUDITOR, COMPLIANCE and ADMIN are allowed.
+  `rest_test.rego` and `AuditResourceSecurityTest` pin the deny and the verb.
+
+Residual: `@RolesAllowed` and the OPA rule both depend on realm role assignment; a realm that grants
+a staff client's tokens a non-`service-account-` id with an oversight role is outside this control.
+`AUTHZ_ENFORCE` for audit-service decides whether the OPA deny is enforced or advisory.

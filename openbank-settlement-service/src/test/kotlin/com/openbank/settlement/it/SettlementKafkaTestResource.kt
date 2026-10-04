@@ -28,7 +28,7 @@ class SettlementKafkaTestResource : QuarkusTestResourceLifecycleManager {
             broker = kafka
             kafka.start()
             started = true
-            TestInfrastructureEvidence.record("kafka", kafka.dockerImageName, "started")
+            TestInfrastructureEvidence.record("redpanda", kafka.dockerImageName, "started")
             Admin.create(mapOf("bootstrap.servers" to kafka.bootstrapServers)).use { admin ->
                 admin.createTopics(listOf(NewTopic(TOPIC, 1, 1)))
                     .all().get(20, TimeUnit.SECONDS)
@@ -51,7 +51,7 @@ class SettlementKafkaTestResource : QuarkusTestResourceLifecycleManager {
         try {
             broker?.let {
                 it.stop()
-                if (started) TestInfrastructureEvidence.record("kafka", it.dockerImageName, "stopped")
+                if (started) TestInfrastructureEvidence.record("redpanda", it.dockerImageName, "stopped")
             }
             started = false
             broker = null

@@ -48,6 +48,14 @@ dependencies {
     testImplementation(libs.pact.provider)
 }
 
+// Four Quarkus test configurations now boot in one test JVM (default, the two pact provider
+// twins, and the synthetic-taint profile), and the default 512m heap ran out on the fourth boot
+// (OutOfMemoryError, the suite then reports SKIPPED rather than failed). Same override as aml,
+// account and balance.
+tasks.withType<Test> {
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         filters {

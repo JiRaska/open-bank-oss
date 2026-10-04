@@ -58,7 +58,12 @@ info:
   #        can offer exactly the sets they accept (a set must be as of the run's own date); the
   #        IRRBB read states a multi-currency book's aggregate in CZK at ČNB fixings
   #        (Irrbb.reportingAggregate), so the outlier test is computed for such a book too.
-  version: 1.22.0
+  # 1.22.0 -> 1.23.0: additive — GET /snapshots/{id}/irrbb: `curveSetId` is optional (newest set as
+  #        of the run's date); `dataGaps[]` states what the figures do not capture (flat curve
+  #        extrapolation past the last pillar, no prepayment, simplified NMD, margins, deals not
+  #        projected); `outlierTest` falls back to the run's own-funds Tier 1 and is evaluated
+  #        against the declared `irrbb-eve-outlier` limit (status, earlyWarning, limitId).
+  version: 1.23.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -279,13 +284,16 @@ paths:
         Annex 2 scenarios (`deltaEve = PV(shocked) − PV(base)`, negative is a loss), ΔNII over 12
         months under parallel up/down, the worst case, and the assumptions that produced them.
         Shock sizes are configuration: a currency without them is listed in `shockNotConfigured`
-        and gets no scenarios. `tier1Capital` is optional and only ever the caller's; without it
-        the supervisory outlier ratio is not computed. Derived on request, never stored.
+        and gets no scenarios. `tier1Capital` is optional; without it the run's own-funds Tier 1
+        (CZK) is used — the figure the `irrbb-eve-outlier` limit uses — and only for a CZK
+        aggregate. `dataGaps` lists what the figures do not capture, notably curves extrapolated
+        flat beyond their last pillar. Derived on request, never stored.
       parameters:
         - $ref: '#/components/parameters/RunId'
         - name: curveSetId
           in: query
-          required: true
+          required: false
+          description: Defaults to the newest curve set recorded as of the run's own date (400 when none).
           schema:
             type: string
             format: uuid
@@ -304,7 +312,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/Irrbb'
         '400':
-          description: Missing or malformed `curveSetId` / `tier1Capital`, or a curve set for another as-of date
+          description: Malformed `curveSetId` / `tier1Capital`, no curve set as of the run's date, or a curve set for another as-of date
         '401':
           description: Unauthenticated
         '403':
@@ -1310,6 +1318,23 @@ components:
         niiHorizonMonths: {type: integer}
         currencyAggregation: {type: string}
 
+    IrrbbDataGap:
+      type: object
+      required: [code, detail]
+      properties:
+        code:
+          type: string
+          x-extensible-enum: [CURVE_EXTRAPOLATED_FLAT, PREPAYMENT_NOT_MODELLED, NMD_BEHAVIOUR_SIMPLIFIED,
+            COMMERCIAL_MARGIN_INCLUDED, INSTRUMENTS_NOT_PROJECTED]
+        currency: {type: [string, 'null']}
+        curveIndex: {type: [string, 'null']}
+        lastPillarDate: {type: [string, 'null'], format: date}
+        lastFlowDate: {type: [string, 'null'], format: date}
+        flowsBeyond: {type: [integer, 'null']}
+        basePvBeyond: {type: [number, 'null'], description: Base PV of the flows beyond the last pillar}
+        count: {type: [integer, 'null']}
+        detail: {type: string}
+
     Irrbb:
       type: object
       required: [runId, asOf, provenance, curveSetId, curveSetProvenance, curveSetSource, gaps, scenarios,
@@ -1341,13 +1366,26 @@ components:
           type: object
           required: [tier1Supplied, threshold, note]
           properties:
-            tier1Supplied: {type: boolean}
+            tier1Supplied: {type: boolean, description: True only when the caller passed tier1Capital}
             tier1Capital: {type: [number, 'null']}
+            tier1Source:
+              type: [string, 'null']
+              x-extensible-enum: [caller, own-funds]
+            tier1Gap: {type: [string, 'null'], description: Why no Tier 1 is usable}
             currency: {type: [string, 'null']}
-            threshold: {type: number}
+            threshold: {type: number, description: The declared irrbb-eve-outlier limit, else 0.15}
+            earlyWarning: {type: [number, 'null']}
+            limitId: {type: [string, 'null']}
+            status:
+              type: string
+              x-extensible-enum: [OK, EARLY_WARNING, BREACH, NOT_EVALUABLE]
             ratio: {type: [number, 'null']}
             breached: {type: [boolean, 'null']}
             note: {type: string}
+        dataGaps:
+          type: array
+          description: What the figures do not capture. Never silently omitted.
+          items: {$ref: '#/components/schemas/IrrbbDataGap'}
         shockNotConfigured:
           type: array
           items: {type: string}

@@ -15,7 +15,7 @@ import java.io.File
  * because a config key with no reader fails by looking correct.
  *
  * This test is the thing that was missing: it asserts the general property (any
- * `openbank.domestic.*` config key is read by some Kotlin source) rather than the specific
+ * `openbank.domestic.*` config key is named, by its full dotted path, in some Kotlin source) rather than the specific
  * absence, so it also covers the next key that loses its reader. A key that legitimately needs no
  * Kotlin reader — one consumed by a Quarkus extension — belongs in [FRAMEWORK_READ].
  */
@@ -30,7 +30,7 @@ class FraudEnforcementFlagRetiredTest {
 
     @Test
     fun `the retired enforcement flag has not come back`() {
-        assertThat(yamlKeysUnderOpenbankDomestic())
+        assertThat(yamlKeysUnderOpenbankDomestic().map { it.substringAfterLast('.') })
             .describedAs("re-adding this key needs a workflow-level decision path, not a boolean — see #4221")
             .doesNotContain("enforcement-enabled")
     }
@@ -39,7 +39,7 @@ class FraudEnforcementFlagRetiredTest {
     fun `every openbank domestic config key is read by something`() {
         val unread = yamlKeysUnderOpenbankDomestic()
             .filterNot { it in FRAMEWORK_READ }
-            .filterNot { key -> kotlinSources.any { it.contains(key) } }
+            .filterNot { key -> kotlinSources.any { it.contains("$PREFIX$key") } }
 
         assertThat(unread)
             .describedAs(
@@ -49,24 +49,47 @@ class FraudEnforcementFlagRetiredTest {
             .isEmpty()
     }
 
+    @Test
+    fun `the block is parsed into full dotted paths, not bare leaf names`() {
+        // The guard against this test going vacuous again (#4403): a bare leaf such as `enabled`
+        // occurs in unrelated sources, so matching on it could not fail. The path must carry its
+        // parents, and the parser must actually find the block.
+        assertThat(yamlKeysUnderOpenbankDomestic())
+            .contains("screening-redrive.enabled")
+            .doesNotContain("enabled")
+    }
+
     /**
-     * Leaf keys of the `openbank.domestic:` block. Deliberately textual and shallow: the point is
-     * to notice a key nobody consumes, and a full SmallRye-faithful parse would not make that
-     * judgement any sharper.
+     * Leaf keys of the `openbank.domestic:` block as dotted paths relative to it
+     * (`screening-redrive.enabled`). Deliberately textual: the point is to notice a key nobody
+     * consumes, and a full SmallRye-faithful parse would not make that judgement any sharper.
      */
     private fun yamlKeysUnderOpenbankDomestic(): List<String> {
         val lines = yaml.readLines()
         val start = lines.indexOfFirst { it.trimEnd() == "  domestic:" }
         check(start >= 0) { "the openbank.domestic block moved — this test needs updating, not deleting" }
         val indent = "    "
+        val parents = ArrayDeque<Pair<Int, String>>()
         return lines.drop(start + 1)
             .takeWhile { it.isBlank() || it.startsWith(indent) || it.startsWith("#") }
             .filterNot { it.trimStart().startsWith("#") }
-            .mapNotNull { line -> KEY.find(line)?.groupValues?.get(1) }
+            .mapNotNull { line ->
+                val match = KEY.find(line) ?: return@mapNotNull null
+                val depth = match.groupValues[1].length
+                val name = match.groupValues[2]
+                while (parents.isNotEmpty() && parents.last().first >= depth) parents.removeLast()
+                if (match.groupValues[3].isBlank()) {
+                    parents.addLast(depth to name)
+                    null
+                } else {
+                    (parents.map { it.second } + name).joinToString(".")
+                }
+            }
     }
 
     companion object {
-        private val KEY = Regex("""^\s{4,}([a-z0-9-]+):\s*\S""")
+        private const val PREFIX = "openbank.domestic."
+        private val KEY = Regex("""^(\s{4,})([a-z0-9-]+):\s*(.*)$""")
 
         /** Keys consumed by a Quarkus extension or the YAML itself rather than by our Kotlin. */
         private val FRAMEWORK_READ = emptySet<String>()

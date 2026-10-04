@@ -1,0 +1,45 @@
+# Prometheus history-length guard (ADR-0088 D3).
+#
+# Twenty Pyrra SLOs declare `window: 30d`, and the forecast/capacity rules extrapolate over
+# weeks. They are only honest while Prometheus actually HOLDS 30 days. Two things can quietly
+# shorten that, and neither shows on any SLO panel: retention set too low (12h until
+# 2026-09-30), and size-based retention (`retentionSize`) evicting blocks before the time limit
+# is reached. Size beats time, so the time setting alone says nothing. The 30d config shipped
+# with `retentionSize: 85GB` against ~4.6 GB/day of compacted blocks, which would have started
+# evicting at about day 20.
+#
+# This alert fires when the size limit is what is deleting history. That is the one case where
+# configured and actual retention differ. The `lowest_timestamp` clause keeps it quiet after a
+# deliberate size cap on a store that already holds the full 30d, and it clears without anyone
+# touching it once the size limit is raised.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-prometheus-retention
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.prometheus.retention
+      rules:
+        - alert: PrometheusHistoryTruncatedBySize
+          expr: |
+            increase(prometheus_tsdb_size_retentions_total[6h]) > 0
+              and on (instance)
+            (time() - prometheus_tsdb_lowest_timestamp_seconds) < 29 * 86400
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            subject_period: continuous
+            summary: "Prometheus is deleting history by size before 30d: SLO windows are short"
+            description: >-
+              retentionSize is evicting blocks while the oldest sample is under 29 days old, so
+              every `window: 30d` SLO, error budget and :increase30d series is computed over
+              less history than it claims. Measure the daily growth with
+              `deriv(prometheus_tsdb_storage_blocks_bytes[1d]) * 86400`, then raise
+              `retentionSize` and the PVC in gitops/apps/kube-prometheus-stack.yaml together (the
+              operator does not resize a live PVC; patch it once after merge). Or find the
+              cardinality regression that made the store grow.

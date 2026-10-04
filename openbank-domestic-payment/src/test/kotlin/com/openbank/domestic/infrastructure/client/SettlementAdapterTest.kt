@@ -10,6 +10,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -115,15 +116,16 @@ class SettlementAdapterTest {
         assertThat(req.rail).isEqualTo("DOMESTIC")
         assertThat(req.type).isEqualTo("DEBIT")
         assertThat(req.sourceAccountId).isEqualTo(p.debtorAccountId)
-        assertThat(req.amount).isEqualByComparingTo(p.amount)
+        assertThat(req.amount).isEqualByComparingTo(p.amount.amount)
         assertThat(req.currencyCode).isEqualTo(p.currency)
     }
 
     @Test
-    fun `settle rounds a wide-scale amount half-up to the currency's minor units`(): Unit = runBlocking {
-        // A tie at the third decimal discriminates HALF_UP (10.13) from HALF_EVEN (10.12): the
-        // booking amount keeps the LEDGER_POSTING rounding it has always had.
-        val p = payment().copy(amount = BigDecimal("10.125000"))
+    fun `settle books the Money amount at the currency's minor-unit scale without rounding`(): Unit = runBlocking {
+        // #11604: the NUMERIC(20,6) column value 10.130000 reads back as Money 10.13 CZK. The booking
+        // carries exactly that — scale 2, which transaction-service requires — and no rounding step
+        // exists any more: an amount with a third decimal can no longer reach this adapter.
+        val p = payment().copy(amount = Money.of(BigDecimal("10.130000"), "CZK"))
         val response = mockk<Response>()
         every { response.status } returns 201
         every { response.readEntity(String::class.java) } returns """{"id":"${UUID.randomUUID()}"}"""
@@ -134,6 +136,7 @@ class SettlementAdapterTest {
         adapter().settle(p)
 
         assertThat(requestSlot.captured.amount).isEqualTo(BigDecimal("10.13"))
+        assertThat(requestSlot.captured.amount.scale()).isEqualTo(2)
     }
 
     @Test
@@ -188,8 +191,7 @@ class SettlementAdapterTest {
         creditorAccountNumber = "9876543210",
         creditorBankCode = "0100",
         creditorName = "Bob",
-        amount = BigDecimal("500.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("500.00"), "CZK"),
         variableSymbol = "12345",
         specificSymbol = null,
         constantSymbol = null,

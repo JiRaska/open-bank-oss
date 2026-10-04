@@ -119,6 +119,16 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
+  folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
+  a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
+  clean score at every layer that reads the outcome. `FraudVerdict.UNKNOWN` now names that case,
+  counted apart from real and synthetic outcomes (`result="unrecognised"`) with the degraded gauge
+  at 0, since the scorer was reachable. **No trust boundary, edge or privilege changed**; the
+  verdict is still shadow-only, so payment decisions do not change. The log line records the event;
+  the counter feeds `FraudScoringUnrecognisedVerdict`, which warns on an unreadable score.
+  Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
+  a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
@@ -599,3 +609,17 @@ not change any existing request's outcome until explicitly flipped.
   grants are unchanged. **STRIDE-T:** none new — the rounding rule is now a single named policy
   rather than a literal, so a later change to it is one reviewed edit instead of a silent drift
   between call sites. Rollback: revert the commit.
+- **2026-10-04** — **Kernel `Money` built at the create boundary (#11604).** `POST /api/v1/domestic-payments`
+  builds `Money.parseInbound(amount, currency)` and requires it to be strictly positive in the request
+  DTO, before the use case looks up or binds the `Idempotency-Key`; the command and the domain carry
+  `Money`. **STRIDE-T (closed):** on `main` before this change the service accepted, persisted,
+  announced (`domestic.payment.created`) and started a workflow for a zero or negative amount, an
+  unknown currency (`XYZ`, `XAU`) and a sub-haléř amount (`100.005 CZK`, later rounded HALF_UP by the
+  settlement edge). All are now a 400 problem (`AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` /
+  `VALIDATION_ERROR`) with no row, no outbox event and the key left free. **Unchanged:** the
+  `NUMERIC(20,6)` column (no migration — sandbox holds 43 CZK rows, all at haléř scale and positive);
+  the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
+  is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
+  Money can hold). Reads, events and the confirmation document serialise at the currency scale
+  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
+  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
