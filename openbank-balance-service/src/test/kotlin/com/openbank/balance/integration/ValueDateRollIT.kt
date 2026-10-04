@@ -15,6 +15,7 @@ import com.openbank.balance.infrastructure.persistence.repository.LedgerProjecti
 import com.openbank.balance.infrastructure.persistence.repository.LedgerProjectionPortImpl
 import com.openbank.balance.it.PostgresRedpandaTestResource
 import com.openbank.libs.domain.calendar.AccountingClock
+import com.openbank.libs.domain.money.Money
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
@@ -206,7 +207,12 @@ class ValueDateRollIT {
         assertThatThrownBy {
             onEventLoop {
                 balanceService.placeHold(
-                    PlaceHoldCommand(accountId, BigDecimal("3000.01"), "CZK", "payment", UUID.randomUUID().toString()),
+                    PlaceHoldCommand(
+                        accountId,
+                        Money.of(BigDecimal("3000.01"), "CZK"),
+                        "payment",
+                        UUID.randomUUID().toString(),
+                    ),
                 )
             }
         }.isInstanceOf(InsufficientFundsException::class.java)
@@ -215,7 +221,12 @@ class ValueDateRollIT {
         // The effective part is still fully spendable — this restricts the future credit only.
         val hold = onEventLoop {
             balanceService.placeHold(
-                PlaceHoldCommand(accountId, BigDecimal("3000.00"), "CZK", "payment", UUID.randomUUID().toString()),
+                PlaceHoldCommand(
+                    accountId,
+                    Money.of(BigDecimal("3000.00"), "CZK"),
+                    "payment",
+                    UUID.randomUUID().toString(),
+                ),
             )
         }
         assertThat(hold.amount).isEqualByComparingTo(BigDecimal("3000.00"))

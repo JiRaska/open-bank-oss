@@ -126,7 +126,7 @@ class BalanceService(
         )
 
         val updated = try {
-            balance.withReservation(cmd.amount).copy(updatedAt = OffsetDateTime.now(clock))
+            balance.withReservation(cmd.amount.amount).copy(updatedAt = OffsetDateTime.now(clock))
         } catch (e: IllegalArgumentException) {
             throw InsufficientFundsException(e.message ?: "Insufficient funds")
         }
@@ -134,7 +134,7 @@ class BalanceService(
         val hold = BalanceHold(
             id = Ids.newId(),
             accountId = cmd.accountId,
-            amount = cmd.amount,
+            amount = cmd.amount.amount,
             currency = cmd.currency,
             reason = cmd.reason,
             referenceId = cmd.referenceId,
@@ -154,7 +154,7 @@ class BalanceService(
                     eventType = BalanceEventType.HOLD_PLACED,
                     accountId = cmd.accountId,
                     currency = cmd.currency,
-                    amount = cmd.amount,
+                    amount = cmd.amount.amount,
                     bookedAmount = updated.bookedAmount,
                     availableAmount = updated.availableAmount,
                     reservedAmount = updated.reservedAmount,
@@ -215,7 +215,7 @@ class BalanceService(
             cmd.accountId,
             cmd.currency,
             cmd.referenceId,
-            cmd.amount,
+            cmd.amount.amount,
             BalanceEventActors.API,
         ).balance
     }
@@ -228,7 +228,7 @@ class BalanceService(
                 cmd.accountId,
                 cmd.currency,
                 cmd.referenceId,
-                cmd.amount,
+                cmd.amount.amount,
                 BalanceEventActors.API,
             ).balance
         } catch (e: IllegalArgumentException) {
@@ -244,13 +244,13 @@ class BalanceService(
             id = UUID.randomUUID(),
             accountId = cmd.accountId,
             currency = cmd.currency,
-            bookedAmount = cmd.initialAmount,
-            availableAmount = cmd.initialAmount,
+            bookedAmount = cmd.initialAmount.amount,
+            availableAmount = cmd.initialAmount.amount,
             reservedAmount = java.math.BigDecimal.ZERO,
             pendingAmount = java.math.BigDecimal.ZERO,
             updatedAt = OffsetDateTime.now(clock),
             version = 0,
-            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit,
+            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit.amount,
         )
         return balanceRepo.save(balance)
     }
@@ -260,7 +260,7 @@ class BalanceService(
             ?: throw BalanceNotFoundException("Balance not found for account=${cmd.accountId} currency=${cmd.currency}")
 
         val updated = balance.copy(
-            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit,
+            arrangedOverdraftLimit = cmd.arrangedOverdraftLimit.amount,
             updatedAt = OffsetDateTime.now(clock),
             version = balance.version + 1,
         )
