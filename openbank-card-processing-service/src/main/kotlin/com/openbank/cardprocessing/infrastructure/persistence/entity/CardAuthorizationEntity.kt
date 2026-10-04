@@ -8,6 +8,7 @@ import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import jakarta.persistence.Version
 import java.time.Instant
 import java.util.UUID
 
@@ -81,4 +82,9 @@ class CardAuthorizationEntity {
 
     @Column(name = "updated_at")
     lateinit var updatedAt: Instant
+
+    /** Optimistic lock (V4): Hibernate issues `UPDATE ... WHERE version = ?` and bumps it. */
+    @Version
+    @Column(name = "version")
+    var version: Long = 0
 }

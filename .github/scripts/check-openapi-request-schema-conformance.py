@@ -47,8 +47,8 @@ stdlib-only.
 Usage:
     check-openapi-request-schema-conformance.py --service <name> --generated <path/to/openapi.yaml> [--enforce]
 
-Exits 0 (with a ::notice) if the generated file does not exist — a missing artifact is a CI wiring
-question, not a schema-conformance finding, and must never silently read as "no findings".
+In advisory mode, a missing generated file is a notice. Under --enforce it is an error: an
+unavailable artifact cannot prove that request schemas conform.
 """
 
 from __future__ import annotations
@@ -103,6 +103,12 @@ def main() -> int:
     generated_path = Path(args.generated)
 
     if not generated_path.is_file():
+        if args.enforce:
+            print(
+                f"::error::openapi-request-schema-conformance: {args.service}: generated schema "
+                f"missing at {generated_path}; cannot verify the published request schemas"
+            )
+            return 2
         print(
             f"::notice::openapi-request-schema-conformance: {args.service}: no generated schema at "
             f"{generated_path} — check-api-contract's build step may not have produced one for this "

@@ -1208,6 +1208,57 @@ spec:
 apiVersion: pyrra.dev/v1alpha1
 kind: ServiceLevelObjective
 metadata:
+  name: openbank-card-processing-availability
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-card-processing-service
+spec:
+  target: "99.9"
+  window: 30d
+  alerting:
+    absent: false
+  # Money-path (ADR-0283): card-processing takes the scheme authorisation and clearing traffic.
+  description: "openbank-card-processing-service availability — non-error span ratio (issue #669, rules.yaml: slo.availability_target)."
+  indicator:
+    ratio:
+      errors:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",status_code="STATUS_CODE_ERROR"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
+  name: openbank-card-processing-latency
+  namespace: observability
+  annotations:
+    argocd.argoproj.io/sync-wave: "2"
+  labels:
+    app.kubernetes.io/part-of: observability
+    pyrra.dev/team: platform
+    openbank.io/money-path-service: openbank-card-processing-service
+spec:
+  target: "99"
+  window: 30d
+  alerting:
+    absent: false
+  # Fleet 1s threshold from rules.yaml; an authorisation-specific tighter objective is a
+  # follow-up once real scheme traffic gives a baseline to set it against.
+  description: "openbank-card-processing-service latency — share of requests faster than 1s (issue #669, rules.yaml: slo.latency_threshold_seconds)."
+  indicator:
+    latency:
+      success:
+        metric: traces_spanmetrics_latency_bucket{service="openbank-card-processing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info",le="1"}
+      total:
+        metric: traces_spanmetrics_calls_total{service="openbank-card-processing-service",span_kind="SPAN_KIND_SERVER",span_name!~"GET /|GET /api/v1/info"}
+---
+apiVersion: pyrra.dev/v1alpha1
+kind: ServiceLevelObjective
+metadata:
   name: openbank-treasury-availability
   namespace: observability
   annotations:
