@@ -203,16 +203,14 @@ function TargetRows({ target, copyLabel }: { target: ApprovalTarget; copyLabel: 
   if (target.kind === 'settlement') {
     return <><dt>{t('Vázaný pokyn', 'Bound instruction')}</dt><dd className="mono" style={{ whiteSpace: 'pre-wrap' }}>{target.summary}</dd></>
   }
+  const bound = <><dt>{t('Vázaný požadavek', 'Bound request')}</dt><dd className="mono" style={{ whiteSpace: 'pre-wrap' }}>{target.summary}</dd></>
   if (target.kind === 'challenge') {
     return <><dt>{t('Cíl operace', 'Operation target')}</dt>
-      <dd><HumanReference label={t('SCA challenge', 'SCA challenge')} reference={target.challenge} copyLabel={copyLabel} /></dd></>
+      <dd><HumanReference label={t('SCA challenge', 'SCA challenge')} reference={target.challenge} copyLabel={copyLabel} /></dd>
+      {bound}</>
   }
   return <>
     <dt>{t('Klient', 'Party')}</dt><dd><EntityChip type="party" id={target.party} /></dd>
-    <dt>{t('Zařízení', 'Device')}</dt>
-    <dd>{t(
-      'Konkrétní zařízení služba váže otiskem původního požadavku a nezveřejňuje ho; ověřte ho s autorem.',
-      'The service binds the exact device to the original request fingerprint and does not publish it; confirm it with the maker.',
-    )}</dd>
+    {bound}
   </>
 }

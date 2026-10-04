@@ -28,6 +28,7 @@ FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}@sha256:475f4ae80a09d769d84c92202
 # (CVE-2026-102268). Its Python lives in /app/.venv and has no pip, so bootstrap pip only
 # for this hashed wheel install, then remove it again. Do not install into system Python:
 # that would leave the vulnerable version active in the proxy's virtualenv.
+# Wheel hash checked against PyPI's published digest for pyjwt-2.14.0-py3-none-any.whl.
 RUN python3 -m ensurepip --default-pip \
     && printf '%s\n' 'PyJWT==2.14.0 --hash=sha256:ad0cef71c756a56e74863c2919cf0985f72decbcfcb550ee2f422e7c62b5eedc' > /tmp/pyjwt-requirements.txt \
     && python3 -m pip install --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /tmp/pyjwt-requirements.txt \

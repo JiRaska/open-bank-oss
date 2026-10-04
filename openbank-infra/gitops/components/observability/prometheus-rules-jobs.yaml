@@ -73,6 +73,93 @@ spec:
             description: >-
               A Job with no CronJob owner has failed; it will not run again on its own.
               kubectl -n {{ $labels.namespace }} describe job {{ $labels.job_name }}
+    # ---- has this CronJob SUCCEEDED recently enough? ----
+    # CronJobLatestRunFailed answers "did the last run fail". It cannot see a CronJob
+    # that has stopped producing successes WITHOUT a failed Job to point at: suspended,
+    # never scheduled (startingDeadlineSeconds missed), Jobs GC'd by ttlSecondsAfterFinished,
+    # a run hanging until activeDeadlineSeconds, or one that alternates fail/succeed.
+    # Several CronJobs here are CONTROLS (drift scanners, sync verifier, synthetic
+    # probes), and a dead control looks exactly like a quiet one.
+    #
+    # Each CronJob declares its own budget as the annotation
+    #   openbank.tech/max-success-age-seconds: "<tier>"
+    # which kube-state-metrics exports (metricAnnotationsAllowList in
+    # apps/kube-prometheus-stack.yaml) as a LABEL on kube_cronjob_annotations. PromQL
+    # cannot turn a label into a number, so the budget is restricted to the tiers below
+    # and each tier is one arm of the recording rule. A value that is not a tier, or no
+    # annotation at all, makes the CronJob unmonitored, and CronJobMaxSuccessAgeUndeclared
+    # fires for it. That alert also fires for EVERY CronJob if the KSM allowlist flag is
+    # lost, so the staleness rule cannot go quiet without saying so.
+    # The tier set is read from this file by .github/scripts/check-cronjob-max-success-age.py,
+    # which fails CI on a CronJob with no annotation, a non-tier value, or a value no larger
+    # than the longest gap between its scheduled runs.
+    - name: openbank.platform.cronjob-liveness
+      rules:
+        - record: openbank:cronjob_max_success_age_seconds
+          expr: |
+            max by (namespace, cronjob) (
+                  900 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="900"}
+              or 1800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="1800"}
+              or 3600 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="3600"}
+              or 7200 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="7200"}
+              or 32400 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="32400"}
+              or 46800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="46800"}
+              or 180000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="180000"}
+              or 352800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="352800"}
+              or 1296000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="1296000"}
+            )
+        # Age of the last success. A CronJob that has NEVER succeeded has no
+        # last_successful_time series at all, so it falls back to its own creation time
+        # (it has been failing to succeed for that long). The `> 0` drops a zero
+        # timestamp, which would otherwise read as ~56 years.
+        - record: openbank:cronjob_success_age_seconds
+          expr: |
+            (
+              time() - max by (namespace, cronjob) (
+                kube_cronjob_status_last_successful_time{job="kube-state-metrics"} > 0
+              )
+            )
+            or
+            (
+              time() - max by (namespace, cronjob) (kube_cronjob_created{job="kube-state-metrics"})
+            )
+        - alert: CronJobSuccessStale
+          expr: |
+            openbank:cronjob_success_age_seconds
+              > on (namespace, cronjob)
+            openbank:cronjob_max_success_age_seconds
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not succeeded for {{ $value | humanizeDuration }}"
+            description: >-
+              Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded.
+              The latest run may have failed, hung, been skipped or never been scheduled, or the
+              CronJob may be suspended. If it is a control (a drift scanner, verifier or probe),
+              nothing it guards has been checked for that long. Start with
+              kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }} -o wide
+              and kubectl -n {{ $labels.namespace }} get jobs --sort-by=.status.startTime
+        - alert: CronJobMaxSuccessAgeUndeclared
+          expr: |
+            max by (namespace, cronjob, annotation_openbank_tech_max_success_age_seconds) (
+              kube_cronjob_annotations{job="kube-state-metrics"}
+            )
+              unless on (namespace, cronjob)
+            openbank:cronjob_max_success_age_seconds
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} is not covered by CronJobSuccessStale"
+            description: >-
+              It has no openbank.tech/max-success-age-seconds annotation, or the value
+              ("{{ $labels.annotation_openbank_tech_max_success_age_seconds }}") is not one of
+              the tiers in prometheus-rules-jobs.yaml, so nobody would notice if it stopped
+              succeeding. If EVERY CronJob reports this at once, kube-state-metrics has lost
+              its metricAnnotationsAllowList flag.
     # ---- alerts that nobody acts on ----
     # Measured 2026-09-30: PushChannelSilent had fired for 22 days, the ledger's
     # accounting day 2026-07-31 had sat in CUTOFF since 2026-08-27, three KYC

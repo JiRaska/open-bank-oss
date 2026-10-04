@@ -9,6 +9,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -33,8 +34,7 @@ class DomesticPaymentMapperTest {
         creditorAccountNumber = "123456789",
         creditorBankCode = "0100",
         creditorName = "Brno Utility",
-        amount = BigDecimal("1234.560000"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("1234.560000"), "CZK"),
         variableSymbol = "2026001",
         specificSymbol = "55",
         constantSymbol = "0308",
@@ -67,8 +67,7 @@ class DomesticPaymentMapperTest {
         creditorAccountNumber = "2000",
         creditorBankCode = "0100",
         creditorName = "Payee",
-        amount = BigDecimal("10.000000"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("10.000000"), "CZK"),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,
@@ -115,7 +114,7 @@ class DomesticPaymentMapperTest {
         assertThat(entity.priority).isEqualTo("URGENT")
         assertThat(entity.transferScope).isEqualTo("TECHNICAL_ACCOUNT")
         assertThat(entity.rejectReason).isEqualTo("SANCTIONS_HIT")
-        assertThat(entity.amount).isEqualByComparingTo(original.amount)
+        assertThat(entity.amount).isEqualByComparingTo(original.amount.amount)
         assertThat(entity.initiatedByPartyId).isEqualTo(initiatedByPartyId)
         assertThat(entity.requestFingerprint).isEqualTo(requestFingerprint)
         assertThat(entity.delegationId).isEqualTo(delegationId)
