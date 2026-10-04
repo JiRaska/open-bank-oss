@@ -139,10 +139,18 @@ def gh_api(path: str) -> list | dict:
     A gate that cannot reach its subject must still never report a clean pass — UNRESOLVED is
     neither pass nor fail, and run-gates skips the min_subjects floor for it.
     """
-    try:
-        p = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=30)
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"could not run `gh api {path}`: {exc}") from exc
+    # A single stalled API read must not consume the whole 60-second gate budget. Retry a
+    # timeout once; two ruleset reads can still finish within 50 seconds in the worst case.
+    # Exhaustion remains a hard failure because bypass actors were never verified.
+    for timeout in (15, 10):
+        try:
+            p = subprocess.run(["gh", "api", path], capture_output=True, text=True, timeout=timeout)
+            break
+        except subprocess.TimeoutExpired as exc:
+            if timeout == 10:
+                raise RuntimeError(f"could not run `gh api {path}` after two timeouts: {exc}") from exc
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"could not run `gh api {path}`: {exc}") from exc
     if p.returncode != 0:
         stderr = p.stderr.strip()
         if _is_transient(stderr):
@@ -351,6 +359,39 @@ def self_test() -> int:
                 except RuntimeError:
                     if want_unreadable:
                         fails.append(f"{msg!r} must be Unreadable (rate limited), not a bare RuntimeError")
+            finally:
+                subprocess.run = _saved_run
+
+        # A timed-out first read gets one bounded retry. Both timeouts must stay red:
+        # an unavailable API never becomes evidence that the bypass list is clean.
+        for succeed_on_retry in (True, False):
+            timeouts: list[int] = []
+
+            def _timed_read(*args, **kwargs):
+                timeouts.append(kwargs["timeout"])
+                if len(timeouts) == 1 or not succeed_on_retry:
+                    raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
+
+                class _OkProc:
+                    returncode = 0
+                    stdout = '{"bypass_actors": []}'
+                    stderr = ""
+
+                return _OkProc()
+
+            _saved_run = subprocess.run
+            try:
+                subprocess.run = _timed_read
+                globals()["gh_api"] = _real_gh_api
+                try:
+                    response = _real_gh_api("x")
+                    if not succeed_on_retry or response != {"bypass_actors": []}:
+                        fails.append("timeout retry returned an unexpected result")
+                except RuntimeError:
+                    if succeed_on_retry:
+                        fails.append("successful retry after timeout must return the API result")
+                if timeouts != [15, 10]:
+                    fails.append(f"timeout retry must use the bounded 15s/10s pair, got {timeouts}")
             finally:
                 subprocess.run = _saved_run
 
