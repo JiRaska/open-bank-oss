@@ -1,0 +1,120 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# pricing.open-bank.tech on the shared Gateway (ADR-0324 Phase 4), the Gateway API translation
+# of the `pricing-console` Ingress in ingress.yaml.
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, which external-dns skips, so pricing.open-bank.tech keeps
+# resolving to ingress-nginx. Three steps, each its own change, in this order:
+#   1. this file — the Certificate, the ReferenceGrant, the route and its policy;
+#   2. the Gateway's https-pricing listener (envoy-gateway/gateway.yaml), once the grant is
+#      live — switching a listener in the same sync as its grant left langfuse's listener
+#      RefNotPermitted (2026-10-03), because the two are different Argo apps with no ordering;
+#   3. the DNS cutover: the annotation moves from this route to the Ingress.
+#
+# WHY ITS OWN CERTIFICATE and not `pricing-console-tls`. cert-manager runs with
+# --enable-certificate-owner-ref, so `pricing-console-tls` is owned by the Ingress; deleting
+# that Ingress after the cutover would garbage-collect the Secret a listener served. No key
+# pinning exists for this host, so a fresh key is harmless. Same shape as pact-edge-tls.
+#
+# Annotation mapping from ingress.yaml:
+#   ssl-redirect            -> the Gateway's http listener redirects every host (301)
+#   custom-headers pricing-console-edge-headers-v1 (X-Frame-Options, Referrer-Policy)
+#   + the controller's HSTS (2y, preload), nosniff and hide-headers X-Powered-By
+#                           -> ResponseHeaderModifier below, same values
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                           -> BackendTrafficPolicy below; Envoy otherwise has no body cap
+#                              and a 15s route timeout
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: pricing-edge-tls
+  namespace: pricing
+spec:
+  secretName: pricing-edge-tls
+  dnsNames:
+    - pricing.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+# The Gateway may read the edge certificate. `pricing-console-tls` is admitted too, so pointing
+# the listener back at the Ingress-owned Secret needs no grant change while that Secret exists.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: edge-gateway-tls
+  namespace: pricing
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: pricing-console-tls
+    - group: ""
+      kind: Secret
+      name: pricing-edge-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: pricing-console
+  namespace: pricing
+  annotations:
+    # Held out of DNS until the cutover change (step 3 above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-pricing
+  hostnames:
+    - pricing.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: X-Frame-Options
+                value: SAMEORIGIN
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: pricing-console
+          port: 3100
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: pricing-console
+  namespace: pricing
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: pricing-console
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s
