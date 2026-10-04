@@ -6132,3 +6132,18 @@ gates:
     selftest_inputs: [".github/scripts/check-json-logging-extension.py"]
     run: |
       python3 .github/scripts/check-json-logging-extension.py --enforce
+
+  - id: log-trace-id-path
+    name: "Alloy extracts trace/span/correlation ids from the path the log encoder writes (enforced)"
+    group: gitops
+    mode: enforced
+    rationale: "The logs->trace link died twice because Alloy's stage.json and the libs-runtime encoder disagreed on where traceId lives (#11657 vs #11630); an empty structured-metadata value errors nowhere, so the path is derived from the encoder config and compared with the pipeline."
+    review_after: "2027-04-03"
+    verified: "2026-10-03 — 3 id fields compared, 0 findings with mdc.* extraction; main's top-level-only alloy.yaml (pre-#12026) fails all 3 (exit 1)"
+    budget_seconds: 10
+    min_subjects: 3
+    selftest: python3 .github/scripts/check-log-trace-id-path.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-log-trace-id-path.py"]
+    run: |
+      python3 .github/scripts/check-log-trace-id-path.py --enforce
