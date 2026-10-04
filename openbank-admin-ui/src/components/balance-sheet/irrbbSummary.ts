@@ -11,7 +11,7 @@
 //   - An outlier status the engine could not evaluate is NOT_EVALUABLE, never a green badge.
 //   - Every data gap the engine reports is listed; an unknown code falls back to its own detail.
 
-import type { Irrbb, IrrbbDataGap, ScenarioName } from './contracts'
+import type { Irrbb, IrrbbDataGap, IrrbbTreasury, ScenarioName } from './contracts'
 
 export type Lang = 'cs' | 'en'
 
@@ -89,9 +89,35 @@ export function dataGapText(gap: IrrbbDataGap, lang: Lang): string {
         : 'Loan flows are discounted including the commercial margin; it is not stripped out of EVE.'
     case 'INSTRUMENTS_NOT_PROJECTED':
       return cs
-        ? `Obchody peněžního trhu (${gap.count ?? '?'}) nejsou v mezeře přecenění, EVE ani NII zahrnuty.`
-        : `Money-market deals (${gap.count ?? '?'}) are not in the repricing gap, EVE or NII.`
+        ? `Nástroje, které projekce nečte (${gap.count ?? '?'}), nejsou v mezeře přecenění, EVE ani NII zahrnuty: ${gap.detail}`
+        : `Instruments the projection does not read (${gap.count ?? '?'}) are not in the repricing gap, EVE or NII: ${gap.detail}`
     default:
       return gap.detail
   }
+}
+
+export type TreasuryRow = {
+  currency: string
+  deals: number
+  placements: number
+  borrowings: number
+  /** The deals' ΔEVE under the worst scenario of their currency (else parallel up); already in the totals. */
+  scenario: ScenarioName | null
+  deltaEve: number | null
+}
+
+/** One row per currency with treasury deals: their share of the figures above, never added to them. */
+export function treasuryRows(data: Irrbb): TreasuryRow[] {
+  return (data.treasury ?? []).map((t: IrrbbTreasury) => {
+    const scenario = data.worstCase.byCurrency[t.currency] ?? (t.scenarios.length > 0 ? 'parallel-up' : null)
+    const hit = scenario ? t.scenarios.find(s => s.scenario === scenario) : undefined
+    return {
+      currency: t.currency,
+      deals: t.deals,
+      placements: t.placements,
+      borrowings: t.borrowings,
+      scenario: hit ? scenario : null,
+      deltaEve: hit ? hit.deltaEve : null,
+    }
+  })
 }

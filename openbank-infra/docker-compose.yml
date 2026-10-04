@@ -157,10 +157,10 @@ services:
 
   # ─────────────────────────────────────────────
   # OpenBao (dev mode for local) — same LF/MPL-2.0 fork production runs
-  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.5.5).
+  # (runbook 0005, openbank-infra/gitops/apps/openbao.yaml pins quay.io/openbao/openbao:2.7.1).
   # ─────────────────────────────────────────────
   openbao:
-    image: quay.io/openbao/openbao:2.5.5
+    image: quay.io/openbao/openbao:2.7.1
     container_name: openbank-openbao
     restart: unless-stopped
     environment:
@@ -198,7 +198,7 @@ services:
   # Keycloak (IAM)
   # ─────────────────────────────────────────────
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.3
+    image: quay.io/keycloak/keycloak:26.8.0
     container_name: openbank-keycloak
     restart: unless-stopped
     environment:
@@ -418,6 +418,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-account-service
     image: openbank/account-service:local
     container_name: openbank-account-service
@@ -472,6 +473,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-aml-service
     image: openbank/aml-service:local
     container_name: openbank-aml-service
@@ -530,6 +532,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-audit-service
     image: openbank/audit-service:local
     container_name: openbank-audit-service
@@ -592,6 +595,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-analytics-sink
     image: openbank/analytics-sink:local
     container_name: openbank-analytics-sink
@@ -655,6 +659,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-balance-service
     image: openbank/balance-service:local
     container_name: openbank-balance-service
@@ -714,6 +719,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-card-issuance-service
     image: openbank/card-issuance-service:local
     container_name: openbank-card-issuance-service
@@ -771,6 +777,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-clearing-service
     image: openbank/clearing-service:local
     container_name: openbank-clearing-service
@@ -822,6 +829,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-consent-service
     image: openbank/consent-service:local
     container_name: openbank-consent-service
@@ -878,6 +886,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-dispute-service
     image: openbank/dispute-service:local
     container_name: openbank-dispute-service
@@ -927,6 +936,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-domestic-payment
     image: openbank/domestic-payment:local
     entrypoint: ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-Dmp.messaging.incoming.payment-requests-in.value.deserializer=org.apache.kafka.common.serialization.StringDeserializer", "-Dmp.messaging.incoming.payment-requests-in.bootstrap.servers=kafka:9092", "-jar", "/app/quarkus-run.jar"]
@@ -986,6 +996,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-interest-service
     image: openbank/interest-service:local
     container_name: openbank-interest-service
@@ -1041,6 +1052,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-kyc-service
     image: openbank/kyc-service:local
     container_name: openbank-kyc-service
@@ -1101,6 +1113,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-ledger-service
     image: openbank/ledger-service:local
     container_name: openbank-ledger-service
@@ -1160,6 +1173,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-notification-service
     image: openbank/notification-service:local
     container_name: openbank-notification-service
@@ -1216,6 +1230,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-party-service
     image: openbank/party-service:local
     container_name: openbank-party-service
@@ -1271,6 +1286,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-pid-service
     image: openbank/pid-service:local
     container_name: openbank-pid-service
@@ -1326,6 +1342,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-sca-service
     image: openbank/sca-service:local
     container_name: openbank-sca-service
@@ -1382,6 +1399,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-sepa-instant
     image: openbank/sepa-instant:local
     container_name: openbank-sepa-instant-service
@@ -1434,6 +1452,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-sepa-payment
     image: openbank/sepa-payment:local
     entrypoint: ["java", "-Djava.util.logging.manager=org.jboss.logmanager.LogManager", "-Dmp.messaging.incoming.payment-requests-in.value.deserializer=org.apache.kafka.common.serialization.StringDeserializer", "-Dmp.messaging.incoming.payment-requests-in.bootstrap.servers=kafka:9092", "-jar", "/app/quarkus-run.jar"]
@@ -1497,6 +1516,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-sanctions-service
     image: openbank/sanctions-service:local
     container_name: openbank-sanctions-service
@@ -1563,6 +1583,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-tpp-registry-service
     image: openbank/tpp-registry-service:local
     container_name: openbank-tpp-registry-service
@@ -1623,6 +1644,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-psd2-service
     image: openbank/psd2-service:local
     container_name: openbank-psd2-service
@@ -1677,6 +1699,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-agent-service
     image: openbank/agent-service:local
     container_name: openbank-agent-service
@@ -1732,6 +1755,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-transaction-service
     image: openbank/transaction-service:local
     container_name: openbank-transaction-service
@@ -1783,6 +1807,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-fx-service
     image: openbank/fx-service:local
     container_name: openbank-fx-service
@@ -1830,6 +1855,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-standing-order-service
     image: openbank/standing-order-service:local
     container_name: openbank-standing-order-service
@@ -1877,6 +1903,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-swift-service
     image: openbank/swift-service:local
     container_name: openbank-swift-service
@@ -1925,6 +1952,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-security-scanner
     image: openbank/security-scanner:local
     container_name: openbank-security-scanner
@@ -1978,6 +2006,7 @@ services:
       context: ..
       dockerfile: openbank-infra/docker/services/standalone-service.Dockerfile
       args:
+        SOURCE_COMMIT: ${SOURCE_COMMIT:-}
         SERVICE_DIR: openbank-product-catalog
     image: openbank/product-catalog:local
     container_name: openbank-product-catalog

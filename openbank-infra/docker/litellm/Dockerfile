@@ -9,7 +9,7 @@
 # /root/.cache (mode 0700), so at uid 1000 the proxy died before reading its config, and this
 # file moved the Prisma home and regenerated the client. From v1.99 upstream fixed that itself:
 # engines live in /opt/prisma (0755, root-owned) and the client no longer references /root.
-# Measured on v1.99.4, 2026-09-28: the arm64 schema-engine is readable as uid 1000 and is an
+# Measured on v1.99.4, 2026-09-28 (and again on v1.104.0, 2026-10-04): the arm64 schema-engine is readable as uid 1000 and is an
 # aarch64 ELF. What remains here is a GUARD, not a workaround: the build fails if a future
 # upstream again ships an engine for the wrong architecture or out of reach of uid 1000.
 #
@@ -17,24 +17,17 @@
 # v1.83; use the newest release tag. NEVER 1.82.7 or 1.82.8 (the compromised PyPI releases).
 # CI (platform-images.yml) builds, scans, signs and pushes it, and opens the gitops PR.
 
-ARG LITELLM_VERSION=v1.99.4
+ARG LITELLM_VERSION=v1.104.0
 
-FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}@sha256:475f4ae80a09d769d84c92202e70502abe52a62a760c97e598261c9c8cf8244f
+FROM ghcr.io/berriai/litellm:${LITELLM_VERSION}@sha256:625981c83410a3ea68eb0697590a57ec1d764d634514d54fa5db0591077ee839
 
 # No `USER root` needed: the upstream image already builds and runs as root; the last line of
 # this file is what drops to uid 1000.
 
-# Upstream v1.99.4 ships PyJWT 2.13.0. The platform image's CRITICAL scan requires 2.14.0
-# (CVE-2026-102268). Its Python lives in /app/.venv and has no pip, so bootstrap pip only
-# for this hashed wheel install, then remove it again. Do not install into system Python:
-# that would leave the vulnerable version active in the proxy's virtualenv.
-# Wheel hash checked against PyPI's published digest for pyjwt-2.14.0-py3-none-any.whl.
-RUN python3 -m ensurepip --default-pip \
-    && printf '%s\n' 'PyJWT==2.14.0 --hash=sha256:ad0cef71c756a56e74863c2919cf0985f72decbcfcb550ee2f422e7c62b5eedc' > /tmp/pyjwt-requirements.txt \
-    && python3 -m pip install --no-cache-dir --no-deps --only-binary=:all: --require-hashes -r /tmp/pyjwt-requirements.txt \
-    && python3 -c 'import jwt; assert jwt.__version__ == "2.14.0", jwt.__version__' \
-    && python3 -m pip uninstall -y pip \
-    && rm /tmp/pyjwt-requirements.txt
+# PyJWT: v1.99.4 shipped 2.13.0 and this file force-installed a hashed 2.14.0 wheel for
+# CVE-2026-102268. Upstream v1.104.0 ships 2.15.0 in /app/.venv, so the override is gone; the
+# assertion below keeps the floor so a future base cannot silently regress below the fix.
+RUN /app/.venv/bin/python3 -c 'import jwt; v = tuple(int(x) for x in jwt.__version__.split(".")[:2]); assert v >= (2, 14), jwt.__version__'
 
 # The Prisma home for every process in this image. Root-owned and read-only to the runtime uid
 # on purpose: the engines are code, and a writable engine directory in the one pod with

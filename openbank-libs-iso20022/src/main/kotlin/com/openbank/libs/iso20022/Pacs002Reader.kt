@@ -4,10 +4,8 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Element
-import java.io.ByteArrayInputStream
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 
 /** The status a rail needs from an inbound `pacs.002`: the verdict and (on reject) why. */
 data class ReceivedStatusReport(val originalEndToEndId: String?, val status: PaymentStatus, val reasonCode: String?)
@@ -25,14 +23,7 @@ class Pacs002ParseException(message: String) : RuntimeException(message)
  */
 class Pacs002Reader {
     fun read(xml: String): ReceivedStatusReport {
-        val factory = DocumentBuilderFactory.newInstance().apply {
-            isNamespaceAware = true
-            setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        }
-        val doc = factory.newDocumentBuilder()
-            .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+        val doc = SecureXml.parse(xml)
         doc.documentElement.normalize()
 
         val root = doc.documentElement

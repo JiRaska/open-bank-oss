@@ -34,10 +34,20 @@ version = file("version.txt").readText().trim()
 // The generated page contains only facts from build inputs. It also supplies an
 // honest index for new services until they add authored docs to src/main/resources/docs.
 val generatedServiceDocs = layout.buildDirectory.dir("generated/service-docs")
-val sourceCommit = providers.environmentVariable("GITHUB_SHA")
+// The commit is an explicit INPUT, resolved in this order:
+//   1. SOURCE_COMMIT - set by every container build (Docker build arg, see
+//      standalone-service.Dockerfile); a container has no .git (.dockerignore drops it).
+//   2. GITHUB_SHA    - set by GitHub Actions for host-side builds.
+//   3. `git rev-parse HEAD` - a developer's checkout. Run with ignoreExitValue, so a tree
+//      without .git yields an empty value and the task below fails with an actionable
+//      message instead of "Error while evaluating property 'sourceCommit'".
+// There is deliberately no placeholder hash: the value is published as a build fact.
+val sourceCommit = providers.environmentVariable("SOURCE_COMMIT").map { it.trim() }.filter { it.isNotEmpty() }
+    .orElse(providers.environmentVariable("GITHUB_SHA").map { it.trim() }.filter { it.isNotEmpty() })
     .orElse(
         providers.exec {
             commandLine("git", "rev-parse", "HEAD")
+            isIgnoreExitValue = true
         }.standardOutput.asText.map { it.trim() },
     )
 val generateServiceDocs by tasks.registering {
@@ -56,7 +66,8 @@ val generateServiceDocs by tasks.registering {
         val releaseVersion = versionFile.asFile.readText().trim()
         val gitCommit = sourceCommit.get().trim()
         check(Regex("[0-9a-fA-F]{40}").matches(gitCommit)) {
-            "${project.name}: GITHUB_SHA or git rev-parse HEAD must provide a full commit hash"
+            "${project.name}: no source commit - set SOURCE_COMMIT (Docker: --build-arg SOURCE_COMMIT=<sha>), " +
+                "GITHUB_SHA, or build from a git checkout; got '$gitCommit'"
         }
         generatedServiceDocs.get().asFile.resolve("openbank-service-build.properties")
             .writeText("git.commit=$gitCommit\n")

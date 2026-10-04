@@ -90,7 +90,7 @@ class AccountConcurrencyIT {
         // (retry later); one that arrives after it finished replays the winner's 201.
         assertThat(responses.map { it.statusCode })
             .describedAs("statuses %s", responses.map { "${it.statusCode}: ${it.body.asString().take(120)}" })
-            .allMatch { it == 201 || it == 409 }
+            .allSatisfy { assertThat(it).isIn(201, 409) }
             .contains(201)
         responses.filter { it.statusCode == 409 }.forEach {
             assertThat(it.jsonPath().getString("code")).isEqualTo("IDEMPOTENCY_REQUEST_IN_PROGRESS")
