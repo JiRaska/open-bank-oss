@@ -175,7 +175,7 @@ spec:
         # data.openbank.rest.allow for all @Authorize-annotated endpoints in interest-service
         # (interest.*). Bundle mounted from interest-opa-bundle ConfigMap (gen-interest-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

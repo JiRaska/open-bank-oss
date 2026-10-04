@@ -1,13 +1,13 @@
 ---
 date: 2026-10-04
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
 delivery-repos: []
 tags: [authn, customer-edge, testing, security]
-followup: "#4348 — realm client, SYNTHETIC party, Vault secret, trusted-principals config and the identity gate are unbuilt; this ADR records the decision only"
+followup: "#4348 — template client, trust lists and the enforced gate are shipped; the live SYNTHETIC party, kcadm client, Vault secret and the first journey on it are owner steps still open"
 summary: "A canary authenticates as a confidential customers-realm client whose service-account user carries one SYNTHETIC party_id and ROLE_CUSTOMER; no password, no impersonation, no cross-realm exchange. A gate pins its shape."
 ---
 
@@ -144,7 +144,7 @@ git grep -n 'OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS\|synthetic.trusted-principals
 grep -A6 'id: wealth-declared-holding' openbank-libs/governance/journeys.yaml | grep status
 ```
 
-Until check 4 shows `active`, the honest delivery status is `planned` or `partial`.
+Until check 4 shows `active`, the honest delivery status is `partial`: checks 1-3 are repository facts, check 4 needs the live identity.
 
 ## Compliance impact
 
