@@ -846,17 +846,15 @@ jobs:
           echo "Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid HAL/JSON — proceeding to provider verification."
 
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
-      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
-      # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
-      # to the Pact Broker) that Gradle's up-to-date/build-cache machinery cannot observe, so a
-      # cached providerPactTest would silently skip the publish (#1964's original reason,
-      # narrowed here to a task this job ALONE runs — no PR-lane cache to protect).
+      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. The task
+      # itself is never up-to-date or cacheable: publishing a verification result is a network
+      # side effect that Gradle cannot observe. Its compile/model prerequisites remain cacheable.
       - name: Provider verification (:${{ inputs.service }}:providerPactTest)
         if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          ./gradlew :${{ inputs.service }}:providerPactTest --rerun-tasks --build-cache \
+          ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \
