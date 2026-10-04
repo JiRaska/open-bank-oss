@@ -54,6 +54,9 @@ KEY_ALIASES = {
     "card-issuance-api": "openbank-card-issuance-service",
     "fraud-api": "openbank-fraud-service",
     "transaction-api": "openbank-transaction-service",
+    "context-lending-access": "openbank-context-service",
+    "lending-graph-party-proof": "openbank-party-service",
+    "lending-graph-document-proof": "openbank-document-service",
 }
 
 # Providers outside this repository. A pact against them would verify nothing here.
