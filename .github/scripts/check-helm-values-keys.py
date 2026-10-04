@@ -78,6 +78,7 @@ Usage:
 
 from __future__ import annotations
 
+import concurrent.futures
 import hashlib
 import pathlib
 import shutil
@@ -220,6 +221,19 @@ def iter_helm_sources():
                 yield path.name, chart, src.get("repoURL"), str(src.get("targetRevision", "")), values
 
 
+def prefetch_charts(cache: pathlib.Path, sources: list[tuple]) -> dict[tuple, tuple[pathlib.Path, str | None]]:
+    """Pull distinct chart references with bounded concurrency; retain source-order verdicts."""
+    refs = list(dict.fromkeys((chart, repo_url, version)
+                              for _, chart, repo_url, version, _ in sources))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        pending = {
+            ref: (cache / f"chart-{index}", pool.submit(
+                _pull_chart, *ref, cache / f"chart-{index}"))
+            for index, ref in enumerate(refs)
+        }
+        return {ref: (path, future.result()) for ref, (path, future) in pending.items()}
+
+
 def check_fleet() -> int:
     if shutil.which("helm") is None:
         print("FAIL: `helm` is not on PATH — cannot verify, and 'unchecked' must not "
@@ -233,29 +247,29 @@ def check_fleet() -> int:
     checked = 0
 
     try:
-        for name, chart, repo_url, version, values in iter_helm_sources():
-            chart_root = cache / f"{chart}-{version}"
-            if not chart_root.exists():
-                pull_error = _pull_chart(chart, repo_url, version, chart_root)
-                if pull_error is not None:
-                    # COULD-NOT-CHECK is a third state, and collapsing it into FAIL was wrong in
-                    # both directions. Measured 2026-08-21: gitlab.com answered 502 for the
-                    # glitchtip chart, which (a) failed an enforced gate on an unrelated PR as if
-                    # the repo were broken, and (b) `return 1` here ABORTED the scan, so the other
-                    # 19 charts were never examined — a green run and a red run both told you
-                    # nothing about them.
-                    #
-                    # Now: record it, keep going, and let the SUBJECT FLOOR decide. One unreachable
-                    # repo leaves 19 of 20 checked and the gate passes with a loud warning; a real
-                    # outage drops the count under `min_subjects: 15` and run-gates fails the gate
-                    # for examining too little. That is the repo's existing mechanism for "this
-                    # gate did not see enough to mean anything", and it is the honest one here.
-                    unreachable.append(
-                        f"{name}: could not reach {repo_url} to pull {chart}@{version} after "
-                        f"{PULL_RETRY_ATTEMPTS} attempts — upstream network failure, NOT a "
-                        f"values-key finding: {pull_error[:200]}"
-                    )
-                    continue
+        sources = list(iter_helm_sources())
+        pulls = prefetch_charts(cache, sources)
+        for name, chart, repo_url, version, values in sources:
+            chart_root, pull_error = pulls[(chart, repo_url, version)]
+            if pull_error is not None:
+                # COULD-NOT-CHECK is a third state, and collapsing it into FAIL was wrong in
+                # both directions. Measured 2026-08-21: gitlab.com answered 502 for the
+                # glitchtip chart, which (a) failed an enforced gate on an unrelated PR as if
+                # the repo were broken, and (b) `return 1` here ABORTED the scan, so the other
+                # 19 charts were never examined — a green run and a red run both told you
+                # nothing about them.
+                #
+                # Now: record it, keep going, and let the SUBJECT FLOOR decide. One unreachable
+                # repo leaves 19 of 20 checked and the gate passes with a loud warning; a real
+                # outage drops the count under `min_subjects: 15` and run-gates fails the gate
+                # for examining too little. That is the repo's existing mechanism for "this
+                # gate did not see enough to mean anything", and it is the honest one here.
+                unreachable.append(
+                    f"{name}: could not reach {repo_url} to pull {chart}@{version} after "
+                    f"{PULL_RETRY_ATTEMPTS} attempts — upstream network failure, NOT a "
+                    f"values-key finding: {pull_error[:200]}"
+                )
+                continue
 
             chart_yamls = list(chart_root.glob("*/Chart.yaml"))
             if not chart_yamls:
@@ -335,11 +349,15 @@ def _self_test_unreachable_is_not_a_finding() -> str | None:
         ("reachable-a", "chart-a", "https://example.invalid/a", "1.0.0", {"k": 1}),
         ("dead-repo", "chart-b", "https://example.invalid/b", "2.0.0", {"k": 1}),
         ("reachable-c", "chart-c", "https://example.invalid/c", "3.0.0", {"k": 1}),
+        ("same-name-other-repo", "chart-a", "https://example.invalid/other", "1.0.0", {"k": 1}),
     ]
     pulled: list[str] = []
+    chart_a_dirs: list[pathlib.Path] = []
 
     def _pull(chart, repo_url, version, dest):
         pulled.append(chart)
+        if chart == "chart-a":
+            chart_a_dirs.append(pathlib.Path(dest))
         if chart == "chart-b":
             return "502 Bad Gateway"
         pathlib.Path(dest, "inner").mkdir(parents=True, exist_ok=True)
@@ -355,12 +373,14 @@ def _self_test_unreachable_is_not_a_finding() -> str | None:
 
     if rc != 0:
         return f"an unreachable repo failed the gate (rc={rc}); it is a could-not-check, not a finding"
-    if [c for c in pulled] != ["chart-a", "chart-b", "chart-c"]:
+    if sorted(pulled) != ["chart-a", "chart-a", "chart-b", "chart-c"]:
         return f"the scan stopped at the unreachable repo instead of continuing: pulled={pulled}"
+    if len(set(chart_a_dirs)) != 2:
+        return "different repositories with the same chart name/version reused one chart directory"
     combined = out.getvalue() + err.getvalue()
     if "::warning" not in combined or "dead-repo" not in combined:
         return "the unreachable source was not reported as a warning naming it"
-    if "SUBJECTS=2" not in combined:
+    if "SUBJECTS=3" not in combined:
         return f"subject count must exclude the unreachable source, got: {combined[-200:]!r}"
     return None
 
