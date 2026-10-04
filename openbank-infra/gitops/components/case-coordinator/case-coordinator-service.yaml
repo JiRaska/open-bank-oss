@@ -209,7 +209,7 @@ spec:
         # it yet — the capability-gate adapter is the tracked follow-up — but the sidecar and
         # the bundle ship WITH the deployment so the follow-up is a service-code-only change.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

@@ -361,7 +361,7 @@ services:
   # still uses deny-by-default and never calls this sidecar until enforcement is switched on.
   # ─────────────────────────────────────────────
   opa:
-    image: openpolicyagent/opa:1.17.0
+    image: openpolicyagent/opa:1.21.1
     container_name: openbank-opa
     restart: unless-stopped
     command:

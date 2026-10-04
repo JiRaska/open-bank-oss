@@ -51,8 +51,9 @@ VERB_RE = re.compile(r"^\s+- (\w+)", re.MULTILINE)
 # Declared, not inferred. An entry needs a reason and is expected to shrink; the gate also fails
 # on an entry that has become granted, so the declaration cannot outlive the debt.
 #
-# The remaining two are money-path and share the defect found with transaction.sweep (#4754).
-# They are baselined rather than fixed here because granting them is an authoring decision: adding them to
+# Originally three, all money-path and the SAME defect, found together (#4754); `transaction.sweep`
+# has since been granted (transaction_rest_ext.rego `operator-transaction-sweep`). The rest are
+# baselined rather than fixed here because granting them is an authoring decision: adding them to
 # `role_action_matrix` would be a grant to a machine (M2M callers authenticate with a
 # client_credentials JWT and are classified HUMAN, and `shared_m2m_write_prohibition` is not
 # emitted into any bundle, so no policy can veto it). The defensible shape is a service-scoped

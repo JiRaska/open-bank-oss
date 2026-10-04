@@ -313,7 +313,7 @@ spec:
         #   data.openbank.copilot.tool.allow — for CopilotToolGate (get_balance, initiate_transfer…)
         # Both packages are in the same bundle; a single sidecar answers both query paths.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
