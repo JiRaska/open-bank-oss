@@ -12,7 +12,9 @@
 #   1. The client has no browser, password or implicit flow, and is confidential with a service
 #      account. A canary with a password grant re-opens the surface ADR-0066 closed.
 #   2. The client emits `party_id` from the user attribute, the claim customer-edge scopes
-#      every call by. Without it the edge falls back to `sub` and the canary is nobody.
+#      every call by, and `preferred_username`, the claim the edge's principal name comes from.
+#      Without party_id the canary is nobody; without preferred_username its principal is a
+#      UUID that no trust list names (measured live 2026-10-04: the first canary token had none).
 #   3. Its service-account user holds EXACTLY `ROLE_CUSTOMER` and no client role, and carries a
 #      `party_id` attribute. One extra role turns a canary into a privileged customer.
 #   4. `openbank.synthetic.trusted-principals` is set only to principals that may assert the
@@ -49,6 +51,21 @@ RELAY_PRINCIPALS = {"service-account-openbank-edge"}
 FLOWS_OFF = ("standardFlowEnabled", "implicitFlowEnabled", "directAccessGrantsEnabled")
 
 
+def _username_mapper(client: dict) -> bool:
+    """preferred_username is the claim Quarkus takes the principal name from (after upn); without
+    it the principal is the service-account user's UUID and no trust list can name it."""
+    for m in client.get("protocolMappers") or []:
+        cfg = m.get("config") or {}
+        if (
+            m.get("protocolMapper") == "oidc-usermodel-property-mapper"
+            and cfg.get("user.attribute") == "username"
+            and cfg.get("claim.name") == "preferred_username"
+            and str(cfg.get("access.token.claim")).lower() == "true"
+        ):
+            return True
+    return False
+
+
 def _party_id_mapper(client: dict) -> bool:
     for m in client.get("protocolMappers") or []:
         cfg = m.get("config") or {}
@@ -78,6 +95,8 @@ def check_realm(realm: dict) -> tuple[list[str], set[str]]:
         for flow in FLOWS_OFF:
             if c.get(flow) is not False:
                 findings.append(f"{where}: {flow} must be explicitly false — a canary authenticates by client_credentials only")
+        if not _username_mapper(c):
+            findings.append(f"{where}: no preferred_username mapper on the access token — the principal would be a UUID the trust list cannot name")
         if not _party_id_mapper(c):
             findings.append(f"{where}: no party_id user-attribute mapper on the access token — the edge would scope it by sub")
         user = users.get(cid)
@@ -150,6 +169,10 @@ GOOD_CLIENT = {
     "directAccessGrantsEnabled": False,
     "protocolMappers": [
         {
+            "protocolMapper": "oidc-usermodel-property-mapper",
+            "config": {"user.attribute": "username", "claim.name": "preferred_username", "access.token.claim": "true"},
+        },
+        {
             "protocolMapper": "oidc-usermodel-attribute-mapper",
             "config": {"user.attribute": "party_id", "claim.name": "party_id", "access.token.claim": "true"},
         }
@@ -186,7 +209,8 @@ def self_test() -> int:
         ("password grant enabled", {**GOOD_CLIENT, "directAccessGrantsEnabled": True}, GOOD_USER, edge_ok, relay_ok, 1),
         ("flow key omitted", {k: v for k, v in GOOD_CLIENT.items() if k != "standardFlowEnabled"}, GOOD_USER, None, None, 1),
         ("public client", {**GOOD_CLIENT, "publicClient": True}, GOOD_USER, None, None, 1),
-        ("no party_id mapper", {**GOOD_CLIENT, "protocolMappers": []}, GOOD_USER, None, None, 1),
+        ("no party_id mapper", {**GOOD_CLIENT, "protocolMappers": GOOD_CLIENT["protocolMappers"][:1]}, GOOD_USER, None, None, 1),
+        ("no preferred_username mapper", {**GOOD_CLIENT, "protocolMappers": GOOD_CLIENT["protocolMappers"][1:]}, GOOD_USER, None, None, 1),
         ("extra realm role", GOOD_CLIENT, {**GOOD_USER, "realmRoles": ["ROLE_CUSTOMER", "ROLE_OPERATOR"]}, None, None, 1),
         ("client role", GOOD_CLIENT, {**GOOD_USER, "clientRoles": {"realm-management": ["manage-users"]}}, None, None, 1),
         ("no party_id attribute", GOOD_CLIENT, {**GOOD_USER, "attributes": {}}, None, None, 1),

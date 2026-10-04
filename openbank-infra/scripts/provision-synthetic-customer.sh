@@ -156,6 +156,7 @@ if [[ -z "${SYNTHETIC_PARTY_ID:-}" ]]; then
   SYNTHETIC_PARTY_ID="$(jq -r '.id' <<<"${RESP%$'\n'*}")"
   [[ "$(jq -r '.classification' <<<"${RESP%$'\n'*}")" == SYNTHETIC ]] || { echo "ERROR: party is not SYNTHETIC" >&2; exit 1; }
   kill $PF 2>/dev/null || true
+  wait $PF 2>/dev/null || true
   unset PARTY_ADMIN_TOKEN
 fi
 echo "    party: $SYNTHETIC_PARTY_ID"
@@ -170,6 +171,16 @@ if [[ -z "$CID" ]]; then
 else
   echo "==> client $CLIENT_ID exists; reusing it and its secret"
 fi
+# An existing client keeps its mappers from the day it was created; add any the template has
+# gained since (e.g. preferred-username, which the trust list depends on). Never removes one.
+LIVE_MAPPERS="$(kc get "clients/$CID/protocol-mappers/models" -r "$REALM" --fields name --format csv --noquotes)"
+while IFS= read -r mapper; do
+  name="$(jq -r .name <<<"$mapper")"
+  if ! grep -qxF "$name" <<<"$LIVE_MAPPERS"; then
+    echo "==> adding protocol mapper $name to $CLIENT_ID"
+    printf '%s' "$mapper" | kc create "clients/$CID/protocol-mappers/models" -r "$REALM" -f - >/dev/null
+  fi
+done < <(jq -c '.protocolMappers[]' <<<"$CLIENT_JSON")
 SA_ID="$(kc get "clients/$CID/service-account-user" -r "$REALM" --fields id --format csv --noquotes)"
 kc add-roles -r "$REALM" --uid "$SA_ID" --rolename ROLE_CUSTOMER >/dev/null
 kc update "users/$SA_ID" -r "$REALM" -s "attributes.party_id=[\"$SYNTHETIC_PARTY_ID\"]" >/dev/null
@@ -180,6 +191,9 @@ SECRET="$(kc get "clients/$CID/client-secret" -r "$REALM" --fields value --forma
 [[ -n "$SECRET" ]] || { echo "ERROR: could not read the generated client secret" >&2; exit 1; }
 
 # --- 3 + 4. OpenBao ------------------------------------------------------------------------
+# SKIP_OPENBAO=1 re-runs only the Keycloak shaping and the claims check, e.g. after the template
+# gained a mapper, without a second OpenBao sign-in. The secret is unchanged by such a run.
+if [[ "${SKIP_OPENBAO:-0}" != 1 ]]; then
 if [[ -z "${VAULT_TOKEN:-}" && -n "${BAO_TOKEN:-}" ]]; then VAULT_TOKEN="$BAO_TOKEN"; fi
 if command -v bao >/dev/null; then
   # Local CLI over a port-forward (OpenBao has no ingress). The token lives in this process's
@@ -219,6 +233,7 @@ UPDATED="$(jq -c --argjson client "$CLIENT_JSON" --arg secret "$SECRET" --arg pa
 NEW_ENTRY="$(jq -c --arg f "$REALM_FIELD" --arg v "$UPDATED" '.[$f] = $v' <<<"$ENTRY")"
 printf '%s\n%s' "$VAULT_TOKEN" "$NEW_ENTRY" | bao kv put "$KV_REALM_PATH" - >/dev/null
 unset ENTRY CURRENT UPDATED NEW_ENTRY
+fi
 
 # --- 5. verify against the PUBLIC issuer ----------------------------------------------------
 echo "==> minting a token through $PUBLIC_ISSUER and checking its claims"
