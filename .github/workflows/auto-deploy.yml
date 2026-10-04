@@ -1189,7 +1189,8 @@ jobs:
           #
           # Safe because the rewrite is deterministic — pin each image: to the tag just built —
           # so recomputing against a newer main is always correct.
-          bash .github/scripts/refresh-gitops-pr-base.sh
+          git fetch origin main
+          git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
 
