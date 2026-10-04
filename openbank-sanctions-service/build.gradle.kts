@@ -44,6 +44,7 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.smallrye.reactive.messaging.inmemory)
 
     // Pact provider verification (issue #2255, C3): fx-service is a consumer of
     // POST /api/v1/sanctions/screen. @TestSecurity supplies the operator role Pact replays with.
@@ -64,12 +65,6 @@ dependencies {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
-
-// Quarkus and Kafka share the sanctions test JVM across the integration suite. The default heap
-// exhausted after reporting 166 tests with zero failures in CI, before Gradle could finish (#11558).
-tasks.named<Test>("test") {
-    maxHeapSize = "2g"
-}
 
 kover {
     reports {
