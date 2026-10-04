@@ -45,6 +45,9 @@ class DeclaredHoldingRepositoryImpl(
             eventType = eventType,
             payload = payload,
             createdAt = clock.instant(),
+            // From the HOLDING, not the request: an event about a canary's holding is synthetic
+            // however it was triggered, and a real holding's never is.
+            synthetic = holding.synthetic,
         )
         Panache.withTransaction {
             find("holdingId", holding.id).firstResult().flatMap { existing ->
@@ -141,6 +144,7 @@ class DeclaredHoldingRepositoryImpl(
         status = holding.status.name
         pledgedToLoanId = holding.pledgedToLoanId
         updatedAt = holding.updatedAt
+        synthetic = holding.synthetic
     }
 
     private fun DeclaredHoldingEntity.toDomain() = DeclaredHolding(
@@ -162,5 +166,6 @@ class DeclaredHoldingRepositoryImpl(
         pledgedToLoanId = pledgedToLoanId,
         createdAt = createdAt,
         updatedAt = updatedAt,
+        synthetic = synthetic,
     )
 }
