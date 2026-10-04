@@ -126,7 +126,8 @@ authenticating with `client_credentials`. Its service-account user is the synthe
   confidential service-account clients. What is new is that this one is a customer.
 
 **Enforcement:** gate `synthetic-customer-identity` (`check-synthetic-customer-identity.py`),
-introduced `advisory` with a `target_enforce_date`, per ADR-0144.
+introduced `enforced`. Nothing in the tree has to migrate first, so ADR-0144's advisory period
+with a deadline buys nothing here.
 
 ### Delivery check
 
