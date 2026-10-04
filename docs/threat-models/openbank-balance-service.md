@@ -253,6 +253,16 @@ also be deleted (nothing else in balance-service depends on it).
   standalone `balance_rest_ext.rego` so `opa test` can load it (interest/delegation pattern).
   Rollback: revert the ext to the pre-#3734 shape — no live caller is lost, as no edge write
   path exists.
+- **2026-10-04** — **The public edge for `/api/v1/balances` moves from ingress-nginx to the Envoy
+  Gateway (ADR-0324 Phase 4).** `components/balances/httproute.yaml` replaces the `balances-api`
+  Ingress. TLS, the OIDC/OPA checks and the path are unchanged. D1 changes:
+  `limit-connections: 10` (concurrent connections per client IP) has no Envoy Gateway
+  equivalent. It is replaced by the same per-client request rate (20/s), a listener-wide
+  connection limit on `https-api`, and a per-backend circuit breaker. **Residual-risk delta:**
+  one client can hold more than 10 concurrent connections, bounded only by the listener total.
+  This was accepted because the archived controller is the larger risk (ADR-0324 Phase 4
+  amendment). `balance-service-ingress-allow-list` gains `TCP:8103 FROM envoy-gateway-system`
+  (generated). The ingress-nginx rule stays until Phase 5.
 - **2026-08-02** — **balance-service is now genuinely reachable from the public edge**, and the
   honest framing is that the *intent* did not change while the *reality* did. `accounts/accounts-api`
   had declared `api.open-bank.tech/api/v1/balances` since the Ingress was written, so the exposure was
