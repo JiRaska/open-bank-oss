@@ -35,7 +35,7 @@ import java.time.LocalDate
  * test (#2187). Only the external ČNB download is stubbed — with the real committed files.
  *
  * Proves, in order: the boot run stores every row of all three histories and publishes them AND the
- * two Flyway-seeded minimum-reserve facts through the outbox; a re-run is a no-op (no row, no
+ * minimum-reserve ratio and remuneration downloaded from the real ČNB workbook through the outbox; a re-run is a no-op (no row, no
  * event); a changed rate for a stored date is applied as a REVISION with exactly one new event.
  */
 @QuarkusTest
@@ -67,6 +67,9 @@ class CnbPolicyRateIngestionIT {
             "https://stub.invalid/${FILES.getValue(instrument)}",
             overrides[instrument] ?: real(instrument),
         )
+
+        override suspend fun fetchMinimumReserves(): CnbPolicyRateDocument =
+            CnbPolicyRateDocument("https://stub.invalid/$PMR", resource(PMR))
     }
 
     @Inject
@@ -101,7 +104,7 @@ class CnbPolicyRateIngestionIT {
         assertThat(rows(CnbPolicyInstrument.DISCOUNT)).isEqualTo(77)
         assertThat(rows(CnbPolicyInstrument.LOMBARD)).isEqualTo(85)
         assertThat(events())
-            .describedAs("one event per stored row, plus the two seeded minimum-reserve facts")
+            .describedAs("one event per stored row, including the three downloaded minimum-reserve change points")
             .isEqualTo(TOTAL_EVENTS)
         assertThat(count("select count(*) from cnb_policy_rate where published_at is null")).isZero()
 
@@ -114,10 +117,19 @@ class CnbPolicyRateIngestionIT {
             useCase.effectiveAt(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(2026, 7, 1))
         }!!
         assertThat(ratio.rate).isEqualByComparingTo("0.04")
-        assertThat(ratio.note).contains("323/2024")
-        // Before the first cited fact there is nothing — not a default.
-        assertThat(onEventLoop { useCase.effectiveAt(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(2025, 1, 1)) })
+        assertThat(ratio.effectiveFrom).isEqualTo(LocalDate.of(2025, 1, 2))
+        assertThat(ratio.sourceUrl).endsWith(PMR)
+        val before =
+            onEventLoop { useCase.effectiveAt(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(2025, 1, 1)) }
+        assertThat(before!!.rate).isEqualByComparingTo("0.02")
+        // Before the workbook's first representable ratio there is nothing — not a default.
+        assertThat(
+            onEventLoop {
+                useCase.effectiveAt(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(1999, 10, 6))
+            },
+        )
             .isNull()
+        assertThat(rows(CnbPolicyInstrument.MIN_RESERVE_REMUNERATION)).isEqualTo(1)
     }
 
     @Test
@@ -162,11 +174,15 @@ class CnbPolicyRateIngestionIT {
             CnbPolicyInstrument.LOMBARD to "vyvoj_lombard_historie.txt",
         )
 
-        fun real(instrument: CnbPolicyInstrument): ByteArray = requireNotNull(
-            CnbPolicyRateIngestionIT::class.java.getResourceAsStream("/cnb/policy-rates/${FILES.getValue(instrument)}"),
+        const val PMR = "PMR_historie_zmen.xlsx"
+
+        fun real(instrument: CnbPolicyInstrument): ByteArray = resource(FILES.getValue(instrument))
+
+        fun resource(name: String): ByteArray = requireNotNull(
+            CnbPolicyRateIngestionIT::class.java.getResourceAsStream("/cnb/policy-rates/$name"),
         ).readBytes()
 
-        const val TOTAL_EVENTS = 117L + 77L + 85L + 2L
+        const val TOTAL_EVENTS = 117L + 77L + 85L + 2L + 1L
         const val BUDGET_NANOS = 60_000_000_000L
         const val POLL_MILLIS = 250L
     }

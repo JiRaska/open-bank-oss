@@ -10,6 +10,7 @@ import com.openbank.fx.application.port.out.CnbPolicyRateFeed
 import com.openbank.fx.application.port.out.CnbPolicyRateProvenance
 import com.openbank.fx.application.port.out.CnbPolicyRateRepository
 import com.openbank.fx.application.port.out.CnbPolicyRateUpsertOutcome
+import com.openbank.fx.domain.cnb.CnbMinimumReserveParser
 import com.openbank.fx.domain.cnb.CnbPolicyInstrument
 import com.openbank.fx.domain.cnb.CnbPolicyRateFact
 import com.openbank.fx.domain.cnb.CnbPolicyRateParser
@@ -28,7 +29,8 @@ import java.util.HexFormat
 import java.util.UUID
 
 /**
- * ČNB policy rates (2W repo, discount, lombard) and the minimum-reserve facts.
+ * ČNB policy rates (2W repo, discount, lombard — text history files) and the minimum-reserve
+ * ratio and remuneration (the `PMR_historie_zmen.xlsx` workbook), all downloaded periodically.
  *
  * A feed is ingested all-or-nothing: the bytes are hashed for provenance, decoded as strict UTF-8
  * (a mis-decoded file fails rather than storing mojibake), parsed by [CnbPolicyRateParser] — which
@@ -51,7 +53,10 @@ class CnbPolicyRateService(
         val document = feed.fetch(instrument)
         val observations = CnbPolicyRateParser.parse(decode(document.body, instrument), instrument)
         val provenance = CnbPolicyRateProvenance(document.sourceUrl, Instant.now(clock), sha256(document.body))
-        val outcome = repository.upsertAndPublish(instrument, observations, provenance, ::event)
+        return repository.upsertAndPublish(instrument, observations, provenance, ::event).also { warnRevisions(it) }
+    }
+
+    private fun warnRevisions(outcome: CnbPolicyRateUpsertOutcome) {
         outcome.revisions.forEach {
             log.warnf(
                 "ČNB %s rate effective %s REVISED from %s to %s — the ČNB does not normally revise history",
@@ -61,11 +66,20 @@ class CnbPolicyRateService(
                 it.rate.toPlainString(),
             )
         }
-        return outcome
     }
 
-    override suspend fun publishPendingFacts(): Int =
-        repository.publishPending(CnbPolicyInstrument.entries.filter { it.feedHeader == null }, ::event)
+    override suspend fun ingestMinimumReserves(): Map<CnbPolicyInstrument, CnbPolicyRateUpsertOutcome> {
+        val document = feed.fetchMinimumReserves()
+        // Parsed in full BEFORE any write: an anomaly anywhere in the workbook stores nothing.
+        val parsed = CnbMinimumReserveParser.parse(document.body)
+        val provenance = CnbPolicyRateProvenance(document.sourceUrl, Instant.now(clock), sha256(document.body))
+        return mapOf(
+            CnbPolicyInstrument.MIN_RESERVE_RATIO to parsed.ratio,
+            CnbPolicyInstrument.MIN_RESERVE_REMUNERATION to parsed.remuneration,
+        ).mapValues { (instrument, observations) ->
+            repository.upsertAndPublish(instrument, observations, provenance, ::event).also { warnRevisions(it) }
+        }
+    }
 
     override suspend fun effectiveAt(instrument: CnbPolicyInstrument, asOf: LocalDate): CnbPolicyRateFact? =
         repository.findEffective(instrument, asOf)

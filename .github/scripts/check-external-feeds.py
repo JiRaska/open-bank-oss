@@ -145,6 +145,23 @@ def shape_cnb_policy_rate_history(text):
     return None
 
 
+def shape_cnb_min_reserve_workbook(text):
+    """The ČNB minimum-reserve history workbook `PMR_historie_zmen.xlsx`.
+
+    A zip (local-file signature `PK\\x03\\x04`) whose stored entry names include the workbook and
+    shared-strings parts — the names sit uncompressed in the zip headers, so they survive this
+    script's text decoding. fx-service's CnbMinimumReserveParser does the content checks.
+    """
+    if _looks_like_html(text):
+        return "payload is an HTML page, not the xlsx workbook"
+    if not text.startswith("PK\x03\x04"):
+        return f"payload is not a zip/xlsx archive: {text[:20]!r}"
+    for part in ("xl/workbook.xml", "xl/sharedStrings.xml", "xl/worksheets/"):
+        if part not in text:
+            return f"archive has no {part} part — not the PMR workbook"
+    return None
+
+
 def shape_xml_document(text):
     """Any XML payload with at least one element — used for registry-style feeds."""
     if _looks_like_html(text):
@@ -160,6 +177,7 @@ def shape_xml_document(text):
 SHAPES = {
     "cnb_fixing": shape_cnb_fixing,
     "cnb_policy_rate_history": shape_cnb_policy_rate_history,
+    "cnb_min_reserve_workbook": shape_cnb_min_reserve_workbook,
     "xml_document": shape_xml_document,
 }
 
@@ -232,6 +250,20 @@ FEEDS = [
                 "schedule/CnbPolicyRateIngestionScheduler.kt"
             ),
             "const": "FEED_LOMBARD",
+        },
+    },
+    {
+        "name": "cnb-policy-rate-min-reserves",
+        "file": "openbank-fx-service/src/main/resources/application.yaml",
+        "yaml_path": "openbank.cnb.policy-rates.min-reserves-url",
+        "shape": "cnb_min_reserve_workbook",
+        "why": "The ČNB minimum-reserve (PMR) ratio and remuneration history; the risk engine's minimum-reserve requirement is NOT_EVALUABLE without it. Parsed all-or-nothing by CnbMinimumReserveParser.",
+        "kotlin_liveness": {
+            "file": (
+                "openbank-fx-service/src/main/kotlin/com/openbank/fx/infrastructure/"
+                "schedule/CnbPolicyRateIngestionScheduler.kt"
+            ),
+            "const": "FEED_MIN_RESERVES",
         },
     },
     {
@@ -655,6 +687,19 @@ def self_test():
             "cnb_policy_rate_history rejects a malformed row",
             shape_cnb_policy_rate_history,
             "PLATNA_OD|CNB_REPO_SAZBA_V_%\n" + "\n".join(f"2025{m:02d}01|3,75" for m in range(1, 12)) + "\n2025-12-01|3,75",
+            False,
+        ),
+        (
+            "cnb_min_reserve_workbook accepts an xlsx-shaped zip",
+            shape_cnb_min_reserve_workbook,
+            "PK\x03\x04....xl/workbook.xml....xl/sharedStrings.xml....xl/worksheets/sheet1.xml",
+            True,
+        ),
+        ("cnb_min_reserve_workbook rejects the ČNB 404 HTML page", shape_cnb_min_reserve_workbook, CNB_404_HTML, False),
+        (
+            "cnb_min_reserve_workbook rejects a zip that is not a workbook",
+            shape_cnb_min_reserve_workbook,
+            "PK\x03\x04....word/document.xml",
             False,
         ),
         ("xml_document accepts XML", shape_xml_document, '<?xml version="1.0"?><banks><bank/></banks>', True),

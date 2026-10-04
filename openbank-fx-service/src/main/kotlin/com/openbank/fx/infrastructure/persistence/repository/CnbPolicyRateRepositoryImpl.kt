@@ -85,15 +85,6 @@ class CnbPolicyRateRepositoryImpl(private val clock: Clock) : CnbPolicyRateRepos
         }.awaitSuspending()
     }
 
-    override suspend fun publishPending(
-        instruments: Collection<CnbPolicyInstrument>,
-        event: (CnbPolicyRateFact) -> OutboxMessage,
-    ): Int {
-        if (instruments.isEmpty()) return 0
-        val now = Instant.now(clock)
-        return sf.withTransaction { s, _ -> publishPendingIn(s, instruments, event, now) }.awaitSuspending()
-    }
-
     override suspend fun findEffective(instrument: CnbPolicyInstrument, asOf: LocalDate): CnbPolicyRateFact? =
         sf.withSession { s ->
             s.createQuery(

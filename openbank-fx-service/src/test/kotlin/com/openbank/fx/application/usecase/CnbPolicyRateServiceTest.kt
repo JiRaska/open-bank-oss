@@ -96,42 +96,64 @@ class CnbPolicyRateServiceTest {
     }
 
     @Test
-    fun `the published event carries the fact, its provenance and a deterministic key`(): Unit = runBlocking {
-        val factory = slot<(CnbPolicyRateFact) -> OutboxMessage>()
-        coEvery { repo.publishPending(any(), capture(factory)) } returns 2
+    fun `a malformed workbook stores nothing for either instrument`(): Unit = runBlocking {
+        coEvery { feed.fetchMinimumReserves() } returns CnbPolicyRateDocument("u", "<html>".toByteArray())
 
-        assertThat(service.publishPendingFacts()).isEqualTo(2)
-        coVerify {
-            repo.publishPending(
-                listOf(CnbPolicyInstrument.MIN_RESERVE_RATIO, CnbPolicyInstrument.MIN_RESERVE_REMUNERATION),
-                any(),
-            )
-        }
-
-        val fact = CnbPolicyRateFact(
-            CnbPolicyInstrument.MIN_RESERVE_RATIO,
-            LocalDate.of(2025, 1, 2),
-            BigDecimal("0.04"),
-            "https://www.cnb.cz/x.xlsx",
-            Instant.parse("2026-10-04T00:00:00Z"),
-            "a".repeat(64),
-            "Vyhláška č. 323/2024 Sb.",
-            previousRate = BigDecimal("0.02"),
-            revisedAt = now,
-        )
-        val message = factory.captured(fact)
-        assertThat(message.eventType).isEqualTo(CnbPolicyRatePublished.EVENT_TYPE)
-        assertThat(message.aggregateId)
-            .isEqualTo(
-                CnbPolicyRateService.aggregateId(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(2025, 1, 2)),
-            )
-        val json = mapper.readTree(message.payload)
-        assertThat(json["instrument"].asText()).isEqualTo("MIN_RESERVE_RATIO")
-        assertThat(json["effectiveFrom"].asText()).isEqualTo("2025-01-02")
-        assertThat(json["rate"].decimalValue()).isEqualByComparingTo("0.04")
-        assertThat(json["revised"].asBoolean()).isTrue()
-        assertThat(json["previousRate"].decimalValue()).isEqualByComparingTo("0.02")
-        assertThat(json["sourceService"].asText()).isEqualTo("fx-service")
-        assertThat(json["contentSha256"].asText()).hasSize(64)
+        assertThatThrownBy { runBlocking { service.ingestMinimumReserves() } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+        coVerify(exactly = 0) { repo.upsertAndPublish(any(), any(), any(), any()) }
     }
+
+    @Test
+    fun `the workbook is ingested and its events carry the fact, its provenance and a deterministic key`(): Unit =
+        runBlocking {
+            val xlsxUrl = "https://www.cnb.cz/x/PMR_historie_zmen.xlsx"
+            val xlsx = requireNotNull(
+                javaClass.getResourceAsStream("/cnb/policy-rates/PMR_historie_zmen.xlsx"),
+            ).readBytes()
+            coEvery { feed.fetchMinimumReserves() } returns CnbPolicyRateDocument(xlsxUrl, xlsx)
+            val factory = slot<(CnbPolicyRateFact) -> OutboxMessage>()
+            val ratio = slot<List<CnbPolicyRateObservation>>()
+            coEvery {
+                repo.upsertAndPublish(CnbPolicyInstrument.MIN_RESERVE_RATIO, capture(ratio), any(), capture(factory))
+            } returns CnbPolicyRateUpsertOutcome(CnbPolicyRateUpsert(2, 0, 0), emptyList(), 2)
+            coEvery { repo.upsertAndPublish(CnbPolicyInstrument.MIN_RESERVE_REMUNERATION, any(), any(), any()) } returns
+                CnbPolicyRateUpsertOutcome(CnbPolicyRateUpsert(1, 0, 0), emptyList(), 1)
+
+            val outcomes = service.ingestMinimumReserves()
+
+            assertThat(outcomes.keys)
+                .containsExactlyInAnyOrder(
+                    CnbPolicyInstrument.MIN_RESERVE_RATIO,
+                    CnbPolicyInstrument.MIN_RESERVE_REMUNERATION,
+                )
+            assertThat(ratio.captured.map { it.effectiveFrom })
+                .containsExactly(LocalDate.of(1999, 10, 7), LocalDate.of(2025, 1, 2))
+
+            val fact = CnbPolicyRateFact(
+                CnbPolicyInstrument.MIN_RESERVE_RATIO,
+                LocalDate.of(2025, 1, 2),
+                BigDecimal("0.04"),
+                "https://www.cnb.cz/x.xlsx",
+                Instant.parse("2026-10-04T00:00:00Z"),
+                "a".repeat(64),
+                "Vyhláška č. 323/2024 Sb.",
+                previousRate = BigDecimal("0.02"),
+                revisedAt = now,
+            )
+            val message = factory.captured(fact)
+            assertThat(message.eventType).isEqualTo(CnbPolicyRatePublished.EVENT_TYPE)
+            assertThat(message.aggregateId)
+                .isEqualTo(
+                    CnbPolicyRateService.aggregateId(CnbPolicyInstrument.MIN_RESERVE_RATIO, LocalDate.of(2025, 1, 2)),
+                )
+            val json = mapper.readTree(message.payload)
+            assertThat(json["instrument"].asText()).isEqualTo("MIN_RESERVE_RATIO")
+            assertThat(json["effectiveFrom"].asText()).isEqualTo("2025-01-02")
+            assertThat(json["rate"].decimalValue()).isEqualByComparingTo("0.04")
+            assertThat(json["revised"].asBoolean()).isTrue()
+            assertThat(json["previousRate"].decimalValue()).isEqualByComparingTo("0.02")
+            assertThat(json["sourceService"].asText()).isEqualTo("fx-service")
+            assertThat(json["contentSha256"].asText()).hasSize(64)
+        }
 }

@@ -202,13 +202,16 @@ openbank:
     # Currencies (against CZK) ingested from the ČNB central-bank fixing — ADR-0046 scope.
     currencies: ${CNB_CURRENCIES:EUR,USD,GBP}
     # ČNB monetary-policy rate histories (CnbPolicyRateIngestionScheduler). Each URL is probed daily
-    # by check-external-feeds.py under the feed names in that scheduler. UTF-8 with BOM, pipe
-    # separated, `PLATNA_OD|CNB_<X>_SAZBA_V_%` header, yyyyMMdd dates, decimal comma. Verify with:
+    # by check-external-feeds.py under the feed names in that scheduler. The three .txt files: UTF-8
+    # with BOM, pipe separated, `PLATNA_OD|CNB_<X>_SAZBA_V_%` header, yyyyMMdd dates, decimal comma:
     #   curl -sS "<url>" | head -2
     policy-rates:
       repo-url: ${CNB_POLICY_REPO_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_repo_historie.txt}
       discount-url: ${CNB_POLICY_DISCOUNT_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_diskontni_historie.txt}
       lombard-url: ${CNB_POLICY_LOMBARD_URL:https://www.cnb.cz/cs/casto-kladene-dotazy/.galleries/vyvoj_lombard_historie.txt}
+      # Minimum reserve (PMR) ratio + remuneration: the ČNB's own change history, one sheet per year
+      # (no text feed exists). Parsed all-or-nothing by CnbMinimumReserveParser.
+      min-reserves-url: ${CNB_POLICY_MIN_RESERVES_URL:https://www.cnb.cz/export/sites/cnb/cs/financni-trhy/.galleries/penezni_trh/download/PMR_historie_zmen.xlsx}
   temporal:
     enabled: false
     server-url: ${TEMPORAL_SERVER_URL:localhost:7233}

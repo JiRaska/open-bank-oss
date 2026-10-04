@@ -231,8 +231,8 @@ paths:
         The row with the latest `effectiveFrom` on or before `asOf`, with its provenance (source
         URL, fetch time, SHA-256 of the downloaded file). REPO_2W, DISCOUNT and LOMBARD are
         ingested daily from the ČNB history files; MIN_RESERVE_RATIO and MIN_RESERVE_REMUNERATION
-        are cited facts maintained by migration until the ČNB spreadsheet is ingested
-        automatically. 404 when no fact is in effect on that day — never a default. Requires
+        are downloaded from the ČNB minimum-reserve workbook on the same schedule. 404 when no fact
+        is in effect on that day — never a default. Requires
         ROLE_VIEWER, ROLE_OPERATOR, ROLE_ADMIN or ROLE_PAYMENTS (authorize action `fx.read`).
       operationId: getCnbPolicyRate
       parameters:
@@ -397,7 +397,7 @@ components:
         note:
           type: string
           nullable: true
-          description: Legal basis or citation, for facts maintained by migration.
+          description: Optional citation; null for downloaded rows.
         previousRate:
           type: number
           nullable: true

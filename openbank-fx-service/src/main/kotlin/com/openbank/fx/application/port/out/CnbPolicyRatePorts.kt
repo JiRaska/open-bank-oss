@@ -18,6 +18,9 @@ class CnbPolicyRateDocument(val sourceUrl: String, val body: ByteArray)
 /** Outbound port: the ČNB policy-rate history file of a feed-backed instrument. */
 interface CnbPolicyRateFeed {
     suspend fun fetch(instrument: CnbPolicyInstrument): CnbPolicyRateDocument
+
+    /** The ČNB minimum-reserve history workbook (`PMR_historie_zmen.xlsx`), raw bytes. */
+    suspend fun fetchMinimumReserves(): CnbPolicyRateDocument
 }
 
 /** Where one batch of observations came from. */
@@ -50,12 +53,6 @@ interface CnbPolicyRateRepository {
         provenance: CnbPolicyRateProvenance,
         event: (CnbPolicyRateFact) -> OutboxMessage,
     ): CnbPolicyRateUpsertOutcome
-
-    /** Publishes every not-yet-published row of [instruments] (the Flyway-seeded facts). */
-    suspend fun publishPending(
-        instruments: Collection<CnbPolicyInstrument>,
-        event: (CnbPolicyRateFact) -> OutboxMessage,
-    ): Int
 
     /** The row with the latest effectiveFrom <= [asOf], or null. */
     suspend fun findEffective(instrument: CnbPolicyInstrument, asOf: LocalDate): CnbPolicyRateFact?

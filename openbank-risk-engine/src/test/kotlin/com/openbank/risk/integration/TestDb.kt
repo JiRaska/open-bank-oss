@@ -14,8 +14,9 @@ internal object TestDb {
     }
 
     /**
-     * The two cited ČNB minimum-reserve facts fx-service publishes (its V9): ratio 4 % from
-     * 2025-01-02 and remuneration 0 from 2023-10-05. Idempotent.
+     * The ČNB minimum-reserve facts as fx-service parses them from the live workbook: ratio 4 % from
+     * 2025-01-02 and remuneration 0 from 2023-10-05 (the rows that matter for 2025+ snapshots).
+     * Test data standing in for the consumed topic. Idempotent.
      */
     fun seedReserveFacts() {
         execute(

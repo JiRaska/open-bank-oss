@@ -48,8 +48,11 @@ interface CnbPolicyRateUseCase {
     /** Fetches, parses (all-or-nothing) and upserts one feed-backed instrument; throws on any failure. */
     suspend fun ingest(instrument: CnbPolicyInstrument): CnbPolicyRateUpsertOutcome
 
-    /** Publishes the fact rows that have no machine feed and have not been published yet. */
-    suspend fun publishPendingFacts(): Int
+    /**
+     * Fetches the ČNB minimum-reserve workbook, parses it all-or-nothing and upserts the reserve
+     * ratio and its remuneration; returns the outcome per instrument. Throws on any failure.
+     */
+    suspend fun ingestMinimumReserves(): Map<CnbPolicyInstrument, CnbPolicyRateUpsertOutcome>
 
     /** The fact in effect on [asOf] (latest effectiveFrom <= asOf), or null when none is. */
     suspend fun effectiveAt(instrument: CnbPolicyInstrument, asOf: LocalDate): CnbPolicyRateFact?

@@ -45,6 +45,11 @@ class CnbPolicyRateIngestionSchedulerTest {
     private fun successRecorded(workflow: String): Double = registry.get(WorkflowLivenessMetrics.SUCCESS_RECORDED)
         .tag(WorkflowLivenessMetrics.WORKFLOW_TAG, workflow).gauge().value()
 
+    private fun minReserves() = mapOf(
+        CnbPolicyInstrument.MIN_RESERVE_RATIO to outcome(),
+        CnbPolicyInstrument.MIN_RESERVE_REMUNERATION to outcome(),
+    )
+
     private fun outcome(revised: Int = 0) =
         CnbPolicyRateUpsertOutcome(CnbPolicyRateUpsert(1, 2, revised), emptyList(), 1 + revised)
 
@@ -56,13 +61,13 @@ class CnbPolicyRateIngestionSchedulerTest {
     @Test
     fun `a run where every feed succeeds records the heartbeat and each feed's freshness`(): Unit = runBlocking {
         coEvery { useCase.ingest(any()) } returns outcome(revised = 1)
-        coEvery { useCase.publishPendingFacts() } returns 2
+        coEvery { useCase.ingestMinimumReserves() } returns minReserves()
 
         scheduler.ingestPolicyRates()
 
         CnbPolicyInstrument.FEED_BACKED.forEach { coVerify(exactly = 1) { useCase.ingest(it) } }
         assertThat(successRecorded(CnbPolicyRateIngestionScheduler.WORKFLOW_NAME)).isEqualTo(1.0)
-        CnbPolicyRateIngestionScheduler.FEED_NAMES.values.forEach {
+        (CnbPolicyRateIngestionScheduler.FEED_NAMES.values + CnbPolicyRateIngestionScheduler.FEED_MIN_RESERVES).forEach {
             assertThat(successRecorded("feed-$it")).describedAs(it).isEqualTo(1.0)
         }
         assertThat(
@@ -76,7 +81,7 @@ class CnbPolicyRateIngestionSchedulerTest {
         coEvery { useCase.ingest(CnbPolicyInstrument.REPO_2W) } throws IOException("connection reset")
         coEvery { useCase.ingest(CnbPolicyInstrument.DISCOUNT) } returns outcome()
         coEvery { useCase.ingest(CnbPolicyInstrument.LOMBARD) } returns outcome()
-        coEvery { useCase.publishPendingFacts() } returns 0
+        coEvery { useCase.ingestMinimumReserves() } returns minReserves()
 
         scheduler.ingestPolicyRates() // must not throw
 
@@ -95,7 +100,7 @@ class CnbPolicyRateIngestionSchedulerTest {
     @Test
     fun `a malformed feed is classified as a parse error`(): Unit = runBlocking {
         coEvery { useCase.ingest(any()) } throws IllegalArgumentException("2 malformed row(s)")
-        coEvery { useCase.publishPendingFacts() } returns 0
+        coEvery { useCase.ingestMinimumReserves() } returns minReserves()
 
         scheduler.ingestPolicyRates()
 
@@ -107,4 +112,22 @@ class CnbPolicyRateIngestionSchedulerTest {
         ).isEqualTo(1.0)
         assertThat(successRecorded(CnbPolicyRateIngestionScheduler.WORKFLOW_NAME)).isZero()
     }
+
+    @Test
+    fun `a failed workbook is its own feed outcome and holds the heartbeat, the rate feeds still advance`(): Unit =
+        runBlocking {
+            coEvery { useCase.ingest(any()) } returns outcome()
+            coEvery { useCase.ingestMinimumReserves() } throws IllegalArgumentException("not a single rate")
+
+            scheduler.ingestPolicyRates()
+
+            assertThat(successRecorded(CnbPolicyRateIngestionScheduler.WORKFLOW_NAME)).isZero()
+            assertThat(successRecorded("feed-${CnbPolicyRateIngestionScheduler.FEED_MIN_RESERVES}")).isZero()
+            assertThat(successRecorded("feed-${CnbPolicyRateIngestionScheduler.FEED_REPO}")).isEqualTo(1.0)
+            assertThat(
+                registry.get("openbank.feed.fetch")
+                    .tags("feed", CnbPolicyRateIngestionScheduler.FEED_MIN_RESERVES, "outcome", "parse_error")
+                    .counter().count(),
+            ).isEqualTo(1.0)
+        }
 }

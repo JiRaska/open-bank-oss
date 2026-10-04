@@ -52,7 +52,8 @@ channels:
     address: openbank.fx.cnb-policy-rate.published
     description: |
       ČNB monetary-policy rates (2W repo, discount, lombard — ingested daily from the ČNB history
-      files) and minimum-reserve facts (ratio, remuneration — cited rows maintained by migration).
+      files) and minimum-reserve facts (ratio, remuneration — downloaded from the ČNB workbook
+      `PMR_historie_zmen.xlsx`), all ingested daily and on boot.
       One event per (instrument, effectiveFrom) row that was stored for the first time or whose rate
       was revised, written in the same transaction as the row; an unchanged re-run emits nothing.
       Partition key: `aggregateId` = a name-based UUID of `CNB-POLICY:<instrument>:<effectiveFrom>`.
@@ -150,7 +151,7 @@ components:
         contentSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 of the downloaded file bytes. }
         note:
           type: [string, 'null']
-          description: Legal basis or citation, for facts maintained by migration.
+          description: Optional citation; null for downloaded rows.
         revised: { type: boolean, description: True when this replaces a different rate for the same key. }
         previousRate:
           type: [number, 'null']

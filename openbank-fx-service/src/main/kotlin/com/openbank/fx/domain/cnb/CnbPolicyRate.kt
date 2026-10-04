@@ -11,7 +11,8 @@ import java.time.LocalDate
 /**
  * A ČNB monetary-policy rate or minimum-reserve parameter, each a step function of its effective
  * date. [feedHeader] is the exact header line of the instrument's official history file; an
- * instrument without one has no machine feed and is maintained as a cited fact row (Flyway V9).
+ * instrument without one is read from the ČNB minimum-reserve workbook instead
+ * ([CnbMinimumReserveParser]).
  */
 enum class CnbPolicyInstrument(val feedHeader: String?) {
     /** 2-week repo rate — the ČNB's main monetary-policy rate. */
@@ -23,10 +24,10 @@ enum class CnbPolicyInstrument(val feedHeader: String?) {
     /** Lombard rate — the marginal lending facility rate. */
     LOMBARD("PLATNA_OD|CNB_LOMBARDNI_SAZBA_V_%"),
 
-    /** Minimum reserve (PMR) ratio applied to the reserve base. No machine feed. */
+    /** Minimum reserve (PMR) ratio applied to the reserve base. From `PMR_historie_zmen.xlsx`. */
     MIN_RESERVE_RATIO(null),
 
-    /** Rate the ČNB pays on required reserves. No machine feed. */
+    /** Rate the ČNB pays on required reserves. From `PMR_historie_zmen.xlsx`. */
     MIN_RESERVE_REMUNERATION(null),
     ;
 

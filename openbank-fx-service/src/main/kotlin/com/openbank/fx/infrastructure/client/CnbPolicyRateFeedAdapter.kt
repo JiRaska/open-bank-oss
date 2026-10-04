@@ -18,7 +18,7 @@ import org.eclipse.microprofile.rest.client.RestClientBuilder
 import java.net.URI
 
 /**
- * Resilient fetch of the three ČNB policy-rate history files, with the same fault-tolerance
+ * Resilient fetch of the three ČNB policy-rate history files and the minimum-reserve workbook, with the same fault-tolerance
  * posture as [CnbRateProviderAdapter]. Self-injection routes the call through the CDI proxy so the
  * MicroProfile Fault Tolerance interceptors fire.
  */
@@ -27,6 +27,7 @@ class CnbPolicyRateFeedAdapter(
     @ConfigProperty(name = "openbank.cnb.policy-rates.repo-url") private val repoUrl: String,
     @ConfigProperty(name = "openbank.cnb.policy-rates.discount-url") private val discountUrl: String,
     @ConfigProperty(name = "openbank.cnb.policy-rates.lombard-url") private val lombardUrl: String,
+    @ConfigProperty(name = "openbank.cnb.policy-rates.min-reserves-url") private val minReservesUrl: String,
 ) : CnbPolicyRateFeed {
 
     @Inject
@@ -38,6 +39,9 @@ class CnbPolicyRateFeedAdapter(
         val url = urlOf(instrument)
         return CnbPolicyRateDocument(url, self.fetchWithResilience(url))
     }
+
+    override suspend fun fetchMinimumReserves(): CnbPolicyRateDocument =
+        CnbPolicyRateDocument(minReservesUrl, self.fetchWithResilience(minReservesUrl))
 
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 3, delay = 500, jitter = 200, retryOn = [Exception::class])

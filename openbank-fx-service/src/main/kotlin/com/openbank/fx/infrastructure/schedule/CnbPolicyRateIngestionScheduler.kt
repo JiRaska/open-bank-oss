@@ -19,14 +19,14 @@ import org.jboss.logging.Logger
 import java.time.Duration
 
 /**
- * Ingests the ČNB policy-rate histories (2W repo, discount, lombard) and publishes the
- * minimum-reserve facts. Runs daily after the ČNB's usual 14:30 publication, AND shortly after
+ * Downloads and ingests the ČNB policy-rate histories (2W repo, discount, lombard) and the
+ * minimum-reserve workbook (reserve ratio + remuneration). Runs daily after the ČNB's usual 14:30 publication, AND shortly after
  * every boot, so a fresh deployment (or one that missed the cron while down) does not wait up to a
  * day for its first data. Every run re-reads the whole history; the upsert is idempotent, so a
  * repeated or overlapping run stores nothing new.
  *
  * Each feed is attempted independently and records its OWN feed outcome — one dead URL must not
- * hide the other two. The workflow heartbeat advances only when every feed succeeded.
+ * hide the others. The workflow heartbeat advances only when every feed succeeded.
  */
 @ApplicationScoped
 class CnbPolicyRateIngestionScheduler(
@@ -40,10 +40,12 @@ class CnbPolicyRateIngestionScheduler(
     // never be the thing that fails a money-path job.
     private var liveness: WorkflowLivenessRecorder? = null
     private var feeds: Map<CnbPolicyInstrument, FeedFetchRecorder> = emptyMap()
+    private var minReservesFeed: FeedFetchRecorder? = null
 
     fun onStart(@Observes @Suppress("UNUSED_PARAMETER") ev: StartupEvent) {
         liveness = domainMetrics.registerWorkflowLiveness(WORKFLOW_NAME, Duration.ofDays(1))
         feeds = FEED_NAMES.mapValues { (_, name) -> domainMetrics.registerFeedFetch(name, Duration.ofDays(1)) }
+        minReservesFeed = domainMetrics.registerFeedFetch(FEED_MIN_RESERVES, Duration.ofDays(1))
     }
 
     // `suspend`, never `runBlocking` (#2187): a suspending @Scheduled method is dispatched on a
@@ -61,23 +63,37 @@ class CnbPolicyRateIngestionScheduler(
         delayed = "{openbank.cnb.policy-rates.initial-delay:30s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
-    // Any failure of one step is that step's recorded outcome; the scheduler thread must never see it.
-    @Suppress("TooGenericExceptionCaught")
+    // Each step records its own outcome and never throws, so the scheduler thread never sees one.
     suspend fun ingestPolicyRates() {
         var allFetched = true
         for (instrument in CnbPolicyInstrument.FEED_BACKED) {
             allFetched = ingestOne(instrument) && allFetched
         }
-        try {
-            val published = useCase.publishPendingFacts()
-            if (published > 0) log.infof("ČNB minimum-reserve facts published: %d", published)
-        } catch (ex: Exception) {
-            // observed-by: openbank_workflow_last_success_age_seconds{workflow=WORKFLOW_NAME} — the
-            // heartbeat does not advance; the next run retries the same unpublished rows.
-            allFetched = false
-            log.errorf(ex, "ČNB minimum-reserve fact publication failed: %s", ex.message)
-        }
+        allFetched = ingestMinimumReserves() && allFetched
         if (allFetched) liveness?.recordSuccess()
+    }
+
+    @Suppress("TooGenericExceptionCaught") // classified by CnbFetchOutcomes, never rethrown
+    private suspend fun ingestMinimumReserves(): Boolean = try {
+        val outcomes = useCase.ingestMinimumReserves()
+        outcomes.forEach { (instrument, outcome) ->
+            rowMetrics.record(instrument, outcome.counts)
+            log.infof(
+                "ČNB %s ingested from the minimum-reserve workbook: %d new, %d unchanged, %d revised",
+                instrument,
+                outcome.counts.inserted,
+                outcome.counts.unchanged,
+                outcome.counts.revised,
+            )
+        }
+        minReservesFeed?.record(FeedFetchOutcome.FETCHED)
+        true
+    } catch (ex: Exception) {
+        // observed-by: openbank_feed_fetch_total{feed=FEED_MIN_RESERVES}; the freshness gauge stops
+        // advancing and CnbPolicyRateFeedStale fires. The whole workbook is re-read next run.
+        minReservesFeed?.record(CnbFetchOutcomes.ofFailure(ex))
+        log.errorf(ex, "ČNB minimum-reserve workbook ingestion failed: %s", ex.message)
+        false
     }
 
     @Suppress("TooGenericExceptionCaught") // classified by CnbFetchOutcomes, never rethrown
@@ -112,6 +128,7 @@ class CnbPolicyRateIngestionScheduler(
         const val FEED_REPO = "cnb-policy-rate-repo"
         const val FEED_DISCOUNT = "cnb-policy-rate-discount"
         const val FEED_LOMBARD = "cnb-policy-rate-lombard"
+        const val FEED_MIN_RESERVES = "cnb-policy-rate-min-reserves"
 
         val FEED_NAMES: Map<CnbPolicyInstrument, String> = mapOf(
             CnbPolicyInstrument.REPO_2W to FEED_REPO,
