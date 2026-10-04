@@ -2,8 +2,11 @@
 import base64
 import importlib.util
 import json
+import os
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 SCRIPT = Path(__file__).resolve().parents[1] / "wait_dependency_review_snapshot.py"
 SPEC = importlib.util.spec_from_file_location("wait_dependency_review_snapshot", SCRIPT)
@@ -30,6 +33,74 @@ def missing_response(side):
 
 
 class SnapshotWaitTests(unittest.TestCase):
+    def test_head_producer_finishes_before_index_wait_begins(self):
+        producer = MODULE.PRODUCER
+        replies = iter([
+            json.dumps({"check_runs": [{"name": producer, "status": "in_progress"}]}),
+            json.dumps({"check_runs": [{"name": producer, "status": "completed", "conclusion": "success"}]}),
+        ])
+        sleeps = []
+        self.assertTrue(MODULE.wait_for_head_producer(lambda: next(replies), sleeps.append, (0, 60)))
+        self.assertEqual(sleeps, [60])
+
+    def test_head_producer_failure_is_not_an_indexing_delay(self):
+        failed = json.dumps({"check_runs": [
+            {"name": MODULE.PRODUCER, "status": "completed", "conclusion": "failure"}
+        ]})
+        calls = []
+
+        def query():
+            calls.append(1)
+            return failed
+
+        with self.assertRaises(MODULE.TerminalHeadGraphError):
+            MODULE.wait_for_head_producer(query, lambda _: None, (0, 60))
+        self.assertEqual(len(calls), 2)
+
+    def test_head_producer_rerun_can_replace_a_terminal_check(self):
+        def page(status, conclusion=None):
+            return json.dumps({"check_runs": [
+                {"name": MODULE.PRODUCER, "status": status, "conclusion": conclusion}
+            ]})
+
+        replies = iter([page("completed", "failure"), page("queued"), page("completed", "success")])
+        self.assertTrue(
+            MODULE.wait_for_head_producer(lambda: next(replies), lambda _: None, (0, 60, 120))
+        )
+
+    def test_missing_head_producer_is_bounded(self):
+        calls = []
+
+        def query():
+            calls.append(1)
+            return json.dumps({"check_runs": []})
+
+        self.assertFalse(MODULE.wait_for_head_producer(query, lambda _: None))
+        self.assertEqual(len(calls), 7)
+        self.assertEqual(sum(MODULE.PRODUCER_DELAYS), 1800)
+
+    def test_main_queries_head_producer_before_snapshot(self):
+        base = "a" * 40
+        head = "b" * 40
+        calls = []
+
+        def fake_gh(*args):
+            calls.append(args)
+            if "/compare/" in args[0]:
+                return json.dumps({"merge_base_commit": {"sha": base}})
+            if "check-runs" in args[-1]:
+                return json.dumps({"check_runs": [
+                    {"name": MODULE.PRODUCER, "status": "completed", "conclusion": "success"}
+                ]})
+            return response()
+
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "o/r", "BASE_SHA": base, "HEAD_SHA": head}), \
+             patch.object(sys, "argv", ["wait_dependency_review_snapshot.py"]), \
+             patch.object(MODULE, "_gh", side_effect=fake_gh):
+            self.assertEqual(MODULE.main(), 0)
+        self.assertIn(f"repos/o/r/commits/{head}/check-runs?per_page=100", calls[1])
+        self.assertIn("dependency-graph/compare", calls[2][-1])
+
     def test_missing_head_waits_then_accepts_indexed_graph(self):
         replies = iter([response(1, 0), response(1, 0), response()])
         sleeps = []

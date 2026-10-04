@@ -28,12 +28,14 @@ jobs:
     # submission's runtime alone: the resolve itself took 734 s, but the snapshot only
     # became queryable ~24 min after this job started (GitHub indexes the submitted graph
     # after the API call returns). At timeout-minutes: 25 that run cleared by 48 s — one
-    # slow queue away from a spurious red on an honest PR. 50 contains the bounded
-    # 30-minute sparse snapshot wait, up to ~11.5 minutes of API recovery and the final
-    # ~3.25-minute basis retry, leaving over five minutes for setup and policy execution.
+    # slow queue away from a spurious red on an honest PR. #11497 measured the
+    # producer finishing ten minutes after this job began, leaving only twenty minutes
+    # for indexing in a 30-minute wait. 80 contains the producer's full 30-minute job
+    # budget followed by the 30-minute sparse indexing wait, up to ~11.5 minutes of
+    # API recovery and the final ~3.25-minute basis retry, plus setup and policy work.
     # An exhausted installation quota fails promptly instead of burning the job's remainder.
     # Only dependency-touching PRs wait; the rest finish in seconds.
-    timeout-minutes: 50
+    timeout-minutes: 80
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -131,7 +133,9 @@ jobs:
 
       # The action's 10-second snapshot poll exhausted this installation's API quota
       # on #9971 (2026-09-25): ~160 requests before GitHub indexed the accepted head
-      # snapshot. Probe seven times over 30 minutes instead, then run policy once.
+      # snapshot. First wait sparsely for the separate producer to succeed, then probe
+      # seven times over 30 minutes for indexing; neither a failed producer nor an
+      # unreadable comparison can become a passing review.
       - name: Wait for indexed dependency snapshots
         if: ${{ steps.deps.outputs.changed == 'true' }}
         env:
