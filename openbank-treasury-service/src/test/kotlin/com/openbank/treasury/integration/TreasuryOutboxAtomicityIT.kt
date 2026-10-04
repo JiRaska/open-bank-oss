@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.integration
 
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.treasury.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -20,7 +21,7 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestMethodOrder
 import java.sql.DriverManager
 import java.time.LocalDate
-import java.time.ZoneOffset
+import java.time.Clock
 import java.util.UUID
 
 /**
@@ -62,7 +63,9 @@ class TreasuryOutboxAtomicityIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    private val today: LocalDate = LocalDate.now(ZoneOffset.UTC)
+    // The service defaults tradeDate to the bank (Europe/Prague) day; the UTC date lags it by one
+    // between 22:00 and 24:00 UTC in summer, and a valueDate before tradeDate is a 400.
+    private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     @Test
     @Order(1)
