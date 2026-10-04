@@ -431,6 +431,9 @@ object Liquidity {
                     asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
+                // POLICY CHOICE (#11107): by sign, the most conservative class for that side (see the class KDoc).
+                GlClass.TECHNICAL_OR_CLEARING ->
+                    glAccount(p, if (asset.signum() >= 0) GlClass.OTHER_ASSET else GlClass.OTHER_LIABILITY)
             }
         }
 

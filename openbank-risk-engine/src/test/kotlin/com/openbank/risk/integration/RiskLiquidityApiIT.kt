@@ -147,7 +147,7 @@ class RiskLiquidityApiIT {
 
         // EU rules are the default for this bank (#10860): Delegated Regulation (EU) 2015/61 + CRR2.
         assertThat(body["parameterSetId"].asText()).isEqualTo("eu-2015-61-crr2")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("3")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("4")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         assertThat(total["currency"].asText()).isEqualTo("CZK")

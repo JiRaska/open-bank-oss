@@ -193,7 +193,7 @@ spec:
         # Reached over loopback only (OpaSidecarPolicyDecisionPoint defaults to
         # http://localhost:8181) — 8181 needs no cross-namespace ingress.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

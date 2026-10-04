@@ -6,7 +6,6 @@ package com.openbank.customeredge.infrastructure.rest
 
 import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * In-edge nearby-payment session store (ADR-0095).
@@ -38,12 +37,14 @@ import java.util.concurrent.ConcurrentHashMap
  * later — e.g. a standardised cross-app "pay via your bank app" payload — without changing the
  * token the receiver broadcasts.
  *
- * In-memory is acceptable because the loss mode is benign: an edge restart drops live sessions, the
- * payer's resolve returns 404, and the receiver simply re-shares. For multi-replica edge the token
- * would need a shared TTL cache (Redis) — tracked as a follow-up; single-replica sandbox is fine.
+ * The sessions live in the edge's Redis ([PaymentSessionBackend], issue #4728), not in this JVM:
+ * the token is created on whichever replica serves the receiver, and resolved, paid and polled on
+ * whichever replica serves the next request. A per-pod map 404'd every one of those whenever the
+ * load balancer picked another pod, which is what pinned customer-edge — the public entry point —
+ * to `replicas: 1` and made every pod rotation a customer-visible outage.
  */
 @ApplicationScoped
-class PaymentSessionStore {
+class PaymentSessionStore(private val backend: PaymentSessionBackend) {
 
     data class Session(
         val creditorAccountId: String,
@@ -62,8 +63,6 @@ class PaymentSessionStore {
         val paymentId: String? = null,
     )
 
-    private val sessions = ConcurrentHashMap<String, Session>()
-
     /**
      * Bind a new session to the receiver's [creditorAccountId] (already ownership-checked by the
      * caller) and return the opaque token to broadcast. [creditorMasked] is the only account form a
@@ -76,48 +75,44 @@ class PaymentSessionStore {
         requestedAmount: String?,
         creditorMasked: String,
     ): String {
-        purgeExpired()
         val token = UUID.randomUUID().toString().replace("-", "")
-        sessions[token] = Session(
-            creditorAccountId = creditorAccountId,
-            creditorPartyId = creditorPartyId,
-            displayName = displayName,
-            requestedAmount = requestedAmount,
-            creditorMasked = creditorMasked,
-            expiresAt = System.currentTimeMillis() + TTL_MS,
+        backend.put(
+            token,
+            Session(
+                creditorAccountId = creditorAccountId,
+                creditorPartyId = creditorPartyId,
+                displayName = displayName,
+                requestedAmount = requestedAmount,
+                creditorMasked = creditorMasked,
+                expiresAt = System.currentTimeMillis() + TTL_MS,
+            ),
+            TTL_MS,
         )
         return token
     }
 
-    /** Resolve a discovered token, or null if unknown/expired. Expired entries are evicted on read. */
+    /**
+     * Resolve a discovered token, or null if unknown/expired. The backend expires entries itself;
+     * the [Session.expiresAt] check is a second line for a backend whose expiry lags.
+     */
     fun resolve(token: String): Session? {
-        val session = sessions[token] ?: return null
-        if (System.currentTimeMillis() >= session.expiresAt) {
-            sessions.remove(token)
-            return null
-        }
-        return session
+        val session = backend.get(token) ?: return null
+        return session.takeIf { System.currentTimeMillis() < it.expiresAt }
     }
 
     /** Mark a session as paid once the payer's domestic payment has actually SETTLED (ADR-0108). */
     fun markPaid(token: String) {
-        sessions.computeIfPresent(token) { _, s -> s.copy(paid = true) }
+        backend.markPaid(token)
     }
 
     /**
      * Bind the payer's domestic-payment id to the session at instruction time. Idempotent and
      * first-write-wins: a session is paid by exactly one payer, so a later token reuse must not
      * overwrite the original payment id. Lets [paymentSessionStatus] later reconcile real settlement.
+     * The backend applies first-write-wins atomically, so two replicas racing cannot both win.
      */
     fun attachPayment(token: String, paymentId: String) {
-        sessions.computeIfPresent(token) { _, s ->
-            if (s.paymentId.isNullOrBlank()) s.copy(paymentId = paymentId) else s
-        }
-    }
-
-    private fun purgeExpired() {
-        val now = System.currentTimeMillis()
-        sessions.entries.removeIf { now >= it.value.expiresAt }
+        backend.attachPaymentIfAbsent(token, paymentId)
     }
 
     companion object {
