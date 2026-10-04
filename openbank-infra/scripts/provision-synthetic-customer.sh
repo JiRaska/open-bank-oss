@@ -26,8 +26,10 @@
 #     and keeps the token in memory only. PARTY_ADMIN_TOKEN skips the browser.
 #   - The Keycloak admin user/password default to the keycloak-bootstrap Secret
 #     (KC_ADMIN_USER/KC_ADMIN_PASSWORD override).
-#   - An OpenBao token with write on openbank/* is asked for, hidden, unless VAULT_TOKEN or
-#     BAO_TOKEN is set.
+#   - OpenBao: with a local `bao` CLI the script signs you in through the browser with the
+#     narrow SSO role openbank-sso-writer (runbook 0027: MFA, 15-minute token, write on
+#     keycloak/* and the realm-import blobs only) over a port-forward. VAULT_TOKEN/BAO_TOKEN
+#     skip the sign-in. The break-glass root token is not needed and should not be used.
 #
 # Re-running is safe: an existing client is reused, its secret is not rotated, and the
 # realm-import entry is replaced rather than duplicated.
@@ -179,24 +181,44 @@ SECRET="$(kc get "clients/$CID/client-secret" -r "$REALM" --fields value --forma
 
 # --- 3 + 4. OpenBao ------------------------------------------------------------------------
 if [[ -z "${VAULT_TOKEN:-}" && -n "${BAO_TOKEN:-}" ]]; then VAULT_TOKEN="$BAO_TOKEN"; fi
-prompt_secret VAULT_TOKEN "OpenBao token with write on openbank/*"
-# The token is the FIRST stdin line, read inside the pod (never an exec argument, see above);
-# whatever follows on stdin is left for bao itself, e.g. a `key=-` value.
-bao() { kubectl -n "$NS_VAULT" exec -i openbao-0 -- sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' sh "$@"; }
+if command -v bao >/dev/null; then
+  # Local CLI over a port-forward (OpenBao has no ingress). The token lives in this process's
+  # environment only, never in a `kubectl exec` command line.
+  kubectl -n "$NS_VAULT" port-forward svc/openbao 18200:8200 >/dev/null 2>&1 &
+  BAO_PF=$!
+  trap 'kill $BAO_PF 2>/dev/null || true' EXIT
+  sleep 4
+  export BAO_ADDR=http://127.0.0.1:18200
+  if [[ -z "${VAULT_TOKEN:-}" ]]; then
+    echo "==> signing in to OpenBao as openbank-sso-writer (browser, MFA)"
+    VAULT_TOKEN="$(command bao login -method=oidc -token-only role=openbank-sso-writer)"
+  fi
+  # Stdin protocol kept identical to the in-pod variant below: first line is the token.
+  bao() { local t; IFS= read -r t; BAO_TOKEN="$t" command bao "$@"; }
+else
+  prompt_secret VAULT_TOKEN "OpenBao token with write on openbank/keycloak/*"
+  # The token is the FIRST stdin line, read inside the pod (never an exec argument, see above);
+  # whatever follows on stdin is left for bao itself, e.g. a `key=-` value.
+  bao() { kubectl -n "$NS_VAULT" exec -i openbao-0 -- sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' sh "$@"; }
+fi
 
 echo "==> storing the client secret at $KV_SECRET_PATH"
 printf '%s\n%s' "$VAULT_TOKEN" "$SECRET" | bao kv put "$KV_SECRET_PATH" client_secret=- >/dev/null
 
 echo "==> adding the identity to the realm-import JSON at $KV_REALM_PATH"
-CURRENT="$(printf '%s\n' "$VAULT_TOKEN" | bao kv get -field="$REALM_FIELD" "$KV_REALM_PATH")"
+# Read-modify-write of the WHOLE entry: openbank-sso-writer grants create/update/read but not
+# patch (runbook 0027), and a plain put replaces every field, so the other fields are carried.
+ENTRY="$(printf '%s\n' "$VAULT_TOKEN" | bao kv get -format=json "$KV_REALM_PATH" | jq -c '.data.data')"
+CURRENT="$(jq -r --arg f "$REALM_FIELD" '.[$f]' <<<"$ENTRY")"
 UPDATED="$(jq -c --argjson client "$CLIENT_JSON" --arg secret "$SECRET" --arg party "$SYNTHETIC_PARTY_ID" \
   --arg id "$CLIENT_ID" --arg user "$SA_USER" '
   .clients = ([.clients[] | select(.clientId != $id)] + [$client + {secret: $secret}])
   | .users = ([(.users // [])[] | select(.username != $user)]
       + [{username: $user, enabled: true, serviceAccountClientId: $id,
           realmRoles: ["ROLE_CUSTOMER"], attributes: {party_id: [$party]}}])' <<<"$CURRENT")"
-printf '%s\n%s' "$VAULT_TOKEN" "$UPDATED" | bao kv patch "$KV_REALM_PATH" "$REALM_FIELD=-" >/dev/null
-unset CURRENT UPDATED
+NEW_ENTRY="$(jq -c --arg f "$REALM_FIELD" --arg v "$UPDATED" '.[$f] = $v' <<<"$ENTRY")"
+printf '%s\n%s' "$VAULT_TOKEN" "$NEW_ENTRY" | bao kv put "$KV_REALM_PATH" - >/dev/null
+unset ENTRY CURRENT UPDATED NEW_ENTRY
 
 # --- 5. verify against the PUBLIC issuer ----------------------------------------------------
 echo "==> minting a token through $PUBLIC_ISSUER and checking its claims"
