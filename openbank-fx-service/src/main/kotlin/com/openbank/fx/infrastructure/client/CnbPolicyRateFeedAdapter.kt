@@ -41,7 +41,7 @@ class CnbPolicyRateFeedAdapter(
 
     @CircuitBreaker(requestVolumeThreshold = 4, failureRatio = 0.5, delay = 10_000, successThreshold = 2)
     @Retry(maxRetries = 3, delay = 500, jitter = 200, retryOn = [Exception::class])
-    @Timeout(8_000)
+    @Timeout(FEED_TIMEOUT_MILLIS)
     open suspend fun fetchWithResilience(url: String): ByteArray = client(url).fetch().awaitSuspending()
 
     private fun urlOf(instrument: CnbPolicyInstrument): String = when (instrument) {
@@ -54,5 +54,9 @@ class CnbPolicyRateFeedAdapter(
     @Synchronized
     private fun client(url: String): CnbPolicyRateFeedClient = clients.getOrPut(url) {
         RestClientBuilder.newBuilder().baseUri(URI.create(url)).build(CnbPolicyRateFeedClient::class.java)
+    }
+
+    private companion object {
+        const val FEED_TIMEOUT_MILLIS = 8_000L
     }
 }

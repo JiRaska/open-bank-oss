@@ -61,6 +61,8 @@ class CnbPolicyRateIngestionScheduler(
         delayed = "{openbank.cnb.policy-rates.initial-delay:30s}",
         concurrentExecution = Scheduled.ConcurrentExecution.SKIP,
     )
+    // Any failure of one step is that step's recorded outcome; the scheduler thread must never see it.
+    @Suppress("TooGenericExceptionCaught")
     suspend fun ingestPolicyRates() {
         var allFetched = true
         for (instrument in CnbPolicyInstrument.FEED_BACKED) {
@@ -78,6 +80,7 @@ class CnbPolicyRateIngestionScheduler(
         if (allFetched) liveness?.recordSuccess()
     }
 
+    @Suppress("TooGenericExceptionCaught") // classified by CnbFetchOutcomes, never rethrown
     private suspend fun ingestOne(instrument: CnbPolicyInstrument): Boolean = try {
         val outcome = useCase.ingest(instrument)
         rowMetrics.record(instrument, outcome.counts)

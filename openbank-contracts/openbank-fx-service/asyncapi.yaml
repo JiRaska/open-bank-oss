@@ -4,20 +4,21 @@
 # ADR-0006 contract for openbank-fx-service. Written when the service gained its second topic
 # (ADR-0314 D5), which retires its `openbank.fx.conversion.completed` line from
 # .github/event-contract-baseline.txt. Every claim below is derived from the code that runs:
-# `FxService.settle`, `CnbRateIngestionService.ingest`, `KafkaFxOutboxEventPublisher`.
+# `FxService.settle`, `CnbRateIngestionService.ingest`, `CnbPolicyRateService`,
+# `KafkaFxOutboxEventPublisher`.
 
 asyncapi: 3.0.0
 
 info:
   title: OpenBank FX Service — events
-  version: 1.0.0
+  version: 1.1.0
   description: |
-    Both topics are fed from one transactional outbox (`fx_outbox`); `KafkaFxOutboxEventPublisher`
+    All three topics are fed from one transactional outbox (`fx_outbox`); `KafkaFxOutboxEventPublisher`
     routes each row by event type. The discriminator is the `ce-type` header; neither payload
     carries a body type field.
 
-    Both payloads ALSO carry `sourceService: "fx-service"`, inherited from the sealed `FxEvent`
-    parent rather than declared in either constructor. It is left out of the schemas below only
+    Every payload ALSO carries `sourceService: "fx-service"`, inherited from the sealed `FxEvent`
+    parent rather than declared in any constructor. It is left out of the schemas below only
     because `check-event-contract-code-agreement.py` compares against constructor properties and
     cannot see an inherited one; it is on the wire and consumers may rely on it.
   license:
@@ -47,6 +48,20 @@ channels:
       FxFixingPublished:
         $ref: '#/components/messages/FxFixingPublished'
 
+  policyRates:
+    address: openbank.fx.cnb-policy-rate.published
+    description: |
+      ČNB monetary-policy rates (2W repo, discount, lombard — ingested daily from the ČNB history
+      files) and minimum-reserve facts (ratio, remuneration — cited rows maintained by migration).
+      One event per (instrument, effectiveFrom) row that was stored for the first time or whose rate
+      was revised, written in the same transaction as the row; an unchanged re-run emits nothing.
+      Partition key: `aggregateId` = a name-based UUID of `CNB-POLICY:<instrument>:<effectiveFrom>`.
+      The topic is COMPACTED on that key, so a consumer reading from the earliest offset rebuilds
+      the full history; `cnb_policy_rate` is the state of record.
+    messages:
+      CnbPolicyRatePublished:
+        $ref: '#/components/messages/CnbPolicyRatePublished'
+
 operations:
   publishConversion:
     action: send
@@ -56,6 +71,10 @@ operations:
     action: send
     channel:
       $ref: '#/channels/fixings'
+  publishPolicyRate:
+    action: send
+    channel:
+      $ref: '#/channels/policyRates'
 
 components:
   messages:
@@ -69,6 +88,11 @@ components:
       contentType: application/json
       payload:
         $ref: '#/components/schemas/FxFixingPublishedPayload'
+    CnbPolicyRatePublished:
+      name: fx.cnb-policy-rate.published.v1
+      contentType: application/json
+      payload:
+        $ref: '#/components/schemas/CnbPolicyRatePublishedPayload'
 
   schemas:
     FxConversionExecutedPayload:
@@ -111,4 +135,24 @@ components:
               rateId: { type: string, format: uuid, description: The `fx_rates` row committed with this event. }
               currency: { type: string }
               ratePerUnit: { type: number, description: CZK for ONE unit of `currency` (already divided by the feed's quantity). }
+        occurredAt: { type: string, format: date-time }
+    CnbPolicyRatePublishedPayload:
+      type: object
+      required: [instrument, effectiveFrom, rate, sourceUrl, fetchedAt, contentSha256, revised, occurredAt]
+      properties:
+        instrument:
+          type: string
+          enum: [REPO_2W, DISCOUNT, LOMBARD, MIN_RESERVE_RATIO, MIN_RESERVE_REMUNERATION]
+        effectiveFrom: { type: string, format: date, description: The first day the rate applies (a step function). }
+        rate: { type: number, minimum: 0, maximum: 1, description: 'A FRACTION: 0.0375 is 3.75 %.' }
+        sourceUrl: { type: string, description: The ČNB file the row was read from. }
+        fetchedAt: { type: string, format: date-time }
+        contentSha256: { type: string, pattern: '^[0-9a-f]{64}$', description: SHA-256 of the downloaded file bytes. }
+        note:
+          type: [string, 'null']
+          description: Legal basis or citation, for facts maintained by migration.
+        revised: { type: boolean, description: True when this replaces a different rate for the same key. }
+        previousRate:
+          type: [number, 'null']
+          description: The rate this event replaces; null unless revised.
         occurredAt: { type: string, format: date-time }

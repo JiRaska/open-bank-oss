@@ -1,0 +1,44 @@
+# ČNB policy-rate feed staleness (fx-service CnbPolicyRateIngestionScheduler).
+#
+# The minimum-reserve requirement in the risk engine, and every served ČNB policy rate, rest on the
+# three ČNB history files (2W repo, discount, lombard). Each registers its own feed freshness gauge,
+# openbank_workflow_last_success_age_seconds{workflow="feed-cnb-policy-rate-<x>"}, which advances
+# only when the file was fetched AND parsed whole (a malformed file fails all-or-nothing and does
+# not advance it). The job runs daily and on every boot.
+#
+# Threshold: 3 days. The ČNB changes these rates a few times a year, at board meetings announced
+# weeks ahead, so a missed day or two is harmless; three consecutive failed days is the point at
+# which a rate decision could be published and missed. The generic WorkflowLivenessStale
+# (2 x the 1-day expected interval) already fires earlier on the same series as a generic
+# "something stopped" signal; this rule is the domain-owned one with the remediation attached.
+# Boot-safe: the gauge is seeded at registration (#4208), so a fresh pod reads its own uptime.
+#
+# severity: warning — a stale policy-rate history is a correctness gap to work in hours, not a page.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-cnb-policy-rates
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.cnb.policy-rates
+      interval: 5m
+      rules:
+        - alert: CnbPolicyRateFeedStale
+          expr: openbank_workflow_last_success_age_seconds{workflow=~"feed-cnb-policy-rate-.+"} > 3 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "ČNB policy-rate feed {{ $labels.workflow }} not ingested for {{ $value | humanizeDuration }}"
+            description: >-
+              fx-service has not fetched and parsed {{ $labels.workflow }} for more than 3 days.
+              openbank_feed_fetch_total{feed=~"cnb-policy-rate-.+"} names the failure class
+              (http_error / unreachable / parse_error); a parse_error means the file no longer
+              matches the expected `PLATNA_OD|CNB_<X>_SAZBA_V_%` history and nothing from it was
+              stored. Served rates and the risk engine's minimum-reserve facts stay at the last
+              good history until it recovers. Check the fx pod log for "history ingestion failed"
+              and curl the URL under openbank.cnb.policy-rates.* in fx-service's application.yaml.

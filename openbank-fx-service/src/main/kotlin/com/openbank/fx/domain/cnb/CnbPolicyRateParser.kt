@@ -29,9 +29,9 @@ import java.time.format.DateTimeParseException
 object CnbPolicyRateParser {
 
     private val DATE: DateTimeFormatter = DateTimeFormatter.BASIC_ISO_DATE
-    private val ROW = Regex("""^(\d{8})\|(\d{1,3}(?:,\d+)?)$""")
-    private val HUNDRED = BigDecimal(100)
-    private const val BOM = '﻿'
+    private val ROW = Regex("""^(\d{8})\|(\d{1,3}(?:,\d{1,6})?)$""")
+    private val HUNDRED = BigDecimal.ONE.movePointRight(2)
+    private const val BOM = '\uFEFF'
     private const val MAX_REPORTED = 5
 
     /** FRACTION scale: the feed carries at most 2 decimals of a percent. */

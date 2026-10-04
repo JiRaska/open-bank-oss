@@ -82,8 +82,8 @@ class CnbPolicyRateIngestionIT {
         VertxContextSupport.subscribeAndAwait { uni(CoroutineScope(Dispatchers.Unconfined)) { block() } }
 
     private fun count(sql: String): Long = onEventLoop {
-        sf.withSession { s -> s.createNativeQuery<Number>(sql, Number::class.java).singleResult }
-            .awaitSuspending().toLong()
+        sf.withSession { s -> s.createNativeQuery<Long>(sql, Long::class.javaObjectType).singleResult }
+            .awaitSuspending()
     }
 
     private fun rows(instrument: CnbPolicyInstrument) =
