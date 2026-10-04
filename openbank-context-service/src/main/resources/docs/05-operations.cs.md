@@ -16,7 +16,7 @@ zkusí znovu se stejným ID. Řádek, který zůstane 2 minuty ve stavu `DISPATC
 ## Timeout příkazů v databázi
 
 Aplikační role má v kontextové databázi výchozí `statement_timeout` 750 ms, nastavený Flyway
-migrací `V12__application_role_statement_timeout.sql`. Request cesty ho v rámci transakce upravují
+migrací `V14__application_role_statement_timeout.sql`. Request cesty ho v rámci transakce upravují
 přes `set_config('statement_timeout', ...)` podle `openbank.context.query-timeout-ms`.
 
 Timeout záměrně **není** parametr celého PostgreSQL clusteru. Ten by platil i pro superuživatele

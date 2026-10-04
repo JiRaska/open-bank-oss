@@ -16,7 +16,7 @@ under the same ID after 30 seconds. A row stuck in `DISPATCHING` for 2 minutes i
 ## Database statement timeout
 
 The application role has a 750 ms `statement_timeout` default in the context database, set by
-Flyway migration `V12__application_role_statement_timeout.sql`. Request paths tighten or relax it
+Flyway migration `V14__application_role_statement_timeout.sql`. Request paths tighten or relax it
 per transaction with `set_config('statement_timeout', ...)` from `openbank.context.query-timeout-ms`.
 
 The timeout is deliberately **not** a cluster-wide PostgreSQL parameter. A cluster-wide value also

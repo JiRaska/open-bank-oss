@@ -37,7 +37,7 @@ spec:
       # No cluster-wide statement_timeout: it also bound the postgres superuser, and
       # pg_backup_stop() on the primary (which waits for WAL archiving) was cancelled by it,
       # failing every primary base backup. The 750 ms backstop is set on the application
-      # role by context-service's Flyway migration V12 instead.
+      # role by context-service's Flyway migration V14 instead.
   backup:
     retentionPolicy: "30d"
     barmanObjectStore:
