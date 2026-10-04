@@ -12,12 +12,12 @@ The contract is `src/main/resources/openapi.yaml` (`info.version` 1.0.0, URL maj
 | POST | `/api/v1/card-authorizations/{id}/reversal` | same | `cardprocessing.reverse` | 200 or 409 |
 | GET | `/api/v1/card-authorizations/card/{cardId}` | same | `cardprocessing.read` | newest first; `limit` default 50, clamped to 1..200 |
 | POST | `/api/v1/card-tokens` | `ROLE_API`, `ROLE_OPERATOR`, `ROLE_ADMIN` | `cardprocessing.token` | `Idempotency-Key` required. 201, 404, 409 or 503 |
-| POST | `/api/v1/card-tokens/{tokenReference}/status` | same | `cardprocessing.token` | body `{ status }` — `ACTIVE`, `SUSPENDED`, `DELETED`; other values 400 |
+| POST | `/api/v1/card-tokens/{tokenReference}/status` | same | `cardprocessing.token` | `Idempotency-Key` required; body `{ status }` — `ACTIVE`, `SUSPENDED`, `DELETED`; other values 400. 200, 404 or 409 |
 | GET | `/api/v1/card-tokens/card/{cardId}` | same | `cardprocessing.read` | `{ tokens, source, degradedReason, count }` |
 | POST | `/api/v1/card-disputes` | same | `cardprocessing.dispute` | `Idempotency-Key` required. 201, 400, 404 or 409 |
 | POST | `/api/v1/card-disputes/{id}/evidence` | same | `cardprocessing.dispute` | `Idempotency-Key` required; body `{ documentReference, note }`; appended to the evidence history |
 | GET | `/api/v1/card-disputes/{id}/evidence` | same | `cardprocessing.read` | the evidence history, oldest first |
-| POST | `/api/v1/card-disputes/{id}/refresh` | same | `cardprocessing.dispute` | re-reads the network status; a closed case is returned unchanged |
+| POST | `/api/v1/card-disputes/{id}/refresh` | same | `cardprocessing.dispute` | `Idempotency-Key` required; re-reads the network status; a closed case is returned unchanged |
 | GET | `/api/v1/card-disputes/{id}` | same | `cardprocessing.read` | both `status` and `schemeStatus` |
 | GET | `/api/v1/card-disputes/card/{cardId}` | same | `cardprocessing.read` | newest first; `limit` default 50, clamped to 1..200 |
 | POST | `/api/v1/sandbox/acquirer/purchase` | `ROLE_ADMIN` | `cardprocessing.simulate` | **404 unless** `openbank.card-processing.sandbox-acquirer-enabled=true` |
@@ -53,7 +53,7 @@ Both resources answer a refusal as `{ reason, message }`. `CARD_NOT_FOUND`, `TOK
 - **Token:** `CARD_NOT_FOUND` (card-issuance does not know the card), `CARD_NOT_ACTIVE` (blocked, suspended, expired, cancelled or of unreported state — never tokenised), `ISSUER_UNAVAILABLE`, `TOKEN_NOT_FOUND`, `TOKEN_TERMINAL`, `SCHEME_UNAVAILABLE` (includes `NOT_BOUND`), `SCHEME_REFUSED`.
 - **Dispute:** `AUTHORIZATION_NOT_FOUND`, `NO_NETWORK_REFERENCE`, `NOTHING_CLEARED`, `CURRENCY_MISMATCH` (the dispute currency is not the authorisation's; compared as Money, never converted — an unknown code is 400), `AMOUNT_EXCEEDS_CLEARED`, `ALREADY_DISPUTED`, `CASE_NOT_FOUND`, `CASE_TERMINAL`, `SCHEME_UNAVAILABLE`, `SCHEME_REFUSED`.
 
-Idempotency: token provisioning, dispute opening and evidence filing **reserve** the `Idempotency-Key` in the database (`card_lifecycle_idempotency`) before the network is called. Of two concurrent requests with one key exactly one reaches the network; a retry after it finished replays the first result, a request racing it gets **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and the same key with a different body is **409 `IDEMPOTENCY_KEY_REUSED`** (fleet error shape). A refusal frees the key. Keys are 1–128 characters of `[A-Za-z0-9._:-]` (400 otherwise). Status changes and refresh take no key.
+Idempotency: token provisioning, token status changes, dispute opening, evidence filing and dispute refresh **reserve** the `Idempotency-Key` in the database (`card_lifecycle_idempotency`) before the network is called. Of two concurrent requests with one key exactly one reaches the network; a retry after it finished replays the first result, a request racing it gets **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`**, and the same key with a different body is **409 `IDEMPOTENCY_KEY_REUSED`** (fleet error shape). A refusal frees the key. Keys are 1–128 characters of `[A-Za-z0-9._:-]` (400 otherwise). A replayed status change returns the token as it is now; a replayed refresh returns the case the first refresh produced — for a closed case, the stored outcome — without asking the network again.
 
 The OPA policy grants `cardprocessing.token` and `cardprocessing.dispute` to HUMAN principals with `ROLE_OPERATOR` or `ROLE_ADMIN` (reason `operator-card-lifecycle-write`); the role check on the resource also admits `ROLE_API`. While `AUTHZ_ENFORCE=false` the role check is the effective control.
 
