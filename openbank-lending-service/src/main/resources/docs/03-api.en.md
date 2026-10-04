@@ -1,6 +1,6 @@
 # API
 
-The REST contract is formalized in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version 0.1.0`). Swagger UI is served at `/api/docs`. All paths are versioned under `/api/v1` (ADR-0048: the OpenAPI `major` == `openbank.api.version` == URL `/api/v{N}`).
+The REST contract is formalized in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version 1.36.0`). Swagger UI is served at `/api/docs`. All paths are versioned under `/api/v1` (ADR-0048: the OpenAPI `major` == `openbank.api.version` == URL `/api/v{N}`).
 
 Base path: `/api/v1/lending`. All endpoints require a Keycloak bearer JWT (`bearerAuth`).
 
@@ -13,8 +13,9 @@ The resource class is role-gated; the **acting principal is always the authentic
 | `/applications` | `POST` | (class roles) | Submit application (maker). 201 / 400 |
 | `/applications` | `GET` | (class roles) | List applications by `partyId` (required query) |
 | `/applications/{id}` | `GET` | (class roles) | 200 / 404 |
-| `/applications/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` | Approve/reject (checker). Checker must differ from maker. 200 / 409 |
-| `/applications/{id}/disburse` | `POST` | `ROLE_LENDING_OFFICER`, `ROLE_ADMIN` | Disburse approved loan. Disburser must differ from checker. 201 / 409 |
+| `/applications/{id}/advance` | `POST` | (class roles) | Advance one origination step; cannot leave `FOUR_EYES` or advance a post-decision application with no recorded decider. 200 / 409 / 422 |
+| `/applications/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` | Decide at `FOUR_EYES` (checker). Checker must differ from maker. 200 / 409 |
+| `/applications/{id}/disburse` | `POST` | `ROLE_LENDING_OFFICER`, `ROLE_ADMIN` | Disburse at `READY_TO_DISBURSE` with a recorded decision. Disburser must differ from maker and checker. 201 / 409 |
 | `/loans` | `GET` | (class roles) | List loans by `partyId` (required query) |
 | `/loans/{id}` | `GET` | (class roles) | 200 / 404 |
 | `/loans/{id}/schedule` | `GET` | (class roles) | Repayment schedule |
@@ -33,14 +34,21 @@ The scheduled monthly IFRS 9 provisioning cycle (ADR-0028 Phase 3, `Provisioning
 Origination is a maker-checker-disburser chain enforced server-side (ADR-0028 D5, EBA/GL/2020/06):
 
 ```
-maker (POST /applications)           → application PROPOSED, proposed_by = JWT subject
-checker (POST .../decision)          → APPROVED/REJECTED, decided_by = JWT subject
-                                        409 if decided_by == proposed_by  (four-eyes violation)
+maker (POST /applications)           → application SUBMITTED, proposed_by = JWT subject
+advance                              → FOUR_EYES, then stops until an explicit decision
+checker (POST .../decision)          → OFFERED or DECLINED, decided_by = JWT subject
+                                        409 if decided_by == proposed_by
+advance after decision               → READY_TO_DISBURSE only with a recorded decider
 disburser (POST .../disburse)        → DISBURSED + loan booked
-                                        409 if disburser == decided_by    (segregation of duties)
+                                        409 if disburser == proposed_by or decided_by
 ```
 
-A decision is only accepted on a `PROPOSED` application; disbursement only on an `APPROVED` one; otherwise `409`.
+A decision is accepted only at `FOUR_EYES`; disbursement only at `READY_TO_DISBURSE`.
+Generic `advance` at `FOUR_EYES` returns `409 FOUR_EYES_DECISION_REQUIRED`, and an application
+past that point with no recorded decider returns `409 FOUR_EYES_DECISION_MISSING` on advance or
+disbursement. These refusals leave the state unchanged and write a separate
+`credit.application.transition.refused` outbox event, so a lifecycle reader does not mistake a
+refused command for a transition.
 
 ## Request schemas (selected)
 
@@ -58,11 +66,15 @@ CORS allows an `Idempotency-Key` header, and the service has a Redis client conf
 
 ## Error model
 
-Errors return `application/json` with shape `{ "error": "<message>" }` (`ApiError`). Status mapping observed in `LendingResource`:
+Legacy errors return `application/json` with shape `{ "error": "<message>" }`.
+The coded four-eyes refusals return `{ "error": "<code>", "message": "<description>" }`;
+their bodies contain no proposer, checker or disburser identity. Status mapping in `LendingResource`:
 
 - `400 Bad Request` — validation failures on create (`applyForLoan`, `registerCollateral`).
 - `404 Not Found` — unknown application / loan (and on `provisioning` lookup failure).
-- `409 Conflict` — illegal state transition or four-eyes / segregation-of-duties violation (decision, disburse, repay, writeoff).
+- `409 Conflict` — illegal state transition or four-eyes / segregation-of-duties violation.
+  Coded refusals use `FOUR_EYES_DECISION_REQUIRED`, `FOUR_EYES_DECISION_MISSING` or
+  `SEGREGATION_OF_DUTIES` (advance, decision, disburse).
 - `201 Created` — application accepted, loan disbursed, collateral registered.
 - `200 OK` — reads, decision applied, repayment recorded, write-off, provisioning snapshot.
 

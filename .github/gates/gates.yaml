@@ -3188,6 +3188,29 @@ gates:
     run: |
       python3 .github/scripts/check-nonnull-jaxrs-params.py --root .
 
+  # Every JAXP XML factory comes from com.openbank.libs.xml.SecureXml (openbank-libs-domain),
+  # which closes every external-entity vector in one place. A parse site that builds its own
+  # factory has to remember half a dozen settings, and the one it forgets is an XXE — so ANY raw
+  # *Factory.newInstance() in a src/main Kotlin/Java file outside SecureXml.kt fails. No baseline:
+  # the fleet (libs-iso20022, sanctions, treasury) was migrated in the same change.
+  - id: xml-factory-hardened
+    name: "XML factories only via the hardened SecureXml helper (enforced)"
+    group: security
+    mode: enforced
+    rationale: >-
+      Untrusted XML (ISO 20022 wire messages, camt.053 uploads, sanctions list feeds) must never
+      reach a parser built from a raw JAXP factory; centralising the hardening makes a forgotten
+      setting structurally impossible instead of a per-site review item.
+    review_after: "2027-04-03"
+    verified: "2026-10-03 — self-test flags raw DOM/SAX/Schema/StAX factories and ignores comments, src/test and SecureXml.kt; run against an origin/main snapshot of the three migrated modules it reported all 10 pre-migration sites and exited 1"
+    budget_seconds: 30
+    min_subjects: 1300   # 2747 src/main Kotlin/Java files measured 2026-10-03; half
+    selftest: python3 .github/scripts/check-xml-factory-hardened.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-xml-factory-hardened.py"]
+    run: |
+      python3 .github/scripts/check-xml-factory-hardened.py --root .
+
   # ADR-0318: rounding belongs in libs' RoundingPolicy registry, not in a money-path service's
   # inline setScale(n, RoundingMode.X). Per-service token counts measured 2026-09-26 are
   # baselined in the script; a new site OR a stale (now lower) baseline is a finding.
