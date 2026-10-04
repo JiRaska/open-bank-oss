@@ -222,6 +222,27 @@ spec:
               - key: kubernetes.io/metadata.name
                 operator: In
                 values: [admin-ui, observability]
+    # glitchtip.open-bank.tech (ADR-0324 Phase 4, observability/httproute-glitchtip.yaml). Its
+    # own Certificate `glitchtip-edge-tls` (not pinned), admitted by the ReferenceGrant
+    # glitchtip-edge-gateway-tls, which landed in an EARLIER change on purpose. Admits
+    # `observability`, where Kyverno requires every HTTPRoute to be extAuth-gated or to declare
+    # its ungated machine callers, as the glitchtip route does.
+    - name: https-glitchtip
+      protocol: HTTPS
+      port: 443
+      hostname: glitchtip.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: glitchtip-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
     # kc.open-bank.tech (ADR-0324 Phase 3). Serves the SAME Secret the nginx Ingress does,
     # `keycloak-tls`: the mobile app pins this host's SPKI (ADR-0066 S3, rotation Never), so a
     # new certificate would break every installed app. Admitted by the ReferenceGrant in
