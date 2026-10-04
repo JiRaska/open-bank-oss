@@ -1,0 +1,157 @@
+# Dedicated Valkey for Langfuse v3/v4 (ADR-0328 decision 2, wave A) — the fleet redis.yaml pattern
+# (components/agent/redis.yaml, components/copilot/redis.yaml).
+#
+# What Langfuse keeps here: the BullMQ ingestion/evaluation queues and short-lived caches. The
+# event payloads themselves are in S3 before a queue job references them, so losing this keyspace
+# loses queued WORK (jobs not yet processed into ClickHouse), not the events. Ephemeral on purpose:
+# --save "" --appendonly no on an emptyDir, same trade as the fleet's other caches; the follow-up if
+# queue loss on restart ever matters is AOF on a PVC, not a bigger pod.
+#
+# `--maxmemory-policy noeviction` is required by upstream: BullMQ silently loses jobs under any
+# evicting policy, and a full keyspace must surface as a write ERROR in the worker, not as quietly
+# missing traces. The maxmemory value stays below the container limit so Valkey refuses writes
+# before the kernel OOM-kills it.
+#
+# No AUTH, like every fleet Valkey: the generated NetworkPolicy admits same-namespace callers only.
+#
+# Placement: `stateful` NodePool (see langfuse-clickhouse.yaml for why).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-valkey
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-valkey
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  replicas: 1
+  # Terminate-first (#3545): single-writer queue store on an emptyDir behind one Service.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-valkey
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langfuse-valkey
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      nodeSelector:
+        openbank.io/pool: stateful
+      tolerations:
+        - key: openbank.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: valkey
+          image: docker.io/valkey/valkey:8.1.10-alpine@sha256:081c2f5cb575efc901aa80ff9cdbd1ec6a301682fd35e1ebb4b0990a4a4a8507
+          args:
+            - --save
+            - ""
+            - --appendonly
+            - "no"
+            - --maxmemory
+            - 160mb
+            - --maxmemory-policy
+            - noeviction
+          ports:
+            - name: redis
+              containerPort: 6379
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          readinessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: redis
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          # ADR-0328 FinOps section: 50m / 64Mi.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 192Mi
+        # Same exporter sidecar as copilot-redis (multi-arch, non-alpine tag).
+        - name: exporter
+          image: docker.io/oliver006/redis_exporter:v1.92.1@sha256:7fbc93d30f0f91eed1b2fe6968a956259cc5d260a984dd9071f1d1e9c2692ecd
+          args: ["--redis.addr=redis://localhost:6379"]
+          ports:
+            - name: redis-metrics
+              containerPort: 9121
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-valkey
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-valkey
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  selector:
+    app.kubernetes.io/name: langfuse-valkey
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: redis
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: langfuse-valkey-metrics
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-valkey
+  namespaceSelector:
+    matchNames:
+      - ai-platform
+  podMetricsEndpoints:
+    - port: redis-metrics
+      path: /metrics
+      interval: 30s

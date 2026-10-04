@@ -163,3 +163,37 @@ test_service_principal_cannot_revoke_customer_device_via_self_rule if {
 	}
 		with data.rules as revocation_rules
 }
+
+# --- operator-approval queue is human-operator only (#10041 slice 10) ---
+
+test_operator_may_read_approval_queue if {
+	decision := rest.allow with input as {"principal": operator, "action": "scaChallenge.approval.read"}
+		with data.rules as rules_mock
+	decision.allow == true
+}
+
+test_operator_may_decide_approval if {
+	decision := rest.allow with input as {"principal": operator, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+		with data.rules as rules_mock
+	decision.allow == true
+}
+
+test_shared_m2m_may_not_read_approval_queue if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "scaChallenge.approval.read"}
+		with data.rules as rules_mock
+}
+
+test_edge_may_not_read_approval_queue if {
+	rest.allow == false with input as {"principal": edge, "action": "scaChallenge.approval.read"}
+		with data.rules as rules_mock
+}
+
+test_shared_m2m_may_not_decide_approval if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+		with data.rules as rules_mock
+}
+
+test_edge_may_not_decide_approval if {
+	rest.allow == false with input as {"principal": edge, "action": "scaChallenge.approval.decide", "resource": {"type": "scaChallenge", "id": "a-1"}}
+		with data.rules as rules_mock
+}

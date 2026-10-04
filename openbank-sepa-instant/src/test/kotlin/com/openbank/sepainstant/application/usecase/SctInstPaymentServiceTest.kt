@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.application.usecase
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.sepainstant.application.port.`in`.SubmitSctInstCommand
 import com.openbank.sepainstant.application.port.out.AmlCasePort
@@ -40,7 +41,6 @@ import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -217,8 +217,8 @@ class SctInstPaymentServiceTest {
         assertThat(paymentSlot.captured.debtorName).isEqualTo(command.debtorName)
         assertThat(paymentSlot.captured.creditorName).isEqualTo(command.creditorName)
         assertThat(paymentSlot.captured.creditorBic).isEqualTo(command.creditorBic)
-        assertThat(paymentSlot.captured.amount).isEqualByComparingTo(command.amount)
-        assertThat(paymentSlot.captured.currency).isEqualTo(command.currency)
+        assertThat(paymentSlot.captured.amount).isEqualTo(command.amount)
+        assertThat(paymentSlot.captured.currency).isEqualTo("EUR")
         assertThat(paymentSlot.captured.endToEndId).isEqualTo(command.endToEndId)
         val executionTimeoutAt = requireNotNull(paymentSlot.captured.executionTimeoutAt)
         val submittedAt = requireNotNull(paymentSlot.captured.submittedAt)
@@ -379,8 +379,7 @@ class SctInstPaymentServiceTest {
         creditorIban: String = "FR7630006000011234567890189",
         creditorName: String = "Bob Creditor",
         creditorBic: String? = "AGRIFRPP",
-        amount: BigDecimal = BigDecimal("123.45"),
-        currency: String = "EUR",
+        amount: Money = Money.of("123.45", "EUR"),
         remittanceInfo: String? = "Invoice 42",
         endToEndId: String = "E2E-123",
     ) = SubmitSctInstCommand(
@@ -392,7 +391,6 @@ class SctInstPaymentServiceTest {
         creditorName = creditorName,
         creditorBic = creditorBic,
         amount = amount,
-        currency = currency,
         remittanceInfo = remittanceInfo,
         endToEndId = endToEndId,
     )
@@ -411,8 +409,7 @@ class SctInstPaymentServiceTest {
         creditorIban = "FR7630006000011234567890189",
         creditorName = "Bob Creditor",
         creditorBic = "AGRIFRPP",
-        amount = BigDecimal("123.45"),
-        currency = "EUR",
+        amount = Money.of("123.45", "EUR"),
         remittanceInfo = "Invoice 42",
         endToEndId = "E2E-123",
         executionTimeoutAt = OffsetDateTime.parse("2026-01-01T10:15:30Z"),

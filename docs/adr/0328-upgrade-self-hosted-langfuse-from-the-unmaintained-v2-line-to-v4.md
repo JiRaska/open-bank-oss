@@ -126,6 +126,37 @@ We will move self-hosted Langfuse from v2.95.11 to the current v4 line.
   is what an audit runs, and the existing `evals-registry-integrity` gate keeps ADR-0148's
   boundary.
 
+### FinOps delta (measured 2026-10-03)
+
+Denominator: the ~$300/month sandbox substrate (ADR-0062). Prices are AWS Price List API
+on-demand list prices for eu-north-1. Sizing follows the patterns this ADR names.
+
+| Item | Sizing (source) | $/month |
+|---|---|---|
+| ClickHouse requests | 250m CPU / 1 GiB (`components/analytics/clickhouse.yaml`) | showback only |
+| Worker requests | 100m / 512 MiB (same as today's `langfuse.yaml` web) | showback only |
+| Valkey requests | 50m / 64 MiB, `emptyDir` (`components/agent/redis.yaml`) | showback only |
+| ClickHouse PVC | 10 GiB gp3 at $0.0836/GB-month | 0.84 |
+| S3 storage | under 1 GB at 30-day retention (v2 Postgres PVC uses 0.24 GiB, WAL included) at $0.023/GB | 0.02 |
+| S3 requests | up to 200k PUTs/month at $0.005/1k (assumed upper bound; not measured) | 1.00 |
+| KMS key | one customer-managed key version | 1.00 |
+| **New cash spend** | | **~2.86 (about 1.0% of $300)** |
+| Showback (ADR-0062) | 400m CPU + 1.56 GiB at m6g.xlarge $0.164/h ($119.72/month, half CPU and half RAM) | ~11.8 |
+| **Allocated total** | | **~14.7 (about 4.9% of $300)** |
+
+The compute costs no extra cash only if the new pods fit on nodes that already exist. Read-only
+`kubectl describe node` on 2026-10-03 shows request headroom:
+
+- **`stateful` pool:** 4 × m6g.xlarge on demand, about 7.9 vCPU and about 35 GiB unrequested.
+- **`default` pool:** spot nodes with memory requests at 55–99%; most are above 85%.
+
+The new ClickHouse, Valkey and worker pods therefore go on the `stateful` pool. If they land
+on `default`, Karpenter can add a node, and the delta becomes a node-sized step: one on-demand
+m6g.xlarge is $119.72/month, about 40% of the substrate.
+
+During the v2 → v3.29.0 side-by-side window, a second web pod (100m / 512 MiB) adds about
+$3/month of showback until v2 is removed.
+
 ### Delivery check
 
 ```

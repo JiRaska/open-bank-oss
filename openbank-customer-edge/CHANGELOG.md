@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.85.0...customer-edge-v0.86.0) (2026-10-03)
+
+
+### Features
+
+* **customer-edge:** let a customer declare and manage off-platform holdings ([#11991](https://github.com/JiRaska/open-bank-oss/issues/11991)) ([bf0e812](https://github.com/JiRaska/open-bank-oss/commit/bf0e812518dc21db65b8c38eb246aeab235d47c9))
+
 ## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.84.0...customer-edge-v0.85.0) (2026-10-02)
 
 
