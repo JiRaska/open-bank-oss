@@ -22,6 +22,18 @@ spec:
         cors: {allowOrigins: ["https://admin.example"]}
     - apiVersion: gateway.envoyproxy.io/v1alpha1
       kind: SecurityPolicy
+      metadata: {name: sp-fail-open, namespace: observability}
+      spec:
+        targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: route-fail-open}]
+        extAuth: {failOpen: true, http: {backendRefs: [{name: admin-ui, namespace: admin-ui, port: 3000}]}}
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata: {name: sp-explicit-closed, namespace: observability}
+      spec:
+        targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: route-explicit-closed}]
+        extAuth: {failOpen: false, http: {backendRefs: [{name: admin-ui, namespace: admin-ui, port: 3000}]}}
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
       metadata: {name: sp-other, namespace: observability}
       spec:
         targetRefs:

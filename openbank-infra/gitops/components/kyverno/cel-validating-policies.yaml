@@ -192,15 +192,15 @@ spec:
 # Phase 5 deletes ingress-nginx; both edges serve the tools until then, and each needs its
 # own guard. Same namespace scope, same declaration annotation, same intent: an HTTPRoute in
 # `observability` must either be gated by the identity-aware edge gate (ADR-0234) — an Envoy
-# Gateway SecurityPolicy WITH extAuth whose targetRefs name this route — or declare why it
+# Gateway SecurityPolicy WITH fail-closed extAuth whose targetRefs name this route — or declare why it
 # is not (`openbank.io/ungated-machine-callers`, as rum-gateway's route does).
 #
 # The gate is a SEPARATE object, so unlike the Ingress check (an annotation on the object
 # itself) this reads the namespace's SecurityPolicies with resource.List. Consequences:
 #   - ORDER. A gated route must be created AFTER its SecurityPolicy. The tool routes do this
 #     with sync-waves (observability/httproute-tools-gate.yaml: policies -1, routes 0).
-#   - THE OTHER DIRECTION. Deleting a SecurityPolicy, or editing extAuth out of it, would
-#     ungate a route this policy already admitted, so the second ValidatingPolicy below
+#   - THE OTHER DIRECTION. Deleting a SecurityPolicy, removing extAuth, or setting failOpen
+#     would ungate a route this policy already admitted, so the second ValidatingPolicy below
 #     denies exactly that while the route still exists and declares nothing.
 #   - targetSelectors and a policy attached to the Gateway or listener do NOT count: only a
 #     route-level targetRef is evidence that THIS route is gated. A route-scoped policy also
@@ -216,7 +216,7 @@ spec:
 #   'NAME:.metadata.name,DECLARED:.metadata.annotations.openbank\.io/ungated-machine-callers'
 #   kubectl -n observability get securitypolicy -o custom-columns=\
 #   'NAME:.metadata.name,EXTAUTH:.spec.extAuth.http.path,TARGETS:.spec.targetRefs[*].name'
-# Every route must be DECLARED or appear in some policy's TARGETS with an EXTAUTH.
+# Every route must be DECLARED or appear in some policy's TARGETS with fail-closed EXTAUTH.
 # Tested with the Kyverno 1.19.1 CLI: openbank-infra/tests/kyverno-cel/ (must-reject and
 # must-admit fixtures, pinned expected verdicts).
 apiVersion: policies.kyverno.io/v1
@@ -255,7 +255,7 @@ spec:
       expression: >-
         dyn(resource.List('gateway.envoyproxy.io/v1alpha1', 'securitypolicies',
           object.metadata.namespace).items).exists(p,
-            has(p.spec.extAuth) &&
+            has(p.spec.extAuth) && !p.spec.extAuth.?failOpen.orValue(false) &&
             p.spec.?targetRefs.orValue([]).exists(t,
               t.kind == 'HTTPRoute' && t.?group.orValue('') == 'gateway.networking.k8s.io' &&
               t.name == object.metadata.name))
@@ -264,7 +264,7 @@ spec:
       messageExpression: >-
         "HTTPRoute '" + object.metadata.name + "' in namespace 'observability' is neither
         gated nor declared. An internal tool UI must be served behind the identity-aware
-        edge gate (ADR-0234): create an Envoy Gateway SecurityPolicy with extAuth against
+        edge gate (ADR-0234): create an Envoy Gateway SecurityPolicy with fail-closed extAuth against
         the admin-UI gate whose targetRefs name this HTTPRoute BEFORE the route (see
         observability/httproute-tools-gate.yaml). If this route exists for machine callers
         that cannot follow a login redirect, annotate it
@@ -272,8 +272,8 @@ spec:
         path list narrowed to those endpoints."
 ---
 # The other half of the policy above: a SecurityPolicy in `observability` may not be deleted,
-# nor edited to drop extAuth or to stop targeting a route, while a route it gates still exists
-# with no declaration and no OTHER extAuth policy covering it. Without this, the gate could be
+# nor edited to drop extAuth, set failOpen, or stop targeting a route, while a route it gates still exists
+# with no declaration and no OTHER fail-closed extAuth policy covering it. Without this, the gate could be
 # removed in one step that never touches the HTTPRoute the policy above watches.
 # Deleting the route first (Argo prunes wave 0 before wave -1) and then its policy is admitted.
 apiVersion: policies.kyverno.io/v1
@@ -305,16 +305,17 @@ spec:
           operator: In
           values: [observability]
   variables:
-    # Route names this policy gated before the request (it had extAuth).
+    # Route names this policy gated before the request (it had fail-closed extAuth).
     - name: before
       expression: >-
-        has(oldObject.spec.extAuth)
+        has(oldObject.spec.extAuth) && !oldObject.spec.extAuth.?failOpen.orValue(false)
           ? oldObject.spec.?targetRefs.orValue([]).filter(t, t.kind == 'HTTPRoute').map(t, t.name)
           : []
     # Route names it still gates after the request (none on DELETE).
     - name: after
       expression: >-
-        request.operation == 'DELETE' || !has(object.spec.extAuth)
+        request.operation == 'DELETE' || !has(object.spec.extAuth) ||
+          object.spec.extAuth.?failOpen.orValue(false)
           ? []
           : object.spec.?targetRefs.orValue([]).filter(t, t.kind == 'HTTPRoute').map(t, t.name)
     - name: policyName
@@ -322,7 +323,8 @@ spec:
     - name: others
       expression: >-
         dyn(resource.List('gateway.envoyproxy.io/v1alpha1', 'securitypolicies',
-          request.namespace).items).filter(p, p.metadata.name != variables.policyName && has(p.spec.extAuth))
+          request.namespace).items).filter(p, p.metadata.name != variables.policyName &&
+            has(p.spec.extAuth) && !p.spec.extAuth.?failOpen.orValue(false))
     - name: routes
       expression: >-
         dyn(resource.List('gateway.networking.k8s.io/v1', 'httproutes', request.namespace).items)
@@ -339,7 +341,7 @@ spec:
         "SecurityPolicy '" + variables.policyName + "' in namespace 'observability' gates
         HTTPRoute(s) " + variables.stranded.join(', ') + " with extAuth (ADR-0234). Removing
         the gate would leave them served with no identity check. Delete the route first, or
-        gate it with another extAuth SecurityPolicy, or declare it ungated
+        gate it with another fail-closed extAuth SecurityPolicy, or declare it ungated
         ('openbank.io/ungated-machine-callers')."
 ---
 # STAGE 2 (#11437): enforcing. Pins the openbank-dr SA (ADR-0277) to the

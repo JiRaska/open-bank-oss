@@ -109,7 +109,7 @@ PY
 
 # ── require-gated-or-declared-tool-httproute (ADR-0324 Phase 2) ──────────────────────
 # A NEW policy, not a v1 port: there is no v1 verdict to compare with, so the expected
-# verdicts are pinned here by design — four must-reject, two must-admit, and an
+# verdicts are pinned here by design — five must-reject, three must-admit, and an
 # out-of-namespace route that must not be matched at all. Its own context and CRD stub
 # (context-gateway.yaml): the 1.19.1 CLI registers only the first CRD it is handed.
 # Its sibling protect-tool-httproute-gate-cel matches only UPDATE/DELETE, which the CLI
@@ -131,6 +131,8 @@ for d in yaml.safe_load_all(txt[i:]):
                 got[(res.get('namespace', ''), res['name'])] = r['result']
 WANT = {
     ('observability', 'route-gated'): 'pass',
+    ('observability', 'route-explicit-closed'): 'pass',
+    ('observability', 'route-fail-open'): 'fail',
     ('observability', 'route-declared'): 'pass',
     ('observability', 'route-ungated'): 'fail',
     ('observability', 'route-cors-only'): 'fail',
