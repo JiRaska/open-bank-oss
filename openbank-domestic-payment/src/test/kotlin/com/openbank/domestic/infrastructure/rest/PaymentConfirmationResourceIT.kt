@@ -11,6 +11,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.infrastructure.client.FakePaymentConfirmationRenderPort
 import com.openbank.domestic.integration.DomesticPaymentBootSmokeIT
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -76,8 +77,7 @@ class PaymentConfirmationResourceIT {
             creditorAccountNumber = "0987654321",
             creditorBankCode = "2010",
             creditorName = "Creditor Name",
-            amount = BigDecimal("42.50"),
-            currency = "CZK",
+            amount = Money.of(BigDecimal("42.50"), "CZK"),
             variableSymbol = "999888",
             specificSymbol = null,
             constantSymbol = null,

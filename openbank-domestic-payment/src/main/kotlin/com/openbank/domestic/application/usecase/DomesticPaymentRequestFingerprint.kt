@@ -9,7 +9,6 @@ import java.nio.ByteBuffer
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.HexFormat
-import java.util.Locale
 
 /**
  * Canonical request binding for `Idempotency-Key`.
@@ -29,7 +28,6 @@ internal object DomesticPaymentRequestFingerprint {
         creditorAccountNumber = command.creditorAccountNumber.trim(),
         creditorBankCode = command.creditorBankCode.trim(),
         creditorName = command.creditorName.trim(),
-        currency = command.currency.trim().uppercase(Locale.ROOT),
         variableSymbol = command.variableSymbol.normalizedOptional(),
         specificSymbol = command.specificSymbol.normalizedOptional(),
         constantSymbol = command.constantSymbol.normalizedOptional(),
@@ -53,8 +51,12 @@ internal object DomesticPaymentRequestFingerprint {
         digest.add(normalized.creditorAccountNumber)
         digest.add(normalized.creditorBankCode)
         digest.add(normalized.creditorName)
-        digest.add(normalized.amount.stripTrailingZeros().toPlainString())
-        digest.add(normalized.currency)
+        // Wire-identical to the pre-Money digest for every request the boundary accepts: Money only
+        // rescales exactly (100.5 -> 100.50, never rounds), so the stripped plain string is the
+        // same, and CurrencyCode.of(trim()) upper-cases exactly as the old normalisation did. Legacy
+        // fingerprints stored before #11604 therefore still match an identical retry.
+        digest.add(normalized.amount.amount.stripTrailingZeros().toPlainString())
+        digest.add(normalized.amount.currency.code)
         digest.add(normalized.variableSymbol)
         digest.add(normalized.specificSymbol)
         digest.add(normalized.constantSymbol)

@@ -665,6 +665,16 @@ spec:
         kubeProxy:
           enabled: false
         kube-state-metrics:
+          # Exports each CronJob's declared success budget as a label on
+          # kube_cronjob_annotations, which CronJobSuccessStale reads
+          # (components/observability/prometheus-rules-jobs.yaml). A plain allowlist
+          # flag, NOT customResourceState: a CRS config error takes down every kube_*
+          # series (see openbank-infra/CLAUDE.md). Verified 2026-10-03 against KSM
+          # v2.20.0: the key renders as annotation_openbank_tech_max_success_age_seconds,
+          # and a CronJob without it still emits the series with no such label.
+          # Dropping this flag makes CronJobMaxSuccessAgeUndeclared fire for every CronJob.
+          metricAnnotationsAllowList:
+            - cronjobs=[openbank.tech/max-success-age-seconds]
           resources:
             requests:
               cpu: 20m

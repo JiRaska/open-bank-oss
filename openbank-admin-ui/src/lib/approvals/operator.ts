@@ -35,8 +35,8 @@ export function isApprovalId(id: string): boolean {
 }
 
 export type ApprovalTarget =
-  | { kind: 'challenge'; challenge: string }
-  | { kind: 'device'; party: string }
+  | { kind: 'challenge'; challenge: string; summary: string }
+  | { kind: 'device'; party: string; summary: string }
   | { kind: 'settlement'; summary: string }
 
 /**
@@ -45,10 +45,11 @@ export type ApprovalTarget =
  * decide a request this UI cannot show.
  *
  * sca-service binds `device.enroll`/`device.revoke` to the PARTY (`@Authorize(resource = "#partyId")`)
- * and the exact device to a server-side request fingerprint it does not publish; the queue therefore
- * shows the party, and the binding — not this screen — stops a retry from targeting another device.
- * `scaChallenge.consume` binds the challenge id itself. settlement-service publishes a redacted
- * `summary` of the bound instruction on GET /approvals/{id}; without one there is nothing to review.
+ * and the exact device to a server-side request fingerprint; `scaChallenge.consume` binds the
+ * challenge id itself. Both services publish a `summary` of what the approval binds, rendered when it
+ * was issued — for SCA the device handle and key fingerprint, or the purpose, amount and masked
+ * creditor. The binding, not this screen, stops a retry from targeting something else; without a
+ * summary the checker would approve blind, so there is nothing to review.
  */
 export function approvalTarget(domain: OperatorApprovalDomain, approval: OperatorApproval): ApprovalTarget | null {
   if (domain === 'settlement') {
@@ -57,9 +58,10 @@ export function approvalTarget(domain: OperatorApprovalDomain, approval: Operato
     return summary ? { kind: 'settlement', summary } : null
   }
   const resource = approval.resourceId ?? ''
-  if (!isApprovalId(resource)) return null
-  if (approval.action === 'scaChallenge.consume') return { kind: 'challenge', challenge: resource }
-  if (approval.action === 'device.enroll' || approval.action === 'device.revoke') return { kind: 'device', party: resource }
+  const summary = approval.summary?.trim()
+  if (!isApprovalId(resource) || !summary) return null
+  if (approval.action === 'scaChallenge.consume') return { kind: 'challenge', challenge: resource, summary }
+  if (approval.action === 'device.enroll' || approval.action === 'device.revoke') return { kind: 'device', party: resource, summary }
   return null
 }
 
