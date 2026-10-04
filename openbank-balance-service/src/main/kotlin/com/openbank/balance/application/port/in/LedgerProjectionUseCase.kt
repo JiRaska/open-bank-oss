@@ -4,7 +4,7 @@
 
 package com.openbank.balance.application.port.`in`
 
-import java.math.BigDecimal
+import com.openbank.libs.domain.money.Money
 import java.time.LocalDate
 import java.util.UUID
 
@@ -20,13 +20,15 @@ import java.util.UUID
  */
 data class AccountBookedChange(
     val accountId: UUID,
-    val currency: String,
-    val delta: BigDecimal,
+    /** Signed (zero allowed): the ledger's fact, built as kernel [Money] by the consumer (#11604). */
+    val delta: Money,
     val journalEntryId: UUID,
     val transactionId: UUID,
     val entryDate: LocalDate,
     val version: Long,
-)
+) {
+    val currency: String get() = delta.currency.code
+}
 
 interface LedgerProjectionUseCase {
 
