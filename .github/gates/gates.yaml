@@ -2602,6 +2602,7 @@ gates:
     min_subjects: 13
     run: |
       python3 .github/scripts/dast-zap-coverage.py --self-test
+      python3 .github/scripts/dast-zap-coverage.test.py
 
   - id: ci-reconcile-selector-selftest
     name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
