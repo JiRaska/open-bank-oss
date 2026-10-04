@@ -17,7 +17,10 @@ ADR-0069 (`party_id` pseudonymous subject), ADR-0070 (redaction allowlist), ADR-
 **In scope.** The internet-facing path that accepts OpenTelemetry RUM signals from the KMP customer app
 and lands them in the existing observability backend:
 
-- The public **nginx Ingress** at `rum.open-bank.tech` (TLS termination, rate-limit, body-size cap).
+- The public edge at `rum.open-bank.tech` (TLS termination, rate-limit, body-size cap): today the
+  **nginx Ingress**; from ADR-0324 Phase 1 also the shared **Envoy Gateway** HTTPRoute
+  (`components/observability/httproute-rum-gateway.yaml`), staged with DNS held back until the
+  cutover. Both enforce the same controls; §6 records the differences.
 - A **dedicated hardened OTel Collector** (`otel/opentelemetry-collector-contrib`) — separate from the
   internal `otel-collector` — terminating OTLP/HTTP from devices: OIDC auth, schema/attribute
   validation, PII redaction, sampling.
@@ -78,10 +81,10 @@ hardened boundary; everything before storage happens here), **TB-3** gateway↔i
 | **T2** | Forged `party_id` to attribute spans to another customer | `party_id` is **not** trusted from span attributes. The `oidc` extension authenticates the session but does not propagate its claim onto the span, so — rather than store a spoofable client value — the allow-list **drops** `party_id` entirely (gateway redaction). A trusted JWT-claim binding to re-introduce it is a follow-up (O6). | None: no `party_id` is stored, so it cannot be forged. Trade-off: per-customer attribution waits for O6; the distributed trace still links via `trace_id`. |
 | **R1** | Repudiation — no record of who/what ingested | Gateway access logged at nginx (method, status, rate-limit decisions) + collector telemetry; spans carry the JWT-derived `party_id` only (pseudonymous, ADR-0069), so logs are PII-minimal yet attributable. | Acceptable — RUM is not an audit source of truth (that is the audit-service). |
 | **I1** | **PII leakage into Tempo** — amounts, IBANs, tokens, SCA `DynamicLinkingData`, raw bodies, URL params land in span attributes (the dominant risk) | Defence in depth: (a) client-side redaction reusing the ADR-0070 allowlist (same `beforeSend` pattern as ADR-0075 crash); (b) **server-side** `redaction` processor on the gateway enforcing the allowlist independent of client behaviour — drops amounts/IBAN/PII/secret-shaped keys + strips URL query params **before** the in-VPC hop. Storage only ever sees the allowlist. | A novel sensitive value placed in an *allowed* free-text attribute (e.g. `screen.name`) could slip through — mitigated by value-length caps and a periodic attribute audit (O3). |
-| **I2** | Eavesdropping in transit | TLS (letsencrypt-prod) on the public hop; in-VPC hop inside the cluster network (and TLS-pinnable client per ADR-0064, key-rotation `Never`). | Standard TLS residual. |
-| **D1** | Volumetric DoS against the public endpoint | nginx `limit-rps` + burst (per-IP, mirroring customer-edge's 20 rps/3× burst), `proxy-body-size` cap, OTLP path allow-list; collector `memory_limiter` sheds load; gateway is a **separate** deployment so its saturation cannot starve the internal collector or backend services. | A large botnet can still exhaust the gateway's own capacity — bounded blast radius (RUM degrades; banking unaffected). HPA/again-rate-limit is a follow-up (O1). |
+| **I2** | Eavesdropping in transit | TLS (letsencrypt-prod) on the public hop — both edges serve the **same** `rum-gateway-tls` Secret (the Gateway via a ReferenceGrant scoped to that one Secret), so the pinned key never changes across the migration; in-VPC hop inside the cluster network (and TLS-pinnable client per ADR-0064, key-rotation `Never`). | Standard TLS residual. |
+| **D1** | Volumetric DoS against the public endpoint | Per-client-IP rate limit at the edge: nginx `limit-rps` + burst (20 rps/3× burst, mirroring customer-edge), and on the Envoy Gateway a local rate limit keyed on the distinct source address (20 req/s, burst 20) — real client IPs reach both proxies because both NLB Services run `externalTrafficPolicy: Local`; `proxy-body-size` cap, OTLP path allow-list; collector `memory_limiter` sheds load; gateway is a **separate** deployment so its saturation cannot starve the internal collector or backend services. | A large botnet can still exhaust the gateway's own capacity — bounded blast radius (RUM degrades; banking unaffected). HPA/again-rate-limit is a follow-up (O1). |
 | **D2** | Cardinality bomb — unique attribute values explode **both** Prometheus span-metrics series **and** Tempo trace/block volume (storage + query cost) | Attribute allow-list + value-length cap + sampling; span-metrics dimensions restricted to bounded keys (service, route, os, app.version); enumerated `route`/`screen` sets cap the trace-id fan-out too. | Needs a cardinality budget + alert covering Prometheus *and* Tempo (O2); device-controlled `route`/`screen` values are the main vector. |
-| **D3** | Decompression bomb / oversized payload | `proxy-body-size` cap at nginx + collector message-size limits; reject oversized OTLP. | Low. |
+| **D3** | Decompression bomb / oversized payload | `proxy-body-size` cap at nginx / `requestBuffer.limit: 512Ki` on the Envoy Gateway (413 above it) + collector message-size limits; reject oversized OTLP. | Low. |
 | **E1** | Using the public RUM endpoint to reach internal services / SSRF | The gateway collector has **no** exporter or extension that calls arbitrary URLs; the only egress is the fixed in-VPC OTLP endpoint. NetworkPolicy restricts the gateway pod's egress to the internal collector/Tempo only. | Low — no user-controllable egress target. |
 | **E2** | Compromised gateway pivots into the cluster | Runs as non-root, read-only rootfs, dropped caps (PSS restricted, fleet pattern); dedicated namespace/SA with least-privilege; NetworkPolicy default-deny except the OTLP egress. | Standard container-escape residual. |
 
@@ -111,6 +114,7 @@ hardened boundary; everything before storage happens here), **TB-3** gateway↔i
 | TLS on the public ingest (cert-manager letsencrypt-prod) | 🔨 built — verify cert issues |
 | OIDC auth on the OTLP receiver (verify openbank-customers JWT, aud=openbank-app, reject anonymous) | 🔨 built — verify JWKS reachable + iss matches |
 | Per-IP rate-limit + burst at nginx | 🔨 built |
+| Envoy Gateway edge (ADR-0324 Phase 1): same Secret, per-client-IP local rate limit, 512Ki body cap, path allow-list, HSTS/nosniff | 🔨 built, DNS held back — verify with `curl --resolve` before cutover |
 | Payload body-size cap + OTLP path allow-list | 🔨 built |
 | Attribute allow-list + length cap + drop unknown attrs (redaction `allow_all_keys=false` + transform truncate) | 🔨 built |
 | Server-side PII redaction processor (allowlist + block amounts/IBAN-shaped values; URL params dropped as non-allowed) | 🔨 built |
@@ -125,3 +129,27 @@ hardened boundary; everything before storage happens here), **TB-3** gateway↔i
 
 > All controls are 🔲 because this threat model **precedes** the build (ADR-0088 D4b: threat-model first).
 > Each must flip to ✅ — with verification — before the mobile RUM go-live gate is met.
+
+---
+
+## 6. Edge migration to the shared Envoy Gateway (ADR-0324 Phase 1)
+
+The route is staged on the Gateway's own NLB while DNS still names ingress-nginx
+(`external-dns.kubernetes.io/controller: gateway-api-cutover-pending` on the HTTPRoute). What changes
+at TB-2, and what does not:
+
+| Aspect | nginx Ingress | Envoy Gateway | Note |
+|---|---|---|---|
+| TLS key | `rum-gateway-tls` (`private-key-rotation-policy: Never`) | the same Secret, via a ReferenceGrant naming only that Secret | No new Certificate is ever issued for this host — the app pins the SPKI. Before the Ingress is deleted, the Certificate must be declared explicitly (it is owned by the Ingress today, and cert-manager runs with owner refs, so deleting the Ingress would garbage-collect the Secret and the pinned key). |
+| Rate limit (D1) | 20 rps per client IP, burst 60 | 20 req/s per distinct client IP, burst 20 | Same sustained rate, tighter burst. Both are per proxy replica. Requires `externalTrafficPolicy: Local` on the Gateway Service (set in `envoy-gateway/gateway.yaml`), else every client shares one node-address bucket. |
+| Body cap (D3) | `proxy-body-size 512k` | `requestBuffer.limit: 512Ki` | |
+| Path allow-list | `/v1/traces`, `/v1/metrics` | the same two PathPrefix matches; anything else is a 404 at the edge | |
+| Who may attach a route for this host | — | only the `observability` namespace, selected by `kubernetes.io/metadata.name` on the `https-rum` listener | Another namespace cannot claim `rum.open-bank.tech` on the shared Gateway. |
+| Backend reach (E1/E2) | `ingress-nginx` → `:4318` | `envoy-gateway-system` → `:4318` added to `networkpolicy-rum-gateway.yaml` | The nginx peer is removed when the Ingress is. During the migration both edges can reach the receiver. |
+| Repudiation (R1) | nginx access log | Envoy access log + `envoy_http_downstream_rq_xx` | The edge-5xx alerts (#2677) must be retargeted per host at cutover. |
+
+Residual risk added by the migration: two public paths to the same receiver until the Ingress is
+removed (both carrying the same controls), and a second NLB address that answers for the host to
+anyone using `--resolve`. Neither bypasses the collector's OIDC auth (S1), which remains the control
+that gates every request.
+

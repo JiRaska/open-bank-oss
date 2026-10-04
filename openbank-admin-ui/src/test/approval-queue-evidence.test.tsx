@@ -32,7 +32,7 @@ const sourceNames = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
   'delegation', 'agent', 'communication', 'treasury', 'ledger-backfill',
-  'compliance-pack', 'campaign', 'audience', 'identity-case',
+  'compliance-pack', 'campaign', 'audience', 'identity-case', 'sca', 'settlement',
 ]
 const inbox = { items: [], sources: Object.fromEntries(sourceNames.map(name => [name, 'ok'])) }
 

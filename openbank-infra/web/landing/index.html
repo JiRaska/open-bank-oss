@@ -3,14 +3,62 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>A bank you can look inside · OpenBank</title>
-<meta name="description" content="Explore the OpenBank customer app, banking domains and governed AI agents. Try the public sandbox or join the iOS TestFlight beta." />
+<title>OpenBank | Open-source banking ecosystem &amp; reference platform</title>
+<meta name="description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
 <meta name="theme-color" content="#f8f6f1" />
-<meta property="og:title" content="A bank you can look inside · OpenBank" />
-<meta property="og:description" content="Explore the OpenBank customer app, banking domains and governed AI agents. Try the public sandbox or join the iOS TestFlight beta." />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="OpenBank" />
+<meta property="og:url" content="https://open-bank.tech/" />
+<meta property="og:title" content="OpenBank | Open-source banking ecosystem &amp; reference platform" />
+<meta property="og:description" content="Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools." />
 <meta property="og:image" content="https://open-bank.tech/assets/explorers-hero.webp" />
+<meta property="og:image:width" content="1536" />
+<meta property="og:image:height" content="1024" />
+<meta property="og:image:alt" content="OpenBank lion, lioness and bot" />
+<meta name="twitter:card" content="summary_large_image" />
 <link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
 <link rel="canonical" href="https://open-bank.tech/" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://open-bank.tech/#website",
+      "url": "https://open-bank.tech/",
+      "name": "OpenBank",
+      "description": "Open-source banking ecosystem and reference implementation connecting bank domains, shared foundations and customer experiences.",
+      "inLanguage": "en"
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": "https://open-bank.tech/#project",
+      "name": "OpenBank",
+      "url": "https://open-bank.tech/",
+      "codeRepository": "https://github.com/JiRaska/open-bank-oss",
+      "description": "Early-stage open-source banking reference implementation connecting customer and business identity, banking domains, shared libraries, Product Studio, test evidence, observability and governed AI tools. Not a licensed bank or production-ready service.",
+      "programmingLanguage": [
+        "Kotlin",
+        "TypeScript"
+      ]
+    },
+    {
+      "@type": "WebPage",
+      "@id": "https://open-bank.tech/#webpage",
+      "url": "https://open-bank.tech/",
+      "name": "OpenBank | Open-source banking ecosystem & reference platform",
+      "description": "Explore OpenBank: an open-source Bank as Code ecosystem with Documentation as Code, Compliance as Code, Product Studio and governed AI/MCP tools.",
+      "isPartOf": {
+        "@id": "https://open-bank.tech/#website"
+      },
+      "about": {
+        "@id": "https://open-bank.tech/#project"
+      },
+      "inLanguage": "en"
+    }
+  ]
+}
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
@@ -70,6 +118,7 @@
 <div class="section-heading">
 <p class="eyebrow">Choose your way in</p>
 <h2>One open core.<br />A whole bank to explore.</h2>
+<p>OpenBank is an open-source banking reference implementation: connected domains, a customer app, shared banking libraries, Product Studio and governed AI tools. Follow the architecture, the evidence and the experience from one place.</p>
 </div>
 <div class="entry-grid">
 <a class="entry" href="#app">
@@ -90,6 +139,61 @@
 </h3>
 <p>Clear roles, bounded tools and a human responsible for impact.</p>
 </a>
+</div>
+</section>
+<section class="ecosystem-section" id="ecosystem">
+<div class="wrap">
+<div class="ecosystem-heading">
+<p class="eyebrow">The bank as one system</p>
+<h2>One bank.<br /><span>Every connection counts.</span></h2>
+<p>OpenBank is an open-source banking ecosystem for the work inside a bank and the relationships it serves outside. Explore the domains together, follow the evidence behind them and see how a shared core keeps the experience coherent.</p>
+</div>
+<div class="bank-as-code" id="bank-as-code">
+<div class="bank-as-code-intro">
+<p class="eyebrow">Bank as Code</p>
+<h3>The bank explains itself.</h3>
+<p>A running service exposes its own API contract, version and health. Its documentation travels with its release, so teams can inspect what is deployed and trace it back to the code.</p>
+<a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0019-docs-as-service.md">See docs-as-service in the source →</a>
+</div>
+<div class="bank-as-code-proof">
+<div><span>01 / SERVICE</span><strong>Self-describing services</strong><p>Live endpoints report the deployed version, API contract and health.</p></div>
+<div><span>02 / DOCUMENTATION</span><strong>Documentation as Code</strong><p>Service-owned docs ship with the release; generated decisions and runbooks are checked for drift.</p></div>
+<div><span>03 / GOVERNANCE</span><strong>Compliance as Code</strong><p>Each service declares ownership, lineage and retention. CI cross-checks claims that the code can verify.</p></div>
+<div><span>04 / EVIDENCE</span><strong>Ready to examine</strong><p>Link a change to its contract, tests and operational signals, giving reviewers a path from a claim to its evidence.</p></div>
+</div>
+<p class="bank-as-code-note">The public catalog is a code-derived snapshot, not a live deployment report. Running-service endpoints and operational views show current state.</p>
+</div>
+<div class="ecosystem-grid">
+<article class="ecosystem-card ecosystem-bank">
+<div class="ecosystem-card-copy"><span class="ecosystem-index">01 / INSIDE THE BANK</span><h3>From a customer need<br />to the whole bank.</h3><p>Identity, products, accounts, payments, risk and operations are separate domains with visible contracts. Follow how they work together instead of treating each service as an island.</p><a href="platform.html#domains">Explore every banking domain →</a></div>
+<div class="bank-system" role="group" aria-label="Conceptual map of OpenBank domains and shared engineering foundations">
+<div class="bank-system-core"><span>OpenBank</span><small>one connected architecture</small></div>
+<div class="bank-domains"><span>Identity &amp; relationships</span><span>Products &amp; pricing</span><span>Accounts &amp; payments</span><span>Risk &amp; compliance</span><span>Treasury &amp; wealth</span><span>Operations &amp; AI</span></div>
+<div class="bank-foundations"><div><b>openbank-libs</b><small>Shared rules &amp; contracts</small></div><div><b>Test evidence</b><small>Unit · contract · journeys</small></div><div><b>Observability</b><small>Traces · metrics · liveness</small></div></div>
+<p class="bank-feedback">The loop: shared rules → tests that exercise them → operational signals that show what actually happened.</p>
+</div>
+</article>
+<article class="ecosystem-card ecosystem-relationships">
+<div class="ecosystem-card-copy"><span class="ecosystem-index">02 / THE RELATIONSHIP</span><h3>See the person.<br />Understand the context.</h3><p>A holistic bank view starts with identity: one person may act for companies, hold different products and eventually bring a wider wealth picture into view. Each connection needs a source, permission and purpose.</p><a href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/adr/0303-banking-context-graph-and-authorized-hybrid-retrieval.md">Explore the context-graph design →</a><p class="ecosystem-note">Customer 360 is shipped; person–company links are partial and the broader wealth view is planned.</p></div>
+<div class="relationship-flow" role="group" aria-label="Roadmap from a person and their companies to a permission-scoped financial picture"><div class="relationship-node">Person<small>verified identity</small></div><span class="relationship-arrow" aria-hidden="true">↔</span><div class="relationship-node">Companies<small>roles &amp; mandates</small></div><span class="relationship-arrow" aria-hidden="true">→</span><div class="relationship-node">Wealth view<small>planned composition</small></div></div>
+</article>
+<article class="ecosystem-card ecosystem-studio">
+<span class="ecosystem-index">03 / PRODUCT STUDIO</span>
+<h3>Ideas become<br />real products.</h3>
+<p>Design specifications and contextual offers, review a versioned draft, then publish through maker-checker controls. The catalog keeps the approved terms clear and reproducible.</p>
+<div class="studio-flow" role="group" aria-label="Product Studio workflow"><span>Define</span><span>Compose</span><span>Review</span><span>Publish</span></div>
+<a href="https://admin.open-bank.tech/product-studio">Open Product Studio ↗</a>
+<p class="ecosystem-note">Operator sign-in required · <a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-product-catalog">explore the source</a></p>
+</article>
+<article class="ecosystem-card ecosystem-ai">
+<span class="ecosystem-index">04 / AI-NATIVE · MCP-NATIVE</span>
+<h3>Banking context,<br />ready for AI.</h3>
+<p>A customer-facing copilot and governed MCP tools let AI work with banking context in the public sandbox. Access follows consent, policy and audit; payment actions remain proposals for human review.</p>
+<div class="ai-routes"><span>Customer <b>→</b> Copilot</span><span>Bank team <b>→</b> Governed MCP</span></div>
+<a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-mcp-service">Explore the MCP source →</a>
+<p class="ecosystem-note">External MCP access beyond the sandbox is not yet enabled.</p>
+</article>
+</div>
 </div>
 </section>
 <section class="app-section" id="app">

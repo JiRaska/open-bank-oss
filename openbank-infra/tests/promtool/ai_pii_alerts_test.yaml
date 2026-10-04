@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# openbank.ai.pii: zero replicas warns, one replica raises info, two replicas are silent, and a
+# presidio-named deployment in another namespace is out of scope.
+rule_files:
+  - prometheus-rules-ai-pii.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "no analyzer replica warns; healthy anonymizer and other namespaces stay silent"
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="ai-platform",deployment="presidio-analyzer"}'
+        values: "0x10"
+      - series: 'kube_deployment_status_replicas_available{namespace="ai-platform",deployment="presidio-anonymizer"}'
+        values: "2x10"
+      - series: 'kube_deployment_status_replicas_available{namespace="sandbox",deployment="presidio-analyzer"}'
+        values: "0x10"
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: AiPiiServiceUnavailable
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: AiPiiServiceUnavailable
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              team: platform
+              deployment: presidio-analyzer
+            exp_annotations:
+              summary: "presidio-analyzer has no available replica; gateway PII masking fails closed"
+              description: >-
+                With the LiteLLM presidio guardrail enabled, every LLM call through the gateway now
+                answers 500 ("Presidio PII analysis failed") until a replica is back. Check the pods
+                in ai-platform (OOMKilled: the analyzer holds the spaCy model, ~0.9 GiB resident).
+      - eval_time: 7m
+        alertname: AiPiiServiceDegraded
+        exp_alerts: []
+
+  - interval: 1m
+    name: "one replica for 30m raises info"
+    input_series:
+      - series: 'kube_deployment_status_replicas_available{namespace="ai-platform",deployment="presidio-anonymizer"}'
+        values: "1x40"
+    alert_rule_test:
+      - eval_time: 35m
+        alertname: AiPiiServiceDegraded
+        exp_alerts:
+          - exp_labels:
+              severity: info
+              team: platform
+              deployment: presidio-anonymizer
+            exp_annotations:
+              summary: "presidio-anonymizer is running on a single replica"
+              description: >-
+                The PII services are on the gateway's critical path and fail closed. One replica
+                left means the next node drain or OOM stops every LLM call; restore the second.
+      - eval_time: 35m
+        alertname: AiPiiServiceUnavailable
+        exp_alerts: []

@@ -120,7 +120,7 @@ class SctInstPaymentService(
      */
     private fun scoreFraudShadow(payment: SctInstPayment): Uni<Void> = fraudScoringPort.score(
         FraudScoreCommand(
-            amount = payment.amount,
+            amount = payment.amount.amount,
             currency = payment.currency,
             rail = "SCT_INST",
             accountId = payment.debtorAccountId,
@@ -169,7 +169,6 @@ class SctInstPaymentService(
             creditorName = command.creditorName,
             creditorBic = command.creditorBic,
             amount = command.amount,
-            currency = command.currency,
             remittanceInfo = command.remittanceInfo,
             endToEndId = command.endToEndId,
             executionTimeoutAt = null,
@@ -300,7 +299,7 @@ class SctInstPaymentService(
                     paymentId = saved.paymentId,
                     debtorIban = saved.debtorIban,
                     creditorIban = saved.creditorIban,
-                    amount = saved.amount,
+                    amount = saved.amount.amount,
                     currency = saved.currency,
                     endToEndId = saved.endToEndId,
                     occurredAt = OffsetDateTime.now(clock),

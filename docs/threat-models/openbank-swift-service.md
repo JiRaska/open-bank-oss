@@ -252,3 +252,22 @@ not change any existing request's outcome until explicitly flipped.
   `SwiftRepository.saveWithOutbox`'s single `Panache.withTransaction` (T on the message/event
   pair unchanged — `SwiftOutboxAtomicityIT`'s same-`xmin` proof still applies), and the publish
   bulkhead widens from 1 to `OutboxDispatch.SEND_CONCURRENCY` (D), bounded per batch.
+- **2026-10-03** — **Kernel Money at the submit boundary (#11604).** `POST /api/v1/swift` now builds
+  a kernel `Money` from `amountMinorUnits` + `currency` (`Money.parseInbound`) in `SwiftResource`,
+  before `SwiftService.send` looks up the `idempotencyKey`. **Tampering / input validation:** a
+  currency that is not ISO 4217 with a minor unit (any string was accepted, stored and sent to the
+  scheme gateway before) answers **400 `CURRENCY_UNSUPPORTED`**; a fractional `amountMinorUnits`
+  (silently truncated by Jackson's float-to-int coercion before) answers **400
+  `AMOUNT_SCALE_EXCEEDED`**; a value beyond a signed 64-bit integer answers **400
+  `VALIDATION_ERROR`** — rendered by libs-runtime `InvalidMoneyExceptionMapper`, field named, value
+  never echoed, no row, no outbox event, no downstream call, key not consumed
+  (`SwiftMoneyBoundaryIT`). Deliberately **no currency allow-list**: SWIFT is cross-border, so JPY
+  (0dp) and KWD/BHD (3dp) are valid. **Integrity of the amount on every outbound edge:** the pacs.008
+  `IntrBkSttlmAmt`, the transaction-service settlement `amount`, the `swift.message.status-changed`
+  event `amount` and the `/messages` list `amount` now come from the `Money` at the currency's own
+  minor unit; all four used a fixed two-place shift, so 1000 JPY minor units went out as `10.00`
+  JPY and 1500 KWD as `15.00`. Every two-decimal currency is byte-identical. The DB keeps
+  `amount_minor_units BIGINT` + `currency CHAR(3)` unchanged; sandbox data checked read-only before
+  the change: 6 rows, all `EUR` (5000–12345 minor units), so no stored row reads differently. The
+  `GET`/`POST` response shape is held by a `SwiftMessageView` mirroring the former domain members.
+  No new endpoint, caller, privilege or event. Rollback: revert the commit.
