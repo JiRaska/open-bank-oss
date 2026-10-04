@@ -73,6 +73,7 @@ class ClearingService(
             // Canonical currency scale and upper-case ISO code, from the boundary-built Money.
             amount = command.amount.amount,
             currency = command.amount.currency.code,
+            rail = command.rail,
             status = ClearingStatus.PENDING,
             valueDate = command.valueDate ?: LocalDate.now(clock),
             endToEndId = command.endToEndId,
@@ -117,15 +118,17 @@ class ClearingService(
 
     @Timeout(value = 30000)
     override fun triggerClearingCycle(rail: PaymentRail): Uni<ClearingCycleResult> {
-        val cycleId = "CYCLE-${rail.name}-${LocalDate.now(clock).format(
-            DateTimeFormatter.BASIC_ISO_DATE,
-        )}-${clock.millis() % 10000}"
+        val cycleId = cycleIdFor(rail, LocalDate.now(clock), clock.millis())
         // #11974: a batch is per (rail, currency). Only currencies with a settlement GL pair are
         // selected at all, so an unsettleable item can neither enter a batch whose journal could
         // never post, nor occupy the selection window and starve settleable items on every run.
         val settleable = settlementAccounts.settleableCurrencies()
-        return itemRepo.countPendingOutside(settleable).flatMap { stranded ->
+        return itemRepo.countPendingWithoutRail().flatMap { railless ->
+            reportRailless(rail, cycleId, railless)
+            itemRepo.countPendingOutside(settleable)
+        }.flatMap { stranded ->
             reportUnsettleable(rail, cycleId, stranded)
+            // #12004: only THIS rail's items; batches are therefore per (rail, currency).
             itemRepo.findPendingByRail(rail, settleable, CYCLE_ITEM_LIMIT).flatMap { items ->
                 if (items.isEmpty()) {
                     emptyCycle(rail, cycleId).map { ClearingCycleResult(cycleId, rail, listOf(it), stranded) }
@@ -216,6 +219,18 @@ class ClearingService(
         }
     }
 
+    private fun reportRailless(rail: PaymentRail, cycleId: String, count: Long) {
+        if (count > 0) {
+            log.warnf(
+                "[clearing-cycle] %s %s: %d PENDING item(s) have no recorded rail (written before V12) and are " +
+                    "selected by no cycle — set clearing_items.rail for them to the rail they were submitted for",
+                cycleId,
+                rail,
+                count,
+            )
+        }
+    }
+
     private fun reportUnsettleable(rail: PaymentRail, cycleId: String, stranded: Map<String, Long>) {
         cycleMetrics.recordUnsettleablePending(stranded)
         stranded.forEach { (currency, count) ->
@@ -290,7 +305,27 @@ class ClearingService(
             }
         }
 
-    private companion object {
-        const val CYCLE_ITEM_LIMIT = 1000
+    companion object {
+        private const val CYCLE_ITEM_LIMIT = 1000
+
+        /**
+         * Longest cycle id that fits everywhere it is stored (#12005): `cycle_id` is VARCHAR(64)
+         * since V12, but the batch reference is `<cycleId>-<CCY>` in VARCHAR(64), so 64 - 4.
+         */
+        const val CYCLE_ID_MAX_LENGTH = 60
+
+        private const val CYCLE_SUFFIX_MODULUS = 10_000L
+
+        /**
+         * `CYCLE-<RAIL>-<yyyyMMdd>-<0..9999>`. Bounded by construction (#12005): the rail name is
+         * the longest variable part, and [CYCLE_ID_MAX_LENGTH] is asserted here so a future rail
+         * with a longer name fails the cycle loudly instead of failing the insert.
+         */
+        fun cycleIdFor(rail: PaymentRail, date: LocalDate, epochMillis: Long): String {
+            val id = "CYCLE-${rail.name}-${date.format(DateTimeFormatter.BASIC_ISO_DATE)}-" +
+                "${Math.floorMod(epochMillis, CYCLE_SUFFIX_MODULUS)}"
+            check(id.length <= CYCLE_ID_MAX_LENGTH) { "cycle id '$id' exceeds $CYCLE_ID_MAX_LENGTH characters" }
+            return id
+        }
     }
 }
