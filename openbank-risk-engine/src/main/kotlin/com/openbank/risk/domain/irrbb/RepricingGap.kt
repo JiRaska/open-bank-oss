@@ -11,6 +11,7 @@ import com.openbank.risk.domain.cashflow.NonMaturityDepositCashFlows
 import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
 import com.openbank.risk.domain.cashflow.TimeBucket
 import com.openbank.risk.domain.model.Instrument
+import com.openbank.risk.domain.model.InstrumentKind
 import com.openbank.risk.domain.model.LoanExtension
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.PositionKind
@@ -18,7 +19,7 @@ import java.math.BigDecimal
 import java.time.LocalDate
 
 /** Where a repricing amount comes from — shown so a gap figure can be traced to its rule. */
-enum class RepricingSource { FIXED_LOAN_PRINCIPAL, FLOATING_LOAN_RESET, NMD_BEHAVIOURAL }
+enum class RepricingSource { FIXED_LOAN_PRINCIPAL, FLOATING_LOAN_RESET, NMD_BEHAVIOURAL, MONEY_MARKET_DEAL }
 
 /**
  * One notional that reprices on [date]. [amount] is signed from the bank's side like a
@@ -60,11 +61,14 @@ data class CurrencyGap(
  *  - a non-maturity deposit reprices as the behavioural model runs it off. The model
  *    ([BehaviouralModel], `nmd-linear-core`) carries NO repricing assumption separate from its
  *    run-off, so repricing = run-off: the volatile part overnight, the core in monthly slices.
- *    This is an assumption, reported with every result, not a finding.
+ *    This is an assumption, reported with every result, not a finding;
+ *  - a treasury money-market deal (placement, borrowing, ČNB deposit or lombard) is fixed-rate
+ *    to maturity, so its whole principal reprices on its maturity date — signed as the snapshot
+ *    carries it: a placement or ČNB deposit an asset, a borrowing a liability.
  *
  * Only principal is a repricing notional; interest flows are not (they are in ΔEVE through the
- * full cash flows). So a currency's total gap equals the sum of its loans' outstanding minus its
- * deposits, to the cent.
+ * full cash flows). So a currency's total gap equals the sum of its loans' outstanding and its deals'
+ * signed principal minus its deposits, to the cent.
  */
 object RepricingGap {
 
@@ -82,7 +86,17 @@ object RepricingGap {
         val loans = instruments
             .filter { it.kind in SnapshotCashFlowProjection.LOAN_KINDS && it.outstanding.signum() != 0 }
             .flatMap { loan(it, asOf) }
-        return deposits + loans
+        val deals = instruments
+            .filter { it.kind == InstrumentKind.MONEY_MARKET_DEAL && it.outstanding.signum() != 0 }
+            .map { deal ->
+                RepricingAmount(
+                    date = requireNotNull(deal.maturityDate) { "deal ${deal.id} has no maturity" },
+                    currency = deal.currency,
+                    amount = deal.outstanding,
+                    source = RepricingSource.MONEY_MARKET_DEAL,
+                )
+            }
+        return deposits + loans + deals
     }
 
     private fun loan(instrument: Instrument, asOf: LocalDate): List<RepricingAmount> {
