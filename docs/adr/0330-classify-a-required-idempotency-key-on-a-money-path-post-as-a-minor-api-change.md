@@ -44,6 +44,12 @@ class. The obligation that replaces the MAJOR bump: the same PR updates every in
 send a key. An out-of-repo caller fails loudly with a 400 naming the header rather than silently
 double-booking, which is the trade this decision makes on purpose.
 
+The classification remains mechanical. Separately, the enforced gate requires a PR section
+`## Idempotency caller migration` with one line per hardened operation:
+`- \`openbank-service POST /path\` | callers: \`repo/path\` (or none) | proof: \`changed-test-file\``.
+The gate checks that each operation has an assertion and its proof test changed in the PR;
+reviewers check that the caller inventory is complete and the test actually sends the key.
+
 Held to a must-pass and four must-fail fixtures in the gate's own `--self-test`
 (`idempotency_hardening_self_test`), each of which goes red when its narrowing is removed.
 

@@ -52,6 +52,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -462,6 +463,63 @@ def idempotency_hardening(entries: list[dict], money_path: bool) -> bool:
     return True
 
 
+_MIGRATION_SECTION = re.compile(
+    r"(?ms)^## Idempotency caller migration[ \t]*\n(.*?)(?=^## |\Z)"
+)
+_MIGRATION_LINE = re.compile(
+    r"^- `(openbank-[^` ]+) POST ([^`]+)` \| callers: (.+) \| proof: `([^`]+)`$"
+)
+
+
+def migration_assertion_findings(
+    body: str, service: str, entries: list[dict], changed: set[str], repo: Path = Path("."),
+) -> list[str]:
+    """Require reviewable caller inventory and changed test evidence for each MINOR exception.
+
+    This does not claim to discover every caller. The human reviewer checks that the declared
+    inventory is complete; the gate makes its absence and an unchanged/nonexistent proof fail.
+    """
+    expected = {str(e.get("path", "")) for e in entries}
+    section = _MIGRATION_SECTION.search(body)
+    if not section:
+        return [f"{service}: add a '## Idempotency caller migration' PR section with one line "
+                "per hardened operation, e.g. - `openbank-service POST /path` | "
+                "callers: `file` (or none) | proof: `changed-test-file` (ADR-0330)"]
+    lines = [line.strip() for line in section.group(1).splitlines() if line.strip().startswith("- ")]
+    found: dict[str, tuple[str, str]] = {}
+    findings = []
+    for line in lines:
+        match = _MIGRATION_LINE.fullmatch(line)
+        if not match:
+            findings.append(f"{service}: malformed migration assertion: {line}")
+            continue
+        declared_service, path, callers, proof = match.groups()
+        if declared_service != service:
+            continue  # A different changed service checks its own entries below.
+        if path in found:
+            findings.append(f"{service}: duplicate caller migration assertion for POST {path}")
+        found[path] = (callers, proof)
+    for path in sorted(expected):
+        if path not in found:
+            findings.append(f"{service}: missing caller migration assertion for POST {path}")
+            continue
+        callers, proof = found[path]
+        if callers != "none":
+            caller_paths = re.findall(r"`([^`]+)`", callers)
+            if not caller_paths or ", ".join(f"`{p}`" for p in caller_paths) != callers:
+                findings.append(f"{service}: POST {path}: callers must be comma-separated repo paths or none")
+            for caller in caller_paths:
+                if Path(caller).is_absolute() or ".." in Path(caller).parts or not (repo / caller).is_file():
+                    findings.append(f"{service}: POST {path}: caller path does not exist: {caller}")
+        if Path(proof).is_absolute() or ".." in Path(proof).parts or not (repo / proof).is_file():
+            findings.append(f"{service}: POST {path}: proof test path does not exist: {proof}")
+        elif proof not in changed or not ("/test/" in proof or "/tests/" in proof or ".test." in proof):
+            findings.append(f"{service}: POST {path}: proof must be a test file changed in this PR: {proof}")
+    for path in sorted(set(found) - expected):
+        findings.append(f"{service}: migration assertion names unchanged operation POST {path}")
+    return findings
+
+
 def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int, int]) -> bool:
     if kind == "breaking":
         return new_v[0] > old_v[0]
@@ -624,11 +682,12 @@ def _self_test() -> int:
 
     failures += classification_self_test()
     failures += idempotency_hardening_self_test()
+    failures += migration_assertion_self_test()
 
     if failures:
         print(f"{failures} self-test case(s) failed")
         return 1
-    print(f"all {len(cases) + len(live)} self-test checks passed")
+    print("all API contract self-test groups passed")
     return 0
 
 
@@ -838,6 +897,38 @@ def idempotency_hardening_self_test() -> int:
     return failures
 
 
+def migration_assertion_self_test() -> int:
+    entries = [{"operation": "POST", "path": "/api/v1/things/{id}/refresh"}]
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        (repo / "src").mkdir()
+        (repo / "tests").mkdir()
+        (repo / "src/client.ts").write_text("// caller\n")
+        (repo / "tests/client.test.ts").write_text("// proof\n")
+        line = ("- `openbank-example POST /api/v1/things/{id}/refresh` | callers: `src/client.ts` "
+                "| proof: `tests/client.test.ts`")
+        body = f"## Idempotency caller migration\n{line}\n"
+        changed = {"src/client.ts", "tests/client.test.ts"}
+        cases = [
+            ("complete assertion", body, changed, False),
+            ("missing section", "", changed, True),
+            ("missing operation", "## Idempotency caller migration\n", changed, True),
+            ("other service cannot assert this operation", body.replace("openbank-example", "openbank-other"), changed, True),
+            ("unlisted test change", body, {"src/client.ts"}, True),
+            ("missing caller file", body.replace("src/client.ts", "src/missing.ts"), changed, True),
+            ("no in-repo callers", body.replace("`src/client.ts`", "none"), changed, False),
+        ]
+        failures = 0
+        for name, candidate, paths, must_find in cases:
+            findings = migration_assertion_findings(candidate, "openbank-example", entries, paths, repo)
+            if bool(findings) != must_find:
+                print(f"SELF-TEST FAIL: {name}: findings={findings}")
+                failures += 1
+        if not failures:
+            print("ok: caller migration assertions require each operation and changed test proof")
+        return failures
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--base", help="git sha of the PR base (not needed with --self-test)")
@@ -919,12 +1010,17 @@ def main() -> int:
             if kind == "breaking":
                 rules_text = RULES_YAML.read_text(encoding="utf-8") if RULES_YAML.is_file() else ""
                 is_money_path = service in money_path_services(rules_text)
-                if idempotency_hardening(breaking_entries(args.oasdiff, old_path, head_path), is_money_path):
+                entries = breaking_entries(args.oasdiff, old_path, head_path)
+                if idempotency_hardening(entries, is_money_path):
+                    if os.environ.get("GITHUB_EVENT_NAME") != "push":
+                        findings.extend(migration_assertion_findings(
+                            os.environ.get("PR_BODY", ""), service, entries, set(changed_all),
+                        ))
                     print(
                         f"::notice::api-contract gate: {service}: every breaking change is a newly "
                         f"required Idempotency-Key header on a money-path POST — classifying as "
-                        f"IDEMPOTENCY-HARDENING (MINOR). In-repo callers must send a key in the "
-                        f"same PR (ADR-0330)."
+                        f"IDEMPOTENCY-HARDENING (MINOR). The PR must inventory callers and "
+                        f"change a proof test for every operation (ADR-0330)."
                     )
                     kind = "idempotency-hardening"
             old_path.unlink(missing_ok=True)
