@@ -14,6 +14,7 @@ import com.openbank.balance.application.port.`in`.ReleaseHoldCommand
 import com.openbank.balance.application.port.`in`.SetOverdraftLimitCommand
 import com.openbank.balance.infrastructure.client.AccountServiceClient
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.security.Roles
 import jakarta.annotation.security.RolesAllowed
 import jakarta.ws.rs.Consumes
@@ -106,8 +107,17 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(body) { "request body is required" }
+        // Kernel Money at the boundary (#11604), before the (accountId, currency, referenceId)
+        // idempotency lookup: an over-scale amount or an unsupported currency is a 400 problem
+        // (libs-runtime InvalidMoneyExceptionMapper) and reserves, records and announces nothing.
         val hold = svc.placeHold(
-            PlaceHoldCommand(accountId, body.amount, body.currency, body.reason, body.referenceId, body.ttlSeconds),
+            PlaceHoldCommand(
+                accountId,
+                Money.parseInbound(body.amount, body.currency),
+                body.reason,
+                body.referenceId,
+                body.ttlSeconds,
+            ),
         )
         return Response.status(201).entity(hold).build()
     }
@@ -128,8 +138,8 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(body) { "request body is required" }
-        return Response.ok(svc.credit(CreditAccountCommand(accountId, body.amount, body.currency, body.referenceId)))
-            .build()
+        val amount = Money.parseInbound(body.amount, body.currency)
+        return Response.ok(svc.credit(CreditAccountCommand(accountId, amount, body.referenceId))).build()
     }
 
     @POST
@@ -141,8 +151,8 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(body) { "request body is required" }
-        return Response.ok(svc.debit(DebitAccountCommand(accountId, body.amount, body.currency, body.referenceId)))
-            .build()
+        val amount = Money.parseInbound(body.amount, body.currency)
+        return Response.ok(svc.debit(DebitAccountCommand(accountId, amount, body.referenceId))).build()
     }
 
     @POST
@@ -154,14 +164,13 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
         // first field access threw NPE and this answered 500 (#3038). libs-runtime maps
         // IllegalArgumentException to 400.
         requireNotNull(body) { "request body is required" }
-        val balance = svc.initializeBalance(
-            InitializeBalanceCommand(
-                accountId,
-                body.currency,
-                body.initialAmount ?: BigDecimal.ZERO,
-                body.arrangedOverdraftLimit ?: BigDecimal.ZERO,
-            ),
+        val initialAmount = Money.parseInbound(body.initialAmount ?: BigDecimal.ZERO, body.currency, "initialAmount")
+        val limit = Money.parseInbound(
+            body.arrangedOverdraftLimit ?: BigDecimal.ZERO,
+            body.currency,
+            "arrangedOverdraftLimit",
         )
+        val balance = svc.initializeBalance(InitializeBalanceCommand(accountId, initialAmount, limit))
         return Response.status(201).entity(balance).build()
     }
 
@@ -172,23 +181,31 @@ class BalanceResource(private val svc: BalanceUseCase, private val accountClient
     suspend fun setOverdraftLimit(
         @PathParam("accountId") accountId: UUID,
         @PathParam("currency") currency: String,
-        body: OverdraftLimitRequest,
-    ): Response = Response.ok(
-        svc.setOverdraftLimit(SetOverdraftLimitCommand(accountId, currency, body.arrangedOverdraftLimit)),
-    ).build()
+        body: OverdraftLimitRequest?,
+    ): Response {
+        requireNotNull(body) { "request body is required" }
+        val limit = Money.parseInbound(body.arrangedOverdraftLimit, currency, "arrangedOverdraftLimit")
+        return Response.ok(svc.setOverdraftLimit(SetOverdraftLimitCommand(accountId, limit))).build()
+    }
 }
 
+// amount/currency are nullable so an absent one is a 400 naming the field (Money.parseInbound),
+// not a Jackson binding failure.
 data class PlaceHoldRequest(
-    val amount: BigDecimal,
-    val currency: String,
+    val amount: BigDecimal? = null,
+    val currency: String? = null,
     val reason: String,
     val referenceId: String,
     val ttlSeconds: Long? = null,
 )
-data class BalanceOperationRequest(val amount: BigDecimal, val currency: String, val referenceId: String)
+data class BalanceOperationRequest(
+    val amount: BigDecimal? = null,
+    val currency: String? = null,
+    val referenceId: String,
+)
 data class InitializeRequest(
-    val currency: String,
+    val currency: String? = null,
     val initialAmount: BigDecimal? = null,
     val arrangedOverdraftLimit: BigDecimal? = null,
 )
-data class OverdraftLimitRequest(val arrangedOverdraftLimit: BigDecimal)
+data class OverdraftLimitRequest(val arrangedOverdraftLimit: BigDecimal? = null)
