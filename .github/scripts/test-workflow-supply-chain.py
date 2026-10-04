@@ -146,17 +146,27 @@ class SupplyChainTest(unittest.TestCase):
             if [names.index(name) for name in required] != sorted(names.index(name) for name in required):
                 errors.append('tag must follow scan and attestation')
             by_name = {step.get('name'): step for step in steps}
-            push = '\n'.join(line for line in by_name['Build + push']['run'].splitlines()
-                             if not line.lstrip().startswith('#'))
+            def commands(name):
+                return [line.strip() for line in by_name[name]['run'].splitlines()
+                        if line.strip() and not line.lstrip().startswith('#')]
+
+            push = '\n'.join(commands('Build + push'))
+            scan = commands('Trivy image scan (gate fixable CRITICAL, report HIGH)')
+            attest = commands('Sign + attest (cosign + KMS, shared lib)')
             tag = by_name['Tag attested image']['run']
             if 'push-by-digest=true' not in push or re.search(r'(^|\s)-t\s+', push):
                 errors.append('build must push an untagged digest')
+            if not scan or '--exit-code 1' not in scan[-1] or '|| true' in scan[-1]:
+                errors.append('critical vulnerability scan must stop the release')
+            if not attest or not attest[-1].startswith('cosign_sign_and_attest ') or '|| true' in attest[-1]:
+                errors.append('failed signing or attestation must stop the release')
             if '--prefer-index=false' not in tag or '[ "$got" = "$DIGEST" ]' not in tag:
                 errors.append('tag must preserve and verify the attested digest')
             return errors
 
         self.assertEqual(defects(workflow), [])
-        for mutation in ('early-tag', 'tagged-build', 'index-wrap', 'no-digest-check'):
+        for mutation in ('early-tag', 'tagged-build', 'scan-bypass', 'attest-bypass',
+                         'index-wrap', 'no-digest-check'):
             doc = copy.deepcopy(workflow)
             steps = doc['jobs']['build']['steps']
             named = {step.get('name'): step for step in steps}
@@ -166,6 +176,12 @@ class SupplyChainTest(unittest.TestCase):
                 steps.insert(steps.index(named['Trivy image scan (gate fixable CRITICAL, report HIGH)']), tag_step)
             elif mutation == 'tagged-build':
                 named['Build + push']['run'] += '\ndocker buildx build -t "$IMAGE:$TAG" --push "$CONTEXT"'
+            elif mutation == 'scan-bypass':
+                named['Trivy image scan (gate fixable CRITICAL, report HIGH)']['run'] = (
+                    named['Trivy image scan (gate fixable CRITICAL, report HIGH)']['run'].replace(
+                        '--exit-code 1', '--exit-code 0'))
+            elif mutation == 'attest-bypass':
+                named['Sign + attest (cosign + KMS, shared lib)']['run'] += '\necho attestation skipped'
             elif mutation == 'index-wrap':
                 named['Tag attested image']['run'] = named['Tag attested image']['run'].replace(
                     '--prefer-index=false', '')
