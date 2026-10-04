@@ -17,6 +17,25 @@ spec.loader.exec_module(guard)
 
 
 class SupplyChainTest(unittest.TestCase):
+    def test_auto_deploy_pr_discloses_carried_pins_and_contract_verdict(self):
+        workflow = yaml.safe_load((guard.ROOT / '.github/workflows/auto-deploy.yml').read_text())
+        steps = workflow['jobs']['gitops-pr']['steps']
+        rewrite = next(step for step in steps if step.get('id') == 'rewrite')['run']
+        body = next(step for step in steps if step.get('id') == 'gitops_pr')['with']['body']
+
+        def complete(rewrite_script, pr_body):
+            return (all(token in rewrite_script for token in
+                        ('CARRIED_PRS+=("#${n}")', 'carried_prs=${CARRIED_PRS[*]}',
+                         'carried_prs=none'))
+                    and 'needs.build-push.outputs.deployable_services' in pr_body
+                    and 'needs.can-i-deploy.outputs.deployable' in pr_body
+                    and 'steps.rewrite.outputs.carried_prs' in pr_body
+                    and '**Deployed services:**' not in pr_body)
+
+        self.assertTrue(complete(rewrite, body))
+        self.assertFalse(complete(rewrite.replace('CARRIED_PRS+=("#${n}")', ':'), body))
+        self.assertFalse(complete(rewrite, body.replace('steps.rewrite.outputs.carried_prs', 'none')))
+
     def test_personal_model_credential_is_rejected_in_every_workflow(self):
         for name in ('agent-review.yml', 'other.yml'):
             doc = {'jobs': {'test': {'steps': [{
