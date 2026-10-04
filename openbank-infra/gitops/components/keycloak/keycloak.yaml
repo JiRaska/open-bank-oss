@@ -61,7 +61,7 @@ spec:
           # live in the Dockerfile now and MUST NOT be re-set as env below, or
           # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
           # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.7.3-optimized@sha256:60fa61c0d9e13bbfdc780a0c0b1174a556f4a8cbfb67afd6c1169659d32a32dd
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.7.3-optimized@sha256:41d8f57c2456ffe62383e0a1270492c355db53b24aa85a0c5cdcc183d8b714d3
           args: ["start", "--optimized", "--import-realm"]
           env:
             # --- front/back-channel hostname split ---
