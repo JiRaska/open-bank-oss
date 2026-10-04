@@ -56,7 +56,8 @@ CLIENT_JSON="$(jq -c --arg id "$CLIENT_ID" '.clients[] | select(.clientId == $id
 [[ -n "$CLIENT_JSON" ]] || { echo "ERROR: $CLIENT_ID is not declared in $TEMPLATE" >&2; exit 1; }
 
 KC_POD="$(kubectl -n "$NS_KC" get pods -l app.kubernetes.io/name=keycloak -o jsonpath='{.items[0].metadata.name}')"
-kc() { kubectl -n "$NS_KC" exec -i "$KC_POD" -- /opt/keycloak/bin/kcadm.sh "$@"; }
+# kcadm keeps its session in a file; /tmp because the pod's root filesystem may be read-only.
+kc() { kubectl -n "$NS_KC" exec -i "$KC_POD" -- /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm-synthetic.config; }
 
 # --- 1. the SYNTHETIC party -------------------------------------------------------------
 if [[ -z "${SYNTHETIC_PARTY_ID:-}" ]]; then
@@ -88,7 +89,11 @@ if [[ -z "${KC_ADMIN_PASSWORD:-}" ]]; then
   KC_ADMIN_PASSWORD="$(kubectl -n "$NS_KC" get secret keycloak-bootstrap -o jsonpath='{.data.admin-password}' | base64 -d)"
 fi
 echo "==> logging kcadm in (inside the Keycloak pod)"
-kc config credentials --server http://localhost:8080 --realm master --user "$KC_ADMIN_USER" --password "$KC_ADMIN_PASSWORD" >/dev/null
+# The password goes over stdin and is read INSIDE the pod: `kubectl exec` arguments travel in the
+# API request URL, where the API server's audit log can record them, so no secret may be one.
+printf '%s\n' "$KC_ADMIN_PASSWORD" | kubectl -n "$NS_KC" exec -i "$KC_POD" -- sh -c \
+  'read -r PW; exec /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm-synthetic.config \
+     --server http://localhost:8080 --realm master --user "$1" --password "$PW"' sh "$KC_ADMIN_USER" >/dev/null
 unset KC_ADMIN_PASSWORD
 
 CID="$(kc get clients -r "$REALM" -q clientId="$CLIENT_ID" --fields id --format csv --noquotes | head -1)"
@@ -111,20 +116,22 @@ SECRET="$(kc get "clients/$CID/client-secret" -r "$REALM" --fields value --forma
 # --- 3 + 4. OpenBao ------------------------------------------------------------------------
 if [[ -z "${VAULT_TOKEN:-}" && -n "${BAO_TOKEN:-}" ]]; then VAULT_TOKEN="$BAO_TOKEN"; fi
 prompt_secret VAULT_TOKEN "OpenBao token with write on openbank/*"
-bao() { kubectl -n "$NS_VAULT" exec -i openbao-0 -- env "BAO_TOKEN=$VAULT_TOKEN" bao "$@"; }
+# The token is the FIRST stdin line, read inside the pod (never an exec argument, see above);
+# whatever follows on stdin is left for bao itself, e.g. a `key=-` value.
+bao() { kubectl -n "$NS_VAULT" exec -i openbao-0 -- sh -c 'read -r BAO_TOKEN; export BAO_TOKEN; exec bao "$@"' sh "$@"; }
 
 echo "==> storing the client secret at $KV_SECRET_PATH"
-printf '%s' "$SECRET" | bao kv put "$KV_SECRET_PATH" client_secret=- >/dev/null
+printf '%s\n%s' "$VAULT_TOKEN" "$SECRET" | bao kv put "$KV_SECRET_PATH" client_secret=- >/dev/null
 
 echo "==> adding the identity to the realm-import JSON at $KV_REALM_PATH"
-CURRENT="$(bao kv get -field="$REALM_FIELD" "$KV_REALM_PATH")"
+CURRENT="$(printf '%s\n' "$VAULT_TOKEN" | bao kv get -field="$REALM_FIELD" "$KV_REALM_PATH")"
 UPDATED="$(jq -c --argjson client "$CLIENT_JSON" --arg secret "$SECRET" --arg party "$SYNTHETIC_PARTY_ID" \
   --arg id "$CLIENT_ID" --arg user "$SA_USER" '
   .clients = ([.clients[] | select(.clientId != $id)] + [$client + {secret: $secret}])
   | .users = ([(.users // [])[] | select(.username != $user)]
       + [{username: $user, enabled: true, serviceAccountClientId: $id,
           realmRoles: ["ROLE_CUSTOMER"], attributes: {party_id: [$party]}}])' <<<"$CURRENT")"
-printf '%s' "$UPDATED" | bao kv patch "$KV_REALM_PATH" "$REALM_FIELD=-" >/dev/null
+printf '%s\n%s' "$VAULT_TOKEN" "$UPDATED" | bao kv patch "$KV_REALM_PATH" "$REALM_FIELD=-" >/dev/null
 unset CURRENT UPDATED
 
 # --- 5. verify against the PUBLIC issuer ----------------------------------------------------
