@@ -210,6 +210,58 @@ class LendingServiceTest {
     }
 
     @Test
+    fun `advance refuses the four-eyes state for the proposer and leaves it unchanged`() {
+        val app = proposedApplication(proposer = "alice")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim()
+
+        assertThatThrownBy { service.advance(app.id, "alice").await().indefinitely() }
+            .isInstanceOf(DecisionRequiredException::class.java)
+            .hasMessageContaining("/decision")
+
+        verifyClaims(0)
+        verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
+    }
+
+    @Test
+    fun `advance refuses the four-eyes state for anyone, not only the proposer`() {
+        val app = proposedApplication(proposer = "alice")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim()
+
+        assertThatThrownBy { service.advance(app.id, "bob").await().indefinitely() }
+            .isInstanceOf(DecisionRequiredException::class.java)
+            .satisfies({ assertThat((it as DecisionRequiredException).proposedBy).isEqualTo("alice") })
+
+        verifyClaims(0)
+    }
+
+    @Test
+    fun `advanceIfInState cannot carry a timer past the four-eyes state either`() {
+        val app = proposedApplication(proposer = "alice")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim()
+
+        assertThatThrownBy {
+            service.advanceIfInState(app.id, OriginationState.FOUR_EYES.name, "timer").await().indefinitely()
+        }.isInstanceOf(DecisionRequiredException::class.java)
+
+        verifyClaims(0)
+    }
+
+    @Test
+    fun `decide records the decider so disbursement segregation has an approver to compare`() {
+        val app = proposedApplication(proposer = "alice")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim()
+
+        val declined = service.decide(app.id, DecisionRequest(approve = false), "bob").await().indefinitely()
+
+        assertThat(declined.status).isEqualTo(OriginationState.DECLINED)
+        assertThat(declined.decidedBy).isEqualTo("bob")
+    }
+
+    @Test
     fun `advance refuses a terminal state`() {
         val app = proposedApplication().copy(status = OriginationState.DISBURSED)
         every { applications.findById(app.id) } returns Uni.createFrom().item(app)

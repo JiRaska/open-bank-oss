@@ -58,6 +58,7 @@ import com.openbank.libs.lending.Delinquency
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9
 import com.openbank.libs.lending.compliance.CompliancePackEvaluator
+import com.openbank.libs.lending.origination.FourEyesDecision
 import com.openbank.libs.lending.origination.OriginationActorKind
 import com.openbank.libs.lending.origination.OriginationAdvance
 import com.openbank.libs.lending.origination.OriginationState
@@ -419,9 +420,15 @@ class LendingService @Inject constructor(
         val mandatory = mandatoryStepsFor(application)
         var state = application.status
         while (state != OriginationState.READY_TO_DISBURSE) {
-            val next = OriginationAdvance.nextState(state, mandatory)
-                ?: return application.copy(status = state)
-            val result = machine.apply(transition(application, state, next, OriginationConfig.SANDBOX_ACTOR))
+            // A decision state has no forward drive; the sandbox STP records an explicit approval by
+            // its own actor instead, through the same four-eyes guard every human decision passes.
+            val decision = OriginationAdvance.requiresDecision(state)
+            val next = if (decision) OriginationState.OFFERED else OriginationAdvance.nextState(state, mandatory)
+            if (next == null) return application.copy(status = state)
+            val base = transition(application, state, next, OriginationConfig.SANDBOX_ACTOR)
+            val result = machine.apply(
+                if (decision) base.copy(metadata = FourEyesDecision.metadata(true, application.proposedBy)) else base,
+            )
             check(result is OriginationTransitionResult.Applied) {
                 "STP drive refused at $state -> $next: ${(result as OriginationTransitionResult.Rejected).reason}"
             }
@@ -437,6 +444,19 @@ class LendingService @Inject constructor(
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
                 actor.isBlank() ->
                     Uni.createFrom().failure(IllegalArgumentException("Actor identity is required"))
+                // A decision state is left only through decide() by a second person. Refuse here,
+                // before the state machine, so the caller gets a typed answer naming the right action.
+                OriginationAdvance.requiresDecision(existing.status) -> {
+                    log.warnf(
+                        "AUDIT origination.advance.refused application=%s state=%s actor=%s proposedBy=%s " +
+                            "reason=decision-required",
+                        existing.id.value,
+                        existing.status,
+                        actor,
+                        existing.proposedBy,
+                    )
+                    Uni.createFrom().failure(DecisionRequiredException(existing.status, existing.proposedBy))
+                }
                 else -> {
                     val next = OriginationAdvance.nextState(existing.status, mandatoryStepsFor(existing))
                     when {
@@ -526,7 +546,9 @@ class LendingService @Inject constructor(
                     )
                 else -> {
                     val target = if (decision.approve) OriginationState.OFFERED else OriginationState.DECLINED
-                    when (val result = machine.apply(transition(existing, existing.status, target, decidedBy))) {
+                    val command = transition(existing, existing.status, target, decidedBy)
+                        .copy(metadata = FourEyesDecision.metadata(decision.approve, existing.proposedBy))
+                    when (val result = machine.apply(command)) {
                         is OriginationTransitionResult.Rejected ->
                             Uni.createFrom().failure(IllegalStateException(result.reason))
                         is OriginationTransitionResult.Applied -> claimTransition(

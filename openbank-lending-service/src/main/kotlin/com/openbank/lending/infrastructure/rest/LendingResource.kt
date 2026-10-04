@@ -12,6 +12,7 @@ import com.openbank.lending.application.port.`in`.ProvisioningUseCase
 import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
+import com.openbank.lending.application.usecase.DecisionRequiredException
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -259,6 +260,19 @@ class LendingResource(
         .map { Response.ok(it).build() }
         .onFailure(IllegalArgumentException::class.java)
         .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
+        // A decision state is not advanced: 409 with a machine code naming the decision action.
+        .onFailure(DecisionRequiredException::class.java)
+        .recoverWithItem { e ->
+            val refusal = e as DecisionRequiredException
+            Response.status(HTTP_CONFLICT).entity(
+                mapOf(
+                    "error" to DecisionRequiredException.CODE,
+                    "message" to refusal.message,
+                    "state" to refusal.state.name,
+                    "proposedBy" to refusal.proposedBy,
+                ),
+            ).build()
+        }
         .onFailure(IllegalStateException::class.java)
         .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
 
@@ -487,6 +501,7 @@ class LendingResource(
         const val APPLICATIONS_PATH = "/api/v1/lending/applications"
         const val HTTP_NOT_FOUND = 404
         const val HTTP_UNPROCESSABLE = 422
+        const val HTTP_CONFLICT = 409
         const val MAX_APPLICATION_LIST_LIMIT = 200
     }
 }

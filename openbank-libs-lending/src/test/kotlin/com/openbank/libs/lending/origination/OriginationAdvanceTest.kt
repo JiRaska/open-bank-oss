@@ -65,37 +65,60 @@ class OriginationAdvanceTest {
     }
 
     @Test
-    fun `driving from DRAFT with nothing mandatory reaches READY_TO_DISBURSE and skips both optionals`() {
+    fun `the forward drive stops at the four-eyes state - leaving it is a decision, never an advance`() {
+        assertThat(OriginationAdvance.requiresDecision(OriginationState.FOUR_EYES)).isTrue()
+        assertThat(OriginationAdvance.nextState(OriginationState.FOUR_EYES, none)).isNull()
+        val mandatory = setOf(OriginationState.DOCS_REQUIRED, OriginationState.REFLECTION_PERIOD)
+        assertThat(OriginationAdvance.nextState(OriginationState.FOUR_EYES, mandatory)).isNull()
+        OriginationState.entries.filter { it != OriginationState.FOUR_EYES }.forEach {
+            assertThat(OriginationAdvance.requiresDecision(it)).describedAs("%s", it).isFalse()
+        }
+    }
+
+    @Test
+    fun `driving from DRAFT with nothing mandatory halts at FOUR_EYES and skips DOCS_REQUIRED`() {
         val path = generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, none) }.toList()
-        assertThat(path).endsWith(OriginationState.READY_TO_DISBURSE)
-        assertThat(path).doesNotContain(OriginationState.DOCS_REQUIRED, OriginationState.REFLECTION_PERIOD)
+        assertThat(path).endsWith(OriginationState.FOUR_EYES)
+        assertThat(path).doesNotContain(OriginationState.DOCS_REQUIRED, OriginationState.OFFERED)
         assertThat(path).startsWith(OriginationState.DRAFT, OriginationState.SUBMITTED, OriginationState.KYC_PENDING)
     }
 
     @Test
-    fun `driving from DRAFT with both optionals mandatory visits every state on the forward path`() {
+    fun `driving from OFFERED with nothing mandatory reaches READY_TO_DISBURSE and skips the reflection period`() {
+        val path = generateSequence(OriginationState.OFFERED) { OriginationAdvance.nextState(it, none) }.toList()
+        assertThat(path).endsWith(OriginationState.READY_TO_DISBURSE)
+        assertThat(path).doesNotContain(OriginationState.REFLECTION_PERIOD)
+    }
+
+    @Test
+    fun `with both optionals mandatory the two drive segments visit every state on the forward path`() {
         val mandatory = setOf(OriginationState.DOCS_REQUIRED, OriginationState.REFLECTION_PERIOD)
-        val path = generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, mandatory) }.toList()
-        assertThat(path).containsSequence(
+        val beforeDecision =
+            generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, mandatory) }.toList()
+        val afterDecision =
+            generateSequence(OriginationState.OFFERED) { OriginationAdvance.nextState(it, mandatory) }.toList()
+        assertThat(beforeDecision).containsSequence(
             OriginationState.KYC_PENDING,
             OriginationState.DOCS_REQUIRED,
             OriginationState.ASSESSMENT,
         )
-        assertThat(path).containsSequence(
+        assertThat(afterDecision).containsSequence(
             OriginationState.SIGNED,
             OriginationState.REFLECTION_PERIOD,
             OriginationState.READY_TO_DISBURSE,
         )
-        assertThat(path).hasSize(12)
+        assertThat(beforeDecision.size + afterDecision.size).isEqualTo(12)
     }
 
     @Test
     fun `every consecutive pair the advancer produces is a legal transition in the standard policy`() {
         val policy = OriginationTransitionPolicy.standard()
         listOf(none, setOf(OriginationState.DOCS_REQUIRED, OriginationState.REFLECTION_PERIOD)).forEach { mandatory ->
-            val path = generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, mandatory) }.toList()
-            path.zipWithNext().forEach { (from, to) ->
-                assertThat(policy.isAllowed(from, to)).describedAs("%s -> %s", from, to).isTrue()
+            listOf(OriginationState.DRAFT, OriginationState.OFFERED).forEach { start ->
+                val path = generateSequence(start) { OriginationAdvance.nextState(it, mandatory) }.toList()
+                path.zipWithNext().forEach { (from, to) ->
+                    assertThat(policy.isAllowed(from, to)).describedAs("%s -> %s", from, to).isTrue()
+                }
             }
         }
     }

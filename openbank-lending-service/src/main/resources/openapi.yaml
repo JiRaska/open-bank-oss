@@ -23,7 +23,7 @@ info:
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
-  version: 1.32.0
+  version: 1.33.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -636,11 +636,28 @@ paths:
         makes them mandatory. Advancement stops at READY_TO_DISBURSE — booking is the disburse
         endpoint. Legacy status names (PROPOSED/APPROVED/REJECTED) remain accepted by the
         listRecentApplications filter for compatibility; retired rows were migrated by V9.
+        Decision states are not advanced: an application in FOUR_EYES moves on only through
+        POST /applications/{id}/decision by someone other than the proposer, and advance answers
+        409 FOUR_EYES_DECISION_REQUIRED with the state unchanged.
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: Application advanced to the next state }
         '404': { description: Application not found }
+        '409':
+          description: >-
+            The application is in a decision state (FOUR_EYES); use the decision endpoint.
+            `error` is FOUR_EYES_DECISION_REQUIRED.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: { type: string, enum: [FOUR_EYES_DECISION_REQUIRED] }
+                  message: { type: string }
+                  state: { type: string }
+                  proposedBy: { type: string }
         '422': { description: No forward transition from the current state }
         '403':
           $ref: '#/components/responses/Forbidden'
