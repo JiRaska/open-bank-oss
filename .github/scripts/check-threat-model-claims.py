@@ -438,6 +438,7 @@ CODEISH = (".kt", ".java", ".py", ".rego", ".sql", ".ts", ".tsx", ".sh", ".yaml"
 STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
+DECLARATION = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+([A-Za-z][A-Za-z0-9]*)\b")
 
 # A `gen-*opa-bundle*.sh` script writes its source `.rego` blob into the generated ConfigMap
 # under a key spelled exactly as the file's basename would be, e.g. `domestic_payment_rest_ext.rego: |`
@@ -513,6 +514,7 @@ class Corpus:
         # Stub detection anchors on DEPLOYED source only: a stubbed test helper is not the
         # defect this gate is about.
         self.main = {f: b for f, b in self.blobs.items() if is_deployed(f) and "/src/main/" in f}
+        self.stub_sites = self.index_stub_sites(self.main)
         # A COMMENT-ONLY view is not evidence a thing exists. Measured 2026-09-03: the sole
         # occurrence of `BalanceResourceSecurityTest` anywhere in the tree is the KDoc line
         # `* locked by BalanceResourceSecurityTest.` in `BalanceResource.kt`, and the sole
@@ -574,6 +576,20 @@ class Corpus:
     def _word(sym: str) -> re.Pattern:
         return re.compile(r"(?<![A-Za-z0-9_])" + re.escape(sym) + r"(?![A-Za-z0-9_])")
 
+    @staticmethod
+    def index_stub_sites(main: dict[str, str]) -> dict[str, str]:
+        """Index the same declaration windows that stub_site used to scan per citation."""
+        sites: dict[str, str] = {}
+        for path, blob in main.items():
+            lines = blob.splitlines()
+            for index, line in enumerate(lines):
+                for match in DECLARATION.finditer(line):
+                    symbol = match.group(1)
+                    if symbol not in sites and STUB_MARK.search(
+                            "\n".join(lines[index:index + STUB_WINDOW])):
+                        sites[symbol] = f"{path}:{index + 1}"
+        return sites
+
     def resolve(self, sym: str) -> bool:
         """True iff the symbol occurs as REAL CONTENT in at least one tracked backend file.
 
@@ -624,17 +640,7 @@ class Corpus:
         """
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
-        return None
+        return self.stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -951,6 +957,19 @@ def self_test() -> int:
     sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
     case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
     case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+
+    # A declaration can be mentioned earlier without a stub; the indexed answer must
+    # still point to the first declaration whose own eight-line window has a marker.
+    stub_lines = {
+        "openbank-x/src/main/kotlin/Prelude.kt": "class BrokenGuard {\n  fun execute() = true\n}\n",
+        "openbank-x/src/main/kotlin/First.kt": "class BrokenGuard {\n  fun execute() = TODO()\n}\n",
+        "openbank-x/src/main/kotlin/Second.kt": "class BrokenGuard {\n  // FIXME: replace\n}\n",
+        "openbank-x/src/main/kotlin/Healthy.kt": "class HealthyGuard {\n  fun execute() = true\n}\n",
+    }
+    indexed = Corpus.index_stub_sites(stub_lines)
+    case("stub index retains the first declaration site",
+         indexed.get("BrokenGuard"), "openbank-x/src/main/kotlin/First.kt:1")
+    case("ordinary declaration is not marked as a stub", indexed.get("HealthyGuard"), None)
 
     # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
     #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
