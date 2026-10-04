@@ -63,9 +63,6 @@ class TreasuryOutboxAtomicityIT {
         override fun stop() = InMemoryConnector.clear()
     }
 
-    // Choose a value date after the bank day so a test crossing Prague midnight stays valid.
-    private val valueDate: LocalDate = AccountingClock.bank(Clock.systemUTC()).today().plusDays(1)
-
     @Test
     @Order(1)
     @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
@@ -144,13 +141,16 @@ class TreasuryOutboxAtomicityIT {
     }
 
     private fun draftAndSubmit(principal: String): String {
+        // Keep both dates on the same bank day even if this ordered IT crosses midnight.
+        val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
         val id: String = given()
             .contentType("application/json")
             .header("Idempotency-Key", UUID.randomUUID().toString())
             .body(
                 """
                 {"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK",
-                 "principal":$principal,"rate":4.25,"valueDate":"$valueDate","maturityDate":"${valueDate.plusDays(30)}"}
+                 "principal":$principal,"rate":4.25,"tradeDate":"$today",
+                 "valueDate":"$today","maturityDate":"${today.plusDays(30)}"}
                 """.trimIndent(),
             )
             .`when`().post("/api/v1/treasury/deals")

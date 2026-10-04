@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.275.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.274.0...admin-ui-v0.275.0) (2026-10-03)
+
+
+### Features
+
+* **card-processing:** network-token and dispute-case lifecycle — the callers for the phase-2 ports (ADR-0283 phase 3) ([#8864](https://github.com/JiRaska/open-bank-oss/issues/8864)) ([1851c09](https://github.com/JiRaska/open-bank-oss/commit/1851c09ad884c1778e753ff9c162438da27296a7))
+
 ## [0.274.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.273.0...admin-ui-v0.274.0) (2026-10-03)
 
 
