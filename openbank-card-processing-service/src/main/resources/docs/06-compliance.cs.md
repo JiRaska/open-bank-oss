@@ -19,6 +19,9 @@
 | Kontrola | Kde |
 |---|---|
 | Žádný dvojí hold při opakování | UNIQUE `idempotency_key` |
+| Žádný dvojí clearing při opakované prezentaci | UNIQUE `card_clearings (authorization_id, idempotency_key)` + replay / 409 `IDEMPOTENCY_KEY_REUSED` |
+| Žádný ztracený clearing, clearing nad hold ani reverzace/expirace, která by ho přepsala, při souběhu | optimistický zámek `card_authorizations.version` na každém zápisu + nové vyhodnocení proti zbývajícímu holdu |
+| Jedno zaúčtování na clearing, nikdy sdílené mezi autorizacemi | klíč zaúčtování `card-clearing:<idAutorizace>:h:<base64url(SHA-256(klíč))>` — omezený na autorizaci, vždy hashovaný |
 | Žádné přečerpání clearingu | `AuthorizationLifecycle.clear` **a** CHECK omezení |
 | Důvod zamítnutí jen u zamítnutí | CHECK omezení |
 | Žádná tiše nenapojená integrace | `NOT_BOUND` z vendor vazeb bez přihlašovacích údajů nebo bez smlouvy |
