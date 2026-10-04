@@ -420,6 +420,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "26"
+          # Only this shard runs npm ci (for governance-manifest and mermaid-parses).
+          # Reuse the UI lockfile's cache without restoring it on the other gate shards.
+          cache: ${{ matrix.slug == 'lint-supplychain-security' && 'npm' || '' }}
+          package-manager-cache: "false"
+          cache-dependency-path: openbank-admin-ui/package-lock.json
 
       # PyYAML is a prerequisite of run-gates.py itself, and of most checkers. It used to
       # be installed inside the gen-network-policies gate, which happened to be the first
