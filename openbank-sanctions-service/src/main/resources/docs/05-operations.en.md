@@ -146,3 +146,7 @@ Per-service CI pipeline (`.github/workflows/ci-sanctions-service.yml`):
 ## Startup warm-up (#11890)
 
 sanctions sets `openbank.warmup.protected-path: /api/v1/sanctions/pending`, so the libs-runtime warm-up (see openbank-libs docs, 05-operations) exercises this endpoint's security path before the pod reports ready. Measured on this service: first authenticated `GET /api/v1/sanctions/pending` after readiness, median 2622 ms without the warm-up, 967 ms with it; later requests 15–60 ms either way.
+
+## XML feed rejection
+
+OFAC and EU FSF imports now parse through the shared hardened `SecureXml` SAX parser. A feed containing a DOCTYPE is rejected, including external DTDs and entity declarations. On parse failure the import keeps the previously stored list and reports `FAILED_KEPT_EXISTING`; investigate the upstream feed and do not disable the parser guard to force a refresh. `SanctionsImportServiceTest` and `EuFsfSaxParserTest` exercise the rejection.

@@ -7,6 +7,8 @@ package com.openbank.risk.integration
 import com.fasterxml.jackson.databind.DeserializationFeature
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.risk.application.port.out.TreasuryDealBook
+import com.openbank.risk.application.port.out.TreasuryDealEvent
 import com.openbank.risk.domain.Fixtures
 import com.openbank.risk.domain.Fixtures.lendingLoan
 import com.openbank.risk.domain.Fixtures.sl
@@ -18,11 +20,14 @@ import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured.given
 import jakarta.inject.Inject
+import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
+import java.time.LocalDate
+import java.util.UUID
 
 /**
  * ADR-0313 phase 1 IRRBB end to end: ledger and lending test doubles at the ports, a real
@@ -41,6 +46,12 @@ class RiskIrrbbApiIT {
     @Inject
     lateinit var lending: FakeLendingPort
 
+    @Inject
+    lateinit var treasury: TreasuryDealBook
+
+    private val placement = UUID.randomUUID()
+    private val lateDeal = UUID.randomUUID()
+
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
     private val loan = lendingLoan(id = Fixtures.LOAN_A, principal = "60000.00", currency = "EUR", term = 60, paid = 6)
@@ -49,6 +60,23 @@ class RiskIrrbbApiIT {
     fun reset() {
         lending.loans = emptyList()
         ledger.inputs = Fixtures.tiedOut()
+        TestDb.execute("DELETE FROM treasury_deal WHERE deal_id IN ('$placement', '$lateDeal')")
+    }
+
+    private fun seedSettled(id: UUID, product: String, valueDate: String, maturity: String): Unit = runBlocking {
+        treasury.apply(
+            TreasuryDealEvent(
+                state = "SETTLED",
+                dealId = id,
+                product = product,
+                counterpartyId = "BANK-A",
+                currency = "CZK",
+                principal = BigDecimal("1000000.00"),
+                rate = BigDecimal("3.5"),
+                valueDate = LocalDate.parse(valueDate),
+                maturityDate = LocalDate.parse(maturity),
+            ),
+        )
     }
 
     /** A EUR-only bank: 200 on deposit, the loan on 1200 funded by equity. */
@@ -218,5 +246,45 @@ class RiskIrrbbApiIT {
     fun `an unauthenticated caller cannot read IRRBB`() {
         given().`when`().get("/api/v1/risk/snapshots/00000000-0000-7000-8000-000000000001/irrbb?curveSetId=x")
             .then().statusCode(401)
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a settled placement frozen on the run is in gap, EVE and NII, and a later deal never changes that run`() {
+        // #11107: 1 000 000 CZK placed 2026-04-30 for 90 days at 3.5 %, on 1500 funded by equity.
+        val asOf = "2026-04-30"
+        val base = Fixtures.tiedOut()
+        ledger.inputs = base.copy(
+            asOf = LocalDate.parse(asOf),
+            trialBalance = base.trialBalance + tb("1500", "ASSET", "CZK", "1000000.00", "0") +
+                tb("3000", "EQUITY", "CZK", "0", "1000000.00"),
+        )
+        seedSettled(placement, "MM_PLACEMENT", asOf, "2026-07-29")
+        val run = snapshot(asOf, "TIED_OUT")
+        val set = curveSet(asOf)
+
+        val before = irrbb(run, set)
+        val gap = before["gaps"].single()
+        // 1 500 of deposits run off as liabilities; the placement is the only asset.
+        assertThat(gap["totalAssets"].decimalValue()).isEqualByComparingTo("1000000.00")
+        assertThat(gap["totalGap"].decimalValue()).isEqualByComparingTo("998500.00")
+        val t = before["treasury"].single()
+        assertThat(t["currency"].asText()).isEqualTo("CZK")
+        assertThat(t["deals"].asInt()).isEqualTo(1)
+        assertThat(t["placements"].decimalValue()).isEqualByComparingTo("1000000.00")
+        val up = t["scenarios"].single { it["scenario"].asText() == "parallel-up" }["deltaEve"].decimalValue()
+        assertThat(up.signum()).isNegative()
+        val czkUp = before["scenarios"].single { it["scenario"].asText() == "parallel-up" }["currencies"].single()
+        assertThat(czkUp["deltaNii"].decimalValue().signum()).isPositive() // the placement re-lends higher
+        assertThat(before["dataGaps"].map { it["code"].asText() }).doesNotContain("INSTRUMENTS_NOT_PROJECTED")
+
+        // A deal valued on or before asOf that only reaches the engine now: visible to a fresh read
+        // (so this is not vacuous), but the run's IRRBB reads the instruments frozen on the run.
+        seedSettled(lateDeal, "MM_BORROWING", asOf, "2026-10-30")
+        assertThat(runBlocking { treasury.dealsOnBook(LocalDate.parse(asOf)) }.map { it.dealId }).contains(lateDeal)
+        val after = irrbb(run, set)
+        assertThat(after["gaps"]).isEqualTo(before["gaps"])
+        assertThat(after["scenarios"]).isEqualTo(before["scenarios"])
+        assertThat(after["treasury"]).isEqualTo(before["treasury"])
     }
 }
