@@ -17,7 +17,7 @@ import type { Tone } from '@/components/ui/tone'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import { irrbbSchema, type Irrbb } from '@/components/balance-sheet/contracts'
-import { SCENARIO_NAMES, dataGapText, irrbbRows, outlierStatus, type OutlierStatus } from '@/components/balance-sheet/irrbbSummary'
+import { SCENARIO_NAMES, dataGapText, irrbbRows, outlierStatus, treasuryRows, type OutlierStatus } from '@/components/balance-sheet/irrbbSummary'
 import { formatMoney } from '@/lib/lending/money'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
@@ -67,6 +67,7 @@ export function IrrbbSummaryPanel({ runId }: { runId: string }) {
     : o.tier1Source === 'caller' ? t('zadáno ručně', 'supplied manually') : null
   const rows = irrbbRows(data)
   const gaps = data.dataGaps ?? []
+  const treasury = treasuryRows(data)
 
   return (
     <div>
@@ -118,6 +119,39 @@ export function IrrbbSummaryPanel({ runId }: { runId: string }) {
           ))}
         </tbody>
       </table>
+      {treasury.length > 0 && (
+        <section style={{ marginTop: 12 }} aria-label={t('Podíl treasury obchodů', 'Treasury deals contribution')}>
+          <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+            {t('Z toho obchody peněžního trhu (již zahrnuto výše)', 'Of which money-market deals (already included above)')}
+          </h3>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }} aria-label={t('Podíl treasury obchodů', 'Treasury deals contribution')}>
+            <thead>
+              <tr>
+                <th scope="col" style={{ textAlign: 'left' }}>{t('Měna', 'Currency')}</th>
+                <th scope="col" style={{ textAlign: 'right' }}>{t('Obchody', 'Deals')}</th>
+                <th scope="col" style={{ textAlign: 'right' }}>{t('Umístění (aktiva)', 'Placements (assets)')}</th>
+                <th scope="col" style={{ textAlign: 'right' }}>{t('Výpůjčky (pasiva)', 'Borrowings (liabilities)')}</th>
+                <th scope="col" style={{ textAlign: 'right' }}>ΔEVE</th>
+              </tr>
+            </thead>
+            <tbody>
+              {treasury.map(r => (
+                <tr key={r.currency} data-treasury={r.currency}>
+                  <td>{r.currency}</td>
+                  <td style={{ textAlign: 'right' }}>{r.deals}</td>
+                  <td style={{ textAlign: 'right' }}>{formatMoney(r.placements, r.currency, lang)}</td>
+                  <td style={{ textAlign: 'right' }}>{formatMoney(r.borrowings, r.currency, lang)}</td>
+                  <td style={{ textAlign: 'right' }}>
+                    {r.deltaEve === null || r.scenario === null
+                      ? '—'
+                      : `${formatMoney(r.deltaEve, r.currency, lang)} (${t(SCENARIO_NAMES[r.scenario][0], SCENARIO_NAMES[r.scenario][1])})`}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
       {(gaps.length > 0 || data.shockNotConfigured.length > 0 || data.unpriced.length > 0) && (
         <section style={{ marginTop: 12 }} aria-label={t('Předpoklady a mezery v datech', 'Assumptions and data gaps')}>
           <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{t('Předpoklady a mezery v datech', 'Assumptions and data gaps')}</h3>

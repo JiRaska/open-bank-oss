@@ -30,3 +30,9 @@ Every service built on `openbank-libs-runtime` warms the JVM before it reports r
 Why: in the sandbox every slow request over 48h was the first request after a pod start (1–2 s vs 17–60 ms). Measured first-request median with the warm-up: 967 ms vs 2622 ms without.
 
 Config: `openbank.warmup.enabled` (default true, off in `%test`), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Each step logs `warm-up step <name>: <ms>`; a step failure is logged and does not stop the others.
+
+## Safe XML and outbound TLS
+
+Parse untrusted XML through `SecureXml` in `openbank-libs-domain`. Its DOM, SAX, StAX, schema and transformer factories disable external entities and DTD access; DOM and SAX reject a DOCTYPE entirely. Production parsers must not instantiate their own JAXP factories. `SecureXmlTest` and `XxeRejectionTest` cover external entity and DTD rejection.
+
+For HTTPS, `SafeHttpClient` in `openbank-libs-runtime` uses JVM certificate chain validation and hostname verification. Test-only trust anchors still pass through the platform PKIX trust manager; callers cannot supply a custom trust manager or TLS context.
