@@ -175,13 +175,15 @@ query($id:ID!,$after:String) {
 """
 
 
-def _fill_overlap_oids(prs, graphql):
-    """Fetch blob oids only for paths that can affect the overlap verdict."""
+def _fill_overlap_oids(prs, graphql, focus_number=None):
+    """Fetch blob oids only for paths that can affect the focused PR's verdict."""
     owners = {}
     for pr in prs:
         for path in pr["files"]:
             owners.setdefault(path, []).append(pr)
-    targets = [(pr, path) for path, path_prs in owners.items() if len(path_prs) > 1
+    targets = [(pr, path) for path, path_prs in owners.items()
+               if len(path_prs) > 1 and (focus_number is None or any(
+                   owner["number"] == focus_number for owner in path_prs))
                for pr in path_prs]
     for offset in range(0, len(targets), 50):
         batch = targets[offset:offset + 50]
@@ -201,7 +203,7 @@ def _fill_overlap_oids(prs, graphql):
             pr["files"][path] = obj.get("oid", "") if isinstance(obj, dict) else ""
 
 
-def fetch_open_prs(graphql=_graphql):
+def fetch_open_prs(graphql=_graphql, focus_number=None):
     """[{number, title, files: {path: blob_sha}}] for every OPEN pull request."""
     owner, name = REPO.split("/", 1)
     out, after = [], None
@@ -220,7 +222,7 @@ def fetch_open_prs(graphql=_graphql):
         if not connection["pageInfo"]["hasNextPage"]:
             break
         after = connection["pageInfo"]["endCursor"]
-    _fill_overlap_oids(out, graphql)
+    _fill_overlap_oids(out, graphql, focus_number)
     return out
 
 
@@ -442,12 +444,40 @@ def self_test():
     check("non-overlapping paths caused blob reads", fetched[0]["files"]["only-first.txt"] == "")
     check("GraphQL snapshot used an unexpected call count", len(calls) == 4)
 
+    # 10. Unrelated PRs may overlap one another, but their blob identities cannot change
+    #     this PR's verdict. Do not spend API calls resolving those pairs.
+    focused = [
+        {"number": 1, "headRefOid": "one", "files": {"mine.txt": ""}},
+        {"number": 2, "headRefOid": "two", "files": {"other.txt": ""}},
+        {"number": 3, "headRefOid": "three", "files": {"other.txt": ""}},
+    ]
+    focused_calls = []
+
+    def focused_graphql(query, variables):
+        focused_calls.append((query, variables))
+        return {"data": {"repository": {}}}
+
+    _fill_overlap_oids(focused, focused_graphql, focus_number=1)
+    check("unrelated overlap caused blob reads", not focused_calls)
+    focused[1]["files"]["mine.txt"] = ""
+
+    def focused_blob_graphql(query, variables):
+        focused_calls.append((query, variables))
+        return {"data": {"repository": {"f0": {"oid": "same"},
+                                        "f1": {"oid": "same"}}}}
+
+    _fill_overlap_oids(focused, focused_blob_graphql, focus_number=1)
+    check("focused overlap was not resolved", focused[0]["files"]["mine.txt"] == "same"
+          and focused[1]["files"]["mine.txt"] == "same")
+    check("unrelated shared path caused blob reads",
+          len(focused_calls) == 1 and "other.txt" not in str(focused_calls[0][1]))
+
     if failures:
         for f in failures:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(failures)} case(s))\n")
         return 1
-    print("self-test ok: overlap classifier and paginated GraphQL snapshot are falsifiable (9 cases)")
+    print("self-test ok: overlap classifier and paginated GraphQL snapshot are falsifiable (10 cases)")
     return 0
 
 
@@ -466,7 +496,7 @@ def main():
         return 0
 
     try:
-        prs = fetch_open_prs()
+        prs = fetch_open_prs(focus_number=number)
     except RuntimeError as e:
         # NOT a clean verdict. On GitHub a permission-shaped absence is byte-identical to a
         # real one, so the only honest answer is "could not check".
