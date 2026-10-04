@@ -86,11 +86,43 @@ PATCH /api/v1/balances/{accountId}/overdraft
 { "currency": "EUR", "arrangedOverdraftLimit": "2000.00" }
 ```
 
+## Částka a měna na vstupu (#11604)
+
+Každý vstup nesoucí peníze se nejdřív postaví jako kernel `Money` (`Money.parseInbound`) — dřív než
+replay lookup holdu `(accountId, currency, referenceId)` (ADR-0287), dřív než `referenceId` marker
+pohybu pro credit/debit (V8), dřív než jakýkoli zápis a outbox event. Platí pro `POST /holds`,
+`/credit`, `/debit` (`amount` + `currency`), `/initialize` (`initialAmount`,
+`arrangedOverdraftLimit` + `currency`) a `PUT /{currency}/overdraft-limit` (`arrangedOverdraftLimit`).
+
+| Vstup | Odpověď |
+|---|---|
+| víc desetinných míst, než měna dovoluje (`10.005 EUR`, `1000.5 JPY`, `1.2345 KWD`) | 400 `AMOUNT_SCALE_EXCEEDED` |
+| není ISO 4217 kód s minor unit (`XYZ`, `EURO`, `XAU`, prázdný) | 400 `CURRENCY_UNSUPPORTED` |
+| chybějící částka/měna, víc než 19 celých číslic | 400 `VALIDATION_ERROR` |
+| `amount` holdu/creditu/debitu nula nebo méně; záporný overdraft limit | 400 `VALIDATION_ERROR` |
+
+Tělo je platformní RFC 9457 `ProblemDetail`; `violations[].field` jmenuje pole a odmítnutá hodnota se
+nikdy nevrací. Nic se nerezervuje, nezaúčtuje ani neohlásí a `referenceId` zůstává volné, takže
+opravený retry projde. Nikdy se nezaokrouhluje: koncové nuly nevadí (`10.5000 EUR` je `10.50`),
+velikost písmen a mezery v měně se ignorují (`eur` je `EUR`).
+
+Validní vstup uloží stejnou hodnotu `NUMERIC(19,4)` jako dřív. Odpověď holdu a `amount` v eventech
+`HOLD_PLACED` / `BALANCE_UPDATED` nově nesou scale měny (`10.50` pro požadavek `10.5`, `250.00` pro
+`250`); čtení zůstatků jde dál beze změny ze sloupců `NUMERIC(19,4)` a žádná čtecí cesta `Money`
+nestaví, takže uložené řádky nemůžou selhat při načtení.
+
+**Kafka konzumenti.** `ledger-events-in` staví `delta` z `AccountBookedChanged` jako `Money`;
+`balance-init-in` staví měnu z `AccountCreated` jako kernel `CurrencyCode`. Odmítnutí se znovu
+vyhodí, takže `failure-strategy: dead-letter-queue` kanálu odloží záznam do
+`openbank.dlq.balance.ledger-events-in` / `openbank.dlq.balance.balance-init-in` (s původním String
+payloadem) a kanál pokračuje — nezapíše se dedup marker, pocket, změna zůstatku ani event. Nulová a
+záporná delta zůstává validní (jde o zaúčtovaná fakta z ledgeru).
+
 ## Error model (jednotný `openbank-libs.api.ApiError`)
 
 | HTTP | code | Kdy |
 |---|---|---|
-| 400 | `validation-failed` | DTO check (záporné amount, missing currency) |
+| 400 | `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` / `VALIDATION_ERROR` | částka + měna nejsou kernel `Money`, nebo nekladný pohyb (viz výše) |
 | 404 | `balance-not-found` | `(accountId,currency)` neexistuje |
 | 404 | `hold-not-found` | holdId neexistuje |
 | 409 | `idempotency-key-mismatch` | replay s jiným body |

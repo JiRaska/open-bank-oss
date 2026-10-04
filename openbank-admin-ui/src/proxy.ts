@@ -123,6 +123,8 @@ export const config = {
     // not 2xx/401/403 to a 500 — so the middleware's 302-to-login would make the gate fail closed on
     // precisely the unauthenticated request it exists to reject cleanly. The route runs the same
     // session + role check itself, returns 204/401/403 with no body, and proxies nothing.
+    // The same exclusion covers the Envoy Gateway contract under /api/gate/<tool>/… (ADR-0324
+    // Phase 2), which must return its own 302 carrying the deep link rather than the middleware's.
     // api/security/kpis/metrics is excluded so the in-cluster Prometheus ServiceMonitor
     // (servicemonitor-admin-ui.yaml) can scrape it: Prometheus cannot hold a console
     // session, and a 302-to-login would read as a permanently-down target. The series it
