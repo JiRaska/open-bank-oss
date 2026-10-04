@@ -164,9 +164,22 @@ spec:
                 // that already live in the GitHub Actions UI. None of it belongs in
                 // the bank's log store, and it buries the actual service logs. This
                 // is also the dind volume that forced the alloy 512Mi memory bump.
+                //
+                // Exception: arc-stuck-runner-reaper is a CONTROL that runs in
+                // arc-runners (every 10 min, a few lines per run). With the whole
+                // namespace dropped, its failed run on 2026-10-03 01:40 was
+                // undiagnosable once the pod was GC'd. Mark it, then drop only
+                // unmarked pods.
                 rule {
-                  source_labels = ["__meta_kubernetes_namespace"]
-                  regex         = "arc-runners|gradle-build-cache"
+                  source_labels = ["__meta_kubernetes_pod_name"]
+                  regex         = "arc-stuck-runner-reaper-.*"
+                  target_label  = "__tmp_keep"
+                  replacement   = "1"
+                }
+                rule {
+                  source_labels = ["__meta_kubernetes_namespace", "__tmp_keep"]
+                  separator     = ";"
+                  regex         = "(arc-runners|gradle-build-cache);"
                   action        = "drop"
                 }
 

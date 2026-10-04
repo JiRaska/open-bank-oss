@@ -61,6 +61,12 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /products/term-deposits` | `accounts:read` | discover active public term-deposit offers |
 | `GET /products/term-deposits/{productId}` | `accounts:read` | read one offer and its conditions |
 | `POST /term-deposits` | `accounts:read` | open a term-deposit account after KYC |
+| `GET /holdings` | `wealth:read` | the caller's declared off-platform holdings (ADR-0301) |
+| `POST /holdings` | `wealth:write` | declare a holding; the valuation source is always `CUSTOMER_DECLARED` |
+| `GET /holdings/{holdingId}` | `wealth:read` | 404 unless the caller owns it |
+| `PUT /holdings/{holdingId}/valuation` | `wealth:write` | revalue; the previous value stays in the history |
+| `GET /holdings/{holdingId}/valuations` | `wealth:read` | valuation history, newest first |
+| `DELETE /holdings/{holdingId}` | `wealth:write` | withdraw; 409 `HOLDING_LOCKED` while pledged |
 
 ## Selected requests
 

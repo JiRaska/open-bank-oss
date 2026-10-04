@@ -54,6 +54,12 @@ dependencies {
     testImplementation(libs.pact.consumer)
 }
 
+tasks.test {
+    // The HTTP/Postgres profiles restart Quarkus under Kover in one test fork. The default
+    // Gradle test heap exhausts during class instrumentation before any test XML is emitted.
+    maxHeapSize = "2g"
+}
+
 kover {
     reports {
         verify {

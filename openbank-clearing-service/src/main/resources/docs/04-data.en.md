@@ -16,6 +16,7 @@
 | `V2__create_clearing_outbox.sql` | transactional outbox table `clearing_outbox` + indexes |
 | `V3__hibernate_sequences.sql` | `clearing_outbox_seq` (INCREMENT BY 50) — required because Hibernate Reactive allocates ids from `<table>_seq` while `generation=none` |
 | `V4__amount_check_constraints.sql` | positive-amount CHECK constraints on items and batch totals |
+| `V12__clearing_item_rail_and_cycle_id_width.sql` | `clearing_items.rail` (nullable, no default) + partial index `idx_clearing_items_pending_rail`; `cycle_id` widened to VARCHAR(64) in `clearing_batches` and `settlement_positions` (#12004, #12005) |
 
 > **Migration discipline (CLAUDE.md):** never edit an applied migration. `V3` exists precisely because a missing `<table>_seq` would fail every INSERT at runtime — its rollback note is `DROP SEQUENCE clearing_outbox_seq;`.
 
@@ -33,8 +34,9 @@ A settlement cycle for one rail.
 | `status` | `clearing_status` enum | default PENDING |
 | `total_debit` / `total_credit` / `net_position` | NUMERIC(20,4) | CHECK `total_debit >= 0`, `total_credit >= 0` (V4) |
 | `currency` | CHAR(3) | default EUR |
+| `rail` | `payment_rail` enum | the rail the payment was submitted for (V12, #12004); a cycle selects only its own rail's items. NULL only on pre-V12 rows: selected by **no** cycle, never defaulted |
 | `item_count` | INT | default 0 |
-| `cycle_id` | VARCHAR(32) | nullable |
+| `cycle_id` | VARCHAR(64) (V12, #12005) | nullable |
 | `settlement_date` | DATE | nullable |
 | `settled_at` | TIMESTAMPTZ | nullable |
 | `created_at` / `updated_at` | TIMESTAMPTZ | default NOW() |
@@ -71,7 +73,7 @@ Per-participant net position in a cycle.
 | `id` | UUID PK | `gen_random_uuid()` |
 | `participant_bic` | VARCHAR(11) | |
 | `currency` | CHAR(3) | default EUR |
-| `cycle_id` | VARCHAR(32) | |
+| `cycle_id` | VARCHAR(64) (V12, #12005) | |
 | `gross_debit` / `gross_credit` / `net_position` | NUMERIC(20,4) | default 0 |
 | `settled` | BOOLEAN | default FALSE |
 | `settled_at` | TIMESTAMPTZ | nullable |
