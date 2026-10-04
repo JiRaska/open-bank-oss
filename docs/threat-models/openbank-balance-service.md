@@ -419,3 +419,32 @@ the original journal/account/currency identity used for deduplication.
 then a valid event and its acknowledged redelivery apply one booked movement and consume
 matching cover. This does not prove upstream ledger delivery, OIDC enforcement or a full
 settlement workflow.
+
+### 2026-10-04 — Inbound amount and currency validated as kernel `Money` (#11604)
+
+**Tampering / input validation.** Every balance write now builds a kernel `Money` with
+`Money.parseInbound` in `BalanceResource` before the hold's `(accountId, currency, referenceId)`
+replay lookup (ADR-0287), the credit/debit `referenceId` movement marker (V8), any write and any
+outbox event; the use-case commands carry `Money`. Before, an amount the currency cannot hold
+(`10.005 EUR`, `1000.5 JPY`) was reserved or booked as a sub-minor-unit figure, any string became
+a currency pocket (`/initialize` with `XYZ` answered 201), an amount beyond `NUMERIC(19,4)` failed
+only at the database (500), and — the sharpest case — a **negative or zero credit/debit answered
+200**: a negative credit lowered the booked balance with no overdraft guard and a negative debit
+raised it. Each now answers **400 `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` /
+`VALIDATION_ERROR`** (libs-runtime `InvalidMoneyExceptionMapper`, or `ValidationFailure` for the
+sign rule), naming the field and never echoing the value, with nothing reserved, booked, marked
+or announced; the `referenceId` stays free. A negative overdraft limit is refused the same way.
+
+**Kafka.** `ledger-events-in` builds the `AccountBookedChanged` delta as `Money`, and
+`balance-init-in` the `AccountCreated` currency as `CurrencyCode`; a refusal is rethrown and
+parked by the configured dead-letter strategy, so a malformed upstream event cannot book a
+sub-minor-unit delta, create a phantom pocket or initialise a balance in an unsupported currency,
+and cannot wedge the channel. `balance-init-in`'s DLQ now also serialises String values without
+JSON-string wrapping, matching `ledger-events-in`. Proven against a real broker by
+`BalanceConsumerMoneyDlqIT`; REST by `BalanceMoneyBoundaryIT`.
+
+**Residual.** Read paths do not build `Money` (balances are served from the `NUMERIC(19,4)`
+columns), so a stored row cannot fail to load; a sandbox read-only check on 2026-10-04 found no
+off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
+`ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
+No new endpoint, caller, privilege or event. Rollback: revert the commit.

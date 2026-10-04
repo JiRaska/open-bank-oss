@@ -25,7 +25,8 @@ import { approvalTarget, isOwnRequest } from '@/lib/approvals/operator'
 
 const id = 'bde18d9e-3e49-4f4e-98cc-a56646ccbc61'
 const party = 'd52f0505-bb8a-4a9f-b8e0-9c9c5f765876'
-const approval = { id, action: 'device.revoke', resourceId: party, status: 'PENDING', makerId: 'maker', createdAt: '2026-09-14T00:00:00Z', decidedBy: null }
+const deviceSummary = `action=device.revoke party=${party} device=abcdef01… credential=cred-7f3… algorithm=ES256 enrolledAt=2026-09-01`
+const approval = { id, action: 'device.revoke', resourceId: party, status: 'PENDING', makerId: 'maker', createdAt: '2026-09-14T00:00:00Z', decidedBy: null, summary: deviceSummary }
 const settlement = {
   ...approval, action: 'settlement.create', resourceId: null, decidedAt: null, claimedAt: null,
   expiresAt: '2026-09-14T00:15:00Z', expired: false, summary: 'POST /api/v1/settlements amount=250.00 CZK',
@@ -55,6 +56,9 @@ describe('operator approval workbench (SCA #11903, settlement #11915)', () => {
     // The approval id is a secondary, shortened reference — never the primary text.
     expect(screen.queryByText(id)).not.toBeInTheDocument()
     expect(screen.getAllByText('SCA device revocation').length).toBeGreaterThan(0)
+    // The device the approval binds is shown, so the checker no longer has to ask the maker.
+    expect(screen.getByText(deviceSummary)).toBeInTheDocument()
+    expect(screen.queryByText(/confirm it with the maker/)).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('checkbox'))
     fireEvent.click(approve)
     expect(fetcher).toHaveBeenCalledOnce()
@@ -69,6 +73,31 @@ describe('operator approval workbench (SCA #11903, settlement #11915)', () => {
     await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
     expect(screen.getByText(/Approval recorded/)).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    // The SCA decision response carries no summary; the reviewed device stays on screen.
+    expect(screen.getByText(deviceSummary)).toBeInTheDocument()
+  })
+
+  it('shows an enrollment by key fingerprint and a consume with its masked creditor', async () => {
+    const enroll = `action=device.enroll party=${party} credential=webauthn… algorithm=ES256 keySha256=3f9a0c12`
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...approval, action: 'device.enroll', summary: enroll })))
+    const view = mount()
+    expect(await screen.findByText(enroll)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+    view.unmount()
+    const consume = 'action=scaChallenge.consume challenge=9c1e… purpose=PAYMENT_INITIATION amount=1250.50 CZK creditor=…5399'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...approval, action: 'scaChallenge.consume', summary: consume })))
+    mount()
+    expect(await screen.findByText(consume)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument()
+  })
+
+  it('offers no decision on an SCA approval without a bound-request summary', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ ...approval, summary: null })))
+    mount()
+    await screen.findByText('This request type cannot be safely reviewed in this interface.')
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument()
+    expect(approvalTarget('sca', { ...approval, summary: '   ' } as never)).toBeNull()
+    expect(approvalTarget('sca', approval as never)).toEqual({ kind: 'device', party, summary: deviceSummary })
   })
 
   it('never offers the maker a decision on their own request', async () => {

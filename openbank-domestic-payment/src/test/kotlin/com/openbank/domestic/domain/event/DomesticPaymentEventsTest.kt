@@ -8,6 +8,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -33,8 +34,7 @@ class DomesticPaymentEventsTest {
         creditorAccountNumber = "2000",
         creditorBankCode = "0100",
         creditorName = "Payee",
-        amount = BigDecimal("99.50"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("99.50"), "CZK"),
         variableSymbol = "VS",
         specificSymbol = null,
         constantSymbol = null,

@@ -611,3 +611,17 @@ not change any existing request's outcome until explicitly flipped.
   grants are unchanged. **STRIDE-T:** none new — the rounding rule is now a single named policy
   rather than a literal, so a later change to it is one reviewed edit instead of a silent drift
   between call sites. Rollback: revert the commit.
+- **2026-10-04** — **Kernel `Money` built at the create boundary (#11604).** `POST /api/v1/domestic-payments`
+  builds `Money.parseInbound(amount, currency)` and requires it to be strictly positive in the request
+  DTO, before the use case looks up or binds the `Idempotency-Key`; the command and the domain carry
+  `Money`. **STRIDE-T (closed):** on `main` before this change the service accepted, persisted,
+  announced (`domestic.payment.created`) and started a workflow for a zero or negative amount, an
+  unknown currency (`XYZ`, `XAU`) and a sub-haléř amount (`100.005 CZK`, later rounded HALF_UP by the
+  settlement edge). All are now a 400 problem (`AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` /
+  `VALIDATION_ERROR`) with no row, no outbox event and the key left free. **Unchanged:** the
+  `NUMERIC(20,6)` column (no migration — sandbox holds 43 CZK rows, all at haléř scale and positive);
+  the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
+  is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
+  Money can hold). Reads, events and the confirmation document serialise at the currency scale
+  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
+  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.
