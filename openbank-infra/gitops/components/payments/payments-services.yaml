@@ -42,7 +42,7 @@ spec:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-transaction-opa-bundle.sh via the trailing marker comment
         # (do not hand-edit, do not drop the marker).
-        openbank.tech/policy-checksum: "c075dabe6fa92581" # transaction-opa-bundle
+        openbank.tech/policy-checksum: "e09e20bbff0ed5e5" # transaction-opa-bundle
     spec:
       securityContext:
         runAsNonRoot: true
@@ -240,7 +240,7 @@ spec:
         # @Authorize-annotated endpoints in transaction-service (transaction.*). Bundle
         # mounted from transaction-opa-bundle ConfigMap (gen-transaction-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -646,7 +646,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-payment (sepaPayment.*).
         # Bundle mounted from sepa-payment-opa-bundle ConfigMap (gen-sepa-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1009,7 +1009,7 @@ spec:
         # Bundle mounted from domestic-payment-opa-bundle ConfigMap
         # (gen-domestic-payment-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1343,7 +1343,7 @@ spec:
         # all @Authorize-annotated endpoints in sepa-instant (sctInstPayment.*).
         # Bundle mounted from sepa-instant-opa-bundle ConfigMap (gen-sepa-instant-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1654,7 +1654,7 @@ spec:
         # all @Authorize-annotated endpoints in clearing-service (clearingBatch.*).
         # Bundle mounted from clearing-opa-bundle ConfigMap (gen-clearing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -1995,7 +1995,7 @@ spec:
         # endpoint). Bundle mounted from standing-order-opa-bundle ConfigMap
         # (gen-standing-order-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2289,7 +2289,7 @@ spec:
         # card-issuance-service (card.*). Bundle mounted from card-issuance-opa-bundle
         # ConfigMap (gen-card-issuance-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2562,7 +2562,7 @@ spec:
         # cardprocessing.* actions. Bundle from the card-processing-opa-bundle ConfigMap
         # (gen-card-processing-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -2856,7 +2856,7 @@ spec:
         # the @Authorize-annotated endpoint in settlement-service (settlement.create).
         # Bundle mounted from settlement-opa-bundle ConfigMap (gen-settlement-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -3292,7 +3292,7 @@ spec:
         # all @Authorize-annotated endpoints in swift-service (swift.*). Bundle
         # mounted from swift-opa-bundle ConfigMap (gen-swift-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -3588,7 +3588,7 @@ spec:
         # OPA policy-decision sidecar (ADR-0034). Serves data.openbank.rest.allow for
         # vop.verify. Bundle mounted from vop-opa-bundle ConfigMap (gen-vop-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
