@@ -8,8 +8,8 @@ service those two are jointly unsatisfiable — measured on aml-service, red at 
 
 The tests that matter here are the NEGATIVE ones: a reclassification that fires too eagerly turns
 the gate off for real breaking changes. `service_touched_beyond_spec` is the whole discriminator,
-so it is tested against a diff that must disqualify (a Kotlin change), one that must not (only
-release-please's derived files) and the cross-service cases.
+so it is tested against a diff that must disqualify (a Kotlin change), files that must not
+(release-please output, tests and authored service docs), and the cross-service cases.
 
 The module under test has a hyphenated filename and lives in .github/scripts, so it is loaded via
 importlib — the same technique the sibling tests use.
@@ -65,10 +65,20 @@ class ServiceTouchedBeyondSpecTest(unittest.TestCase):
         changed = [SPEC, "openbank-aml-service-extras/src/main/kotlin/Foo.kt"]
         self.assertEqual(gate.service_touched_beyond_spec(SVC, SPEC, changed), [])
 
-    def test_test_sources_disqualify(self):
-        """Conservative on purpose: only the two derived filenames are exempt, nothing else."""
+    def test_test_sources_do_not_disqualify(self):
+        """Tests pin the corrected contract but cannot change the served response."""
         changed = [SPEC, f"{SVC}/src/test/kotlin/AmlCaseResourceTest.kt"]
-        self.assertEqual(len(gate.service_touched_beyond_spec(SVC, SPEC, changed)), 1)
+        self.assertEqual(gate.service_touched_beyond_spec(SVC, SPEC, changed), [])
+
+    def test_authored_service_docs_do_not_disqualify(self):
+        """The docs freshness gate requires these files with an OpenAPI correction."""
+        changed = [SPEC, f"{SVC}/src/main/resources/docs/03-api.en.md"]
+        self.assertEqual(gate.service_touched_beyond_spec(SVC, SPEC, changed), [])
+
+    def test_other_docs_still_disqualify(self):
+        """Only the service's authored docs tree is exempt."""
+        changed = [SPEC, f"{SVC}/docs/03-api.en.md"]
+        self.assertEqual(gate.service_touched_beyond_spec(SVC, SPEC, changed), [changed[1]])
 
 
 class BumpSatisfiedTest(unittest.TestCase):

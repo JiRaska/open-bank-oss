@@ -1495,7 +1495,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
+    min_subjects: 31   # 32 today (2026-10-04): 9 classifier + 7 ARC runner + 5 digest-vs-tag + 7 end-to-end/stderr + 1 retry-count + 3 placeholder-staleness
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
@@ -3972,8 +3972,10 @@ gates:
       python3 .github/scripts/check-four-eyes-verb-grantable.py --self-test
     run: |
       set -euo pipefail
-      git fetch -q origin main
-      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref origin/main --enforce
+      # Read the PR's own tree (HEAD = the merge commit), not the base: against origin/main a PR
+      # that grants an action AND drops its KNOWN_UNGRANTED entry fails on the base's stale
+      # state (#4754), so a baseline entry could never be removed.
+      python3 .github/scripts/check-four-eyes-verb-grantable.py --ref HEAD --enforce
 
   - id: openapi-version-not-taken
     name: "openapi-version-not-taken — info.version still free on the base tip (ADR-0048, enforced)"
@@ -5212,6 +5214,28 @@ gates:
     run: |
       python3 .github/scripts/check-realm-template-importable.py
 
+  # A bank-owned canary customer (ADR-0331) is safe in exactly one shape: a confidential
+  # customers-realm client with no browser/password/implicit flow, a party_id mapper, and a
+  # service-account user holding only ROLE_CUSTOMER plus one SYNTHETIC party_id. And the
+  # synthetic taint may be trusted only from those clients at customer-edge, and only from the
+  # edge's relay identity downstream: any other trusted principal could drop real activity out
+  # of the regulatory aggregates by sending one header. Falsified on the real tree in both
+  # halves before wiring: enabling the canary's password grant, and adding a second principal
+  # to wealth-service's list, each exit 2 naming the file.
+  - id: synthetic-customer-identity
+    name: "synthetic customer identity keeps the ADR-0331 shape and trust list (enforced)"
+    group: security
+    mode: enforced
+    rationale: "A canary customer with a password grant or an extra role, or a trust list naming any other caller, would let that caller drop real activity out of the regulatory aggregates; the JSON and manifests are the only place either is visible before it is live."
+    review_after: "2027-04-04"
+    budget_seconds: 10
+    selftest: python3 .github/scripts/check-synthetic-customer-identity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-synthetic-customer-identity.py"]
+    min_subjects: 3  # 2026-10-04: 1 canary client + 2 trusted-principal declarations (customer-edge, wealth)
+    run: |
+      python3 .github/scripts/check-synthetic-customer-identity.py --root .
+
   # Importability alone does not reject an operator client with a password grant,
   # open redirect or weak PKCE. Keep the dedicated CLI identity constrained (#10905).
   - id: ops-cli-client-contract
@@ -6140,6 +6164,8 @@ gates:
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/auto-deploy.yml"
+      - ".github/workflows/platform-images.yml"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py

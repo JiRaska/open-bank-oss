@@ -1,0 +1,84 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# admin.open-bank.tech (the console) on the shared Gateway (ADR-0324 Phase 3), the Gateway API
+# translation of the `admin-ui` Ingress in admin-ui.yaml. It attaches to listener https-admin,
+# which already serves `admin-edge-tls` (edge-gateway-grants.yaml) and already carries the
+# ADR-0234 tool routes (observability/httproute-tools-gate.yaml). Gateway API picks the LONGEST
+# matching PathPrefix across every route on the listener, so /tools/<t> stays with the gated
+# tool routes and everything else lands here, exactly as the nginx Ingresses split it.
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, so it answers only on the Gateway's own NLB (curl --resolve).
+# The host cannot move per path: the DNS cutover is ONE change that removes the annotation from
+# this route AND the three tool routes, and adds it to all four nginx Ingresses (admin-ui +
+# tools-gate.yaml).
+#
+# Annotation mapping from admin-ui.yaml:
+#   ssl-redirect            -> the Gateway's http listener redirects every host (301)
+#   custom-headers admin-ui-edge-headers-v1 (X-Frame-Options, Referrer-Policy)
+#   + the controller's HSTS (2y, preload), nosniff and hide-headers X-Powered-By
+#                           -> ResponseHeaderModifier below, same values
+#   cert-manager.io/cluster-issuer
+#                           -> the listener serves its own Certificate `admin-edge-tls`
+#                              (edge-gateway-grants.yaml); no key pinning on this host
+#   controller proxy-buffer-size 32k (next-auth's large session Set-Cookie on
+#   /api/auth/callback)     -> nothing to carry: Envoy has no 4k/8k upstream header buffer,
+#                              only its 60 KiB header limit
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                           -> BackendTrafficPolicy below; Envoy otherwise has no body cap
+#                              and a 15s route timeout
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+  annotations:
+    # Held out of DNS until the host-wide cutover change (above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-admin
+  hostnames:
+    - admin.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: X-Frame-Options
+                value: SAMEORIGIN
+              - name: Referrer-Policy
+                value: strict-origin-when-cross-origin
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: admin-ui
+          port: 3000
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: admin-ui
+  namespace: admin-ui
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: admin-ui
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s

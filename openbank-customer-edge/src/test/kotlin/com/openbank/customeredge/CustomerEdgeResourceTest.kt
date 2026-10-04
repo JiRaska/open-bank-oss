@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -34,7 +35,7 @@ class CustomerEdgeResourceTest {
     private fun resourceFor(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
-        PaymentSessionStore(),
+        inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
         Clock.systemUTC(),
@@ -1157,7 +1158,7 @@ class CustomerEdgeResourceTest {
     private fun statusResourceFor(
         upstream: UpstreamClient,
         callerParty: UUID,
-        store: PaymentSessionStore = PaymentSessionStore(),
+        store: PaymentSessionStore = inMemoryPaymentSessionStore(),
     ): CustomerEdgeResource = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
@@ -1264,7 +1265,7 @@ class CustomerEdgeResourceTest {
     fun `session status is ACTIVE before any payer has initiated (no upstream call)`() {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
-        val store = PaymentSessionStore()
+        val store = inMemoryPaymentSessionStore()
         val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
         val upstream = mockk<UpstreamClient>(relaxed = true)
         val resp = statusResourceFor(upstream, caller, store).paymentSessionStatus(token)
@@ -1277,7 +1278,7 @@ class CustomerEdgeResourceTest {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
         val pid = UUID.randomUUID()
-        val store = PaymentSessionStore()
+        val store = inMemoryPaymentSessionStore()
         val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
         store.attachPayment(token, pid.toString())
         val upstream = mockk<UpstreamClient>()
@@ -1292,7 +1293,7 @@ class CustomerEdgeResourceTest {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
         val pid = UUID.randomUUID()
-        val store = PaymentSessionStore()
+        val store = inMemoryPaymentSessionStore()
         val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
         store.attachPayment(token, pid.toString())
         val upstream = mockk<UpstreamClient>()
@@ -1310,7 +1311,7 @@ class CustomerEdgeResourceTest {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
         val pid = UUID.randomUUID()
-        val store = PaymentSessionStore()
+        val store = inMemoryPaymentSessionStore()
         val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
         store.attachPayment(token, pid.toString())
         val upstream = mockk<UpstreamClient>()
@@ -1325,7 +1326,7 @@ class CustomerEdgeResourceTest {
         val caller = UUID.randomUUID()
         val acct = UUID.randomUUID()
         val pid = UUID.randomUUID()
-        val store = PaymentSessionStore()
+        val store = inMemoryPaymentSessionStore()
         val token = store.create(acct.toString(), caller.toString(), "Jan", "250", "CZ…5399")
         store.attachPayment(token, pid.toString())
         val upstream = mockk<UpstreamClient>()
@@ -1421,7 +1422,7 @@ class CustomerEdgeResourceTest {
         val resource = CustomerEdgeResource(
             upstream,
             mockk(relaxed = true),
-            PaymentSessionStore(),
+            inMemoryPaymentSessionStore(),
             mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),
@@ -1459,7 +1460,7 @@ class CustomerEdgeResourceTest {
         val resource = CustomerEdgeResource(
             upstream,
             mockk(relaxed = true),
-            PaymentSessionStore(),
+            inMemoryPaymentSessionStore(),
             mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),
@@ -1496,7 +1497,7 @@ class CustomerEdgeResourceTest {
         val resource = CustomerEdgeResource(
             upstream,
             mockk(relaxed = true),
-            PaymentSessionStore(),
+            inMemoryPaymentSessionStore(),
             mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),
@@ -1529,7 +1530,7 @@ class CustomerEdgeResourceTest {
         val resource = CustomerEdgeResource(
             upstream,
             mockk(relaxed = true),
-            PaymentSessionStore(),
+            inMemoryPaymentSessionStore(),
             mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),
@@ -1683,7 +1684,7 @@ class CustomerEdgeResourceTest {
     private fun fxResource(upstream: UpstreamClient, callerParty: UUID): CustomerEdgeResource = CustomerEdgeResource(
         upstream,
         mockk(relaxed = true),
-        PaymentSessionStore(),
+        inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
         Clock.systemUTC(),
