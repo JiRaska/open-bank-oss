@@ -367,9 +367,9 @@ def self_test() -> int:
         for succeed_on_retry in (True, False):
             timeouts: list[int] = []
 
-            def _timed_read(*args, **kwargs):
-                timeouts.append(kwargs["timeout"])
-                if len(timeouts) == 1 or not succeed_on_retry:
+            def _timed_read(*args, _timeouts=timeouts, _succeed_on_retry=succeed_on_retry, **kwargs):
+                _timeouts.append(kwargs["timeout"])
+                if len(_timeouts) == 1 or not _succeed_on_retry:
                     raise subprocess.TimeoutExpired(args[0], kwargs["timeout"])
 
                 class _OkProc:
