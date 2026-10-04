@@ -36,7 +36,10 @@ function deployedServiceDestinations(): Map<string, Set<string>> {
 describe('approval inbox source truthfulness', () => {
   it('addresses every approval provider at its declared GitOps service namespace and port', () => {
     const destinations = deployedServiceDestinations()
-    const targets = [...routeSource.matchAll(/serverSvcUrl\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*(\d+)/g)]
+    const directTargets = [...routeSource.matchAll(/serverSvcUrl\(\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*(\d+)/g)]
+    const operatorTargets = [...routeSource.matchAll(/operatorApprovalsPending\(\s*'(?:sca|settlement)'\s*,\s*'([^']+)'\s*,\s*'([^']+)'\s*,\s*(\d+)/g)]
+    expect(operatorTargets).toHaveLength(2)
+    const targets = [...directTargets, ...operatorTargets]
     expect(targets.length).toBeGreaterThan(20)
     for (const [, name, namespace, port] of targets) {
       expect(destinations.get(name), `${name} is missing from GitOps Services`).toBeDefined()
