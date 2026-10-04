@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.6.4](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.6.3...authz-policy-auditor-v0.6.4) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.6.3](https://github.com/JiRaska/open-bank-oss/compare/authz-policy-auditor-v0.6.2...authz-policy-auditor-v0.6.3) (2026-09-29)
 
 

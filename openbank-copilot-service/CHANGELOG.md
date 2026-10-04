@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.4](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.3...copilot-service-v0.17.4) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
+
+### Security
+
+* **copilot:** log proposal tokens by fingerprint, not id ([#12024](https://github.com/JiRaska/open-bank-oss/issues/12024)) ([4ed8c2d](https://github.com/JiRaska/open-bank-oss/commit/4ed8c2dbd53d208b56399912574009fd91bcc288))
+
 ## [0.17.3](https://github.com/JiRaska/open-bank-oss/compare/copilot-service-v0.17.2...copilot-service-v0.17.3) (2026-09-29)
 
 
