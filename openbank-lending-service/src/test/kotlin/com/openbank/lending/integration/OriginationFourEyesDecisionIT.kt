@@ -17,6 +17,7 @@ import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.MethodOrderer
 import org.junit.jupiter.api.Order
 import org.junit.jupiter.api.Test
@@ -50,6 +51,8 @@ class OriginationFourEyesDecisionIT {
     private companion object {
         const val PROPOSER = "four-eyes-it-proposer"
         const val CHECKER = "four-eyes-it-checker"
+        const val DISBURSER = "four-eyes-it-disburser"
+        const val ADVANCES_TO_DISBURSABLE = 3
         const val ADVANCES_TO_FOUR_EYES = 4
     }
 
@@ -59,6 +62,22 @@ class OriginationFourEyesDecisionIT {
             ps.executeQuery().use { rs ->
                 check(rs.next()) { "application $applicationId not stored" }
                 rs.getString(1)
+            }
+        }
+    }
+
+    /** Durable refusal evidence for this application, by code — read straight from the outbox. */
+    private fun refusals(code: String, action: String): Int = dataSource.connection.use { c ->
+        c.prepareStatement(
+            "select count(*) from lending_outbox where event_type = 'credit.application.transition.refused' " +
+                "and aggregate_id = ? and payload like ? and payload like ?",
+        ).use { ps ->
+            ps.setObject(1, UUID.fromString(applicationId))
+            ps.setString(2, "%\"code\":\"$code\"%")
+            ps.setString(3, "%\"attemptedAction\":\"$action\"%")
+            ps.executeQuery().use { rs ->
+                rs.next()
+                rs.getInt(1)
             }
         }
     }
@@ -104,11 +123,11 @@ class OriginationFourEyesDecisionIT {
         } Then {
             statusCode(409)
             body("error", equalTo("FOUR_EYES_DECISION_REQUIRED"))
-            body("state", equalTo("FOUR_EYES"))
-            body("proposedBy", equalTo(PROPOSER))
             body("message", containsString("/decision"))
+            body("proposedBy", nullValue())
         }
         assertThat(storedStatus()).isEqualTo("FOUR_EYES")
+        assertThat(refusals("FOUR_EYES_DECISION_REQUIRED", "ADVANCE")).isEqualTo(1)
     }
 
     @Test
@@ -122,8 +141,10 @@ class OriginationFourEyesDecisionIT {
             post("/api/v1/lending/applications/$applicationId/decision")
         } Then {
             statusCode(409)
+            body("error", equalTo("SEGREGATION_OF_DUTIES"))
         }
         assertThat(storedStatus()).isEqualTo("FOUR_EYES")
+        assertThat(refusals("SEGREGATION_OF_DUTIES", "DECIDE")).isEqualTo(1)
     }
 
     @Test
@@ -141,5 +162,60 @@ class OriginationFourEyesDecisionIT {
             body("decidedBy", equalTo(CHECKER))
         }
         assertThat(storedStatus()).isEqualTo("OFFERED")
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = CHECKER, roles = ["ROLE_LENDING_OFFICER"])
+    fun `5 - the offer advances normally to READY_TO_DISBURSE once decided`() {
+        repeat(ADVANCES_TO_DISBURSABLE) {
+            Given {
+                contentType("application/json")
+            } When {
+                post("/api/v1/lending/applications/$applicationId/advance")
+            } Then {
+                statusCode(200)
+            }
+        }
+        assertThat(storedStatus()).isEqualTo("READY_TO_DISBURSE")
+    }
+
+    @Test
+    @Order(6)
+    @TestSecurity(user = PROPOSER, roles = ["ROLE_LENDING_OFFICER", "ROLE_ADMIN"])
+    fun `6 - the proposer cannot disburse their own loan`() {
+        Given {
+            contentType("application/json")
+        } When {
+            post("/api/v1/lending/applications/$applicationId/disburse")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("SEGREGATION_OF_DUTIES"))
+        }
+        assertThat(storedStatus()).isEqualTo("READY_TO_DISBURSE")
+        assertThat(refusals("SEGREGATION_OF_DUTIES", "DISBURSE")).isEqualTo(1)
+    }
+
+    @Test
+    @Order(7)
+    @TestSecurity(user = DISBURSER, roles = ["ROLE_LENDING_OFFICER"])
+    fun `7 - a ready application with no recorded decision is not disbursable by anyone`() {
+        // The shape an application could reach before the decision state was enforced: ready, undecided.
+        dataSource.connection.use { c ->
+            c.prepareStatement("update loan_application set decided_by = null where id = ?").use { ps ->
+                ps.setObject(1, UUID.fromString(applicationId))
+                check(ps.executeUpdate() == 1)
+            }
+        }
+        Given {
+            contentType("application/json")
+        } When {
+            post("/api/v1/lending/applications/$applicationId/disburse")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("FOUR_EYES_DECISION_MISSING"))
+        }
+        assertThat(storedStatus()).isEqualTo("READY_TO_DISBURSE")
+        assertThat(refusals("FOUR_EYES_DECISION_MISSING", "DISBURSE")).isEqualTo(1)
     }
 }

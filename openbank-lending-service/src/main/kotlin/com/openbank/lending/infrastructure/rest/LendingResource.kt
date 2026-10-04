@@ -12,7 +12,7 @@ import com.openbank.lending.application.port.`in`.ProvisioningUseCase
 import com.openbank.lending.application.port.`in`.RescheduleLoanUseCase
 import com.openbank.lending.application.port.`in`.ServicingUseCase
 import com.openbank.lending.application.port.`in`.WriteOffLoanUseCase
-import com.openbank.lending.application.usecase.DecisionRequiredException
+import com.openbank.lending.application.usecase.OriginationRefusedException
 import com.openbank.lending.domain.model.ApplicationStateSummary
 import com.openbank.lending.domain.model.CollateralDecisionRequest
 import com.openbank.lending.domain.model.CollateralRequest
@@ -260,19 +260,9 @@ class LendingResource(
         .map { Response.ok(it).build() }
         .onFailure(IllegalArgumentException::class.java)
         .recoverWithItem { e -> Response.status(HTTP_NOT_FOUND).entity(mapOf("error" to e.message)).build() }
-        // A decision state is not advanced: 409 with a machine code naming the decision action.
-        .onFailure(DecisionRequiredException::class.java)
-        .recoverWithItem { e ->
-            val refusal = e as DecisionRequiredException
-            Response.status(HTTP_CONFLICT).entity(
-                mapOf(
-                    "error" to DecisionRequiredException.CODE,
-                    "message" to refusal.message,
-                    "state" to refusal.state.name,
-                    "proposedBy" to refusal.proposedBy,
-                ),
-            ).build()
-        }
+        // A control refusal (decision state, missing decision): 409 with a machine code.
+        .onFailure(OriginationRefusedException::class.java)
+        .recoverWithItem { e -> refused(e as OriginationRefusedException) }
         .onFailure(IllegalStateException::class.java)
         .recoverWithItem { e -> Response.status(HTTP_UNPROCESSABLE).entity(mapOf("error" to e.message)).build() }
 
@@ -284,6 +274,8 @@ class LendingResource(
     fun decide(@PathParam("id") id: UUID, decision: DecisionRequest): Uni<Response> =
         apply.decide(LoanApplicationId(id), decision, actor())
             .map { Response.ok(it).build() }
+            .onFailure(OriginationRefusedException::class.java)
+            .recoverWithItem { e -> refused(e as OriginationRefusedException) }
             .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
 
     @GET
@@ -359,7 +351,14 @@ class LendingResource(
     @Authorize(action = "lending.disburse", resource = "#id")
     fun disburseLoan(@PathParam("id") id: UUID): Uni<Response> = disburse.disburse(LoanApplicationId(id), actor())
         .map { Response.status(HTTP_CREATED).entity(it).build() }
+        .onFailure(OriginationRefusedException::class.java)
+        .recoverWithItem { e -> refused(e as OriginationRefusedException) }
         .onFailure().recoverWithItem { e -> Response.status(409).entity(mapOf("error" to e.message)).build() }
+
+    /** A coded control refusal. Deliberately carries no identities: the application GET, which is
+     *  permission-filtered, is where a client reads who proposed or decided it. */
+    private fun refused(e: OriginationRefusedException): Response =
+        Response.status(HTTP_CONFLICT).entity(mapOf("error" to e.code, "message" to e.message)).build()
 
     // --- Servicing ----------------------------------------------------------------------------------
 

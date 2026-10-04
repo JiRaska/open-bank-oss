@@ -76,6 +76,16 @@ class OriginationAdvanceTest {
     }
 
     @Test
+    fun `every state the drive reaches after the decision requires a recorded decider`() {
+        val after = generateSequence(OriginationState.OFFERED) { OriginationAdvance.nextState(it, all) }.toList()
+        after.forEach { assertThat(OriginationAdvance.requiresRecordedDecision(it)).describedAs("%s", it).isTrue() }
+        val before = generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, all) }.toList()
+        before.forEach { assertThat(OriginationAdvance.requiresRecordedDecision(it)).describedAs("%s", it).isFalse() }
+    }
+
+    private val all = setOf(OriginationState.DOCS_REQUIRED, OriginationState.REFLECTION_PERIOD)
+
+    @Test
     fun `driving from DRAFT with nothing mandatory halts at FOUR_EYES and skips DOCS_REQUIRED`() {
         val path = generateSequence(OriginationState.DRAFT) { OriginationAdvance.nextState(it, none) }.toList()
         assertThat(path).endsWith(OriginationState.FOUR_EYES)

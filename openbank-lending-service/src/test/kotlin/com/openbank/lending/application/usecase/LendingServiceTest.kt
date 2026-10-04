@@ -52,6 +52,7 @@ import com.openbank.libs.lending.Ifrs9Stage
 import com.openbank.libs.lending.compliance.CompliancePackRegistry
 import com.openbank.libs.lending.origination.OriginationState
 import io.mockk.CapturingSlot
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -216,11 +217,99 @@ class LendingServiceTest {
         stubClaim()
 
         assertThatThrownBy { service.advance(app.id, "alice").await().indefinitely() }
-            .isInstanceOf(DecisionRequiredException::class.java)
+            .isInstanceOf(OriginationRefusedException::class.java)
             .hasMessageContaining("/decision")
+            .satisfies({
+                assertThat((it as OriginationRefusedException).code).isEqualTo("FOUR_EYES_DECISION_REQUIRED")
+            })
 
         verifyClaims(0)
-        verify(exactly = 0) { events.emit(any<LendingOutboxMessage>()) }
+        assertRefusalRecorded("ADVANCE", "FOUR_EYES_DECISION_REQUIRED", "alice")
+    }
+
+    /** The refusal reached the durable evidence channel, as its own event type, and no transition did. */
+    private fun assertRefusalRecorded(action: String, code: String, actor: String) {
+        val sent = mutableListOf<LendingOutboxMessage>()
+        verify(atLeast = 1) { events.emit(capture(sent)) }
+        assertThat(sent.map { it.eventType }).containsOnly("credit.application.transition.refused")
+        val payload = sent.single().payload
+        assertThat(payload).contains("\"attemptedAction\":\"$action\"", "\"code\":\"$code\"", "\"outcome\":\"REFUSED\"")
+        assertThat(payload).contains("\"actorId\":\"$actor\"")
+    }
+
+    @Test
+    fun `advance past the decision point without a recorded decider is refused and recorded`() {
+        listOf(
+            OriginationState.OFFERED,
+            OriginationState.AWAITING_SIGNATURE,
+            OriginationState.SIGNED,
+            OriginationState.REFLECTION_PERIOD,
+        ).forEach { state ->
+            clearMocks(events, answers = false)
+            val app = proposedApplication(proposer = "alice").copy(status = state, decidedBy = null)
+            every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+            stubClaim()
+
+            assertThatThrownBy { service.advance(app.id, "alice").await().indefinitely() }
+                .describedAs("%s", state)
+                .isInstanceOf(OriginationRefusedException::class.java)
+                .satisfies({
+                    assertThat((it as OriginationRefusedException).code).isEqualTo("FOUR_EYES_DECISION_MISSING")
+                })
+            assertRefusalRecorded("ADVANCE", "FOUR_EYES_DECISION_MISSING", "alice")
+        }
+        verifyClaims(0)
+    }
+
+    @Test
+    fun `advance past the decision point with a recorded decider is unaffected`() {
+        val app = proposedApplication(proposer = "alice").copy(status = OriginationState.OFFERED, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+        stubClaim()
+
+        assertThat(service.advance(app.id, "alice").await().indefinitely().status)
+            .isEqualTo(OriginationState.AWAITING_SIGNATURE)
+    }
+
+    @Test
+    fun `disburse refuses a ready application with no recorded decision, and records it`() {
+        val app = proposedApplication(
+            proposer = "alice",
+        ).copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = null)
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+
+        assertThatThrownBy { service.disburse(app.id, "dave").await().indefinitely() }
+            .isInstanceOf(OriginationRefusedException::class.java)
+            .satisfies({ assertThat((it as OriginationRefusedException).code).isEqualTo("FOUR_EYES_DECISION_MISSING") })
+
+        verify(exactly = 0) { loans.save(any()) }
+        assertRefusalRecorded("DISBURSE", "FOUR_EYES_DECISION_MISSING", "dave")
+    }
+
+    @Test
+    fun `disburse refuses the proposer as disburser, and records it`() {
+        val app = proposedApplication(
+            proposer = "alice",
+        ).copy(status = OriginationState.READY_TO_DISBURSE, decidedBy = "bob")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+
+        assertThatThrownBy { service.disburse(app.id, "alice").await().indefinitely() }
+            .isInstanceOf(OriginationRefusedException::class.java)
+            .satisfies({ assertThat((it as OriginationRefusedException).code).isEqualTo("SEGREGATION_OF_DUTIES") })
+
+        verify(exactly = 0) { loans.save(any()) }
+        assertRefusalRecorded("DISBURSE", "SEGREGATION_OF_DUTIES", "alice")
+    }
+
+    @Test
+    fun `a refused self-decision is recorded as refusal evidence`() {
+        val app = proposedApplication(proposer = "alice")
+        every { applications.findById(app.id) } returns Uni.createFrom().item(app)
+
+        assertThatThrownBy { service.decide(app.id, DecisionRequest(approve = true), "alice").await().indefinitely() }
+            .isInstanceOf(OriginationRefusedException::class.java)
+
+        assertRefusalRecorded("DECIDE", "SEGREGATION_OF_DUTIES", "alice")
     }
 
     @Test
@@ -230,8 +319,10 @@ class LendingServiceTest {
         stubClaim()
 
         assertThatThrownBy { service.advance(app.id, "bob").await().indefinitely() }
-            .isInstanceOf(DecisionRequiredException::class.java)
-            .satisfies({ assertThat((it as DecisionRequiredException).proposedBy).isEqualTo("alice") })
+            .isInstanceOf(OriginationRefusedException::class.java)
+            .satisfies({
+                assertThat((it as OriginationRefusedException).code).isEqualTo("FOUR_EYES_DECISION_REQUIRED")
+            })
 
         verifyClaims(0)
     }
@@ -244,7 +335,7 @@ class LendingServiceTest {
 
         assertThatThrownBy {
             service.advanceIfInState(app.id, OriginationState.FOUR_EYES.name, "timer").await().indefinitely()
-        }.isInstanceOf(DecisionRequiredException::class.java)
+        }.isInstanceOf(OriginationRefusedException::class.java)
 
         verifyClaims(0)
     }

@@ -28,6 +28,21 @@ object OriginationAdvance {
 
     fun requiresDecision(state: OriginationState): Boolean = state in DECISION_STATES
 
+    /**
+     * States that exist only downstream of a four-eyes decision. An application in one of them must
+     * carry a recorded decider; one that does not was never decided, and is neither advanced nor
+     * disbursed (fail closed).
+     */
+    val POST_DECISION_STATES: Set<OriginationState> = setOf(
+        OriginationState.OFFERED,
+        OriginationState.AWAITING_SIGNATURE,
+        OriginationState.SIGNED,
+        OriginationState.REFLECTION_PERIOD,
+        OriginationState.READY_TO_DISBURSE,
+    )
+
+    fun requiresRecordedDecision(state: OriginationState): Boolean = state in POST_DECISION_STATES
+
     private val FORWARD_PATH: List<OriginationState> = listOf(
         OriginationState.DRAFT,
         OriginationState.SUBMITTED,
