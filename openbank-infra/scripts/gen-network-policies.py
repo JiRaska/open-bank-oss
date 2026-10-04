@@ -28,6 +28,9 @@ per directory rather than one for the namespace):
     e.g. "redis") — those are same-namespace-only, since admin-ui never speaks
     the raw wire protocol directly,
   - ingress-nginx allowed where an Ingress backend declares it,
+  - envoy-gateway-system (the shared Gateway's Envoy proxy, ADR-0324) allowed
+    where an HTTPRoute backendRef names the Service — the Gateway API twin of
+    the Ingress rule, so a host moved off ingress-nginx stays reachable,
   - the keda namespace (KEDA HTTP add-on interceptor) allowed on the HTTP port
     of any workload fronted by an HTTPScaledObject (T1 scale-to-zero) — the
     interceptor is the one making the actual inbound connection once the
@@ -75,6 +78,10 @@ OBSERVABILITY_NS = "observability"
 SECURITY_SCANNER_NS = "security-scanner"
 ADMIN_UI_NS = "admin-ui"
 INGRESS_NS = "ingress-nginx"
+# The shared Gateway's namespace (components/envoy-gateway). Envoy Gateway runs the
+# proxy that opens the backend connection in the Gateway's own namespace, so that is
+# the peer an HTTPRoute backend must admit (ADR-0324).
+GATEWAY_NS = "envoy-gateway-system"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
 
@@ -88,8 +95,11 @@ KEDA_NS = "keda"
 # still gets the management/security-scanner rules if it separately exposes a
 # port literally named "management". This is the gap behind the fraud-service
 # online-feature-store Redis fix (PR #706): any non-"management" port was
-# unconditionally treated as an admin-ui-reachable HTTP port.
-INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql"}
+# unconditionally treated as an admin-ui-reachable HTTP port. ClickHouse's
+# HTTP interface is a SQL endpoint, not an API the BFF discovers, so the
+# Langfuse ClickHouse (ADR-0328) names its ports `ch-http`/`ch-native` to land
+# here too.
+INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
 # Container ports belonging to a SIDECAR the app container reaches over the pod's
 # own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
@@ -195,6 +205,26 @@ def job_pod_template(doc: dict) -> dict:
     return spec.get("template", {}) or {}
 
 
+def httproute_backends(doc: dict) -> list[tuple[str, str, int | None]]:
+    """(namespace, service, port) for every Service backendRef of an HTTPRoute.
+
+    A backendRef with no `namespace` lives in the route's own namespace; one with a
+    non-core `group` or a `kind` other than Service (e.g. an Envoy `Backend`) is not a
+    pod the proxy dials through a Service, so it yields no allow-list edge here.
+    """
+    meta = doc.get("metadata", {}) or {}
+    route_ns = meta.get("namespace")
+    out = []
+    for rule in (doc.get("spec", {}) or {}).get("rules", []) or []:
+        for ref in (rule or {}).get("backendRefs", []) or []:
+            if (ref.get("group") or "") != "" or (ref.get("kind") or "Service") != "Service":
+                continue
+            ns = ref.get("namespace") or route_ns
+            if ns and ref.get("name"):
+                out.append((ns, ref["name"], ref.get("port")))
+    return out
+
+
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
 
@@ -269,6 +299,17 @@ def self_test() -> int:
     case("a kafka bootstrap without a port is not matched",
          sorted(KAFKA_RE.findall("bootstrap: openbank-kafka-bootstrap.messaging.svc")), [])
 
+    # HTTPRoute backends (ADR-0324): the Gateway API twin of the Ingress backend rule.
+    route = {"kind": "HTTPRoute", "metadata": {"namespace": "pact-broker"}, "spec": {"rules": [
+        {"backendRefs": [{"name": "pact-broker", "port": 9292}]},
+        {"backendRefs": [{"name": "x", "namespace": "other", "port": 80}]},
+        {"backendRefs": [{"group": "gateway.envoyproxy.io", "kind": "Backend", "name": "ext"}]},
+        {"filters": [{"type": "RequestRedirect"}]},
+    ]}}
+    case("httproute backendRefs resolve namespace and skip non-Service kinds",
+         httproute_backends(route),
+         [("pact-broker", "pact-broker", 9292), ("other", "x", 80)])
+
     # The datastore-port convention: these names mark ports that must NOT be opened to the
     # whole namespace. An empty set here would quietly widen every policy that consults it.
     for name in ("redis", "postgres", "postgresql"):
@@ -315,7 +356,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction and atomic policy publication (19 cases)")
+    print("self-test ok: dependency extraction and atomic policy publication (20 cases)")
     return 0
 
 def main():
@@ -335,6 +376,7 @@ def main():
     edges = defaultdict(set)
     edge_ports = defaultdict(set)  # (callee_ns, callee_svc) -> ports
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
+    gateway_backends = defaultdict(set)  # (ns, svc-name) -> ports named by an HTTPRoute
     http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
     # ns -> the broker ports that namespace's clients actually name in their bootstrap URLs.
     # The port is DERIVED rather than hardcoded (#3393): this rule used to emit a literal
@@ -486,6 +528,10 @@ def main():
                         port = (be.get("port", {}) or {}).get("number")
                         ingress_backends[(ns, be["name"])].add(port)
 
+        elif kind == "HTTPRoute" and ns:
+            for bns, svc, port in httproute_backends(doc):
+                gateway_backends[(bns, svc)].add(port)
+
         elif kind == "HTTPScaledObject" and ns:
             # ADR-0083 T1 pilot: the KEDA HTTP add-on interceptor
             # (keda-add-ons-http-interceptor.keda.svc) is the actual caller once the
@@ -584,6 +630,10 @@ def main():
             resolve_pod_port(ns, wl_name, p)
             for p in ingress_backends.get((ns, wl_name), set())
         }
+        gw_ports = {
+            resolve_pod_port(ns, wl_name, p)
+            for p in gateway_backends.get((ns, wl_name), set())
+        }
 
         rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
@@ -626,6 +676,11 @@ def main():
             rules.append({
                 "from": [ns_peer(INGRESS_NS)],
                 "ports": [{"protocol": "TCP", "port": p} for p in sorted(ing_ports)],
+            })
+        if gw_ports:
+            rules.append({
+                "from": [ns_peer(GATEWAY_NS)],
+                "ports": [{"protocol": "TCP", "port": p} for p in sorted(gw_ports)],
             })
 
         by_dir[wl.get("dir") or ns_dir.get(ns)].append({

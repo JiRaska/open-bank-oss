@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: sca-service
     app.kubernetes.io/part-of: sca
   annotations:
-    openbank.tech/policy-checksum: "1689331bbd71c3eb"
+    openbank.tech/policy-checksum: "c57c05e71e75b1fa"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -602,6 +602,7 @@ data:
     #   scaChallenge.consume  — spend an approved challenge (ADR-0021 settlement gate)
     #   device.enroll         — enrol a device credential (#partyId)
     #   device.list           — list a party's device credentials (#partyId)
+    #   device.revoke         — revoke a credential and cancel its unconsumed approvals (#partyId)
     #
     # Base rest.rego already grants: operator-read-any / compliance-read-any for
     # *.read + *.list, party-self-service for device.list when the JWT sub equals
@@ -611,6 +612,15 @@ data:
     package openbank.rest
 
     import rego.v1
+
+    # An owner can request revocation of their own credential. The ordinary money-path
+    # four-eyes obligation still applies; this grant is not an exemption from approval.
+    allowed_reasons contains "device-self-revocation" if {
+    	input.principal.type == "HUMAN"
+    	"ROLE_CUSTOMER" in input.principal.roles
+    	input.action == "device.revoke"
+    	input.principal.id == input.resource.id
+    }
 
     # Operators and admins may perform ANY SCA challenge lifecycle operation — the ops
     # console path (resolve a stuck challenge, service-desk credential reset per the
@@ -680,6 +690,18 @@ data:
     	input.principal.type == "HUMAN"
     	input.principal.id == "service-account-openbank-services"
     	input.action in {"scaChallenge.read", "scaChallenge.consume"}
+    }
+
+    # Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
+    # and each record expose the action, the party id and the maker id of every parked four-eyes SCA
+    # operation. Base operator-read-any is role-only, and both realm M2M clients
+    # (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+    # ROLE_OPERATOR in at least one realm, so without this veto both could read the queue. No M2M
+    # consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
+    # reading and deciding are human-operator only. Identity decides, never principal.type (#266).
+    prohibited if {
+    	startswith(input.principal.id, "service-account-")
+    	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
     }
   agents.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -1398,6 +1420,17 @@ data:
                                                 # without the cardholder's SCA today — add a verb here when one ships.
                                                 # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                                # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                                # a journal through ledger's POST /api/v1/journals. Threat model:
+                                                # docs/threat-models/openbank-treasury-service.md.
+                                                # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                                # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                                # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                                # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                                # needs an X-Approval-Id round-trip the deal's own
+                                                # PENDING_APPROVAL state already is. Writes are human-only in
+                                                # treasury_rest_ext.rego.
+      - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1475,6 +1508,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1891,7 +1925,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

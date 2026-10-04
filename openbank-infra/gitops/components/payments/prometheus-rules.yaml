@@ -325,6 +325,26 @@ spec:
               the {{ $labels.rail }} rail are completing unscored. The adapter fails open by design, so
               nothing is blocked and no error rate rises; this gauge is the only signal. Check
               fraud-service in the `fraud` namespace and the pod's FRAUD_SERVICE_URL.
+        - alert: FraudScoringUnrecognisedVerdict
+          # A reachable scorer can still return a verdict no rail understands. That is neither
+          # a real score nor a synthetic fallback: the degraded gauge becomes 0, and the
+          # synthetic-ratio alert excludes it. One such response is contract drift on a money
+          # path, so alert on the dedicated counter even when traffic is sparse.
+          expr: |
+            sum by (service, rail) (
+              increase(openbank_fraud_scoring_outcomes_total{result="unrecognised"}[30m])
+            ) > 0
+          for: 0m
+          labels:
+            severity: warning
+            service: '{{ $labels.service }}'
+          annotations:
+            subject_period: continuous
+            summary: "Unreadable fraud verdict on the {{ $labels.rail }} rail"
+            description: >-
+              {{ $labels.service }} received a fraud-service verdict this rail cannot interpret
+              during the last 30m. Payments remain in shadow mode, but these attempts have no
+              usable fraud verdict. Check the provider response contract before enabling enforcement.
         - alert: FraudScoringNeverAttempted
           # -1, the boot value, is a distinct state from a healthy 0 on purpose. This is the alert
           # that would have fired on the original defect: every consumer resolved fraud-service to

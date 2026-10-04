@@ -134,6 +134,13 @@ separately — which is why the `BROKEN` anchors stop. Do not read a `BROKEN` an
 tampering, and do not read it as noise either: check whether the affected range is the known legacy
 segment (`hash_version IS NULL` on `audit_entries`) before concluding either way.
 
+The online anchor verifier reports these checkpoints as `BROKEN` with
+`firstBroken.capturedChainNotIntact=true`; a valid signature remains
+`signatureInvalid=false`. A changed stored digest is separately reported as
+`anchorDigestMismatch=true`. These reasons distinguish checkpoint integrity from signature
+validity. A coherent unsigned checkpoint or unavailable historical key remains `UNVERIFIED`.
+Neither endpoint proves independent archival custody.
+
 ## 6. What this does NOT establish — state this in any report
 
 Three gaps are real, and a partial control described as full independence is worse than none:

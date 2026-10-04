@@ -34,6 +34,9 @@ class EnrolledDeviceEntity : PanacheEntityBase() {
     @Column(name = "created_at", nullable = false, updatable = false)
     lateinit var createdAt: OffsetDateTime
 
+    @Column(name = "revoked_at")
+    var revokedAt: OffsetDateTime? = null
+
     fun toDomain(): EnrolledDevice = EnrolledDevice(
         id = id,
         partyId = partyId,
@@ -41,6 +44,7 @@ class EnrolledDeviceEntity : PanacheEntityBase() {
         publicKeySpkiB64 = publicKeySpki,
         algorithm = algorithm,
         createdAt = createdAt,
+        revokedAt = revokedAt,
     )
 
     companion object {
@@ -51,6 +55,7 @@ class EnrolledDeviceEntity : PanacheEntityBase() {
             publicKeySpki = d.publicKeySpkiB64
             algorithm = d.algorithm
             createdAt = d.createdAt
+            revokedAt = d.revokedAt
         }
     }
 }

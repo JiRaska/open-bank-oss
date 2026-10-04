@@ -168,6 +168,12 @@ def generate(repo, output, env, extra_arguments=()):
         raise ValueError('missing dependency graph identity from setup-gradle')
     if sha != env['GITHUB_DEPENDENCY_GRAPH_SHA']:
         raise ValueError('checkout and dependency graph SHA differ')
+    source_ref = ('refs/heads/' + env['GITHUB_HEAD_REF']
+                  if env.get('GITHUB_HEAD_REF') else env.get('GITHUB_REF'))
+    if not source_ref or not source_ref.startswith('refs/heads/'):
+        raise ValueError('dependency graph source is not a branch')
+    if env['GITHUB_DEPENDENCY_GRAPH_REF'] != source_ref:
+        raise ValueError('dependency graph ref does not match checked-out source branch')
     if env.get('GITHUB_DEPENDENCY_GRAPH_WORKSPACE') != str(repo):
         raise ValueError('checkout and dependency graph workspace differ')
     correlator = env['GITHUB_DEPENDENCY_GRAPH_JOB_CORRELATOR']

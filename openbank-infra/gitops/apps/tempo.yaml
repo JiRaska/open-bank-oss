@@ -22,11 +22,14 @@ spec:
   source:
     # grafana/helm-charts `tempo` was deprecated 2026-01-30 (last: 1.24.4 / Tempo
     # 2.9.0, affected by GHSA-ffqx-q65f-36jf). Its successor lives in the
-    # grafana-community repo; 2.4.0 ships Tempo 2.10.8 (fix landed in 2.10.3),
-    # staying on the 2.x line — chart 3.x moves to Tempo 3.0 (storage/config breaks).
+    # grafana-community repo. Chart 3.1.0 ships Tempo 3.1.0 (monolithic, no Kafka).
+    # Tempo 3 removed the ingester and compactor (live-store + backend-scheduler/
+    # worker replace them) and the `local_blocks` processor; the chart renders
+    # `tempo.retention` into backend_scheduler block_retention. Blocks already in
+    # S3 (2.x vParquet4, RF3) stay readable in place; new blocks are vParquet5.
     repoURL: https://grafana-community.github.io/helm-charts
     chart: tempo
-    targetRevision: 2.4.0
+    targetRevision: 3.1.0
     helm:
       valuesObject:
         fullnameOverride: tempo
@@ -66,19 +69,12 @@ spec:
           metricsGenerator:
             enabled: true
             remoteWriteUrl: "http://kube-prometheus-stack-prometheus.observability.svc:9090/api/v1/write"
-            # local-blocks processor (ADR-0082) — powers TraceQL metrics, i.e. the
-            # Grafana Drilldown → Traces app (`{} | rate()` / `quantile_over_time`).
-            # WITHOUT this the Drilldown "Span rate" query 500s ("An error occurred in
-            # the query"); the span-metrics→Prometheus dashboards work regardless since
-            # they don't use TraceQL metrics. flush_to_storage lets the querier read
-            # flushed blocks from the S3 backend beyond the generator's in-memory
-            # window; filter_server_spans=false keeps client/internal spans too so the
-            # Drilldown "All spans" breakdowns aren't empty (trace volume is tiny —
-            # ~580 active series — so the extra cardinality is cheap).
+            # No `local_blocks` here: Tempo 3 dropped that processor. TraceQL metrics
+            # (Grafana Drilldown → Traces, `{} | rate()`) are now answered by the
+            # live-store for recent data and by the backend blocks for older data,
+            # with no generator-side buffer — which also removes the local-blocks
+            # in-memory span buffer that drove the 2Gi limit below.
             processor:
-              local_blocks:
-                flush_to_storage: true
-                filter_server_spans: false
               # Explicit latency buckets (issue #669 SLO definitions): Tempo's default
               # span-metrics buckets (2ms..4.1s exponential) do NOT include a clean 1s
               # boundary, so a Pyrra `latency` indicator selecting `le="1"` would silently
@@ -99,7 +95,6 @@ spec:
                 processors:
                   - service-graphs
                   - span-metrics
-                  - local-blocks
           resources:
             requests:
               cpu: 100m

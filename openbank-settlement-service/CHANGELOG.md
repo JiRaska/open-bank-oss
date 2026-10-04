@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.1...settlement-service-v0.11.0) (2026-10-03)
+
+
+### Features
+
+* **settlement:** query a settlement's status, with an operator page ([#11935](https://github.com/JiRaska/open-bank-oss/issues/11935)) ([ec34f5a](https://github.com/JiRaska/open-bank-oss/commit/ec34f5a6fb6cb37e4170c12d522c32603b3f468b)), closes [#10041](https://github.com/JiRaska/open-bank-oss/issues/10041)
+
+## [0.10.1](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.10.0...settlement-service-v0.10.1) (2026-10-03)
+
+
+### Security
+
+* **settlement:** durable operator approvals and least-privilege approval queues ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 10) ([#11915](https://github.com/JiRaska/open-bank-oss/issues/11915)) ([2cf126b](https://github.com/JiRaska/open-bank-oss/commit/2cf126bc21c6ca84efc3529a2ef41a6263d3b0b8))
+
+## [0.10.0](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.3...settlement-service-v0.10.0) (2026-10-03)
+
+
+### Features
+
+* **settlement:** project settlements to the ledger with a state audit outbox ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 7) ([#11860](https://github.com/JiRaska/open-bank-oss/issues/11860)) ([b46cd46](https://github.com/JiRaska/open-bank-oss/commit/b46cd46702852cb97269bf905b38e2ef478d18b8))
+
 ## [0.9.3](https://github.com/JiRaska/open-bank-oss/compare/settlement-service-v0.9.2...settlement-service-v0.9.3) (2026-09-22)
 
 

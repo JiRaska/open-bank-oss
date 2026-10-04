@@ -8,8 +8,9 @@
 # components/argo-rollouts/network-policies.yaml. Ingress only: egress is unrestricted,
 # because the proxy must reach whichever backend namespace a future HTTPRoute names.
 #
-# Phase 0 leaves the backend side alone: generated allow-lists admit `ingress-nginx`,
-# and a backend is added for this namespace in the same change that routes a host to it.
+# The backend side: gen-network-policies.py admits this namespace on every port an
+# HTTPRoute backendRef names (Phase 1: pact-broker, langfuse); hand-authored backend
+# policies add it by hand (observability/networkpolicy-rum-gateway.yaml).
 ---
 # Controller: xDS (18000), rate-limit (18001) and wasm (18002) are served only to the
 # proxies in this namespace; metrics (19001) to Prometheus. With the topology-injector

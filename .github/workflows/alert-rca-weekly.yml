@@ -32,9 +32,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       actions: read # list and download successful daily digest runs
-      contents: write
-      issues: write
-      pull-requests: write
+      contents: write        # git push of the chore/alert-rca-* branch
+      issues: write          # gh issue create for a recurring alert (recurrence guard)
+      pull-requests: write   # gh pr create for the weekly RCA log
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

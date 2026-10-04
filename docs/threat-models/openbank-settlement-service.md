@@ -317,6 +317,44 @@ replacing the former in-memory stub), so settlement state is durable across rest
 
 ## Change log
 
+- **2026-10-03** — **Read-only settlement status query (#10041).** `GET /api/v1/settlements/{id}`
+  returns the persisted settlement (stable v1 status vocabulary, `recoveryRequired` for an
+  uncertain balance movement, amount as exact decimal text) with `Cache-Control: no-store`. It
+  calls only the repository lookup and never starts, resumes or retries a workflow. **STRIDE-E/I:**
+  `@RolesAllowed(OPERATOR, ADMIN)` plus OPA `settlement.read`, which the shared `operator-read-any`
+  reason already grants to a HUMAN operator or admin, so no settlement rego changed. That reason
+  also admits a `service-account-*` principal holding ROLE_OPERATOR (verified by `opa eval` against
+  the deployed bundle), and an extra allow rule cannot narrow it, so the resource refuses any
+  `service-account-*` principal itself with 403 (`SettlementStatusQueryIT`, falsified by disabling
+  the check). A malformed or non-canonical id is 400, an unknown one 404; neither confirms a
+  timed-out origination had no effect. The admin-ui BFF (`settlements:view` = OPERATOR, ADMIN)
+  forwards only the session bearer, validates identity and shape, suppresses upstream error bodies
+  and sets `no-store`. Residual risk: settlement and account UUIDs are disclosed to operators who
+  can already read accounts.
+
+- **2026-10-03** — **Durable operator approvals for settlement origination (#10041 slice 10).**
+  `settlement.create` joins rules.yaml `four_eyes.actions`; with `AUTHZ_FOUR_EYES_ENFORCE=true`
+  (default false, fleet convention) an operator's `POST /api/v1/settlements` is parked with 202 and
+  a PENDING row in `settlement_operator_approvals` (V6), bound to the exact instruction by the
+  shared request fingerprint (#11675), until a DIFFERENT operator decides it at
+  `/api/v1/settlements/approvals`; the identical retry with `X-Approval-Id` executes once.
+  **STRIDE-E/T:** a checker cannot approve their own request (store-enforced, and a DB CHECK
+  `decided_by <> maker_id`); an approval cannot execute a different payer, payee, amount, currency
+  or idempotency key (fingerprint mismatch re-parks); validation moved into the request DTO so a
+  malformed instruction is refused at deserialisation, before it can park or consume an approval.
+  **STRIDE-R:** every transition commits with a `SETTLEMENT_OPERATOR_APPROVAL_CHANGED` outbox
+  event (maker, checker, claim, fingerprint) — the retained evidence once the row is purged after
+  `openbank.settlement.approval-retention-days` (1826) past expiry. `settlement_outbox` therefore
+  carries two aggregate types: the settlement FK is kept for state events through a generated
+  `settlement_ref` column, approval events have no FK by design. **STRIDE-I/E (least privilege):**
+  `settlement_rest_ext.rego` vetoes every `service-account-*` principal on `settlement.approval.*`
+  and excludes them from `operator-settlement-write`; both realm M2M clients carry ROLE_OPERATOR and
+  are classified HUMAN, and no M2M caller exists (verified by `opa eval` against the regenerated
+  bundle: must-DENY for both service accounts, must-ALLOW for a human operator). Residual risk: the
+  approval TTL (24 h) is the interceptor default; with four-eyes enforcement off the gate records
+  `required_not_enforced` and proceeds, exactly as before this change. Rollback: set
+  `AUTHZ_FOUR_EYES_ENFORCE=false`; keep the table and its outbox evidence.
+
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into

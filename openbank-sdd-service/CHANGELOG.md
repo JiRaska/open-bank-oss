@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.5...sdd-service-v0.13.6) (2026-10-03)
+
+
+### Performance
+
+* **sdd:** move the outbox onto the kernel v2 repository (ADR-0327 phase 3) ([#11874](https://github.com/JiRaska/open-bank-oss/issues/11874)) ([0fd8448](https://github.com/JiRaska/open-bank-oss/commit/0fd844843a0b865a019a16bf16bc1c6654f25d8d))
+
 ## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/sdd-service-v0.13.4...sdd-service-v0.13.5) (2026-09-29)
 
 

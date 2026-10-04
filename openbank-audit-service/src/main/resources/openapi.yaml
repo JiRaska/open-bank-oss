@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Audit Service API
-  version: 1.7.0
+  version: 1.9.0
   description: Immutable audit trail — retrieve event history per aggregate; verify hash-chain integrity (ADR-0086) and externally-signed anchors (ADR-0031 D5).
   license:
     name: Apache-2.0
@@ -124,6 +124,38 @@ paths:
                 items:
                   $ref: '#/components/schemas/AuditEntryResponse'
 
+  /api/v1/audit/evidence/{aggregateId}:
+    get:
+      tags: [Audit]
+      summary: Ordered, hash-checked evidence bundle for one aggregate (ADR-0214 D3)
+      description: >
+        Every audit entry about one aggregate (a loan application, a loan), oldest first, each with
+        its own record hash recomputed at read time. `tampered` is true if any entry's hash failed to
+        recompute. Per-entry recomputation proves rows were not edited; proving none were deleted or
+        re-ordered is the full chain walk at /api/v1/audit/integrity. At most 1000 entries;
+        `truncated` says when more exist. Callers: audit, compliance and credit-risk staff, directly
+        or through lending-service's evidence endpoint, which forwards the caller's own token.
+      operationId: getEvidence
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: aggregateId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Evidence bundle (an unknown aggregate yields an empty bundle, not 404)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EvidenceResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller is not audit, admin, compliance or credit-risk staff, or is a service account
+
   /api/v1/audit/entries/by-actor/{actorId}:
     get:
       tags: [Audit]
@@ -231,7 +263,9 @@ paths:
       operationId: verifyAnchors
       description: >
         Recomputes each anchor digest, verifies its signature, and confirms the attested chain
-        head still matches the live chain. Detects a wholesale rewrite of the log that the
+        head still matches the live chain. A stored digest mismatch or non-INTACT captured
+        chain status also returns BROKEN with a distinct reason; a valid signature over a broken
+        checkpoint is not evidence of forgery. Detects a wholesale rewrite of the log that the
         internal hash-chain walk alone cannot.
       security:
         - bearerAuth: []
@@ -289,6 +323,73 @@ components:
       bearerFormat: JWT
 
   schemas:
+    EvidenceResponse:
+      type: object
+      required: [aggregateId, attestation, entryCount, truncated, tampered, hashStatusCounts, fullChainVerification, entries]
+      properties:
+        aggregateId:
+          type: string
+        attestation:
+          type: string
+          enum: [audit-chain]
+        entryCount:
+          type: integer
+        truncated:
+          type: boolean
+        tampered:
+          type: boolean
+        hashStatusCounts:
+          type: object
+          additionalProperties:
+            type: integer
+        fullChainVerification:
+          type: string
+          description: Path of the full chain walk that also detects deleted or re-ordered entries.
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceEntry'
+    EvidenceEntry:
+      type: object
+      required: [entryId, eventType, aggregateType, sourceService, occurredAt, occurredAtSource, recordedAt, payload, hashStatus]
+      properties:
+        entryId:
+          type: string
+          format: uuid
+        eventType:
+          type: string
+        aggregateType:
+          type: string
+        sourceService:
+          type: string
+        actorId:
+          type: string
+          nullable: true
+        actorType:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        occurredAt:
+          type: string
+          format: date-time
+        occurredAtSource:
+          type: string
+        recordedAt:
+          type: string
+          format: date-time
+        payload:
+          type: string
+        recordHash:
+          type: string
+          nullable: true
+        prevHash:
+          type: string
+          nullable: true
+        hashStatus:
+          type: string
+          enum: [VERIFIED, MISMATCH, LEGACY_UNVERIFIABLE, UNCHAINED]
     IntegrityResponse:
       type: object
       required: [chainStatus, checkedCount, unchainedCount]
@@ -354,14 +455,14 @@ components:
         status:
           type: string
           enum: [INTACT, BROKEN, UNVERIFIED, NO_ANCHORS]
-          description: INTACT only when every anchor's signature and attested head verify; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
+          description: INTACT only when every anchor's stored digest, signature and attested head verify and its captured chainStatus is INTACT; UNVERIFIED means a signature or historical key cannot be verified, and NO_ANCHORS means no independent evidence exists.
         anchorCount:
           type: integer
           format: int64
         verifiedCount:
           type: integer
           format: int64
-          description: Anchors whose signature and attested head both verified.
+          description: Anchors whose stored digest, signature and attested head verified and whose captured chainStatus is INTACT.
         unsignedCount:
           type: integer
           format: int64
@@ -405,6 +506,12 @@ components:
         headHashMismatch:
           type: boolean
           description: The attested head hash no longer matches the live chain (rewrite).
+        anchorDigestMismatch:
+          type: boolean
+          description: The stored anchor digest differs from the recomputed checkpoint digest.
+        capturedChainNotIntact:
+          type: boolean
+          description: The checkpoint did not attest an INTACT chain at capture time, even if its signature is valid.
 
     AccessLogEntryResponse:
       type: object
