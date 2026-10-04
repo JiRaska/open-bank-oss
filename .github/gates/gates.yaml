@@ -1481,7 +1481,7 @@ gates:
     review_after: "2027-02-14"
     # The corpus is the checker's own fixture set — its subjects are assertions, not files, so
     # the floor is the number of cases that must run. It drops the day someone deletes one.
-    min_subjects: 17   # 18 today: 9 classifier + 5 end-to-end + 1 retry-count + 3 placeholder-staleness (2026-08-31)
+    min_subjects: 31   # 32 today (2026-10-04): 9 classifier + 7 ARC runner + 5 digest-vs-tag + 7 end-to-end/stderr + 1 retry-count + 3 placeholder-staleness
     run: |
       # The gate IS the selftest here: the artifact under test is the classifier + exit-code
       # contract, not the fleet (verifying 62 real images needs ECR credentials this job does
