@@ -27,6 +27,8 @@ data class DeclareHoldingCommand(
     val ownershipShare: BigDecimal = BigDecimal.ONE,
     val externalReference: String? = null,
     val documentIds: List<UUID> = emptyList(),
+    /** The request was accepted as a canary's by the trusted-principal filter (ADR-0252). */
+    val synthetic: Boolean = false,
 )
 
 data class RevalueHoldingCommand(val holdingId: UUID, val valuation: Valuation)
