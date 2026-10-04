@@ -49,6 +49,26 @@ class LendingContextAccessPactConsumerTest {
     }
 
     @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun unassignedLoanAccess(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("a lending investigator is not assigned to the requested loan")
+        .uponReceiving("GET data-free access for an unassigned lending loan")
+        .path(ACCESS_PATH)
+        .method("GET")
+        .headers(headers())
+        .willRespondWith()
+        .status(403)
+        .headers(mapOf("Cache-Control" to "no-store"))
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "unassignedLoanAccess")
+    fun `unassigned loan access is forbidden`(mockServer: MockServer) {
+        assertClientRoute("check", ACCESS_PATH)
+        request(mockServer).get(ACCESS_PATH).then().statusCode(403)
+            .header("Cache-Control", "no-store")
+    }
+
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
     fun assignedCandidates(builder: PactDslWithProvider): RequestResponsePact = builder
         .given("a lending investigator is assigned to the requested loan")
         .uponReceiving("GET assigned lending loan candidates without a shared match")

@@ -53,6 +53,28 @@
         },
         "status": 204
       }
+    },
+    {
+      "description": "GET data-free access for an unassigned lending loan",
+      "providerStates": [
+        {
+          "name": "a lending investigator is not assigned to the requested loan"
+        }
+      ],
+      "request": {
+        "headers": {
+          "X-Investigation-Case-Id": "f0c8d9e0-0000-4000-8000-000000000003",
+          "X-Investigation-Purpose": "LENDING_EXPOSURE_REVIEW"
+        },
+        "method": "GET",
+        "path": "/api/v1/context/lending-loans/f0c8d9e0-0000-4000-8000-000000000003/access"
+      },
+      "response": {
+        "headers": {
+          "Cache-Control": "no-store"
+        },
+        "status": 403
+      }
     }
   ],
   "metadata": {

@@ -29,6 +29,27 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "POST lending guarantor proof with an unauthorized caller",
+      "providerStates": [
+        {
+          "name": "a verified lending guarantor exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "partyId": "f0c8d9e0-0000-4000-8000-000000000001"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/parties/lending-guarantor-identity/verify"
+      },
+      "response": {
+        "status": 403
+      }
     }
   ],
   "metadata": {

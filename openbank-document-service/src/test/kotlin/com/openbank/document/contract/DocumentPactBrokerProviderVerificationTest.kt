@@ -12,7 +12,11 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.libs.storage.ObjectStorePort
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestIdentityAssociation
@@ -24,6 +28,8 @@ import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.UUID
 
 /**
  * Broker-side provider verification for document-service — the published-result counterpart to
@@ -94,6 +100,13 @@ class DocumentPactBrokerProviderVerificationTest {
         // authenticates every broker replay, including those, and would answer as if signed in.
         if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
             testIdentityAssociation.setTestIdentity(null)
+        } else if (context?.interaction?.description == "POST lending guarantee evidence proof for a signed document") {
+            testIdentityAssociation.setTestIdentity(
+                QuarkusSecurityIdentity.builder()
+                    .setPrincipal(QuarkusPrincipal("service-account-openbank-lending-graph"))
+                    .addRole("ROLE_LENDING_GRAPH_PROOF")
+                    .build(),
+            )
         }
         context?.verifyInteraction()
     }
@@ -101,6 +114,32 @@ class DocumentPactBrokerProviderVerificationTest {
     @State(NEGATIVE_AUTH_STATE)
     fun stateNoValidM2mIdentity() {
         // verifyPacts clears the authenticated test identity for this interaction.
+    }
+
+    @State("signed lending guarantee evidence matches its loan and guarantor")
+    fun signedLendingGuaranteeEvidenceExists() = DocumentDisclosurePactSeed.runOnVertxContext(vertx) {
+        val id = UUID.fromString("f0c8d9e0-0000-4000-8000-000000000002")
+        if (documentRepository.findById(id) != null) return@runOnVertxContext
+        documentRepository.save(
+            Document(
+                id = id,
+                templateCode = "PACT_LENDING_GUARANTEE",
+                templateVersion = "1",
+                sha256 = "b".repeat(64),
+                storageKey = "pact/lending-guarantee/$id.pdf",
+                contentType = "application/pdf",
+                sizeBytes = 1,
+                status = DocumentStatus.SIGNED,
+                metadata = emptyMap(),
+                partyRef = "f0c8d9e0-0000-4000-8000-000000000001",
+                caseRef = "f0c8d9e0-0000-4000-8000-000000000003",
+                productRef = null,
+                retainUntil = null,
+                createdAt = Instant.parse("2026-01-15T10:00:00Z"),
+                sealedSha256 = "a".repeat(64),
+                bankScope = "openbank-cz",
+            ),
+        )
     }
 
     /**

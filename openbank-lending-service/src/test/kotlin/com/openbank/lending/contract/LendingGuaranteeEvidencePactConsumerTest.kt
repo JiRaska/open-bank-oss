@@ -60,6 +60,25 @@ class LendingGuaranteeEvidencePactConsumerTest {
         assertThat(mapper.readValue<SignedGuaranteeProofResponse>(response).matches).isTrue()
     }
 
+    @Pact(consumer = CONSUMER, provider = PROVIDER)
+    fun wrongCallerCannotVerify(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("signed lending guarantee evidence matches its loan and guarantor")
+        .uponReceiving("POST lending guarantee evidence proof with an unauthorized caller")
+        .path(PATH)
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(mapper.writeValueAsString(request))
+        .willRespondWith()
+        .status(403)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "wrongCallerCannotVerify")
+    fun `document proof rejects a caller without the graph proof role`(mockServer: MockServer) {
+        given().baseUri(mockServer.getUrl()).contentType("application/json")
+            .body(mapper.writeValueAsString(request)).post(clientPath()).then().statusCode(403)
+    }
+
     private fun clientPath(): String {
         val base = requireNotNull(LendingGraphDocumentProofClient::class.java.getAnnotation(Path::class.java)).value
         val method = LendingGraphDocumentProofClient::class.java.getMethod(

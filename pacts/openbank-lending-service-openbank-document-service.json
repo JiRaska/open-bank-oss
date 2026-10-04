@@ -33,6 +33,31 @@
         },
         "status": 200
       }
+    },
+    {
+      "description": "POST lending guarantee evidence proof with an unauthorized caller",
+      "providerStates": [
+        {
+          "name": "signed lending guarantee evidence matches its loan and guarantor"
+        }
+      ],
+      "request": {
+        "body": {
+          "bankScope": "openbank-cz",
+          "documentId": "f0c8d9e0-0000-4000-8000-000000000002",
+          "guarantorPartyId": "f0c8d9e0-0000-4000-8000-000000000001",
+          "loanId": "f0c8d9e0-0000-4000-8000-000000000003",
+          "sealedSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/documents/lending-guarantee-evidence/verify"
+      },
+      "response": {
+        "status": 403
+      }
     }
   ],
   "metadata": {

@@ -31,9 +31,12 @@ import com.openbank.party.domain.model.PartyEvents
 import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.core.runtime.context.VertxContextSafetyToggle
 import io.vertx.core.Vertx
@@ -110,6 +113,9 @@ class PartyEventPactProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     private val objectMapper = jacksonObjectMapper().registerModule(JavaTimeModule())
 
     /**
@@ -151,7 +157,24 @@ class PartyEventPactProviderVerificationTest {
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
         // context is null on the @IgnoreNoPactsToVerify dummy invocation — skip gracefully.
+        if (context?.interaction?.description == "POST lending guarantor proof for a verified customer") {
+            testIdentityAssociation.setTestIdentity(
+                QuarkusSecurityIdentity.builder()
+                    .setPrincipal(QuarkusPrincipal("service-account-openbank-lending-graph"))
+                    .addRole("ROLE_LENDING_GRAPH_PROOF")
+                    .build(),
+            )
+        }
         context?.verifyInteraction()
+    }
+
+    @State("a verified lending guarantor exists")
+    fun verifiedLendingGuarantorExists() = runOnVertxContext {
+        seedMandateParty(
+            UUID.fromString("f0c8d9e0-0000-4000-8000-000000000001"),
+            PartyType.INDIVIDUAL,
+            "Pact Verified Guarantor",
+        )
     }
 
     /**
