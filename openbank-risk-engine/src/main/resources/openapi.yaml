@@ -63,7 +63,11 @@ info:
   #        extrapolation past the last pillar, no prepayment, simplified NMD, margins, deals not
   #        projected); `outlierTest` falls back to the run's own-funds Tier 1 and is evaluated
   #        against the declared `irrbb-eve-outlier` limit (status, earlyWarning, limitId).
-  version: 1.23.0
+  # 1.23.0 -> 1.24.0 (#11107): additive — the IRRBB read projects the run's treasury money-market
+  #        deals (fixed rate, principal + ACT/360 interest at maturity) into the repricing gap,
+  #        ΔEVE and ΔNII, and breaks their share out in `treasury[]`; INSTRUMENTS_NOT_PROJECTED is
+  #        now raised only for instrument kinds still not projected, named in its detail.
+  version: 1.24.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
     trial balance and the deposit-control sub-ledger balances for an as-of date, expands them into
@@ -1335,6 +1339,24 @@ components:
         count: {type: [integer, 'null']}
         detail: {type: string}
 
+    IrrbbTreasuryContribution:
+      type: object
+      required: [currency, deals, placements, borrowings, scenarios]
+      properties:
+        currency: {type: string}
+        deals: {type: integer}
+        placements: {type: number, description: Principal of asset-side deals (repricing at maturity)}
+        borrowings: {type: number, description: Principal of liability-side deals, as a magnitude}
+        basePv: {type: [number, 'null'], description: Base PV of the deals' flows; null when the currency is not evaluated}
+        scenarios:
+          type: array
+          items:
+            type: object
+            required: [scenario, deltaEve]
+            properties:
+              scenario: {type: string}
+              deltaEve: {type: number}
+
     Irrbb:
       type: object
       required: [runId, asOf, provenance, curveSetId, curveSetProvenance, curveSetSource, gaps, scenarios,
@@ -1382,6 +1404,13 @@ components:
             ratio: {type: [number, 'null']}
             breached: {type: [boolean, 'null']}
             note: {type: string}
+        treasury:
+          type: array
+          description: |
+            Per currency, the treasury money-market deals frozen on the run (placements and ČNB
+            deposits as assets, borrowings and ČNB lombard as liabilities) — their share of the gap
+            and ΔEVE, ALREADY included in `gaps` and `scenarios`. Empty when the run has no deals.
+          items: {$ref: '#/components/schemas/IrrbbTreasuryContribution'}
         dataGaps:
           type: array
           description: What the figures do not capture. Never silently omitted.

@@ -5,11 +5,11 @@
 # API translation of components/admin-ui/tools-gate.yaml. Same three tools, same sub-paths of
 # admin.open-bank.tech, same admin-UI session check; only the edge that asks changes.
 #
-# NOT IN DNS. Every route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, so these answer only on the Gateway's own NLB (curl --resolve)
-# and the nginx Ingresses in tools-gate.yaml keep serving. The tools share admin.open-bank.tech
-# with the console, so this host cannot be cut over per tool: it moves in Phase 3 together
-# with the admin-ui route (cutover steps at the end of this header).
+# IN DNS since the Phase 3 cutover: external-dns publishes admin.open-bank.tech from these
+# routes and the console route (admin-ui/httproute.yaml), pointing at the Gateway's NLB. All four
+# nginx Ingresses (admin-ui.yaml + tools-gate.yaml) now carry `external-dns.kubernetes.io/
+# controller: gateway-api-cutover-pending` and keep serving on ingress-nginx as the rollback
+# (swap the annotation back on all four routes and all four Ingresses together).
 #
 # WHY HERE, in `observability`, and not in `admin-ui` as the Ingresses are. An Ingress can name
 # only Services in its own namespace, which is what forced the ExternalName indirection in
@@ -59,7 +59,7 @@
 # ORDER. The SecurityPolicies are wave -1 and the routes wave 0, so in one sync a route never
 # exists without the policy that gates it; the Kyverno policy would deny it otherwise.
 #
-# ── Cutover (Phase 3, with the admin-ui route; not part of this change) ──────────────────
+# ── Cutover (Phase 3, with the admin-ui route; done, kept as the procedure) ──────────────────
 #   GW=$(kubectl -n envoy-gateway-system get gateway edge -o jsonpath='{.status.addresses[0].value}')
 #   IP=$(dig +short "$GW" | head -1)
 #   curl -sSI --resolve admin.open-bank.tech:443:$IP https://admin.open-bank.tech/tools/grafana/
@@ -144,8 +144,6 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/component: tools-gate
-  annotations:
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
@@ -181,8 +179,6 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/component: tools-gate
-  annotations:
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
@@ -217,8 +213,6 @@ metadata:
   namespace: observability
   labels:
     app.kubernetes.io/component: tools-gate
-  annotations:
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge

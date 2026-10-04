@@ -80,7 +80,7 @@ spec:
             - { name: kafka-ca, mountPath: /mnt/kafka-ca, readOnly: true }
             - { name: msg-override, mountPath: /mnt/msg-config, readOnly: true }
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           args: [run, --server, --addr=0.0.0.0:8181, --bundle, /bundle]
           ports: [{ name: opa, containerPort: 8181 }]
           readinessProbe: { httpGet: { path: "/health?bundles=true", port: opa }, initialDelaySeconds: 5 }

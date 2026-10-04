@@ -24,6 +24,7 @@
 | Cesta | Port | Účel |
 |---|---|---|
 | `/api/v1/aml/cases/...` | 8117 | byznysové REST API |
+| `/api/v1/aml/cases/...` | 8443 | mTLS rozhraní s privátní CA pro volající uvnitř clusteru |
 | `/api/v1/info` | 8117 | ServiceInfoResource (build metadata) |
 | `/api/docs` | 8117 | Swagger UI |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (tato dokumentace) |
@@ -32,6 +33,8 @@
 | `/q/metrics` | 8085 | Prometheus (Micrometer) |
 
 Management rozhraní je na **samostatném portu 8085** (`quarkus.management.enabled=true`, root-path `/q`). V `%test` je vypnuté.
+
+V produkci port 8443 vyžaduje klientský certifikát důvěryhodný pro privátní CA. Serverový certifikát a svazek důvěry se připojují z Certificate `aml-service-internal-tls`; služba používá TLS 1.3. Rozhraní se nasadí dříve, než na něj přejdou volající. Port 8117 zůstává během přechodu dostupný pro dosavadní readiness a admin UI. Před přepnutím volajících ověř stav Certificate a přístup autorizovaného klienta na 8443; při selhání rozhraní ponech volající na 8117 a obnov předchozí nasazení.
 
 ## Konfigurace
 

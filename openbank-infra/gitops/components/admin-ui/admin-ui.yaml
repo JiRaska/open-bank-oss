@@ -901,6 +901,9 @@ metadata:
   name: admin-ui
   namespace: admin-ui
   annotations:
+    # DNS moved to the Envoy Gateway routes (httproute.yaml + observability/httproute-tools-gate.yaml).
+    # This makes external-dns ignore the Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     # Browser-trusted Let's Encrypt via DNS-01; external-dns publishes this
     # host's A/ALIAS record. On letsencrypt-prod: open-bank.tech resolves and the
     # staging cert proved the DNS-01 flow, so this serves a browser-trusted leaf.

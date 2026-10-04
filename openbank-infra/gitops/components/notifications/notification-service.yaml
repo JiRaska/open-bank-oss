@@ -74,6 +74,10 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            # The four-eyes approval queue uses RedisApprovalStore. The app's localhost
+            # default would address this pod, not the namespace-local Redis Service.
+            - name: QUARKUS_REDIS_HOSTS
+              value: redis://redis.notifications.svc:6379
             # JDBC leg: Hibernate ORM + Flyway (blocking) onto the CNPG primary.
             - name: QUARKUS_DATASOURCE_JDBC_URL
               value: jdbc:postgresql://notifications-db-rw.notifications.svc:5432/openbank_notifications
@@ -277,7 +281,7 @@ spec:
         # OpaSidecarPolicyDecisionPoint gets connection-refused on localhost:8181 →
         # 503 for the whole customer notification center + push-device registry.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
