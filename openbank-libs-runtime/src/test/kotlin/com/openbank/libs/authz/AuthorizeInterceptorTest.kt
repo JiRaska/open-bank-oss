@@ -732,6 +732,23 @@ class AuthorizeInterceptorTest {
     }
 
     @Test
+    fun `four-eyes records an authenticated customer as customer party`() {
+        every { identity.roles } returns setOf("ROLE_CUSTOMER")
+        every { sc.userPrincipal } returns JavaPrincipal { "customer-42" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "customer-subject-42"
+        }
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind }).containsExactly(MakerActorKind.CUSTOMER_PARTY)
+    }
+
+    @Test
     fun `four-eyes does not trust an agent-looking display name without an agent subject`() {
         every { identity.roles } returns setOf("ROLE_OPERATOR")
         val store = InMemoryApprovalStore()

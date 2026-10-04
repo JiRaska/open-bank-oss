@@ -602,6 +602,7 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
 private fun makerActorKind(query: AuthzQuery): MakerActorKind = when {
     query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) -> MakerActorKind.SERVICE_ACCOUNT
     query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
+    query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
     query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
     else -> MakerActorKind.UNKNOWN
 }
