@@ -8,6 +8,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -131,8 +132,7 @@ class PaymentConfirmationMapperTest {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "2010",
         creditorName = "Creditor Name",
-        amount = BigDecimal("20.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("20.00"), "CZK"),
         variableSymbol = variableSymbol,
         specificSymbol = null,
         constantSymbol = null,

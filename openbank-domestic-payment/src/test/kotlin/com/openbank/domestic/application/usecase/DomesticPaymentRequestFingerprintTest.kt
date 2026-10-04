@@ -7,6 +7,7 @@ package com.openbank.domestic.application.usecase
 import com.openbank.domestic.application.port.`in`.CreateDomesticPaymentCommand
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -23,8 +24,7 @@ class DomesticPaymentRequestFingerprintTest {
         val first = command()
         val equivalent = first.copy(
             debtorName = "Alice Example",
-            amount = BigDecimal("1500.0000"),
-            currency = "CZK",
+            amount = Money.of(BigDecimal("1500.0000"), "CZK"),
             variableSymbol = "2026001",
             specificSymbol = "   ",
             messageForPayee = "Utility bill",
@@ -36,12 +36,34 @@ class DomesticPaymentRequestFingerprintTest {
     }
 
     @Test
+    fun `the Money-typed digest is byte-identical to the pre-Money digest of the same request`() {
+        // #11604: these hex values were computed with the pre-Money algorithm (amount as a raw
+        // BigDecimal, currency trimmed and upper-cased by normalize()). Money rescales exactly and
+        // CurrencyCode upper-cases the trimmed code, so every fingerprint already stored for an
+        // accepted request still matches its identical retry — no replay turns into a 409.
+        assertThat(DomesticPaymentRequestFingerprint.sha256(command()))
+            .isEqualTo("829fd2b9077a0a4cca7ffc1bdddf09c1c704522377c3bcea70ffc8a4bdc91c75")
+        assertThat(
+            DomesticPaymentRequestFingerprint.sha256(
+                command().copy(amount = Money.parseInbound(BigDecimal("1500.5"), "CZK")),
+            ),
+        )
+            .isEqualTo("9d68fd0b0c41461761d0ebef557956df92ad5c952c4c3f7d56a757d624e07641")
+        assertThat(
+            DomesticPaymentRequestFingerprint.sha256(
+                command().copy(amount = Money.parseInbound(BigDecimal("100.10"), "czk")),
+            ),
+        )
+            .isEqualTo("f96366196cc218622faec3c38eb4ac3f5ca5bc4b469bbdb0acca600c91e4553a")
+    }
+
+    @Test
     fun `every security-sensitive binding changes the fingerprint`() {
         val original = command()
         val originalFingerprint = DomesticPaymentRequestFingerprint.sha256(original)
 
         val mutations = listOf(
-            original.copy(amount = BigDecimal("1500.01")),
+            original.copy(amount = Money.of(BigDecimal("1500.01"), "CZK")),
             original.copy(creditorAccountNumber = "1111111111"),
             original.copy(actorId = UUID.randomUUID()),
             original.copy(actorScope = "https://other-issuer.example\u001f$actorId"),
@@ -82,8 +104,7 @@ class DomesticPaymentRequestFingerprintTest {
         creditorAccountNumber = " 9876543210 ",
         creditorBankCode = " 0100 ",
         creditorName = " Brno Utility ",
-        amount = BigDecimal("1500.00"),
-        currency = " czk ",
+        amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
         variableSymbol = " 2026001 ",
         specificSymbol = null,
         constantSymbol = " 0308 ",

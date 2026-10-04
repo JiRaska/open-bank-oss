@@ -102,7 +102,7 @@ class RiskCapitalApiIT {
 
         // The default set is the EU CRR one (application.yaml parameter-set-id).
         assertThat(body["parameterSetId"].asText()).isEqualTo("eu-crr3-sa")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("1")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
         assertThat(body["provenance"].asText()).isEqualTo("synthetic")
         val total = body["total"]
         // nostro 1500 × 150% (SCRA Grade C, CRR Art. 121) + ČNB 4000 × 0% (Art. 114(4))

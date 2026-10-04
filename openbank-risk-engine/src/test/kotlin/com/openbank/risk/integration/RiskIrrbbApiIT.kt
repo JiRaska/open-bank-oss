@@ -116,7 +116,18 @@ class RiskIrrbbApiIT {
         assertThat(body["worstCase"]["currency"].asText()).isEqualTo("EUR")
 
         assertThat(body["outlierTest"]["tier1Supplied"].asBoolean()).isFalse()
+        // Own-funds Tier 1 is CZK and this aggregate is EUR: never mixed, so no ratio and NOT_EVALUABLE.
         assertThat(body["outlierTest"]["ratio"].isNull).isTrue()
+        assertThat(body["outlierTest"]["status"].asText()).isEqualTo("NOT_EVALUABLE")
+        assertThat(body["outlierTest"]["tier1Gap"].isNull).isFalse()
+        // The 1Y curve set cannot price a 5-year loan without extrapolating, and the read says so.
+        val flat = body["dataGaps"].single {
+            it["code"].asText() == "CURVE_EXTRAPOLATED_FLAT" && it["curveIndex"].asText() == "ESTR"
+        }
+        assertThat(flat["lastPillarDate"].asText()).isEqualTo("2026-11-28")
+        assertThat(flat["flowsBeyond"].asInt()).isPositive()
+        assertThat(body["dataGaps"].map { it["code"].asText() })
+            .contains("PREPAYMENT_NOT_MODELLED", "NMD_BEHAVIOUR_SIMPLIFIED")
         assertThat(body["assumptions"]["shockSource"].asText()).contains("2024/856")
         val eurSizes = body["assumptions"]["shockSizes"].single { it["currency"].asText() == "EUR" }
         assertThat(eurSizes["parallelBp"].decimalValue()).isEqualByComparingTo("200")
@@ -125,8 +136,36 @@ class RiskIrrbbApiIT {
 
         val withTier1 = irrbb(run, set, "&tier1Capital=10000")
         val worst = withTier1["worstCase"]["loss"].decimalValue()
-        assertThat(withTier1["outlierTest"]["ratio"].decimalValue())
-            .isEqualByComparingTo(worst.divide(BigDecimal(10000)).setScale(6, java.math.RoundingMode.HALF_EVEN))
+        val ratio = worst.divide(BigDecimal(10000)).setScale(6, java.math.RoundingMode.HALF_EVEN)
+        assertThat(withTier1["outlierTest"]["ratio"].decimalValue()).isEqualByComparingTo(ratio)
+        assertThat(withTier1["outlierTest"]["tier1Source"].asText()).isEqualTo("caller")
+        // Evaluated against the declared irrbb-eve-outlier limit (15 %, early warning 12 %).
+        assertThat(withTier1["outlierTest"]["limitId"].asText()).isEqualTo("irrbb-eve-outlier")
+        assertThat(withTier1["outlierTest"]["threshold"].decimalValue()).isEqualByComparingTo("0.15")
+        assertThat(withTier1["outlierTest"]["earlyWarning"].decimalValue()).isEqualByComparingTo("0.12")
+        val expected = when {
+            ratio > BigDecimal("0.15") -> "BREACH"
+            ratio >= BigDecimal("0.12") -> "EARLY_WARNING"
+            else -> "OK"
+        }
+        assertThat(withTier1["outlierTest"]["status"].asText()).isEqualTo(expected)
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `without curveSetId the newest curve set of the run's own date is used, and none is a 400`() {
+        ledger.inputs = eurBook()
+        lending.loans = listOf(loan)
+        val asOf = "2025-12-30"
+        val run = snapshot(asOf, "TIED_OUT")
+        given().`when`().get("/api/v1/risk/snapshots/$run/irrbb").then().statusCode(400)
+        curveSet(asOf)
+        val newest = curveSet(asOf)
+        val body = json.readTree(
+            given().`when`().get("/api/v1/risk/snapshots/$run/irrbb").then().statusCode(200).extract().asString(),
+        )
+        assertThat(body["curveSetId"].asText()).isEqualTo(newest)
+        assertThat(body["scenarios"]).hasSize(6)
     }
 
     @Test
@@ -165,7 +204,6 @@ class RiskIrrbbApiIT {
         ledger.inputs = Fixtures.tiedOut()
         val tied = given().contentType("application/json").body("""{"asOf":"2026-02-27"}""")
             .`when`().post("/api/v1/risk/snapshots").then().statusCode(201).extract().path<String>("id")
-        given().`when`().get("/api/v1/risk/snapshots/$tied/irrbb").then().statusCode(400)
         given().`when`().get(
             "/api/v1/risk/snapshots/$tied/irrbb?curveSetId=$set&tier1Capital=abc",
         ).then().statusCode(400)
