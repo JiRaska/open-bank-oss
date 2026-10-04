@@ -52,7 +52,7 @@ object PaymentConfirmationMapper {
                 "paymentReference" to payment.id.toString(),
                 "endToEndId" to payment.endToEndId,
                 "executedAt" to executedAt.toString(),
-                "amount" to payment.amount.toPlainString(),
+                "amount" to payment.amount.amount.toPlainString(),
                 "currency" to payment.currency,
                 "debtorIban" to toCzIban(payment.debtorAccountNumber, payment.debtorBankCode),
                 "creditorIban" to toCzIban(payment.creditorAccountNumber, payment.creditorBankCode),
