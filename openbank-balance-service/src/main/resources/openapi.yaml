@@ -3,7 +3,10 @@
 openapi: 3.1.0
 info:
   title: Balance Service API
-  version: 1.10.0
+  # 1.10.0 -> 1.11.0 (#11604): additive — holds/credit/debit/initialize/overdraft-limit document
+  # 400 AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR (amount + currency are built
+  # into a kernel Money at the boundary, never rounded).
+  version: 1.11.0
   description: >-
     Account balance management — holds, credits, debits, multi-currency. Per ADR-0039 (Phase A) a
     read-only reconciliation ties out, per currency, the ledger deposit-control balance against the
@@ -110,6 +113,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
@@ -139,6 +144,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HoldResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -184,6 +191,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -211,6 +220,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/BalanceResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
         '422':
@@ -235,6 +246,8 @@ paths:
       responses:
         '201':
           description: Balance initialized
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
 
@@ -366,6 +379,23 @@ components:
         format: uuid
 
   responses:
+    InvalidMoney:
+      description: >-
+        The request is invalid, distinguished by `code` (ADR-0326). The amount + currency are built
+        into a kernel Money at this boundary (#11604), before any idempotency lookup, and never
+        rounded, so: AMOUNT_SCALE_EXCEEDED — the amount has more decimal places than the currency's
+        minor unit (e.g. 10.005 EUR, 0.5 JPY); trailing zeros are not counted (10.500 EUR is
+        accepted as 10.50). CURRENCY_UNSUPPORTED — the currency is not an ISO 4217 code with a minor
+        unit (unknown codes, wrong length, blank, metals such as XAU); case and surrounding blanks are
+        ignored (`eur` is EUR). VALIDATION_ERROR — any other invalid field, including an absent amount
+        or currency, one outside the supported magnitude, a hold/credit/debit amount of zero or less,
+        or a negative overdraft limit. Nothing is reserved, booked or announced and the referenceId
+        is not consumed. The offending field is named in `violations[].field` and its code in
+        `violations[].code`; the rejected value is never echoed.
+      content:
+        application/problem+json:
+          schema:
+            type: object
     Forbidden:
       description: Authenticated but denied by the OPA authorization policy (ADR-0034)
       content:
