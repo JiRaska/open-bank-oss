@@ -213,7 +213,7 @@ spec:
         # gen-statement-opa-bundle.sh. Mirrors party-service's OPA sidecar (same image, probes,
         # security context, subPath mounts).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

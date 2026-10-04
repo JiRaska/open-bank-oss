@@ -65,7 +65,7 @@ Trust boundaries:
 | S-2 | Attacker replays a captured customer token | Short `accessTokenLifespan: 300s`. Keycloak session binding. Token revocation via `revokeRefreshToken: true`. | Low |
 | S-3 | Attacker presents operator-realm token to customer edge | Quarkus OIDC validates `iss` = `openbank-customers` realm only. Cross-realm token rejected with 401. | Negligible |
 | S-4 | Attacker spoofs `X-Customer-Party-Id` header to upstream | Header is set by the edge from the validated JWT — never from the request. Upstream services never read this header from untrusted clients (only from the M2M token's ROLE_OPERATOR caller). | Low |
-| S-5 | Customer sends `x-openbank-synthetic: true` so their real activity is tainted and drops out of FINREP/COREP, the ledger's real-only scope and analytics (ADR-0252) | The edge's `SyntheticTaintRequestFilter` honours the header only for a principal listed in `openbank.synthetic.trusted-principals` (empty by default) and treats every other claim as real. `UpstreamClient.upstreamRequest()` forwards only that inbound decision, never the client's header, so an untrusted claim cannot reach any upstream. Proven by `UpstreamClientSyntheticTaintTest`. | Low — the trust list is the whole control; adding a principal to it is a reviewed config change |
+| S-5 | Customer sends `x-openbank-synthetic: true` so their real activity is tainted and drops out of FINREP/COREP, the ledger's real-only scope and analytics (ADR-0252) | The edge's `SyntheticTaintRequestFilter` honours the header only for a principal listed in `openbank.synthetic.trusted-principals` (empty by default) and treats every other claim as real. `UpstreamClient.upstreamRequest()` forwards only that inbound decision, never the client's header, so an untrusted claim cannot reach any upstream. Proven by `UpstreamClientSyntheticTaintTest`. | Low — the trust list is the whole control. Since ADR-0331 it names exactly one principal, the bank-owned canary `service-account-openbank-synthetic-retail`, and the `synthetic-customer-identity` gate fails any other value, as well as any canary client with a browser, password or implicit flow or a role beyond `ROLE_CUSTOMER` |
 
 ### 3.2 Tampering
 
@@ -153,6 +153,8 @@ Trust boundaries:
 | Mobile certificate pinning | 🔲 ADR-0064 Phase F2 |
 
 ## 6. Change log
+
+- **2026-10-04** — **Canary customer trusted for the synthetic taint (ADR-0331).** `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS` names `service-account-openbank-synthetic-retail`, a customers-realm service account bound to one SYNTHETIC party. The identity's shape and the trust list are held by the enforced `synthetic-customer-identity` gate. S-5 residual updated.
 
 - **2026-10-04** — **Synthetic taint survives the edge (ADR-0252 phase 1, #4348).** `UpstreamClient` builds every upstream request through `upstreamRequest()`, which forwards the edge's own trusted taint decision as `x-openbank-synthetic`. Before this the marker died at the edge, so a canary customer would have been real to every service behind it. New threat S-5.
 
