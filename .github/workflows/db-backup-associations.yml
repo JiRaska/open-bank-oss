@@ -28,7 +28,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write # OIDC assume-role
 
 concurrency:
   group: db-backup-associations-${{ github.ref }}
@@ -42,6 +41,9 @@ env:
 
 jobs:
   live-check:
+    permissions:
+      contents: read
+      id-token: write  # OIDC assume-role
     name: assert declared associations are live in AWS
     runs-on: ubuntu-latest # hosted (public repo); ships aws CLI v2 with list-pod-identity-associations
     timeout-minutes: 10

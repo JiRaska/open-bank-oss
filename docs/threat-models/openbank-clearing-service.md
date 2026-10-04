@@ -238,3 +238,14 @@ not change any existing request's outcome until explicitly flipped.
   is unchanged (DLQ strategy as before). **Residual:** the clearing cycle sums items across
   currencies on one rail — tracked as #11974; no currency allow-list is added here. No new
   endpoint, caller, privilege or event. Rollback: revert the commit.
+- **2026-10-03** — **Each rail's cycle clears only its own items; every cycle id fits (#12004,
+  #12005).** Items now persist the submitted `rail` (V12, nullable, no default) and
+  `findPendingByRail` filters on it, so a cycle for one rail can no longer net and settle another
+  rail's payments (**Tampering/integrity** on the money path: previously every rail's cycle swept
+  every rail's PENDING items). `POST /api/v1/clearing/submit` now enforces the contract's existing
+  `required: rail` — an absent rail is a 400 instead of a silent `SEPA_SCT` default. A pre-V12 row
+  without a rail is selected by no cycle and reported by a per-cycle WARN; it is never defaulted.
+  `cycle_id` widened to VARCHAR(64) and the id bounded to 60 characters by construction, so a
+  SEPA_SCT_INST cycle (33 characters) no longer fails on insert (**DoS** of that rail). No new
+  endpoint, caller, privilege or event; no producer outside the service submits items today.
+  Rollback: revert the commit, then the V12 rollback note.
