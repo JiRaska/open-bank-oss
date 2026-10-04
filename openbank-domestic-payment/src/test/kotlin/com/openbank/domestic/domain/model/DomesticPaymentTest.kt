@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0\n// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.\n// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.\n
 package com.openbank.domestic.domain.model
 
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
@@ -73,8 +74,7 @@ class DomesticPaymentTest {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "2010",
         creditorName = "Creditor",
-        amount = BigDecimal("20.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("20.00"), "CZK"),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,

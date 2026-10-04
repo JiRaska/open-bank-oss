@@ -11,6 +11,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.mockk
@@ -111,8 +112,7 @@ class PaymentConfirmationServiceTest {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "2010",
         creditorName = "Creditor Name",
-        amount = BigDecimal("20.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("20.00"), "CZK"),
         variableSymbol = "123456",
         specificSymbol = null,
         constantSymbol = null,

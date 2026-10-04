@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "bc35843e96361f58"
+    openbank.tech/policy-checksum: "044f0e26782a700d"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -384,7 +384,7 @@ data:
     # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
     # audit-service.
     #
-    # Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
+    # Deliberately a DISTINCT action from `audit.trail.inspect`, not the `audit.` family: that is the
     # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
     # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
     # behind a service account. `audit.customerRead` reaches only the metadata projection.
@@ -1520,6 +1520,17 @@ data:
                                                 # without the cardholder's SCA today — add a verb here when one ships.
                                                 # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                                # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                                # a journal through ledger's POST /api/v1/journals. Threat model:
+                                                # docs/threat-models/openbank-treasury-service.md.
+                                                # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                                # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                                # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                                # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                                # needs an X-Approval-Id round-trip the deal's own
+                                                # PENDING_APPROVAL state already is. Writes are human-only in
+                                                # treasury_rest_ext.rego.
+      - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1727,7 +1738,6 @@ data:
             - account.read
             - anacredit.list
             - anacredit.read
-            - audit.read
             - card.list
             - card.read
             - device.list
@@ -1860,7 +1870,7 @@ data:
           grant:
             - account.read
             - anacredit.read
-            - audit.read
+            - audit.trail.inspect
             - card.read
             - dispatch.read
             - fx.read
@@ -1904,7 +1914,7 @@ data:
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
-            - audit.read
+            - audit.trail.inspect
             - audit.verify
         ROLE_SUPERVISOR:
           grant:

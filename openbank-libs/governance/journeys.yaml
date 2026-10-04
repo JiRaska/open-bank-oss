@@ -365,11 +365,12 @@ journeys:
       with a partial answer. Calling wealth-service on its ClusterIP instead of the edge must
       also fail, since that proves the service answers and not that a customer can reach it.
     blocked_by: >-
-      Two independent blockers. customer-edge exposes only GET /net-worth and no route to
-      declare a holding (#11966), so no customer surface can write the holding this journey
-      reads. And ADR-0252 phase 1 (#4348) has no bank-owned synthetic persona yet, so a
-      production write would land in a real party's wealth data with no taint to keep it out
-      of their view and out of derived aggregates (#9829).
+      ADR-0252 phase 1 (#4348): no bank-owned synthetic customer identity exists yet. The write
+      routes (#11991), the edge->wealth contract (#11998), the taint across the edge (#12050) and
+      wealth's own taint persistence are built; what is missing is a canary that can obtain a
+      customers-realm token headlessly, a SYNTHETIC party behind it, and its principal in
+      openbank.synthetic.trusted-principals. Until then a production write would land in a real
+      party's wealth data (#9829).
 
 # ---------------------------------------------------------------------------------------
 # MONEY-PATH ACCOUNTABILITY (ADR-0252 phase 2, #4348)
@@ -448,6 +449,15 @@ money_path_accountability:
         the journey that exercises it is the card-processing path (#8809): issue → authorise →
         clear → posted journal. Until then the accountable surface is the SCA-gated card
         operations (ADR-0194).
+    - service: openbank-card-processing-service
+      note: >-
+        ADR-0283 phase 1 (#8809). The card money path: authorise (hold) → clear → posted CARD-rail
+        journal through transaction-service. The journey for it is the one named above for
+        card-issuance, and it is blocked by the default blocker: a clearing posts a real debit, so
+        it cannot run until the SYNTHETIC taint reaches the ledger. Its in-repo sandbox acquirer is
+        off in every deployed environment. When the journey lands it should assert the posted
+        transaction by its ledger key (card-clearing:<authorizationId>:<key> once #11990 lands), not the HTTP status
+        — a SKIPPED_DISABLED posting also answers 200.
     - service: openbank-treasury-service
       note: >-
         ADR-0315. A journey here would book, approve and settle a deal, which posts a real journal

@@ -33,7 +33,10 @@ info:
   # 1.17.0: additive — GET /positions answers basis ACTUAL | PROJECTED, the accounting day `today`
   #         (Europe/Prague) it was judged against, the counted deal states, and a per-currency
   #         dealCount. A date after today is a projection of concluded deals, no longer all zeros.
-  version: 1.17.0
+  # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
+  #         principal and maximum tenor, declared in configuration. Enforced at submit and
+  #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
+  version: 1.18.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -54,6 +57,13 @@ info:
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
     again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
     a bounded override with a reason; four-eyes separation still applies at booking.
+
+    **Product limits** (ADR-0315 D4) are the bank's mandate per product, declared in configuration:
+    the currencies a product may be dealt in, the largest principal per deal in each, and the
+    longest tenor. A product with no declared limit is not permitted. Enforced at submission and
+    re-checked at approval (the mandate may have been tightened in between); a breach is 422
+    `PRODUCT_LIMIT_BREACHED` with `breaches`. It is not overridable — the senior override covers
+    the counterparty limit only.
 
     **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
@@ -167,6 +177,12 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/deals/{id}/approve:
     post:
@@ -182,7 +198,10 @@ paths:
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
-          description: FOUR_EYES_VIOLATION (approver created or submitted the deal) or LIMIT_BREACHED
+          description: >-
+            FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
+            limit, not covered by a senior override) or PRODUCT_LIMIT_BREACHED (the deal is outside its
+            product limit as declared NOW — re-checked at approval; not overridable)
           content:
             application/json:
               schema:
@@ -674,9 +693,23 @@ components:
       properties:
         error:
           type: string
-          description: FOUR_EYES_VIOLATION, LIMIT_BREACHED, ACTOR_NOT_PERMITTED, INVALID_STATE, NOT_FOUND
+          description: >-
+            FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
+            INVALID_STATE, NOT_FOUND
         message:
           type: [string, 'null']
+        breaches:
+          type: array
+          description: PRODUCT_LIMIT_BREACHED only — each product-limit rule the deal breaks.
+          items:
+            type: object
+            required: [rule, limit, actual]
+            properties:
+              rule:
+                type: string
+                enum: [PRODUCT_NOT_PERMITTED, CURRENCY_NOT_PERMITTED, MAX_PRINCIPAL, MAX_TENOR]
+              limit: { type: string, description: 'The declared limit, e.g. "2000000000.00 CZK" or "366"' }
+              actual: { type: string, description: "The deal's figure in the same unit" }
     DraftDealRequest:
       type: object
       required: [product, counterpartyId, principal, rate]

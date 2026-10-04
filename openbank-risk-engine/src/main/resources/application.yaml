@@ -244,7 +244,8 @@ openbank:
           # "2": treasury GL accounts classified (ADR-0315, #10618) — 1510 ČNB deposit facility as HQLA L1.
           # "3": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
           # "4": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
-          version: "4"
+          # "5": GL 1100, 1990, 1991, 1995, 2200 classified (#11107) — POLICY CHOICES, in classification below.
+          version: "5"
           regime: bcbs
           source: "BCBS d238 (Jan 2013) LCR and BCBS d295 (Oct 2014) NSFR, standard factors; EU CRR / Delegated Regulation 2015/61 deviations not applied"
           factors:
@@ -288,7 +289,8 @@ openbank:
         eu-2015-61-crr2:
           # "2": ČNB lombard (GL 2320, #10896) — central-bank secured funding factors added.
           # "3": contract-level MM placements maturing ≤ 30 days are an LCR inflow (lcr-inflow-fi-placement-30d).
-          version: "3"
+          # "4": GL 1100, 1990, 1991, 1995, 2200 classified (#11107) — POLICY CHOICES, in classification below.
+          version: "4"
           regime: eu
           source: "Delegated Regulation (EU) 2015/61 as amended by (EU) 2018/1620 (LCR) and Regulation (EU) 575/2013 Part Six Title IV as amended by (EU) 2019/876 (NSFR); UNVERIFIED factors keep the BCBS d238/d295 value"
           factors:
@@ -384,6 +386,34 @@ openbank:
           "6040": capital-deduction
           "6050": capital
           "6060": capital-tier2
+          # #11107 — these five were unclassified, so LCR and NSFR (and their limits) were NOT_EVALUABLE.
+          # Every choice is a POLICY CHOICE (#11107), made so that no ratio is better than the unknown
+          # facts permit. Accrued-interest rule (EU 2015/61 Art. 32 / follow-the-principal) does not
+          # apply: none of the five is accrued interest.
+          #
+          # 1100 "Customer Cash Clearing" (CZK; posted by transaction-service payments, domestic-payment
+          # settlement, clearing net settlement, lending funding): funds in transit, no counterparty or
+          # maturity recorded. Debit: not HQLA (not coins/banknotes or a central-bank reserve, EU 2015/61
+          # Art. 10(1)(a),(b)), no inflow claimed (Art. 32(1) needs a contractual claim; Art. 32(3)
+          # items in collection not evidenced), 100% RSF (CRR Art. 428ah, article UNVERIFIED). Credit:
+          # an obligation of unknown nature, 100% outflow (Art. 22(1), paragraph UNVERIFIED), 0% ASF
+          # (CRR Art. 428k). Same "no counterparty class" reasoning as its capital mapping (other-asset).
+          "1100": technical-or-clearing
+          # 1990 / 1991 "FX Position CZK / EUR" (treasury FX deals, customer currency conversions,
+          # ADR-0025) and 1995 "FX Position Counter-Value EUR (CZK)" (ledger daily ČNB revaluation,
+          # ADR-0031): currency-position bookkeeping legs, not a claim on or debt to anyone, and they do
+          # NOT net to zero per account by design (they stay open while customers hold FX). Not
+          # excludable, so the conservative two-sided treatment: a debit never counts as HQLA or an
+          # inflow and carries 100% RSF; a credit counts as a 100% outflow with 0% ASF — never as a
+          # negative RSF line (which `other-asset` would produce on a credit balance).
+          "1990": technical-or-clearing
+          "1991": technical-or-clearing
+          "1995": technical-or-clearing
+          # 2200 "Withholding Tax Payable" (CZK; interest-service capitalisation, remitted monthly to
+          # the tax office, ADR-0038): a liability falling due within the 30-day horizon -> 100%
+          # outflow (EU 2015/61 Art. 22(1), paragraph UNVERIFIED; d238 ¶141) and 0% ASF (CRR Art. 428k;
+          # d295 ¶25).
+          "2200": other-liability
         # Income / expense accounts not yet closed to equity: 0% ASF (d295 ¶25(a)); no LCR flow.
         gl-account-types:
           INCOME: current-year-result
@@ -406,8 +436,8 @@ openbank:
           # June 2011) ¶50. EU CRR Part Three Title II Chapter 2 is NOT applied in this set.
           bcbs-d424-sa:
             # "2": GL 1100-1113, 1400-1403, 1990-1997 classified (#10896, #11107) — POLICY CHOICES,
-            # in classification below (shared by every set).
-            version: "2"
+            # in classification below (shared by every set). "3": GL 1001/1002 nostro (#11107).
+            version: "3"
             regime: bcbs
             source: "BCBS d424 (Dec 2017) Part I standardised approach for credit risk; minima BCBS bcbs189 (rev. June 2011) ¶50. BCBS d424 SA weights; EU CRR Part Three Title II Chapter 2 not applied"
             # d424 ¶55's criteria (product, EUR 1m per obligor, 0.2% granularity) and ¶54's "individual
@@ -442,7 +472,8 @@ openbank:
           # Art. 121 (SCRA table), Art. 122 (unrated corporate), Art. 123 (retail 75%) and Art. 134
           # (which of (2)/(3) is cash in hand 0% and which cash items in collection 20%).
           eu-crr3-sa:
-            version: "1"
+            # "2": GL 1001/1002 classified nostro (#11107), in the shared classification below.
+            version: "2"
             regime: eu
             source: "Regulation (EU) 575/2013 as amended by (EU) 2019/876 and (EU) 2024/1623, Part Three Title II Chapter 2 (standardised approach) and Art. 92(1); paragraphs marked UNVERIFIED in the factor citations are not confirmed against the consolidated text"
             # CRR has NO "other retail" class: an exposure that does not meet ALL Art. 123 criteria
@@ -498,8 +529,12 @@ openbank:
           # COREP C 02.00 credit-risk row on the sandbox. Each is a POLICY CHOICE awaiting owner
           # sign-off; each is chosen so that RWA is never lower than the unknown facts permit.
           gl-accounts:
-            "1001": bank                         # nostro
-            "1002": bank                         # nostro EUR
+            # POLICY CHOICE (#11107): nostro at a correspondent bank. Debit = claim on an institution,
+            # weighted as "bank" (SCRA Grade C above: no counterparty rating is in the data); credit =
+            # the nostro is overdrawn, owed TO the correspondent, so no exposure (not listed as a
+            # credit balance on an exposure account, which would leave every ratio not evaluable).
+            "1001": nostro                       # nostro CZK
+            "1002": nostro                       # nostro EUR
             "1500": bank                         # money-market placements with banks
             "1501": bank
             "1520": bank                         # accrued interest follows its principal

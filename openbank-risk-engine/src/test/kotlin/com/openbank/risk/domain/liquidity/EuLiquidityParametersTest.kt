@@ -59,7 +59,7 @@ class EuLiquidityParametersTest {
     fun `the EU set is the default, identified, versioned and cites EU law`() {
         val default = LiquidityTestParameters.shipped()
         assertThat(default.id).isEqualTo("eu-2015-61-crr2")
-        assertThat(default.version).isEqualTo("3")
+        assertThat(default.version).isEqualTo("4")
         assertThat(default.regime).isEqualTo(LiquidityRegime.EU)
         assertThat(default.source).contains("2015/61").contains("575/2013")
         assertThat(LiquidityFactor.entries.map { default.citation(it) })

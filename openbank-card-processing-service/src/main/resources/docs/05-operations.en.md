@@ -59,9 +59,12 @@ Both are `suspend fun`; in `%test` the scheduler is disabled and the tests drive
 |---|---|
 | `openbank.card.processing.authorizations` | `approved`, `reason` |
 | `openbank.card.processing.presentments` | `fully_cleared` |
+| `openbank.card.processing.clearing.conflicts` | — (clearings, reversals and expiries that lost a concurrent-write race and were re-evaluated; an expiry that loses twice is left for the next sweep) |
 | `openbank.card.processing.hold.releases` | `kind` (`REVERSAL` / `EXPIRY`) |
 | `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
+
+Shadow fraud scoring sends fraud-service its real `POST /api/v1/fraud/score` contract: `accountId`, `amount` in major units by the currency's minor-unit digits, `currency` and `rail = "CARD"`. It reads `verdict` and an integer `score`. It never blocks an authorisation. A failure (any 4xx/5xx, timeout or unreadable body) is counted as `outcome=FAILED` and logged at WARN, at most once a minute with the number of suppressed failures. Before 2026-10-04 the client sent `currencyCode`, no `rail` and minor-unit amounts, and read `decision`, so every shadow score failed silently. The pacts `pacts/openbank-card-processing-service-openbank-fraud-service.json` and `…-openbank-transaction-service.json` now pin both calls, including a recorded 401.
 
 | `openbank.card.token.provisions` | `scheme`, `refusal` |
 | `openbank.card.token.status.changes` | `scheme`, `status`, `refusal` |
@@ -88,7 +91,7 @@ Defined in `openbank-infra/gitops/components/observability/prometheus-rules-card
 
 ### Ledger posting FAILED
 
-The clearing is recorded; the books are not. Look for the log line `ledger posting FAILED for authorization …` and the `outcome=FAILED` counter. Check transaction-service reachability and the client-credentials token. The posting carries the idempotency key `card-clearing:<key>`, so a replay through transaction-service cannot double-post.
+The clearing is recorded; the books are not. Look for the log line `ledger posting FAILED for authorization …` and the `outcome=FAILED` counter. Check transaction-service reachability and the client-credentials token. The posting carries the idempotency key `card-clearing:<authorizationId>:h:<base64url(SHA-256(key))>` (see 03 — API), so a replay through transaction-service cannot double-post. An acquirer retry of the same clearing does **not** re-attempt the posting: the clearing key is already applied and replays without touching the ledger, so a `FAILED` posting must be re-driven deliberately.
 
 ### Every authorisation is declined
 
