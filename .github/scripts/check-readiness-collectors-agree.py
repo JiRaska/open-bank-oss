@@ -42,6 +42,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -76,6 +77,14 @@ def run_node(repo: Path, out: Path) -> list[dict]:
     return json.loads(out.read_text())["services"]
 
 
+def collect_pair(repo: Path, py_out: Path, node_out: Path) -> tuple[list[dict], list[dict]]:
+    """Read the same repo with both independent collectors concurrently."""
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        py = pool.submit(run_python, repo, py_out)
+        node = pool.submit(run_node, repo, node_out)
+        return py.result(), node.result()
+
+
 def compare(repo: Path, count: list[int] | None = None) -> list[str]:
     """-> human-readable differences; empty when the two collectors agree.
 
@@ -83,8 +92,8 @@ def compare(repo: Path, count: list[int] | None = None) -> list[str]:
     as the gate's subject count even on the failure path.
     """
     with tempfile.TemporaryDirectory() as tmp:
-        return diff_results(run_python(repo, Path(tmp) / "py.json"),
-                            run_node(repo, Path(tmp) / "node.json"), count)
+        py, node = collect_pair(repo, Path(tmp) / "py.json", Path(tmp) / "node.json")
+        return diff_results(py, node, count)
 
 
 def diff_results(py_services: list[dict], node_services: list[dict],
@@ -142,11 +151,10 @@ def self_test() -> int:
                                 ignore=shutil.ignore_patterns("build", ".gradle", "node_modules"))
         shutil.copytree(REPO / "openbank-infra" / "gitops", work / "openbank-infra" / "gitops")
 
-        # Each collector run costs tens of seconds, so every result below is reused: two
-        # runs establish agreement, two prove a build copy changes nothing, and one more
-        # (Node only — Python is untouched) proves the comparison can fail.
-        before_py = run_python(work, Path(tmp) / "before-py.json")
-        before_node = run_node(work, Path(tmp) / "before-node.json")
+        # Every result is reused: a parallel pair establishes agreement, a second pair
+        # proves a build copy changes nothing, and one more Node run proves divergence.
+        before_py, before_node = collect_pair(
+            work, Path(tmp) / "before-py.json", Path(tmp) / "before-node.json")
         clean = diff_results(before_py, before_node)
         if clean:
             print("SELF-TEST FAILED: the untouched copy already diverges:", file=sys.stderr)
@@ -161,8 +169,9 @@ def self_test() -> int:
         generated = work / service / "build/resources/main/db/migration" / migration.name
         generated.parent.mkdir(parents=True)
         shutil.copyfile(migration, generated)
-        after_py = run_python(work, Path(tmp) / "after-py.json")
-        if after_py != before_py or run_node(work, Path(tmp) / "after-node.json") != before_node:
+        after_py, after_node = collect_pair(
+            work, Path(tmp) / "after-py.json", Path(tmp) / "after-node.json")
+        if after_py != before_py or after_node != before_node:
             print("SELF-TEST FAILED: build outputs changed readiness scores or evidence", file=sys.stderr)
             return 1
 
