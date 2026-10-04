@@ -91,6 +91,36 @@ have none.
 A placeholder here must use the same Vault value as the `es-*-oidc.yaml` entry the
 consuming service reads, or a cold-started realm and the running service disagree.
 
+## Synthetic customer identity (ADR-0331) — live provisioning
+
+`clients[openbank-synthetic-retail]` in `customers-realm-template.json` is a bank-owned canary
+customer: a confidential client whose service-account user carries `ROLE_CUSTOMER` and the
+`party_id` of one SYNTHETIC party (ADR-0252). The template is the shape the
+`synthetic-customer-identity` gate holds. It does not create anything, because the live realm
+is imported from Vault on cold start only. Provisioning is an owner step:
+
+1. **Create the party.** `POST /api/v1/parties` on party-service with `classification: SYNTHETIC`
+   and no personal data. The call needs `ROLE_ADMIN`. Record the party id.
+2. **Create the client** from the template entry with `kcadm create clients -r openbank-customers`,
+   **without** `secret`, so Keycloak generates one.
+3. **Shape the service-account user.** Grant the realm role `ROLE_CUSTOMER` and nothing else. Set
+   the user attribute `party_id` to the id from step 1.
+4. **Store the secret.** Put the generated secret in Vault KV under
+   `keycloak/synthetic-retail`, property `client_secret`. Then add the client, the
+   service-account user, the secret and the party id to the Vault realm-import JSON, following
+   [runbook 0009](../../../../docs/runbooks/0009-keycloak-realm-import-reconcile.md), so a
+   cold-started realm keeps the identity.
+5. **Verify against the PUBLIC issuer.** customer-edge pins
+   `iss = https://kc.open-bank.tech/realms/openbank-customers`, and a token minted through the
+   in-cluster URL carries the in-cluster issuer, so it is refused. Mint through the public token
+   endpoint and decode the claims without printing the token:
+   `party_id` is the SYNTHETIC party, `realm_access.roles` is exactly `["ROLE_CUSTOMER"]`, and
+   `preferred_username` is `service-account-openbank-synthetic-retail`.
+
+The taint switches on when that principal is honoured by customer-edge's
+`OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS`. It is already listed, inert until step 2 exists.
+Removing it from that list switches the canary back to real, which is the containment lever.
+
 ## Relocated prose
 
 The five comments removed from `customers-realm-template.json`, by path.
