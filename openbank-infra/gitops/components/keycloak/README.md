@@ -110,15 +110,17 @@ is imported from Vault on cold start only. Provisioning is an owner step:
    service-account user, the secret and the party id to the Vault realm-import JSON, following
    [runbook 0009](../../../../docs/runbooks/0009-keycloak-realm-import-reconcile.md), so a
    cold-started realm keeps the identity.
-5. **Verify against the PUBLIC issuer.** customer-edge pins
-   `iss = https://kc.open-bank.tech/realms/openbank-customers`, and a token minted through the
-   in-cluster URL carries the in-cluster issuer, so it is refused. Mint through the public token
-   endpoint and decode the claims without printing the token:
-   `party_id` is the SYNTHETIC party, `realm_access.roles` is exactly `["ROLE_CUSTOMER"]`, and
+5. **Verify the token's claims.** Mint a token for the client and decode the claims without
+   printing the token: `iss` is `https://kc.open-bank.tech/realms/openbank-customers` (the realm's
+   discovery document reports this frontend issuer through both the in-cluster and the public
+   URL, measured 2026-10-04), `party_id` is the SYNTHETIC party,
+   `realm_access.roles` holds `ROLE_CUSTOMER` and nothing beyond the realm defaults, and
    `preferred_username` is `service-account-openbank-synthetic-retail`.
 
-`openbank-infra/scripts/provision-synthetic-customer.sh` does steps 1-5 in order, asks hidden for
-the tokens it needs, and never prints the secret or the token.
+`openbank-infra/scripts/provision-synthetic-customer.sh` does steps 1-5 in order and never prints a
+secret or a token. Step 1 signs you in through the browser with the operator CLI client
+`openbank-ops-cli` (#10905); the live realm predates that client, so the script first creates it
+from its reviewed `realm-template.json` entry if it is missing.
 
 The taint switches on when that principal is honoured by customer-edge's
 `OPENBANK_SYNTHETIC_TRUSTED_PRINCIPALS`. It is already listed, inert until step 2 exists.

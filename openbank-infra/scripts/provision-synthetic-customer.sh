@@ -20,11 +20,14 @@
 #   5. Mints a token through the PUBLIC issuer (customer-edge pins it) and prints the claims that
 #      matter. It never prints the secret or the token.
 #
-# Needs: kubectl on the sandbox cluster, jq, curl, and run from the repo root. It asks, hidden,
-# for anything not already in the environment: the Keycloak admin user/password
-# (KC_ADMIN_USER/KC_ADMIN_PASSWORD; default read from the keycloak-bootstrap Secret), an
-# OpenBao token with write on openbank/* (VAULT_TOKEN/BAO_TOKEN), and an operator-realm bearer
-# token holding ROLE_ADMIN for party-service (PARTY_ADMIN_TOKEN).
+# Needs: kubectl on the sandbox cluster, jq, curl, python3, and run from the repo root.
+#   - party-service needs an operator holding ROLE_ADMIN. The script signs you in through the
+#     browser with the operator CLI client openbank-ops-cli (PKCE, loopback redirect, #10905)
+#     and keeps the token in memory only. PARTY_ADMIN_TOKEN skips the browser.
+#   - The Keycloak admin user/password default to the keycloak-bootstrap Secret
+#     (KC_ADMIN_USER/KC_ADMIN_PASSWORD override).
+#   - An OpenBao token with write on openbank/* is asked for, hidden, unless VAULT_TOKEN or
+#     BAO_TOKEN is set.
 #
 # Re-running is safe: an existing client is reused, its secret is not rotated, and the
 # realm-import entry is replaced rather than duplicated.
@@ -40,8 +43,9 @@ KV_SECRET_PATH="openbank/keycloak/synthetic-${PERSONA}"
 KV_REALM_PATH="openbank/keycloak-customers-realm-import"
 REALM_FIELD="openbank-customers-realm.json"
 NS_KC=iam NS_VAULT=vault NS_PARTY=party
+OPERATOR_REALM_URL="${OPERATOR_REALM_URL:-https://kc.open-bank.tech/realms/openbank}"
 
-for tool in kubectl jq curl; do command -v "$tool" >/dev/null || { echo "ERROR: $tool not found" >&2; exit 1; }; done
+for tool in kubectl jq curl python3; do command -v "$tool" >/dev/null || { echo "ERROR: $tool not found" >&2; exit 1; }; done
 [[ -f "$TEMPLATE" ]] || { echo "ERROR: run from the repo root ($TEMPLATE not found)" >&2; exit 1; }
 
 prompt_secret() { # var_name prompt_text
@@ -59,9 +63,81 @@ KC_POD="$(kubectl -n "$NS_KC" get pods -l app.kubernetes.io/name=keycloak -o jso
 # kcadm keeps its session in a file; /tmp because the pod's root filesystem may be read-only.
 kc() { kubectl -n "$NS_KC" exec -i "$KC_POD" -- /opt/keycloak/bin/kcadm.sh "$@" --config /tmp/kcadm-synthetic.config; }
 
+# Operator sign-in through the browser: authorization code + PKCE with the public operator CLI
+# client, redirect to a one-shot loopback listener. Prints only the sign-in URL; the token goes
+# to stdout of this function and nowhere else.
+operator_token() {
+  python3 - "$OPERATOR_REALM_URL" <<'PY'
+import base64, hashlib, http.server, json, os, secrets, subprocess, sys, urllib.parse, urllib.request
+realm = sys.argv[1]
+verifier = secrets.token_urlsafe(64)
+challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
+state = secrets.token_urlsafe(16)
+result = {}
+class H(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def do_GET(self):
+        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        ok = q.get("state", [""])[0] == state and "code" in q
+        if ok: result["code"] = q["code"][0]
+        self.send_response(200); self.send_header("Content-Type", "text/plain"); self.end_headers()
+        self.wfile.write(b"Signed in; you can close this tab." if ok else b"Sign-in failed.")
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+redirect = f"http://127.0.0.1:{srv.server_port}/callback"
+url = realm + "/protocol/openid-connect/auth?" + urllib.parse.urlencode({
+    "client_id": "openbank-ops-cli", "response_type": "code", "scope": "openid",
+    "redirect_uri": redirect, "code_challenge": challenge, "code_challenge_method": "S256", "state": state})
+print("==> sign in as an operator holding ROLE_ADMIN:", url, file=sys.stderr)
+subprocess.run(["open", url], check=False, stderr=subprocess.DEVNULL) if sys.platform == "darwin" else None
+import time
+deadline = time.monotonic() + 300
+srv.timeout = 5
+while "code" not in result and time.monotonic() < deadline:
+    srv.handle_request()
+if "code" not in result:
+    sys.exit("ERROR: no sign-in completed within 5 minutes")
+body = urllib.parse.urlencode({"grant_type": "authorization_code", "client_id": "openbank-ops-cli",
+    "code": result["code"], "redirect_uri": redirect, "code_verifier": verifier}).encode()
+with urllib.request.urlopen(realm + "/protocol/openid-connect/token", body, timeout=20) as resp:
+    print(json.load(resp)["access_token"])
+PY
+}
+
+# --- 0. kcadm session, and the operator CLI client ------------------------------------------
+if [[ -z "${KC_ADMIN_USER:-}" ]]; then
+  KC_ADMIN_USER="$(kubectl -n "$NS_KC" get secret keycloak-bootstrap -o jsonpath='{.data.admin-username}' | base64 -d)"
+fi
+if [[ -z "${KC_ADMIN_PASSWORD:-}" ]]; then
+  KC_ADMIN_PASSWORD="$(kubectl -n "$NS_KC" get secret keycloak-bootstrap -o jsonpath='{.data.admin-password}' | base64 -d)"
+fi
+echo "==> logging kcadm in (inside the Keycloak pod)"
+# The password goes over stdin and is read INSIDE the pod: `kubectl exec` arguments travel in the
+# API request URL, where the API server's audit log can record them, so no secret may be one.
+printf '%s\n' "$KC_ADMIN_PASSWORD" | kubectl -n "$NS_KC" exec -i "$KC_POD" -- sh -c \
+  'read -r PW; exec /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm-synthetic.config \
+     --server http://localhost:8080 --realm master --user "$1" --password "$PW"' sh "$KC_ADMIN_USER" >/dev/null
+unset KC_ADMIN_PASSWORD
+
+# openbank-ops-cli (#10905) is declared in realm-template.json and held to its shape by the
+# ops-cli-client-contract gate, but the live realm predates it, so a browser sign-in would get
+# "Client not found". Create it from that reviewed template entry if it is missing.
+if [[ -z "${PARTY_ADMIN_TOKEN:-}" && -z "${SYNTHETIC_PARTY_ID:-}" ]]; then
+  OPS_CID="$(kc get clients -r openbank -q clientId=openbank-ops-cli --fields id --format csv --noquotes | head -1)"
+  if [[ -z "$OPS_CID" ]]; then
+    echo "==> creating the operator CLI client openbank-ops-cli in realm openbank (from realm-template.json)"
+    jq -c '.clients[] | select(.clientId == "openbank-ops-cli")' openbank-infra/gitops/components/keycloak/realm-template.json \
+      | kc create clients -r openbank -f - >/dev/null
+  fi
+fi
+
 # --- 1. the SYNTHETIC party -------------------------------------------------------------
 if [[ -z "${SYNTHETIC_PARTY_ID:-}" ]]; then
-  prompt_secret PARTY_ADMIN_TOKEN "Operator-realm bearer token with ROLE_ADMIN (party-service)"
+  if [[ -z "${PARTY_ADMIN_TOKEN:-}" ]]; then
+    PARTY_ADMIN_TOKEN="$(operator_token)"
+  fi
+  ROLES="$(cut -d. -f2 <<<"$PARTY_ADMIN_TOKEN" | tr '_-' '/+' | awk '{ l=length($0)%4; if (l) $0=$0 substr("===",1,4-l); print }' \
+    | base64 -d 2>/dev/null | jq -c '.realm_access.roles // []')"
+  jq -e 'index("ROLE_ADMIN")' <<<"$ROLES" >/dev/null || { echo "ERROR: the signed-in operator does not hold ROLE_ADMIN" >&2; exit 1; }
   echo "==> creating the SYNTHETIC party"
   kubectl -n "$NS_PARTY" port-forward svc/party-service 18111:8111 >/dev/null 2>&1 &
   PF=$!
@@ -78,23 +154,11 @@ if [[ -z "${SYNTHETIC_PARTY_ID:-}" ]]; then
   SYNTHETIC_PARTY_ID="$(jq -r '.id' <<<"${RESP%$'\n'*}")"
   [[ "$(jq -r '.classification' <<<"${RESP%$'\n'*}")" == SYNTHETIC ]] || { echo "ERROR: party is not SYNTHETIC" >&2; exit 1; }
   kill $PF 2>/dev/null || true
+  unset PARTY_ADMIN_TOKEN
 fi
 echo "    party: $SYNTHETIC_PARTY_ID"
 
 # --- 2. the client and its service-account user -----------------------------------------
-if [[ -z "${KC_ADMIN_USER:-}" ]]; then
-  KC_ADMIN_USER="$(kubectl -n "$NS_KC" get secret keycloak-bootstrap -o jsonpath='{.data.admin-username}' | base64 -d)"
-fi
-if [[ -z "${KC_ADMIN_PASSWORD:-}" ]]; then
-  KC_ADMIN_PASSWORD="$(kubectl -n "$NS_KC" get secret keycloak-bootstrap -o jsonpath='{.data.admin-password}' | base64 -d)"
-fi
-echo "==> logging kcadm in (inside the Keycloak pod)"
-# The password goes over stdin and is read INSIDE the pod: `kubectl exec` arguments travel in the
-# API request URL, where the API server's audit log can record them, so no secret may be one.
-printf '%s\n' "$KC_ADMIN_PASSWORD" | kubectl -n "$NS_KC" exec -i "$KC_POD" -- sh -c \
-  'read -r PW; exec /opt/keycloak/bin/kcadm.sh config credentials --config /tmp/kcadm-synthetic.config \
-     --server http://localhost:8080 --realm master --user "$1" --password "$PW"' sh "$KC_ADMIN_USER" >/dev/null
-unset KC_ADMIN_PASSWORD
 
 CID="$(kc get clients -r "$REALM" -q clientId="$CLIENT_ID" --fields id --format csv --noquotes | head -1)"
 if [[ -z "$CID" ]]; then
