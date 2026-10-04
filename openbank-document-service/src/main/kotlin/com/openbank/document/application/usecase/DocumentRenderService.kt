@@ -17,6 +17,7 @@ import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.storage.ObjectStorePort
+import io.quarkus.runtime.Startup
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
@@ -28,6 +29,7 @@ import java.time.Instant
  * transaction (transactional-outbox pattern, ADR-0050).
  */
 @ApplicationScoped
+@Startup
 class DocumentRenderService(
     private val templateRepo: TemplateRepositoryPort,
     private val documentRepo: DocumentRepositoryPort,
