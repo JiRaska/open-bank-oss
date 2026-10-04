@@ -14,8 +14,8 @@ import au.com.dius.pact.core.model.RequestResponsePact
 import au.com.dius.pact.core.model.annotations.Pact
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
-import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import com.sun.net.httpserver.HttpServer
 import io.mockk.mockk
 import org.assertj.core.api.Assertions.assertThat
@@ -116,7 +116,7 @@ class CustomerEdgeDelegatedPaymentPactConsumerTest {
         return CustomerEdgeResource(
             upstream,
             mockk(relaxed = true),
-            PaymentSessionStore(),
+            inMemoryPaymentSessionStore(),
             mockk(relaxed = true),
             mockk(relaxed = true),
             Clock.systemUTC(),

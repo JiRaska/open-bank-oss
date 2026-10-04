@@ -165,3 +165,42 @@ test_other_role_api_sa_denied_transaction_reads if {
 		}
 	}
 }
+
+# #4754: transaction.sweep is four-eyes and needs its own allow reason, HUMAN operators only.
+sweep_in(principal) := {"principal": principal, "action": "transaction.sweep"}
+
+test_human_operator_may_sweep if {
+	decision := rest.allow with input as sweep_in({"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
+		with data.rules as rules_mock
+	decision.allow == true
+	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]})
+		with data.rules as rules_mock
+}
+
+test_human_admin_may_sweep if {
+	"operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in({"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]})
+		with data.rules as rules_mock
+}
+
+test_shared_m2m_identities_may_not_sweep if {
+	every id in {"service-account-openbank-edge", "service-account-openbank-services"} {
+		p := {"type": "HUMAN", "id": id, "roles": ["ROLE_OPERATOR"]}
+		not "operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in(p)
+			with data.rules as rules_mock
+		not rest.allow.allow with input as sweep_in(p)
+			with data.rules as rules_mock
+	}
+}
+
+test_human_without_operator_role_may_not_sweep if {
+	every roles in [["ROLE_VIEWER"], ["ROLE_API"], ["ROLE_KYC"], []] {
+		p := {"type": "HUMAN", "id": "u-nobody", "roles": roles}
+		not "operator-transaction-sweep" in rest.allowed_reasons with input as sweep_in(p)
+			with data.rules as rules_mock
+	}
+}
+
+test_operator_sweep_grant_does_not_leak_to_other_actions if {
+	not "operator-transaction-sweep" in rest.allowed_reasons with input as {"principal": {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}, "action": "transaction.create"}
+		with data.rules as rules_mock
+}
