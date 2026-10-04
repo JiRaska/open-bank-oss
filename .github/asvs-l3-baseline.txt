@@ -11,20 +11,17 @@ V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:123: plain
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:125: plaintext http:// env value http://balance-service.balances.svc:8103
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:127: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:463: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
-V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:465: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:467: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:479: plaintext http:// env value http://pyroscope.observability.svc:4040
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:493: plaintext http:// env value http://clearing-simulator.payments.svc:8139
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:499: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:803: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
-V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:805: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:811: plaintext http:// env value http://account-service.accounts.svc:8100
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:813: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:823: plaintext http:// env value http://clearing-simulator.payments.svc:8139
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:828: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1122: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1126: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
-V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1128: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1138: plaintext http:// env value http://clearing-simulator.payments.svc:8139
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1144: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/payments/payments-services.yaml:1431: plaintext http:// env value http://tempo.observability.svc:4317
@@ -107,7 +104,6 @@ V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:116: plaintext ht
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:118: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:121: plaintext http:// env value http://product-catalog.accounts.svc:8104
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:123: plaintext http:// env value http://ledger-service.ledger.svc:8101
-V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:128: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:130: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:132: plaintext http:// env value http://clearing-service.payments.svc:8124
 V9.1 openbank-infra/gitops/components/agent/agent-service.yaml:134: plaintext http:// env value http://sepa-instant.payments.svc:8127
@@ -160,7 +156,6 @@ V9.1 openbank-infra/gitops/components/control-liveness-sentinel/control-liveness
 V9.1 openbank-infra/gitops/components/sdd/sdd-service.yaml:88: plaintext http:// env value http://transaction-service.payments.svc:8102
 V9.1 openbank-infra/gitops/components/sdd/sdd-service.yaml:90: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:80: plaintext http:// env value http://sanctions-service.sanctions.svc:8123
-V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:82: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/fx-service/fx-service.yaml:90: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/balances/balance-service.yaml:110: plaintext http:// env value http://ledger-service.ledger.svc:8101
 V9.1 openbank-infra/gitops/components/balances/balance-service.yaml:114: plaintext http:// env value http://account-service.accounts.svc:8100
@@ -306,8 +301,6 @@ V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:/
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/communication/communication-service.yaml:47: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/context/context-service.yaml:36: plaintext http:// env value http://tempo.observability.svc:4317
-# aml-service exposes no TLS listener (Service ports: http 8117, management 8085); same debt as the agent/fx/payments/security-scanner callers above (#12008).
-V9.1 openbank-infra/gitops/components/context/context-service.yaml:53: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/finrep/finrep-service.yaml:54: plaintext http:// env value http://tempo.observability.svc:4317
