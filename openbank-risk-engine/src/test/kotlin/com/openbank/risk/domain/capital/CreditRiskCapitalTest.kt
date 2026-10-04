@@ -200,11 +200,29 @@ class CreditRiskCapitalTest {
 
     @Test
     fun `a credit balance on an exposure or deduction account is listed, never netted or added`() {
-        val r = run(listOf(gl("1001", "ASSET", "-10"), gl("6000", "EQUITY", "-100"), gl("6040", "EQUITY", "-5")))
+        val r = run(listOf(gl("1500", "ASSET", "-10"), gl("6000", "EQUITY", "-100"), gl("6040", "EQUITY", "-5")))
         assertThat(r.total!!.totalRwa).isEqualByComparingTo("0")
         assertThat(r.total!!.ownFunds!!.cet1).isEqualByComparingTo("100")
-        assertThat(r.unclassified.map { it.glAccountCode }).containsExactly("1001", "6040")
+        assertThat(r.unclassified.map { it.glAccountCode }).containsExactly("1500", "6040")
         assertThat(r.ratiosNotComputable).contains("RWA is zero")
+    }
+
+    @Test
+    fun `an overdrawn nostro is owed to the correspondent - no exposure and nothing unclassified`() {
+        // The sandbox shape of 2026-10-04: treasury settlement drained nostro 1001 to a credit balance.
+        val r = run(book + gl("1001", "ASSET", "-1998611.11"), bookInstruments)
+        val base = run(book, bookInstruments)
+        assertThat(r.unclassified).isEmpty()
+        assertThat(r.total!!.totalRwa).isEqualByComparingTo(base.total!!.totalRwa)
+        assertThat(r.ratios).isNotNull
+    }
+
+    @Test
+    fun `a nostro in debit is a claim on a bank, weighted exactly as bank`() {
+        val asNostro = run(listOf(gl("1001", "ASSET", "1000"), gl("6000", "EQUITY", "-100")))
+        val line = asNostro.total!!.lines.single()
+        assertThat(line.exposureClass).isEqualTo(ExposureClass.BANK)
+        assertThat(asNostro.total!!.totalRwa).isEqualByComparingTo("1500") // SCRA Grade C 150%
     }
 
     @Test
