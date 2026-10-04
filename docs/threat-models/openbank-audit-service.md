@@ -109,3 +109,22 @@ acknowledgement-on-failure is unsafe. See `docs/runbooks/audit-ingestion-recover
 Residual: unsigned coherent checkpoints and unavailable historical keys remain UNVERIFIED. These
 checks do not establish external custody, completeness of an export or retention guarantees;
 independent verification remains necessary.
+
+### 2026-10-03 — trail reads refuse service accounts at the policy decision
+
+- **Information disclosure / Elevation of privilege:** the trail reads (`/entries/{aggregateId}`,
+  `/entries/by-actor/{actorId}`) were authorized as `audit.read`. Ending in `.read`, that action was
+  granted by base `rest.rego`'s `operator-read-any` / `compliance-read-any` to any HUMAN-classified
+  principal holding ROLE_OPERATOR / ROLE_COMPLIANCE — and Keycloak client_credentials tokens are
+  classified HUMAN. Measured with `opa eval` against the audit OPA bundle:
+  `service-account-openbank-services` (ROLE_API, ROLE_OPERATOR) was allowed with reason
+  `operator-read-any`. The audit extension rule's `service-account-` exclusion was therefore not
+  load-bearing; only `@RolesAllowed` stopped a machine caller. The action is now
+  `audit.trail.inspect`, outside base's `{list, read}` verbs, and the role-action matrix no longer
+  lists the old name. Against the regenerated bundle, service accounts with ROLE_OPERATOR,
+  ROLE_COMPLIANCE or ROLE_AUDITOR are denied; human AUDITOR, COMPLIANCE and ADMIN are allowed.
+  `rest_test.rego` and `AuditResourceSecurityTest` pin the deny and the verb.
+
+Residual: `@RolesAllowed` and the OPA rule both depend on realm role assignment; a realm that grants
+a staff client's tokens a non-`service-account-` id with an oversight role is outside this control.
+`AUTHZ_ENFORCE` for audit-service decides whether the OPA deny is enforced or advisory.

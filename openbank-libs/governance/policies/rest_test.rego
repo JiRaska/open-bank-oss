@@ -709,8 +709,29 @@ test_deny_operator_audit_customer_read if {
 test_deny_service_audit_read if {
 	not rest.allow with input as {
 		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_API"]},
-		"action": "audit.read",
+		"action": "audit.trail.inspect",
 		"resource": {"type": "party", "id": "p-1"},
+	}
+}
+
+# The audit trail read is `audit.trail.inspect`, a verb OUTSIDE operator-read-any's and
+# compliance-read-any's {list, read} set, so base grants it to nobody — not even a service account
+# classified HUMAN that holds ROLE_OPERATOR / ROLE_COMPLIANCE. Only audit_rest_ext.rego's
+# auditor-audit-oversight-read (which excludes service-account-*) permits it. If this action is
+# ever renamed back to a `.read`, these go red.
+test_deny_service_account_operator_audit_trail_inspect if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_API", "ROLE_OPERATOR"]},
+		"action": "audit.trail.inspect",
+		"resource": {"type": "aggregate", "id": "a-1"},
+	}
+}
+
+test_deny_service_account_compliance_audit_trail_inspect if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-services", "type": "HUMAN", "roles": ["ROLE_COMPLIANCE"]},
+		"action": "audit.trail.inspect",
+		"resource": {"type": "aggregate", "id": "a-1"},
 	}
 }
 
