@@ -113,6 +113,7 @@ The customer (customers-realm) token is **never forwarded** — upstreams valida
 - **M2M token cache** — `client_credentials` token cached until 60 s before expiry; refresh is `@Synchronized`.
 - **Operation variants** — `get` (JSON), `getRaw` (preserves upstream Content-Type for camt.053 XML / MT940 / PDF, read as `ByteArray` to avoid charset corruption), `post` (idempotency-aware), `postAnonymous` (onboarding, no party header).
 - **Failure mode** — any transport exception degrades to a JSON `502 {"error":"upstream unavailable"}`.
+- **Synthetic taint (ADR-0252)** — every upstream request is built by `upstreamRequest()`, which adds `x-openbank-synthetic: true` when the edge's own inbound filter accepted the request as synthetic (MDC or OTel baggage, both set only for a principal in `openbank.synthetic.trusted-principals`). A client-supplied header is never copied. The token request is the one exception. `UpstreamClientSyntheticTaintTest` pins both the behaviour and the single entry point.
 
 ## Ownership / IDOR model
 

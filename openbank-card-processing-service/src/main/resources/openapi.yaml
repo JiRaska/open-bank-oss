@@ -5,7 +5,7 @@
 openapi: 3.0.3
 info:
   title: OpenBank Card Processing API
-  version: 1.1.0
+  version: 1.2.0
   description: |
     Card authorisation, holds, clearing and release (ADR-0283 phase 1).
 
@@ -97,6 +97,16 @@ paths:
       description: |
         Applies the presented amount and posts it to the books. Partial presentments are supported;
         cumulative clearing may never exceed the authorised amount.
+
+        Idempotent per authorisation on the Idempotency-Key header: a clearing key is applied at most
+        once to an authorisation, enforced by a database UNIQUE constraint on (authorisation, key).
+        A retry with the same amount and currency replays the authorisation without applying the
+        presentment again (no second hold decrement, no second event, no second ledger posting);
+        reusing the key with a different amount or currency is refused with 409
+        IDEMPOTENCY_KEY_REUSED (libs ApiError body). A refused presentment is not recorded, so its
+        retry is evaluated afresh. Concurrent clearings under different keys on one authorisation
+        are serialised: a clearing that loses the race is re-evaluated once against the remaining
+        hold, and answers 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (retry later) if it loses again.
       operationId: clearCardAuthorization
       security:
         - bearerAuth: []
@@ -244,10 +254,17 @@ paths:
         `DELETED` is terminal in every scheme's token lifecycle, and this service refuses a change
         to an already-deleted token without calling the network — the rule belongs to the record,
         not to whichever binding happens to be wired.
+
+        A status change reaches the network, so `Idempotency-Key` is required and is RESERVED in the
+        database before the network is called, exactly as for token provisioning: a retry with the
+        same key and body replays the token (200) without a second network call, a request racing
+        the first is answered 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`, and the same key with a
+        different target status is 409 `IDEMPOTENCY_KEY_REUSED`. A refusal frees the key.
       operationId: changeCardTokenStatus
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - name: tokenReference
           in: path
           required: true
@@ -268,12 +285,15 @@ paths:
               schema:
                 $ref: '#/components/schemas/Token'
         '400':
-          description: The status is not one of ACTIVE, SUSPENDED, DELETED
+          description: The status is not one of ACTIVE, SUSPENDED, DELETED, or `Idempotency-Key` is missing
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/TokenRefused'
         '409':
+          # Kept as the TokenRefusal ref: wrapping it in a oneOf with IdempotencyConflict is itself
+          # breaking to oasdiff (a field once guaranteed may be absent). The idempotency 409s
+          # (fleet error shape) are named in the operation description above.
           $ref: '#/components/responses/TokenRefused'
 
   /api/v1/card-tokens/card/{cardId}:
@@ -417,10 +437,17 @@ paths:
         A CLOSED case (WON, LOST, WITHDRAWN) is terminal: refresh returns the stored case unchanged
         and never moves its outcome. If the network now reports a different outcome the disagreement
         is counted (`openbank_card_dispute_terminal_mismatches_total`) and logged for investigation.
+
+        `Idempotency-Key` is required and reserved before the network is asked: a retry with the
+        same key replays the case the first refresh produced (for a closed case, the stored outcome)
+        without asking the network again; a request racing the first is 409
+        `IDEMPOTENCY_REQUEST_IN_PROGRESS`; the same key against another case is 409
+        `IDEMPOTENCY_KEY_REUSED`.
       operationId: refreshCardDispute
       security:
         - bearerAuth: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - $ref: '#/components/parameters/DisputeId'
       responses:
         '200':
@@ -429,11 +456,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Dispute'
+        '400':
+          $ref: '#/components/responses/BadRequest'
         '403':
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/DisputeRefused'
         '409':
+          # Kept as DisputeRefused: a oneOf with IdempotencyConflict is breaking to oasdiff. The
+          # idempotency 409s (fleet error shape) are named in the operation description above.
           $ref: '#/components/responses/DisputeRefused'
 
   /api/v1/card-disputes/{id}:

@@ -124,6 +124,12 @@ spec:
                   mv /tmp/bin/infracost-linux-arm64 /tmp/bin/infracost
                   /tmp/bin/infracost --version
 
+                  # restartPolicy OnFailure restarts the container IN the same pod, and /tmp
+                  # (an emptyDir) survives that restart. Without this rm every retry died on
+                  # "destination path '/tmp/repo' already exists", so backoffLimit bought
+                  # nothing: the 2026-09-27..30 runs each failed once for real (infracost
+                  # monthly quota) and then twice on the leftover clone.
+                  rm -rf /tmp/repo /tmp/ic && mkdir -p /tmp/ic
                   git clone --quiet --depth 1 --filter=blob:none --sparse "$REPO_URL" /tmp/repo
                   git -C /tmp/repo sparse-checkout set openbank-infra/aws openbank-infra/scripts
                   echo "repo at $(git -C /tmp/repo rev-parse HEAD)"

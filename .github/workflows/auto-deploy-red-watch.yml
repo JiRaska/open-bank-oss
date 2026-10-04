@@ -48,7 +48,6 @@ on:
 permissions:
   contents: read
   actions: read
-  issues: write
 
 concurrency:
   group: auto-deploy-red-watch
@@ -56,6 +55,10 @@ concurrency:
 
 jobs:
   watch:
+    permissions:
+      contents: read
+      actions: read
+      issues: write  # github-script opens/refreshes/closes the one red-streak issue
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
