@@ -277,3 +277,19 @@ not change any existing request's outcome until explicitly flipped.
   EUR (any case) is unchanged. Sandbox data re-checked read-only before the change: 8 rows, all EUR,
   so no stored row is affected. No new endpoint, caller, privilege or event. Rollback: revert the
   commit.
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+The `payments-api` HTTPRoute stages `/api/v1/sepa-instant-payments` alongside nginx. The
+generated `sepa-instant-ingress-allow-list` adds `envoy-gateway-system` on TCP 8127 and
+retains ingress-nginx. DNS stays on nginx in this step, while the new internal proxy peer
+can reach the service when the Gateway listener is installed. OIDC, OPA, idempotency,
+screening and settlement decisions remain in the service.
+
+**D1 residual risk at cutover:** the nginx cap of ten concurrent connections per client
+IP has no Envoy Gateway equivalent. A 20/s per-client request rate, a per-backend circuit
+breaker and the separately staged listener-wide connection limit bound load, but one
+slow client may hold more than ten connections and compete with other instant-payment
+callers. Verify the listener policy and 401/429 responses on the Gateway address before
+moving DNS. Roll back all four `api.open-bank.tech` routes together to nginx; its Ingress
+and NetworkPolicy peer remain through Phase 5.
