@@ -64,6 +64,28 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 - **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `sca_outbox` kept every SENT row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; its v1 repository opts in by delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are never touched. For this service the payloads at stake are `DEVICE_ENROLLED` (party id, credential id) and `SCA_DEVICE_DECIDED` with the signed payment payload (creditor IBAN). This closes the residual the durable-decision entry below records: the outbox copy no longer outlives the 1 826-day retention of `sca_device_decisions`. Information disclosure: shrinks the window in which a database read (replica, backup, operator query) exposes past event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now comes from the broker or audit-service, not this table.
 
+- **2026-10-03** — **Operator approvals publish what they bind (`summary`).** `GET
+  /api/v1/sca/approvals` and `/{id}` now return a `summary` rendered by `ScaApprovalSummaryRenderer`
+  (through the new optional libs-runtime `ApprovalSummaryRenderer` hook) from the same arguments the
+  #11675 fingerprint covers, once, when the approval is issued, and stored in the existing V15
+  `summary` column — so it is the summary of what was bound, never re-derived (a later revocation
+  does not rewrite it; `ScaFourEyesFlowIT` proves it on an executed approval). **STRIDE-I (what it
+  reveals, and why):** to OPERATOR/ADMIN only (`scaChallenge.approval.read`), the party id (already
+  the approval's `resourceId`), an 8-character credential handle and device-id handle, the
+  algorithm, the enrolment date, the first 8 hex of the SHA-256 of an enrolling public key, and for
+  a consume the challenge purpose (only when the challenge belongs to the stated party), amount,
+  currency and the creditor masked to its last 4 alphanumerics. That is the minimum a checker needs
+  to recognise the target and compare it with what the maker claims; without it the checker
+  approved blind. It never carries the public key, a full IBAN or any secret: caller-supplied
+  values are shape-checked (amount, ISO currency, card action, SHA-256 hex) or shortened, so a
+  crafted field cannot be echoed or impersonate another `key=value`. Before this change the shared
+  generic summary — the full argument dump, public key and creditor IBAN included — was stored but
+  never served; for these three actions it is no longer stored either. The `summary` is not in the
+  `SCA_OPERATOR_APPROVAL_CHANGED` event (payload unchanged). A renderer failure refuses the call
+  (503) rather than issuing an approval with the generic dump. **Tampering:** none — the summary is
+  informational, the fingerprint alone decides a match. **Residual:** the two shared M2M
+  service-accounts that can read the queue (see the slice 9b entry) now also read the summary.
+  **Rollback:** revert the binary; stored summaries are inert text and need no data change.
 - **2026-10-03** — **Durable challenge and device lifecycle** (#10041 slice 9a). Four changes,
   one risk class: integrity and non-repudiation of the decoupled-approval ceremony.
   (1) Optimistic `version` on `sca_challenges` (V12): every lifecycle write, including the
@@ -309,7 +331,7 @@ is the **authentication assurance gate** for payments and consent — defeating 
   as HUMAN with `ROLE_OPERATOR` in some realms. Measured with `opa eval` on the generated bundle
   (2026-10-03): `service-account-openbank-services` and `-edge` are DENIED
   `scaChallenge.approval.decide` but ALLOWED `scaChallenge.approval.read` via `operator-read-any`,
-  so they can see the queue (action, party id, maker id — not the request summary or fingerprint)
+  so they can see the queue (action, party id, maker id — not the request summary or fingerprint; the summary since the `summary` entry above)
   but cannot decide it (least-privilege restriction deferred to slice 10). **Retention:**
   `OperatorApprovalPurgeScheduler` (`suspend` `@Scheduled`, daily `0 45 3 * * ?`, bounded batches
   and a per-run cap, liveness `sca-operator-approval-purge` and counter

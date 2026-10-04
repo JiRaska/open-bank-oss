@@ -154,7 +154,7 @@ class SchemeGatewayAdapter(
             interbankSettlementDate = now,
             endToEndId = payment.endToEndId,
             transactionId = null,
-            amount = payment.amount,
+            amount = payment.amount.amount,
             currency = payment.currency,
             chargeBearer = ChargeBearer.SLEV,
             settlementMethod = SettlementMethod.CLRG,
