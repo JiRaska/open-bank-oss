@@ -83,6 +83,10 @@ describe('contracts and refusals', () => {
     expect(fe).toContain('same person')
     expect(fe).not.toMatch(/422/)
     expect(refusalText({ ok: false, status: 422, kind: 'refused', code: 'LIMIT_BREACHED', message: null }, 'Approve', t)).toContain('limit breached')
+    const pl = refusalText({ ok: false, status: 422, kind: 'refused', code: 'PRODUCT_LIMIT_BREACHED', message: 'product limit breached: MM_PLACEMENT tenor 400 days exceeds the product maximum 366 days' }, 'Approve', t)
+    expect(pl).toContain('outside the product limit')
+    expect(pl).toContain('tenor 400 days exceeds the product maximum 366 days')
+    expect(pl).not.toContain('counterparty')
   })
 
   it('parses a CONFIRMED deal instead of treating the whole response as unavailable (ADR-0315 D2)', () => {

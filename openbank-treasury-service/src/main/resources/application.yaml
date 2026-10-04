@@ -163,6 +163,37 @@ openbank:
           SIMBK-A: 5
           SIMBK-B: 10
           SIMBK-C: 20
+    product-limits:
+      # ADR-0315 D4 product limits, declared as code: per product, the largest principal per deal by
+      # currency (a currency not listed may not be dealt in that product) and the longest tenor in
+      # days. Enforced at submit AND re-checked at approval; a breach is 422 PRODUCT_LIMIT_BREACHED
+      # and is NOT overridable — dealing outside a mandate means changing it here, under review.
+      # A product missing from this map is not permitted at all (fail-closed). Sandbox-sized: each
+      # cap sits at or above the largest synthetic counterparty line, so the counterparty limit
+      # stays the binding constraint in the sandbox.
+      MM_PLACEMENT:
+        max-principal:
+          CZK: 2000000000.00
+          EUR: 50000000.00
+        max-tenor-days: 366
+      MM_BORROWING:
+        max-principal:
+          CZK: 2000000000.00
+          EUR: 50000000.00
+        max-tenor-days: 366
+      CNB_DEPOSIT_FACILITY:
+        max-principal:
+          CZK: 100000000000.00
+        # Overnight to the next business day: 7 covers the longest Czech holiday bridge.
+        max-tenor-days: 7
+      CNB_LOMBARD:
+        max-principal:
+          CZK: 10000000000.00
+        max-tenor-days: 7
+      FX_SPOT:
+        # The foreign leg; the CZK equivalent is bounded by the counterparty's CZK limit.
+        max-principal:
+          EUR: 50000000.00
     nostro:
       # Configure correspondent IBAN -> treasury GL code in deployment-specific configuration.
       # An unconfigured account is refused; no sample account is active in production.

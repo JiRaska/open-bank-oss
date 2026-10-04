@@ -16,6 +16,7 @@ import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.hasSize
 import org.junit.jupiter.api.MethodOrderer
@@ -456,6 +457,48 @@ class TreasuryDealApiIT {
             .then().statusCode(409).body("error", equalTo("INVALID_STATE"))
     }
 
+    @Test
+    @Order(18)
+    @TestSecurity(user = "dana.dealer", roles = ["ROLE_TREASURY_DEALER"])
+    fun `18 - ADR-0315 D4 - a deal outside its product mandate cannot be submitted (422 PRODUCT_LIMIT_BREACHED)`() {
+        val tooLong = draft(
+            """
+            {"product":"MM_PLACEMENT","counterpartyId":"SIMBK-A","currency":"CZK",
+             "principal":1000.00,"rate":4.25,"valueDate":"$today","maturityDate":"${today.plusDays(400)}"}
+            """.trimIndent(),
+        )
+        action(tooLong, "submit").then().statusCode(422)
+            .body("error", equalTo("PRODUCT_LIMIT_BREACHED"))
+            .body("breaches[0].rule", equalTo("MAX_TENOR"))
+        assertThat(state(tooLong)).isEqualTo("DRAFT")
+
+        mandateId = draft(draftBody("1000.00"))
+        action(mandateId, "submit").then().statusCode(200).body("state", equalTo("PENDING_APPROVAL"))
+        // The deal was within the mandate when submitted; make it fall outside before approval (the
+        // same position as a mandate tightened in between): approval must re-check, not trust submit.
+        jdbc { c ->
+            c.prepareStatement("update deals set maturity_date = ? where deal_id = ?").use {
+                it.setObject(1, today.plusDays(400))
+                it.setObject(2, UUID.fromString(mandateId))
+                it.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    @Order(19)
+    @TestSecurity(user = "adam.approver", roles = ["ROLE_TREASURY_APPROVER"])
+    fun `19 - ADR-0315 D4 - approval re-checks the product limit and refuses, booking and emitting nothing`() {
+        ledger.reset()
+        action(mandateId, "approve").then().statusCode(422)
+            .body("error", equalTo("PRODUCT_LIMIT_BREACHED"))
+            .body("message", containsString("tenor 400 days exceeds the product maximum 366 days"))
+            .body("breaches[0].rule", equalTo("MAX_TENOR"))
+        assertThat(state(mandateId)).isEqualTo("PENDING_APPROVAL")
+        assertThat(outboxTypes(UUID.fromString(mandateId))).isEmpty()
+        assertThat(ledger.calls).isEmpty()
+    }
+
     private fun state(id: String): String = jdbc { c ->
         c.prepareStatement("select state from deals where deal_id = ?").use { ps ->
             ps.setObject(1, UUID.fromString(id))
@@ -497,5 +540,6 @@ class TreasuryDealApiIT {
         lateinit var selfId: String
         lateinit var lombardId: String
         lateinit var fxId: String
+        lateinit var mandateId: String
     }
 }
