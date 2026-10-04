@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Private-CA SERVER certificate for aml-service's east-west mTLS listener (8443, client auth
+# REQUIRED). Same shape as ledger-service-internal-tls. Distinct from aml-internal-tls, which is
+# aml-service's CLIENT identity toward party-service/account-service and carries no dnsNames.
+# The SANs must match the URL every caller dials (https://aml-service.aml.svc:8443), or hostname
+# verification on the caller side fails the handshake.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: aml-service-internal-tls
+  namespace: aml
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: aml-service-internal-tls
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - aml-service.aml.svc
+    - aml-service.aml.svc.cluster.local
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io
