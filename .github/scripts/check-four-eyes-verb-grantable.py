@@ -5,12 +5,12 @@ WHY THIS EXISTS
 ---------------
 `rules.yaml: four_eyes.verbs` declares which verbs pause for a second approver. Whether the
 approval can ever be *requested* depends on something else entirely: the action must have an
-allow reason, either in `authz.role_action_matrix` or in a service-scoped `*_rest_ext.rego`.
+allow reason, either in `authz.role_action_matrix` or in a service-scoped production `*_rest_ext.rego`.
 Nothing connected the two.
 
-Measured on `origin/main` (#4754): `transaction.sweep` is declared four-eyes and granted in
-neither place. Two consequences, and the second is the reason this is a gate rather than a
-comment on one issue:
+Originally measured on `origin/main` (#4754): `transaction.sweep` was declared four-eyes and
+granted in neither place. It now has a service-scoped operator grant. The original gap had two
+consequences, and the second is the reason this is a gate rather than a comment on one issue:
 
 1. `response_attributes` rides on the **allow** object in `rest.rego`, so a denied decision
    carries no attributes at all. `four_eyes_required = true` is computed and never reaches
@@ -28,7 +28,7 @@ passing rather than as unchecked.
 WHAT IT CHECKS, AND WHAT IT DOES NOT
 ------------------------------------
 For every `@Authorize(action = "x.verb")` in `*/src/main/**.kt` whose trailing verb appears in
-`four_eyes.verbs`, the action must appear in `role_action_matrix` or in some `.rego` under
+`four_eyes.verbs`, the action must appear in `role_action_matrix` or in production `.rego` under
 `openbank-infra/gitops/components`.
 
 It asks whether an allow reason EXISTS, not whether it is correct or appropriately scoped. A
@@ -51,20 +51,13 @@ VERB_RE = re.compile(r"^\s+- (\w+)", re.MULTILINE)
 # Declared, not inferred. An entry needs a reason and is expected to shrink; the gate also fails
 # on an entry that has become granted, so the declaration cannot outlive the debt.
 #
-# All three are money-path and all three are the SAME defect, found together (#4754). They are
-# baselined rather than fixed here because granting them is an authoring decision: adding them to
+# The remaining two are money-path and share the defect found with transaction.sweep (#4754).
+# They are baselined rather than fixed here because granting them is an authoring decision: adding them to
 # `role_action_matrix` would be a grant to a machine (M2M callers authenticate with a
 # client_credentials JWT and are classified HUMAN, and `shared_m2m_write_prohibition` is not
 # emitted into any bundle, so no policy can veto it). The defensible shape is a service-scoped
-# rego rule pinned to human operators -- which for transaction-service means creating its first
-# `*_rest_ext.rego` -- and each such edit restamps ~73 bundle files.
+# rego rule pinned to human operators; each such edit restamps the generated bundles.
 KNOWN_UNGRANTED: dict[str, str] = {
-    "transaction.sweep": (
-        "#4754. Declared four-eyes, granted nowhere. Measured with `opa eval` against the "
-        "materialised transaction bundle: allow=false for every principal probed, with a "
-        "must-DENY and a must-ALLOW control in the same run. AUTHZ_ENFORCE defaults false for "
-        "transaction-service with no gitops override, so the deny is advisory today."
-    ),
     "swift.send": (
         "#4754 sibling, same shape. No literal and no prefix rule anywhere under "
         "openbank-infra/gitops/components. AUTHZ_ENFORCE defaults false for swift-service."
@@ -108,12 +101,17 @@ def matrix_text(rules: str) -> str:
 PREFIX_RE = re.compile(r'startswith\(\s*input\.action\s*,\s*"([^"]+)"')
 
 
+def is_policy_source(path: str) -> bool:
+    # OPA test fixtures can quote actions while asserting a DENY. They are never
+    # shipped in the generated bundle and cannot supply an allow reason.
+    return not path.endswith("_test.rego")
+
+
 def rego_corpus(ref: str) -> str:
-    """Every rego AND every bundle ConfigMap, concatenated.
+    """Production rego AND every bundle ConfigMap, concatenated.
 
     Bundles are read too because a service's policy may live only inside its generated
-    ConfigMap -- transaction-service has no `*_rest_ext.rego` file at all, so a rego-only
-    search would report a clean sweep of a corpus it never saw.
+    ConfigMap; a rego-only search could miss that production grant.
     """
     parts = []
     for pathspec in (
@@ -121,7 +119,9 @@ def rego_corpus(ref: str) -> str:
         "openbank-infra/gitops/components/**/*opa-bundle*.yaml",
     ):
         for line in sh("git", "grep", "-l", "--", "input.action", ref, "--", pathspec).split():
-            parts.append(sh("git", "show", f"{ref}:{line.split(':', 1)[1]}"))
+            path = line.split(":", 1)[1]
+            if is_policy_source(path):
+                parts.append(sh("git", "show", f"{ref}:{path}"))
     return "\n".join(parts)
 
 
@@ -168,7 +168,7 @@ def self_test() -> int:
     matrix = 'transaction.reverse\nledger.reverse\n'
     actions = {
         "transaction.reverse": "a.kt",   # in matrix          -> pass
-        "transaction.sweep": "b.kt",     # nowhere            -> FLAG (the real #4754 case)
+        "transaction.sweep": "b.kt",     # nowhere in fixture -> FLAG
         "account.list": "c.kt",          # verb not four-eyes -> ignored entirely
         "customer.pockets.convert": "d.kt",  # granted only by a PREFIX rule -> pass
     }
@@ -180,6 +180,8 @@ def self_test() -> int:
     got_ungranted = {a for a, _, _ in ungranted}
     got_granted = {a for a, _, _ in granted}
     checks = [
+        ("excludes test-only rego grants", not is_policy_source("payments/transaction_rest_ext_test.rego")),
+        ("retains production rego", is_policy_source("payments/transaction_rest_ext.rego")),
         ("flags an action declared four-eyes and granted nowhere", "transaction.sweep" in got_ungranted),
         ("does NOT flag one present in the matrix", "transaction.reverse" in got_granted),
         ("ignores an action whose verb is not four-eyes", "account.list" not in got_ungranted | got_granted),
