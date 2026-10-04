@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
 'use client'
+import Link from 'next/link'
 import { useState, useEffect, useCallback } from 'react'
 import { Cloud, Info, CheckCircle2, CircleDashed, Circle, X, RefreshCw, Wifi, WifiOff, Minus } from 'lucide-react'
 import type { InfraStatusResult } from '@/lib/infra/probes'
@@ -16,20 +17,19 @@ type Bilingual = [string, string]
 // Source of truth for this diagram:
 //   • Target architecture — ADR-0027 (cloud-agnostic substrate, everything
 //     stateful/identity in-cluster OSS, OpenTofu + ArgoCD GitOps).
-//   • Status overlay      — the REAL state of the openbank-sandbox EKS cluster
-//     as verified against the live cluster,
-//     so this page documents the gap honestly instead of selling the target.
+//   • Static node status  — documented implementation snapshot, not a live cluster reading.
+//     Only probe badges returned by /api/infra/status represent current reachability.
 //
-//   live    = running in the sandbox cluster / applied today
-//   partial = deployed but incomplete or drifting (e.g. 1 of ~33 services)
+//   live    = documented as implemented; current health requires a probe
+//   partial = documented as incomplete
 //   planned = ADR-0027 target, not yet deployed
 // ---------------------------------------------------------------------------
 
 type Status = 'live' | 'partial' | 'planned'
 
 const STATUS_META: Record<Status, { label: Bilingual; color: string; bg: string; border: string; Icon: React.ElementType }> = {
-  live:    { label: ['Živé (běží dnes)', 'Live (running today)'],            color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
-  partial: { label: ['Částečné (nasazeno, neúplné)', 'Partial (deployed, incomplete)'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
+  live:    { label: ['Dokumentováno jako zavedené', 'Documented as implemented'], color: 'var(--success-text)', bg: 'var(--success-bg)', border: 'var(--success-border)', Icon: CheckCircle2 },
+  partial: { label: ['Dokumentováno jako neúplné', 'Documented as incomplete'], color: 'var(--warning-text)', bg: 'var(--warning-bg)', border: 'var(--warning-border)', Icon: CircleDashed },
   planned: { label: ['Plánováno (ADR-0027)', 'Planned (ADR-0027)'],          color: 'var(--text-primary)', bg: 'var(--surface-3)', border: 'var(--border-strong)', Icon: Circle },
 }
 
@@ -117,11 +117,11 @@ const NAMESPACES: NS[] = [
   },
   {
     id: 'banking', label: 'ns: accounts / admin-ui (+ per-domain)',
-    note: ['Doména = namespace (ADR-0037). Jeden vertikální řez je živý; zbytek flotily čeká na onboarding do GitOps.', 'Domain = namespace (ADR-0037). One vertical slice is live; the rest of the fleet is pending GitOps onboarding.'],
+    note: ['Doména = namespace (ADR-0037). Úplný aktuální inventář služeb je v katalogu služeb; tento diagram je vybraný architektonický pohled.', 'Domain = namespace (ADR-0037). The full current service inventory is in the service catalog; this diagram is a selected architecture view.'],
     nodes: [
       node('account-svc', ['account-service', 'account-service'], 'live', ['První Quarkus služba nasazená end-to-end: account-service + accounts-db (CNPG) + redis. ArgoCD app accounts Synced + Healthy.', 'First Quarkus service deployed end-to-end: account-service + accounts-db (CNPG) + redis. ArgoCD app accounts Synced + Healthy.']),
       node('admin-ui', ['admin-ui (tato aplikace)', 'admin-ui (this app)'], 'live', ['Operations konzole v Next.js, kterou právě používáte — nasazena in-cluster v ns admin-ui. ArgoCD app admin-ui Synced + Healthy.', 'The Next.js operations console you are using — deployed in-cluster in ns admin-ui. ArgoCD app admin-ui Synced + Healthy.']),
-      node('services', ['Nasazeno 10+ doménových vertikál', '10+ domain verticals deployed'], 'partial', ['Živé GitOps aplikace: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 zbývajících služeb (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction a další) čeká na onboarding do GitOps.', 'GitOps apps live: ledger, balances, payments (sepa/domestic/instant), sca, consent, agent (platform ns), notifications (T2 scale-to-zero), product-catalog, security-scanner. ~24 remaining services (anacredit, lending, sdd, swift, party, kyc, aml, sanctions, audit, dispute, card-issuance, clearing, interest, statement, fx, tpp-registry, psd2, pid, standing-order, transaction, and others) pending GitOps onboarding.']),
+      node('services', ['Doménové služby — vybraný pohled', 'Domain services — selected view'], 'partial', ['Tento architektonický uzel není inventář ani důkaz nasazení. Aktuální úplný seznam modulů najdete v katalogu služeb; stav konkrétní služby ověřte v živém monitoringu.', 'This architecture node is neither an inventory nor deployment proof. Find the complete current module list in the service catalog; verify individual runtime state in live monitoring.']),
       node('notification-svc', ['Notification Service (T2)', 'Notification Service (T2)'], 'live', ['ArgoCD app notifications Synced. KEDA ScaledObject vlastní počet replik — ustálený stav je 0 podů (FinOps T2, ADR-0057). Probouzí se na lagu consumer-group openbank.notification.requests; vyprázdní se a vrátí na 0 po cooldownu.', 'ArgoCD app notifications Synced. KEDA ScaledObject owns replica count — steady state is 0 pods (FinOps T2, ADR-0057). Wakes on openbank.notification.requests consumer-group lag; drains and returns to 0 after cooldown.']),
       node('security-scanner-svc', ['Security Scanner', 'Security Scanner'], 'live', ['ArgoCD app security-scanner Synced. Každých 30 min sonduje všechny /q/health endpointy flotily; report se čte přes REST, DORA ICT incidenty jdou do openbank.security.ict.incident. Report je bez perzistence (v paměti), ale DORA ICT incidenty se od V5__create_ict_incidents.sql ukládají do vlastní Postgres (#4728) — dřív žily jen v ConcurrentHashMap a restart podu je tiše smazal.', 'ArgoCD app security-scanner Synced. Probes all fleet /q/health endpoints every 30 min; the report is served over REST and DORA ICT incidents go to openbank.security.ict.incident. The probe report is unpersisted (in-memory), but DORA ICT incidents have had their own Postgres table since V5__create_ict_incidents.sql (#4728) — before that they lived only in a ConcurrentHashMap and a pod restart silently emptied the register.']),
     ],
@@ -135,7 +135,7 @@ const NAMESPACES: NS[] = [
       node('loki', ['Loki', 'Loki'], 'live', ['ArgoCD app loki Synced + Healthy. Agregace logů ze všech podů. Chunky → in-cluster PVC (integrace s S3 je prod follow-up).', 'ArgoCD app loki Synced + Healthy. Log aggregation for all pods. Chunks → in-cluster PVC (S3 integration is a prod follow-up).']),
       node('tempo', ['Tempo', 'Tempo'], 'live', ['ArgoCD app tempo Synced + Healthy. Backend distribuovaného tracingu pro OTLP trasy z Quarkus služeb.', 'ArgoCD app tempo Synced + Healthy. Distributed tracing backend for OTLP traces from Quarkus services.']),
       node('otel', ['OpenTelemetry Collector', 'OpenTelemetry Collector'], 'live', ['ArgoCD app otel-collector Synced + Healthy. Pipeline: OTLP → Tempo (trasy) + Prometheus remote-write (metriky).', 'ArgoCD app otel-collector Synced + Healthy. Pipeline: OTLP → Tempo (traces) + Prometheus remote-write (metrics).']),
-      node('alloy', ['Grafana Alloy', 'Grafana Alloy'], 'live', ['ArgoCD app alloy Synced + Healthy. DaemonSet (18 podů) sbírá logy z uzlů a posílá je do Loki; běží v ns observability.', 'ArgoCD app alloy Synced + Healthy. DaemonSet (18 pods) collects node logs and ships them to Loki; runs in ns observability.']),
+      node('alloy', ['Grafana Alloy', 'Grafana Alloy'], 'live', ['DaemonSet sbírá logy z uzlů a posílá je do Loki. Aktuální počet podů a zdraví je nutné ověřit v clusteru.', 'The DaemonSet collects node logs and ships them to Loki. Verify the current pod count and health in the cluster.']),
       node('pyroscope', ['Pyroscope', 'Pyroscope'], 'live', ['ArgoCD app pyroscope Synced + Healthy. Continuous-profiling backend; StatefulSet Running v ns observability.', 'ArgoCD app pyroscope Synced + Healthy. Continuous-profiling backend; StatefulSet Running in ns observability.']),
       node('alertmanager', ['Alertmanager', 'Alertmanager'], 'live', ['Součástí kube-prometheus-stacku. StatefulSet Running v ns observability; směruje alerty z Prometheu.', 'Bundled in kube-prometheus-stack. StatefulSet Running in ns observability; routes alerts from Prometheus.']),
       node('pyrra', ['Pyrra (SLO)', 'Pyrra (SLO)'], 'live', ['ArgoCD app pyrra Synced + Healthy. SLO/error-budget engine nad Prometheem (pyrra-api + pyrra-kubernetes) Running v ns observability.', 'ArgoCD app pyrra Synced + Healthy. SLO/error-budget engine over Prometheus (pyrra-api + pyrra-kubernetes) Running in ns observability.']),
@@ -165,7 +165,7 @@ function CloudNodeBox({ n, selectedId, liveStatus, t, onSelect }: CloudNodeBoxPr
   const probeId = INFRA_PROBE_MAP[n.id]
   const probe = probeId && liveStatus ? liveStatus[probeId] : null
   const pm = probe ? PROBE_META[probe.status] : null
-  return <button type="button" onClick={() => onSelect(n)} title={t(...n.desc)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px color-mix(in srgb, ${m.color} 35%, transparent)` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
+  return <button type="button" onClick={() => onSelect(n)} title={t(...m.label)} aria-label={`${t(...n.name)} — ${t(...m.label)}`} aria-pressed={active} aria-controls={active ? 'cloud-architecture-selection' : undefined} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 10px', borderRadius: '8px', cursor: 'pointer', background: m.bg, border: `1px solid ${active ? m.color : m.border}`, boxShadow: active ? `0 0 0 2px color-mix(in srgb, ${m.color} 35%, transparent)` : 'none', color: 'var(--text-primary)', fontSize: '12px', fontWeight: 600, fontFamily: 'inherit', textAlign: 'left' }}>
     <StatusDot status={n.status} />
     {t(...n.name)}
     {pm && <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', marginLeft: '4px', padding: '1px 5px', borderRadius: '10px', background: pm.bg, border: `1px solid ${pm.border}`, fontSize: '10px', fontWeight: 700, color: pm.color }}><pm.Icon size={9} aria-hidden="true" />{pm.label}</span>}
@@ -221,9 +221,14 @@ export default function CloudArchitecturePage() {
             <span className="breadcrumb-current">{t('Cloud architektura', 'Cloud Architecture')}</span>
           </>}
         title={t('Cloud architektura (AWS)', 'Cloud Architecture (AWS)')}
-        subtitle={t('Cílový stav dle ADR-0027 se status overlay z živého clusteru openbank-sandbox · klikni na prvek pro detail', 'Target state per ADR-0027 with a status overlay from the live openbank-sandbox cluster · click an element for detail')}
+        subtitle={t('Architektonický návrh dle ADR-0027 a historicky dokumentovaný stav. Jen štítky sond ukazují aktuální dosažitelnost; diagram není úplný inventář.', 'Architecture target per ADR-0027 and historically documented state. Only probe badges show current reachability; this diagram is not a complete inventory.')}
         icon={<Cloud aria-hidden="true" size={18} style={{ color: 'var(--accent)' }} />}
       />
+
+      <p style={{ margin: '0 0 16px', fontSize: 13, color: 'var(--text-secondary)' }}>
+        {t('Úplný seznam služeb a jejich samostatný provozní stav najdete v ', 'Find the complete service list and each service’s operational state in ')}
+        <Link href="/services">{t('katalogu služeb', 'the service catalog')}</Link>.
+      </p>
 
       {/* Legend + honesty note */}
       <div className="card" style={{ padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
@@ -239,7 +244,7 @@ export default function CloudArchitecturePage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', fontSize: '11px', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
             <Info aria-hidden="true" size={13} />
-            {t('Diagram = strategie (ADR-0027); badge', 'Diagram = strategy (ADR-0027); badge')}
+            {t('Diagram = dokumentovaný návrh (ADR-0027); badge', 'Diagram = documented architecture (ADR-0027); badge')}
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: '2px', padding: '1px 5px', borderRadius: '10px', background: 'var(--success-bg)', border: '1px solid var(--success-border)', fontSize: '10px', fontWeight: 700, color: 'var(--success-text)' }}>
               <Wifi aria-hidden="true" size={9} />UP
             </span>
@@ -319,6 +324,7 @@ export default function CloudArchitecturePage() {
               background: STATUS_META[selected.status].bg, color: STATUS_META[selected.status].color,
               border: `1px solid ${STATUS_META[selected.status].border}`, marginBottom: '12px',
             }}>{t(...STATUS_META[selected.status].label)}</span>
+            <p style={{ fontSize: 12, color: 'var(--warning-text)', margin: '0 0 8px' }}>{t('Popis níže zachycuje dříve dokumentovaný stav, nikoli aktuální provozní potvrzení.', 'The description below records a previously documented state, not current operational proof.')}</p>
             <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>{t(...selected.desc)}</p>
           </div>
         )}
