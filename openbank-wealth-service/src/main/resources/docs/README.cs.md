@@ -10,6 +10,7 @@ Dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-a
 - **Porty:** 8154 (aplikace), 8090 (management)
 - **Události:** transakční outbox (ADR-0003) do `openbank.wealth.events`; syntetický provoz je v outboxu označený (ADR-0252)
 - **Autentizace:** jen M2M, `ROLE_API`, `ROLE_OPERATOR` nebo `ROLE_ADMIN`. Vlastník přichází v hlavičce `X-Customer-Party-Id`.
+- **Syntetická značka (ADR-0252):** aktivum deklarované důvěryhodným kanárkovým principálem se uloží se `synthetic = true` a každá událost o něm nese Kafka hlavičku `x-openbank-synthetic`, včetně přecenění a stažení. Značka patří aktivu, ne requestu, který na něj sáhl.
 - **Hranice důvěry:** routy podle id pracují jen s id aktiva a vlastníka NEOVĚŘUJÍ. Zákazník se ke službě dostane jen přes customer-edge, která vlastnictví ověří před každým voláním podle id.
 
 ## API

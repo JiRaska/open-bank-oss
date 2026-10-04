@@ -114,10 +114,14 @@ questions — VoP warns, this authorises.
 `POST /api/v1/card-tokens`, `POST /api/v1/card-disputes` and `POST /api/v1/card-disputes/{id}/evidence`
 each make a call to a card network that is NOT idempotent at the network: asking twice mints a second
 wallet credential, opens a second chargeback or files the evidence twice.
+`POST /api/v1/card-tokens/{tokenReference}/status` and `POST /api/v1/card-disputes/{id}/refresh` reach
+the network too and take the same reservation: a replayed SUSPEND arriving after a RESUME would
+silently re-suspend a credential the customer was just given back.
 
 | Threat | STRIDE | Mitigation |
 |---|---|---|
 | Two concurrent requests with one `Idempotency-Key` both reach the network (duplicate credential / chargeback), the loser 500s | T, D | `LifecycleIdempotencyRepositoryImpl.reserve` — an `INSERT ... ON CONFLICT DO NOTHING` into `card_lifecycle_idempotency` committed BEFORE the network call; the loser replays the winner (`Reservation.Completed`) or gets 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Completion flips the row in the same transaction as the result row and its outbox event (`completeInTransaction`). Proven by `CardLifecycleIdempotencyIT` (two requests released by one latch, network held open). |
+| A token status change or dispute refresh retried (or double-clicked) reaches the network twice | T, D | Both now require `Idempotency-Key` (absent → 400, before any lookup) and reserve it exactly like provisioning (`TOKEN_STATUS_CHANGE`, `DISPUTE_REFRESH`); a refresh that moved nothing, or of a CLOSED case, completes the reservation standalone (`LifecycleIdempotencyPort.complete`) so a retry replays the stored case. Proven by `CardLifecycleIdempotencyIT` (latch race, replay, reuse). |
 | A crash after the network acted, then a retry, acts twice | T | A PENDING reservation never expires; it is released only when the network was provably not asked or refused. A stuck key answers 409 until an operator reconciles it (`ix_card_lifecycle_idempotency_pending`). |
 | The same key replayed for a different request returns someone else's result | I, T | The reservation stores a SHA-256 request fingerprint; a mismatch is 409 `IDEMPOTENCY_KEY_REUSED`. |
 | A network token minted for a blocked/suspended/expired card — a working credential for a card the bank stopped | E, S | `CardTokenService.refuseBeforeNetwork` refuses any card whose card-issuance `status` is not `ACTIVE` (an absent status counts as not active), 409 `CARD_NOT_ACTIVE`, before the network is asked. Pinned by the consumer pact (`status` type matcher). |
@@ -133,7 +137,11 @@ wallet credential, opens a second chargeback or files the evidence twice.
   the scheme in reality; in this repository the sandbox is the only caller. A real processor binding
   should add one, and this line is what says it is missing rather than handled.
 - **Fraud scoring is shadow only**, like every other rail (ADR-0084, #4403). No fraud verdict
-  declines a card transaction today. Nothing here should be read as fraud enforcement.
+  declines a card transaction today. Nothing here should be read as fraud enforcement. A shadow
+  control fails open by design, so its failure must be *visible* rather than quiet: every attempt is
+  counted on `openbank_card_processing_fraud_scores_total{outcome}` and a failure is logged at WARN
+  (at most once a minute). `outcome="FAILED"` climbing while `SCORED` stays flat is the signal that
+  scoring has stopped, which is exactly what went unseen until #12064.
 - **`AUTHZ_ENFORCE=false`** — the OPA decision is advisory; the role check is the live control.
 - **The ledger posting is not two-phase.** A posting that fails is visible and retriable by
   operations, but there is no automatic compensation. Adding one needs the processor binding's own
@@ -159,6 +167,10 @@ wallet credential, opens a second chargeback or files the evidence twice.
   (compared as Money); closed cases are terminal on refresh; evidence history is append-only and
   idempotent; network-seen tokens are adopted into the mirror with stable ids and mirror-only ones
   are flagged `absentAtNetwork`.
+- **2026-10-03** — Idempotency keys on token status change and dispute refresh (Refs #11996): the two
+  POSTs #8864 left without a key now require `Idempotency-Key` and reuse the `card_lifecycle_idempotency`
+  reservation (no new migration — `operation` is unconstrained `VARCHAR(32)`). Closes the gap the
+  `idempotency-coverage-money-path` gate reports once the service is classified money-path.
 - **2026-10-03** — Duplicate presentment (STRIDE-T/R). Found while documenting the service (#8858):
   the clearing request carried an `Idempotency-Key` that was never looked up, so a repeated
   presentment that still fitted inside the remaining hold was applied again — a second hold
@@ -188,3 +200,12 @@ wallet credential, opens a second chargeback or files the evidence twice.
   the UPDATE on a row lock and moves the version underneath it). Residual: a replay does not re-attempt a `FAILED` ledger posting
   — operations re-drive it (§5, runbook). The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
   not, and is added alongside this fix.
+- **2026-10-04** — Shadow fraud scoring had never scored a card authorisation (STRIDE-R, #12064).
+  The fraud client sent `currencyCode` with no `rail`, both non-null in fraud-service's
+  `ScoreFraudRequest`, so every call was refused with a 400; it also sent the amount in MINOR units
+  and read `decision` where the provider answers `verdict`. The broad catch that keeps a shadow
+  control from failing the authorisation logged it at debug level, so nothing surfaced. Fixed: the
+  client mirrors the provider DTOs (`currency`, `rail = CARD`, major units, `verdict`), failures are
+  WARN-logged with a rate limit, and consumer pacts to fraud-service and transaction-service (each
+  with a recorded 401) are replayed by both providers on every PR — the CARD-rail ledger posting
+  had no contract at all before this.

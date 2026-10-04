@@ -115,6 +115,11 @@ spec:
               mountPath: /etc/clickhouse-server/config.d/openbank.xml
               subPath: openbank.xml
               readOnly: true
+            # Settings PROFILE, not server config: it lives under users.d. See the ConfigMap key.
+            - name: server-config
+              mountPath: /etc/clickhouse-server/users.d/openbank-langfuse-profile.xml
+              subPath: openbank-langfuse-profile.xml
+              readOnly: true
           startupProbe:
             httpGet:
               path: /ping
@@ -190,6 +195,25 @@ data:
       <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
       <query_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></query_log>
       <part_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></part_log>
+    </clickhouse>
+  # LANGFUSE WRITES DATETIMES AS EPOCH-MILLISECOND JSON NUMBERS, AND CLICKHOUSE 26.8 STOPPED
+  # READING THEM THAT WAY. 26.8 flipped input_format_read_datetime_number_as_raw_value 1 -> 0
+  # (system.settings_changes), so an unquoted {"timestamp":1789898400000} into DateTime64(3) is
+  # read as SECONDS, overflows, and saturates to 9999-12-31 23:59:59 — silently, no error. Measured
+  # with clickhouse-local on 24.8 / 25.3 / 25.8 / 25.12 / 26.3: 2026-09-20 10:00:00; on 26.8: 9999.
+  # Langfuse 3.29.0's ingestion and the v2 -> v3 background migrations (Postgres -> ClickHouse) both
+  # take that path, so without this every traces/observations/scores time column — timestamp,
+  # start_time, created_at, event_ts — is 9999: the UI's time filters find nothing and the
+  # retention sweep can never age a row out. Reproduced locally on this exact image with 3.29.0
+  # (ingest + background migration -> 9999) and fixed by this profile (same run -> real times).
+  # Applies to every user on this dedicated instance; only Langfuse writes here.
+  openbank-langfuse-profile.xml: |
+    <clickhouse>
+      <profiles>
+        <default>
+          <input_format_read_datetime_number_as_raw_value>1</input_format_read_datetime_number_as_raw_value>
+        </default>
+      </profiles>
     </clickhouse>
 ---
 apiVersion: monitoring.coreos.com/v1

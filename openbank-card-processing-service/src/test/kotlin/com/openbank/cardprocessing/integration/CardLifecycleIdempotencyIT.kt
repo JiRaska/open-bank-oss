@@ -114,8 +114,16 @@ class CardLifecycleIdempotencyIT {
 
         override suspend fun listTokens(cardReference: String) = delegate.listTokens(cardReference)
 
-        override suspend fun changeStatus(tokenReference: String, status: NetworkTokenStatus) =
-            delegate.changeStatus(tokenReference, status)
+        val statusChanges = AtomicInteger()
+
+        override suspend fun changeStatus(
+            tokenReference: String,
+            status: NetworkTokenStatus,
+        ): SchemeResult<NetworkToken> {
+            statusChanges.incrementAndGet()
+            delay(HOLD_MS)
+            return delegate.changeStatus(tokenReference, status)
+        }
     }
 
     @Alternative
@@ -142,7 +150,13 @@ class CardLifecycleIdempotencyIT {
             return delegate.submitEvidence(evidence)
         }
 
-        override suspend fun status(networkCaseId: String) = delegate.status(networkCaseId)
+        val statusReads = AtomicInteger()
+
+        override suspend fun status(networkCaseId: String): SchemeResult<SchemeDispute> {
+            statusReads.incrementAndGet()
+            delay(HOLD_MS)
+            return delegate.status(networkCaseId)
+        }
     }
 
     @Inject
@@ -298,6 +312,85 @@ class CardLifecycleIdempotencyIT {
         ).isEqualTo("doc-2")
     }
 
+    @Test
+    fun `a token status change needs a key, reaches the network once per key, and refuses a reused key`() {
+        val tokenReference = post(
+            "/api/v1/card-tokens",
+            "it-tst-provision",
+            """{"cardId":"$ACTIVE_CARD","requestorId":"wallet-apple","requestorLabel":"Apple Pay"}""",
+        ).then().statusCode(CREATED).extract().path<String>("tokenReference")
+        val path = "/api/v1/card-tokens/$tokenReference/status"
+        val suspend = """{"status":"SUSPENDED"}"""
+
+        // Missing header: a 400, never a 500, and the network is not asked.
+        val before = tokenisation.statusChanges.get()
+        given().contentType(ContentType.JSON).body(suspend).post(path).then().statusCode(BAD_REQUEST)
+        assertThat(tokenisation.statusChanges.get()).isEqualTo(before)
+
+        // Two simultaneous same-key requests: exactly one reaches the network.
+        val raced = race { post(path, "it-tst-1", suspend) }
+        assertThat(raced.map { it.statusCode }).allMatch { it == OK || it == CONFLICT }
+        raced.filter { it.statusCode == CONFLICT }
+            .forEach { assertThat(it.asString()).contains("IDEMPOTENCY_REQUEST_IN_PROGRESS") }
+        assertThat(tokenisation.statusChanges.get() - before).isEqualTo(1)
+        assertThat(
+            string(
+                "SELECT state FROM card_lifecycle_idempotency WHERE reservation_key = 'TOKEN_STATUS_CHANGE:it-tst-1'",
+            ),
+        ).isEqualTo("COMPLETED")
+
+        // A retry replays the same result without a second network call.
+        val replay = post(path, "it-tst-1", suspend)
+        assertThat(replay.statusCode).isEqualTo(OK)
+        assertThat(replay.path<String>("status")).isEqualTo("SUSPENDED")
+        assertThat(tokenisation.statusChanges.get() - before).isEqualTo(1)
+
+        // Same key, different body: 409 IDEMPOTENCY_KEY_REUSED, network untouched.
+        post(path, "it-tst-1", """{"status":"ACTIVE"}""").then().statusCode(CONFLICT)
+            .extract().asString().also { assertThat(it).contains("IDEMPOTENCY_KEY_REUSED") }
+        assertThat(tokenisation.statusChanges.get() - before).isEqualTo(1)
+    }
+
+    @Test
+    fun `a dispute refresh needs a key, reaches the network once per key, and refuses a reused key`() {
+        val authorizationId = clearedAuthorization("it-rfr")
+        val disputeId = post(
+            "/api/v1/card-disputes",
+            "it-rfr-open",
+            """{"authorizationId":"$authorizationId","reasonCode":"10.4","amountMinorUnits":2000,"currencyCode":"CZK"}""",
+        ).then().statusCode(CREATED).extract().path<String>("id")
+        val path = "/api/v1/card-disputes/$disputeId/refresh"
+
+        val before = disputes.statusReads.get()
+        given().post(path).then().statusCode(BAD_REQUEST)
+        assertThat(disputes.statusReads.get()).isEqualTo(before)
+
+        val raced = race { postEmpty(path, "it-rfr-1") }
+        assertThat(raced.map { it.statusCode }).allMatch { it == OK || it == CONFLICT }
+        raced.filter { it.statusCode == CONFLICT }
+            .forEach { assertThat(it.asString()).contains("IDEMPOTENCY_REQUEST_IN_PROGRESS") }
+        assertThat(disputes.statusReads.get() - before).isEqualTo(1)
+        assertThat(
+            string("SELECT state FROM card_lifecycle_idempotency WHERE reservation_key = 'DISPUTE_REFRESH:it-rfr-1'"),
+        ).isEqualTo("COMPLETED")
+
+        val replay = postEmpty(path, "it-rfr-1")
+        assertThat(replay.statusCode).isEqualTo(OK)
+        assertThat(replay.path<String>("id")).isEqualTo(disputeId)
+        assertThat(disputes.statusReads.get() - before).isEqualTo(1)
+
+        // The same key against ANOTHER case is a different request.
+        val otherAuth = clearedAuthorization("it-rfr2")
+        val otherId = post(
+            "/api/v1/card-disputes",
+            "it-rfr2-open",
+            """{"authorizationId":"$otherAuth","reasonCode":"10.4","amountMinorUnits":2000,"currencyCode":"CZK"}""",
+        ).then().statusCode(CREATED).extract().path<String>("id")
+        postEmpty("/api/v1/card-disputes/$otherId/refresh", "it-rfr-1").then().statusCode(CONFLICT)
+            .extract().asString().also { assertThat(it).contains("IDEMPOTENCY_KEY_REUSED") }
+        assertThat(disputes.statusReads.get() - before).isEqualTo(1)
+    }
+
     /** Fires [request] twice from two threads released by one latch, and returns both responses. */
     private fun race(request: () -> Response): List<Response> {
         val pool = Executors.newFixedThreadPool(2)
@@ -321,6 +414,8 @@ class CardLifecycleIdempotencyIT {
         .header("Idempotency-Key", key)
         .body(body)
         .post(path)
+
+    private fun postEmpty(path: String, key: String): Response = given().header("Idempotency-Key", key).post(path)
 
     /** An authorisation on [ACTIVE_CARD] with 5000 minor units cleared and an acquirer reference. */
     private fun clearedAuthorization(prefix: String): String {
