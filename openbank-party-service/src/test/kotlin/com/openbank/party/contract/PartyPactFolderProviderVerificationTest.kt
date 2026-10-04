@@ -31,6 +31,8 @@ import com.openbank.party.domain.model.PartyEvents
 import com.openbank.party.domain.model.PartyMandate
 import com.openbank.party.domain.model.PartyStatus
 import com.openbank.party.domain.model.PartyType
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
@@ -165,8 +167,24 @@ class PartyPactFolderProviderVerificationTest {
         // invocation, so clearing it here cannot leak into the authenticated interactions.
         if (context.interaction.description.endsWith("no caller identity")) {
             testIdentityAssociation.setTestIdentity(null)
+        } else if (context.interaction.description == "POST lending guarantor proof for a verified customer") {
+            testIdentityAssociation.setTestIdentity(
+                QuarkusSecurityIdentity.builder()
+                    .setPrincipal(QuarkusPrincipal("service-account-openbank-lending-graph"))
+                    .addRole("ROLE_LENDING_GRAPH_PROOF")
+                    .build(),
+            )
         }
         context.verifyInteraction()
+    }
+
+    @State("a verified lending guarantor exists")
+    fun verifiedLendingGuarantorExists() = runOnVertxContext {
+        seedMandateParty(
+            UUID.fromString("f0c8d9e0-0000-4000-8000-000000000001"),
+            PartyType.INDIVIDUAL,
+            "Pact Verified Guarantor",
+        )
     }
 
     /**

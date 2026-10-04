@@ -13,9 +13,14 @@ import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactFilter
 import au.com.dius.pact.provider.junitsupport.loader.PactFolder
 import com.openbank.document.application.port.out.DocumentRepositoryPort
+import com.openbank.document.domain.model.Document
+import com.openbank.document.domain.model.DocumentStatus
 import com.openbank.libs.storage.ObjectStorePort
+import io.quarkus.security.runtime.QuarkusPrincipal
+import io.quarkus.security.runtime.QuarkusSecurityIdentity
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
 import io.vertx.core.Vertx
 import jakarta.inject.Inject
@@ -23,6 +28,8 @@ import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
 import org.junit.jupiter.api.extension.ExtendWith
+import java.time.Instant
+import java.util.UUID
 
 /**
  * Provider-side Pact verification for the contracts consumers publish against
@@ -90,6 +97,9 @@ class DocumentPactProviderVerificationTest {
     @Inject
     lateinit var vertx: Vertx
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -99,7 +109,42 @@ class DocumentPactProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
-        context?.verifyInteraction()
+        if (context == null) return
+        if (context.interaction.description == "POST lending guarantee evidence proof for a signed document") {
+            testIdentityAssociation.setTestIdentity(
+                QuarkusSecurityIdentity.builder()
+                    .setPrincipal(QuarkusPrincipal("service-account-openbank-lending-graph"))
+                    .addRole("ROLE_LENDING_GRAPH_PROOF")
+                    .build(),
+            )
+        }
+        context.verifyInteraction()
+    }
+
+    @State("signed lending guarantee evidence matches its loan and guarantor")
+    fun signedLendingGuaranteeEvidenceExists() = DocumentDisclosurePactSeed.runOnVertxContext(vertx) {
+        val id = UUID.fromString("f0c8d9e0-0000-4000-8000-000000000002")
+        if (documentRepository.findById(id) != null) return@runOnVertxContext
+        documentRepository.save(
+            Document(
+                id = id,
+                templateCode = "PACT_LENDING_GUARANTEE",
+                templateVersion = "1",
+                sha256 = "b".repeat(64),
+                storageKey = "pact/lending-guarantee/$id.pdf",
+                contentType = "application/pdf",
+                sizeBytes = 1,
+                status = DocumentStatus.SIGNED,
+                metadata = emptyMap(),
+                partyRef = "f0c8d9e0-0000-4000-8000-000000000001",
+                caseRef = "f0c8d9e0-0000-4000-8000-000000000003",
+                productRef = null,
+                retainUntil = null,
+                createdAt = Instant.parse("2026-01-15T10:00:00Z"),
+                sealedSha256 = "a".repeat(64),
+                bankScope = "openbank-cz",
+            ),
+        )
     }
 
     /**
