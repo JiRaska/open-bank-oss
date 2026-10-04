@@ -100,6 +100,22 @@ class ContextPactProviderVerificationTest {
         }
     }
 
+    @State("a lending investigator is not assigned to the requested loan")
+    fun noLendingLoanAssignment() {
+        val config = org.eclipse.microprofile.config.ConfigProvider.getConfig()
+        DriverManager.getConnection(
+            config.getValue("quarkus.datasource.jdbc.url", String::class.java),
+            config.getValue("quarkus.datasource.username", String::class.java),
+            config.getValue("quarkus.datasource.password", String::class.java),
+        ).use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    "DELETE FROM context_case_assignments WHERE principal_id = 'pact-operator' AND case_id = '$LENDING_LOAN_ID'",
+                )
+            }
+        }
+    }
+
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verify(context: PactVerificationContext) {
