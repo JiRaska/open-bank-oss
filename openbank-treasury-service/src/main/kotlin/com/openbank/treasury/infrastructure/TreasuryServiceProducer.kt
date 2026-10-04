@@ -68,6 +68,7 @@ class TreasuryServiceProducer {
         @ConfigProperty(name = "openbank.treasury.confirmation.required", defaultValue = "true")
         confirmationRequired: Boolean,
         quotes: SimulatedQuoteService,
+        productLimits: ProductLimitConfig,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -80,6 +81,7 @@ class TreasuryServiceProducer {
         FxRateTolerance(rateCheckEnabled, tolerancePercent),
         confirmationRequired,
         quotes,
+        productLimits.toPolicy(),
     )
 
     @Produces

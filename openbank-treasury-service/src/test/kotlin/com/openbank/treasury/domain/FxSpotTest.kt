@@ -69,8 +69,13 @@ class FxSpotTest {
 
     @Test
     fun `reversal of a settled spot is the flipped settlement, from BOOKED nothing, and there is no maturity`() {
-        val settled = fxSpot().submit(dealer, LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO), NOW)
-            .approve(approver, LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO), NOW)
+        val settled = fxSpot().submit(
+            dealer,
+            LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO),
+            NOW,
+            DealFixtures.withinProduct,
+        )
+            .approve(approver, LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO), NOW, DealFixtures.withinProduct)
             .confirm(approver, NOW)
             .settle(approver, MONDAY.plusDays(2), NOW)
         val reversal = PostingRules.reversal(settled, DealState.SETTLED)!!
@@ -97,8 +102,8 @@ class FxSpotTest {
     @Test
     fun `an FX spot consumes the limit while pending, booked or confirmed, and releases it on settlement`() {
         val check = LimitCheck.of(bankA, fxSpot(), BigDecimal.ZERO)
-        val pending = fxSpot().submit(dealer, check, NOW)
-        val booked = pending.approve(approver, check, NOW)
+        val pending = fxSpot().submit(dealer, check, NOW, DealFixtures.withinProduct)
+        val booked = pending.approve(approver, check, NOW, DealFixtures.withinProduct)
         val confirmed = booked.confirm(approver, NOW)
         assertThat(pending.consumesLimit).isTrue()
         assertThat(booked.consumesLimit).isTrue()
