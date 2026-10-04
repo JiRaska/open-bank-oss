@@ -161,7 +161,7 @@ spec:
         # all @Authorize-annotated endpoints in fx-service (fx.*). Bundle mounted from
         # fx-opa-bundle ConfigMap (gen-fx-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
