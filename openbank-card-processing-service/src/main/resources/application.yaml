@@ -168,6 +168,13 @@ mp:
       sandbox-acquirer-enabled: true
 
 "%test":
+  mp:
+    messaging:
+      outgoing:
+        # HTTP/outbox tests assert the committed rows, not broker delivery. Keep the producer
+        # local so the test JVM never retries a Kafka broker that CI does not start.
+        card-processing-events-out:
+          connector: smallrye-in-memory
   quarkus:
     datasource:
       username: openbank
