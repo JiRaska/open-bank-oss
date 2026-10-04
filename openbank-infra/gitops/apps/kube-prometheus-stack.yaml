@@ -381,7 +381,7 @@ spec:
                       storage: 180Gi
         grafana:
           enabled: true
-          # Security patch (ADR-0079 lifecycle): 13.0.1-security-01 -> 13.0.2.
+          # ADR-0079 lifecycle: 13.0.2 -> 13.2.3 (latest 13.2.x; kps subchart default is 13.2.2).
           # Pull from our ECR Public mirror, not Docker Hub: grafana/grafana is not
           # a Docker Official Image, so the anonymous docker-hub ECR pull-through
           # rate-limited it to NotFound on fresh nodes (2026-06-27, stuck rollout).
@@ -390,7 +390,7 @@ spec:
           image:
             registry: public.ecr.aws/d7v4f3x6
             repository: grafana
-            tag: "13.0.2"
+            tag: "13.2.3"
           defaultDashboardsTimezone: browser
           # STILL NO GRAFANA INGRESS. Grafana is reached at
           # https://admin.open-bank.tech/tools/grafana, and that path is served by

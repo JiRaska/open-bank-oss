@@ -178,10 +178,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-instant|6. Change log|SctInstOutboxPort':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
-    'openbank-sepa-payment|**T**ampering|XMLInputFactory':
-        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
-    'openbank-sepa-payment|5a. Return path (pacs.004) — STRIDE supplement|XMLInputFactory':
-        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
     'openbank-settlement-service|T1|workflowRunId':

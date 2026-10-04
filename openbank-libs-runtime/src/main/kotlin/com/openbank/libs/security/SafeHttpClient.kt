@@ -8,10 +8,12 @@ import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.net.SocketTimeoutException
+import java.security.KeyStore
 import java.security.cert.CertificateParsingException
 import java.security.cert.X509Certificate
 import java.time.Duration
@@ -27,6 +29,7 @@ import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLPeerUnverifiedException
 import javax.net.ssl.SSLSession
 import javax.net.ssl.SSLSocket
+import javax.net.ssl.TrustManagerFactory
 
 /**
  * Egress-allowlisted HTTP/1.1 client — ADR-0320 P1 (SSRF control).
@@ -42,7 +45,10 @@ import javax.net.ssl.SSLSocket
  *
  * Deliberately NOT a CDI bean (ADR-0320 amendment rule 1): services construct it from their own
  * config, e.g. `SafeHttpClient(EgressPolicy.fromConfig(allowedHosts))`. Trust is always the JVM
- * default; there is no public way to supply an `SSLContext` (so no caller can pass a trust-all one).
+ * default PKIX validation. No caller — production or test — can supply an `SSLContext` or a
+ * `TrustManager`, so a trust-all configuration is not expressible: the only override
+ * ([withTrustAnchorsForTesting]) swaps the set of trusted ROOTS, and certificates are still
+ * validated by the platform's PKIX trust manager plus HTTPS endpoint identification.
  *
  * Redirects are never followed: a 3xx is returned to the caller as-is, whose `Location` must go
  * back through [send] — and therefore through the policy — if the caller chooses to follow it.
@@ -53,8 +59,8 @@ import javax.net.ssl.SSLSocket
 @Suppress("TooManyFunctions")
 class SafeHttpClient private constructor(
     private val policy: EgressPolicy,
-    /** Null means the JVM default trust. Only [withTrustForTesting] can set it — see there. */
-    private val sslContextOverride: SSLContext?,
+    /** Null means the JVM default trust store. Only [withTrustAnchorsForTesting] sets it. */
+    private val trustAnchors: KeyStore?,
     private val resolver: EgressResolver = EgressResolver.SYSTEM,
     private val connectTimeout: Duration = Duration.ofSeconds(DEFAULT_CONNECT_TIMEOUT_S),
     private val readTimeout: Duration = Duration.ofSeconds(DEFAULT_READ_TIMEOUT_S),
@@ -103,16 +109,12 @@ class SafeHttpClient private constructor(
             )
         try {
             raw.soTimeout = boundedTimeoutMs(deadline)
-            val exchange = { socket: Socket ->
-                check(socket.inetAddress == pinned) { "connected address differs from the vetted one" }
-                val out = socket.getOutputStream()
-                out.write(head)
-                request.body?.let(out::write)
-                out.flush()
-                val input = BufferedInputStream(DeadlineInputStream(socket, deadline, readTimeout.toMillis()))
-                readResponse(input, request.method.uppercase())
+            val wire = Wire(pinned, head, request, deadline)
+            return if (target.scheme == "https") {
+                overTls(raw, target, wire)
+            } else {
+                exchange(raw, raw.getOutputStream(), raw.getInputStream(), wire)
             }
-            return if (target.scheme == "https") overTls(raw, target, exchange) else exchange(raw)
         } finally {
             // Every path — handshake failure, timeout, parse error — releases the raw socket too.
             runCatching { raw.close() }
@@ -156,13 +158,30 @@ class SafeHttpClient private constructor(
         }
     }
 
+    /** What one request needs on the wire, so [exchange] can run on the plain or the TLS socket. */
+    private class Wire(val pinned: InetAddress, val head: ByteArray, val request: EgressRequest, val deadline: Long)
+
+    /**
+     * Writes the request and reads the response. The streams are opened by the CALLER, so on the TLS
+     * path they come from the very `SSLSocket` whose endpoint identification [overTls] configured
+     * (and whose handshake it completed) in the same scope; this function never opens a stream.
+     */
+    private fun exchange(socket: Socket, out: OutputStream, rawIn: InputStream, wire: Wire): EgressResponse {
+        check(socket.inetAddress == wire.pinned) { "connected address differs from the vetted one" }
+        out.write(wire.head)
+        wire.request.body?.let(out::write)
+        out.flush()
+        val input = BufferedInputStream(DeadlineInputStream(socket, rawIn, wire.deadline, readTimeout.toMillis()))
+        return readResponse(input, wire.request.method.uppercase())
+    }
+
     /**
      * Runs [exchange] over a TLS layer on [raw]. The I/O happens HERE, on the same `tls` whose
      * parameters (HTTPS endpoint identification, SNI, TLS 1.2+) were just set and whose handshake
      * completed — so no unverified SSLSocket ever escapes this function.
      */
-    private fun <T> overTls(raw: Socket, target: EgressTarget, exchange: (Socket) -> T): T {
-        val ctx = sslContextOverride ?: SSLContext.getDefault()
+    private fun overTls(raw: Socket, target: EgressTarget, wire: Wire): EgressResponse {
+        val ctx = trustAnchors?.let(::pkixContext) ?: SSLContext.getDefault()
         // host here is the ORIGINAL name (no trailing dot): it becomes the SSLSession peer host, so
         // the default trust manager's HTTPS identity check runs against the name, never the pinned IP.
         val tls = ctx.socketFactory.createSocket(raw, target.host, target.port, true) as SSLSocket
@@ -177,7 +196,7 @@ class SafeHttpClient private constructor(
             // name mismatch; this re-checks the negotiated session explicitly, so a JSSE provider
             // or future edit that drops the parameter still cannot send a byte to the wrong peer.
             PeerHostnameVerifier.verify(target.host, tls.session)
-            return exchange(tls)
+            return exchange(tls, tls.outputStream, tls.inputStream, wire)
         } finally {
             runCatching { tls.close() }
         }
@@ -334,10 +353,10 @@ class SafeHttpClient private constructor(
     /** Arms each read with min(readTimeout, time left on the call deadline). */
     private class DeadlineInputStream(
         private val socket: Socket,
+        private val inner: InputStream,
         private val deadline: Long,
         private val readTimeoutMs: Long,
     ) : InputStream() {
-        private val inner = socket.getInputStream()
 
         private fun arm() {
             socket.soTimeout = minOf(readTimeoutMs, boundedTimeoutMs(deadline).toLong()).toInt()
@@ -393,15 +412,23 @@ class SafeHttpClient private constructor(
             }
 
         /**
-         * TEST-ONLY: a client that trusts [sslContext] instead of the JVM default. `internal` so no
-         * production module can hand SafeHttpClient a trust-all context; there is deliberately no
-         * public way to change trust.
+         * TEST-ONLY: a client whose trusted ROOTS are [trustAnchors] instead of the JVM's cacerts.
+         * `internal`, and deliberately not an `SSLContext`/`TrustManager` parameter: validation is
+         * still the platform PKIX trust manager plus HTTPS endpoint identification, so even a test
+         * cannot build a client that accepts an unvalidated certificate.
          */
-        internal fun withTrustForTesting(
-            sslContext: SSLContext,
+        internal fun withTrustAnchorsForTesting(
+            trustAnchors: KeyStore,
             policy: EgressPolicy,
             resolver: EgressResolver = EgressResolver.SYSTEM,
-        ): SafeHttpClient = SafeHttpClient(policy, sslContext, resolver)
+        ): SafeHttpClient = SafeHttpClient(policy, trustAnchors, resolver)
+
+        /** A TLS context validating against [anchors] with the platform's PKIX trust manager. */
+        private fun pkixContext(anchors: KeyStore): SSLContext {
+            val tmf = TrustManagerFactory.getInstance("PKIX")
+            tmf.init(anchors)
+            return SSLContext.getInstance("TLS").apply { init(null, tmf.trustManagers, null) }
+        }
 
         private fun remainingMs(deadline: Long): Long = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime())
 

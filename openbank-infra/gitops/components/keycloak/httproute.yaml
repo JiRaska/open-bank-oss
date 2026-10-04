@@ -5,9 +5,10 @@
 # BOTH nginx Ingresses in keycloak.yaml: `keycloak` (the browser leg) and
 # `keycloak-admin-block` (the operator-only surfaces, 403 at the edge).
 #
-# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, which external-dns skips, so kc.open-bank.tech keeps resolving
-# to ingress-nginx. Three steps, each its own change, in this order:
+# IN DNS since the cutover: external-dns publishes kc.open-bank.tech from this route, pointing
+# at the Gateway's NLB. Both nginx Ingresses in keycloak.yaml now carry
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keep serving on
+# ingress-nginx as the rollback (swap the annotation back). The three steps were:
 #   1. this file — the ReferenceGrant, the route and its policies (no listener names them yet);
 #   2. the Gateway's https-keycloak listener (envoy-gateway/gateway.yaml), once the grant is
 #      live — switching the listener in the same sync as the grant left langfuse's listener
@@ -83,9 +84,6 @@ kind: HTTPRoute
 metadata:
   name: keycloak
   namespace: iam
-  annotations:
-    # Held out of DNS until the cutover change (step 3 above).
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge

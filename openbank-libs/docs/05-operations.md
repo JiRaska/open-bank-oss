@@ -32,3 +32,9 @@ Každá služba postavená na `openbank-libs-runtime` před hlášením připrav
 Proč: v sandboxu byl každý pomalý požadavek za 48 h první požadavek po startu podu (1–2 s proti 17–60 ms). Naměřený medián prvního požadavku se zahřátím 967 ms, bez něj 2622 ms.
 
 Konfigurace: `openbank.warmup.enabled` (výchozí true, v `%test` vypnuto), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Každý krok loguje délku a výsledek; selhání kroku se zaloguje a ostatní kroky pokračují. `/q/health/ready` ukazuje `startup-warmup`; metrika `openbank_warmup_seconds{step,outcome}` měří kroky i celek (`step="total"`) a `openbank_warmup_cap_exceeded_total` počítá pody, které začaly přijímat provoz po vypršení limitu. Zvýšení poslední metriky nebo `outcome="failed"` vyžaduje ověřit první skutečný požadavek po nasazení.
+
+## Bezpečné XML a TLS odchozích požadavků
+
+Pro nedůvěryhodné XML používejte `SecureXml` z `openbank-libs-domain`; vydávané DOM, SAX, StAX, schema a transformer factory zakazují externí entity a externí DTD. DOM a SAX odmítnou celý DOCTYPE. Produkční parsování nesmí vytvářet vlastní JAXP factory. `SecureXmlTest` a `XxeRejectionTest` ověřují odmítnutí externích entit a DTD.
+
+`SafeHttpClient` z `openbank-libs-runtime` při HTTPS ověřuje certifikační řetězec pomocí JVM a kontroluje hostname. Testovací kořeny stále procházejí platformním PKIX trust managerem; volající nemůže předat vlastní trust manager ani TLS kontext.

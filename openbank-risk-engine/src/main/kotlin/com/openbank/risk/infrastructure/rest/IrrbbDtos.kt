@@ -127,6 +127,18 @@ data class ReportingAggregateDto(
     val notStated: String?,
 )
 
+data class TreasuryScenarioDto(val scenario: String, val deltaEve: BigDecimal)
+
+/** The treasury deals' share of one currency's figures — already inside `gaps` and `scenarios`. */
+data class TreasuryContributionDto(
+    val currency: String,
+    val deals: Int,
+    val placements: BigDecimal,
+    val borrowings: BigDecimal,
+    val basePv: BigDecimal?,
+    val scenarios: List<TreasuryScenarioDto>,
+)
+
 data class IrrbbResponse(
     val runId: UUID,
     val asOf: String,
@@ -141,6 +153,8 @@ data class IrrbbResponse(
     val shockNotConfigured: List<String>,
     val unpriced: List<String>,
     val assumptions: IrrbbAssumptionsDto,
+    /** The treasury money-market deals' share per currency; empty when the run has none. */
+    val treasury: List<TreasuryContributionDto>,
     /** What the figures do not capture: flat curve extrapolation, behavioural simplifications. */
     val dataGaps: List<IrrbbDataGapDto>,
     /** Present only for a multi-currency book (the single-currency aggregate is [worstCase]). */
@@ -275,6 +289,16 @@ fun IrrbbAnalysis.toResponse() = IrrbbResponse(
     reportingAggregate = reporting?.toDto(),
     shockNotConfigured = result.shockNotConfigured,
     unpriced = result.unpriced,
+    treasury = result.treasury.map { t ->
+        TreasuryContributionDto(
+            currency = t.currency,
+            deals = t.deals,
+            placements = t.placements,
+            borrowings = t.borrowings,
+            basePv = t.basePv,
+            scenarios = t.deltaEve.map { (s, d) -> TreasuryScenarioDto(s.wire, d) },
+        )
+    },
     dataGaps = result.dataGaps.map { it.toDto() },
     assumptions = IrrbbAssumptionsDto(
         model = model.toDto(),
