@@ -8,6 +8,7 @@ import com.openbank.cardprocessing.application.port.out.PostingOutcome
 import com.openbank.cardprocessing.domain.model.AuthorizationStatus
 import com.openbank.cardprocessing.domain.model.CardAuthorization
 import com.openbank.cardprocessing.domain.model.PresentmentChannel
+import com.openbank.cardprocessing.infrastructure.client.CardClearingLedgerKey
 import com.openbank.cardprocessing.infrastructure.client.InitiateTransactionRequest
 import com.openbank.cardprocessing.infrastructure.client.TransactionLedgerPostingAdapter
 import com.openbank.cardprocessing.infrastructure.client.TransactionResponse
@@ -65,7 +66,8 @@ class TransactionLedgerPostingAdapterTest {
         coEvery { client.initiate(capture(sent)) } returns TransactionResponse(UUID.randomUUID(), "COMPLETED")
         val adapter = TransactionLedgerPostingAdapter(client, clock, postingEnabled = true)
 
-        val result = adapter.postClearedSpend(authorization("CZK"), 12_345, "clr-1")
+        val authorization = authorization("CZK")
+        val result = adapter.postClearedSpend(authorization, 12_345, "clr-1")
 
         assertThat(result.outcome).isEqualTo(PostingOutcome.POSTED)
         assertThat(sent.captured.amount).isEqualByComparingTo(BigDecimal("123.45"))
@@ -73,8 +75,55 @@ class TransactionLedgerPostingAdapterTest {
         assertThat(sent.captured.sourceAccountId).isNotNull()
         // Derived from the clearing, so a retried presentment presents the same key and
         // transaction-service dedupes it instead of debiting the customer twice.
-        assertThat(sent.captured.idempotencyKey).isEqualTo("card-clearing:clr-1")
+        // Scoped by the authorisation: a clearing key is only unique per authorisation.
+        assertThat(sent.captured.idempotencyKey).isEqualTo(CardClearingLedgerKey.of(authorization.id, "clr-1"))
+        assertThat(sent.captured.idempotencyKey).startsWith("card-clearing:${authorization.id}:h:")
         Unit
+    }
+
+    @Test
+    fun `the same clearing key on two authorisations gives two ledger keys`() {
+        val a = UUID.randomUUID()
+        val b = UUID.randomUUID()
+
+        // The unscoped key made transaction-service dedupe the second authorisation's posting away.
+        assertThat(CardClearingLedgerKey.of(a, "clr-1"))
+            .isNotEqualTo(CardClearingLedgerKey.of(b, "clr-1"))
+    }
+
+    @Test
+    fun `every ledger key is a fixed-length digest that fits the ledger column, deterministically`() {
+        val id = UUID.randomUUID()
+        val keys = listOf("c", "clr-1", "k".repeat(128))
+
+        keys.forEach { clearingKey ->
+            val key = CardClearingLedgerKey.of(id, clearingKey)
+            assertThat(key).hasSize(CardClearingLedgerKey.LENGTH)
+            assertThat(key.length).isLessThanOrEqualTo(CardClearingLedgerKey.MAX_LENGTH)
+            assertThat(key).startsWith("card-clearing:$id:h:")
+            assertThat(CardClearingLedgerKey.of(id, clearingKey)).isEqualTo(key)
+        }
+        assertThat(keys.map { CardClearingLedgerKey.of(id, it) }).doesNotHaveDuplicates()
+    }
+
+    @Test
+    fun `a clearing key that spells another key's digest cannot collide with it`() {
+        // The attack on a mixed "verbatim when it fits, digest otherwise" encoding: choose a short
+        // key equal to the digest form of a long one. One encoding for every key leaves no overlap.
+        val id = UUID.randomUUID()
+        val longKey = "k".repeat(128)
+        val digestHex = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(longKey.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+        val digestB64 = CardClearingLedgerKey.of(id, longKey).substringAfter(":h:")
+
+        assertThat(
+            CardClearingLedgerKey.of(id, "sha256-$digestHex"),
+        ).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(
+            CardClearingLedgerKey.of(id, "sha256-" + digestHex.take(32)),
+        ).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(CardClearingLedgerKey.of(id, "h:$digestB64")).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
+        assertThat(CardClearingLedgerKey.of(id, digestB64)).isNotEqualTo(CardClearingLedgerKey.of(id, longKey))
     }
 
     @Test

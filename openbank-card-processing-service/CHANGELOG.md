@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.4.0...card-processing-service-v0.5.0) (2026-10-03)
+
+
+### Features
+
+* **card-processing:** network-token and dispute-case lifecycle — the callers for the phase-2 ports (ADR-0283 phase 3) ([#8864](https://github.com/JiRaska/open-bank-oss/issues/8864)) ([1851c09](https://github.com/JiRaska/open-bank-oss/commit/1851c09ad884c1778e753ff9c162438da27296a7))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/card-processing-service-v0.3.0...card-processing-service-v0.4.0) (2026-10-03)
 
 

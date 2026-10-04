@@ -45,6 +45,7 @@ dependencies {
     testImplementation(libs.testcontainers.postgresql)
     testImplementation(project(":openbank-libs-testing"))
     testImplementation(libs.smallrye.reactive.messaging.inmemory)
+    testImplementation(libs.pact.provider)
 }
 
 kover {
