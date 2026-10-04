@@ -4,6 +4,7 @@ package com.openbank.balance.application.usecase
 import com.openbank.balance.application.port.`in`.AccountBookedChange
 import com.openbank.balance.application.port.out.LedgerProjectionPort
 import com.openbank.balance.domain.model.Balance
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -18,8 +19,7 @@ import java.util.UUID
 class LedgerProjectionServiceTest {
     private val change = AccountBookedChange(
         UUID.randomUUID(),
-        "CZK",
-        BigDecimal.TEN,
+        Money.of(BigDecimal.TEN, "CZK"),
         UUID.randomUUID(),
         UUID.randomUUID(),
         LocalDate.of(2026, 1, 1),
@@ -38,7 +38,7 @@ class LedgerProjectionServiceTest {
                 change.journalEntryId,
                 change.accountId,
                 change.currency,
-                change.delta,
+                change.delta.amount,
                 change.transactionId,
                 change.entryDate,
                 "system:balance-service:ledger-projection",
