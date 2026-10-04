@@ -31,7 +31,7 @@ Zamítnutí je vytvořený záznam rozhodnutí, proto je to **201**, ne 4xx; odp
 ## Idempotence
 
 - **Autorizace:** `Idempotency-Key` se ukládá na řádek pod UNIQUE indexem; opakovaný klíč vrátí první autorizaci beze změny a druhý hold nevznikne.
-- **Clearing:** klíč je povinný a předává se transaction-service jako `card-clearing:<klíč>` pro zaúčtování. Služba před započtením prezentace klíč clearingu nevyhledává, takže opakovaná prezentace se započte znovu, pokud se ještě vejde do zbývajícího holdu.
+- **Clearing:** klíč je povinný a započte se **nejvýše jednou na autorizaci**. Každý započtený clearing se zapíše do `card_clearings` pod UNIQUE omezením `(authorization_id, idempotency_key)`, ve stejné transakci jako snížení holdu a událost `card.cleared.v1`. Opakování se stejnou částkou a měnou (měna bez ohledu na velikost písmen) vrátí aktuální stav autorizace s **200** — žádné druhé snížení holdu, žádná druhá událost, žádné druhé zaúčtování. Stejný klíč s jinou částkou nebo měnou je **409 `IDEMPOTENCY_KEY_REUSED`** (tělo libs `ApiError`). Dva souběžné duplikáty se nemohou započíst oba: insert poraženého selže na omezení, jeho transakce se celá vrátí a vrátí výsledek vítěze. Odmítnutá prezentace nic nezapisuje, takže její opakování se vyhodnotí znovu. Souběžné clearingy s **různými** klíči na jedné autorizaci serializuje optimistický zámek: poražený se jednou znovu vyhodnotí proti skutečnému zbývajícímu holdu (započte se, nebo 409 `EXCEEDS_AUTHORIZED_AMOUNT`); prohraje-li podruhé, odpoví **409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`** — opakujte později. Zaúčtování má v transaction-service klíč `card-clearing:<idAutorizace>:h:<base64url(SHA-256(klíč))>` — omezený na autorizaci, vždy hashovaný (jediné kódování, takže žádný klíč clearingu nemůže napodobit klíč zaúčtování jiného klíče) a s pevnou délkou 96 znaků, uvnitř 100znakového sloupce transaction-service.
 - **Sandbox nákup:** `idempotencyKey` v těle slouží jako klíč autorizace i jako network reference; klíč clearingu je `<klíč>:clearing`.
 
 ## Model chyb a odmítnutí
@@ -41,6 +41,8 @@ Zamítnutí je vytvořený záznam rozhodnutí, proto je to **201**, ne 4xx; odp
 | Chybějící nebo prázdný `Idempotency-Key`, nekladná částka, měna ≠ měna karty | 400 (`IllegalArgumentException` mapuje libs-runtime) |
 | Karta neznámá pro card-issuance | 404 |
 | Clearing/reverzace odmítnuta životním cyklem | **409** s `{ reason, message }` |
+| Klíč clearingu znovu použit s jinou částkou nebo měnou | **409** s libs `ApiError`, `code: IDEMPOTENCY_KEY_REUSED` |
+| Clearing nebo reverzace dvakrát prohrály souběh zápisů | **409** s libs `ApiError`, `code: IDEMPOTENCY_REQUEST_IN_PROGRESS` (opakujte později) |
 
 `reason` je jedna z hodnot `NOT_HOLDING_FUNDS` (koncový stav nebo neznámé id autorizace), `AMOUNT_NOT_POSITIVE`, `EXCEEDS_AUTHORIZED_AMOUNT`, `CURRENCY_MISMATCH`, `NOT_YET_EXPIRED` (jen expirace, interní).
 

@@ -41,7 +41,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-kyb-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "05f0a6c7d224e47d"
+        openbank.tech/policy-checksum: "c27d850a49ffb20c"
       labels:
         app.kubernetes.io/name: kyb-service
         app.kubernetes.io/part-of: kyb
