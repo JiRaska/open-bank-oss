@@ -3173,7 +3173,6 @@ authz:
         - account.read
         - anacredit.list
         - anacredit.read
-        - audit.read
         - card.list
         - card.read
         - device.list
@@ -3306,7 +3305,7 @@ authz:
       grant:
         - account.read
         - anacredit.read
-        - audit.read
+        - audit.trail.inspect
         - card.read
         - dispatch.read
         - fx.read
@@ -3350,7 +3349,7 @@ authz:
         - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
     ROLE_AUDITOR:
       grant:
-        - audit.read
+        - audit.trail.inspect
         - audit.verify
     ROLE_SUPERVISOR:
       grant:
@@ -3704,6 +3703,8 @@ agent_case_capability_matrix:
 # blast radius without being money-path by that list's definition. The gate's SCOPE is not
 # hand-kept: an undeclared machine account fails the check rather than passing it.
 autonomous_agent_prs:
+  max_open_prs: 3
+  grandfather_created_before: '2026-10-03T20:00:00Z'
   detect:
     - 'any pull_request whose author is a declared agent account, or whose head branch carries a declared agent prefix'
   require:

@@ -115,6 +115,9 @@ metadata:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: journey
     openbank.tech/journey: product-catalog-read
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/10 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "3600"
 spec:
   schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid

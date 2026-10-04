@@ -18,6 +18,7 @@ import com.openbank.domestic.domain.model.DelegatedSpendReservationState
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -204,8 +205,7 @@ class DelegatedDomesticPaymentServiceTest {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "0000",
         creditorName = "Grantee",
-        amount = BigDecimal("1500.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("1500.00"), "CZK"),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,
