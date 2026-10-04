@@ -11,6 +11,7 @@ import com.openbank.balance.domain.model.BalanceEvent
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.domain.model.BalanceHold
 import com.openbank.balance.it.PostgresRedpandaTestResource
+import com.openbank.libs.domain.money.Money
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
@@ -60,8 +61,7 @@ class HoldSnapshotConcurrencyIT {
             projection.apply(
                 AccountBookedChange(
                     account,
-                    "CZK",
-                    BigDecimal("50"),
+                    Money.of(BigDecimal("50"), "CZK"),
                     UUID.randomUUID(),
                     UUID.randomUUID(),
                     LocalDate.of(2026, 1, 1),
@@ -89,8 +89,7 @@ class HoldSnapshotConcurrencyIT {
             projection.apply(
                 AccountBookedChange(
                     account,
-                    "CZK",
-                    BigDecimal("50"),
+                    Money.of(BigDecimal("50"), "CZK"),
                     UUID.randomUUID(),
                     UUID.randomUUID(),
                     LocalDate.of(2026, 1, 1),
@@ -130,8 +129,7 @@ class HoldSnapshotConcurrencyIT {
             projection.apply(
                 AccountBookedChange(
                     account,
-                    "CZK",
-                    BigDecimal("-100"),
+                    Money.of(BigDecimal("-100"), "CZK"),
                     UUID.randomUUID(),
                     transaction,
                     LocalDate.of(2026, 1, 1),

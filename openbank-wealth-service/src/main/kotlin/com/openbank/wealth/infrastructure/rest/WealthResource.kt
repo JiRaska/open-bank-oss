@@ -6,6 +6,7 @@ package com.openbank.wealth.infrastructure.rest
 
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
+import com.openbank.libs.web.SYNTHETIC_TAINT_PROPERTY
 import com.openbank.wealth.application.port.`in`.DeclareHoldingCommand
 import com.openbank.wealth.application.port.`in`.DeclaredHoldingUseCase
 import com.openbank.wealth.application.port.`in`.RevalueHoldingCommand
@@ -27,6 +28,8 @@ import jakarta.ws.rs.PUT
 import jakarta.ws.rs.Path
 import jakarta.ws.rs.PathParam
 import jakarta.ws.rs.Produces
+import jakarta.ws.rs.container.ContainerRequestContext
+import jakarta.ws.rs.core.Context
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -67,6 +70,7 @@ class WealthResource {
     suspend fun declare(
         @HeaderParam("X-Customer-Party-Id") ownerPartyId: String?,
         request: DeclareHoldingRequest,
+        @Context requestContext: ContainerRequestContext,
     ): Response {
         val owner = requireNotNull(ownerPartyId) { "header 'X-Customer-Party-Id' is required" }
         val holding = holdings.declare(
@@ -80,6 +84,9 @@ class WealthResource {
                 documentIds = request.documentIds.mapIndexed { index, documentId ->
                     requireNotNull(documentId) { "documentIds[$index] must not be null" }
                 },
+                // Set by SyntheticTaintRequestFilter, and only for a principal in
+                // openbank.synthetic.trusted-principals; a raw header is never read here.
+                synthetic = requestContext.getProperty(SYNTHETIC_TAINT_PROPERTY) == true,
             ),
         )
         return Response.status(Response.Status.CREATED).entity(HoldingResponse.from(holding)).build()
