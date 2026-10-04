@@ -4,6 +4,9 @@
 
 package com.openbank.fx.application.port.`in`
 
+import com.openbank.fx.application.port.out.CnbPolicyRateUpsertOutcome
+import com.openbank.fx.domain.cnb.CnbPolicyInstrument
+import com.openbank.fx.domain.cnb.CnbPolicyRateFact
 import com.openbank.fx.domain.model.FxRate
 import java.time.LocalDate
 
@@ -38,4 +41,16 @@ interface CnbRateIngestionUseCase {
      * because every fixing this service writes has Prague-midnight validity bounds.
      */
     suspend fun getCnbRate(base: String, quote: String, asOf: LocalDate? = null): FxRate?
+}
+
+/** Inbound port: ingest the ČNB policy-rate histories and read the rate in effect on a day. */
+interface CnbPolicyRateUseCase {
+    /** Fetches, parses (all-or-nothing) and upserts one feed-backed instrument; throws on any failure. */
+    suspend fun ingest(instrument: CnbPolicyInstrument): CnbPolicyRateUpsertOutcome
+
+    /** Publishes the fact rows that have no machine feed and have not been published yet. */
+    suspend fun publishPendingFacts(): Int
+
+    /** The fact in effect on [asOf] (latest effectiveFrom <= asOf), or null when none is. */
+    suspend fun effectiveAt(instrument: CnbPolicyInstrument, asOf: LocalDate): CnbPolicyRateFact?
 }
