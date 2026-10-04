@@ -180,21 +180,20 @@ class TreasuryDealServiceTest {
      * its trade date to the Prague day rejects it. The bank-zone date is the one callers must send.
      */
     @Test
-    fun `a value date taken from the UTC date after 22 00 UTC precedes the Prague trade date`(): Unit =
-        runBlocking {
-            clock = Clock.fixed(java.time.Instant.parse("2026-07-22T22:30:00Z"), ZoneOffset.UTC)
-            val utcDate = LocalDate.now(clock)
-            val bankDate = AccountingClock.bank(clock).today()
-            assertThat(utcDate).isEqualTo(LocalDate.parse("2026-07-22"))
-            assertThat(bankDate).isEqualTo(LocalDate.parse("2026-07-23"))
+    fun `a value date taken from the UTC date after 22 00 UTC precedes the Prague trade date`(): Unit = runBlocking {
+        clock = Clock.fixed(java.time.Instant.parse("2026-07-22T22:30:00Z"), ZoneOffset.UTC)
+        val utcDate = LocalDate.now(clock)
+        val bankDate = AccountingClock.bank(clock).today()
+        assertThat(utcDate).isEqualTo(LocalDate.parse("2026-07-22"))
+        assertThat(bankDate).isEqualTo(LocalDate.parse("2026-07-23"))
 
-            val fromUtc = cmd(maturity = utcDate.plusDays(30)).copy(tradeDate = null, valueDate = utcDate)
-            assertThatThrownBy { runBlocking { service.draft(fromUtc, DealFixtures.dealer) } }
-                .hasMessageContaining("valueDate must not precede tradeDate")
+        val fromUtc = cmd(maturity = utcDate.plusDays(30)).copy(tradeDate = null, valueDate = utcDate)
+        assertThatThrownBy { runBlocking { service.draft(fromUtc, DealFixtures.dealer) } }
+            .hasMessageContaining("valueDate must not precede tradeDate")
 
-            val fromBank = cmd(maturity = bankDate.plusDays(30)).copy(tradeDate = null, valueDate = bankDate)
-            assertThat(service.draft(fromBank, DealFixtures.dealer).tradeDate).isEqualTo(bankDate)
-        }
+        val fromBank = cmd(maturity = bankDate.plusDays(30)).copy(tradeDate = null, valueDate = bankDate)
+        assertThat(service.draft(fromBank, DealFixtures.dealer).tradeDate).isEqualTo(bankDate)
+    }
 
     private suspend fun bookOnPragueDay(at: java.time.Instant, prague: LocalDate): Deal {
         clock = Clock.fixed(at, ZoneOffset.UTC)
