@@ -11,8 +11,8 @@ import com.openbank.customeredge.infrastructure.audit.EdgeAuditPublisher
 import com.openbank.customeredge.infrastructure.rest.ActingForResolver
 import com.openbank.customeredge.infrastructure.rest.BusinessPaymentApprovals
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
-import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
 import io.mockk.mockk
 import jakarta.ws.rs.core.Response
@@ -67,7 +67,7 @@ class BusinessPaymentSingleSignatureRegressionTest {
     private fun resource(upstream: UpstreamClient, withHold: Boolean) = CustomerEdgeResource(
         upstream,
         mockk<EdgeAuditPublisher>(relaxed = true),
-        PaymentSessionStore(),
+        inMemoryPaymentSessionStore(),
         mockk(relaxed = true),
         mockk(relaxed = true),
         Clock.systemUTC(),
