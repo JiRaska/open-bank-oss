@@ -14,6 +14,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -95,7 +96,7 @@ class DomesticPaymentServiceTest {
 
         assertThatThrownBy {
             runBlocking {
-                service.createPayment(command.copy(amount = command.amount + BigDecimal.ONE))
+                service.createPayment(command.copy(amount = command.amount + Money.of(BigDecimal.ONE, "CZK")))
             }
         }
             .isInstanceOf(DomesticPaymentIdempotencyConflictException::class.java)
@@ -238,8 +239,7 @@ class DomesticPaymentServiceTest {
         creditorAccountNumber = " 9876543210 ",
         creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
-        amount = BigDecimal("1500.00"),
-        currency = " czk ",
+        amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
         variableSymbol = " 2026001 ",
         specificSymbol = null,
         constantSymbol = " 0308 ",
@@ -262,8 +262,7 @@ class DomesticPaymentServiceTest {
         creditorAccountNumber = "9876543210",
         creditorBankCode = "0100",
         creditorName = "Brno Utility",
-        amount = BigDecimal("1500.00"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("1500.00"), "CZK"),
         variableSymbol = "2026001",
         specificSymbol = null,
         constantSymbol = "0308",
