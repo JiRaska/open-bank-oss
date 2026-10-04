@@ -83,7 +83,7 @@ class CardTokenServiceTest {
     /** A save that completes the claim the way the real repository does, inside its transaction. */
     private fun savingCompletes(saved: CapturingSlot<CardTokenRegistration>, event: CapturingSlot<OutboxMessage>) {
         coEvery { registrations.save(capture(saved), capture(event), any(), any()) } answers {
-            arg<IdempotencyClaim?>(3)?.let { idempotency.complete(it, saved.captured.id) }
+            arg<IdempotencyClaim?>(3)?.let { idempotency.completeNow(it, saved.captured.id) }
             saved.captured
         }
     }
@@ -317,12 +317,57 @@ class CardTokenServiceTest {
         val port = mockk<TokenisationPort>()
 
         val outcome = service(port)
-            .changeStatus(ChangeTokenStatusCommand("tok-dead", NetworkTokenStatus.ACTIVE))
+            .changeStatus(ChangeTokenStatusCommand("tok-dead", NetworkTokenStatus.ACTIVE, "key-dead"))
 
         assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.TOKEN_TERMINAL)
         // The rule is the aggregate's, not the adapter's: it must hold for a binding that would
         // have accepted the call.
         coVerify(exactly = 0) { port.changeStatus(any(), any()) }
+    }
+
+    @Test
+    fun `a status change retried under the same key replays and reaches the scheme once`(): Unit = runBlocking {
+        val live = registration(NetworkTokenStatus.ACTIVE)
+        coEvery { registrations.findByTokenReference(live.tokenReference) } returns live
+        coEvery { registrations.findById(live.id) } returns live.copy(status = NetworkTokenStatus.SUSPENDED)
+        val saved = slot<CardTokenRegistration>()
+        val event = slot<OutboxMessage>()
+        savingCompletes(saved, event)
+        val port = mockk<TokenisationPort>()
+        coEvery { port.changeStatus(live.tokenReference, NetworkTokenStatus.SUSPENDED) } returns
+            SchemeResult.Answered(
+                NetworkToken(live.tokenReference, live.last4, NetworkTokenStatus.SUSPENDED, null, null),
+                CardScheme.SIMULATOR,
+            )
+        val command = ChangeTokenStatusCommand(live.tokenReference, NetworkTokenStatus.SUSPENDED, "idem-status-1")
+
+        val first = service(port).changeStatus(command)
+        val replay = service(port).changeStatus(command)
+
+        assertThat((first as TokenOutcome.Changed).registration.status).isEqualTo(NetworkTokenStatus.SUSPENDED)
+        assertThat((replay as TokenOutcome.Changed).registration.id).isEqualTo(live.id)
+        coVerify(exactly = 1) { port.changeStatus(any(), any()) }
+        coVerify(exactly = 1) { registrations.save(any(), any(), any(), any()) }
+
+        // Same key, different target status: reuse, and the scheme is not asked.
+        assertThatThrownBy {
+            runBlocking {
+                service(port).changeStatus(command.copy(status = NetworkTokenStatus.DELETED))
+            }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+        coVerify(exactly = 1) { port.changeStatus(any(), any()) }
+    }
+
+    @Test
+    fun `a refused status change frees its key`(): Unit = runBlocking {
+        coEvery { registrations.findByTokenReference("tok-nope") } returns null
+
+        val outcome = service().changeStatus(
+            ChangeTokenStatusCommand("tok-nope", NetworkTokenStatus.SUSPENDED, "idem-status-2"),
+        )
+
+        assertThat((outcome as TokenOutcome.Refused).reason).isEqualTo(TokenRefusal.TOKEN_NOT_FOUND)
+        assertThat(idempotency.isPending(LifecycleOperation.TOKEN_STATUS_CHANGE, "idem-status-2")).isFalse()
     }
 
     private fun registration(status: NetworkTokenStatus) = CardTokenRegistration(

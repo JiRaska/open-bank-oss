@@ -1,0 +1,48 @@
+# Exercise the shipped payments PrometheusRule, not a copied PromQL expression.
+# Both positive and quiet controls matter: an alert on every real verdict would be noise.
+evaluation_interval: 1m
+rule_files:
+  - payments-openbank-fraud-scoring-alerts.yaml
+
+tests:
+  - interval: 1m
+    input_series:
+      - series: 'openbank_fraud_scoring_outcomes_total{result="unrecognised",service="domestic",rail="DOMESTIC"}'
+        # One event at 5m, then no more: low-volume contract drift must still alert.
+        values: '0+0x4 1+0x60'
+      - series: 'openbank_fraud_scoring_outcomes_total{result="real",service="domestic",rail="DOMESTIC"}'
+        values: '0+3x60'
+    alert_rule_test:
+      - eval_time: 0m
+        alertname: FraudScoringUnrecognisedVerdict
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: FraudScoringUnrecognisedVerdict
+        exp_alerts:
+          - exp_labels:
+              rail: DOMESTIC
+              service: domestic
+              severity: warning
+            exp_annotations:
+              subject_period: continuous
+              summary: Unreadable fraud verdict on the DOMESTIC rail
+              description: >-
+                domestic received a fraud-service verdict this rail cannot interpret
+                during the last 30m. Payments remain in shadow mode, but these attempts have no
+                usable fraud verdict. Check the provider response contract before enabling enforcement.
+      - eval_time: 40m
+        alertname: FraudScoringUnrecognisedVerdict
+        exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'openbank_fraud_scoring_outcomes_total{result="unrecognised",service="sepa-payment",rail="SEPA"}'
+        values: '0+0x60'
+      - series: 'openbank_fraud_scoring_outcomes_total{result="real",service="sepa-payment",rail="SEPA"}'
+        values: '0+3x60'
+      - series: 'openbank_fraud_scoring_outcomes_total{result="synthetic",service="sepa-payment",rail="SEPA"}'
+        values: '0+2x60'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: FraudScoringUnrecognisedVerdict
+        exp_alerts: []

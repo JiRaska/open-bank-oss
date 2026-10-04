@@ -10,6 +10,15 @@ Both trail reads (`GET /entries/{aggregateId}`, `GET /entries/by-actor/{actorId}
 
 ## Endpoints
 
+### `GET /api/v1/audit/evidence/{aggregateId}`
+
+ADR-0214 D3 evidence bundle (#11900): every entry the chain holds about one aggregate — a loan application, a loan — **oldest first**, each with its own `record_hash` recomputed at read time.
+
+- Roles: `ROLE_AUDITOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE`, `ROLE_CREDIT_RISK` (the only audit route credit-risk staff can read). `@Authorize(action = "audit.evidence.reconstruct")`; the OPA rule refuses every `service-account-*` identity. lending-service's `GET /applications/{id}/evidence` reaches this route with the **caller's own token**, never its service account.
+- Response: `attestation` (`audit-chain`), `entryCount`, `truncated` (more than 1000 entries exist), `tampered` (any entry `MISMATCH`), `hashStatusCounts`, `fullChainVerification`, and `entries[]` with payload, `recordHash`, `prevHash` and `hashStatus` ∈ `VERIFIED` · `MISMATCH` (edited after it was written) · `LEGACY_UNVERIFIABLE` (pre-#3586 hash form) · `UNCHAINED` (pre-chain row).
+- What it proves: each row is unaltered. What it does not: that no row was deleted or re-ordered — that is the full walk at `GET /api/v1/audit/integrity`.
+- An aggregate with no history returns an empty bundle (200), not 404.
+
 ### `GET /api/v1/audit/entries/{aggregateId}`
 
 Retrieve the audit trail for a single aggregate (an account, party, transaction, consent, KYC case, …), most recent first.

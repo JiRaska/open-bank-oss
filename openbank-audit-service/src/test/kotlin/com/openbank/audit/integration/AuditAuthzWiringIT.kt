@@ -34,8 +34,14 @@ class AuditAuthzWiringIT {
             server.createContext("/v1/data/openbank/rest/allow") { exchange ->
                 exchange.use {
                     val input = ObjectMapper().readTree(exchange.requestBody)["input"]
-                    val allowed = input["action"].asText() == "audit.verify" &&
-                        input["principal"]["roles"].any { it.asText() == "ROLE_AUDITOR" }
+                    // AuditEvidenceBundleIT shares this profile (one Quarkus boot, not two: with its own
+                    // profile the full suite ran out of test heap) and needs its route
+                    // to reach the resource; the real evidence rule is proven by the rego tests.
+                    val allowed = input["action"].asText() == "audit.evidence.reconstruct" ||
+                        (
+                            input["action"].asText() == "audit.verify" &&
+                                input["principal"]["roles"].any { it.asText() == "ROLE_AUDITOR" }
+                            )
                     val response = "{\"result\":{\"allow\":$allowed}}".toByteArray()
                     exchange.responseHeaders.add("Content-Type", "application/json")
                     exchange.sendResponseHeaders(200, response.size.toLong())

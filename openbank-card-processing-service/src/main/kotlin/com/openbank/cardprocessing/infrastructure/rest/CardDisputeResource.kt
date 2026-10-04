@@ -6,6 +6,7 @@ package com.openbank.cardprocessing.infrastructure.rest
 
 import com.openbank.cardprocessing.application.port.`in`.CardDisputeUseCase
 import com.openbank.cardprocessing.application.port.`in`.OpenDisputeCommand
+import com.openbank.cardprocessing.application.port.`in`.RefreshDisputeCommand
 import com.openbank.cardprocessing.application.port.`in`.SubmitEvidenceCommand
 import com.openbank.cardprocessing.domain.model.DisputeOutcome
 import com.openbank.cardprocessing.domain.model.DisputeRefusal
@@ -104,7 +105,11 @@ class CardDisputeResource(private val useCase: CardDisputeUseCase) {
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN")
     @Authorize(action = "cardprocessing.dispute", resource = "#id")
     @Operation(summary = "Re-read the network's status for a case and record any move")
-    suspend fun refresh(@PathParam("id") id: UUID): Response = respond(useCase.refreshStatus(id))
+    suspend fun refresh(@PathParam("id") id: UUID, @HeaderParam("Idempotency-Key") idempotencyKey: String?): Response {
+        requireNotNull(idempotencyKey) { "header 'Idempotency-Key' is required" }
+        IdempotencyKeys.requireValid(idempotencyKey)
+        return respond(useCase.refreshStatus(RefreshDisputeCommand(id, idempotencyKey)))
+    }
 
     @GET
     @Path("/{id}")

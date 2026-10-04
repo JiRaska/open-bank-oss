@@ -69,3 +69,30 @@ test_service_m2m_compliance_cannot_inspect_trail if {
 test_anonymous_denied if {
 	count(allowed_reasons) == 0 with input as {"principal": {"type": "ANONYMOUS", "id": "anon", "roles": []}, "action": "audit.trail.inspect"}
 }
+
+# --- audit.evidence.reconstruct (ADR-0214 D3, #11900) ---
+
+credit_risk := {"type": "HUMAN", "id": "u-risk", "roles": ["ROLE_CREDIT_RISK"]}
+
+lending_m2m := {"type": "HUMAN", "id": "service-account-openbank-lending", "roles": ["ROLE_COMPLIANCE", "ROLE_CREDIT_RISK"]}
+
+test_credit_risk_reads_evidence_bundle if {
+	"evidence-bundle-read" in allowed_reasons with input as {"principal": credit_risk, "action": "audit.evidence.reconstruct"}
+}
+
+test_compliance_reads_evidence_bundle if {
+	"evidence-bundle-read" in allowed_reasons with input as {"principal": compliance, "action": "audit.evidence.reconstruct"}
+}
+
+test_credit_risk_does_not_gain_the_general_trail if {
+	not "auditor-audit-oversight-read" in allowed_reasons with input as {"principal": credit_risk, "action": "audit.trail.inspect"}
+	not "evidence-bundle-read" in allowed_reasons with input as {"principal": credit_risk, "action": "audit.trail.inspect"}
+}
+
+test_operator_cannot_read_evidence_bundle if {
+	not "evidence-bundle-read" in allowed_reasons with input as {"principal": operator, "action": "audit.evidence.reconstruct"}
+}
+
+test_lending_service_account_cannot_read_evidence_even_with_roles if {
+	not "evidence-bundle-read" in allowed_reasons with input as {"principal": lending_m2m, "action": "audit.evidence.reconstruct"}
+}

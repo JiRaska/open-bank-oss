@@ -33,7 +33,7 @@ Hodnoty `rail` (query / enum): `SEPA_SCT`, `SEPA_SCT_INST`, `SWIFT`, `DOMESTIC`,
 | `debtorBic` / `creditorBic` | string | ne | až 11 znaků |
 | `amount` | number (BigDecimal) | ano | musí být `> 0` (DB CHECK); nejvýš tolik desetinných míst, kolik má dílčí jednotka měny, nikdy se nezaokrouhluje (#11604) |
 | `currency` | string (CHAR(3)) | ne | výchozí `EUR`; libovolný kód ISO 4217 s dílčí jednotkou, bez ohledu na velikost písmen (`eur` se uloží jako `EUR`) |
-| `rail` | enum | ne | výchozí `SEPA_SCT` |
+| `rail` | enum | **ano** | bez výchozí hodnoty (#12004): chybějící `rail` je 400 a žádná položka se nezapíše — výchozí hodnota by platbu zúčtovala na railu, který volající nezvolil |
 | `valueDate` | date | ne | výchozí dnešek, pokud chybí |
 | `endToEndId` | string | ne | až 35 znaků |
 | `remittanceInfo` | string | ne | až 140 znaků |
