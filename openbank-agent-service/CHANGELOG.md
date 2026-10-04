@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.27.3](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.2...agent-service-v1.27.3) (2026-10-04)
+
+
+### Security
+
+* **sepa-payment,domestic-payment,sepa-instant,agent,fx,context:** call aml-service over its mTLS listener ([#12106](https://github.com/JiRaska/open-bank-oss/issues/12106)) ([6119c65](https://github.com/JiRaska/open-bank-oss/commit/6119c65692b4f76b54e5710103e91d9a27a9229c))
+
 ## [1.27.2](https://github.com/JiRaska/open-bank-oss/compare/agent-service-v1.27.1...agent-service-v1.27.2) (2026-09-29)
 
 
