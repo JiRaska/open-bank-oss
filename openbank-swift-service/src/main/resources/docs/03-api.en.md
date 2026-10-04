@@ -51,8 +51,8 @@ Responses:
 |---|---|
 | `201` | Accepted and queued; returns the `SwiftMessage` (status `VALIDATED`) |
 | `400` | Invalid request body; for amount/currency see [Amount and currency](#amount-and-currency) |
-| `409` | Duplicate idempotency key with conflicting payload (`ErrorResponse`) |
-| `422` | BIC validation failed or business-rule violation (`ValidationError`) |
+| `409` | Duplicate idempotency key with conflicting payload (`ProblemDetail`) |
+| `422` | BIC validation failed or business-rule violation (`ProblemDetail`) |
 
 ## Amount and currency
 
@@ -94,15 +94,15 @@ Both return the updated `SwiftMessage`; `404` if the id is unknown; `409` if the
 
 ## Error model
 
-```json
-{ "error": "string", "message": "string", "traceId": "string" }
-```
-
-Validation errors use `ValidationError`:
+Every error response is a `ProblemDetail` — the body libs-runtime renders. Five members are always present:
 
 ```json
-{ "error": "Validation failed", "violations": [ { "field": "senderBic", "message": "..." } ] }
+{ "traceId": "…", "status": 404, "code": "NOT_FOUND", "message": "HTTP 404 Not Found", "timestamp": "2026-10-04T10:00:09Z" }
 ```
+
+A typed refusal (ADR-0326, e.g. the amount/currency codes above) adds the RFC 9457 members `type`, `title`, `detail`, `instance`, plus `correlationId`, `retryable`, `violations[]` (`field`, `message`, `code`) and `details[]`. Branch on `code`, never on the text. The rejected value is never echoed. A 403 from the role check has an empty body; only an OPA policy deny carries one.
+
+There is no `error` member: earlier revisions of the spec documented `ErrorResponse { error, message }` and `ValidationError`, which the service never sent (#11972). `SwiftErrorBodySpecConformanceIT` validates real responses against the published schema.
 
 ## Versioning
 

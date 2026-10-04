@@ -218,7 +218,7 @@ spec:
         # reverse/approve/trigger). Bundle mounted from ledger-opa-bundle ConfigMap
         # (gen-ledger-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

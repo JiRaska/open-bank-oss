@@ -4,12 +4,10 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Element
-import java.io.ByteArrayInputStream
 import java.math.BigDecimal
 import java.time.OffsetDateTime
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 
 /** Thrown when a `pacs.004` cannot be parsed into a [PaymentReturn]. */
 class Pacs004ParseException(message: String) : RuntimeException(message)
@@ -23,23 +21,11 @@ class Pacs004ParseException(message: String) : RuntimeException(message)
  */
 class Pacs004Reader {
     fun read(xml: String): PaymentReturn {
-        // XXE hardening as plain imperative calls (not `.apply {}`) so static analysis can trace
-        // the sanitizing calls straight to the factory that builds the parser below.
-        val factory = DocumentBuilderFactory.newInstance()
-        factory.isNamespaceAware = true
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-        factory.isXIncludeAware = false
-        factory.isExpandEntityReferences = false
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
         // Wrap the XML parse: the document comes off the wire, so malformed input
         // (SAXParseException, IOException) must surface as the reader's own
         // Pacs004ParseException rather than leaking a raw parser exception to callers.
         val doc = runCatching {
-            factory.newDocumentBuilder().parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            SecureXml.parse(xml)
         }.getOrElse { fail("malformed XML: ${it.message}") }
         doc.documentElement.normalize()
 

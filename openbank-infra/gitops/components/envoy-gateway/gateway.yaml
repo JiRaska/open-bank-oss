@@ -14,6 +14,9 @@
 # (observability/httproute-tools-gate.yaml). Their DNS cannot move on its own: the tools share
 # the host with the console, so admin.open-bank.tech moves in Phase 3 with the admin-ui route.
 #
+# PHASE 3 — kc.open-bank.tech (keycloak/httproute.yaml, both nginx Ingresses in one route, the
+# operator-only paths a direct 403) on listener https-keycloak, held out of DNS the same way.
+#
 # ATTACHMENT. Each HTTPS listener names ONE hostname and admits routes from ONE namespace,
 # selected by `kubernetes.io/metadata.name` — a label the API server sets and nobody can
 # put on another namespace. So a route for pact.open-bank.tech can only come from
@@ -219,3 +222,24 @@ spec:
               - key: kubernetes.io/metadata.name
                 operator: In
                 values: [admin-ui, observability]
+    # kc.open-bank.tech (ADR-0324 Phase 3). Serves the SAME Secret the nginx Ingress does,
+    # `keycloak-tls`: the mobile app pins this host's SPKI (ADR-0066 S3, rotation Never), so a
+    # new certificate would break every installed app. Admitted by the ReferenceGrant in
+    # keycloak/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-keycloak
+      protocol: HTTPS
+      port: 443
+      hostname: kc.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: keycloak-tls
+            namespace: iam
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam
