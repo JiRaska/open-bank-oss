@@ -7,9 +7,9 @@
 - ❌ no PostgreSQL database — it owns none, so `governance.yaml` declares no `databaseName` (`primaryDatastore: Redis`, `ownsNoDatabase: true`, ADR-0071)
 - ❌ no Flyway migrations
 - ❌ no outbox table
-- ✅ a **Redis** store — the only datastore it uses: pending onboardings paused on a four-eyes identity-verification case, keyed by `caseId` with a TTL (`PendingOnboardingStore`, ADR-0072), and WebAuthn credentials keyed by credential id (`WebAuthnStore`, ADR-0066 F2)
+- ✅ a **Redis** store — the only datastore it uses: pending onboardings paused on a four-eyes identity-verification case, keyed by `caseId` with a TTL (`PendingOnboardingStore`, ADR-0072), WebAuthn credentials keyed by credential id (`WebAuthnStore`, ADR-0066 F2), and nearby-pay payment sessions keyed by their opaque token with a 5-minute TTL (`PaymentSessionStore`, ADR-0095)
 
-The only in-memory state is the cached M2M service-account token in `UpstreamClient` (a JWT string + its expiry, refreshed via `client_credentials` until 60 s before expiry). It contains no customer data and is rebuilt on restart.
+Everything a second request may need lives in Redis, so any replica can serve any request. What stays in memory is per-pod caching that each pod rebuilds on its own: the M2M service-account tokens (`UpstreamClient`, `WebAuthnKeycloakClient`), the short-TTL party-merge and acting-for lookups (`PartyMergeResolver`, `ActingForResolver`) and the terms-document caches in `OnboardingResource`. None of it has to agree across replicas beyond its TTL.
 
 ```mermaid
 graph LR
