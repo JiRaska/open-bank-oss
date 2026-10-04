@@ -1,0 +1,107 @@
+{
+  "consumer": {
+    "name": "openbank-card-processing-service"
+  },
+  "interactions": [
+    {
+      "description": "POST a cleared card spend as a CARD one-off debit",
+      "providerStates": [
+        {
+          "name": "a valid source account exists"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 123.45,
+          "currencyCode": "CZK",
+          "description": "Potraviny",
+          "idempotencyKey": "card-clearing:0b0b0b0b-1c1c-4d2d-8e3e-4f4f4f4f4f4f:h:VkQy5VK3C42EEeyvLRLkrLq0cyQKdWHXYOlj5g-xN7M",
+          "instructionType": "ONE_OFF",
+          "rail": "CARD",
+          "sourceAccountId": "7c7c7c7c-8d8d-4e9e-8f0f-1a1a1a1a1a1a",
+          "targetAccountId": null,
+          "type": "DEBIT",
+          "valueDate": "2026-09-05"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "body": {
+          "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
+          "instructionType": "ONE_OFF",
+          "rail": "CARD",
+          "status": "COMPLETED"
+        },
+        "generators": {
+          "body": {
+            "$.id": {
+              "type": "Uuid"
+            }
+          }
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.id": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+                }
+              ]
+            }
+          }
+        },
+        "status": 201
+      }
+    },
+    {
+      "description": "POST a cleared card spend debit with a missing or expired token",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "body": {
+          "amount": 123.45,
+          "currencyCode": "CZK",
+          "description": "Potraviny",
+          "idempotencyKey": "card-clearing:0b0b0b0b-1c1c-4d2d-8e3e-4f4f4f4f4f4f:h:VkQy5VK3C42EEeyvLRLkrLq0cyQKdWHXYOlj5g-xN7M",
+          "instructionType": "ONE_OFF",
+          "rail": "CARD",
+          "sourceAccountId": "7c7c7c7c-8d8d-4e9e-8f0f-1a1a1a1a1a1a",
+          "targetAccountId": null,
+          "type": "DEBIT",
+          "valueDate": "2026-09-05"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "method": "POST",
+        "path": "/api/v1/transactions"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-transaction-service"
+  }
+}

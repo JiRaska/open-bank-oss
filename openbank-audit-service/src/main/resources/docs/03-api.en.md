@@ -4,6 +4,10 @@ The REST surface is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0,
 
 The major API version is `1` (`openbank.api.version`), so all paths live under `/api/v1` (ADR-0048 — the API-contract axis is independent of the release `version.txt`).
 
+## Authorization
+
+Both trail reads (`GET /entries/{aggregateId}`, `GET /entries/by-actor/{actorId}`) require `@RolesAllowed` AUDITOR / ADMIN / COMPLIANCE **and** the OPA action `audit.trail.inspect`; the integrity and anchor endpoints use `audit.verify`. Neither verb is in base `rest.rego`'s `{list, read}` set, so the only OPA permit path is `audit_rest_ext.rego`'s `auditor-audit-oversight-read`, which excludes Keycloak service accounts (`service-account-*`). A machine identity is refused by the policy decision itself, not only by the role check. The customer privacy view (`/customer/{partyId}`) is a separate action, `audit.customerRead`.
+
 ## Endpoints
 
 ### `GET /api/v1/audit/evidence/{aggregateId}`

@@ -5,12 +5,16 @@
 package com.openbank.libs.warmup
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.authz.PolicyDecisionPoint
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import io.quarkus.runtime.LaunchMode
 import io.quarkus.runtime.Startup
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Instance
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.ConfigProvider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.health.HealthCheck
@@ -25,6 +29,7 @@ import java.net.http.HttpResponse
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 /**
  * Warms the JVM before the pod reports ready (#11890).
@@ -36,6 +41,16 @@ import java.util.UUID
  * every deploy, rollout step and restart. This bean exercises those paths once, off-request, and
  * [WarmupReadinessCheck] holds readiness DOWN until it has — capped by
  * `openbank.warmup.max-duration`, after which readiness goes UP regardless.
+ *
+ * The first version (#11894) warmed JSON, the pool and the unauthenticated HTTP stack, and the
+ * first authenticated call on lending-service still took 1.8 s: ~0.4 s to the authz decision,
+ * ~0.4 s of Hibernate first use, ~0.9 s building the response type's serializers. So the steps
+ * now also cover the OPA decision client, one-row reads of every Hibernate Reactive entity,
+ * the (de)serializers of every resource's own types, and any service [WarmupContributor].
+ *
+ * Observable: `openbank_warmup_seconds{step}` (a Timer per step plus `step="total"`, tagged
+ * `outcome`), and `openbank_warmup_cap_exceeded_total`, which counts pods that went ready
+ * because the cap elapsed rather than because warm-up finished.
  *
  * `@Startup` because `@ApplicationScoped` is lazy: nothing would otherwise construct this bean.
  */
@@ -54,7 +69,20 @@ class StartupWarmup(
     private val protectedPath: String,
     private val objectMappers: Instance<ObjectMapper>,
 ) {
+    // Field injection: a ninth constructor parameter trips detekt's LongParameterList.
+    @Inject
+    lateinit var registries: Instance<MeterRegistry>
+
+    @Inject
+    lateinit var pdps: Instance<PolicyDecisionPoint>
+
+    @Inject
+    lateinit var contributors: Instance<WarmupContributor>
+
+    @Volatile private var startedAt: Instant = Instant.now()
+
     val gate: WarmupGate = WarmupGate(enabled, maxDuration) { elapsed ->
+        registry()?.counter("openbank.warmup.cap.exceeded")?.increment()
         LOG.warnf(
             "Startup warm-up still running after %d ms (cap %s); reporting ready anyway",
             elapsed.toMillis(),
@@ -67,6 +95,7 @@ class StartupWarmup(
             LOG.debug("Startup warm-up disabled (openbank.warmup.enabled=false)")
             return
         }
+        startedAt = Instant.now()
         gate.start()
         // Off the startup thread: the HTTP self-calls need the server this event precedes.
         Thread({ runAll() }, "openbank-warmup").apply { isDaemon = true }.start()
@@ -76,12 +105,18 @@ class StartupWarmup(
         val t0 = System.nanoTime()
         try {
             val results = WarmupRunner.run(steps()) { r ->
+                recordStep(r.name, if (r.succeeded) "ok" else "failed", r.millis)
                 if (r.succeeded) {
                     LOG.infof("warm-up step %s: %d ms (%s)", r.name, r.millis, r.detail)
                 } else {
                     LOG.warnf("warm-up step %s FAILED after %d ms: %s", r.name, r.millis, r.detail)
                 }
             }
+            recordStep(
+                "total",
+                if (results.all { it.succeeded }) "ok" else "partial",
+                (System.nanoTime() - t0) / NANOS_PER_MILLI,
+            )
             LOG.infof(
                 "Startup warm-up finished in %d ms (%d/%d steps ok)",
                 (System.nanoTime() - t0) / NANOS_PER_MILLI,
@@ -95,10 +130,25 @@ class StartupWarmup(
 
     private fun steps(): List<WarmupStep> = listOf(
         WarmupStep("json") { warmJson() },
+        WarmupStep("resource-types") { GenericWarmups.resourceTypes(objectMappers) },
         WarmupStep("datasource") { warmDatasource() },
+        WarmupStep("hibernate-entities") { GenericWarmups.entities(startedAt.plus(maxDuration), STEP_TIMEOUT) },
+        WarmupStep("authz") { GenericWarmups.authz(pdps, STEP_TIMEOUT) },
         WarmupStep("http-public") { selfCall("/api/v1/info", httpIterations) },
         WarmupStep("http-unauthenticated") { selfCall(protectedPath, httpIterations) },
-    )
+    ) + contributors.map { c -> WarmupStep("contributor:${c.name}") { c.warm() } }
+
+    private fun registry(): MeterRegistry? = if (registries.isResolvable) registries.get() else null
+
+    private fun recordStep(step: String, outcome: String, millis: Long) {
+        val registry = registry() ?: return
+        Timer.builder("openbank.warmup")
+            .description("Startup warm-up duration before readiness, per step (step=total for the whole run)")
+            .tag("step", step)
+            .tag("outcome", outcome)
+            .register(registry)
+            .record(millis, TimeUnit.MILLISECONDS)
+    }
 
     private fun warmJson(): String {
         if (!objectMappers.isResolvable) return "no ObjectMapper bean"
