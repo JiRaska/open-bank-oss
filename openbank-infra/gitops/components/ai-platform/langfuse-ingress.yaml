@@ -10,7 +10,7 @@
 # OpenBao. Before this pattern is copied to an environment with real data it needs SSO in front of
 # it, not a stronger password.
 #
-# Traces are ingested in-cluster over the Service (litellm -> langfuse.ai-platform.svc:3000); this
+# Traces are ingested in-cluster over the Service (litellm -> langfuse-web.ai-platform.svc:3000); this
 # Ingress carries the human UI only, so removing it degrades visibility, never ingestion.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
@@ -18,6 +18,9 @@ metadata:
   name: langfuse
   namespace: ai-platform
   annotations:
+    # DNS moved to the Envoy Gateway route (langfuse-httproute.yaml, 2026-10-03). This makes
+    # external-dns ignore the Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/custom-headers: ai-platform/langfuse-edge-headers-v1
@@ -33,9 +36,10 @@ spec:
         paths:
           - path: /
             pathType: Prefix
+            # Langfuse v3 web (langfuse-v3.yaml) since ADR-0328 wave B.
             backend:
               service:
-                name: langfuse
+                name: langfuse-web
                 port:
                   number: 3000
 ---

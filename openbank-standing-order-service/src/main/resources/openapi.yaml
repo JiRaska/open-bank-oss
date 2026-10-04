@@ -3,7 +3,9 @@
 openapi: 3.1.0
 info:
   title: Standing Order Service API
-  version: 1.7.0
+  # 1.7 -> 1.8 (#11938): additive — create documents 400 CURRENCY_NOT_ALLOWED (a SEPA_CREDIT
+  # order executes as an SCT, which is euro-only).
+  version: 1.8.0
   description: Recurring payment orders — create, pause, resume, cancel.
   license:
     name: Apache-2.0
@@ -42,6 +44,16 @@ paths:
       responses:
         '201':
           description: Standing order created
+        '400':
+          description: >-
+            CURRENCY_NOT_ALLOWED (#11938) — `paymentType` is SEPA_CREDIT and `currency` is not EUR;
+            a SEPA_CREDIT order executes as an SCT, which is euro-only. Applies to an edit
+            (`replacesStandingOrderId`) too. Nothing is created or cancelled; the violation names
+            `currency` and the rejected value is not echoed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
         '422':
           description: >-
             `replacesStandingOrderId` is not an ACTIVE or PAUSED order of the same party; nothing
@@ -200,6 +212,9 @@ components:
           format: int64
         currency:
           type: string
+          description: >-
+            Must be EUR (case-insensitive) when `paymentType` is SEPA_CREDIT — any other currency is a
+            400 CURRENCY_NOT_ALLOWED (#11938). DOMESTIC and INTERNAL are not constrained here.
         frequency:
           type: string
           enum: [ONCE, DAILY, WEEKLY, BIWEEKLY, MONTHLY, QUARTERLY, ANNUALLY]

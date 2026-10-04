@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.19.0...sca-service-v0.19.1) (2026-10-03)
+
+
+### Security
+
+* **sca:** durable operator approvals ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 9b) ([#11903](https://github.com/JiRaska/open-bank-oss/issues/11903)) ([a147957](https://github.com/JiRaska/open-bank-oss/commit/a147957aaed53896087f810f4c81c7d80ebc66fa))
+
 ## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.18.0...sca-service-v0.19.0) (2026-10-03)
 
 

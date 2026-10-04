@@ -50,9 +50,30 @@ Responses:
 | Code | Meaning |
 |---|---|
 | `201` | Accepted and queued; returns the `SwiftMessage` (status `VALIDATED`) |
-| `400` | Invalid request body (`ErrorResponse`) |
+| `400` | Invalid request body; for amount/currency see [Amount and currency](#amount-and-currency) |
 | `409` | Duplicate idempotency key with conflicting payload (`ErrorResponse`) |
 | `422` | BIC validation failed or business-rule violation (`ValidationError`) |
+
+## Amount and currency
+
+`amountMinorUnits` + `currency` are built into a kernel `Money` (`Money.parseInbound`, #11604) in
+`SwiftResource` **before** the idempotency lookup. SWIFT is cross-border, so there is no currency
+allow-list: any ISO 4217 currency with a minor unit is accepted, and `amountMinorUnits` is read in
+**that currency's** minor unit — JPY has 0 decimals (`1000` = 1000 yen), EUR 2 (`150000` = 1500.00),
+KWD/BHD 3 (`1500` = 1.500). The same `Money` drives the pacs.008 `IntrBkSttlmAmt`, the
+transaction-service settlement amount, the `swift.message.status-changed` event `amount` and the
+`/messages` list `amount`; before #11604 all four shifted every currency by a fixed two places.
+
+| Input | Answer |
+|---|---|
+| `amountMinorUnits` not a whole number (`150.5`) | `400` `AMOUNT_SCALE_EXCEEDED`, field `amountMinorUnits` |
+| `currency` not ISO 4217 with a minor unit (`XYZ`, `EURO`, `XAU`, empty) | `400` `CURRENCY_UNSUPPORTED`, field `currency` |
+| `amountMinorUnits` beyond a signed 64-bit integer | `400` `VALIDATION_ERROR`, field `amountMinorUnits` |
+| lower-case currency (`eur`) | accepted, stored as `EUR` |
+
+The refusal is libs-runtime's problem document (`type`, `title`, `status`, `detail`, `code`,
+`violations[]`); the rejected value is never echoed. Nothing is stored or published and the
+`idempotencyKey` is not consumed — a corrected retry under the same key creates the message.
 
 ## Idempotency
 

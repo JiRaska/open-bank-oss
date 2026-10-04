@@ -1,0 +1,240 @@
+# Dedicated single-node ClickHouse for Langfuse v3/v4 (ADR-0328 decision 2, wave A).
+#
+# NOT the analytics warehouse (components/analytics/clickhouse.yaml, ADR-0022): that one owns a
+# different data class, so sharing it would couple capacity, access and recovery for unrelated
+# workloads. Same shape otherwise: one replica, gp3 volume, the system-log TTLs that analytics only
+# learned after its volume hit 100% on 2026-09-30.
+#
+# SCHEMA IS LANGFUSE'S, NOT OURS. langfuse-web runs its own ClickHouse migrations at start
+# (CLICKHOUSE_MIGRATION_URL, native port 9000), so there is no init ConfigMap here and nothing for
+# clickhouse-ddl-configmap-parity to compare.
+#
+# BACKUP STORY (stated, deliberately not a backup). Everything in this store is DERIVED and
+# re-derivable: the raw ingestion events land in the Langfuse S3 bucket first (the worker reads
+# them from there into ClickHouse), and the v2 history is copied in from langfuse-db (Postgres,
+# barman-backed, 30d) by Langfuse's background migrations. Losing the volume therefore loses only
+# what can be replayed from S3 within the 30-day window plus what the migration re-copies, which
+# is the same window the retention sweep enforces anyway. A ClickHouse BACKUP target is the follow-up
+# if ADR-0328's wave C makes ClickHouse the only copy of anything.
+#
+# PLACEMENT. The `stateful` NodePool (on-demand, tainted openbank.io/stateful): the `default` spot
+# pool is 85-99 % memory-requested (measured 2026-10-03), so a pod landing there would make
+# Karpenter add a node — the ~$120/month step the ADR-0328 FinOps section warns about. The
+# nodeSelector names the POOL label, not capacity-type, because the point is reusing existing
+# headroom, not merely avoiding spot.
+#
+# Image pinned by digest (multi-arch index; the pool is arm64-only). docker.io is rewritten to the
+# ECR pull-through cache at admission (kyverno ecr-pull-through-rewrite-cel).
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-clickhouse
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  selector:
+    app.kubernetes.io/name: langfuse-clickhouse
+  ports:
+    - name: ch-http
+      port: 8123
+      targetPort: ch-http
+    - name: ch-native
+      port: 9000
+      targetPort: ch-native
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: langfuse-clickhouse
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-clickhouse
+    app.kubernetes.io/part-of: ai-platform
+spec:
+  serviceName: langfuse-clickhouse
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-clickhouse
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: langfuse-clickhouse
+        app.kubernetes.io/part-of: ai-platform
+    spec:
+      nodeSelector:
+        openbank.io/pool: stateful
+      tolerations:
+        - key: openbank.io/stateful
+          operator: Equal
+          value: "true"
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        runAsGroup: 101
+        fsGroup: 101
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: clickhouse
+          image: docker.io/clickhouse/clickhouse-server:26.8-alpine@sha256:e08c778ff91f382a15bd0ce9c0fa21e8edc9aa8acc30c4666160000d9a918454
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: ch-http
+              containerPort: 8123
+            - name: ch-native
+              containerPort: 9000
+            - name: metrics
+              containerPort: 9363
+          env:
+            - name: CLICKHOUSE_DB
+              value: default
+            - name: CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT
+              value: "1"
+            # Created by the image on an EMPTY data dir only (first boot), the same caveat as the
+            # analytics instance: rotating the password later is a clickhouse-client ALTER USER.
+            - name: CLICKHOUSE_USER
+              value: langfuse
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-clickhouse-auth
+                  key: CLICKHOUSE_PASSWORD
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/clickhouse
+            - name: server-config
+              mountPath: /etc/clickhouse-server/config.d/openbank.xml
+              subPath: openbank.xml
+              readOnly: true
+          startupProbe:
+            httpGet:
+              path: /ping
+              port: ch-http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: ch-http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: ch-http
+            periodSeconds: 15
+          # ADR-0328 FinOps section: same requests as the analytics instance.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 1Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+      volumes:
+        - name: server-config
+          configMap:
+            name: langfuse-clickhouse-server-config
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        storageClassName: gp3
+        resources:
+          requests:
+            # ADR-0328 FinOps: 10 GiB gp3 ($0.84/month). Immutable on a live StatefulSet — grow a
+            # live PVC with `kubectl patch pvc` (gp3 allowVolumeExpansion), not by editing this.
+            storage: 10Gi
+---
+# System-log TTLs + WARN logging from day one (the analytics instance's 2026-09-30 lesson: stock
+# ClickHouse logs at TRACE into system.text_log forever and outgrows a 10Gi volume within weeks),
+# plus the built-in Prometheus endpoint scraped by the PodMonitor below.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-clickhouse-server-config
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/name: langfuse-clickhouse
+    app.kubernetes.io/part-of: ai-platform
+data:
+  openbank.xml: |
+    <clickhouse>
+      <logger>
+        <level>warning</level>
+        <console_log_level>warning</console_log_level>
+      </logger>
+      <prometheus>
+        <endpoint>/metrics</endpoint>
+        <port>9363</port>
+        <metrics>true</metrics>
+        <events>true</events>
+        <asynchronous_metrics>true</asynchronous_metrics>
+      </prometheus>
+      <text_log>
+        <level>warning</level>
+        <ttl>event_date + INTERVAL 3 DAY DELETE</ttl>
+      </text_log>
+      <trace_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></trace_log>
+      <metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></metric_log>
+      <asynchronous_metric_log><ttl>event_date + INTERVAL 7 DAY DELETE</ttl></asynchronous_metric_log>
+      <query_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></query_log>
+      <part_log><ttl>event_date + INTERVAL 14 DAY DELETE</ttl></part_log>
+    </clickhouse>
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: langfuse-clickhouse-metrics
+  namespace: ai-platform
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: langfuse-clickhouse
+  namespaceSelector:
+    matchNames:
+      - ai-platform
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# The ClickHouse password Langfuse and the server share. New OpenBao key (owner seeds it):
+#   bao kv patch openbank/langfuse CLICKHOUSE_PASSWORD=$(openssl rand -hex 24)
+# Hex, not base64: it is interpolated into nothing, but a `/` or `+` in a password has bitten URL-
+# shaped ClickHouse clients before, and hex costs nothing.
+apiVersion: external-secrets.io/v1
+kind: ExternalSecret
+metadata:
+  name: langfuse-clickhouse-auth
+  namespace: ai-platform
+  annotations:
+    # ADR-0279 #18. Rotation = new KV value + `ALTER USER langfuse IDENTIFIED BY ...` in
+    # clickhouse-client (the env var only applies on an empty data dir) + restart web/worker.
+    openbank.io/rotation-deadline: "2027-10-03"
+spec:
+  refreshInterval: 1h
+  secretStoreRef:
+    kind: ClusterSecretStore
+    name: vault-kv
+  target:
+    name: langfuse-clickhouse-auth
+    creationPolicy: Owner
+    deletionPolicy: Retain
+  data:
+    - secretKey: CLICKHOUSE_PASSWORD
+      remoteRef:
+        key: langfuse
+        property: CLICKHOUSE_PASSWORD

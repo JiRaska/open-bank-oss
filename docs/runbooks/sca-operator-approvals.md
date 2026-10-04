@@ -22,6 +22,17 @@ device id, party, credential, public key or algorithm cannot borrow it; such a r
 approval or a different maker creates a fresh pending approval instead. The OPA resource id stays
 the party id; no policy change is involved. The service has no blanket exemption for operators.
 
+## Admin review
+
+The admin approval inbox lists this queue (source `sca`) and links each item to
+`/approvals/sca/{id}`, open to operators and administrators only, as the service is. The page shows
+the action, the maker and the bound party (or challenge); the exact device of an enrollment or
+revocation is bound by the request fingerprint, which the service does not publish, so confirm it
+with the maker. Approval needs an explicit review tick and a separate confirmation. The maker is
+not offered a decision on their own request (the service refuses it anyway). If a response is
+lost, the page refuses another decision until the state is reloaded; it never retries the
+business operation.
+
 ## Deployment
 
 `AUTHZ_FOUR_EYES_ENFORCE` defaults to false and this change does not set it in any manifest.

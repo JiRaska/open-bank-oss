@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.4...clearing-service-v0.12.0) (2026-10-03)
+
+
+### Features
+
+* **clearing:** build kernel Money at the inbound boundary ([#11975](https://github.com/JiRaska/open-bank-oss/issues/11975)) ([5bb05cc](https://github.com/JiRaska/open-bank-oss/commit/5bb05cc93d61c696fae85a84b321b20161f6b4e5)), closes [#11604](https://github.com/JiRaska/open-bank-oss/issues/11604)
+
 ## [0.11.4](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.3...clearing-service-v0.11.4) (2026-10-03)
 
 
