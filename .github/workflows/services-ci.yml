@@ -48,6 +48,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   # Don't let the nightly run cancel an in-flight PR/main run (or vice-versa): give the
@@ -68,8 +69,37 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
+  agent-admission:
+    name: Agent PR admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.admit.outputs.proceed }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" != 'pull_request' ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
   changes:
     name: Detect changed services
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -534,13 +564,16 @@ jobs:
   # change. #3955 tracks that decision.
   all-green:
     name: all-green
-    needs: [changes, publication-ready, build, verification-metadata]
+    needs: [agent-admission, changes, publication-ready, build, verification-metadata]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Verify no service failed
         run: |
+          if [ "${{ needs.agent-admission.result }}" != 'success' ] || [ "${{ needs.agent-admission.outputs.proceed }}" != 'true' ]; then
+            echo "Agent PR admission refused or failed; service builds did not run."; exit 1
+          fi
           if [ "${{ needs.changes.result }}" != "success" ]; then
             echo "Changed-service detection did not succeed; build scope is unknown."; exit 1
           fi
