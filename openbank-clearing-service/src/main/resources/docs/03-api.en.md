@@ -33,7 +33,7 @@ The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0
 | `debtorBic` / `creditorBic` | string | no | up to 11 chars |
 | `amount` | number (BigDecimal) | yes | must be `> 0` (DB CHECK); at most the currency's minor-unit decimals, never rounded (#11604) |
 | `currency` | string (CHAR(3)) | no | default `EUR`; any ISO 4217 code with a minor unit, case-insensitive (`eur` is stored as `EUR`) |
-| `rail` | enum | no | default `SEPA_SCT` |
+| `rail` | enum | **yes** | no default (#12004): an absent `rail` is a 400 and no item is written — a default would clear the payment on a rail its caller did not choose |
 | `valueDate` | date | no | defaults to today if omitted |
 | `endToEndId` | string | no | up to 35 chars |
 | `remittanceInfo` | string | no | up to 140 chars |
