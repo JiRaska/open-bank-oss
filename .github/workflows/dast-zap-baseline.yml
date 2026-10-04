@@ -1,87 +1,299 @@
 # SPDX-License-Identifier: Apache-2.0
-# DAST baseline scan (OWASP ZAP) — ADR-0030 D3.
+# DAST (OWASP ZAP) — ADR-0030 D3. Authenticated, OpenAPI-driven, and it reports what it scanned.
 #
-# Scope decision (first cut): a full customer-edge or fleet-wide DAST run needs either the
-# real k8s cluster (customer-edge is a gitops-only Rollout/proxy, not a Gradle module with its
-# own image build in this repo) or booting all ~30 services from openbank-infra/docker-compose.yml
-# (postgres/kafka/keycloak + every service Dockerfile — too heavy for a CI job). Instead this
-# scans ONE already-defined docker-compose target: ledger-service (postgres + kafka deps only,
-# already has a health check and documented unauthenticated public paths — see
-# QUARKUS_HTTP_AUTH_PERMISSION__PUBLIC__PATHS in openbank-infra/docker-compose.yml). This is
-# unauthenticated-surface coverage, not a full authenticated crawl — the money-path service most
-# reachable from a plain HTTP client without standing up Keycloak token issuance in CI.
+# WHY IT CHANGED (issue #12097). This lane used to be a passive `zaproxy/action-baseline` spider
+# aimed at ONE URL with no token. Its last green run reached 6 unauthenticated GET URLs, every one
+# 4xx, and reported no operation count — so it only ever saw the auth wall, and a pentest
+# attestation resting on it was resting on nothing. Now:
 #
-# Advisory / report-only for the first cut, same posture as pitest.yml: a fresh ZAP baseline
-# against a banking API is expected to surface findings that need triage (ADR-0030 D1 lifecycle),
-# not an immediate hard gate. Scheduled (not per-PR) — cost + noise.
+#   1. AUTHENTICATED. Same mechanism as api-fuzz-authenticated.yml, not a new one: a throwaway
+#      Keycloak importing the CI realm (.github/workflows/keycloak/), a client_credentials token
+#      for the confidential `openbank-services` client, the service booted with OIDC on against
+#      it. No repository secret is involved. The token reaches ZAP through ZAP's own
+#      ZAP_AUTH_HEADER_VALUE env var, which zaproxy/action-api-scan passes into its container;
+#      ZAP adds the Authorization header to every request.
+#   2. SPEC-DRIVEN. zaproxy/action-api-scan imports the service's committed
+#      src/main/resources/openapi.yaml (servers rewritten to the local port), so the targets are the
+#      spec's operations, not whatever a spider stumbles on. No spider; the API scan policy runs
+#      passive + active rules with a hard scan-duration cap.
+#   3. COUNTED AT THE RECEIVING END. The service logs every request it received
+#      (`ZAPACCESS <method> <path> <status>` via the Quarkus access log) and
+#      .github/scripts/dast-zap-coverage.py maps them onto the spec: operations in spec / requested
+#      / auth-blocked / exercised, responses by status class, ZAP alerts by risk. Step summary +
+#      zap-reports/<svc>-ops.json, whose keys match the schemathesis lanes' fuzz-reports ops record
+#      — `exercised` is what a pentest attestation's `ops:` cites (check-readiness-attestations R8).
+#   4. A NON-SCAN FAILS, A FINDING DOES NOT. Red when: no token, the service never became ready,
+#      zero spec operations requested, or >= 95 % of responses were 401/403. Alerts stay advisory
+#      (rules.yaml: dast.enforced) and feed the ADR-0030 D1 triage lifecycle.
+#
+# Boot: quarkusDev on the runner, as api-fuzz-authenticated.yml does, rather than the compose
+# image — the token's issuer must be the URL the service validates against, and on the runner
+# both sides see the same `localhost:8543`. Scheduled weekly (ledger-service) + dispatch.
 name: DAST baseline (ZAP)
 
 on:
   schedule:
-    - cron: "30 4 * * 0"   # Sunday 04:30 UTC — before the pitest 03:00 UTC... run gets its own slot
+    - cron: "30 4 * * 0"   # Sunday 04:30 UTC
   workflow_dispatch:
     inputs:
-      target_service:
-        description: "docker-compose service name to scan (must exist in openbank-infra/docker-compose.yml)"
+      services:
+        description: "Space-separated modules to scan (each needs src/main/resources/openapi.yaml)"
         required: false
-        default: "ledger-service"
+        default: "openbank-ledger-service"
 
 permissions:
   contents: read
 
+concurrency:
+  group: dast-zap-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  zap-baseline:
-    name: ZAP baseline / ledger-service
+  prepare:
+    name: derive DAST scope
     runs-on: ubuntu-latest
-    timeout-minutes: 20  # measured max 327s; boots a compose stack
-    permissions:
-      contents: read
-      issues: none
+    timeout-minutes: 5
+    outputs:
+      services: ${{ steps.derive.outputs.services }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Boot ledger-service + deps (postgres, kafka)
-        working-directory: openbank-infra
+      # Same eligibility as api-fuzz-authenticated.yml: OIDC must be the only gate (authz.enforce
+      # defaults false — no OPA sidecar here), and a port + database must be derivable. An
+      # ineligible service is excluded OUT LOUD; an empty scope fails rather than scanning nothing.
+      - name: Derive service list
+        id: derive
         env:
-          # Must match the QUARKUS_DATASOURCE_PASSWORD hardcoded per-service in
-          # docker-compose.yml ("openbank_secret") — every service's datasource password is
-          # a literal there, not templated from POSTGRES_PASSWORD, so this can't be a fresh
-          # random value.
-          POSTGRES_PASSWORD: openbank_secret
-          # Containers build without .git; the build-facts task takes the commit from here.
-          SOURCE_COMMIT: ${{ github.sha }}
+          REQUESTED: ${{ github.event.inputs.services || 'openbank-ledger-service' }}
         run: |
-          docker compose up -d postgres kafka ledger-service
-          echo "Waiting for ledger-service health..."
-          for i in $(seq 1 40); do
-            if curl -fsS http://127.0.0.1:8101/api/v1/info >/dev/null 2>&1; then
-              echo "ledger-service is up"; break
-            fi
-            if [ "$i" -eq 40 ]; then
-              echo "::error::ledger-service did not become healthy in time"
-              docker compose logs ledger-service kafka postgres | tail -300
-              exit 1
-            fi
-            sleep 5
-          done
+          python3 - <<'PY'
+          import json, os, pathlib, re
+          keep, skipped = [], []
+          for svc in os.environ["REQUESTED"].split():
+              app = pathlib.Path(svc) / "src/main/resources/application.yaml"
+              spec = pathlib.Path(svc) / "src/main/resources/openapi.yaml"
+              if not app.is_file() or not spec.is_file():
+                  skipped.append((svc, "no application.yaml or openapi.yaml")); continue
+              raw = app.read_text()
+              if any(re.search(r":\s*true", e) for e in re.findall(r"AUTHZ_ENFORCE[^\n]*", raw)):
+                  skipped.append((svc, "authz.enforce defaults true — needs the OPA sidecar (#266)")); continue
+              if not re.search(r"^  http:\n(?:.*\n)?\s*port:\s*(\d+)", raw, re.M):
+                  skipped.append((svc, "no derivable quarkus.http.port")); continue
+              if not re.search(r"jdbc:postgresql://[^/]+/([A-Za-z0-9_]+)", raw):
+                  skipped.append((svc, "no jdbc:postgresql URL")); continue
+              keep.append(svc)
+          for svc, why in skipped:
+              print(f"::warning::dast-zap: {svc} EXCLUDED — {why}")
+          if not keep:
+              print("::error::dast-zap: scope is EMPTY — nothing would be scanned"); raise SystemExit(1)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as fh:
+              fh.write("services=" + json.dumps(keep) + "\n")
+          PY
 
-      - name: ZAP baseline scan (unauthenticated public surface)
-        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+  zap-api-scan:
+    name: "ZAP API scan (${{ matrix.service }})"
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 45  # cold Gradle build + boot (~6 min) + capped scan (15 min) + margin
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        service: ${{ fromJson(needs.prepare.outputs.services) }}
+    env:
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3g -Dfile.encoding=UTF-8"
+      POSTGRES_PASSWORD: "dast-ci-throwaway"
+      OIDC_CLIENT_SECRET: "fuzz-ci-throwaway-secret"   # matches the CI realm import's client secret
+      SERVICE: ${{ matrix.service }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
-          target: "http://127.0.0.1:8101/api/v1/journals"
-          # Report-only: never fail the job on findings (ADR-0030 D3 first cut). Findings feed
-          # the D1 vulnerability-management lifecycle for triage, not an automatic PR gate.
+          distribution: temurin
+          java-version: |
+            21
+            25
+
+      - name: Validate Gradle wrapper
+        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+
+      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        with:
+          cache-read-only: true
+
+      - name: Start Keycloak (throwaway CI realm)
+        run: |
+          set -euo pipefail
+          # Same image/digest and realm as api-fuzz-authenticated.yml.
+          docker run -d --name dast-keycloak -p 8543:8080 \
+            -e KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+            -e KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+            -v "$PWD/.github/workflows/keycloak:/opt/keycloak/data/import:ro" \
+            quay.io/keycloak/keycloak:26.7.3@sha256:29be7252db0a106f1cd2ac17b9a56ff2668073da645638a38b9fc67deeb2d6c4 \
+            start-dev --import-realm --http-enabled=true
+          for _ in $(seq 1 60); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' \
+              http://localhost:8543/realms/openbank/.well-known/openid-configuration || true)"
+            [ "$code" = "200" ] && exit 0
+            sleep 3
+          done
+          echo "::error::Keycloak/realm never became ready"; docker logs dast-keycloak | tail -40; exit 1
+
+      - name: Boot service with OIDC on and the access log enabled
+        id: boot
+        run: |
+          set -uo pipefail
+          svc="$SERVICE"
+          mkdir -p zap-reports
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          APP_YAML="${svc}/src/main/resources/application.yaml"
+          PORT="$(grep -m1 -A3 '^  http:' "$APP_YAML" | grep -m1 'port:' | grep -oE '[0-9]+')"
+          DB="$(grep -m1 'jdbc:postgresql://\|postgresql://' "$APP_YAML" | sed -E 's|.*/([A-Za-z0-9_]+).*|\1|')"
+          # `${VAR:default}` is a config EXPRESSION; the default is what the service will use.
+          resolve_expr() { printf '%s' "$1" | sed -E 's/^"//; s/"$//; s/^\$\{[A-Za-z0-9_]+:([^}]*)\}$/\1/'; }
+          DBUSER="$(resolve_expr "$(grep -m1 '^    username:' "$APP_YAML" | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          DBUSER="${DBUSER:-openbank}"
+          case "$DBUSER" in *[!A-Za-z0-9_]*) echo "::error::[${svc}] datasource username unresolved: ${DBUSER}"; exit 1 ;; esac
+          echo "port=${PORT}" >> "$GITHUB_OUTPUT"
+          echo "==> [${svc}] port=${PORT} db=${DB} user=${DBUSER}"
+
+          docker run -d --name dast-pg -p 5432:5432 \
+            -e POSTGRES_USER="${DBUSER}" -e POSTGRES_PASSWORD="${POSTGRES_PASSWORD}" \
+            -e POSTGRES_DB="${DB}" postgres:18.6-alpine >/dev/null
+          docker run -d --name dast-redis -p 6379:6379 redis:7.2-alpine >/dev/null
+          for _ in $(seq 1 30); do docker exec dast-pg pg_isready -U "${DBUSER}" >/dev/null 2>&1 && break; sleep 2; done
+
+          # Services that register a Temporal worker at boot need a server (see api-fuzz-authenticated.yml).
+          TEMPORAL_NS="$(resolve_expr "$(grep -m1 -A6 '^  temporal:' "$APP_YAML" | grep -m1 'namespace:' | sed -E 's/^[^:]*:[[:space:]]*//')")"
+          TEMPORAL_ARGS=""
+          if [ -n "${TEMPORAL_NS:-}" ]; then
+            docker run -d --name dast-temporal -p 7233:7233 temporalio/temporal:1.8.2 \
+              server start-dev --ip 0.0.0.0 --port 7233 -n "${TEMPORAL_NS}" >/dev/null
+            for _ in $(seq 1 30); do
+              docker exec dast-temporal temporal operator namespace describe --address localhost:7233 "${TEMPORAL_NS}" >/dev/null 2>&1 && break
+              sleep 2
+            done
+            TEMPORAL_ARGS="-Dopenbank.temporal.server-url=localhost:7233"
+          fi
+
+          # The access log is the measurement: one `ZAPACCESS <method> <path> <status>` line per
+          # request the service RECEIVED. dast-zap-coverage.py counts from it, not from ZAP.
+          nohup ./gradlew ":${svc}:quarkusDev" \
+            -Dquarkus.console.basic=true --console=plain --quiet \
+            -Dquarkus.datasource.jdbc.url="jdbc:postgresql://localhost:5432/${DB}" \
+            -Dquarkus.datasource.username="${DBUSER}" \
+            -Dquarkus.datasource.password="${POSTGRES_PASSWORD}" \
+            -Dquarkus.oidc.enabled=true \
+            -Dquarkus.oidc.auth-server-url=http://localhost:8543/realms/openbank \
+            -Dquarkus.oidc.client-id=openbank-services \
+            -Dquarkus.oidc.credentials.secret="${OIDC_CLIENT_SECRET}" \
+            -Dquarkus.redis.hosts=redis://localhost:6379 \
+            -Dquarkus.devservices.enabled=false \
+            -Dquarkus.http.access-log.enabled=true \
+            "-Dquarkus.http.access-log.pattern=ZAPACCESS %m %U %s" \
+            ${TEMPORAL_ARGS} \
+            > "zap-reports/${svc}-boot.log" 2>&1 &
+          DEV_PID=$!
+          for _ in $(seq 1 180); do
+            code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:${PORT}/q/health" || true)"
+            if [ "$code" != "000" ]; then echo "ready=true" >> "$GITHUB_OUTPUT"; echo "==> [${svc}] up"; exit 0; fi
+            kill -0 "$DEV_PID" 2>/dev/null || break
+            sleep 2
+          done
+          if kill -0 "$DEV_PID" 2>/dev/null; then
+            echo "::error::[${svc}] NOT A SCAN — did not become ready within 360s (process still alive: timeout, not a crash)"
+          else
+            echo "::error::[${svc}] NOT A SCAN — the dev-mode process exited before becoming ready"
+          fi
+          sed -E 's/\x1b\[[0-9;]*m//g' "zap-reports/${svc}-boot.log" \
+            | grep -E ' ERROR |Caused by:|Failed to start|Port already bound' | tail -40
+          tail -40 "zap-reports/${svc}-boot.log"
+          exit 1
+
+      - name: Obtain bearer token (client_credentials)
+        run: |
+          set -euo pipefail
+          TOKEN="$(curl -s -X POST http://localhost:8543/realms/openbank/protocol/openid-connect/token \
+            -d grant_type=client_credentials -d client_id=openbank-services \
+            -d client_secret="${OIDC_CLIENT_SECRET}" | jq -r '.access_token // empty')"
+          if [ -z "$TOKEN" ]; then
+            echo "::error::[${SERVICE}] NOT A SCAN — no bearer token from Keycloak; an unauthenticated run only sees the auth wall"
+            exit 1
+          fi
+          echo "::add-mask::${TOKEN}"
+          # Read by zaproxy/action-api-scan's `docker run -e ZAP_AUTH_HEADER_VALUE ...`; ZAP then
+          # sets `Authorization: <value>` on every request. ZAP_AUTH_HEADER_SITE is left unset on
+          # purpose: every target is on this runner, and a site filter that failed to match
+          # (localhost vs 127.0.0.1) would silently send the scan unauthenticated.
+          echo "ZAP_AUTH_HEADER_VALUE=Bearer ${TOKEN}" >> "$GITHUB_ENV"
+          echo "==> got bearer token (len ${#TOKEN})"
+
+      - name: Serve the committed spec with servers pointed at the local service
+        env:
+          PORT: ${{ steps.boot.outputs.port }}
+        run: |
+          set -euo pipefail
+          mkdir -p zap-target
+          python3 - <<'PY'
+          import os, yaml
+          src = f"{os.environ['SERVICE']}/src/main/resources/openapi.yaml"
+          spec = yaml.safe_load(open(src))
+          spec["servers"] = [{"url": f"http://localhost:{os.environ['PORT']}"}]
+          with open("zap-target/openapi.yaml", "w") as fh:
+              yaml.safe_dump(spec, fh, sort_keys=False)
+          PY
+          nohup python3 -m http.server 8099 --bind 127.0.0.1 --directory zap-target >/dev/null 2>&1 &
+          for _ in $(seq 1 20); do curl -fsS -o /dev/null http://127.0.0.1:8099/openapi.yaml && exit 0; sleep 1; done
+          echo "::error::spec server did not come up"; exit 1
+
+      # Findings never fail this step (fail_action: false); whether the run was a SCAN is decided
+      # by the coverage step below, which also runs when ZAP itself errors out.
+      - name: ZAP API scan (OpenAPI, authenticated)
+        continue-on-error: true
+        timeout-minutes: 25
+        uses: zaproxy/action-api-scan@5158fe4d9d8fcc75ea204db81317cce7f9e5453d # v0.10.0
+        with:
+          target: "http://127.0.0.1:8099/openapi.yaml"
+          format: openapi
           fail_action: false
           allow_issue_writing: false
-          artifact_name: zap-baseline-ledger-service
-          cmd_options: "-a"
+          artifact_name: zap-api-scan-${{ matrix.service }}
+          # -I: warnings do not set a failing exit. Bounded active scan: whole scan <= 15 min,
+          # any single rule <= 2 min.
+          cmd_options: >-
+            -I -z "-config scanner.maxScanDurationInMins=15 -config scanner.maxRuleDurationInMins=2"
 
-      - name: Dump container logs on failure
-        if: failure()
-        working-directory: openbank-infra
-        run: docker compose logs ledger-service kafka postgres | tail -300
+      - name: Coverage verdict (fails on a non-scan, not on findings)
+        if: always() && steps.boot.outcome != 'skipped'
+        env:
+          READY: ${{ steps.boot.outputs.ready || 'false' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          mkdir -p zap-reports
+          sed -E 's/\x1b\[[0-9;]*m//g' "zap-reports/${SERVICE}-boot.log" 2>/dev/null \
+            | grep -a 'ZAPACCESS ' > "zap-reports/${SERVICE}-access.log" || true
+          python3 .github/scripts/dast-zap-coverage.py \
+            --service "$SERVICE" \
+            --spec "${SERVICE}/src/main/resources/openapi.yaml" \
+            --access-log "zap-reports/${SERVICE}-access.log" \
+            --zap-json report_json.json \
+            --ready "$READY" \
+            --out-dir zap-reports \
+            --run-url "$RUN_URL"
 
-      - name: Tear down stack
+      - name: Upload coverage record
         if: always()
-        working-directory: openbank-infra
-        run: docker compose down -v
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zap-reports-${{ matrix.service }}
+          path: zap-reports/
+          retention-days: 30
+
+      - name: Tear down
+        if: always()
+        run: |
+          pkill -f quarkusDev 2>/dev/null || true
+          pkill -f "http.server 8099" 2>/dev/null || true
+          docker rm -f dast-pg dast-redis dast-keycloak dast-temporal >/dev/null 2>&1 || true
