@@ -9,6 +9,7 @@ import json
 import math
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import xml.etree.ElementTree as ET
@@ -627,6 +628,8 @@ def observations(service: Path) -> list[dict]:
         for line in file.read_text().splitlines():
             try:
                 item = json.loads(line)
+                if not isinstance(item, dict):
+                    continue
                 item.pop("schemaVersion", None)
                 if "observedAtUnix" in item:
                     image = str(item.get("image", ""))
@@ -646,8 +649,16 @@ def observations(service: Path) -> list[dict]:
                     # stream. Keep that provenance only while deduplicating;
                     # the published schema deliberately contains no host data.
                     resource = item.get("resource")
-                    if resource in INFRASTRUCTURE:
-                        item["image"] = public_runtime_image(resource, item.get("image", ""))
+                    if not isinstance(resource, str) or resource not in INFRASTRUCTURE:
+                        # Same rule the Docker branch above already applies: a resource
+                        # outside the schema's vocabulary (opa, keycloak, ...) is not
+                        # observed. Passing it through made validate_envelope raise, so ONE
+                        # out-of-vocabulary recorder line cost the service its whole
+                        # envelope, and Admin-UI deploy refuses to bake an artifact with
+                        # no run.json (#11850). Never echo a recorder-supplied value to CI logs.
+                        print("collect-test-run-evidence: ignoring unsupported runtime resource", file=sys.stderr)
+                        continue
+                    item["image"] = public_runtime_image(resource, item.get("image", ""))
                     result.append((0 if file.name == "testcontainers.jsonl" else 1, item))
             except json.JSONDecodeError:
                 continue
@@ -872,6 +883,11 @@ def main() -> None:
                 '{"schemaVersion":1,"resource":"postgres","image":"registry.openbank.invalid/team/postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"stopped","observedAt":"2026-08-22T21:11:01Z","resourceScopeId":"11111111-1111-4111-8111-111111111111"}\n'
                 '{"schemaVersion":1,"resource":"postgres","image":"postgres:16.3-alpine","lifecycle":"started","observedAt":"2026-08-22T21:10:10Z","resourceScopeId":"22222222-2222-4222-8222-222222222222"}\n'
+                # A recorder outside the schema vocabulary (sca/settlement record opa and
+                # keycloak) must be dropped, not fail the whole envelope (#11850).
+                '{"schemaVersion":1,"resource":"opa","image":"openpolicyagent/opa:1.4.2","lifecycle":"started","observedAt":"2026-08-22T21:10:20Z"}\n'
+                '{"schemaVersion":1,"resource":{"unexpected":"object"},"lifecycle":"started"}\n'
+                '["unexpected", "record"]\n'
             )
             performance = service / "perf.json"
             # This is k6's actual summary-export form: true means the threshold was crossed.

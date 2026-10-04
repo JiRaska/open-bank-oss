@@ -8,10 +8,10 @@ import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.balance.application.port.`in`.AccountBookedChange
 import com.openbank.balance.application.port.`in`.LedgerProjectionUseCase
+import com.openbank.libs.domain.money.Money
 import jakarta.enterprise.context.ApplicationScoped
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.eclipse.microprofile.reactive.messaging.Incoming
-import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
 
@@ -49,10 +49,20 @@ class LedgerProjectionConsumer(
         projection.apply(change)
     }
 
+    // The delta is built as kernel Money (#11604) BEFORE anything is persisted: a delta with more
+    // decimals than its currency allows, or a currency that is not ISO 4217 with a minor unit, throws
+    // InvalidMoneyException here. The method rethrows, so the configured failure-strategy
+    // (dead-letter-queue -> openbank.dlq.balance.ledger-events-in) parks the record and the channel
+    // moves on; no dedup marker, pocket, balance change or outbox row is written for it.
+    // Before: NUMERIC(19,4) silently rounded a 5th decimal, a sub-minor-unit delta was booked as is,
+    // and an unknown currency created a phantom pocket.
     private fun toChange(node: JsonNode): AccountBookedChange = AccountBookedChange(
         accountId = UUID.fromString(node["aggregateId"].asText()),
-        currency = node["currency"].asText(),
-        delta = BigDecimal(node["delta"].asText()),
+        delta = Money.parseInbound(
+            Money.parseAmount(node["delta"].asText()),
+            node["currency"]?.asText(),
+            amountField = "delta",
+        ),
         journalEntryId = UUID.fromString(node["journalEntryId"].asText()),
         transactionId = UUID.fromString(node["transactionId"].asText()),
         entryDate = LocalDate.parse(node["entryDate"].asText()),

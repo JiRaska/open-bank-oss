@@ -23,6 +23,7 @@ One row per authorisation — approved or declined. It is also the hold.
 | `network_reference` | VARCHAR(64) | acquirer's reference |
 | `idempotency_key` | VARCHAR(128) | written once on insert |
 | `authorized_at`, `expires_at`, `updated_at` | TIMESTAMPTZ | |
+| `version` | BIGINT | optimistic lock (V4, Hibernate `@Version`) — serialises every concurrent write (clearing, reversal, expiry) |
 
 Constraints and indexes:
 
@@ -98,6 +99,22 @@ Idempotency reservations for the calls that reach a card network (token provisio
 
 A `PENDING` row never expires: a request that died after the network acted must not be retried into a second action. `ix_card_lifecycle_idempotency_pending` (partial, `state = 'PENDING'`) is the operator's query for stuck keys.
 
+### `card_clearings`
+
+One row per **applied** clearing presentment (V4) — the idempotency record for its key. Insert-only.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | UUID PK | UUIDv7 |
+| `authorization_id` | UUID FK → `card_authorizations.id` | |
+| `idempotency_key` | VARCHAR(128) | the acquirer's clearing key |
+| `request_fingerprint` | VARCHAR(64) | libs `RequestFingerprint` (SHA-256 hex) of path, amount and upper-cased currency |
+| `amount_minor_units` | BIGINT | `> 0` |
+| `currency_code` | VARCHAR(3) | |
+| `applied_at` | TIMESTAMPTZ | |
+
+UNIQUE `ux_card_clearings_authorization_key (authorization_id, idempotency_key)` — the guarantee that one clearing key applies once even under concurrent duplicates.
+
 ### `card_outbox`
 
 Transactional outbox (ADR-0050): `event_id` (unique), `aggregate_id`, `event_type`, `payload`, `status` (default `PENDING`), `attempt_count`, `last_error`, `created_at`, `updated_at`, `sent_at`, `claimed_at`, `synthetic` (V2). Hibernate uses sequence `card_outbox_seq` (increment 50), created explicitly in V1.
@@ -109,6 +126,7 @@ Transactional outbox (ADR-0050): `event_id` (unique), `aggregate_id`, `event_typ
 | V1 `init_card_processing` | both tables, indexes, `card_outbox_seq` | `DROP TABLE card_outbox; DROP TABLE card_authorizations;` — safe only before any authorisation exists |
 | V2 `synthetic_outbox_taint` | `card_outbox.synthetic BOOLEAN NOT NULL DEFAULT FALSE` (ADR-0252) | `ALTER TABLE card_outbox DROP COLUMN synthetic;` — safe only before synthetic traffic was dispatched |
 | V3 `token_and_dispute_lifecycle` | `card_network_tokens`, `card_dispute_cases`, `card_dispute_evidence`, `card_lifecycle_idempotency`, their indexes | `DROP TABLE card_dispute_evidence; DROP TABLE card_lifecycle_idempotency; DROP TABLE card_dispute_cases; DROP TABLE card_network_tokens;` — all are new and nothing outside V3 references them; the drop loses only rows written since V3 |
+| V4 `card_clearing_idempotency` | `card_clearings` + UNIQUE `(authorization_id, idempotency_key)`; `card_authorizations.version` | `DROP TABLE card_clearings; ALTER TABLE card_authorizations DROP COLUMN version;` — schema-safe, but re-opens double presentment and drops the record of applied clearing keys |
 
 `migrate-at-start: true`; `validate-on-migrate: false`.
 

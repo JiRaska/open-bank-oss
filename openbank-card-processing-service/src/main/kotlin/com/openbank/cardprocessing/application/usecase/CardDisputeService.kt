@@ -7,6 +7,7 @@ package com.openbank.cardprocessing.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.cardprocessing.application.port.`in`.CardDisputeUseCase
 import com.openbank.cardprocessing.application.port.`in`.OpenDisputeCommand
+import com.openbank.cardprocessing.application.port.`in`.RefreshDisputeCommand
 import com.openbank.cardprocessing.application.port.`in`.SubmitEvidenceCommand
 import com.openbank.cardprocessing.application.port.out.CardAuthorizationRepository
 import com.openbank.cardprocessing.application.port.out.CardDisputeCaseRepository
@@ -366,6 +367,30 @@ class CardDisputeService(
     /**
      * Re-reads the network's status and records a MOVE, publishing nothing when nothing moved.
      *
+     * Idempotent under the caller's `Idempotency-Key` like [open]: a retried refresh replays the case
+     * the first one produced and never asks the network again. Whatever the outcome — a move, no move,
+     * or a CLOSED case whose stored outcome is kept — a successful refresh completes the reservation
+     * pointing at the case; a refusal releases it.
+     */
+    override suspend fun refreshStatus(command: RefreshDisputeCommand): DisputeOutcome {
+        val claim = IdempotencyClaim(LifecycleOperation.DISPUTE_REFRESH, command.idempotencyKey)
+        when (val reservation = idempotency.reserve(claim.operation, claim.key, fingerprintOf(command))) {
+            is Reservation.Completed -> return DisputeOutcome.Accepted(
+                cases.findById(reservation.resultId)
+                    ?: error("idempotency reservation points at missing dispute ${reservation.resultId}"),
+            )
+            Reservation.InProgress -> throw IdempotencyRequestInProgressException()
+            Reservation.Mismatch -> throw IdempotencyKeyReusedException()
+            Reservation.Claimed -> Unit
+        }
+        return holdingClaim(claim, "refresh of dispute ${command.disputeId}") { network ->
+            refreshClaimed(command.disputeId, claim, network)
+        }
+    }
+
+    /**
+     * Re-reads the network's status and records a MOVE, publishing nothing when nothing moved.
+     *
      * An event per poll would make "the case changed" indistinguishable from "somebody looked at
      * it", and every consumer would have to de-duplicate a stream that is mostly repeats.
      *
@@ -374,15 +399,21 @@ class CardDisputeService(
      * is a discrepancy for a person to investigate, not a state change to apply silently. The stored
      * case is returned, and a disagreement is counted and logged.
      */
-    override suspend fun refreshStatus(disputeId: UUID): DisputeOutcome {
+    private suspend fun refreshClaimed(
+        disputeId: UUID,
+        claim: IdempotencyClaim,
+        network: NetworkCallMarker,
+    ): DisputeOutcome {
         val case = cases.findById(disputeId)
             ?: return refuse(DisputeRefusal.CASE_NOT_FOUND, "no dispute $disputeId")
-        if (case.terminal) return refreshClosed(case)
+        network.called = true
+        if (case.terminal) return refreshClosed(case).also { idempotency.complete(claim, case.id) }
 
         return when (val answer = disputes.status(case.networkCaseId)) {
             is SchemeResult.Answered -> {
                 val bankStatus = bankStatusFor(answer.value, case.status)
                 if (answer.value.status == case.schemeStatus && bankStatus == case.status) {
+                    idempotency.complete(claim, case.id)
                     return DisputeOutcome.Accepted(case)
                 }
                 val now = Instant.now(clock)
@@ -402,7 +433,7 @@ class CardDisputeService(
                         updated,
                         outboxMessage(updated.id, CardDisputeStatusChanged.EVENT_TYPE, event),
                         idempotencyKeyOf(updated),
-                        null,
+                        claim,
                     ),
                 )
             }
@@ -503,6 +534,9 @@ class CardDisputeService(
         listOf(command.authorizationId, command.reasonCode, command.amountMinorUnits, command.currencyCode.uppercase())
             .joinToString("\n"),
     )
+
+    private fun fingerprintOf(command: RefreshDisputeCommand): String =
+        RequestFingerprint.of("POST", "/api/v1/card-disputes/${command.disputeId}/refresh", "")
 
     private fun fingerprintOf(command: SubmitEvidenceCommand): String = RequestFingerprint.of(
         "POST",

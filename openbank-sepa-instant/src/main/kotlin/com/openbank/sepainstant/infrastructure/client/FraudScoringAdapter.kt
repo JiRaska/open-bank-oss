@@ -49,7 +49,7 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
         // every `onFailure()` below and reach the payment path. Deferring turns it into a failure
         // the recovery can see — the Mutiny equivalent of the coroutine siblings' catch(Throwable).
         Uni.createFrom().deferred { self.scoreWithResilience(command) }
-            .invoke { _ -> metrics.recordReal() }
+            .invoke { outcome -> record(outcome, command) }
             .onFailure().invoke { ex ->
                 metrics.recordSynthetic()
                 log.warnf(
@@ -80,12 +80,30 @@ class FraudScoringAdapter(@RestClient private val client: FraudScoreClient, priv
         )
     }
 
+    private fun record(outcome: FraudScoreOutcome, command: FraudScoreCommand) {
+        if (outcome.verdict == FraudVerdict.UNKNOWN) {
+            metrics.recordUnrecognised()
+            log.warnf(
+                "Fraud scoring returned an unrecognised verdict (rail=%s); reporting UNKNOWN — this payment " +
+                    "carries no usable fraud verdict",
+                command.rail,
+            )
+        } else {
+            metrics.recordReal()
+        }
+    }
+
+    /**
+     * A null, absent or unrecognised verdict is [FraudVerdict.UNKNOWN], never ALLOW (#4403): the
+     * OpenAPI enum constrains the wire today, but that is a property of the schema, and a caller
+     * that one day enforces the verdict would be relying on this mapper.
+     */
     private fun mapVerdict(remote: String?): FraudVerdict = when (remote?.uppercase()) {
         "ALLOW" -> FraudVerdict.ALLOW
         "CHALLENGE" -> FraudVerdict.CHALLENGE
         "REVIEW" -> FraudVerdict.REVIEW
         "DECLINE" -> FraudVerdict.DECLINE
-        else -> FraudVerdict.ALLOW
+        else -> FraudVerdict.UNKNOWN
     }
 
     companion object {
