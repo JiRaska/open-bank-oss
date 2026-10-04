@@ -13,6 +13,8 @@ import com.openbank.risk.domain.model.InvalidLoanContractException
 import jakarta.ws.rs.core.Response
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper
 
+private const val FAILED_DEPENDENCY = 424
+
 /**
  * Only the ones this service owns. `IllegalArgumentException` → 400 is mapped by libs-runtime
  * fleet-wide, and a service-local mapper for it is forbidden (ADR-0049, #526).
@@ -48,18 +50,18 @@ class ExceptionMappers {
 
     /**
      * No ČNB reserve ratio / remuneration fact is in effect on the run's as-of date. The requirement
-     * is NOT_EVALUABLE — a 409 with the reason, never a number computed at a default rate.
+     * is NOT_EVALUABLE — 424 identifies the missing upstream fact without changing the established
+     * 409 UNTIED response shape, and never returns a number computed at a default rate.
      */
     @ServerExceptionMapper
-    fun minReservesNotEvaluable(e: MinReservesNotEvaluableException): Response =
-        Response.status(Response.Status.CONFLICT)
-            .entity(
-                mapOf(
-                    "error" to "NOT_EVALUABLE",
-                    "runId" to e.runId.toString(),
-                    "asOf" to e.asOf.toString(),
-                    "reason" to e.reason,
-                ),
-            )
-            .build()
+    fun minReservesNotEvaluable(e: MinReservesNotEvaluableException): Response = Response.status(FAILED_DEPENDENCY)
+        .entity(
+            mapOf(
+                "error" to "NOT_EVALUABLE",
+                "runId" to e.runId.toString(),
+                "asOf" to e.asOf.toString(),
+                "reason" to e.reason,
+            ),
+        )
+        .build()
 }

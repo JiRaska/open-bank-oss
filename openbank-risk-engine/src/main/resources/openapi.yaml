@@ -70,7 +70,7 @@ info:
   # 1.24.0 -> 1.25.0: additive — GET /snapshots/{id}/min-reserves takes the reserve ratio and its
   #        remuneration from the ČNB facts in effect on the run's as-of date (fed by fx-service), no
   #        longer from configuration; assumptions.rateFacts names them with provenance. With no fact
-  #        in effect the 409 answers NOT_EVALUABLE (MinReservesNotEvaluable) instead of a number.
+  #        in effect the 424 answers NOT_EVALUABLE (MinReservesNotEvaluable) instead of a number.
   version: 1.25.0
   description: |
     Read-only balance-sheet risk engine (ADR-0313, ADR-0314). A snapshot run pulls the ledger
@@ -488,7 +488,7 @@ paths:
         GL account is mapped as the ČNB current account, holdings, surplus and shortfall are null and
         `holdingsNotStated` says why. The ratio and its remuneration are ČNB facts published by
         fx-service and named, with provenance, in `assumptions.rateFacts`; with no fact in effect on
-        the as-of date the answer is 409 NOT_EVALUABLE, never a default rate. Classification comes
+        the as-of date the answer is 424 NOT_EVALUABLE, never a default rate. Classification comes
         from the versioned set `openbank.risk.min-reserves.*`, named on the result. One snapshot day: reserves are held on average over the maintenance period, so
         the surplus is indicative, not a compliance verdict. A GL balance the classification does
         not name is listed in `unclassified` and counted nowhere. Derived on request, never stored.
@@ -508,15 +508,17 @@ paths:
         '404':
           description: No such run
         '409':
-          description: >-
-            The run is UNTIED; nothing derived from it is served (ADR-0314 D3). Or NOT_EVALUABLE: no
-            ČNB reserve ratio / remuneration fact is in effect on the run's as-of date.
+          description: The run is UNTIED; nothing derived from it is served (ADR-0314 D3)
           content:
             application/json:
               schema:
-                oneOf:
-                  - $ref: '#/components/schemas/Untied'
-                  - $ref: '#/components/schemas/MinReservesNotEvaluable'
+                $ref: '#/components/schemas/Untied'
+        '424':
+          description: A required ČNB reserve ratio or remuneration fact is not in effect on the run's as-of date
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MinReservesNotEvaluable'
 
   /api/v1/risk/min-reserves/periods:
     get:

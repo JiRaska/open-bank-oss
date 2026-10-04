@@ -19,7 +19,7 @@ import java.util.UUID
  *
  * The reserve ratio and remuneration are the ČNB facts in effect on the run's as-of date
  * ([ReserveFacts]). With either missing the requirement is NOT_EVALUABLE: this endpoint's v1
- * contract promises a numeric rate, so it answers 409 NOT_EVALUABLE with the reason instead of a
+ * contract promises a numeric rate, so it answers 424 NOT_EVALUABLE with the reason instead of a
  * number computed at a default.
  */
 class MinReservesService(

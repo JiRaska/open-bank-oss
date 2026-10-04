@@ -161,7 +161,7 @@ class RiskMinReservesApiIT {
         TestDb.execute("DELETE FROM cnb_policy_rate_fact WHERE instrument = 'MIN_RESERVE_RATIO'")
         val id = snapshot("2026-05-26", "TIED_OUT")
         given().`when`().get("/api/v1/risk/snapshots/$id/min-reserves")
-            .then().statusCode(409)
+            .then().statusCode(424)
             .body("error", equalTo("NOT_EVALUABLE"))
             .body("asOf", equalTo("2026-05-26"))
             .body("reason", org.hamcrest.Matchers.containsString("MIN_RESERVE_RATIO"))
