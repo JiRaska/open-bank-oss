@@ -47,14 +47,14 @@ faktorem, který engine má, takže žádná strana nemůže poměr zlepšit:
 - **Kredit (pasivum):** zachází se jako s `other-liability`: 100% odtok LCR, 0% ASF. Kreditní zůstatek se nikdy
   nestane zápornou řádkou RSF, která by snižovala požadované stabilní financování.
 
-## Verze sad parametrů
+### Verze sad parametrů
 
 | Sada | Verze | Změna |
 |------|-------|-------|
 | sada režimu BCBS (`regime: bcbs`, d238/d295) | 4 na 5 | klasifikace GL 1100, 1990, 1991, 1995, 2200 |
 | `eu-2015-61-crr2` | 3 na 4 | klasifikace GL 1100, 1990, 1991, 1995, 2200 |
 
-## Testy
+### Testy
 
 `ResidualGlLiquidityClassificationTest` pokrývá novou klasifikaci; aktualizovány jsou aserce verzí sad parametrů
 v existujících likviditních testech a v `RiskLiquidityApiIT`.

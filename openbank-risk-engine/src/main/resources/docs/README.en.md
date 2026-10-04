@@ -47,14 +47,14 @@ conservative factor the engine has, so neither side can improve a ratio:
 - **Credit (liability):** handled as `other-liability`: 100% LCR outflow, 0% ASF. A credit balance never becomes a
   negative RSF line that reduces the required stable funding.
 
-## Parameter set versions
+### Parameter set versions
 
 | Set | Version | Change |
 |-----|---------|--------|
 | `bcbs-d238-d295` | 4 to 5 | GL 1100, 1990, 1991, 1995, 2200 classified |
 | `eu-2015-61-crr2` | 3 to 4 | GL 1100, 1990, 1991, 1995, 2200 classified |
 
-## Tests
+### Tests
 
 `ResidualGlLiquidityClassificationTest` covers the new classification; the parameter-set version assertions in the
 existing liquidity tests and `RiskLiquidityApiIT` are updated.
