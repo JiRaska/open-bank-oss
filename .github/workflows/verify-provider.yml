@@ -43,8 +43,8 @@ on:
         type: string
       provider_version:
         # Blank deliberately means the checked-out ref. A distinct value checks out deployed P,
-        # then overlays the one approved Ledger provider-state fixture blob from ref F.
-        description: "Provider version P to publish. Blank = ref; distinct P is Ledger-only and uses one approved fixture from ref F."
+        # then overlays one approved provider-state fixture blob from ref F.
+        description: "Provider version P to publish. Blank = ref; distinct P is Ledger/Balance-only and uses one approved fixture from ref F."
         required: false
         default: ""
         type: string
