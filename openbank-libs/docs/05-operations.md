@@ -25,11 +25,13 @@ Služby používají vlastní `version.txt` a konfiguraci release-please. Verzi 
 
 ## Zahřátí při startu a readiness (#11890)
 
-Každá služba postavená na `openbank-libs-runtime` před hlášením připravenosti zahřeje JVM. Po `StartupEvent` spustí `StartupWarmup` na vlastním vlákně: průchody Jacksonem, `select 1` na reaktivním poolu (pokud existuje) a volání sebe sama na `/api/v1/info` a na `openbank.warmup.protected-path` bez tokenu (v produkci 401, které i tak projde bezpečnostními filtry). `WarmupReadinessCheck` hlásí DOWN, dokud zahřátí neskončí, a nejpozději po `openbank.warmup.max-duration` (výchozí 20s) hlásí UP vždy. Argo Rollouts tak pošle provoz jen na zahřátý pod a žádný pod nezůstane mimo rotaci navždy.
+Každá služba postavená na `openbank-libs-runtime` před hlášením připravenosti zahřeje JVM. Po `StartupEvent` spustí `StartupWarmup` na vlastním daemon vlákně: průchody Jacksonem, `select 1` na reaktivním poolu (pokud existuje), volání sebe sama na `/api/v1/info` a na `openbank.warmup.protected-path` bez tokenu (v produkci 401, které i tak projde bezpečnostními filtry). Zahřeje také serializéry a deserializéry konkrétních typů REST endpointů, provede nejvýše jeden čtecí dotaz pro každou mapovanou Hibernate Reactive entitu a zavolá PDP s anonymním principalem a akcí `openbank.warmup.probe`. Rozhodnutí PDP se zahodí; politika tuto akci nemá povolovat. Volitelné CDI implementace `WarmupContributor` mohou přidat zahřátí doménové cesty bez zápisů a vedlejších účinků.
+
+`WarmupReadinessCheck` hlásí DOWN, dokud zahřátí neskončí, a nejpozději po `openbank.warmup.max-duration` (výchozí 20s) hlásí UP i při nedokončeném zahřátí. Limit chrání dostupnost, ale není důkazem úspěchu všech kroků. Čtení entit zatěžuje databázi při startu každého podu; jednotlivé entity mají izolované selhání a pětisekundový timeout. Před plošným rolloutem sledujte čas startu a případné chyby kroků v reprezentativní službě.
 
 Proč: v sandboxu byl každý pomalý požadavek za 48 h první požadavek po startu podu (1–2 s proti 17–60 ms). Naměřený medián prvního požadavku se zahřátím 967 ms, bez něj 2622 ms.
 
-Konfigurace: `openbank.warmup.enabled` (výchozí true, v `%test` vypnuto), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Každý krok loguje `warm-up step <name>: <ms>`; selhání kroku se zaloguje a ostatní kroky pokračují.
+Konfigurace: `openbank.warmup.enabled` (výchozí true, v `%test` vypnuto), `openbank.warmup.max-duration`, `openbank.warmup.json-iterations`, `openbank.warmup.http-iterations`, `openbank.warmup.protected-path`. Každý krok loguje délku a výsledek; selhání kroku se zaloguje a ostatní kroky pokračují. `/q/health/ready` ukazuje `startup-warmup`; metrika `openbank_warmup_seconds{step,outcome}` měří kroky i celek (`step="total"`) a `openbank_warmup_cap_exceeded_total` počítá pody, které začaly přijímat provoz po vypršení limitu. Zvýšení poslední metriky nebo `outcome="failed"` vyžaduje ověřit první skutečný požadavek po nasazení.
 
 ## Bezpečné XML a TLS odchozích požadavků
 
