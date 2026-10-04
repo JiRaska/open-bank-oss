@@ -34,6 +34,8 @@ metadata:
     openbank.io/plane: platform
     openbank.io/adr: "0099"
   annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 2 * * 0' plus slack.
+    openbank.tech/max-success-age-seconds: "1296000"
     # Describe what this Job does for the audit trail and runbook readers.
     openbank.io/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
     openbank.io/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"

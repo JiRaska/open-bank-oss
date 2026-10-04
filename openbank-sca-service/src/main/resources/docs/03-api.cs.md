@@ -90,3 +90,8 @@ Chyby používají sdílený `ApiError` (libs): `{ traceId, status, code, messag
 ## Verzování
 
 Změny API se řídí klasifikací OpenAPI-diff (`oasdiff`), nezávisle na release verzi (ADR-0048). Release verze žije v `version.txt` (aktuálně `0.4.0`); verze API kontraktu žije v `openapi.yaml:info.version` a musí být v rámci follow-upu přegenerování kontraktu znovu sladěna s kódem.
+
+
+## Schvalování operátorem (čtyři oči)
+
+`GET /api/v1/sca/approvals` a `GET /api/v1/sca/approvals/{id}` (operátor/admin) vracejí každé schválení s `decidedAt` a `summary` toho, co schválení váže; vykreslí ho `ScaApprovalSummaryRenderer` při vytvoření schválení a uloží se s ním: u `device.enroll` zkrácený identifikátor credentialu, algoritmus a prvních 8 hex znaků SHA-256 veřejného klíče (nikdy klíč samotný); u `device.revoke` zkrácené identifikátory zařízení a credentialu, algoritmus a datum registrace; u `scaChallenge.consume` účel, částku, měnu a věřitele maskovaného na poslední 4 znaky. Shrnutí je informativní; o tom, které opakování schválení odemkne, rozhoduje otisk požadavku.

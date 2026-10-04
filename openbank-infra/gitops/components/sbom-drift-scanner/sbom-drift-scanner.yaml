@@ -376,6 +376,9 @@ metadata:
   labels:
     app.kubernetes.io/name: sbom-drift-scanner
     app.kubernetes.io/part-of: admin-ui
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '10 3 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 03:10 UTC daily — after infra-vuln-scanner's 02:15 slot, before peak traffic.
   schedule: "10 3 * * *"

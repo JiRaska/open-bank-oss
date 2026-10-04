@@ -179,6 +179,9 @@ metadata:
   namespace: ai-platform
   labels:
     app.kubernetes.io/part-of: ai-platform
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '15 3 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "180000"
 spec:
   # 03:15 UTC daily — outside the litellm-db-daily (04:49) and langfuse-db-daily (04:19) backup
   # windows in postgres.yaml/langfuse-postgres.yaml, so a large delete's WAL churn does not
