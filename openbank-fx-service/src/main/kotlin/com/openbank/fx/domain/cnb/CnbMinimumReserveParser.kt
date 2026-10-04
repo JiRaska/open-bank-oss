@@ -34,7 +34,7 @@ import java.time.LocalDate
  */
 object CnbMinimumReserveParser {
 
-    private val EXCEL_EPOCH: LocalDate = LocalDate.of(1899, 12, 30)
+    private val EXCEL_EPOCH: LocalDate = LocalDate.parse("1899-12-30") // the Excel (1900 date system) day zero
     private val HUNDRED = BigDecimal.ONE.movePointRight(2)
     private const val FRACTION_SCALE = 8
     private const val LABEL_BASE = "základna"

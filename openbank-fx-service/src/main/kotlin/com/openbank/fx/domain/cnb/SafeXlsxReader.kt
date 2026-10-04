@@ -53,29 +53,33 @@ object SafeXlsxReader {
 
     private fun unzip(bytes: ByteArray): Map<String, ByteArray> {
         val out = mutableMapOf<String, ByteArray>()
-        var total = 0L
+        val budget = longArrayOf(0L) // total inflated bytes so far, across entries
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
-            while (true) {
-                val entry = zip.nextEntry ?: break
+            generateSequence { zip.nextEntry }.filterNot { it.isDirectory }.forEach { entry ->
                 require(out.size < MAX_ENTRIES) { "xlsx has more than $MAX_ENTRIES entries" }
-                if (entry.isDirectory) continue
-                val buf = ByteArrayOutputStream()
-                val chunk = ByteArray(BUFFER)
-                var size = 0L
-                while (true) {
-                    val n = zip.read(chunk)
-                    if (n < 0) break
-                    size += n
-                    total += n
-                    require(size <= MAX_ENTRY_BYTES) { "xlsx entry '${entry.name}' exceeds $MAX_ENTRY_BYTES bytes" }
-                    require(total <= MAX_TOTAL_BYTES) { "xlsx exceeds $MAX_TOTAL_BYTES uncompressed bytes" }
-                    buf.write(chunk, 0, n)
-                }
-                require(out.put(entry.name, buf.toByteArray()) == null) { "duplicate xlsx entry '${entry.name}'" }
+                val data = inflate(zip, entry.name, budget)
+                require(out.put(entry.name, data) == null) { "duplicate xlsx entry '${entry.name}'" }
             }
         }
         require(out.isNotEmpty()) { "payload is not a zip archive" }
         return out
+    }
+
+    /** Reads one entry, enforcing the per-entry and total limits on the bytes actually inflated. */
+    private fun inflate(zip: ZipInputStream, name: String, budget: LongArray): ByteArray {
+        val buf = ByteArrayOutputStream()
+        val chunk = ByteArray(BUFFER)
+        var size = 0L
+        var n = zip.read(chunk)
+        while (n >= 0) {
+            size += n
+            budget[0] += n
+            require(size <= MAX_ENTRY_BYTES) { "xlsx entry '$name' exceeds $MAX_ENTRY_BYTES bytes" }
+            require(budget[0] <= MAX_TOTAL_BYTES) { "xlsx exceeds $MAX_TOTAL_BYTES uncompressed bytes" }
+            buf.write(chunk, 0, n)
+            n = zip.read(chunk)
+        }
+        return buf.toByteArray()
     }
 
     private val factory: XMLInputFactory = XMLInputFactory.newFactory().apply {

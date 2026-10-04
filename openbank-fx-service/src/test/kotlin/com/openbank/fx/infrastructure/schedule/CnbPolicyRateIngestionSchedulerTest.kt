@@ -67,7 +67,9 @@ class CnbPolicyRateIngestionSchedulerTest {
 
         CnbPolicyInstrument.FEED_BACKED.forEach { coVerify(exactly = 1) { useCase.ingest(it) } }
         assertThat(successRecorded(CnbPolicyRateIngestionScheduler.WORKFLOW_NAME)).isEqualTo(1.0)
-        (CnbPolicyRateIngestionScheduler.FEED_NAMES.values + CnbPolicyRateIngestionScheduler.FEED_MIN_RESERVES).forEach {
+        val feeds =
+            CnbPolicyRateIngestionScheduler.FEED_NAMES.values + CnbPolicyRateIngestionScheduler.FEED_MIN_RESERVES
+        feeds.forEach {
             assertThat(successRecorded("feed-$it")).describedAs(it).isEqualTo(1.0)
         }
         assertThat(
