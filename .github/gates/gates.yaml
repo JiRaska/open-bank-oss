@@ -6148,6 +6148,8 @@ gates:
       - ".github/scripts/await-admin-ui-source-validation.py"
       - ".github/scripts/test-await-admin-ui-source-validation.py"
       - ".github/workflows/admin-ui-deploy.yml"
+      - ".github/workflows/auto-deploy.yml"
+      - ".github/workflows/platform-images.yml"
     selftest: |
       python3 .github/scripts/test-workflow-supply-chain.py
       python3 .github/scripts/test-infracost-scope.py
