@@ -156,6 +156,14 @@ class AuthorizeInterceptor {
     @Inject
     lateinit var approvalStore: Instance<ApprovalStore>
 
+    // Instance<> and nullable for the same reason as `approvalStore`: almost no service supplies an
+    // ApprovalSummaryRenderer, and a hand-built interceptor (unit tests) need not wire one.
+    @field:Inject
+    var summaryRenderer: Instance<ApprovalSummaryRenderer>? = null
+
+    private val summaryRendererOrNull: ApprovalSummaryRenderer?
+        get() = summaryRenderer?.takeIf { it.isResolvable }?.get()
+
     /**
      * Phase toggle (ADR-0034 D5). Default `true` so a service that adds
      * `@Authorize` without an explicit setting gets enforcement — the safe
@@ -402,7 +410,7 @@ class AuthorizeInterceptor {
         val store = approvalStore.get()
         val maker = query.principal.id
         val resourceId = query.resource?.id
-        val binding = ApprovalRequestBindings.of(ctx, annotation.action, resourceId)
+        val binding = ApprovalRequestBindings.of(ctx, annotation.action, resourceId, summaryRendererOrNull)
 
         val approvalId = resolveApprovalIdHeader()
         if (approvalId != null) {

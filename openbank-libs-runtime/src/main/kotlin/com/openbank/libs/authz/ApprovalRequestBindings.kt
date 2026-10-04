@@ -57,28 +57,43 @@ internal object ApprovalRequestBindings {
         "pin", "cvv", "cvc", "otp", "pan", "apikey", "privatekey", "cardnumber",
     )
     private val KEY_TOKEN_SPLIT = Regex("(?<=[a-z0-9])(?=[A-Z])|[_\\-. ]+")
-    private val CONTROL_CHARS = Regex("\\p{Cntrl}")
 
     private val log = Logger.getLogger(ApprovalRequestBindings::class.java)
 
-    fun of(ctx: InvocationContext, action: String, resourceId: String?): ApprovalRequestBinding {
+    fun of(ctx: InvocationContext, action: String, resourceId: String?): ApprovalRequestBinding =
+        bind(ctx, action, resourceId, arguments(ctx, action))
+
+    /**
+     * As [of], with the summary replaced by [renderer]'s rendering of the same arguments when one is
+     * wired and covers [action]. Fails closed: a renderer that throws refuses the call (503) rather
+     * than issuing an approval whose summary could not be produced, or falling back to the generic
+     * argument dump the renderer exists to replace.
+     */
+    suspend fun of(
+        ctx: InvocationContext,
+        action: String,
+        resourceId: String?,
+        renderer: ApprovalSummaryRenderer?,
+    ): ApprovalRequestBinding {
+        val arguments = arguments(ctx, action)
+        val binding = bind(ctx, action, resourceId, arguments)
+        if (renderer == null) return binding
+        val rendered = try {
+            renderer.render(action, resourceId, arguments)
+        } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
+            throw unbindable("four-eyes action '$action': approval summary could not be rendered", ex)
+        } ?: return binding
+        return binding.copy(summary = bounded(rendered))
+    }
+
+    private fun bind(
+        ctx: InvocationContext,
+        action: String,
+        resourceId: String?,
+        arguments: Map<String, Any?>,
+    ): ApprovalRequestBinding {
         val method = ctx.method
         val target = "${method.declaringClass.name}#${method.name}"
-        val names = method.kotlinFunction?.parameters?.drop(1)?.map { it.name }
-        val arguments = linkedMapOf<String, Any?>()
-        ctx.parameters.forEachIndexed { index, value ->
-            val name = names?.getOrNull(index) ?: "arg$index"
-            when {
-                value == null -> arguments[name] = null
-                isContext(value) -> Unit
-                isUnbindable(value) -> throw unbindable(
-                    "four-eyes action '$action' cannot be bound to an approval: argument '$name' is a " +
-                        "${value.javaClass.simpleName}, whose content cannot be fingerprinted",
-                    null,
-                )
-                else -> arguments[name] = value
-            }
-        }
         val canonical = try {
             RequestFingerprints.canonical(mapper, arguments)
         } catch (@Suppress("TooGenericExceptionCaught") ex: Exception) {
@@ -94,6 +109,29 @@ internal object ApprovalRequestBindings {
         )
     }
 
+    /**
+     * The business arguments of the intercepted call keyed by parameter name, framework context
+     * skipped. Throws [PolicyDecisionException] for an argument whose content cannot be bound.
+     */
+    fun arguments(ctx: InvocationContext, action: String): Map<String, Any?> {
+        val names = ctx.method.kotlinFunction?.parameters?.drop(1)?.map { it.name }
+        val arguments = linkedMapOf<String, Any?>()
+        ctx.parameters.forEachIndexed { index, value ->
+            val name = names?.getOrNull(index) ?: "arg$index"
+            when {
+                value == null -> arguments[name] = null
+                isContext(value) -> Unit
+                isUnbindable(value) -> throw unbindable(
+                    "four-eyes action '$action' cannot be bound to an approval: argument '$name' is a " +
+                        "${value.javaClass.simpleName}, whose content cannot be fingerprinted",
+                    null,
+                )
+                else -> arguments[name] = value
+            }
+        }
+        return arguments
+    }
+
     private fun unbindable(message: String, cause: Throwable?): PolicyDecisionException {
         log.errorf("four-eyes: %s — refusing", message)
         return PolicyDecisionException(message, cause)
@@ -105,9 +143,8 @@ internal object ApprovalRequestBindings {
      */
     private fun summary(action: String, target: String, resourceId: String?, canonical: String): String {
         val args = if (canonical.isEmpty()) "{}" else mapper.writeValueAsString(redact(mapper.readTree(canonical)))
-        val text = "action=$action endpoint=${target.substringAfterLast('.')} resource=${resourceId ?: "-"} args=$args"
-        val flat = CONTROL_CHARS.replace(text, " ")
-        return if (flat.length <= MAX_SUMMARY_LENGTH) flat else flat.take(MAX_SUMMARY_LENGTH - 1) + "…"
+        val endpoint = target.substringAfterLast('.')
+        return bounded("action=$action endpoint=$endpoint resource=${resourceId ?: "-"} args=$args")
     }
 
     private fun redact(node: JsonNode): JsonNode = when {
@@ -169,4 +206,13 @@ internal object ApprovalRequestBindings {
         "org.reactivestreams.Publisher",
         "java.util.concurrent.Flow\$Publisher",
     )
+}
+
+private val CONTROL_CHARS = Regex("\\p{Cntrl}")
+
+/** Control characters flattened and capped at the summary limit, as every stored summary is. */
+private fun bounded(text: String): String {
+    val max = ApprovalRequestBindings.MAX_SUMMARY_LENGTH
+    val flat = CONTROL_CHARS.replace(text, " ")
+    return if (flat.length <= max) flat else flat.take(max - 1) + "…"
 }

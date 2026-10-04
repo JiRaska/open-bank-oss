@@ -15,6 +15,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.infrastructure.persistence.repository.DelegatedSpendBindingRepositoryImpl
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
@@ -345,8 +346,7 @@ class DelegatedSpendBindingStateMachineIT {
         creditorAccountNumber = "0987654321",
         creditorBankCode = "2010",
         creditorName = "Payee",
-        amount = reservation.amount,
-        currency = reservation.currency,
+        amount = Money.of(reservation.amount, reservation.currency),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,
