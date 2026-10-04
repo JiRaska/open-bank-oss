@@ -5,9 +5,10 @@
 # of the `customer-edge` Ingress in customer-edge.yaml. The service's own OIDC check is unchanged
 # and is what authenticates every request; this file carries only the edge controls.
 #
-# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
-# gateway-api-cutover-pending`, which external-dns skips, so customer.open-bank.tech keeps
-# resolving to ingress-nginx. Three steps, each its own change, in this order:
+# IN DNS since the cutover: external-dns publishes customer.open-bank.tech from this route,
+# pointing at the Gateway's NLB. The `customer-edge` Ingress in customer-edge.yaml now carries
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keeps serving on
+# ingress-nginx as the rollback (swap the annotation back). The three steps were:
 #   1. this file — the ReferenceGrant, the route and its policy (no listener names them yet);
 #   2. the Gateway's https-customer-edge listener (envoy-gateway/gateway.yaml), once the grant
 #      is live — switching a listener in the same sync as its grant left langfuse's listener
@@ -59,9 +60,6 @@ kind: HTTPRoute
 metadata:
   name: customer-edge
   namespace: customer-edge
-  annotations:
-    # Held out of DNS until the cutover change (step 3 above).
-    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
 spec:
   parentRefs:
     - name: edge
