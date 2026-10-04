@@ -48,6 +48,8 @@ jobs:
           # a literal there, not templated from POSTGRES_PASSWORD, so this can't be a fresh
           # random value.
           POSTGRES_PASSWORD: openbank_secret
+          # Containers build without .git; the build-facts task takes the commit from here.
+          SOURCE_COMMIT: ${{ github.sha }}
         run: |
           docker compose up -d postgres kafka ledger-service
           echo "Waiting for ledger-service health..."
