@@ -112,3 +112,7 @@ Velikost poolu: 20 (výchozí). Při přesycení:
 ## Zahřátí při startu (#11890)
 
 sanctions nastavuje `openbank.warmup.protected-path: /api/v1/sanctions/pending`, takže zahřátí z libs-runtime (viz dokumentace openbank-libs, 05-operations) projde bezpečnostní cestou tohoto endpointu dřív, než pod nahlásí připravenost. Naměřeno na této službě: první autentizovaný `GET /api/v1/sanctions/pending` po readiness měl medián 2622 ms bez zahřátí a 967 ms se zahřátím; další požadavky 15–60 ms v obou případech.
+
+## Odmítnutí XML listiny
+
+Importy OFAC a EU FSF používají sdílený zabezpečený SAX parser `SecureXml`. Listina s DOCTYPE se odmítne, včetně externích DTD a deklarací entit. Při chybě parsování import ponechá dosavadní seznam a oznámí `FAILED_KEPT_EXISTING`; prošetřete zdrojovou listinu a nevypínejte ochranu parseru kvůli vynucení obnovy. Odmítnutí ověřují `SanctionsImportServiceTest` a `EuFsfSaxParserTest`.
