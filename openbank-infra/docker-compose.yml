@@ -198,7 +198,7 @@ services:
   # Keycloak (IAM)
   # ─────────────────────────────────────────────
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.3
+    image: quay.io/keycloak/keycloak:26.8.0
     container_name: openbank-keycloak
     restart: unless-stopped
     environment:
