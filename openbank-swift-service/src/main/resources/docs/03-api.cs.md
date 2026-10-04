@@ -51,8 +51,8 @@ Odpovědi:
 |---|---|
 | `201` | Přijato a zařazeno; vrací `SwiftMessage` (stav `VALIDATED`) |
 | `400` | Neplatné tělo požadavku; pro částku a měnu viz [Částka a měna](#částka-a-měna) |
-| `409` | Duplicitní idempotency key s konfliktním payloadem (`ErrorResponse`) |
-| `422` | Selhání validace BIC nebo porušení business pravidla (`ValidationError`) |
+| `409` | Duplicitní idempotency key s konfliktním payloadem (`ProblemDetail`) |
+| `422` | Selhání validace BIC nebo porušení business pravidla (`ProblemDetail`) |
 
 ## Částka a měna
 
@@ -95,15 +95,15 @@ Oba vracejí aktualizovanou `SwiftMessage`; `404` při neznámém id; `409`, pok
 
 ## Model chyb
 
-```json
-{ "error": "string", "message": "string", "traceId": "string" }
-```
-
-Validační chyby používají `ValidationError`:
+Každá chybová odpověď je `ProblemDetail` — tělo, které vykresluje libs-runtime. Pět členů je přítomno vždy:
 
 ```json
-{ "error": "Validation failed", "violations": [ { "field": "senderBic", "message": "..." } ] }
+{ "traceId": "…", "status": 404, "code": "NOT_FOUND", "message": "HTTP 404 Not Found", "timestamp": "2026-10-04T10:00:09Z" }
 ```
+
+Typované odmítnutí (ADR-0326, např. kódy pro částku a měnu výše) přidává členy RFC 9457 `type`, `title`, `detail`, `instance` a dále `correlationId`, `retryable`, `violations[]` (`field`, `message`, `code`) a `details[]`. Rozhodujte podle `code`, nikdy podle textu. Odmítnutá hodnota se nikdy nevrací zpět. Odpověď 403 z kontroly rolí má prázdné tělo; tělo nese jen zamítnutí politikou OPA.
+
+Člen `error` neexistuje: dřívější verze specifikace popisovaly `ErrorResponse { error, message }` a `ValidationError`, které služba nikdy neposílala (#11972). `SwiftErrorBodySpecConformanceIT` ověřuje skutečné odpovědi proti publikovanému schématu.
 
 ## Verzování
 
