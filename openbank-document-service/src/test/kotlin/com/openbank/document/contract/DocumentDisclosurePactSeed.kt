@@ -79,7 +79,7 @@ object DocumentDisclosurePactSeed {
      * Bridges reactive Panache into Pact-JVM's synchronous `@State` callback, which runs on the
      * JUnit thread with no Vert.x context. Same shape as account-service's provider test.
      */
-    internal fun runOnVertxContext(vertx: Vertx, block: suspend () -> Unit) {
+    fun runOnVertxContext(vertx: Vertx, block: suspend () -> Unit) {
         val future = CompletableFuture<Unit>()
         val duplicated = (vertx.orCreateContext as ContextInternal).duplicate()
         VertxContextSafetyToggle.setContextSafe(duplicated, true)
