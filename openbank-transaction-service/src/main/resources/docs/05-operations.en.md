@@ -24,9 +24,12 @@ CI is path-scoped (only changed services build). The domain layer has **zero** f
 | `LEDGER_SERVICE_URL` | ledger REST client | `http://localhost:8101` |
 | `BALANCE_SERVICE_URL` | balance REST client | `http://localhost:8103` |
 | `FX_SERVICE_URL` | fx REST client | `http://localhost:8119` |
+| `openbank.merchant.logo.fetch.allowed-hosts` | HTTPS host allowlist for operator-requested logo fetches | unset (fetch disabled) |
 | `BUILD_TIME` / `GIT_COMMIT` | build metadata for `/api/v1/info` | `unknown` |
 
 Ports: **8102** app, **8085** management (`/q`). Rate limit: `openbank.rate-limit.enabled=true`, `max-concurrent-requests=150`. Outbox poll: every 5 s, initial delay 5 s.
+
+Merchant logo fetching is disabled until the host allowlist is configured. For an allowed HTTPS name, `LogoFetcher` checks every resolved address for public routability, then `SafeHttpClient` connects to a vetted, pinned address while retaining the name for TLS certificate validation. Redirects and IP-literal targets are refused; the response body is capped. An operator should supply the final HTTPS URL if a source redirects. A refused fetch does not justify broadening the allowlist to an internal name or address.
 
 ## Health probes
 

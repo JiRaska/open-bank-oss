@@ -24,9 +24,12 @@ CI je path-scoped (buildují se jen změněné služby). Doménová vrstva má *
 | `LEDGER_SERVICE_URL` | ledger REST klient | `http://localhost:8101` |
 | `BALANCE_SERVICE_URL` | balance REST klient | `http://localhost:8103` |
 | `FX_SERVICE_URL` | fx REST klient | `http://localhost:8119` |
+| `openbank.merchant.logo.fetch.allowed-hosts` | povolené HTTPS hosty pro stažení loga na žádost operátora | nenastaveno (stahování vypnuto) |
 | `BUILD_TIME` / `GIT_COMMIT` | build metadata pro `/api/v1/info` | `unknown` |
 
 Porty: **8102** aplikace, **8085** management (`/q`). Rate limit: `openbank.rate-limit.enabled=true`, `max-concurrent-requests=150`. Outbox poll: každých 5 s, initial delay 5 s.
+
+Stahování log obchodníků je vypnuté, dokud není nakonfigurován seznam povolených hostů. U povoleného HTTPS jména `LogoFetcher` ověří veřejnou směrovatelnost všech přeložených adres a `SafeHttpClient` se připojí k prověřené pevně zvolené adrese; jméno zachová pro ověření TLS certifikátu. Přesměrování a cíle zadané přímo IP adresou odmítá; velikost těla odpovědi je omezená. Pokud zdroj přesměrovává, operátor zadá konečnou HTTPS URL. Odmítnuté stažení není důvodem přidat interní jméno nebo adresu mezi povolené hosty.
 
 ## Health probes
 
