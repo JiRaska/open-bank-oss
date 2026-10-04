@@ -1,0 +1,258 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Journey: wealth-declared-holding (ADR-0252, ADR-0301, #9829). A bank-owned canary customer
+# declares an off-platform holding through the PUBLIC customer edge, reads it back in its net
+# worth, revalues it, proves the old value survived in the history, and withdraws it again.
+#
+# Why the public edge and not wealth-service's ClusterIP: a journey that calls the service
+# directly proves the service answers and says nothing about whether a customer can reach it.
+# The token comes from the public token endpoint for the same reason: it is the path a customer's
+# app takes. (Either endpoint would work for the issuer check: the realm reports the public
+# frontend issuer through both, which is what customer-edge pins.)
+#
+# Identity: the confidential customers-realm client openbank-synthetic-retail, whose
+# service-account user is a SYNTHETIC party with ROLE_CUSTOMER only (ADR-0331). Every request
+# carries x-openbank-synthetic: true; customer-edge honours it only for that principal and
+# forwards it to wealth-service, so the holding and all its events are synthetic end to end and
+# stay out of real customers' views and the regulatory aggregates.
+#
+# The secret arrives through the OPTIONAL ExternalSecret journey-wealth-declared-holding-oidc.
+# Until the identity is provisioned (openbank-infra/scripts/provision-synthetic-customer.sh) the
+# script logs "credential absent" and fails every check: a red run, never a crash loop and never
+# a green one.
+#
+# It writes, so it cleans up: the holding it declared is withdrawn at the end of every run, also
+# when an earlier check failed. Withdrawn holdings are kept by wealth-service and left out of the
+# customer's picture, so at one run per 15 minutes the synthetic party accumulates ~96
+# withdrawn rows a day, all of them tainted.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: journey-wealth-declared-holding-script
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: wealth-declared-holding
+data:
+  journey.js: |
+    import http from 'k6/http';
+    import { check } from 'k6';
+
+    export const options = {
+      vus: 1,
+      iterations: 1,
+      thresholds: {
+        checks: ['rate==1.0'],
+        http_req_duration: ['p(95)<3000'],
+      },
+      tags: { journey: 'wealth-declared-holding' },
+    };
+
+    // Override the bases only for the catalog's documented falsification.
+    const CUSTOMER_BASE = __ENV.CUSTOMER_BASE || 'https://customer.open-bank.tech';
+    const TOKEN_URL = __ENV.TOKEN_URL || 'https://kc.open-bank.tech/realms/openbank-customers/protocol/openid-connect/token';
+    const CLIENT_ID = __ENV.SYNTHETIC_CLIENT_ID || 'openbank-synthetic-retail';
+    const CLIENT_SECRET = __ENV.SYNTHETIC_CLIENT_SECRET || '';
+
+    const CHECKS = [
+      'holding is declared as CUSTOMER_DECLARED',
+      'valuation age is reported and moves with valuedAt',
+      'net worth shows the holding under an AVAILABLE declared-holdings branch',
+      'revaluation is accepted',
+      'the previous valuation survives in the history',
+      'an unknown holding is NOT_FOUND',
+      'the holding is withdrawn again',
+    ];
+
+    function failAll() {
+      const verdicts = {};
+      for (const name of CHECKS) verdicts[name] = () => false;
+      check(null, verdicts);
+    }
+
+    // Never log the secret, the token, headers or response bodies: retained Job logs must stay
+    // secret-free and PII-free. Status codes only.
+    function fetchToken() {
+      if (!CLIENT_SECRET) {
+        console.error('wealth-declared-holding credential absent: SYNTHETIC_CLIENT_SECRET is not set (ExternalSecret journey-wealth-declared-holding-oidc not provisioned); refusing to probe unauthenticated');
+        return null;
+      }
+      const res = http.post(TOKEN_URL, {
+        grant_type: 'client_credentials',
+        client_id: CLIENT_ID,
+        client_secret: CLIENT_SECRET,
+      }, { tags: { endpoint: 'token', service: 'keycloak' } });
+      if (res.status !== 200) {
+        console.error(`wealth-declared-holding token request failed: status=${res.status}`);
+        return null;
+      }
+      let token = null;
+      try { token = res.json('access_token'); } catch (_) { /* reported below */ }
+      if (typeof token !== 'string' || token.length === 0) {
+        console.error('wealth-declared-holding token response carried no access_token');
+        return null;
+      }
+      return token;
+    }
+
+    function isoDaysAgo(days) {
+      return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    }
+
+    function json(res) {
+      try { return res.json(); } catch (_) { return null; }
+    }
+
+    function report(step, res, expected) {
+      if (res.status !== expected) console.error(`wealth-declared-holding ${step}: status=${res.status} expected=${expected}`);
+    }
+
+    export default function () {
+      const token = fetchToken();
+      if (token === null) { failAll(); return; }
+      const params = (endpoint) => ({
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'x-openbank-synthetic': 'true',
+        },
+        tags: { endpoint, service: 'customer-edge' },
+      });
+      const run = `${Date.now()}`;
+      const label = `Canary holding ${run}`;
+      const ageDays = 3;
+
+      // 1. declare
+      const declared = http.post(`${CUSTOMER_BASE}/customer/v1/holdings`, JSON.stringify({
+        holdingType: 'COLLECTIBLE',
+        label,
+        externalReference: `canary-${run}`,
+        valuation: { amount: '1000', currency: 'CZK', valuedAt: isoDaysAgo(ageDays) },
+      }), params('holdings-declare'));
+      report('declare', declared, 201);
+      const holding = declared.status === 201 ? json(declared) : null;
+      const id = holding && holding.holdingId;
+      if (!id) { failAll(); return; }
+
+      try {
+        // 2. read it back in net worth
+        const nw = http.get(`${CUSTOMER_BASE}/customer/v1/net-worth`, params('net-worth'));
+        report('net-worth', nw, 200);
+        const body = nw.status === 200 ? json(nw) : null;
+        const branch = body && (body.branches || []).find((b) => b.branch === 'DECLARED_HOLDINGS');
+        const inNetWorth = !!branch && branch.status === 'AVAILABLE'
+          && (branch.leaves || []).some((l) => l.label === label && l.valuationSource === 'CUSTOMER_DECLARED');
+
+        // 3. revalue, 4. history keeps the old value
+        const revalued = http.put(`${CUSTOMER_BASE}/customer/v1/holdings/${id}/valuation`, JSON.stringify({
+          valuation: { amount: '1100', currency: 'CZK', valuedAt: isoDaysAgo(0) },
+        }), params('holdings-revalue'));
+        report('revalue', revalued, 200);
+        const history = http.get(`${CUSTOMER_BASE}/customer/v1/holdings/${id}/valuations`, params('holdings-valuations'));
+        report('valuations', history, 200);
+        const entries = history.status === 200 ? (json(history) || []) : [];
+        const amounts = entries.map((v) => Number(v.amount));
+
+        // 5. negative path: the edge's ownership guard answers 404 for an id it cannot prove
+        const unknown = http.get(`${CUSTOMER_BASE}/customer/v1/holdings/00000000-0000-4000-8000-${run.slice(-12).padStart(12, '0')}`, params('holdings-unknown'));
+
+        check(null, {
+          'holding is declared as CUSTOMER_DECLARED': () => holding.valuationSource === 'CUSTOMER_DECLARED',
+          // Server LocalDate.now() and this run's UTC date can straddle midnight: allow one day.
+          'valuation age is reported and moves with valuedAt': () =>
+            typeof holding.valuationAgeDays === 'number' && Math.abs(holding.valuationAgeDays - ageDays) <= 1,
+          'net worth shows the holding under an AVAILABLE declared-holdings branch': () => inNetWorth,
+          'revaluation is accepted': () => revalued.status === 200,
+          'the previous valuation survives in the history': () =>
+            entries.length >= 2 && amounts[0] === 1100 && amounts.includes(1000),
+          'an unknown holding is NOT_FOUND': () => unknown.status === 404,
+        });
+      } finally {
+        // 6. always clean up what this run declared
+        const withdrawn = http.del(`${CUSTOMER_BASE}/customer/v1/holdings/${id}`, null, params('holdings-withdraw'));
+        report('withdraw', withdrawn, 200);
+        const w = withdrawn.status === 200 ? json(withdrawn) : null;
+        check(null, { 'the holding is withdrawn again': () => !!w && w.status === 'WITHDRAWN' });
+      }
+    }
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: journey-wealth-declared-holding
+  namespace: observability
+  annotations:
+    # Four runs at */15: a single failed run is the journey's own alert, a silent CronJob is this.
+    openbank.tech/max-success-age-seconds: "3600"
+  labels:
+    app.kubernetes.io/part-of: observability
+    app.kubernetes.io/component: journey
+    openbank.tech/journey: wealth-declared-holding
+spec:
+  schedule: "*/15 * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 120
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      ttlSecondsAfterFinished: 172800
+      activeDeadlineSeconds: 180
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/component: journey
+            openbank.tech/journey: wealth-declared-holding
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 12345
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: k6
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              args:
+                - run
+                - --quiet
+                - /scripts/journey.js
+              env:
+                # Optional on purpose: an unprovisioned identity must yield a red run with an
+                # explicit "credential absent" error, not CreateContainerConfigError.
+                - name: SYNTHETIC_CLIENT_SECRET
+                  valueFrom:
+                    secretKeyRef:
+                      name: journey-wealth-declared-holding-oidc
+                      key: SYNTHETIC_CLIENT_SECRET
+                      optional: true
+              volumeMounts:
+                - name: script
+                  mountPath: /scripts
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 192Mi
+          volumes:
+            - name: script
+              configMap:
+                name: journey-wealth-declared-holding-script
+          nodeSelector:
+            workload: observability
+          tolerations:
+            - key: workload
+              operator: Equal
+              value: observability
+              effect: NoSchedule

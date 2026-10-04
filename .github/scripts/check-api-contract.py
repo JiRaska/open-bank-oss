@@ -534,13 +534,46 @@ def bump_satisfied(kind: str, old_v: tuple[int, int, int], new_v: tuple[int, int
 # not disqualify a spec correction. release-please writes both.
 BEHAVIOURLESS = {"CHANGELOG.md", "version.txt"}
 
+# Trees inside a service that cannot change what it serves either. Tests never ship, and the
+# authored docs are prose that check-service-docs-freshness.py REQUIRES alongside any src/main
+# change, openapi.yaml included — so without this the two gates were jointly unsatisfiable for a
+# correction, and a test pinning the corrected spec to the running service disqualified it (#11972).
+BEHAVIOURLESS_TREES = ("src/test/", "src/main/resources/docs/")
+
 
 def service_touched_beyond_spec(service: str, spec_rel: str, changed_all: list[str]) -> list[str]:
-    """Files in this service the PR changed other than its openapi.yaml (and derived files)."""
+    """Files in this service the PR changed other than its openapi.yaml (and behaviourless files)."""
     return [
         f for f in changed_all
-        if f.startswith(service + "/") and f != spec_rel and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+        if f.startswith(service + "/") and f != spec_rel
+        and f.rsplit("/", 1)[-1] not in BEHAVIOURLESS
+        and not f[len(service) + 1:].startswith(BEHAVIOURLESS_TREES)
     ]
+
+
+def touched_beyond_spec_self_test() -> int:
+    """The behaviourless exemptions must not swallow a file that can change the served contract."""
+    svc, spec = "openbank-x", "openbank-x/src/main/resources/openapi.yaml"
+    cases = [
+        ("a test", f"{svc}/src/test/kotlin/XIT.kt", False),
+        ("authored docs", f"{svc}/src/main/resources/docs/03-api.en.md", False),
+        ("release-please output", f"{svc}/version.txt", False),
+        ("production code", f"{svc}/src/main/kotlin/X.kt", True),
+        ("application config", f"{svc}/src/main/resources/application.yaml", True),
+        ("a migration", f"{svc}/src/main/resources/db/migration/V2__x.sql", True),
+        ("the build", f"{svc}/build.gradle.kts", True),
+        ("a docs dir that is not the authored one", f"{svc}/docs/x.md", True),
+        ("another service's code", "openbank-y/src/main/kotlin/Y.kt", False),
+    ]
+    failures = 0
+    for why, path, disqualifies in cases:
+        got = bool(service_touched_beyond_spec(svc, spec, [spec, path]))
+        if got != disqualifies:
+            print(f"SELF-TEST FAIL: touched-beyond-spec: {why} ({path}) disqualifies={got}, expected {disqualifies}")
+            failures += 1
+        else:
+            print(f"ok: touched-beyond-spec: {why} disqualifies={got}")
+    return failures
 
 
 def _self_test() -> int:
@@ -683,6 +716,7 @@ def _self_test() -> int:
     failures += classification_self_test()
     failures += idempotency_hardening_self_test()
     failures += migration_assertion_self_test()
+    failures += touched_beyond_spec_self_test()
 
     if failures:
         print(f"{failures} self-test case(s) failed")

@@ -1193,6 +1193,7 @@ jobs:
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
+          CARRIED_PRS=()
 
           # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
           # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
@@ -1256,9 +1257,16 @@ jobs:
                 | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
                 || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
               [ -z "$carried" ] && continue
+              CARRIED_PRS+=("#${n}")
               echo "  carried from deferred PR #${n}:"; echo "$carried"
               while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
             done
+          fi
+
+          if [ "${#CARRIED_PRS[@]}" -gt 0 ]; then
+            (IFS=,; echo "carried_prs=${CARRIED_PRS[*]}") >> "$GITHUB_OUTPUT"
+          else
+            echo "carried_prs=none" >> "$GITHUB_OUTPUT"
           fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
@@ -1347,10 +1355,15 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
+            **Built and scanned in this run:** ${{ needs.build-push.outputs.deployable_services }}
 
-            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
-            triggering commit). ArgoCD syncs automatically after merge.
+            **Contract-approved in this run:** ${{ needs.can-i-deploy.outputs.deployable || 'not evaluated' }}
+
+            **Pending image pins carried from earlier PRs:** ${{ steps.rewrite.outputs.carried_prs }}
+
+            Images built in this run use the short SHA of the triggering commit. Carried pins
+            retain their own build tags. The Files changed tab is the proposed deployment set;
+            ArgoCD syncs after merge.
 
             ## Linked issues
 

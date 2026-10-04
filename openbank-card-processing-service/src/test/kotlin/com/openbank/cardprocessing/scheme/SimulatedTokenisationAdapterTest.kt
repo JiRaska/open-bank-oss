@@ -42,13 +42,19 @@ class SimulatedTokenisationAdapterTest {
 
     @Test
     fun `nothing the simulator mints is PAN-shaped`(): Unit = runBlocking {
-        val token = (adapter.provision("card-1", wallet) as SchemeResult.Answered).value
-
         // The ports were designed so no signature accepts a PAN; the simulator must not smuggle
         // one in through the back door by minting something that looks like one.
-        assertThat(token.tokenReference).startsWith("sim-tok-")
-        assertThat(token.last4).isEqualTo("0000")
-        assertThat(token.tokenReference).doesNotMatch(".*\\d{12,}.*")
+        //
+        // Many mints, not one: a single draw cannot see a property that fails rarely. A raw UUID's
+        // final 12-hex group is all decimal digits with probability (10/16)^12 ≈ 0.36 %, which one
+        // draw passed 99.6 % of the time while 10 000 draws catch it essentially always.
+        repeat(MINTS) {
+            val token = (adapter.provision("card-1", wallet) as SchemeResult.Answered).value
+
+            assertThat(token.tokenReference).startsWith("sim-tok-")
+            assertThat(token.last4).isEqualTo("0000")
+            assertThat(token.tokenReference).doesNotMatch(".*\\d{12,}.*")
+        }
     }
 
     @Test
@@ -112,5 +118,9 @@ class SimulatedTokenisationAdapterTest {
         val result = router.provision("card-1", wallet)
 
         assertThat((result as SchemeResult.Answered).scheme).isEqualTo(CardScheme.SIMULATOR)
+    }
+
+    private companion object {
+        const val MINTS = 10_000
     }
 }

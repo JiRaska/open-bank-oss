@@ -4,11 +4,10 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.xml.SecureXml
 import org.xml.sax.ErrorHandler
 import org.xml.sax.SAXParseException
-import java.io.ByteArrayInputStream
 import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.dom.DOMSource
 import javax.xml.validation.Schema
 import javax.xml.validation.SchemaFactory
@@ -29,7 +28,7 @@ import javax.xml.validation.SchemaFactory
  * to [javax.xml.validation.Validator.validate] directly (a [SchemaFactory]/[Schema]-based sink
  * CodeQL's java/xxe query does not reliably recognize as sanitized even with external-access
  * properties disabled), [validate] first parses with the same XXE-hardened
- * [DocumentBuilderFactory] (`disallow-doctype-decl`) used by [Pacs008Reader]/[Pacs004Reader], then
+ * builder from [com.openbank.libs.xml.SecureXml] used by every reader, then
  * validates the already-parsed, entity-free DOM tree. The Validator itself additionally has
  * external DTD/schema access disabled too, belt-and-suspenders.
  */
@@ -56,21 +55,9 @@ class Iso20022Validator(private val schema: Schema) {
             }
         }
         return try {
-            // XXE hardening: xml is untrusted wire input. Parse it with a locked-down
-            // DocumentBuilder (no DOCTYPE at all — the OWASP-recommended primary XXE defense)
-            // before the Validator ever sees it.
-            val docFactory = DocumentBuilderFactory.newInstance()
-            docFactory.isNamespaceAware = true
-            docFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-            docFactory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-            docFactory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-            docFactory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-            docFactory.isXIncludeAware = false
-            docFactory.isExpandEntityReferences = false
-            docFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            docFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-            val doc = docFactory.newDocumentBuilder()
-                .parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+            // xml is untrusted wire input: parse it with the fleet-wide hardened builder (no
+            // DOCTYPE, no entities, no external access) before the Validator ever sees it.
+            val doc = SecureXml.parse(xml)
             validator.validate(DOMSource(doc))
             if (errors.isEmpty()) {
                 Iso20022ValidationResult.Valid
@@ -97,11 +84,8 @@ class Iso20022Validator(private val schema: Schema) {
             val path = "iso20022/schemas/$schemaResource"
             val url = Iso20022Validator::class.java.classLoader.getResource(path)
                 ?: error("ISO 20022 schema not found on classpath: $path")
-            val factory = SchemaFactory.newInstance(XMLConstants.W3C_XML_SCHEMA_NS_URI)
-            // XXE hardening: no vendored schema uses xs:import/xs:include, so external
-            // resolution is never legitimately needed — disable it outright.
-            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-            factory.setProperty(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
+            // No vendored schema uses xs:import/xs:include, so external resolution is never needed.
+            val factory = SecureXml.schemaFactory()
             val schema = try {
                 factory.newSchema(url)
             } catch (e: org.xml.sax.SAXException) {

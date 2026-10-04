@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.76.0
+  version: 1.76.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -2364,8 +2364,8 @@ paths:
       tags: [Payment Sessions]
       summary: Create a "nearby pay" (BLE proximity) session on the caller's own account (ADR-0095)
       description: >-
-        Entirely in-memory at the edge — no dedicated backend service. Sessions expire after
-        5 minutes and do not survive an edge restart (single-replica-only by design).
+        Held by the edge itself in its Redis — no dedicated backend service. Sessions expire
+        after 5 minutes and are shared by every edge replica.
       operationId: createPaymentSession
       security:
         - customerOidc: [payments:initiate]

@@ -25,7 +25,6 @@ import javax.net.ssl.SSLException
 import javax.net.ssl.SSLServerSocket
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.StandardConstants
-import javax.net.ssl.TrustManagerFactory
 import kotlin.concurrent.thread
 
 class SafeHttpClientTest {
@@ -100,10 +99,10 @@ class SafeHttpClientTest {
 
     @Test
     fun `https is pinned to the vetted IP while SNI, Host and certificate identity use the name`(@TempDir dir: Path) {
-        val (serverCtx, clientCtx) = tlsContexts(dir, "stub.test")
+        val (serverCtx, anchors) = tlsContexts(dir, "stub.test")
         val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
         val client =
-            SafeHttpClient.withTrustForTesting(clientCtx, policy("stub.test:${stub.port};private")) {
+            SafeHttpClient.withTrustAnchorsForTesting(anchors, policy("stub.test:${stub.port};private")) {
                 listOf(loopback)
             }
 
@@ -116,10 +115,10 @@ class SafeHttpClientTest {
 
     @Test
     fun `https to a name the certificate does not cover fails the handshake`(@TempDir dir: Path) {
-        val (serverCtx, clientCtx) = tlsContexts(dir, "other.test")
+        val (serverCtx, anchors) = tlsContexts(dir, "other.test")
         val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
         val client =
-            SafeHttpClient.withTrustForTesting(clientCtx, policy("stub.test:${stub.port};private")) {
+            SafeHttpClient.withTrustAnchorsForTesting(anchors, policy("stub.test:${stub.port};private")) {
                 listOf(loopback)
             }
 
@@ -249,7 +248,35 @@ class SafeHttpClientTest {
         assertThat(connects.get()).isZero()
     }
 
-    private fun tlsContexts(dir: Path, san: String): Pair<SSLContext, SSLContext> {
+    @Test
+    fun `a self-signed certificate is rejected by the default trust and nothing is sent`(@TempDir dir: Path) {
+        val (serverCtx, _) = tlsContexts(dir, "stub.test")
+        val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
+        // The public constructor: JVM default trust, exactly what every production caller gets.
+        val client = SafeHttpClient(policy("stub.test:${stub.port};private"), resolver = { listOf(loopback) })
+
+        assertThatThrownBy { client.send(EgressRequest("GET", "https://stub.test:${stub.port}/")) }
+            .isInstanceOf(SSLException::class.java)
+        assertThat(stub.requests).allMatch { it.isEmpty() }
+    }
+
+    @Test
+    fun `test trust anchors still validate - a certificate outside the anchor set is rejected`(@TempDir dir: Path) {
+        val (serverCtx, _) = tlsContexts(dir, "stub.test")
+        val stub = Stub(server = serverCtx.serverSocketFactory.createServerSocket(0, 50, loopback) as SSLServerSocket)
+        val unrelated = tlsContexts(dir.resolve("other").also { it.toFile().mkdirs() }, "stub.test").second
+        val client =
+            SafeHttpClient.withTrustAnchorsForTesting(unrelated, policy("stub.test:${stub.port};private")) {
+                listOf(loopback)
+            }
+
+        assertThatThrownBy { client.send(EgressRequest("GET", "https://stub.test:${stub.port}/")) }
+            .isInstanceOf(SSLException::class.java)
+        assertThat(stub.requests).allMatch { it.isEmpty() }
+    }
+
+    /** A server TLS context with a fresh self-signed cert for [san], and a trust store holding only it. */
+    private fun tlsContexts(dir: Path, san: String): Pair<SSLContext, KeyStore> {
         val ks = dir.resolve("ks.p12").toString()
         val keytool = Path.of(System.getProperty("java.home"), "bin", "keytool").toString()
         val proc =
@@ -267,10 +294,8 @@ class SafeHttpClientTest {
         }
         val trust = KeyStore.getInstance("PKCS12").apply { load(null, null) }
         trust.setCertificateEntry("s", store.getCertificate("s"))
-        val tmf = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(trust) }
         val server = SSLContext.getInstance("TLS").apply { init(kmf.keyManagers, null, null) }
-        val client = SSLContext.getInstance("TLS").apply { init(null, tmf.trustManagers, null) }
-        return server to client
+        return server to trust
     }
 
     companion object {

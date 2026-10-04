@@ -185,7 +185,7 @@ spec:
         # all @Authorize-annotated endpoints in balance-service (balance.*). Bundle
         # mounted from balance-opa-bundle ConfigMap (gen-balance-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

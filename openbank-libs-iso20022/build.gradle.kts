@@ -6,7 +6,8 @@
 // `iso20022` (builders, readers, XSD validation + the schemas under src/main/resources) and
 // `domain.payment`, PACKAGE NAMES UNCHANGED so no consumer import moved. Framework-free exactly
 // like libs-domain (ADR-0122, ADR-0002): JDK javax.xml only. It may depend on libs-domain, never
-// the reverse — today it needs nothing from it.
+// the reverse — it uses only `com.openbank.libs.xml.SecureXml`, the fleet's single hardened
+// XML factory (every parse here handles untrusted wire input).
 
 plugins {
     alias(libs.plugins.kotlin.jvm)
@@ -29,6 +30,7 @@ repositories {
 
 dependencies {
     api(libs.kotlin.stdlib)
+    implementation(project(":openbank-libs-domain"))
 
     // NO framework dependencies here — same rule as openbank-libs-domain (ADR-0002, #3670).
 
