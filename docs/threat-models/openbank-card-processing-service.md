@@ -188,3 +188,11 @@ wallet credential, opens a second chargeback or files the evidence twice.
   the UPDATE on a row lock and moves the version underneath it). Residual: a replay does not re-attempt a `FAILED` ledger posting
   — operations re-drive it (§5, runbook). The 2026-09-05 entry says the service was listed in `rules.yaml: money_path_services`; it was
   not, and is added alongside this fix.
+- **2026-10-03** — **SENT outbox rows are purged after 7 days** (ADR-0329, ADR-0327 D8). `card_outbox` kept every SENT
+  row, payload included, indefinitely: `purgeSent` existed and nothing called it. The shared libs-runtime
+  `OutboxSentRetentionJob` now deletes SENT rows whose `sent_at` is older than
+  `openbank.outbox.retention.sent-days` (default 7) nightly in bounded batches; the v1 repository opts in by
+  delegating `SentOutboxRetention` to `PanacheOutboxRetention`. PENDING, FAILED, DISPATCHING and DEAD rows are
+  never touched. Information disclosure: shrinks the window in which a database read exposes past
+  authorisation-event payloads. No new endpoint, caller or privilege; replaying an event older than 7 days now
+  comes from the broker or audit-service, not this table.
