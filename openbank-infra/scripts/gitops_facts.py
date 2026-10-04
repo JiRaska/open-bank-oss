@@ -26,6 +26,7 @@ Stdlib only, no pyyaml: this module is imported by scripts that must run on a ba
 from __future__ import annotations
 
 import re
+from contextlib import contextmanager
 from pathlib import Path
 
 __all__ = [
@@ -128,6 +129,67 @@ def _nearest_kustomize_namespace(manifest: Path, gitops: Path) -> str | None:
     return None
 
 
+# Set only inside `frozen_tree()`; None means every call re-reads the tree, as it always did.
+_FROZEN: dict[Path, tuple] | None = None
+
+
+@contextmanager
+def frozen_tree():
+    """Read each gitops tree at most ONCE for the duration of the block.
+
+    The three workload resolvers below and `cnpg_backup_configured` walk and read the whole tree
+    on every call. That is correct for a library — a caller (and the collector's own tests) may
+    write a manifest and ask again — and ruinous for a batch: the runbook generator calls them
+    ~600 times per run, ~400k file reads, ~70 % of `service-runbook-drift`'s wall time, which is
+    what pushed that gate over its CI budget. A caller that does not write under the tree while
+    asking opts in here; nobody else's semantics change. Nesting keeps the outer snapshot.
+    """
+    global _FROZEN
+    if _FROZEN is not None:
+        yield
+        return
+    _FROZEN = {}
+    try:
+        yield
+    finally:
+        _FROZEN = None
+
+
+def _workload_index(gitops: Path) -> tuple[tuple[Path, str, tuple[tuple[str, str, str | None], ...]], ...]:
+    """Every gitops manifest as (path, text, its Deployment/Rollout docs), in path order.
+
+    Each doc is `(kind, metadata.name, explicit namespace or None)`. Served from the snapshot
+    inside `frozen_tree()`, read fresh otherwise.
+    """
+    if _FROZEN is not None and gitops in _FROZEN:
+        return _FROZEN[gitops]
+    out = []
+    for f in sorted(gitops.rglob("*.yaml")):
+        text = read(f)
+        workloads = []
+        for doc in text.split("\n---"):
+            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
+            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
+                continue
+            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
+            if not name:
+                continue
+            explicit = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
+            workloads.append((kind.group(1), name.group(1), explicit.group(1) if explicit else None))
+        out.append((f, text, tuple(workloads)))
+    index = tuple(out)
+    if _FROZEN is not None:
+        _FROZEN[gitops] = index
+    return index
+
+
+def _workloads_mentioning(gitops: Path, haystacks: tuple[str, ...]):
+    """(path, workloads) for each manifest whose text mentions one of `haystacks`, in path order."""
+    for f, text, workloads in _workload_index(gitops):
+        if workloads and any(h in text for h in haystacks):
+            yield f, workloads
+
+
 def workload_namespaces(short: str, gitops: Path) -> set[str]:
     """Every namespace in which a Deployment/Rollout for this service is declared.
 
@@ -142,20 +204,12 @@ def workload_namespaces(short: str, gitops: Path) -> set[str]:
     # `-service` form alone skipped the three payment modules entirely (#2364).
     haystacks = (f"openbank-{short}-service", f"openbank-{short}")
     found: set[str] = set()
-    for f in sorted(gitops.rglob("*.yaml")):
-        text = read(f)
-        if not any(h in text for h in haystacks):
-            continue
-        for doc in text.split("\n---"):
-            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
-            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
+    for f, workloads in _workloads_mentioning(gitops, haystacks):
+        for _kind, name, explicit in workloads:
+            if name not in names:
                 continue
-            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
-            if not name or name.group(1) not in names:
-                continue
-            explicit = re.search(r"^\s{2}namespace:\s*(\S+)", doc, re.M)
             if explicit:
-                found.add(explicit.group(1))
+                found.add(explicit)
             else:
                 inherited = _nearest_kustomize_namespace(f, gitops)
                 if inherited:
@@ -181,17 +235,10 @@ def workload_kind(short: str, gitops: Path) -> str:
     """
     names = module_names(short)
     haystacks = (f"openbank-{short}-service", f"openbank-{short}")
-    for f in sorted(gitops.rglob("*.yaml")):
-        text = read(f)
-        if not any(h in text for h in haystacks):
-            continue
-        for doc in text.split("\n---"):
-            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
-            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
-                continue
-            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
-            if name and name.group(1) in names:
-                return kind.group(1)
+    for _f, workloads in _workloads_mentioning(gitops, haystacks):
+        for kind, name, _explicit in workloads:
+            if name in names:
+                return kind
     return "Deployment"
 
 
@@ -209,17 +256,10 @@ def workload_name(short: str, gitops: Path) -> str | None:
     """
     names = module_names(short)
     haystacks = (f"openbank-{short}-service", f"openbank-{short}")
-    for f in sorted(gitops.rglob("*.yaml")):
-        text = read(f)
-        if not any(h in text for h in haystacks):
-            continue
-        for doc in text.split("\n---"):
-            kind = re.search(r"^kind:\s*(\S+)", doc, re.M)
-            if not kind or kind.group(1) not in ("Deployment", "Rollout"):
-                continue
-            name = re.search(r"^\s{2}name:\s*(\S+)", doc, re.M)
-            if name and name.group(1) in names:
-                return name.group(1)
+    for _f, workloads in _workloads_mentioning(gitops, haystacks):
+        for _kind, name, _explicit in workloads:
+            if name in names:
+                return name
     return None
 
 
@@ -425,8 +465,7 @@ def cnpg_backup_configured(short: str, gitops: Path) -> bool:
     root = comp if scoped else gitops
     if not root.is_dir():
         return False
-    for f in sorted(root.rglob("*.yaml")):
-        text = read(f)
+    for _f, text, _workloads in _workload_index(root):
         if "barmanObjectStore" not in text:
             continue  # cheap prefilter — the key must be present literally to be present structurally
         for doc in _yaml_documents(text):

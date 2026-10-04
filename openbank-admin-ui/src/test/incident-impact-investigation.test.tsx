@@ -34,20 +34,21 @@ afterEach(() => {
 async function submit() {
   fireEvent.change(screen.getByLabelText('Incident'), { target: { value: incidents[0].id } })
   fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'case-7' } })
-  fireEvent.click(screen.getByRole('button', { name: 'Evaluate impact' }))
+  fireEvent.click(screen.getByRole('button', { name: 'View reported scope' }))
 }
 
 describe('incident impact investigation', () => {
   it('renders a validated aggregate without exposing identifier drill-down', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      affectedByType: { PAYMENT: 3, ACCOUNT: 1 }, total: 4, drilldownAvailable: false,
+      affectedByType: { SERVICE: 1 }, total: 1, drilldownAvailable: false,
     }), { status: 200 })))
     render(<LanguageProvider initialLanguage="en"><IncidentImpactInvestigation incidents={[...incidents]} /></LanguageProvider>)
 
     await submit()
 
-    expect(await screen.findByText('Observed 4')).toBeInTheDocument()
-    expect(screen.getByText('PAYMENT: 3')).toBeInTheDocument()
+    expect(await screen.findByText('Projected links: 1')).toBeInTheDocument()
+    expect(screen.getByText('SERVICE: 1')).toBeInTheDocument()
+    expect(screen.getByText(/not measured impact/)).toBeInTheDocument()
     expect(screen.getByText(/customer identifiers are never returned/)).toBeInTheDocument()
     expect(screen.getAllByRole('button')).toHaveLength(1)
   })
@@ -61,8 +62,8 @@ describe('incident impact investigation', () => {
     await act(async () => { resolve(new Response(JSON.stringify({
       affectedByType: { SERVICE: 2 }, total: 2, drilldownAvailable: false, projectionStatus: 'AVAILABLE',
     }))) })
-    expect(screen.queryByText('Observed 2')).not.toBeInTheDocument()
-    expect(screen.queryByRole('img', { name: 'Aggregate incident impact map' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Projected links: 2')).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Aggregate reported incident scope map' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -76,10 +77,10 @@ describe('incident impact investigation', () => {
     render(<LanguageProvider initialLanguage="en"><IncidentImpactInvestigation incidents={[...incidents]} /></LanguageProvider>)
     await submit()
     expect(await screen.findByRole('status')).toHaveTextContent(String(message))
-    if (projectionStatus === 'MISSING') expect(screen.queryByText('Observed 0')).not.toBeInTheDocument()
+    if (projectionStatus === 'MISSING') expect(screen.queryByText('Projected links: 0')).not.toBeInTheDocument()
     fireEvent.change(screen.getByLabelText('Case ID'), { target: { value: 'another-case' } })
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
-    expect(screen.queryByRole('img', { name: 'Aggregate incident impact map' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('img', { name: 'Aggregate reported incident scope map' })).not.toBeInTheDocument()
   })
 
   it.each([
@@ -93,6 +94,6 @@ describe('incident impact investigation', () => {
     await submit()
 
     expect(await screen.findByRole('alert')).toHaveTextContent('Impact could not be verified safely.')
-    expect(screen.queryByText(/Observed /)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Projected links:/)).not.toBeInTheDocument()
   })
 })

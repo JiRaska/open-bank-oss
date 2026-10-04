@@ -27,6 +27,16 @@ reference/counterparty/amount/date). Holds customer financial movement data.
 - **Trust boundaries:** caller↔service (OIDC; OPA per ADR-0034 is a tracked follow-up); service↔Postgres; service↔Kafka (inbound `payment.scheme-accepted` + outbound `tx_outbox`).
 - **Assets:** transaction records, counterparty data, the searchable history index.
 
+### Outbound reversal evidence for complaint investigations
+
+`TransactionInitiated` may now include `reversalOf`, copied from the persisted reversal row.
+It is an internal transaction identifier, not a free-text reason or a claim that the reversal
+completed. The existing transactional outbox publishes it on the already protected transaction
+topic. Context accepts the link only when the event type is `REVERSAL`, both identifiers are valid,
+and the original booking is already on an authorized complaint path; the bounded query cannot
+use the identifier to traverse arbitrary transactions. Missing legacy fields stay unlinked.
+Disclosure still requires the complaint case assignment, purpose, policy decision and read audit.
+
 ### 2a. Kafka inbound trust boundary — `payment.scheme-accepted` (ADR-0108)
 
 `SchemeAcceptedConsumer` opens a new **inbound trust boundary**: any Kafka producer able to publish to `payment.scheme-accepted` can trigger a settlement transaction in the money-path engine.

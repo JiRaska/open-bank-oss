@@ -1,5 +1,7 @@
 # 03 — API & contracts
 
+Shared domain APIs live in `openbank-libs-domain`; Quarkus adapters and HTTP resources live in `openbank-libs-runtime`. The root `openbank-libs` module re-exports them for compatibility. For a deployed service, read its own `/q/openbank/docs` and `/q/openapi` for the exact version in use.
+
 How services consume each libs package. Examples are abbreviated but runnable.
 
 ## domain/money — Money + CurrencyCode

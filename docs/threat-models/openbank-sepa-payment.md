@@ -73,6 +73,8 @@ not bundled here (see ADR-0155).
 | **S**poofing | A caller other than an operator decides an approval | `@RolesAllowed("ROLE_OPERATOR","ROLE_ADMIN","ROLE_PAYMENTS")` + OPA `@Authorize(action="sepaPayment.approval.decide")` on the decide endpoint |
 | **E**oP | The maker approves their own request (self-approval defeats maker-checker) | `ApprovalStore.decide` throws `SelfApprovalNotAllowedException` (mapped to 403) when `decidedBy == makerId` — enforced in the domain port itself, not just the REST layer, and `makerId`/`decidedBy` both resolve via the same `.principal.name` extraction (interceptor vs. `SecurityIdentity`) so the comparison can't silently mismatch for the same real person |
 | **T**ampering | A stale, mismatched, or already-consumed `X-Approval-Id` is replayed to unlock a different request | `AuthorizeInterceptor` requires the approval's `action` + `resourceId` + `makerId` to match the CURRENT request exactly, `status == APPROVED`, and marks it `EXECUTED` (one-time use) on success; any mismatch re-issues a fresh pending approval instead of proceeding |
+| **T**ampering / **E**oP | (slice 5 of #10041) Two racing requests both pass the store's status check before either writes: two checkers each told their (contradictory) decision was recorded, or one `APPROVED` approval spent by several concurrent retries — one four-eyes approval unlocking the gated action N times. A late write after TTL expiry also recreated an evicted approval | `RedisApprovalStore.decide`/`markExecuted` replace the record only through a single-key Lua compare-and-set against the exact bytes read (`PENDING`→decided, `APPROVED`→`EXECUTED`); a loser gets `InvalidApprovalStateException`, a vanished key stays vanished. `AuthorizeInterceptor` proceeds only when its own `markExecuted` returns the claimed record. Proven by `RedisApprovalStoreIT` (real Valkey, all racers forced through one read snapshot), which goes red against the pre-CAS store (8/8 consumers succeeded; 2/8 checkers). Residual: an `EXECUTED` claim does not prove the business write committed (separate transactions) — see `docs/runbooks/atomic-four-eyes-approvals.md` |
+| **E**oP | `authz.four-eyes.enforce=true` on an instance with no `ApprovalStore` bean silently proceeded without a second approver (logged only) | Fails closed: `PolicyDecisionException` → 503 through the shared infrastructure-error mapper (ADR-0155 amendment) |
 | **R**epudiation | No record of who approved a gated transition | `PendingApproval.decidedBy` + `decidedAt` recorded in the approval record itself (Redis, TTL-bounded — see ADR-0155 Negative consequences: not yet a permanent audit trail) |
 | **I**nfo disclosure | Approval id enumeration reveals payment/action metadata to an unauthorized caller | `find`/`decide` require the caller to already hold a valid, role-gated session; the id itself is a random UUID (`RedisApprovalStore`, not sequential) |
 | **I**nfo disclosure | (issue #5679) `GET /api/v1/sepa-payments/approvals` lists every pending four-eyes request with its `makerId` and age | Role-gated `ROLE_OPERATOR`/`ROLE_ADMIN` + `@Authorize(action = "sepaPayment.approval.read")`; the payload carries approval metadata only — the action name, the resource id and who asked — never payment amount, IBAN or other payload content, which stay behind the existing read-role gate (I1 above). Limit clamped to 200 — an unbounded query parameter over a Redis scan is a trivially reachable amplification. Deliberately NOT filtered to exclude the caller's own requests: hiding a maker's request from them would not stop them attempting it (the guard is in `RedisApprovalStore.decide`, server-side) and would only make the queue lie about its own depth |
@@ -461,3 +463,64 @@ simply stops existing).
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("sepa-payment", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:sepa-payment:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
+- **2026-10-02** — **Inbound amount and currency validated as kernel `Money` before the
+  Idempotency-Key is reserved (#11813).** `POST /api/v1/sepa-payments` now builds a kernel `Money`
+  from `amount` + `currency` at the API boundary; `SepaPayment` and `CreateSepaPaymentCommand` carry
+  `Money`. **Tampering / input validation:** an amount that would need rounding to fit the
+  currency (e.g. `1.005 EUR`, `1.5 JPY`) or a currency that is not an ISO 4217 code with a minor
+  unit (`XYZ`, blank, `XAU`) was previously accepted and persisted; it now answers **400
+  `AMOUNT_SCALE_EXCEEDED`** / **`CURRENCY_UNSUPPORTED`** before any idempotency record, row, outbox
+  event or downstream call exists. The refusal body names the field, never the rejected value. Valid
+  input is persisted byte-identically; amounts read back are serialised at the currency's scale
+  (`250.00` instead of the column's `250.000000`), numerically equal. **Residual:** a legacy row
+  already holding an over-scale amount or unknown currency now fails to load (500 naming the row)
+  instead of being served; the PR body carries the SQL count to run before deploy. No new endpoint,
+  caller, privilege or event. Rollback: revert the commit.
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
+- **2026-10-03** — **The existing inbound `Money` check now uses the kernel parser (#11870).**
+  `POST /api/v1/sepa-payments` still constructs `Money` before reserving the idempotency key;
+  `Money.parseInbound` replaces the former service-local amount/currency validator and
+  `InvalidMoneyExceptionMapper` replaces its `ValidationFailure` rendering. The same authenticated
+  caller, endpoint, amount/currency fields, downstream edges and persistence boundary remain.
+  **Tampering / input validation:** over-scale amounts and unsupported currencies still fail with
+  HTTP 400 and the same machine-readable codes and field names; out-of-range amounts now include
+  `VALIDATION_ERROR` on the violation as well. Error titles and messages change, but the rejected
+  value is not echoed. `SepaPaymentMoneyBoundaryIT` pins the stable problem fields for all three
+  refusals and the no-idempotency-record outcome. **Residual risk:** a client that compares human
+  error prose could observe a change despite the stable codes; no new privilege or data-flow risk
+  is introduced. Rollback: revert this parser substitution and keep the service-local validator.
+- **2026-10-03** — **Submissions refused unless the currency is EUR (#11931).** SEPA Credit Transfer
+  is a euro-only scheme, yet `POST /api/v1/sepa-payments` accepted any currency kernel `Money` could
+  hold (`USD`, `CZK`, `GBP` were 201, screened, persisted, emitted and handed to the scheme gateway
+  as a pacs.008 the scheme cannot settle). **Tampering / input validation:** the request DTO now
+  passes the parsed amount through `SctSchemeRules.requireSchemeCurrency` right after
+  `Money.parseInbound`, so a non-EUR currency answers **400 `CURRENCY_NOT_ALLOWED`** (service-owned
+  ADR-0326 code, VALIDATION category, same code and title as sepa-instant; rendered by libs-runtime
+  `DomainExceptionMapper`) before the Idempotency-Key is reserved and before any screening call,
+  row, outbox event or downstream call exists. The violation names `currency`, never the rejected
+  value. EUR (any case) is unchanged. The standing-order executor reaches the same REST boundary, so
+  a non-EUR `SEPA_CREDIT` standing order now fails its execution with this 400 instead of creating
+  an unsettleable payment. Sandbox data re-checked read-only before the change: 20 rows, all EUR, so
+  no stored row is affected. No new endpoint, caller, privilege or event. Rollback: revert the
+  commit.

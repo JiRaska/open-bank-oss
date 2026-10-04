@@ -1,0 +1,159 @@
+<!--
+SPDX-License-Identifier: Apache-2.0
+Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+-->
+# Threat model — openbank-card-processing-service
+
+- **Date:** 2026-10-03
+- **Status:** Lightweight STRIDE/DFD (ADR-0030 D2). Money-path service from its first commit.
+- **Service ADR:** [ADR-0283](../adr/0283-card-platform-scheme-agnostic-capability-ports.md) (card platform — scheme-agnostic capability ports and card-processing as a bounded context)
+
+## 1. Scope & purpose
+
+The card money path: it takes an authorisation from an acquirer, measures what the card has already
+spent, asks card-issuance for the decision (ADR-0194 D3), holds the funds an approval implies,
+applies clearing presentments against that hold, releases what is never presented, and posts cleared
+spend to the books on the `CARD` rail (ADR-0103).
+
+**Not** an issuer-processor: no 3-D Secure ACS, no PIN or HSM operation, no scheme connection. Those
+stay behind the processor port (ADR-0283 D2, inherited from the superseded ADR-0190), whose only
+binding in this repository is the sandbox acquirer.
+
+**No PAN, no card credential, no CVV** is accepted, stored or logged. A card is referenced by its
+card-issuance id. That is a security property, not an implementation detail: it is what keeps this
+service outside the cardholder-data environment, and the migration says so where the table is
+defined.
+
+## 2. Data flow (DFD)
+
+```
+[Acquirer / sandbox]--OIDC-->(POST /api/v1/card-authorizations)-->[card-processing]
+                                                                       |
+       (1) counted spend  <---------------------------------- [(Postgres: card_authorizations)]
+       (2) decision       --OIDC------> [card-issuance  POST /cards/{id}/authorizations]
+       (3) shadow score   --OIDC------> [fraud-service  POST /fraud/score]        (verdict ignored)
+       (4) on clearing    --OIDC------> [transaction-service POST /transactions]  (rail=CARD)
+                                                                       |
+                                                            [(card_outbox)]--outbox-->[Kafka]
+                                                               card.authorised.v1
+                                                               card.declined.v1
+                                                               card.cleared.v1
+                                                               card.hold_released.v1
+```
+
+## 3. Authn/Authz
+
+- Every REST endpoint requires an OIDC bearer token and `ROLE_API`, `ROLE_OPERATOR` or `ROLE_ADMIN`,
+  plus an `@Authorize` action evaluated by the OPA sidecar (ADR-0034): `cardprocessing.authorize`,
+  `.clear`, `.reverse`, `.read`, and `.simulate` (ROLE_ADMIN only).
+- Outbound calls authenticate as the service (`openbank-services` client credentials), because
+  card-processing asks about a card the caller does not own.
+- `AUTHZ_ENFORCE=false` today, joining the #3679 advisory cohort. Stated plainly: the OPA decision is
+  currently advisory here, so the effective control is the role check.
+
+## 4. STRIDE
+
+| Threat | Vector | Mitigation |
+|---|---|---|
+| **S**poofing | A caller impersonates an acquirer and authorises spend on someone's card | OIDC bearer + role + OPA action; the card's owner is resolved from card-issuance, never taken from the request |
+| **T**ampering | Replaying an authorisation to take a second hold | `idempotency_key` is UNIQUE in the database, and the use case returns the first authorisation unchanged |
+| **T**ampering | A clearing for more than was authorised | Refused by `AuthorizationLifecycle.clear` **and** by a CHECK constraint on the table — the application rule alone can be forgotten by a future writer |
+| **R**epudiation | "I never made that purchase" / "my card was refused and I was not told why" | Every decision is a row and an event, including declines, carrying the issuer's own reason name verbatim |
+| **I**nformation disclosure | Card data leaking into logs or events | No PAN/CVV is accepted or stored; events carry the card id, amount, merchant and category only |
+| **D**enial of service | An acquirer floods the authorisation endpoint | Short client timeouts (3 s issuer, 2 s fraud), bulkheads on the dispatcher; the endpoint itself is not rate limited today — see §5 |
+| **E**levation of privilege | The sandbox acquirer used in a real environment to move money | Disabled by default, ROLE_ADMIN only, and answers **404** when disabled, so it is indistinguishable from an endpoint that was never deployed |
+
+## 4a. The two ways card spend can go missing (D1) — STRIDE supplement
+
+This is the failure the service exists to prevent, and both halves are silent by nature.
+
+1. **A clearing that never reaches the books.** The posting happens after the clearing has committed
+   and is deliberately not rolled back on failure — the acquirer has asserted the fact and refusing
+   to record it would lose it. So a failed posting leaves money spent and unbooked. Mitigated by
+   making the outcome a three-valued enum (`POSTED | SKIPPED_DISABLED | FAILED`), never a boolean,
+   counted per value in `openbank_card_processing_ledger_postings_total`. The precedent is exact:
+   the push-notification fan-out returned `success = true` for a skipped send and reported
+   deliveries that never left the process (#4348). **The alert that matters is
+   `SKIPPED_DISABLED > 0`, not an error rate** — the quiet outcome is the dangerous one.
+2. **A hold that is never released.** An approved authorisation nobody presents against would freeze
+   the customer's funds for ever, with no error anywhere. Mitigated by `expires_at` on every
+   authorisation and a sweep that releases past it; the sweep is a `suspend fun` because a plain
+   `@Scheduled` method has no Vert.x context and would abort silently (#2148), and its coverage is a
+   profile that runs the real cron, not a direct call to the method.
+
+## 4b. Spend counting (D2) — STRIDE supplement
+
+The issuer endpoint takes the spend figures as arguments. Before this service existed it had no
+caller, so those arguments were never anything; a limit evaluated against a number the requester
+supplies is not a limit. The counters are therefore computed here, in the database, over the
+authorisation rows — not held in a running-total column, because a stored counter that drifts from
+the rows is invisible: both numbers look plausible.
+
+Two consequences a reviewer should check:
+
+- A hold counts in **full** until it clears, so the unpresented remainder cannot be spent twice.
+- The windows are the **accounting** day and month (ADR-0207), not UTC midnight. A limit is a promise
+  to a customer in a country; deriving it from UTC puts two hours of every summer evening in the
+  wrong day.
+
+## 4c. Failing closed (D3) — STRIDE supplement
+
+If card-issuance cannot be reached, the authorisation is **declined**, under its own reason
+`ISSUER_UNAVAILABLE`. Two properties matter. An issuer that cannot evaluate its controls must not let
+spend through — otherwise "payments abroad off" holds only while the network is healthy. And the
+unavailability reason is never one of the policy's own reasons: in a dispute, in a metric and in the
+customer's app, "the issuer was down" and "you turned gambling off" must not look alike.
+
+This is the opposite of VoP's deliberate fail-open (ADR-0171) because the two answer different
+questions — VoP warns, this authorises.
+
+## 4d. Network tokens and chargebacks (ADR-0283 phase 3) — STRIDE supplement
+
+`POST /api/v1/card-tokens`, `POST /api/v1/card-disputes` and `POST /api/v1/card-disputes/{id}/evidence`
+each make a call to a card network that is NOT idempotent at the network: asking twice mints a second
+wallet credential, opens a second chargeback or files the evidence twice.
+
+| Threat | STRIDE | Mitigation |
+|---|---|---|
+| Two concurrent requests with one `Idempotency-Key` both reach the network (duplicate credential / chargeback), the loser 500s | T, D | `LifecycleIdempotencyRepositoryImpl.reserve` — an `INSERT ... ON CONFLICT DO NOTHING` into `card_lifecycle_idempotency` committed BEFORE the network call; the loser replays the winner (`Reservation.Completed`) or gets 409 `IDEMPOTENCY_REQUEST_IN_PROGRESS`. Completion flips the row in the same transaction as the result row and its outbox event (`completeInTransaction`). Proven by `CardLifecycleIdempotencyIT` (two requests released by one latch, network held open). |
+| A crash after the network acted, then a retry, acts twice | T | A PENDING reservation never expires; it is released only when the network was provably not asked or refused. A stuck key answers 409 until an operator reconciles it (`ix_card_lifecycle_idempotency_pending`). |
+| The same key replayed for a different request returns someone else's result | I, T | The reservation stores a SHA-256 request fingerprint; a mismatch is 409 `IDEMPOTENCY_KEY_REUSED`. |
+| A network token minted for a blocked/suspended/expired card — a working credential for a card the bank stopped | E, S | `CardTokenService.refuseBeforeNetwork` refuses any card whose card-issuance `status` is not `ACTIVE` (an absent status counts as not active), 409 `CARD_NOT_ACTIVE`, before the network is asked. Pinned by the consumer pact (`status` type matcher). |
+| card-issuance unreachable presented as "no such card" | R | `CardIssuerUnavailableException` → 503 `ISSUER_UNAVAILABLE`, fails closed like authorisation (§4c). |
+| A chargeback filed in a currency other than the transaction's, compared as raw minor units | T | `CardDisputeService.eligibility` compares `CurrencyCode` then `Money`; a mismatch is 409 `CURRENCY_MISMATCH` and the network is never asked. |
+| A late or wrong network read flips a closed case's outcome (WON → LOST after funds moved) | T, R | Closed cases are terminal in `refreshStatus`: never mutated; a disagreement is counted on `openbank_card_dispute_terminal_mismatches_total` and logged for investigation. |
+| Evidence silently overwritten, so the file a scheme ruled on cannot be reconstructed | R | `card_dispute_evidence` is append-only, one row per filing, written in the filing's transaction; `GET .../evidence` reads it. |
+| A token the network holds never appears in the bank's record, or a token the network lost disappears from view | R | A NETWORK read adopts unknown tokens into the mirror (`adoptNetworkSeen`, `ON CONFLICT (token_reference) DO NOTHING`, stable id) and flags mirror-only tokens `absentAtNetwork` instead of dropping them. |
+
+## 5. Residual risks / assumptions
+
+- **No rate limit on the authorisation endpoint.** Acquirer traffic is authenticated and bounded by
+  the scheme in reality; in this repository the sandbox is the only caller. A real processor binding
+  should add one, and this line is what says it is missing rather than handled.
+- **Fraud scoring is shadow only**, like every other rail (ADR-0084, #4403). No fraud verdict
+  declines a card transaction today. Nothing here should be read as fraud enforcement.
+- **`AUTHZ_ENFORCE=false`** — the OPA decision is advisory; the role check is the live control.
+- **The ledger posting is not two-phase.** A posting that fails is visible and retriable by
+  operations, but there is no automatic compensation. Adding one needs the processor binding's own
+  reconciliation file, which does not exist yet.
+- **A stuck PENDING idempotency reservation blocks its key indefinitely.** Deliberate (expiring it
+  could repeat a network action); there is no automated reconciliation yet, only the partial index
+  an operator query uses.
+- **The authorisation path still answers an unreachable card-issuance lookup with a generic 500**;
+  only token provisioning maps it to 503 today.
+- **No PAN today, by design.** If a real processor is ever bound, the cardholder-data environment
+  question reopens — HSM/P2PE and full PCI DSS 4.0.1 scope — and ADR-0283 D7 says that is a separate
+  decision, not a config change.
+
+## 6. Change log
+
+- **2026-09-05** — Initial threat model, authored with the service (ADR-0283 phase 1, #8809).
+  Money-path from the first commit: `rules.yaml: money_path_services`, an SLO pair, a journey
+  accountability entry and this document all land in the same PR as the code, rather than being
+  retrofitted after the service is already carrying traffic.
+- **2026-10-03** — Token and dispute lifecycle (#8864, before merge): §4d added. Idempotency keys are
+  reserved in Postgres before any network call; tokens are refused for non-ACTIVE cards and fail
+  closed (503) when card-issuance is unreachable; disputes must match the authorisation currency
+  (compared as Money); closed cases are terminal on refresh; evidence history is append-only and
+  idempotent; network-seen tokens are adopted into the mirror with stable ids and mirror-only ones
+  are flagged `absentAtNetwork`.

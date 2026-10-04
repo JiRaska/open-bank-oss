@@ -5,6 +5,7 @@
 package com.openbank.clearing.application.usecase
 
 import com.openbank.clearing.application.port.out.ClearingBatchRepository
+import com.openbank.clearing.application.port.out.ClearingCycleMetrics
 import com.openbank.clearing.application.port.out.ClearingEventPublisher
 import com.openbank.clearing.application.port.out.ClearingItemRepository
 import com.openbank.clearing.application.port.out.SettlementPositionRepository
@@ -12,7 +13,8 @@ import com.openbank.clearing.domain.model.ClearingBatch
 import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxMessage
 import io.mockk.CapturingSlot
 import io.mockk.every
@@ -39,19 +41,27 @@ class ClearingServiceTest {
     private val eventPublisher = mockk<ClearingEventPublisher>()
     private val fixedClock = Clock.fixed(Instant.parse("2026-01-20T10:00:00Z"), ZoneOffset.UTC)
     private val fixedNow = OffsetDateTime.now(fixedClock)
-    private val service = ClearingService(batchRepo, itemRepo, positionRepo, eventPublisher, fixedClock)
+    private val cycleMetrics = mockk<ClearingCycleMetrics>(relaxed = true)
+    private val service = ClearingService(
+        batchRepo,
+        itemRepo,
+        positionRepo,
+        eventPublisher,
+        fixedClock,
+        { setOf("CZK", "EUR") },
+        cycleMetrics,
+    )
 
     @Test
     fun `submit saves clearing item with pending status`() {
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
             debtorBic = "DEUTDEFF",
             creditorBic = "COBADEFF",
-            amount = BigDecimal("125.50"),
-            currency = "EUR",
+            amount = Money.of("125.50", "EUR"),
             valueDate = LocalDate.of(2026, 1, 20),
             endToEndId = "E2E-001",
             remittanceInfo = "Invoice 42",
@@ -69,8 +79,8 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.paymentReference).isEqualTo(request.paymentReference)
         assertThat(itemSlot.captured.debtorIban).isEqualTo(request.debtorIban)
         assertThat(itemSlot.captured.creditorIban).isEqualTo(request.creditorIban)
-        assertThat(itemSlot.captured.amount).isEqualByComparingTo(request.amount)
-        assertThat(itemSlot.captured.currency).isEqualTo(request.currency)
+        assertThat(itemSlot.captured.amount).isEqualTo(BigDecimal("125.50"))
+        assertThat(itemSlot.captured.currency).isEqualTo("EUR")
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
@@ -79,12 +89,12 @@ class ClearingServiceTest {
     fun `a retried submit for the same payment replays the existing clearing item`() {
         // ADR-0298 (#8351): a payment enters clearing exactly once — a retry must not stack a
         // second PENDING row that the clearing cycle would sweep into a batch and settle twice.
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
-            amount = BigDecimal("125.50"),
+            amount = Money.of("125.50", "EUR"),
         )
         val existing = request.toExpectedItem()
 
@@ -100,12 +110,12 @@ class ClearingServiceTest {
     fun `a submit that loses the unique-index race re-reads the winner`() {
         // ADR-0298 (#8351): uq_clearing_items_payment (V9) fires on a true-concurrency race; the
         // loser replays the winner instead of erroring the caller.
-        val request = SubmitPaymentRequest(
+        val request = SubmitPaymentCommand(
             paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
             paymentReference = "PAY-001",
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
-            amount = BigDecimal("125.50"),
+            amount = Money.of("125.50", "EUR"),
         )
         val winner = request.toExpectedItem()
         val violation = java.sql.SQLException(
@@ -250,14 +260,15 @@ class ClearingServiceTest {
         val eventSlot: CapturingSlot<OutboxMessage> = slot()
         val settledMessage = mockk<OutboxMessage>()
 
-        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any()) } returns
+        every { itemRepo.countPendingOutside(any()) } returns Uni.createFrom().item(emptyMap())
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any(), any()) } returns
             Uni.createFrom().item(emptyList())
         every { eventPublisher.batchSettledMessage(capture(batchSlot)) } returns settledMessage
         every { batchRepo.saveWithEvent(any(), capture(eventSlot)) } answers {
             Uni.createFrom().item(firstArg<ClearingBatch>())
         }
 
-        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+        val batch = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely().batches.single()
 
         // The cycle RAN. Without an event a consumer cannot tell that from "the cycle did not
         // run" -- distinguishing those two is why this event exists.
@@ -280,7 +291,8 @@ class ClearingServiceTest {
         )
         val batchSlot: CapturingSlot<ClearingBatch> = slot()
 
-        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any()) } returns Uni.createFrom().item(items)
+        every { itemRepo.countPendingOutside(any()) } returns Uni.createFrom().item(emptyMap())
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, any(), any()) } returns Uni.createFrom().item(items)
         every { batchRepo.save(capture(batchSlot)) } answers {
             val b = firstArg<ClearingBatch>()
             Uni.createFrom().item(b)
@@ -295,10 +307,59 @@ class ClearingServiceTest {
         assertThat(batch.netPosition).isEqualByComparingTo(BigDecimal.ZERO)
     }
 
+    @Test
+    fun `a cycle opens one batch per currency and never adds across currencies`() {
+        val items = listOf(
+            clearingItem(amount = BigDecimal("100.00"), currency = "EUR"),
+            clearingItem(amount = BigDecimal("1000.00"), currency = "CZK"),
+            clearingItem(amount = BigDecimal("0.50"), currency = "EUR"),
+        )
+        val saved = mutableListOf<ClearingBatch>()
+        every { itemRepo.countPendingOutside(setOf("CZK", "EUR")) } returns Uni.createFrom().item(emptyMap())
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, setOf("CZK", "EUR"), any()) } returns
+            Uni.createFrom().item(items)
+        every { batchRepo.save(capture(saved)) } answers { Uni.createFrom().item(firstArg<ClearingBatch>()) }
+        every { itemRepo.saveAll(any()) } answers { Uni.createFrom().item(firstArg<List<ClearingItem>>()) }
+
+        val result = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+
+        assertThat(result.batches.map { it.currency }).containsExactly("CZK", "EUR")
+        val byCcy = result.batches.associateBy { it.currency }
+        assertThat(byCcy.getValue("CZK").totalDebit).isEqualByComparingTo("1000.00")
+        assertThat(byCcy.getValue("CZK").itemCount).isEqualTo(1)
+        assertThat(byCcy.getValue("EUR").totalDebit).isEqualByComparingTo("100.50")
+        assertThat(byCcy.getValue("EUR").itemCount).isEqualTo(2)
+        assertThat(result.batches.map { it.batchReference }).doesNotHaveDuplicates()
+        assertThat(result.batches.map { it.cycleId }.distinct()).containsExactly(result.cycleId)
+        // Each item is re-homed to the batch of its own currency.
+        verify {
+            itemRepo.saveAll(match { l -> l.all { it.currency == "EUR" && it.batchId == byCcy.getValue("EUR").id } })
+        }
+        verify {
+            itemRepo.saveAll(match { l -> l.all { it.currency == "CZK" && it.batchId == byCcy.getValue("CZK").id } })
+        }
+    }
+
+    @Test
+    fun `a currency with no settlement account is reported, not selected`() {
+        every { itemRepo.countPendingOutside(setOf("CZK", "EUR")) } returns Uni.createFrom().item(mapOf("PLN" to 3L))
+        every { itemRepo.findPendingByRail(PaymentRail.SEPA_SCT, setOf("CZK", "EUR"), any()) } returns
+            Uni.createFrom().item(emptyList())
+        every { eventPublisher.batchSettledMessage(any()) } returns mockk()
+        every { batchRepo.saveWithEvent(any(), any()) } answers { Uni.createFrom().item(firstArg<ClearingBatch>()) }
+
+        val result = service.triggerClearingCycle(PaymentRail.SEPA_SCT).await().indefinitely()
+
+        assertThat(result.unsettleablePending).containsEntry("PLN", 3L)
+        verify(exactly = 1) { cycleMetrics.recordUnsettleablePending(mapOf("PLN" to 3L)) }
+        verify(exactly = 0) { batchRepo.save(any()) }
+    }
+
     private fun clearingItem(
         batchId: UUID = UUID.fromString("00000000-0000-0000-0000-000000000000"),
         status: ClearingStatus = ClearingStatus.PENDING,
         amount: BigDecimal = BigDecimal("100.00"),
+        currency: String = "EUR",
     ) = ClearingItem(
         batchId = batchId,
         paymentId = UUID.randomUUID(),
@@ -306,13 +367,13 @@ class ClearingServiceTest {
         debtorIban = "DE89370400440532013000",
         creditorIban = "DE12500105170648489890",
         amount = amount,
-        currency = "EUR",
+        currency = currency,
         status = status,
         createdAt = fixedNow,
         updatedAt = fixedNow,
     )
 
-    private fun SubmitPaymentRequest.toExpectedItem(): ClearingItem = ClearingItem(
+    private fun SubmitPaymentCommand.toExpectedItem(): ClearingItem = ClearingItem(
         batchId = UUID.fromString("00000000-0000-0000-0000-000000000000"),
         paymentId = paymentId,
         paymentReference = paymentReference,
@@ -320,8 +381,8 @@ class ClearingServiceTest {
         creditorIban = creditorIban,
         debtorBic = debtorBic,
         creditorBic = creditorBic,
-        amount = amount,
-        currency = currency,
+        amount = amount.amount,
+        currency = amount.currency.code,
         status = ClearingStatus.PENDING,
         valueDate = valueDate,
         endToEndId = endToEndId,

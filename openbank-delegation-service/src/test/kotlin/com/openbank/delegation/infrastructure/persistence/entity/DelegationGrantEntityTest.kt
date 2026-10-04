@@ -66,6 +66,8 @@ class DelegationGrantEntityTest {
             capabilities = setOf(DelegationCapability.ACCOUNT_INITIATE_PAYMENT),
             approvalPolicy = ApprovalPolicy.N_OF_M,
             requiredApprovals = 2,
+            approvalGroupId = UUID.randomUUID(),
+            approvalGroupRevision = 1,
             // Scaled to the currency's minor unit, which is what the mapper now guarantees on the
             // way back: the columns are NUMERIC(20,6) and Postgres returns scale 6, so the mapper
             // re-scales or `Money` refuses the value outright. Writing the fixture at scale 0 hid

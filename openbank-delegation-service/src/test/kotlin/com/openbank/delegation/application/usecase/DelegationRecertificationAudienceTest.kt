@@ -61,9 +61,18 @@ class DelegationRecertificationAudienceTest {
 
     @BeforeEach
     fun setUp() {
-        service = DelegationService(repository, scaClient, eligibilityClient, authorityClient, ownershipClient, clock)
+        service = DelegationService(
+            repository,
+            scaClient,
+            eligibilityClient,
+            authorityClient,
+            ownershipClient,
+            mockk(),
+            false,
+            clock,
+        )
         coEvery { ownershipClient.verifyOwnership(grantor, any(), any()) } returns OwnershipVerdict.OWNED
-        coEvery { scaClient.consumeChallenge(any(), any()) } answers {
+        coEvery { scaClient.consumeChallenge(any(), any(), any()) } answers {
             ScaChallengeSnapshot(firstArg(), secondArg(), "DELEGATION_GRANT", "COMPLETED")
         }
     }
@@ -94,7 +103,7 @@ class DelegationRecertificationAudienceTest {
                 service.offer(offerCommand().copy(recertificationAudience = DelegationRecertificationAudience.SME))
             }
         }.isInstanceOf(IllegalArgumentException::class.java)
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -111,7 +120,7 @@ class DelegationRecertificationAudienceTest {
             }
         }.isInstanceOf(DelegationGrantorAuthorityException::class.java)
         coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 
@@ -128,7 +137,7 @@ class DelegationRecertificationAudienceTest {
             }
         }.isInstanceOf(DelegationGrantorAuthorityUnavailableException::class.java)
         coVerify(exactly = 0) { eligibilityClient.eligibilityOf(any()) }
-        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any()) }
+        coVerify(exactly = 0) { scaClient.consumeChallenge(any(), any(), any()) }
         coVerify(exactly = 0) { repository.save(any<DelegationGrant>(), any()) }
     }
 

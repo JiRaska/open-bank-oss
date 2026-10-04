@@ -149,6 +149,13 @@ operations and may invalidate pending ones under an explicit policy, but never r
 evidence. This keeps legal authority, customer workflow and execution evidence separate while
 scaling from sole traders through SMEs to corporate groups.
 
+Approval groups are independently versioned configuration, not live operation authority. Creating
+or replacing a roster requires SCA dynamically linked to a canonical digest of the complete change;
+the full roster and threshold are emitted in the same transaction as the revision. A payment or
+other controlled operation must later snapshot a referenced group revision. It must never re-read
+the mutable current roster while counting decisions, and must never infer statutory authority from
+membership in an employee group.
+
 **D4 — The customer edge switches profiles with `X-Acting-For`, fail-closed.** The JWT still
 identifies the human. `GET /customer/v1/profiles` lists the personal profile (with `hasProducts`)
 plus one business profile per active mandate — always off the token, never off the header, so a

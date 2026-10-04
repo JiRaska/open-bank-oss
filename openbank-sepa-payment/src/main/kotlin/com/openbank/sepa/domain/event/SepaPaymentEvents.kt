@@ -87,6 +87,8 @@ data class SepaPaymentReturnedEvent(
     /** Whether the ledger reversal was actually performed, or skipped (no txId / reversal down). */
     val reversalPerformed: Boolean,
     val occurredAt: Instant,
+    /** ID returned by transaction-service when a new reversal was booked; absent on idempotent conflict. */
+    val reversalTransactionId: UUID? = null,
     /** Stated explicitly so the audit row is EVENT-attributed rather than topic-inferred (#3994). */
     val eventType: String = RETURN_EVIDENCE_EVENT_TYPE,
     /** See [SepaPaymentCreatedEvent.sourceService] (#3994/#5256). */
@@ -116,7 +118,7 @@ fun SepaPayment.toCreatedEvent(clock: Clock) = SepaPaymentCreatedEvent(
     debtorAccountId = debtorAccountId,
     debtorIban = debtorIban,
     creditorIban = creditorIban,
-    amount = amount,
+    amount = amount.amount,
     currency = currency,
     endToEndId = endToEndId,
     occurredAt = Instant.now(clock),

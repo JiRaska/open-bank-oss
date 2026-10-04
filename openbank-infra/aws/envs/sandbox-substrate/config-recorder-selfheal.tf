@@ -17,6 +17,12 @@
 #     missed (event delivery is best-effort, not guaranteed).
 # Both invoke the same Lambda, which is idempotent — restarting an already-
 # running recorder is a no-op checked before any AWS API call.
+# Both triggers and the handler follow local.config_recording_enabled. An
+# intentional stop must not be undone by delayed events or the periodic backstop.
+# After changing it to false, verify both rules, the Lambda environment and the
+# recorder after rule propagation and any old invocation finishes (timeout 30s).
+# An invocation started before the update can still restart it; require a
+# subsequent full plan to converge before declaring the disablement complete.
 # ─────────────────────────────────────────────────────────────────────────────
 
 data "aws_partition" "current" {}
@@ -77,18 +83,19 @@ resource "aws_iam_role_policy" "config_recorder_healer" {
 
 resource "aws_lambda_function" "config_recorder_healer" {
   function_name    = "${var.cluster_name}-config-recorder-healer"
-  role              = aws_iam_role.config_recorder_healer.arn
-  handler           = "handler.handler"
-  runtime           = "python3.13"
-  timeout           = 30
-  memory_size       = 128
-  filename          = data.archive_file.config_recorder_healer.output_path
-  source_code_hash  = data.archive_file.config_recorder_healer.output_base64sha256
+  role             = aws_iam_role.config_recorder_healer.arn
+  handler          = "handler.handler"
+  runtime          = "python3.13"
+  timeout          = 30
+  memory_size      = 128
+  filename         = data.archive_file.config_recorder_healer.output_path
+  source_code_hash = data.archive_file.config_recorder_healer.output_base64sha256
 
   environment {
     variables = {
       RECORDER_NAME       = module.audit_baseline.config_recorder_name
       RECORDING_FREQUENCY = "DAILY"
+      RECORDING_ENABLED   = tostring(local.config_recording_enabled)
     }
   }
 }
@@ -100,7 +107,8 @@ resource "aws_cloudwatch_log_group" "config_recorder_healer" {
 
 # Layer 1: event-driven, fires within ~1 minute of the stop.
 resource "aws_cloudwatch_event_rule" "config_recorder_stopped" {
-  name = "${var.cluster_name}-config-recorder-stopped"
+  name  = "${var.cluster_name}-config-recorder-stopped"
+  state = local.config_recording_enabled ? "ENABLED" : "DISABLED"
   event_pattern = jsonencode({
     source      = ["aws.config"]
     detail-type = ["AWS API Call via CloudTrail"]
@@ -127,6 +135,7 @@ resource "aws_lambda_permission" "config_recorder_stopped" {
 # Layer 2: periodic backstop in case the CloudTrail event is ever missed.
 resource "aws_cloudwatch_event_rule" "config_recorder_healer_schedule" {
   name                = "${var.cluster_name}-config-recorder-healer-schedule"
+  state               = local.config_recording_enabled ? "ENABLED" : "DISABLED"
   schedule_expression = "rate(15 minutes)"
 }
 

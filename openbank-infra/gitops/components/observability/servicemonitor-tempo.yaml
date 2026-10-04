@@ -1,0 +1,48 @@
+# Scrape Tempo's own Prometheus metrics (2026-09-30, sibling of servicemonitor-loki.yaml).
+#
+# WHY THIS EXISTS: Tempo exported NOTHING to Prometheus — measured 2026-09-30, the only
+# `tempo_*` series in the cluster Prometheus was one Grafana buffer-pool counter — because
+# nothing scraped it. Tempo's metrics-generator remote-writes the DERIVED series
+# (`traces_spanmetrics_*`, `traces_service_graph_*`), which is why every RED dashboard and the
+# Pyrra SLOs work, but the pipeline that produces them was unobservable: a Tempo that stops
+# ingesting spans makes those derived series go flat, which reads exactly like a quiet estate.
+# On 2026-09-30 an admission-policy change rolled single-replica Tempo (46 s without ingestion)
+# and nothing could have said so at any duration. See prometheus-rules-trace-ingestion.yaml.
+#
+# The metrics are already served on the existing `tempo` Service (port `tempo-prom-metrics`:
+# 3200, verified live: `tempo_distributor_spans_received_total`, `tempo_receiver_accepted_spans`,
+# `tempo_ingester_traces_created_total` all present; Tempo 3 renames the last one
+# `tempo_live_store_traces_created_total` — the ingester is gone, the distributor metric stays). Nothing needed to be turned on, only
+# scraped — and a ServiceMonitor here, rather than the chart's `serviceMonitor.enabled` value
+# on the Application, does not touch Tempo's pod template, so landing it rolls nothing.
+#
+# Selector precision, as for Loki: the chart ships `tempo` and `tempo-headless` under identical
+# name/instance labels and the headless one carries `prometheus.io/service-monitor: "false"`.
+# The NotIn expression honours that opt-out, so exactly one target results.
+#
+# The cluster Prometheus has empty ServiceMonitor selectors, so this is picked up automatically.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: tempo
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - observability
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: tempo
+      app.kubernetes.io/instance: tempo
+    matchExpressions:
+      - key: prometheus.io/service-monitor
+        operator: NotIn
+        values: ["false"]
+  endpoints:
+    - port: tempo-prom-metrics
+      interval: 30s
+      path: /metrics
+      honorLabels: true

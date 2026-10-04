@@ -1,0 +1,49 @@
+# Presidio PII services behind the LiteLLM gateway's presidio guardrail (ai-platform/presidio.yaml).
+#
+# Once the guardrail is on, these pods are on the critical path of EVERY model call and the hook
+# fails CLOSED: no analyzer means HTTP 500 for every caller, not unmasked traffic. That is the
+# right failure for PII, and exactly why it must be visible — the callers degrade to their quiet
+# "no model" path, so without this alert the symptom is merely an AI fleet that went silent.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-ai-pii-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.ai.pii
+      interval: 1m
+      rules:
+        - alert: AiPiiServiceUnavailable
+          expr: |
+            max by (deployment) (
+              kube_deployment_status_replicas_available{namespace="ai-platform",deployment=~"presidio-analyzer|presidio-anonymizer"}
+            ) == 0
+          for: 5m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.deployment }} has no available replica; gateway PII masking fails closed"
+            description: >-
+              With the LiteLLM presidio guardrail enabled, every LLM call through the gateway now
+              answers 500 ("Presidio PII analysis failed") until a replica is back. Check the pods
+              in ai-platform (OOMKilled: the analyzer holds the spaCy model, ~0.9 GiB resident).
+
+        - alert: AiPiiServiceDegraded
+          # One of two replicas left: still serving, but the next disruption is an outage.
+          expr: |
+            max by (deployment) (
+              kube_deployment_status_replicas_available{namespace="ai-platform",deployment=~"presidio-analyzer|presidio-anonymizer"}
+            ) == 1
+          for: 30m
+          labels:
+            severity: info
+            team: platform
+          annotations:
+            summary: "{{ $labels.deployment }} is running on a single replica"
+            description: >-
+              The PII services are on the gateway's critical path and fail closed. One replica
+              left means the next node drain or OOM stops every LLM call; restore the second.

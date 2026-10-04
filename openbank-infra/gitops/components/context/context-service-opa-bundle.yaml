@@ -10,7 +10,7 @@ metadata:
     app.kubernetes.io/name: context-service
     app.kubernetes.io/part-of: context
   annotations:
-    openbank.tech/policy-checksum: "156d977432aa9970"
+    openbank.tech/policy-checksum: "95c9f31e2478d480"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -597,6 +597,36 @@ data:
 
     import rego.v1
 
+    prohibited if {
+        input.action == "context.authorization.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.authorization.read"
+        object.get(input.attributes, "purpose", "") != "AUTHORIZATION_REVIEW"
+    }
+
+    prohibited if {
+        input.action == "context.authorization.read"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
+        object.get(input.attributes, "purpose", "") != "AML_INVESTIGATION"
+    }
+
+    prohibited if {
+        input.action == "context.aml-case.read"
+        count({r | r := input.principal.roles[_]; r in {"ROLE_COMPLIANCE", "ROLE_ADMIN"}}) == 0
+    }
+
     # Assignment administration changes who can see restricted banking context. Only a human
     # administrator may perform these exact lifecycle actions; the service persists an independent
     # maker/checker decision and immediately expires a revoked assignment.
@@ -626,12 +656,22 @@ data:
 
     prohibited if {
         input.action == "context.complaint.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.complaint.read"
         object.get(input.attributes, "purpose", "") != "PAYMENT_COMPLAINT"
     }
 
     prohibited if {
         input.action == "context.incident.aggregate.read"
         object.get(input.attributes, "assignmentVerified", false) != true
+    }
+
+    prohibited if {
+        input.action == "context.incident.aggregate.read"
+        object.get(input.attributes, "rootScopeVerified", false) != true
     }
 
     prohibited if {
@@ -1068,6 +1108,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1484,7 +1525,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

@@ -57,6 +57,12 @@ Všechny cesty jsou pod `/customer/v1`. Scopy jsou OAuth scopy deklarované v `o
 | `GET /products/term-deposits` | `accounts:read` | zobrazit aktivní veřejné nabídky termínovaných vkladů |
 | `GET /products/term-deposits/{productId}` | `accounts:read` | detail nabídky a podmínek |
 | `POST /term-deposits` | `accounts:read` | založit účet termínovaného vkladu po KYC |
+| `GET /holdings` | `wealth:read` | deklarovaná aktiva a závazky mimo banku (ADR-0301) |
+| `POST /holdings` | `wealth:write` | deklarovat aktivum; zdroj ocenění je vždy `CUSTOMER_DECLARED` |
+| `GET /holdings/{holdingId}` | `wealth:read` | 404, pokud ho volající nevlastní |
+| `PUT /holdings/{holdingId}/valuation` | `wealth:write` | přecenit; předchozí hodnota zůstává v historii |
+| `GET /holdings/{holdingId}/valuations` | `wealth:read` | historie ocenění, nejnovější první |
+| `DELETE /holdings/{holdingId}` | `wealth:write` | stáhnout; 409 `HOLDING_LOCKED`, dokud je zastavené |
 
 ## Vybrané requesty
 
