@@ -17,6 +17,7 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 | Oblast | Hodnota | Zdroj |
 |---|---|---|
 | App HTTP port | `8113` | `quarkus.http.port` |
+| East-west mTLS port | `8443` (certifikát z privátní CA `audit-service-internal-tls`, klientský certifikát povinný; jen `%prod`) | env `QUARKUS_HTTP_SSL_*`, `quarkus.http.ssl.client-auth` (build time) |
 | Management port | `8085`, root-path `/q` | `quarkus.management.*` |
 | Datasource | `postgresql://localhost:5432/openbank_audit` | `quarkus.datasource` |
 | Flyway | `migrate-at-start: true`, 10 connect retries | `quarkus.flyway` |
@@ -25,6 +26,8 @@ Build je fast-jar (nikdy uber-jar — viz GitOps pravidla v root CLAUDE.md). Gen
 | OIDC | `…/realms/openbank`, client `openbank-services` | `quarkus.oidc` |
 | OTel | OTLP `http://localhost:4317` | `quarkus.otel` |
 | Rate limit | zapnuto, max 200 concurrent | `openbank.rate-limit` |
+
+Listener 8443 slouží čtení důkazního balíku z lending-service (#11900), které nese token konkrétní osoby; HTTP/8113 zůstává pro stávající volající a sondy (`quarkus.http.insecure-requests: enabled`).
 
 Secrets (`POSTGRES_PASSWORD`, `OIDC_CLIENT_SECRET`) nesou placeholdery `CHANGE_ME_LOCAL_DEV_ONLY`; produkce injektuje reálné hodnoty (Vault, ADR-0017). Placeholdery nikdy nešipuj.
 
