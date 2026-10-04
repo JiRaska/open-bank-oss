@@ -52,6 +52,20 @@ class ClearingServiceTest {
         cycleMetrics,
     )
 
+    init {
+        every { itemRepo.countPendingWithoutRail() } returns Uni.createFrom().item(0L)
+    }
+
+    @Test
+    fun `the longest cycle id of every rail fits the stored width`() {
+        // #12005: the widest date and the widest suffix, for every rail.
+        PaymentRail.entries.forEach { rail ->
+            val id = ClearingService.cycleIdFor(rail, LocalDate.of(2026, 12, 31), 9_999L)
+            assertThat(id).endsWith("-20261231-9999")
+            assertThat(id.length).isLessThanOrEqualTo(ClearingService.CYCLE_ID_MAX_LENGTH)
+        }
+    }
+
     @Test
     fun `submit saves clearing item with pending status`() {
         val request = SubmitPaymentCommand(
@@ -62,6 +76,7 @@ class ClearingServiceTest {
             debtorBic = "DEUTDEFF",
             creditorBic = "COBADEFF",
             amount = Money.of("125.50", "EUR"),
+            rail = PaymentRail.SEPA_SCT_INST,
             valueDate = LocalDate.of(2026, 1, 20),
             endToEndId = "E2E-001",
             remittanceInfo = "Invoice 42",
@@ -81,6 +96,8 @@ class ClearingServiceTest {
         assertThat(itemSlot.captured.creditorIban).isEqualTo(request.creditorIban)
         assertThat(itemSlot.captured.amount).isEqualTo(BigDecimal("125.50"))
         assertThat(itemSlot.captured.currency).isEqualTo("EUR")
+        assertThat(itemSlot.captured.rail).describedAs("the submitted rail is persisted (#12004)")
+            .isEqualTo(PaymentRail.SEPA_SCT_INST)
         assertThat(itemSlot.captured.status).isEqualTo(ClearingStatus.PENDING)
         verify(exactly = 1) { itemRepo.save(any()) }
     }
@@ -95,6 +112,7 @@ class ClearingServiceTest {
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
             amount = Money.of("125.50", "EUR"),
+            rail = PaymentRail.SEPA_SCT_INST,
         )
         val existing = request.toExpectedItem()
 
@@ -116,6 +134,7 @@ class ClearingServiceTest {
             debtorIban = "DE89370400440532013000",
             creditorIban = "DE12500105170648489890",
             amount = Money.of("125.50", "EUR"),
+            rail = PaymentRail.SEPA_SCT_INST,
         )
         val winner = request.toExpectedItem()
         val violation = java.sql.SQLException(
@@ -383,6 +402,7 @@ class ClearingServiceTest {
         creditorBic = creditorBic,
         amount = amount.amount,
         currency = amount.currency.code,
+        rail = rail,
         status = ClearingStatus.PENDING,
         valueDate = valueDate,
         endToEndId = endToEndId,

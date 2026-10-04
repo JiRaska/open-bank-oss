@@ -92,6 +92,8 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ### Items stuck PENDING in an unsettleable currency
 `openbank_clearing_unsettleable_pending_items{currency}` > 0 (and a WARN `[clearing-cycle] … left unbatched` per cycle) means items were accepted in a currency with no settlement GL pair; the cycle deliberately leaves them PENDING (#11974). Either seed the Customer Cash Clearing + Scheme Settlement GLs for that currency (ledger migration + `NetSettlementJournalFactory`) — they settle on the next cycle — or return the payments upstream. Never hand-move them into a batch of another currency.
 
+A WARN `[clearing-cycle] … have no recorded rail` means PENDING items written before V12 carry no rail (#12004); no cycle selects them, by design, so they never settle on a guessed rail. Set `clearing_items.rail` for each to the rail it was submitted for (from the originating payment) and the next cycle of that rail clears it. The sandbox held 0 items when V12 shipped.
+
 ### Settle/trigger returns 500
 Body is `{ "error": "<message>" }`. Common cause: `settleBatch` with an unknown id → `IllegalArgumentException("Batch not found")`. Verify the batch id; reads via `GET /batches/{id}`.
 

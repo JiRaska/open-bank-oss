@@ -44,6 +44,8 @@ class ScaOpaTestResource : QuarkusTestResourceLifecycleManager {
         container = opa
         opa.start()
         started = true
+        // "opa" is outside the Test Intelligence runtime vocabulary (postgres/redpanda/valkey);
+        // collect-test-run-evidence.py drops it rather than failing the envelope (#11850).
         TestInfrastructureEvidence.record("opa", opa.dockerImageName, "started")
         return mapOf("opa.url" to "http://${opa.host}:${opa.getMappedPort(OPA_PORT)}", "opa.timeout-ms" to "5000")
     }
