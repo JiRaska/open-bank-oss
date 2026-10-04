@@ -68,6 +68,31 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
         cls.git("commit", "-m", "delete shared behavior without documentation")
         cls.deleted_libs = cls.git("rev-parse", "HEAD")
 
+        cls.git("checkout", "-b", "deleted-doc-with-code-pr", cls.base)
+        cls.git("rm", "openbank-alpha-service/src/main/resources/docs/README.md")
+        cls.write("openbank-alpha-service/src/main/App.kt", "new behavior with removed docs\n")
+        cls.git("add", "--", "openbank-alpha-service/src/main/App.kt")
+        cls.git("commit", "-m", "delete service docs while changing code")
+        cls.deleted_doc_with_code = cls.git("rev-parse", "HEAD")
+
+        cls.git("checkout", "-b", "deleted-only-service-doc-pr", cls.base)
+        cls.git("rm", "openbank-alpha-service/src/main/resources/docs/README.md")
+        cls.git("commit", "-m", "delete only authored service documentation")
+        cls.deleted_only_service_doc = cls.git("rev-parse", "HEAD")
+
+        cls.git("checkout", "-b", "empty-service-doc-pr", cls.base)
+        cls.write("openbank-alpha-service/src/main/resources/docs/README.md", "")
+        cls.git("add", "--", "openbank-alpha-service/src/main/resources/docs/README.md")
+        cls.git("commit", "-m", "empty authored service documentation")
+        cls.empty_service_doc = cls.git("rev-parse", "HEAD")
+
+        cls.git("checkout", "-b", "deleted-shared-doc-with-code-pr", cls.base)
+        cls.git("rm", "openbank-libs/docs/README.md")
+        cls.write("openbank-libs-runtime/src/main/Shared.kt", "new shared behavior with removed docs\n")
+        cls.git("add", "--", "openbank-libs-runtime/src/main/Shared.kt")
+        cls.git("commit", "-m", "delete shared docs while changing code")
+        cls.deleted_shared_doc_with_code = cls.git("rev-parse", "HEAD")
+
         cls.git("checkout", "main")
         cls.write("openbank-beta-service/src/main/App.kt", "unrelated main change\n")
         cls.commit("main advances after PR opens")
@@ -136,6 +161,26 @@ class ServiceDocsFreshnessTest(unittest.TestCase):
 
     def test_deleted_shared_code_requires_documentation(self):
         result = self.gate("--head", self.deleted_libs)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-libs/docs/*.md", result.stderr)
+
+    def test_deleting_service_documentation_does_not_satisfy_freshness(self):
+        result = self.gate("--head", self.deleted_doc_with_code)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_every_runnable_service_retains_authored_documentation(self):
+        result = self.gate("--head", self.deleted_only_service_doc)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_empty_authored_documentation_is_not_coverage(self):
+        result = self.gate("--head", self.empty_service_doc)
+        self.assertEqual(1, result.returncode)
+        self.assertIn("openbank-alpha-service", result.stderr)
+
+    def test_deleting_shared_documentation_does_not_satisfy_freshness(self):
+        result = self.gate("--head", self.deleted_shared_doc_with_code)
         self.assertEqual(1, result.returncode)
         self.assertIn("openbank-libs/docs/*.md", result.stderr)
 

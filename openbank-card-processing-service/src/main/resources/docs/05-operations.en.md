@@ -64,6 +64,8 @@ Both are `suspend fun`; in `%test` the scheduler is disabled and the tests drive
 | `openbank.card.processing.ledger.postings` | `outcome` (`POSTED` / `SKIPPED_DISABLED` / `FAILED`) |
 | `openbank.card.processing.fraud.scores` | `outcome` (`SCORED` / `SKIPPED_DISABLED` / `FAILED`) |
 
+Shadow fraud scoring sends fraud-service its real `POST /api/v1/fraud/score` contract: `accountId`, `amount` in major units by the currency's minor-unit digits, `currency` and `rail = "CARD"`. It reads `verdict` and an integer `score`. It never blocks an authorisation. A failure (any 4xx/5xx, timeout or unreadable body) is counted as `outcome=FAILED` and logged at WARN, at most once a minute with the number of suppressed failures. Before 2026-10-04 the client sent `currencyCode`, no `rail` and minor-unit amounts, and read `decision`, so every shadow score failed silently. The pacts `pacts/openbank-card-processing-service-openbank-fraud-service.json` and `…-openbank-transaction-service.json` now pin both calls, including a recorded 401.
+
 | `openbank.card.token.provisions` | `scheme`, `refusal` |
 | `openbank.card.token.status.changes` | `scheme`, `status`, `refusal` |
 | `openbank.card.token.reads` | `source` (`NETWORK` / `LOCAL_MIRROR`) |
