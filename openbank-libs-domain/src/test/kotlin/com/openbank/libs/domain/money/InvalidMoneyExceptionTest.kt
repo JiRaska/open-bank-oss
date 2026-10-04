@@ -99,4 +99,61 @@ class InvalidMoneyExceptionTest {
             .isInstanceOf(ValidationFailure::class.java)
             .hasMessageContaining("ccy")
     }
+
+    @Test
+    fun `requirePositive refuses zero as NOT_POSITIVE on the amount field`() {
+        val e = refusal {
+            Money.parseInbound(BigDecimal("0.00"), "EUR", amountField = "instructedAmount", requirePositive = true)
+        }
+        assertThat(e.reason).isEqualTo(InvalidMoneyReason.NOT_POSITIVE)
+        assertThat(e.errorCode).isEqualTo(PlatformErrorCode.AMOUNT_NOT_POSITIVE)
+        assertThat(e.field).isEqualTo("instructedAmount")
+        assertThat(e.clientMessage).isEqualTo("Amount must be greater than zero")
+        assertThat(e).isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `requirePositive refuses a negative amount and never echoes it`() {
+        val e = refusal { Money.parseInbound(BigDecimal("-12.34"), "EUR", requirePositive = true) }
+        assertThat(e.reason).isEqualTo(InvalidMoneyReason.NOT_POSITIVE)
+        assertThat(e.field).isEqualTo("amount")
+        assertThat(e.clientMessage).doesNotContain("12.34")
+        assertThat(e.message).doesNotContain("12.34")
+    }
+
+    @Test
+    fun `requirePositive accepts a positive amount, including the smallest unit`() {
+        assertThat(Money.parseInbound(BigDecimal("0.01"), "EUR", requirePositive = true))
+            .isEqualTo(Money.of("0.01", "EUR"))
+        assertThat(Money.parseInbound(BigDecimal("1"), "JPY", requirePositive = true))
+            .isEqualTo(Money.of("1", "JPY"))
+    }
+
+    @Test
+    fun `requirePositive treats a zero-decimal currency's zero as zero`() {
+        val e = refusal { Money.parseInbound(BigDecimal.ZERO, "JPY", requirePositive = true) }
+        assertThat(e.reason).isEqualTo(InvalidMoneyReason.NOT_POSITIVE)
+    }
+
+    @Test
+    fun `requirePositive keeps the earlier refusals ahead of it`() {
+        // A fractional JPY or an unknown currency is still answered as before, not as NOT_POSITIVE.
+        assertThat(refusal { Money.parseInbound(BigDecimal("-0.5"), "JPY", requirePositive = true) }.reason)
+            .isEqualTo(InvalidMoneyReason.SCALE_EXCEEDED)
+        assertThat(refusal { Money.parseInbound(BigDecimal.ZERO, "XAU", requirePositive = true) }.reason)
+            .isEqualTo(InvalidMoneyReason.CURRENCY_UNSUPPORTED)
+    }
+
+    @Test
+    fun `by default parseInbound still accepts zero and negative amounts`() {
+        assertThat(Money.parseInbound(BigDecimal.ZERO, "EUR")).isEqualTo(Money.of("0.00", "EUR"))
+        assertThat(Money.parseInbound(BigDecimal("-5"), "EUR")).isEqualTo(Money.of("-5.00", "EUR"))
+        assertThat(Money.parseInbound(BigDecimal.ZERO, "JPY")).isEqualTo(Money.of("0", "JPY"))
+    }
+
+    @Test
+    fun `AMOUNT_NOT_POSITIVE is VALIDATION and not retryable`() {
+        assertThat(PlatformErrorCode.AMOUNT_NOT_POSITIVE.category).isEqualTo(ErrorCategory.VALIDATION)
+        assertThat(PlatformErrorCode.AMOUNT_NOT_POSITIVE.retryable).isFalse()
+    }
 }
