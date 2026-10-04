@@ -5210,6 +5210,8 @@ gates:
     name: "synthetic customer identity keeps the ADR-0331 shape and trust list (enforced)"
     group: security
     mode: enforced
+    rationale: "A canary customer with a password grant or an extra role, or a trust list naming any other caller, would let that caller drop real activity out of the regulatory aggregates; the JSON and manifests are the only place either is visible before it is live."
+    review_after: "2027-04-04"
     budget_seconds: 10
     selftest: python3 .github/scripts/check-synthetic-customer-identity.py --self-test
     selftest_expect: pass
