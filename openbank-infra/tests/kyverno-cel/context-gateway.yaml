@@ -1,0 +1,36 @@
+# Cluster state for require-gated-or-declared-tool-httproute-cel (ADR-0324 Phase 2): the
+# SecurityPolicies the HTTPRoutes in resources-gateway.yaml are judged against. A separate
+# context from context.yaml because the 1.19.1 CLI registers only the FIRST CRD it is given
+# (measured: with Rollout and SecurityPolicy stubs both passed, whichever came second was
+# "no matches for kind"), so each context may need at most one CRD.
+apiVersion: cli.kyverno.io/v1alpha1
+kind: Context
+metadata: {name: context-gateway}
+spec:
+  resources:
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata: {name: sp-gate, namespace: observability}
+      spec:
+        targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: route-gated}]
+        extAuth: {headersToExtAuth: [cookie], http: {backendRefs: [{name: admin-ui, namespace: admin-ui, port: 3000}], path: /api/gate/grafana}}
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata: {name: sp-cors, namespace: observability}
+      spec:
+        targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: route-cors-only}]
+        cors: {allowOrigins: ["https://admin.example"]}
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata: {name: sp-other, namespace: observability}
+      spec:
+        targetRefs:
+          - {group: gateway.networking.k8s.io, kind: HTTPRoute, name: other-route}
+          - {group: gateway.networking.k8s.io, kind: GRPCRoute, name: route-gated-by-name-only}
+        extAuth: {http: {backendRefs: [{name: admin-ui, namespace: admin-ui, port: 3000}]}}
+    - apiVersion: gateway.envoyproxy.io/v1alpha1
+      kind: SecurityPolicy
+      metadata: {name: sp-wrong-namespace, namespace: default}
+      spec:
+        targetRefs: [{group: gateway.networking.k8s.io, kind: HTTPRoute, name: route-gated-by-name-only}]
+        extAuth: {http: {backendRefs: [{name: admin-ui, namespace: admin-ui, port: 3000}]}}

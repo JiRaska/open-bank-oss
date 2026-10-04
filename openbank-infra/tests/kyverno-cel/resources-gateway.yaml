@@ -1,0 +1,41 @@
+# require-gated-or-declared-tool-httproute-cel fixtures (ADR-0324 Phase 2). The
+# SecurityPolicies these routes are judged against are in context-gateway.yaml.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-gated, namespace: observability}
+spec: {hostnames: [admin.example], rules: [{backendRefs: [{name: grafana, port: 80}]}]}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-declared, namespace: observability, annotations: {openbank.io/ungated-machine-callers: "OTLP from SDKs"}}
+spec: {hostnames: [rum.example], rules: [{backendRefs: [{name: rum, port: 4318}]}]}
+---
+# MUST REJECT: nothing targets it.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-ungated, namespace: observability}
+spec: {hostnames: [admin.example], rules: [{backendRefs: [{name: pyrra, port: 9099}]}]}
+---
+# MUST REJECT: a SecurityPolicy targets it, but with CORS only — no extAuth, no gate.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-cors-only, namespace: observability}
+spec: {hostnames: [admin.example], rules: [{backendRefs: [{name: pyrra, port: 9099}]}]}
+---
+# MUST REJECT: an extAuth policy exists in the namespace, but it targets ANOTHER route.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-gated-by-name-only, namespace: observability}
+spec: {hostnames: [admin.example], rules: [{backendRefs: [{name: alertmanager, port: 9093}]}]}
+---
+# MUST REJECT: an empty declaration is not a declaration.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-empty-declaration, namespace: observability, annotations: {openbank.io/ungated-machine-callers: ""}}
+spec: {hostnames: [admin.example], rules: [{backendRefs: [{name: pyrra, port: 9099}]}]}
+---
+# Out of scope: another namespace is not the tools' namespace.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata: {name: route-ungated-elsewhere, namespace: default}
+spec: {hostnames: [pact.example], rules: [{backendRefs: [{name: pact, port: 9292}]}]}
