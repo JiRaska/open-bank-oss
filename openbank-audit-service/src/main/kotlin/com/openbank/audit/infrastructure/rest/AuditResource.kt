@@ -5,6 +5,9 @@
 package com.openbank.audit.infrastructure.rest
 
 import com.openbank.audit.application.AuditAnchorService
+import com.openbank.audit.domain.model.EntryHashStatus
+import com.openbank.audit.domain.model.EvidenceBundle
+import com.openbank.audit.domain.model.EvidenceEntry
 import com.openbank.audit.infrastructure.persistence.AuditRepository
 import com.openbank.libs.authz.Authorize
 import com.openbank.libs.security.Roles
@@ -22,6 +25,7 @@ import org.eclipse.microprofile.openapi.annotations.Operation
 import org.eclipse.microprofile.openapi.annotations.media.Schema
 import org.eclipse.microprofile.openapi.annotations.parameters.Parameter
 import org.eclipse.microprofile.openapi.annotations.tags.Tag
+import java.time.Instant
 import java.util.UUID
 
 @Path("/api/v1/audit")
@@ -49,7 +53,7 @@ class AuditResource {
     // service account carries ROLE_OPERATOR — @RolesAllowed(ROLE_API) alone 403'd every call
     // before OPA was ever consulted. ROLE_OPERATOR is also held by real staff, so the narrowing
     // is OPA's job: `audit.customerRead` is a DISTINCT action from the auditor-facing
-    // `audit.read`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
+    // `audit.trail.inspect`, granted by rest.rego's `edge-service-audit-customer` rule to exactly the
     // `service-account-openbank-edge` principal id and nothing else. The payload is deliberately
     // not projected: the app gets event metadata, not event internals.
     @RolesAllowed(Roles.API, Roles.OPERATOR, Roles.ADMIN)
@@ -137,21 +141,42 @@ class AuditResource {
     // The audit trail is regulated evidence (SOX/DORA): read-only and role-gated.
     // AUDITOR is the dedicated read-only audit role; ADMIN and COMPLIANCE also need it
     // for investigations. Never @PermitAll — an unauthenticated audit log is itself an
-    // audit finding (K7).
+    // audit finding (K7). The action is deliberately NOT a `*.read`: base rest.rego's
+    // operator-read-any / compliance-read-any grant every `.read` to any HUMAN-classified
+    // ROLE_OPERATOR / ROLE_COMPLIANCE holder, Keycloak service accounts included. The verb
+    // `inspect` is outside that set, so only audit_rest_ext.rego's oversight rule (which
+    // excludes `service-account-*`) can permit it.
     @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
-    @Authorize(action = "audit.read", resource = "#aggregateId")
+    @Authorize(action = "audit.trail.inspect", resource = "#aggregateId")
     @Operation(summary = "Get audit trail for an aggregate (account, party, transaction, etc.)")
     suspend fun getAuditTrail(
         @PathParam("aggregateId") aggregateId: String,
         @QueryParam("limit") @DefaultValue("100") limit: Int,
     ): Response = Response.ok(repo.findByAggregateId(aggregateId, limit.coerceIn(1, 500))).build()
 
+    /**
+     * ADR-0214 D3 evidence bundle: everything the chain holds about one aggregate (a loan
+     * application, a loan), oldest first, each entry with its own hash recomputed at read time.
+     *
+     * The ONE audit route ROLE_CREDIT_RISK may read (#11900): lending's
+     * `GET /applications/{id}/evidence` forwards the signed-in person's own token here, so the
+     * human stays the principal end to end and no service account is ever granted the trail.
+     * The OPA rule refuses `service-account-*` identities for that reason.
+     */
+    @GET
+    @Path("/evidence/{aggregateId}")
+    @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE", "ROLE_CREDIT_RISK")
+    @Authorize(action = "audit.evidence.reconstruct", resource = "#aggregateId")
+    @Operation(summary = "Ordered, hash-checked evidence bundle for one aggregate (ADR-0214 D3)")
+    suspend fun getEvidence(@PathParam("aggregateId") aggregateId: String): Response =
+        Response.ok(EvidenceResponse.of(repo.evidenceFor(aggregateId))).build()
+
     @GET
     @Path("/entries/by-actor/{actorId}")
     // Same regulated-evidence gate as the aggregate trail above; JAX-RS prefers this literal
     // "by-actor" segment over the {aggregateId} template, so the two routes never collide.
     @RolesAllowed("ROLE_AUDITOR", "ROLE_ADMIN", "ROLE_COMPLIANCE")
-    @Authorize(action = "audit.read", resource = "#actorId")
+    @Authorize(action = "audit.trail.inspect", resource = "#actorId")
     @Operation(
         summary = "Get audit entries for one actor across all ingress channels (ADR-0226) — " +
             "the forensic 'what did person X do' query, optionally narrowed by ?channel=ui|mcp|api",
@@ -280,3 +305,71 @@ data class IntegrityResponse(
     val unchainedCount: Long,
     val firstBrokenAt: UUID?,
 )
+
+/**
+ * Wire shape of [com.openbank.audit.domain.model.EvidenceBundle]. `attestation` names what backs
+ * the bundle (`audit-chain`, as opposed to lending's former `local-outbox`); `tampered` is true if
+ * any entry's hash failed to recompute; `fullChainVerification` points at the walk that also
+ * proves nothing was deleted or re-ordered, which per-entry recomputation cannot.
+ */
+data class EvidenceResponse(
+    val aggregateId: String,
+    val attestation: String,
+    val entryCount: Int,
+    val truncated: Boolean,
+    val tampered: Boolean,
+    val hashStatusCounts: Map<EntryHashStatus, Int>,
+    val fullChainVerification: String,
+    val entries: List<EvidenceEntryView>,
+) {
+    companion object {
+        fun of(bundle: EvidenceBundle) = EvidenceResponse(
+            aggregateId = bundle.aggregateId,
+            attestation = "audit-chain",
+            entryCount = bundle.entries.size,
+            truncated = bundle.truncated,
+            tampered = bundle.tampered,
+            hashStatusCounts = EntryHashStatus.entries.associateWith { s ->
+                bundle.entries.count { it.hashStatus == s }
+            },
+            fullChainVerification = "/api/v1/audit/integrity",
+            entries = bundle.entries.map(EvidenceEntryView::of),
+        )
+    }
+}
+
+data class EvidenceEntryView(
+    val entryId: UUID,
+    val eventType: String,
+    val aggregateType: String,
+    val sourceService: String,
+    val actorId: String?,
+    val actorType: String?,
+    val correlationId: String?,
+    val occurredAt: Instant,
+    val occurredAtSource: String,
+    val recordedAt: Instant,
+    val payload: String,
+    val recordHash: String?,
+    val prevHash: String?,
+    val hashStatus: EntryHashStatus,
+) {
+    companion object {
+        fun of(e: EvidenceEntry) = EvidenceEntryView(
+            entryId = e.entry.id,
+            eventType = e.entry.eventType,
+            aggregateType = e.entry.aggregateType,
+            sourceService = e.entry.sourceService,
+            actorId = e.entry.actorId,
+            actorType = e.entry.actorType,
+            correlationId = e.entry.correlationId,
+            occurredAt = e.entry.occurredAt,
+            occurredAtSource = e.entry.occurredAtSource.name,
+            recordedAt = e.entry.recordedAt,
+            payload = e.entry.payload,
+            recordHash = e.recordHash,
+            prevHash = e.prevHash,
+            hashStatus = e.hashStatus,
+        )
+    }
+}

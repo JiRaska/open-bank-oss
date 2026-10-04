@@ -117,6 +117,9 @@ metadata:
     app.kubernetes.io/component: pilot-injector
     openbank.tech/journey: swarm-shadow-pilot
     openbank.tech/pilot-phase: p3-shadow
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 */4 * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "32400"
 spec:
   # Suspended by default. Enable only in sandbox for the 7-day pilot.
   suspend: true

@@ -15,7 +15,7 @@ spec:
   selector: { matchLabels: { app.kubernetes.io/name: context-service } }
   template:
     metadata:
-      annotations: { openbank.tech/policy-checksum: "d8f3eabcdddabb10" }
+      annotations: { openbank.tech/policy-checksum: "09f451f643aa70a6" }
       labels: { app.kubernetes.io/name: context-service, app.kubernetes.io/part-of: context }
     spec:
       securityContext:
@@ -48,8 +48,9 @@ spec:
             - { name: QUARKUS_OIDC_AUTH_SERVER_URL, value: http://keycloak.iam.svc:8080/realms/openbank }
             - name: OIDC_CLIENT_SECRET
               valueFrom: { secretKeyRef: { name: context-service-oidc, key: OIDC_CLIENT_SECRET } }
-            - name: AML_CASE_SOURCE_URL
-              valueFrom: { secretKeyRef: { name: context-service-source-discovery, key: AML_CASE_SOURCE_URL } }
+            # A plain in-cluster Service address, like every other aml-service caller in this tree;
+            # it is not a credential, so it does not belong in the secret store.
+            - { name: AML_CASE_SOURCE_URL, value: "http://aml-service.aml.svc:8117" }
             - { name: KAFKA_BOOTSTRAP_SERVERS, value: openbank-cluster-kafka-bootstrap.messaging.svc:9093 }
             - { name: KAFKA_SECURITY_PROTOCOL, value: SSL }
             - { name: KAFKA_SSL_KEYSTORE_LOCATION, value: /mnt/kafka-user/user.p12 }

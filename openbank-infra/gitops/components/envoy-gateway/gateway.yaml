@@ -9,6 +9,11 @@
 # skips, so the routes are reachable only on this Gateway's own NLB address (curl
 # --resolve) until a cutover PR removes that annotation. See httproute-redirect.yaml.
 #
+# PHASE 2 — the ADR-0234 gated tools (/tools/grafana, /tools/alertmanager, /tools/pyrra on
+# admin.open-bank.tech) on listener https-admin, held out of DNS the same way
+# (observability/httproute-tools-gate.yaml). Their DNS cannot move on its own: the tools share
+# the host with the console, so admin.open-bank.tech moves in Phase 3 with the admin-ui route.
+#
 # ATTACHMENT. Each HTTPS listener names ONE hostname and admits routes from ONE namespace,
 # selected by `kubernetes.io/metadata.name` — a label the API server sets and nobody can
 # put on another namespace. So a route for pact.open-bank.tech can only come from
@@ -188,3 +193,29 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
+    # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
+    # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
+    # must carry an extAuth SecurityPolicy or an ungated-machine-callers declaration (Kyverno
+    # require-gated-or-declared-tool-httproute-cel), so this listener admits no ungated route
+    # from it. Certificate + ReferenceGrant: components/admin-ui/edge-gateway-grants.yaml,
+    # landed in an EARLIER change on purpose (the Phase-1 RefNotPermitted lesson in
+    # httproute-redirect.yaml / pact-broker/httproute.yaml).
+    - name: https-admin
+      protocol: HTTPS
+      port: 443
+      hostname: admin.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: admin-edge-tls
+            namespace: admin-ui
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [admin-ui, observability]

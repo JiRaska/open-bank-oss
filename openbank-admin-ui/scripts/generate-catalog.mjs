@@ -94,7 +94,7 @@ for (const name of entries) {
   // The convention plugin identifies a runnable Quarkus module more reliably
   // than its name: risk-engine and product-catalog have no -service suffix.
   const buildScript = readText(path.join(dir, 'build.gradle.kts')) ?? ''
-  const runnable = buildScript.includes('openbank.quarkus-service')
+  const runnable = /^\s*(?:plugins\s*\{\s*)?id\(["']openbank\.quarkus-service["']\)/m.test(buildScript)
     && (buildScript.includes('project(":openbank-libs-runtime")') || buildScript.includes('project(":openbank-libs")'))
   const moneyPath = gov.moneyPath.has(name)
 

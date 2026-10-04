@@ -306,6 +306,8 @@ V9.1 openbank-infra/gitops/components/kyb/kyb-service.yaml:126: plaintext http:/
 V9.1 openbank-infra/gitops/components/campaign/campaign-service.yaml:62: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/communication/communication-service.yaml:47: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/context/context-service.yaml:36: plaintext http:// env value http://tempo.observability.svc:4317
+# aml-service exposes no TLS listener (Service ports: http 8117, management 8085); same debt as the agent/fx/payments/security-scanner callers above (#12008).
+V9.1 openbank-infra/gitops/components/context/context-service.yaml:53: plaintext http:// env value http://aml-service.aml.svc:8117
 V9.1 openbank-infra/gitops/components/delegation/delegation-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/engagement/engagement-service.yaml:79: plaintext http:// env value http://tempo.observability.svc:4317
 V9.1 openbank-infra/gitops/components/finrep/finrep-service.yaml:54: plaintext http:// env value http://tempo.observability.svc:4317

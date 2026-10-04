@@ -12,6 +12,9 @@ import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.FxSide
 import com.openbank.treasury.domain.model.LimitCheck
+import com.openbank.treasury.domain.model.ProductLimit
+import com.openbank.treasury.domain.model.ProductLimitCheck
+import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.Instant
@@ -30,6 +33,16 @@ object DealFixtures {
     val seniorApprover = Actor("sam.senior", ActorType.HUMAN)
     val agent = Actor("agent:treasury-drafter", ActorType.AI_AGENT)
     val serviceAccount = Actor("service-account-openbank-services", ActorType.SERVICE)
+
+    /** A product check with no breach, for domain tests that are not about product limits. */
+    val withinProduct = ProductLimitCheck(ProductType.MM_PLACEMENT, null, emptyList())
+
+    /** Every product permitted in CZK and EUR up to 1e12, no tenor cap: product limits out of the way. */
+    val permissiveProductLimits = ProductLimitPolicy(
+        ProductType.entries.map {
+            ProductLimit(it, mapOf("CZK" to BigDecimal("1E12"), "EUR" to BigDecimal("1E12")), null)
+        },
+    )
 
     val bankA = Counterparty(
         id = "SIMBK-A",

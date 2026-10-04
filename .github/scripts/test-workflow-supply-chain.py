@@ -26,14 +26,39 @@ class SupplyChainTest(unittest.TestCase):
 
     def test_tags_fail_for_steps_and_reusable_jobs(self):
         for job in ({'uses': 'owner/action@v1'}, {'steps': [{'uses': 'actions/checkout@v4'}]}):
-            self.assertTrue(guard.findings('example.yml', {'jobs': {'test': job}}))
+            self.assertTrue(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
 
     def test_pins_and_local_actions_pass(self):
         job = {'steps': [{'uses': './local'}, {'uses': 'actions/checkout@' + 'a' * 40}]}
-        self.assertFalse(guard.findings('example.yml', {'jobs': {'test': job}}))
+        self.assertFalse(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
+
+    def test_top_level_permissions_must_be_declared_and_read_only(self):
+        job = {'permissions': {'issues': 'write'}, 'steps': []}
+        self.assertFalse(guard.findings('example.yml', {'permissions': {}, 'jobs': {'test': job}}))
+        self.assertFalse(guard.findings('example.yml', {'permissions': 'read-all', 'jobs': {}}))
+        for top in (None, {'contents': 'read', 'issues': 'write'}, 'write-all', {'id-token': 'write'}):
+            doc = {'jobs': {'test': job}}
+            if top is not None:
+                doc['permissions'] = top
+            with self.subTest(top=top):
+                self.assertTrue(guard.top_level_findings(doc))
+                self.assertTrue(guard.findings('example.yml', doc))
+
+    def test_every_real_workflow_regresses_when_a_write_moves_to_the_top(self):
+        for path in sorted((guard.ROOT / '.github/workflows').glob('*.y*ml')):
+            original = yaml.safe_load(path.read_text())
+            self.assertFalse(guard.top_level_findings(original), path.name)
+            for mutation in ('drop', 'write'):
+                doc = copy.deepcopy(original)
+                if mutation == 'drop':
+                    doc.pop('permissions')
+                else:
+                    doc['permissions'] = {'contents': 'write'}
+                with self.subTest(name=path.name, mutation=mutation):
+                    self.assertTrue(guard.top_level_findings(doc))
 
     def test_slsa_exception_cannot_spread(self):
-        doc = {'jobs': {'provenance': {'uses': guard.SLSA}}}
+        doc = {'permissions': {}, 'jobs': {'provenance': {'uses': guard.SLSA}}}
         self.assertFalse(guard.findings('release-please.yml', doc))
         self.assertTrue(guard.findings('other.yml', doc))
         doc['jobs']['provenance']['uses'] = guard.SLSA.replace('v2.1.0', 'main')
@@ -41,8 +66,9 @@ class SupplyChainTest(unittest.TestCase):
 
     def test_trigger_filter_regression(self):
         for name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):
-            self.assertTrue(guard.findings(name, {'on': {'workflow_run': {}}, 'jobs': {}}))
-            self.assertFalse(guard.findings(name, {'on': {'workflow_run': {'branches': ['main']}}, 'jobs': {}}))
+            self.assertTrue(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {}}, 'jobs': {}}))
+            self.assertFalse(guard.findings(name, {'permissions': {}, 'on': {'workflow_run': {'branches': ['main']}},
+                                                   'jobs': {}}))
 
     def test_pull_request_workflow_requires_concurrency(self):
         path = guard.ROOT / '.github/workflows/dependency-review.yml'
