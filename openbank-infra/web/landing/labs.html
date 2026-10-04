@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OpenBank Labs | Banking kernel &amp; QRlessPay SDK</title>
+<meta name="description" content="Explore OpenBank Labs: shared Kotlin banking libraries and QRlessPay, a bank-agnostic SDK for sending payment descriptors phone-to-phone without scanning a QR code." />
+<meta name="theme-color" content="#f8f6f1" />
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="OpenBank" />
+<meta property="og:url" content="https://open-bank.tech/labs.html" />
+<meta property="og:title" content="OpenBank Labs | Banking kernel &amp; QRlessPay SDK" />
+<meta property="og:description" content="Explore OpenBank Labs: shared Kotlin banking libraries and QRlessPay, a bank-agnostic SDK for sending payment descriptors phone-to-phone without scanning a QR code." />
+<meta property="og:image" content="https://open-bank.tech/assets/openbank-labs-kernel.jpg" />
+<meta property="og:image:width" content="1223" />
+<meta property="og:image:height" content="1285" />
+<meta property="og:image:alt" content="OpenBank Labs lioness and banking kernel illustration" />
+<meta name="twitter:card" content="summary_large_image" />
+<link rel="icon" href="assets/ob-mark-complete.svg" type="image/svg+xml" />
+<link rel="canonical" href="https://open-bank.tech/labs.html" />
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "WebPage",
+  "@id": "https://open-bank.tech/labs.html#webpage",
+  "url": "https://open-bank.tech/labs.html",
+  "name": "OpenBank Labs | Banking kernel & QRlessPay SDK",
+  "description": "Explore OpenBank Labs: shared Kotlin banking libraries and QRlessPay, a bank-agnostic SDK for sending payment descriptors phone-to-phone without scanning a QR code.",
+  "isPartOf": {
+    "@id": "https://open-bank.tech/#website"
+  },
+  "about": {
+    "@id": "https://open-bank.tech/#project"
+  },
+  "inLanguage": "en"
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&amp;family=Space+Mono:wght@400;700&amp;display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="nav wrap">
+<a class="brand" href="index.html" aria-label="OpenBank home"><img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a>
+<nav aria-label="Main navigation">
+<a class="nav-labs" href="labs.html" aria-current="page">Labs <img src="assets/labs-flask.svg" width="15" height="19" alt="" /></a>
+<a href="platform.html">Platform</a>
+<a href="index.html#app">App</a>
+<a href="index.html#agents">Agents</a>
+<a href="index.html#join">Community</a>
+</nav>
+<a class="sandbox-cta" href="index.html#sandbox">Explore the sandbox ↗</a>
+</header>
+<main id="main">
+<section class="labs-hero wrap">
+<div class="labs-hero-copy">
+<p class="eyebrow">OpenBank Labs <img class="flask-inline" src="assets/labs-flask.svg" width="12" height="15" alt="" /> / Shared banking intelligence</p>
+<h1>A shared kernel<br />for <span>modern banks.</span></h1>
+<p class="lede">Every bank needs to count money, understand business days and speak payment rails. Those rules should be written once, tested deeply and shared.</p>
+<div class="actions"><a class="btn btn-labs" href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs">Explore the source ↗</a><a class="btn btn-ghost" href="#inside">What's inside ↓</a><a class="text-link labs-qrless-link" href="#qrlesspay">Discover QRlessPay ↓</a></div>
+</div>
+<figure class="labs-art"><img src="assets/openbank-labs-kernel.jpg" width="1223" height="1285" alt="OpenBank Labs: lioness scientist and bot illustrating layers of the shared banking kernel." /><figcaption>Original OpenBank Labs artwork · illustrative module diagram; the repository is the source of truth.</figcaption></figure>
+</section>
+<section class="labs-statement"><div class="wrap"><p>From common logic to extraordinary banks.</p><strong>Build on what matters.</strong></div></section>
+<section class="section wrap" id="inside">
+<div class="section-heading"><p class="eyebrow">Inside openbank-libs</p><h2>The banking knowledge<br />services share.</h2><p>The domain core is plain Kotlin without framework dependencies. Shared types and rules help services agree at the source instead of reconciling differences later.</p></div>
+<div class="labs-grid">
+<article class="labs-card"><span>01 / DOMAIN CORE</span><h3>Money, identity &amp; time</h3><p>Money types with rounding policy, IBAN and Czech account checks, identity numbers and a banking calendar that handles working days and Easter.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-domain">Explore libs-domain ↗</a></article>
+<article class="labs-card"><span>02 / CREDIT MATH</span><h3>Loans that add up</h3><p>Amortization, APRC, IFRS 9 and delinquency calculations are shared building blocks rather than slightly different implementations in every service.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-lending">Explore libs-lending ↗</a></article>
+<article class="labs-card"><span>03 / PAYMENT LANGUAGE</span><h3>ISO 20022</h3><p>Reusable messages for pacs.008, pacs.002, pacs.004 and camt.054/056 make payment flows speak the same language.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-iso20022">Explore libs-iso20022 ↗</a></article>
+<article class="labs-card"><span>04 / RELIABLE RUNTIME</span><h3>Rules around the work</h3><p>Transactional outbox, idempotency, audit and authorization primitives reduce the need to rebuild the same infrastructure service by service.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-runtime">Explore libs-runtime ↗</a></article>
+<article class="labs-card"><span>05 / MONEY FLOWS</span><h3>Durable workflows</h3><p>Shared temporal patterns help long-running banking work remain explicit and recoverable.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-temporal">Explore libs-temporal ↗</a></article>
+<article class="labs-card"><span>06 / PROOF</span><h3>Test the promises</h3><p>Testcontainers, money generators for property tests and conformance checks help prove outbox and authorization behavior.</p><a href="https://github.com/JiRaska/open-bank-oss/tree/main/openbank-libs-testing">Explore libs-testing ↗</a></article>
+</div>
+</section>
+<section class="qrless-section" id="qrlesspay">
+<div class="wrap qrless-layout">
+<div class="qrless-copy">
+<p class="eyebrow">From OpenBank Labs · QRlessPay SDK</p>
+<h2>The QR payment.<br /><span>Without the camera.</span></h2>
+<p>QRlessPay carries the same SPAYD payment descriptor a QR code would carry, directly from one phone to another over Bluetooth Low Energy. A bank-agnostic profile and public Swift/Kotlin SDK aim to let different banks and app platforms exchange a payment request with one tap.</p>
+<p>The payer still sees the recipient and amount, confirms the proposal and authorizes the payment in their own bank app. Settlement stays on the bank's existing account-to-account rail.</p>
+<div class="actions"><a class="btn btn-labs" href="https://github.com/JiRaska/qrlesspay-sdk">Explore the SDK ↗</a><a class="text-link" href="https://github.com/JiRaska/open-bank-oss/blob/main/docs/specs/qrlesspay-v1.md">Read the open wire spec ↗</a></div>
+<p class="qrless-status">Early reference SDK · public source and conformance tests; physical two-device interoperability has not yet been demonstrated.</p>
+</div>
+<div class="qrless-visual" role="group" aria-label="QRlessPay concept: payment request moves phone to phone over BLE, then the payer confirms in their own bank app">
+<div class="qrless-phones"><div class="qrless-phone"><span>01 · REQUEST</span><strong>Payee</strong><small>Bank A app</small></div><div class="qrless-signal"><i></i><i></i><i></i><b>BLE</b></div><div class="qrless-phone"><span>02 · CONFIRM</span><strong>Payer</strong><small>Bank B app</small></div></div>
+<div class="qrless-rail"><span>SPAYD payload, not pixels</span><span>Existing A2A payment rail →</span></div>
+<div class="qrless-tech"><div><b>BLE</b><small>Reference transport</small></div><div><b>UWB</b><small>Optional proximity check</small></div><div><b>NFC</b><small>Future research</small></div></div>
+</div>
+</div>
+</section>
+<section class="labs-close"><div class="wrap"><p class="eyebrow">Open source · open questions</p><h2>No one should write APRC<br />for the hundred and first time.</h2><p>The ambition is a reusable bank kernel: shared foundations that leave teams free to build their own customer experience.</p><div class="actions"><a class="btn btn-labs" href="https://github.com/JiRaska/open-bank-oss">Open the repository ↗</a><a class="text-link" href="https://www.linkedin.com/feed/update/urn:li:share:7510941181430706177/">Read the original post ↗</a></div></div></section>
+</main>
+<footer class="footer wrap"><a class="brand" href="index.html"><img src="assets/ob-mark-complete.svg" width="48" height="34" alt="" />OpenBank</a><div><p>An open banking reference implementation. Built to be explored.</p><p class="fine">Early-stage software · not a licensed bank · not production-ready. Demo data only.</p><p class="fine">Platform: Apache-2.0. AI agent licensing: AGPL-3.0-only + commercial. <a href="https://github.com/JiRaska/open-bank-oss#license">License details ↗</a></p><p class="fine">© 2026 OpenBank contributors · <a href="classic.html">Previous website</a> · <a href="https://github.com/JiRaska/open-bank-oss/blob/main/TRADEMARKS.md">Independent project / trademark notice</a></p></div></footer>
+</body>
+</html>

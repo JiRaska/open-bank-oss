@@ -156,20 +156,21 @@ class ClearingApiIT {
             post("/api/v1/clearing/cycle/trigger?rail=SEPA_SCT")
         } Then {
             statusCode(200)
-            body("id", notNullValue())
-            body("status", equalTo("IN_CLEARING"))
-            body("settlementType", equalTo("NET"))
-            body("itemCount", equalTo(2))
+            body("batches.size()", equalTo(1))
+            body("batches[0].id", notNullValue())
+            body("batches[0].status", equalTo("IN_CLEARING"))
+            body("batches[0].settlementType", equalTo("NET"))
+            body("batches[0].itemCount", equalTo(2))
             body("cycleId", notNullValue())
         }
 
         val json = response.extract().body().jsonPath()
-        batchId = json.getString("id")
+        batchId = json.getString("batches[0].id")
         cycleId = json.getString("cycleId")
         // Money-path: batch totals must equal the exact sum of the cleared items.
-        assertThat(BigDecimal(json.getString("totalDebit"))).isEqualByComparingTo(BigDecimal("300.75"))
-        assertThat(BigDecimal(json.getString("totalCredit"))).isEqualByComparingTo(BigDecimal("300.75"))
-        assertThat(BigDecimal(json.getString("netPosition"))).isEqualByComparingTo(BigDecimal.ZERO)
+        assertThat(BigDecimal(json.getString("batches[0].totalDebit"))).isEqualByComparingTo(BigDecimal("300.75"))
+        assertThat(BigDecimal(json.getString("batches[0].totalCredit"))).isEqualByComparingTo(BigDecimal("300.75"))
+        assertThat(BigDecimal(json.getString("batches[0].netPosition"))).isEqualByComparingTo(BigDecimal.ZERO)
     }
 
     @Test
@@ -253,8 +254,8 @@ class ClearingApiIT {
             post("/api/v1/clearing/cycle/trigger?rail=SEPA_SCT")
         } Then {
             statusCode(200)
-            body("status", equalTo("SETTLED"))
-            body("itemCount", equalTo(0))
+            body("batches[0].status", equalTo("SETTLED"))
+            body("batches[0].itemCount", equalTo(0))
         }
     }
 }

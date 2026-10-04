@@ -167,58 +167,58 @@ if [ "${1:-}" = "--self-test" ]; then
     printf '%s\n' "$2" > "$tmp/$1"
   }
 
-  probe() {  # $1 label, $2 expected rc, $3 must-appear substring ("" = none)
-    local label="$1" want="$2" needle="$3" rc=0 out
+  probe() {  # $1 label, $2 expected rc, remaining args: filenames/text that must appear
+    local label="$1" want="$2" needle rc=0 out
+    shift 2
     out="$(MERMAID_SCAN_ROOT="$tmp" bash "$self" 2>&1)" || rc=$?
     if [ "$rc" != "$want" ]; then
       echo "  BAD  $label: want rc=$want, got rc=$rc"; echo "$out" | sed 's/^/       | /'
       fails=$((fails + 1)); return
     fi
-    if [ -n "$needle" ] && ! printf '%s' "$out" | grep -qF -- "$needle"; then
-      echo "  BAD  $label: rc=$want as expected, but the output never named '$needle'"
-      echo "$out" | sed 's/^/       | /'
-      fails=$((fails + 1)); return
-    fi
+    # With pipefail, grep -q can close the pipe as soon as it sees the filename while printf is
+    # still writing a long Mermaid error. printf then gets SIGPIPE and the whole pipeline fails
+    # even though the filename was present. Match the captured output in Bash instead.
+    for needle in "$@"; do
+      if [[ "$out" != *"$needle"* ]]; then
+        echo "  BAD  $label: rc=$want as expected, but the output never named '$needle'"
+        echo "$out" | sed 's/^/       | /'
+        fails=$((fails + 1)); return
+      fi
+    done
     echo "  ok   $label"
   }
 
-  write_doc good.md 'graph TB
+  # One parser process for all positive fixtures, one for all negative fixtures, and one for the
+  # empty corpus. Each failing filename must appear in the negative run's output, so dropping any
+  # parser or extension path still fails this self-test. Eight separate scans took 49.4s in CI.
+  write_doc quoted.md 'graph TB
   a["Outbox<br/>Dispatcher<br/>@Scheduled every 5s"]
   b[Sink]
   a --> b'
-  probe "a quoted @-label parses" 0 ""
+  write_doc escaped-sequence.md 'sequenceDiagram
+  A->>B: status=ACTIVE#59; outbox written'
+  write_mmd valid.mmd 'graph TB
+  a[Sink]
+  b[Source]
+  b --> a'
+  probe "quoted @-label, escaped ; and standalone .mmd all parse" 0
 
   # Named, because a gate that goes red without saying WHICH file is the #2165 failure.
-  write_doc good.md 'graph TB
+  write_doc bad-label.md 'graph TB
   a[Outbox<br/>Dispatcher<br/>@Scheduled every 5s]
   b[Sink]
   a --> b'
-  probe "an unquoted @-label is flagged, by file" 1 "good.md"
-
-  write_doc good.md 'sequenceDiagram
-  A->>B: status=ACTIVE#59; outbox written'
-  probe "an escaped ; in a sequence message parses" 0 ""
-
-  write_doc good.md 'sequenceDiagram
+  write_doc bad-sequence.md 'sequenceDiagram
   A->>B: status=ACTIVE; outbox written'
-  probe "a literal ; in a sequence message is flagged, by file" 1 "good.md"
 
   # --- standalone .mmd coverage (#6495) ---------------------------------------------------
   # 114 .mmd files were outside this gate's walk until #6495, and 7 of them did not parse
   # (#6496). The extension list is the whole subject set here, so it needs a fixture in BOTH
   # directions — a gate that only ever sees .md fixtures cannot notice that .mmd was dropped
   # from the walk again.
-  rm -f "$tmp"/*.md
-  write_mmd good.mmd 'graph TB
-  a[Sink]
-  b[Source]
-  b --> a'
-  probe "a standalone .mmd is scanned and parses" 0 ""
-
-  write_mmd good.mmd 'sequenceDiagram
+  write_mmd bad.mmd 'sequenceDiagram
   participant PAR as party-service
   PAR->>K: party.events'
-  probe "a broken .mmd is flagged, by file" 1 "good.mmd"
 
   # The whole file is the diagram: a .mmd wrapped in a fence is NOT valid, and treating it
   # like a .md would silently skip it (no fence match => zero blocks => vacuous pass).
@@ -226,7 +226,8 @@ if [ "${1:-}" = "--self-test" ]; then
   graph TB
   a --> b
   ```'
-  probe "a .mmd is read whole, not searched for fences" 1 "fenced.mmd"
+  probe "all four defects are flagged by filename" 1 \
+    "bad-label.md" "bad-sequence.md" "bad.mmd" "fenced.mmd"
 
   rm -f "$tmp"/*.md "$tmp"/*.mmd
   probe "an empty tree FAILS rather than reporting a vacuous pass" 1 "found NO mermaid diagrams"

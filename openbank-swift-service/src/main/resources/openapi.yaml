@@ -9,7 +9,14 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.2 -> 1.3): additive
   # only — GET /swift/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: "1.5.0"
+  # 1.5 -> 1.6 (#11604): additive — POST /api/v1/swift documents its 400 as InvalidMoney
+  # (AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR); amountMinorUnits + currency
+  # are built into a kernel Money at the boundary. Request and response schemas are unchanged.
+  # 1.6 -> 1.7 (#11972): correction — every error response was documented as
+  # `ErrorResponse { error, message }` (and 422 as `ValidationError { error, violations }`), and the
+  # service has never sent an `error` member. They now reference ProblemDetail, the body libs-runtime
+  # actually renders. Spec-only: the served contract is unchanged (check-api-contract: correction).
+  version: "1.7.0"
   description: |
     SWIFT MT/MX message dispatch, acknowledgement, and status tracking.
     Supports MT103 (customer credit transfer), MT202 (bank transfer), MT900/910/940/950 (confirmations/statements).
@@ -68,7 +75,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/SwiftMessage'
         "400":
-          $ref: '#/components/responses/BadRequest'
+          $ref: '#/components/responses/InvalidMoney'
         "403":
           $ref: '#/components/responses/Forbidden'
         "409":
@@ -76,13 +83,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
         "422":
           description: BIC validation failed or business rule violation
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ValidationError'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/messages:
     get:
@@ -192,7 +199,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/{id}/reject:
     post:
@@ -235,7 +242,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorResponse'
+                $ref: '#/components/schemas/ProblemDetail'
 
   /api/v1/swift/approvals:
     get:
@@ -513,33 +520,80 @@ components:
       enum: [NORMAL, URGENT, SYSTEM]
       default: NORMAL
 
-    ErrorResponse:
+    ProblemDetail:
       type: object
-      required: [error, message]
+      description: >-
+        The error body every non-2xx response of this service carries (#11972). It is libs-runtime's
+        error document: either its `ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`,
+        optional `details`) or the ADR-0326 RFC 9457 problem document, which is a SUPERSET of it and
+        adds `type`, `title`, `detail`, `instance`, `correlationId`, `retryable` and `violations`.
+        So the five members below are always present and the rest appear when the problem form is
+        rendered. Branch on `code`, never on `message`/`detail`. A rejected value is never echoed.
+        Pinned to the running service by SwiftErrorBodySpecConformanceIT.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
       properties:
-        error:
+        type:
           type: string
-        message:
+          description: "`urn:openbank:error:<code in kebab case>`"
+          example: "urn:openbank:error:amount-scale-exceeded"
+        title:
           type: string
-        traceId:
+        status:
+          type: integer
+          example: 400
+        detail:
           type: string
-
-    ValidationError:
-      type: object
-      required: [error, violations]
-      properties:
-        error:
+        instance:
           type: string
-          example: "Validation failed"
+          description: "`urn:openbank:error-occurrence:<correlationId>`"
+        code:
+          type: string
+          description: Stable machine-readable error code.
+          example: AMOUNT_SCALE_EXCEEDED
+        correlationId:
+          type: string
+        retryable:
+          type: boolean
         violations:
           type: array
           items:
-            type: object
-            properties:
-              field:
-                type: string
-              message:
-                type: string
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId:
+          type: string
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        code:
+          type: string
+
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        rejectedValue:
+          description: Always null — the rejected value is never echoed.
 
     ApprovalResponse:
       type: object
@@ -575,21 +629,41 @@ components:
           nullable: true
 
   responses:
+    InvalidMoney:
+      description: >-
+        The request is invalid, distinguished by `code` (ADR-0326). `amountMinorUnits` + `currency`
+        are built into a kernel Money at this boundary (#11604) and never rounded. SWIFT is
+        cross-border, so there is no currency allow-list: any ISO 4217 currency with a minor unit is
+        accepted, and `amountMinorUnits` is read in THAT currency's minor unit (JPY 0 decimals, EUR 2,
+        KWD/BHD 3 — 1000 JPY minor units is 1000 yen, 1500 KWD minor units is 1.500 dinar).
+        AMOUNT_SCALE_EXCEEDED — `amountMinorUnits` is not a whole number (e.g. 150.5).
+        CURRENCY_UNSUPPORTED — `currency` is not an ISO 4217 code with a minor unit (unknown codes,
+        wrong length, metals such as XAU). Case and surrounding blanks are ignored (`eur` is EUR).
+        VALIDATION_ERROR — any other invalid field, including an `amountMinorUnits` outside a signed
+        64-bit integer. Nothing is created, nothing is published and the `idempotencyKey` is not
+        consumed. The offending field is named in `violations[].field` and its code in
+        `violations[].code`; the rejected value is never echoed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetail'
     BadRequest:
       description: Invalid request body
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
     NotFound:
       description: Resource not found
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'
     Forbidden:
-      description: Policy denied the request (ADR-0034 OPA authorization)
+      description: >-
+        Forbidden. An OPA policy deny (ADR-0034) carries the body below; a refusal by the role check
+        (`@RolesAllowed`) happens before any error mapper runs and has an EMPTY body.
       content:
         application/json:
           schema:
-            $ref: '#/components/schemas/ErrorResponse'
+            $ref: '#/components/schemas/ProblemDetail'

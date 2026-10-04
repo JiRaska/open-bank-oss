@@ -113,6 +113,7 @@ The customer (customers-realm) token is **never forwarded** — upstreams valida
 - **M2M token cache** — `client_credentials` token cached until 60 s before expiry; refresh is `@Synchronized`.
 - **Operation variants** — `get` (JSON), `getRaw` (preserves upstream Content-Type for camt.053 XML / MT940 / PDF, read as `ByteArray` to avoid charset corruption), `post` (idempotency-aware), `postAnonymous` (onboarding, no party header).
 - **Failure mode** — any transport exception degrades to a JSON `502 {"error":"upstream unavailable"}`.
+- **Synthetic taint (ADR-0252)** — every upstream request is built by `upstreamRequest()`, which adds `x-openbank-synthetic: true` when the edge's own inbound filter accepted the request as synthetic (MDC or OTel baggage, both set only for a principal in `openbank.synthetic.trusted-principals`). A client-supplied header is never copied. The token request is the one exception. `UpstreamClientSyntheticTaintTest` pins both the behaviour and the single entry point.
 
 ## Ownership / IDOR model
 
@@ -122,6 +123,7 @@ Several upstreams scope only by `accountId` (the party header is advisory there)
 - `getProfile`, `listNotifications`, `listDevices` — implicitly party-scoped (the upstream query uses the JWT party, never a client id).
 - `enrollDevice` — the `partyId` path param must equal the JWT party.
 - `registerDevice`, `initiateChallenge`, `openAccount` — `partyId` is injected from the JWT (via Jackson, overwriting any client value) so the caller cannot supply it.
+- `CustomerHoldingsResource` (`/holdings/{holdingId}`) — wealth-service acts on a holding id alone, so the edge reads the holding and confirms `ownerPartyId == resolved party` before every read, revaluation or withdrawal. A non-owned, unknown or malformed id returns **404** for all three, so the answer is the same and reveals nothing; only the canonical UUID goes upstream. The valuation source is set by the edge (`CUSTOMER_DECLARED`), never read from the body.
 - Payment debtor id is parsed with Jackson (last-wins, matching the upstream) to close a double-key IDOR bypass; `cursor` is URL-encoded so it cannot inject extra query params.
 
 **Known limitation:** `getChallenge` is not ownership-checked at the edge (opaque challenge id, no sensitive data beyond status/method/expires) — tracked in the threat model. Full OPA-sidecar enforcement is an ADR-0034 fleet-sweep follow-up (ADR-0065 §3).

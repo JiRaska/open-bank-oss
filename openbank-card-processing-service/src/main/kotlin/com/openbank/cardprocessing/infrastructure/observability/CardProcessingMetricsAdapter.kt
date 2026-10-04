@@ -55,6 +55,15 @@ class CardProcessingMetricsAdapter(private val registry: MeterRegistry?) : CardP
             .increment()
     }
 
+    override fun clearingConflict() {
+        val r = registry ?: return
+        Counter.builder("openbank.card.processing.clearing.conflicts")
+            .tag("service", SERVICE)
+            .description("Clearings that lost a concurrent-clearing race on one authorisation and were re-evaluated")
+            .register(r)
+            .increment()
+    }
+
     override fun presentmentApplied(fullyCleared: Boolean) {
         val r = registry ?: return
         Counter.builder("openbank.card.processing.presentments")

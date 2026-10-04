@@ -4,7 +4,20 @@ REST povrch je definován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `i
 
 Major API verze je `1` (`openbank.api.version`), takže všechny cesty žijí pod `/api/v1` (ADR-0048 — osa API-kontraktu je nezávislá na release `version.txt`).
 
+## Autorizace
+
+Obě čtení stopy (`GET /entries/{aggregateId}`, `GET /entries/by-actor/{actorId}`) vyžadují `@RolesAllowed` AUDITOR / ADMIN / COMPLIANCE **a** OPA akci `audit.trail.inspect`; endpointy integrity a kotev používají `audit.verify`. Žádné z těchto sloves není v množině `{list, read}` základního `rest.rego`, takže jedinou povolující cestou v OPA je pravidlo `auditor-audit-oversight-read` v `audit_rest_ext.rego`, které vylučuje servisní účty Keycloaku (`service-account-*`). Strojová identita je tak odmítnuta samotným rozhodnutím politiky, nejen kontrolou rolí. Zákaznický pohled na soukromí (`/customer/{partyId}`) je samostatná akce `audit.customerRead`.
+
 ## Endpointy
+
+### `GET /api/v1/audit/evidence/{aggregateId}`
+
+Důkazní balík podle ADR-0214 D3 (#11900): všechny záznamy, které řetězec drží o jednom agregátu — žádosti o úvěr, úvěru — **od nejstaršího**, u každého s `record_hash` přepočteným při čtení.
+
+- Role: `ROLE_AUDITOR`, `ROLE_ADMIN`, `ROLE_COMPLIANCE`, `ROLE_CREDIT_RISK` (jediná auditní cesta, kterou smí číst credit-risk). `@Authorize(action = "audit.evidence.reconstruct")`; pravidlo OPA odmítne každou identitu `service-account-*`. Endpoint lending-service `GET /applications/{id}/evidence` sem přichází s **vlastním tokenem volajícího**, nikdy se svým servisním účtem.
+- Odpověď: `attestation` (`audit-chain`), `entryCount`, `truncated` (existuje víc než 1000 záznamů), `tampered` (některý záznam `MISMATCH`), `hashStatusCounts`, `fullChainVerification` a `entries[]` s payloadem, `recordHash`, `prevHash` a `hashStatus` ∈ `VERIFIED` · `MISMATCH` (upraven po zápisu) · `LEGACY_UNVERIFIABLE` (hash ve formě před #3586) · `UNCHAINED` (řádek z doby před řetězcem).
+- Co dokazuje: každý řádek je nezměněný. Co nedokazuje: že žádný řádek nebyl smazán nebo přeřazen — to je úplný průchod `GET /api/v1/audit/integrity`.
+- Agregát bez historie vrátí prázdný balík (200), ne 404.
 
 ### `GET /api/v1/audit/entries/{aggregateId}`
 

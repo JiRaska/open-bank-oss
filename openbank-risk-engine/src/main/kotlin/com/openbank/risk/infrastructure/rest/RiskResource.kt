@@ -143,8 +143,9 @@ class RiskResource {
 
     /**
      * IRRBB of a TIED_OUT run (ADR-0313 phase 1): repricing gap, ΔEVE under the six BCBS d368
-     * scenarios, ΔNII (parallel up/down). `tier1Capital` is optional and only ever the caller's:
-     * without it the outlier ratio is not computed. Same gates as cash flows: UNTIED → 409.
+     * scenarios, ΔNII (parallel up/down), and the gaps the figures do not capture. `curveSetId`
+     * defaults to the newest set as of the run's date. `tier1Capital` is optional: without it the
+     * run's own-funds Tier 1 (CZK) is used, as the `irrbb-eve-outlier` limit does. UNTIED → 409.
      */
     @GET
     @Path("/{id}/irrbb")
@@ -158,7 +159,8 @@ class RiskResource {
         val tier1 = tier1Capital?.takeIf { it.isNotBlank() }?.let {
             requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'tier1Capital' must be a decimal number" }
         }
-        return Response.ok(irrbb.analyse(id, parseCurveSetId(curveSetId), tier1).toResponse()).build()
+        val setId = curveSetId?.takeIf { it.isNotBlank() }?.let { parseCurveSetId(it) }
+        return Response.ok(irrbb.analyse(id, setId, tier1).toResponse()).build()
     }
 
     /**

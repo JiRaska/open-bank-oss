@@ -21,6 +21,7 @@ import com.openbank.balance.domain.model.BalanceEventActors
 import com.openbank.balance.domain.model.BalanceEventType
 import com.openbank.balance.domain.model.BalanceHold
 import com.openbank.libs.domain.event.EventActor
+import com.openbank.libs.domain.money.Money
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -57,8 +58,7 @@ class BalanceServiceTest {
             val cmd =
                 PlaceHoldCommand(
                     balance.accountId,
-                    BigDecimal("20.00"),
-                    "CZK",
+                    Money.of(BigDecimal("20.00"), "CZK"),
                     "card auth",
                     "ref-1",
                     ttlSeconds = 60,
@@ -80,7 +80,13 @@ class BalanceServiceTest {
         val service = BalanceService(balanceRepo, holdRepo, movement)
 
         val hold = service.placeHold(
-            PlaceHoldCommand(balance.accountId, BigDecimal("20.00"), "CZK", "card auth", "ref-1", ttlSeconds = 60),
+            PlaceHoldCommand(
+                balance.accountId,
+                Money.of(BigDecimal("20.00"), "CZK"),
+                "card auth",
+                "ref-1",
+                ttlSeconds = 60,
+            ),
         )
 
         assertEquals(0, hold.amount.compareTo(BigDecimal("20.00")))
@@ -102,7 +108,9 @@ class BalanceServiceTest {
 
         assertThrows<InsufficientFundsException> {
             runBlocking {
-                service.debit(DebitAccountCommand(balanceRepo.seed.accountId, BigDecimal("20.00"), "CZK", "ref-2"))
+                service.debit(
+                    DebitAccountCommand(balanceRepo.seed.accountId, Money.of(BigDecimal("20.00"), "CZK"), "ref-2"),
+                )
             }
         }
     }
@@ -114,7 +122,7 @@ class BalanceServiceTest {
         val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
 
         val result = service.credit(
-            CreditAccountCommand(balanceRepo.seed.accountId, BigDecimal("40.00"), "CZK", "pay-1"),
+            CreditAccountCommand(balanceRepo.seed.accountId, Money.of(BigDecimal("40.00"), "CZK"), "pay-1"),
         )
 
         assertEquals(0, result.bookedAmount.compareTo(BigDecimal("140.00")))
@@ -131,8 +139,9 @@ class BalanceServiceTest {
         val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
         val acct = balanceRepo.seed.accountId
 
-        val first = service.credit(CreditAccountCommand(acct, BigDecimal("40.00"), "CZK", "pay-1"))
-        val replay = service.credit(CreditAccountCommand(acct, BigDecimal("40.00"), "CZK", "pay-1")) // same ref
+        val first = service.credit(CreditAccountCommand(acct, Money.of(BigDecimal("40.00"), "CZK"), "pay-1"))
+        // same ref
+        val replay = service.credit(CreditAccountCommand(acct, Money.of(BigDecimal("40.00"), "CZK"), "pay-1"))
 
         // Applied exactly once: 100 + 40 = 140 on both the first call and the idempotent replay.
         assertEquals(0, first.bookedAmount.compareTo(BigDecimal("140.00")))
@@ -148,8 +157,9 @@ class BalanceServiceTest {
         val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
         val acct = balanceRepo.seed.accountId
 
-        service.debit(DebitAccountCommand(acct, BigDecimal("30.00"), "CZK", "wd-1"))
-        val replay = service.debit(DebitAccountCommand(acct, BigDecimal("30.00"), "CZK", "wd-1")) // same ref
+        service.debit(DebitAccountCommand(acct, Money.of(BigDecimal("30.00"), "CZK"), "wd-1"))
+        // same ref
+        val replay = service.debit(DebitAccountCommand(acct, Money.of(BigDecimal("30.00"), "CZK"), "wd-1"))
 
         assertEquals(0, replay.bookedAmount.compareTo(BigDecimal("70.00"))) // 100 - 30, applied once
         assertEquals(1, movement.events.size)
@@ -231,7 +241,9 @@ class BalanceServiceTest {
             FakeBalanceMovementPort(balanceRepo),
         )
 
-        val result = service.initializeBalance(InitializeBalanceCommand(existing.accountId, "CZK", BigDecimal("5.00")))
+        val result = service.initializeBalance(
+            InitializeBalanceCommand(existing.accountId, Money.of(BigDecimal("5.00"), "CZK")),
+        )
 
         assertEquals(existing, result)
         assertTrue(balanceRepo.saved.isEmpty())
@@ -248,7 +260,7 @@ class BalanceServiceTest {
         )
 
         val result = service.setOverdraftLimit(
-            SetOverdraftLimitCommand(balance.accountId, "CZK", BigDecimal("5000.00")),
+            SetOverdraftLimitCommand(balance.accountId, Money.of(BigDecimal("5000.00"), "CZK")),
         )
 
         assertEquals(0, result.arrangedOverdraftLimit.compareTo(BigDecimal("5000.00")))
@@ -264,7 +276,7 @@ class BalanceServiceTest {
         )
 
         assertThrows<BalanceNotFoundException> {
-            service.setOverdraftLimit(SetOverdraftLimitCommand(UUID.randomUUID(), "EUR", BigDecimal.ZERO))
+            service.setOverdraftLimit(SetOverdraftLimitCommand(UUID.randomUUID(), Money.of(BigDecimal.ZERO, "EUR")))
         }
     }
 
@@ -289,7 +301,13 @@ class BalanceServiceTest {
         )
 
         service.placeHold(
-            PlaceHoldCommand(balance.accountId, BigDecimal("20.00"), "CZK", "card auth", "ref-1", ttlSeconds = 60),
+            PlaceHoldCommand(
+                balance.accountId,
+                Money.of(BigDecimal("20.00"), "CZK"),
+                "card auth",
+                "ref-1",
+                ttlSeconds = 60,
+            ),
         )
 
         val event = holdRepo.savedWithEvent.single().third
@@ -303,7 +321,9 @@ class BalanceServiceTest {
         val movement = FakeBalanceMovementPort(balanceRepo)
         val service = BalanceService(balanceRepo, FakeHoldRepository(), movement)
 
-        service.credit(CreditAccountCommand(balanceRepo.seed.accountId, BigDecimal("5.00"), "CZK", "ref-credit"))
+        service.credit(
+            CreditAccountCommand(balanceRepo.seed.accountId, Money.of(BigDecimal("5.00"), "CZK"), "ref-credit"),
+        )
 
         assertEquals("system:balance-service:balance-api", movement.events.single().actorId)
         assertEquals("SYSTEM", movement.events.single().actorType)

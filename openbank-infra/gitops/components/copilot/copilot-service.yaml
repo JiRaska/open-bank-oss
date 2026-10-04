@@ -39,7 +39,7 @@ spec:
       annotations:
         # Rolls the pod when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-copilot-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "140a7d5e7e983395"
+        openbank.tech/policy-checksum: "52a6ca899ea6d5e2"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -50,7 +50,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: copilot-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-d859c4e3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-copilot-service:sandbox-49bf3545
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -313,7 +313,7 @@ spec:
         #   data.openbank.copilot.tool.allow — for CopilotToolGate (get_balance, initiate_transfer…)
         # Both packages are in the same bundle; a single sidecar answers both query paths.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

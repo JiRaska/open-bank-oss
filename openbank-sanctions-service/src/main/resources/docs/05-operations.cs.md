@@ -44,6 +44,8 @@ Co drží heslo mimo prod: `openbank-infra/gitops/components/sanctions-service/s
 
 ## Health checks
 
+Sdílené zahřátí při startu volá `/api/v1/sanctions/pending` bez přihlašovacích údajů, aby prošlo skutečnou neautentizovanou bezpečnostní cestou; čekající přezkumy nenačítá. Kroky pro JSON, volitelnou databázi a HTTP jsou best-effort. Readiness kontrola startup-warmup zůstává DOWN do jejich dokončení nebo uplynutí výchozího limitu 20 sekund. Pokud po nasazení vzroste latence prvního požadavku, zkontrolujte v aplikačních logách selhání kroků a varování o překročení limitu. Cestu nastavuje `openbank.warmup.protected-path`.
+
 - **Liveness:** `/q/health/live` — JVM + ArC running. Restart podu při selhání.
 - **Readiness:** `/q/health/ready` — DB connection pool + Kafka producer + Redis.
 
@@ -105,3 +107,8 @@ Velikost poolu: 20 (výchozí). Při přesycení:
 1. Zkontroluj aktivní dotazy: `SELECT * FROM pg_stat_activity WHERE application_name='sanctions-service'`
 2. Zabij dlouho běžící: `SELECT pg_cancel_backend(pid)`
 3. Zvyš pool: `quarkus.datasource.jdbc.max-size=40` (přes config map).
+
+
+## Zahřátí při startu (#11890)
+
+sanctions nastavuje `openbank.warmup.protected-path: /api/v1/sanctions/pending`, takže zahřátí z libs-runtime (viz dokumentace openbank-libs, 05-operations) projde bezpečnostní cestou tohoto endpointu dřív, než pod nahlásí připravenost. Naměřeno na této službě: první autentizovaný `GET /api/v1/sanctions/pending` po readiness měl medián 2622 ms bez zahřátí a 967 ms se zahřátím; další požadavky 15–60 ms v obou případech.

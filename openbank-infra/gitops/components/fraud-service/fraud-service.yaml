@@ -23,7 +23,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fraud-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "a75c339dfd0aa2e3"
+        openbank.tech/policy-checksum: "b153b3ff14b20f9a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -33,7 +33,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fraud-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-d859c4e3
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fraud-service:sandbox-49bf3545
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8133}
@@ -158,7 +158,7 @@ spec:
         # all @Authorize-annotated endpoints in fraud-service (fraud.*). Bundle
         # mounted from fraud-opa-bundle ConfigMap (gen-fraud-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

@@ -104,17 +104,17 @@ jobs:
           OS=$(uname -s | tr '[:upper:]' '[:lower:]')
           ARCH=$(uname -m)
           case "${OS}_${ARCH}" in
-            darwin_arm64)   SUFFIX="darwin_arm64_static"; OPA_SHA256="7d7debaf10bba97d32b7e67b7f8ce128c92e911b82e3c6cec24b95c34f8a5003" ;;
-            darwin_x86_64)  SUFFIX="darwin_amd64";        OPA_SHA256="088f6c9d8c7b0e2ee0bee450cba7599953e3167649f3623019bada67a26229a4" ;;
-            linux_aarch64)  SUFFIX="linux_arm64_static";  OPA_SHA256="9d8d4d18e4240e61d6259381066080420441a498f559bcb3a24f7561f76e25eb" ;;
-            linux_arm64)    SUFFIX="linux_arm64_static";  OPA_SHA256="9d8d4d18e4240e61d6259381066080420441a498f559bcb3a24f7561f76e25eb" ;;
-            *)              SUFFIX="linux_amd64";         OPA_SHA256="5485f9c32548af84bc0bfa06a7f40a98ecc742477a7f9f24ea3556d221dc295f" ;;
+            darwin_arm64)   SUFFIX="darwin_arm64_static"; OPA_SHA256="a00a6469a0968c47c01137ed0dacaa88148be5d0eaa8524310cd371f3a98a169" ;;
+            darwin_x86_64)  SUFFIX="darwin_amd64";        OPA_SHA256="57a1127c8c67f819928c123163fafb307341bdb6ad543e680c0bbee7640783c5" ;;
+            linux_aarch64)  SUFFIX="linux_arm64_static";  OPA_SHA256="9a1f3625529c6f01240fe68286dde06aa0b23c5253da700ac48f4d943ff8a4de" ;;
+            linux_arm64)    SUFFIX="linux_arm64_static";  OPA_SHA256="9a1f3625529c6f01240fe68286dde06aa0b23c5253da700ac48f4d943ff8a4de" ;;
+            *)              SUFFIX="linux_amd64";         OPA_SHA256="23c654cdb52fc80c3f30e85c0c884a15f78a10173d0a5a060aa25eac15f48fbb" ;;
           esac
           curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 -o "$HOME/bin/opa" \
-            "https://openpolicyagent.org/downloads/v1.17.0/opa_${SUFFIX}"
+            "https://openpolicyagent.org/downloads/v1.21.1/opa_${SUFFIX}"
           SHATOOL="sha256sum"; command -v sha256sum >/dev/null 2>&1 || SHATOOL="shasum -a 256"
           echo "${OPA_SHA256}  $HOME/bin/opa" | ${SHATOOL} -c - \
-            || { echo "::error::OPA v1.17.0 download failed checksum verification"; exit 1; }
+            || { echo "::error::OPA v1.21.1 download failed checksum verification"; exit 1; }
           chmod +x "$HOME/bin/opa"
           echo "$HOME/bin" >> "$GITHUB_PATH"
           "$HOME/bin/opa" version

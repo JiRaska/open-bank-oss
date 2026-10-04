@@ -5,11 +5,17 @@
 package com.openbank.risk.infrastructure.rest
 
 import com.openbank.risk.application.port.`in`.IrrbbAnalysis
+import com.openbank.risk.domain.capital.ReportingCurrencyTotal
 import com.openbank.risk.domain.curve.BigMath
 import com.openbank.risk.domain.irrbb.CurrencyGap
 import com.openbank.risk.domain.irrbb.Irrbb
+import com.openbank.risk.domain.irrbb.IrrbbDataGap
+import com.openbank.risk.domain.irrbb.IrrbbReportingAggregate
 import com.openbank.risk.domain.irrbb.ScenarioResult
 import com.openbank.risk.domain.irrbb.SupervisoryShocks
+import com.openbank.risk.domain.limits.LimitStatus
+import com.openbank.risk.domain.limits.MetricInput
+import com.openbank.risk.domain.limits.RiskLimits
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
@@ -66,14 +72,37 @@ data class IrrbbAssumptionsDto(
 )
 
 data class OutlierTestDto(
+    /** True only when the CALLER passed `tier1Capital`. */
     val tier1Supplied: Boolean,
+    /** The Tier 1 the ratio is computed with, whatever its [tier1Source]. */
     val tier1Capital: BigDecimal?,
+    /** `caller` or `own-funds` (the run's own-funds lines, CZK); null when no Tier 1 is usable. */
+    val tier1Source: String?,
+    /** Why no Tier 1 is usable; null when one is. */
+    val tier1Gap: String?,
     val currency: String?,
+    /** The declared `irrbb-eve-outlier` limit, else the 15 % of CRD Art. 98(5)(a). */
     val threshold: BigDecimal,
-    /** Worst aggregate loss / Tier 1; null unless Tier 1 was supplied AND an aggregate exists. */
+    val earlyWarning: BigDecimal?,
+    val limitId: String?,
+    /** OK / EARLY_WARNING / BREACH against [threshold], or NOT_EVALUABLE — never OK for a missing figure. */
+    val status: String,
+    /** Worst aggregate loss / Tier 1; null unless both exist in the same currency. */
     val ratio: BigDecimal?,
     val breached: Boolean?,
     val note: String,
+)
+
+data class IrrbbDataGapDto(
+    val code: String,
+    val currency: String?,
+    val curveIndex: String?,
+    val lastPillarDate: String?,
+    val lastFlowDate: String?,
+    val flowsBeyond: Int?,
+    val basePvBeyond: BigDecimal?,
+    val count: Int?,
+    val detail: String,
 )
 
 data class WorstCaseDto(
@@ -81,6 +110,21 @@ data class WorstCaseDto(
     val loss: BigDecimal?,
     val currency: String?,
     val byCurrency: Map<String, String>,
+)
+
+data class ReportingScenarioLossDto(val scenario: String, val loss: BigDecimal)
+
+/**
+ * A multi-currency book's d368 aggregate in CZK at the ČNB fixings in effect on the as-of date.
+ * Exactly one of [scenarios] (non-empty) / [notStated] is set.
+ */
+data class ReportingAggregateDto(
+    val currency: String,
+    val scenarios: List<ReportingScenarioLossDto>,
+    val worstScenario: String?,
+    val worstLoss: BigDecimal?,
+    val fxRates: List<FxRateDto>,
+    val notStated: String?,
 )
 
 data class IrrbbResponse(
@@ -97,8 +141,13 @@ data class IrrbbResponse(
     val shockNotConfigured: List<String>,
     val unpriced: List<String>,
     val assumptions: IrrbbAssumptionsDto,
+    /** What the figures do not capture: flat curve extrapolation, behavioural simplifications. */
+    val dataGaps: List<IrrbbDataGapDto>,
+    /** Present only for a multi-currency book (the single-currency aggregate is [worstCase]). */
+    val reportingAggregate: ReportingAggregateDto?,
 )
 
+/** CRD Art. 98(5)(a): EVE decline over 15 % of Tier 1 — used only when no limit is declared. */
 private val OUTLIER_THRESHOLD = BigDecimal("0.15")
 private const val RATIO_SCALE = 6
 
@@ -118,30 +167,94 @@ fun ScenarioResult.toDto() = ScenarioDto(
     aggregateLoss = aggregateLoss,
 )
 
+private data class Tier1(val value: BigDecimal?, val source: String?, val gap: String?)
+
+private fun IrrbbAnalysis.tier1(currency: String?): Tier1 {
+    if (tier1Capital != null) return Tier1(tier1Capital, "caller", null)
+    return when (val own = ownFundsTier1) {
+        null -> Tier1(null, null, "Tier 1 not supplied and not derived from own funds.")
+        is MetricInput.Gap -> Tier1(null, null, "Tier 1 from own funds unavailable: ${own.reason}")
+        is MetricInput.Measured -> if (currency == ReportingCurrencyTotal.REPORTING_CURRENCY) {
+            Tier1(own.value, "own-funds", null)
+        } else {
+            Tier1(
+                null,
+                null,
+                "Tier 1 from own funds is in ${ReportingCurrencyTotal.REPORTING_CURRENCY} but the EVE aggregate " +
+                    "is in ${currency ?: "no single currency"}; supply tier1Capital in that currency.",
+            )
+        }
+    }
+}
+
 private fun IrrbbAnalysis.outlier(): OutlierTestDto {
-    val currency = result.aggregationCurrency
-    val worst = result.worstLoss ?: BigDecimal.ZERO
-    val ratio = if (tier1Capital != null && currency != null) {
-        worst.divide(tier1Capital, BigMath.MC).setScale(RATIO_SCALE, RoundingMode.HALF_EVEN)
+    // The single-currency aggregate when the book has one, else the CZK reporting aggregate.
+    val stated = reporting?.takeIf { it.notStated == null }
+    val currency = result.aggregationCurrency ?: stated?.currency
+    val worst = (if (result.aggregationCurrency != null) result.worstLoss else stated?.worstLoss) ?: BigDecimal.ZERO
+    val tier1 = tier1(currency)
+    val ratio = if (tier1.value != null && currency != null) {
+        worst.divide(tier1.value, BigMath.MC).setScale(RATIO_SCALE, RoundingMode.HALF_EVEN)
     } else {
         null
     }
-    val note = when {
-        tier1Capital == null ->
-            "Tier 1 not supplied: the ΔEVE / Tier 1 ratio is not computed (never from a guessed figure)."
-        currency == null -> "Tier 1 supplied, but no single-currency aggregate exists: " + Irrbb.AGGREGATION_NOTE
-        else -> "Worst aggregate EVE loss / Tier 1 (in $currency) against the 15 % supervisory outlier threshold."
-    }
+    val threshold = outlierLimit?.limit ?: OUTLIER_THRESHOLD
     return OutlierTestDto(
         tier1Supplied = tier1Capital != null,
-        tier1Capital = tier1Capital,
+        tier1Capital = tier1.value,
+        tier1Source = tier1.source,
+        tier1Gap = tier1.gap,
         currency = currency,
-        threshold = OUTLIER_THRESHOLD,
+        threshold = threshold,
+        earlyWarning = outlierLimit?.earlyWarning,
+        limitId = outlierLimit?.id,
+        status = outlierStatus(ratio, threshold).name,
         ratio = ratio,
-        breached = ratio?.let { it > OUTLIER_THRESHOLD },
-        note = note,
+        breached = ratio?.let { it > threshold },
+        note = outlierNote(currency, tier1, threshold),
     )
 }
+
+private fun IrrbbAnalysis.outlierStatus(ratio: BigDecimal?, threshold: BigDecimal): LimitStatus = when {
+    ratio == null -> LimitStatus.NOT_EVALUABLE
+    outlierLimit != null -> RiskLimits.status(outlierLimit, ratio)
+    ratio > threshold -> LimitStatus.BREACH
+    else -> LimitStatus.OK
+}
+
+private fun IrrbbAnalysis.outlierNote(currency: String?, tier1: Tier1, threshold: BigDecimal): String {
+    val pct = threshold.movePointRight(2).stripTrailingZeros().toPlainString()
+    return when {
+        currency == null ->
+            "No aggregate loss could be stated: " + (reporting?.notStated ?: Irrbb.AGGREGATION_NOTE)
+        tier1.value == null -> "The ΔEVE / Tier 1 ratio is not computed (never from a guessed figure): ${tier1.gap}"
+        result.aggregationCurrency == null ->
+            "Worst EVE loss summed across currencies in $currency at the ČNB fixing in effect on the as-of date, " +
+                "/ Tier 1 (in $currency), against the $pct % supervisory outlier threshold."
+        else -> "Worst aggregate EVE loss / Tier 1 (in $currency) against the $pct % supervisory outlier threshold."
+    }
+}
+
+private fun IrrbbDataGap.toDto() = IrrbbDataGapDto(
+    code = code.name,
+    currency = currency,
+    curveIndex = curveIndex?.name,
+    lastPillarDate = lastPillarDate?.toString(),
+    lastFlowDate = lastFlowDate?.toString(),
+    flowsBeyond = flowsBeyond,
+    basePvBeyond = basePvBeyond,
+    count = count,
+    detail = detail,
+)
+
+private fun IrrbbReportingAggregate.toDto() = ReportingAggregateDto(
+    currency = currency,
+    scenarios = scenarios.map { ReportingScenarioLossDto(it.scenario.wire, it.loss) },
+    worstScenario = worstScenario?.wire,
+    worstLoss = worstLoss,
+    fxRates = fxRates.map { FxRateDto(it.currency, it.rate, it.fixingDate.toString(), it.source) },
+    notStated = notStated,
+)
 
 fun IrrbbAnalysis.toResponse() = IrrbbResponse(
     runId = run.id,
@@ -159,8 +272,10 @@ fun IrrbbAnalysis.toResponse() = IrrbbResponse(
         byCurrency = result.worstByCurrency.mapValues { it.value.wire },
     ),
     outlierTest = outlier(),
+    reportingAggregate = reporting?.toDto(),
     shockNotConfigured = result.shockNotConfigured,
     unpriced = result.unpriced,
+    dataGaps = result.dataGaps.map { it.toDto() },
     assumptions = IrrbbAssumptionsDto(
         model = model.toDto(),
         shockSizes = parameters.shockSizes.toSortedMap().map { (c, s) ->

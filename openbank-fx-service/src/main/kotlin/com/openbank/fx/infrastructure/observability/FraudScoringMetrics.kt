@@ -29,7 +29,8 @@ import java.util.concurrent.atomic.AtomicLong
  *    now" question. `1` = the most recent attempt fell back to a synthetic verdict, `0` = the most
  *    recent attempt was a real answer from fraud-service, and [NEVER_ATTEMPTED] (`-1`) = this pod
  *    has not scored anything since it started.
- *  - `openbank_fraud_scoring_outcomes_total` with `result="real"` / `result="synthetic"` —
+ *  - `openbank_fraud_scoring_outcomes_total` with `result="real"` / `result="synthetic"` /
+ *    `result="unrecognised"` —
  *    **counter**, for rate and for post-hoc "how much of the day was synthetic".
  *
  * ### Why a gauge, and why -1 is a distinct value
@@ -61,6 +62,7 @@ class FraudScoringMetrics {
     private val degraded = AtomicLong(NEVER_ATTEMPTED)
     private var realOutcomes: Counter? = null
     private var syntheticOutcomes: Counter? = null
+    private var unrecognisedOutcomes: Counter? = null
 
     @PostConstruct
     fun register() {
@@ -84,6 +86,7 @@ class FraudScoringMetrics {
             .register(registry)
         realOutcomes = counter(registry, RESULT_REAL)
         syntheticOutcomes = counter(registry, RESULT_SYNTHETIC)
+        unrecognisedOutcomes = counter(registry, RESULT_UNRECOGNISED)
     }
 
     private fun counter(registry: MeterRegistry, result: String): Counter = Counter.builder(OUTCOMES_METRIC)
@@ -105,6 +108,16 @@ class FraudScoringMetrics {
         degraded.set(1)
     }
 
+    /**
+     * fraud-service answered, but with a verdict this rail could not read (#4403). Counted apart
+     * from [recordReal] so an unreadable answer is never tallied as a scored payment; the gauge
+     * goes to `0` because the scorer was reachable — this is a contract drift, not an outage.
+     */
+    fun recordUnrecognised() {
+        unrecognisedOutcomes?.increment()
+        degraded.set(0)
+    }
+
     /** Current gauge value; for tests and for callers that want to log the state. */
     fun degradedValue(): Long = degraded.get()
 
@@ -113,6 +126,7 @@ class FraudScoringMetrics {
         const val OUTCOMES_METRIC = "openbank.fraud.scoring.outcomes"
         const val RESULT_REAL = "real"
         const val RESULT_SYNTHETIC = "synthetic"
+        const val RESULT_UNRECOGNISED = "unrecognised"
         const val SERVICE = "fx"
         const val RAIL = "FX"
 

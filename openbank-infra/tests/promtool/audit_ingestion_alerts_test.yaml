@@ -1,0 +1,66 @@
+evaluation_interval: 1m
+rule_files:
+- prometheus-rules-audit-ingestion.yaml
+tests:
+- name: first observed sample already contains a failure
+  interval: 1m
+  input_series:
+  - series: openbank_audit_ingest_failures_total{namespace="audit",pod="audit-test"}
+    values: 1+0x25
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: AuditIngestionFailed
+    exp_alerts:
+    - exp_labels:
+        namespace: audit
+        pod: audit-test
+        severity: critical
+        service: audit-service
+      exp_annotations:
+        subject_period: continuous
+        summary: Audit ingestion failed
+        description: Audit ingestion failed within the observation window. Inspect
+          the consumer failure and its configured dead-letter handling; reconcile
+          and replay the original event before its retention expires. A healthy hash
+          chain does not prove complete ingestion.
+        runbook_url: docs/runbooks/audit-ingestion-recovery.md
+  - eval_time: 20m
+    alertname: AuditIngestionFailed
+    exp_alerts: []
+- name: healthy startup and idle pod remain quiet
+  interval: 1m
+  input_series:
+  - series: openbank_audit_ingest_failures_total{namespace="audit",pod="audit-test"}
+    values: 0+0x25
+  alert_rule_test:
+  - eval_time: 1m
+    alertname: AuditIngestionFailed
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: AuditIngestionFailed
+    exp_alerts: []
+- name: new failure on a warm pod is observed then ages out
+  interval: 1m
+  input_series:
+  - series: openbank_audit_ingest_failures_total{namespace="audit",pod="audit-test"}
+    values: 0+0x20 1+0x30
+  alert_rule_test:
+  - eval_time: 25m
+    alertname: AuditIngestionFailed
+    exp_alerts:
+    - exp_labels:
+        namespace: audit
+        pod: audit-test
+        severity: critical
+        service: audit-service
+      exp_annotations:
+        subject_period: continuous
+        summary: Audit ingestion failed
+        description: Audit ingestion failed within the observation window. Inspect
+          the consumer failure and its configured dead-letter handling; reconcile
+          and replay the original event before its retention expires. A healthy hash
+          chain does not prove complete ingestion.
+        runbook_url: docs/runbooks/audit-ingestion-recovery.md
+  - eval_time: 45m
+    alertname: AuditIngestionFailed
+    exp_alerts: []

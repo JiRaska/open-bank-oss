@@ -51,7 +51,7 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             idempotencyKey = idempotencyKey,
             type = "DEBIT",
             sourceAccountId = payment.debtorAccountId,
-            amount = payment.amount,
+            amount = payment.amount.amount,
             currencyCode = payment.currency,
             description = "SCT Inst settlement ${payment.endToEndId}",
             valueDate = LocalDate.now(clock).format(DateTimeFormatter.ISO_LOCAL_DATE),

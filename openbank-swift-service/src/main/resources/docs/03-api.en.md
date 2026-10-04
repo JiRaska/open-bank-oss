@@ -50,9 +50,30 @@ Responses:
 | Code | Meaning |
 |---|---|
 | `201` | Accepted and queued; returns the `SwiftMessage` (status `VALIDATED`) |
-| `400` | Invalid request body (`ErrorResponse`) |
-| `409` | Duplicate idempotency key with conflicting payload (`ErrorResponse`) |
-| `422` | BIC validation failed or business-rule violation (`ValidationError`) |
+| `400` | Invalid request body; for amount/currency see [Amount and currency](#amount-and-currency) |
+| `409` | Duplicate idempotency key with conflicting payload (`ProblemDetail`) |
+| `422` | BIC validation failed or business-rule violation (`ProblemDetail`) |
+
+## Amount and currency
+
+`amountMinorUnits` + `currency` are built into a kernel `Money` (`Money.parseInbound`, #11604) in
+`SwiftResource` **before** the idempotency lookup. SWIFT is cross-border, so there is no currency
+allow-list: any ISO 4217 currency with a minor unit is accepted, and `amountMinorUnits` is read in
+**that currency's** minor unit — JPY has 0 decimals (`1000` = 1000 yen), EUR 2 (`150000` = 1500.00),
+KWD/BHD 3 (`1500` = 1.500). The same `Money` drives the pacs.008 `IntrBkSttlmAmt`, the
+transaction-service settlement amount, the `swift.message.status-changed` event `amount` and the
+`/messages` list `amount`; before #11604 all four shifted every currency by a fixed two places.
+
+| Input | Answer |
+|---|---|
+| `amountMinorUnits` not a whole number (`150.5`) | `400` `AMOUNT_SCALE_EXCEEDED`, field `amountMinorUnits` |
+| `currency` not ISO 4217 with a minor unit (`XYZ`, `EURO`, `XAU`, empty) | `400` `CURRENCY_UNSUPPORTED`, field `currency` |
+| `amountMinorUnits` beyond a signed 64-bit integer | `400` `VALIDATION_ERROR`, field `amountMinorUnits` |
+| lower-case currency (`eur`) | accepted, stored as `EUR` |
+
+The refusal is libs-runtime's problem document (`type`, `title`, `status`, `detail`, `code`,
+`violations[]`); the rejected value is never echoed. Nothing is stored or published and the
+`idempotencyKey` is not consumed — a corrected retry under the same key creates the message.
 
 ## Idempotency
 
@@ -73,15 +94,15 @@ Both return the updated `SwiftMessage`; `404` if the id is unknown; `409` if the
 
 ## Error model
 
-```json
-{ "error": "string", "message": "string", "traceId": "string" }
-```
-
-Validation errors use `ValidationError`:
+Every error response is a `ProblemDetail` — the body libs-runtime renders. Five members are always present:
 
 ```json
-{ "error": "Validation failed", "violations": [ { "field": "senderBic", "message": "..." } ] }
+{ "traceId": "…", "status": 404, "code": "NOT_FOUND", "message": "HTTP 404 Not Found", "timestamp": "2026-10-04T10:00:09Z" }
 ```
+
+A typed refusal (ADR-0326, e.g. the amount/currency codes above) adds the RFC 9457 members `type`, `title`, `detail`, `instance`, plus `correlationId`, `retryable`, `violations[]` (`field`, `message`, `code`) and `details[]`. Branch on `code`, never on the text. The rejected value is never echoed. A 403 from the role check has an empty body; only an OPA policy deny carries one.
+
+There is no `error` member: earlier revisions of the spec documented `ErrorResponse { error, message }` and `ValidationError`, which the service never sent (#11972). `SwiftErrorBodySpecConformanceIT` validates real responses against the published schema.
 
 ## Versioning
 

@@ -1013,27 +1013,33 @@ def orphan_runbooks(existing: set[str], population: set[str]) -> list[str]:
 
 def main():
     if "--self-test" in sys.argv:
-        sys.exit(self_test())
+        # Every fixture tree is fully written before it is first queried, so a snapshot is safe
+        # here too — and the self-test runs on every push to main, inside the gate's budget.
+        with gitops_facts.frozen_tree():
+            rc = self_test()
+        sys.exit(rc)
 
     ap = argparse.ArgumentParser()
     ap.add_argument("services", nargs="*")
     ap.add_argument("--force", action="store_true", help="overwrite existing runbooks")
     args = ap.parse_args()
     RUNBOOKS.mkdir(parents=True, exist_ok=True)
-    targets = args.services or all_services()
     created, skipped = 0, 0
-    for short in targets:
-        if not gitops_facts.module_dir(short, REPO).is_dir():
-            print(f"skip: no module directory for {short!r}", file=sys.stderr)
-            continue
-        out = RUNBOOKS / f"svc-{short}.md"
-        if out.exists() and not args.force:
-            skipped += 1
-            continue
-        if write_runbook(out, render(short)):
-            created += 1
-        else:
-            skipped += 1
+    # Nothing below writes under the gitops tree, so it is read once rather than ~600 times.
+    with gitops_facts.frozen_tree():
+        targets = args.services or all_services()
+        for short in targets:
+            if not gitops_facts.module_dir(short, REPO).is_dir():
+                print(f"skip: no module directory for {short!r}", file=sys.stderr)
+                continue
+            out = RUNBOOKS / f"svc-{short}.md"
+            if out.exists() and not args.force:
+                skipped += 1
+                continue
+            if write_runbook(out, render(short)):
+                created += 1
+            else:
+                skipped += 1
     print(f"runbooks: {created} written, {skipped} kept (existing)")
     # Only a FULL run knows the whole population; a run naming services cannot judge the rest.
     if not args.services:

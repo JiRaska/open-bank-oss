@@ -64,6 +64,8 @@ data class IrrbbResult(
     val worstLoss: BigDecimal?,
     /** Worst scenario per evaluated currency, by that currency's own loss; absent when it loses under none. */
     val worstByCurrency: Map<String, ShockScenario>,
+    /** What the figures do not capture ([IrrbbDataGaps]); never empty for a book with loans or deposits. */
+    val dataGaps: List<IrrbbDataGap> = emptyList(),
 )
 
 /**
@@ -157,6 +159,7 @@ object Irrbb {
             worstScenario = worst?.scenario,
             worstLoss = worst?.aggregateLoss,
             worstByCurrency = worstByCurrency,
+            dataGaps = IrrbbDataGaps.of(positions, instruments, curves, baseFlows, evaluated),
         )
     }
 

@@ -12,6 +12,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxStatus
 import io.mockk.every
@@ -53,8 +54,7 @@ class KafkaDomesticPaymentEventPublisherTest {
         creditorAccountNumber = "2000",
         creditorBankCode = "0100",
         creditorName = "Payee",
-        amount = BigDecimal("12.34"),
-        currency = "CZK",
+        amount = Money.of(BigDecimal("12.34"), "CZK"),
         variableSymbol = null,
         specificSymbol = null,
         constantSymbol = null,

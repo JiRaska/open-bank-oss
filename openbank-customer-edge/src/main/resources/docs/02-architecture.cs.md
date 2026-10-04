@@ -113,6 +113,7 @@ Zákaznický token (z customers realmu) se **nikdy nepřeposílá** — upstream
 - **Cache M2M tokenu** — `client_credentials` token cachován do 60 s před expirací; refresh je `@Synchronized`.
 - **Varianty operací** — `get` (JSON), `getRaw` (zachová upstream Content-Type pro camt.053 XML / MT940 / PDF, čte se jako `ByteArray`, aby nedošlo k poškození kódováním), `post` (idempotency-aware), `postAnonymous` (onboarding, bez party hlavičky).
 - **Režim selhání** — jakákoli výjimka transportu degraduje na JSON `502 {"error":"upstream unavailable"}`.
+- **Syntetická značka (ADR-0252)** — každý upstream request staví `upstreamRequest()`, který přidá `x-openbank-synthetic: true`, když vstupní filtr edge request přijal jako syntetický (MDC nebo OTel baggage, obojí nastavené jen pro principála z `openbank.synthetic.trusted-principals`). Hlavičku od klienta nikdy nekopíruje. Jedinou výjimkou je request na token. `UpstreamClientSyntheticTaintTest` hlídá chování i jediný vstupní bod.
 
 ## Model vlastnictví / IDOR
 
@@ -122,6 +123,7 @@ Některé upstreamy omezují jen podle `accountId` (party hlavička je tam jen p
 - `getProfile`, `listNotifications`, `listDevices` — implicitně omezeno na party (upstream dotaz používá party z JWT, nikdy klientské id).
 - `enrollDevice` — path param `partyId` se musí rovnat party z JWT.
 - `registerDevice`, `initiateChallenge`, `openAccount` — `partyId` se injektuje z JWT (přes Jackson, přepíše jakoukoli klientskou hodnotu), takže volající jej nemůže dodat.
+- `CustomerHoldingsResource` (`/holdings/{holdingId}`) — wealth-service pracuje jen s id aktiva, takže edge aktivum načte a před každým čtením, přeceněním nebo stažením ověří `ownerPartyId == party volajícího`. Nevlastněné, neznámé i chybně zapsané id vrací shodně **404**, takže odpověď nic neprozradí; upstream dostane jen kanonické UUID. Zdroj ocenění nastavuje edge (`CUSTOMER_DECLARED`), nikdy ho nečte z těla.
 - Debtor id platby se parsuje Jacksonem (last-wins, shodně s upstreamem), aby se zavřel obejití IDOR přes dvojitý klíč; `cursor` je URL-enkódovaný, aby nemohl injektovat další query parametry.
 
 **Známé omezení:** `getChallenge` není na edge kontrolován na vlastnictví (neprůhledné id challenge, žádná citlivá data kromě status/method/expires) — sledováno v threat modelu. Plné vynucení přes OPA sidecar je follow-up fleet sweepu ADR-0034 (ADR-0065 §3).

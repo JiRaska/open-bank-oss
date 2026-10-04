@@ -503,7 +503,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
       # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
@@ -905,7 +905,10 @@ jobs:
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
-        timeout-minutes: 15
+        # A full-fleet docs rebuild attests every pushed image in sequence. The
+        # previous 15-minute cap stopped after successful image pushes, leaving
+        # the remaining images unattested and preventing the GitOps rollout.
+        timeout-minutes: 30
         run: |
           set -uo pipefail
           SERVICES='${{ steps.scan.outputs.deployable }}'
@@ -1223,6 +1226,7 @@ jobs:
           # A held image remains at its old pin. The scheduled reconcile derives
           # lag from that pin, so it re-offers the service after the hold is removed.
           UPDATED=()
+          CARRIED_PRS=()
 
           # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
           # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
@@ -1291,9 +1295,16 @@ jobs:
                 | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES $HELD_IMAGES")" \
                 || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
               [ -z "$carried" ] && continue
+              CARRIED_PRS+=("#${n}")
               echo "  carried from deferred PR #${n}:"; echo "$carried"
               while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
             done
+          fi
+
+          if [ "${#CARRIED_PRS[@]}" -gt 0 ]; then
+            (IFS=,; echo "carried_prs=${CARRIED_PRS[*]}") >> "$GITHUB_OUTPUT"
+          else
+            echo "carried_prs=none" >> "$GITHUB_OUTPUT"
           fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
@@ -1382,10 +1393,15 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
+            **Built and scanned in this run:** ${{ needs.build-push.outputs.deployable_services }}
 
-            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
-            triggering commit). ArgoCD syncs automatically after merge.
+            **Contract-approved in this run:** ${{ needs.can-i-deploy.outputs.deployable || 'not evaluated' }}
+
+            **Pending image pins carried from earlier PRs:** ${{ steps.rewrite.outputs.carried_prs }}
+
+            Images built in this run use the short SHA of the triggering commit. Carried pins
+            retain their own build tags. The Files changed tab is the proposed deployment set;
+            ArgoCD syncs after merge.
 
             ## Linked issues
 

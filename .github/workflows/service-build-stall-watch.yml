@@ -28,9 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write
-      issues: write
-      pull-requests: read
+      actions: write        # POST actions/runs/{id}/cancel and /force-cancel on a stalled run
+      issues: write         # gh issue create for each cancellation (fleet-health)
+      pull-requests: read   # live PR state before cancelling a PR run
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

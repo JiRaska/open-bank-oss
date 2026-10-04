@@ -370,6 +370,20 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Require service documentation with production changes
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! git diff --quiet "$BASE_SHA...$HEAD_SHA" -- \
+            .github/scripts/check-service-docs-freshness.py \
+            .github/scripts/check-service-docs-freshness_test.py \
+            .github/workflows/services-ci.yml; then
+            python3 .github/scripts/check-service-docs-freshness_test.py
+          fi
+          python3 .github/scripts/check-service-docs-freshness.py --base "$BASE_SHA" --head "$HEAD_SHA"
+
   publication-ready:
     name: Await exact-SHA Admin UI Pact publication
     # Only a hosted runner waits. The broker is private, so the published job's

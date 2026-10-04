@@ -303,7 +303,6 @@ class DomesticPaymentService(
             creditorBankCode = command.creditorBankCode,
             creditorName = command.creditorName,
             amount = command.amount,
-            currency = command.currency,
             variableSymbol = command.variableSymbol,
             specificSymbol = command.specificSymbol,
             constantSymbol = command.constantSymbol,

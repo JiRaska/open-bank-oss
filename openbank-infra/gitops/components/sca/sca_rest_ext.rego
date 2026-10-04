@@ -11,6 +11,7 @@
 #   scaChallenge.consume  — spend an approved challenge (ADR-0021 settlement gate)
 #   device.enroll         — enrol a device credential (#partyId)
 #   device.list           — list a party's device credentials (#partyId)
+#   device.revoke         — revoke a credential and cancel its unconsumed approvals (#partyId)
 #
 # Base rest.rego already grants: operator-read-any / compliance-read-any for
 # *.read + *.list, party-self-service for device.list when the JWT sub equals
@@ -20,6 +21,15 @@
 package openbank.rest
 
 import rego.v1
+
+# An owner can request revocation of their own credential. The ordinary money-path
+# four-eyes obligation still applies; this grant is not an exemption from approval.
+allowed_reasons contains "device-self-revocation" if {
+	input.principal.type == "HUMAN"
+	"ROLE_CUSTOMER" in input.principal.roles
+	input.action == "device.revoke"
+	input.principal.id == input.resource.id
+}
 
 # Operators and admins may perform ANY SCA challenge lifecycle operation — the ops
 # console path (resolve a stuck challenge, service-desk credential reset per the
@@ -89,4 +99,16 @@ allowed_reasons contains "service-sca-shared-client-m2m" if {
 	input.principal.type == "HUMAN"
 	input.principal.id == "service-account-openbank-services"
 	input.action in {"scaChallenge.read", "scaChallenge.consume"}
+}
+
+# Operator-approval queue (ApprovalResource, /api/v1/sca/approvals, #10041 slice 9b): the queue
+# and each record expose the action, the party id and the maker id of every parked four-eyes SCA
+# operation. Base operator-read-any is role-only, and both realm M2M clients
+# (service-account-openbank-services, service-account-openbank-edge) are classified HUMAN with
+# ROLE_OPERATOR in at least one realm, so without this veto both could read the queue. No M2M
+# consumer exists (admin-ui forwards the operator's own token; no backend client calls it), so
+# reading and deciding are human-operator only. Identity decides, never principal.type (#266).
+prohibited if {
+	startswith(input.principal.id, "service-account-")
+	input.action in {"scaChallenge.approval.read", "scaChallenge.approval.decide"}
 }

@@ -119,6 +119,16 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
+  folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
+  a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
+  clean score at every layer that reads the outcome. `FraudVerdict.UNKNOWN` now names that case,
+  counted apart from real and synthetic outcomes (`result="unrecognised"`) with the degraded gauge
+  at 0, since the scorer was reachable. **No trust boundary, edge or privilege changed**; the
+  verdict is still shadow-only, so payment decisions do not change. The log line records the event;
+  the counter feeds `FraudScoringUnrecognisedVerdict`, which warns on an unreadable score.
+  Mitigated by `FraudScoringAdapterTest` (an unrecognised and a blank verdict are `UNKNOWN`, never
+  a clean `ALLOW`; red against the old mapper).
 - **2026-09-26** — **AuthzProducer replaced by the shared libs-runtime OPA PDP producer** (PR
   #10952). The service-local `infrastructure/authz/AuthzProducer.kt` is deleted;
   `application.yaml` now sets `openbank.authz.opa-pdp-producer.enabled: true` to opt into
@@ -580,6 +590,17 @@ not change any existing request's outcome until explicitly flipped.
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+- **2026-09-13** — **Settlement audit edge in the shared payments manifest.**
+  The settlement producer now publishes state events using its own Kafka identity and
+  topic ACL. The shared `payments-services.yaml` also holds this service's workload; a
+  parsed resource comparison confirms that only the settlement Rollout changes. This
+  service receives no new credential mount, Kafka grant, ingress or environment value.
+  The added event exposes settlement account identifiers and amounts to the audit
+  consumer, as assessed in [the settlement threat model](openbank-settlement-service.md).
+  A broker acknowledgement does not establish payment finality or audit persistence;
+  upstream payment status must continue to follow the existing settlement protocol.
+  Rollback removes the settlement relay configuration while retaining its pending outbox
+  rows for recovery; no payment-service schema rollback is required.
 - **2026-10-02** — **Settlement-amount rounding named as `RoundingPolicy.LEDGER_POSTING` (ADR-0318, #11771),
   no boundary change.** `SettlementAdapter` (the outbound settlement-booking edge) normalises the
   payment amount to the currency's minor units with `RoundingPolicy.LEDGER_POSTING.mode` instead of
@@ -588,3 +609,17 @@ not change any existing request's outcome until explicitly flipped.
   grants are unchanged. **STRIDE-T:** none new — the rounding rule is now a single named policy
   rather than a literal, so a later change to it is one reviewed edit instead of a silent drift
   between call sites. Rollback: revert the commit.
+- **2026-10-04** — **Kernel `Money` built at the create boundary (#11604).** `POST /api/v1/domestic-payments`
+  builds `Money.parseInbound(amount, currency)` and requires it to be strictly positive in the request
+  DTO, before the use case looks up or binds the `Idempotency-Key`; the command and the domain carry
+  `Money`. **STRIDE-T (closed):** on `main` before this change the service accepted, persisted,
+  announced (`domestic.payment.created`) and started a workflow for a zero or negative amount, an
+  unknown currency (`XYZ`, `XAU`) and a sub-haléř amount (`100.005 CZK`, later rounded HALF_UP by the
+  settlement edge). All are now a 400 problem (`AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` /
+  `VALIDATION_ERROR`) with no row, no outbox event and the key left free. **Unchanged:** the
+  `NUMERIC(20,6)` column (no migration — sandbox holds 43 CZK rows, all at haléř scale and positive);
+  the replay fingerprint, pinned byte-identical to the pre-Money digest; the settlement amount, which
+  is now the Money amount itself (the removed `LEDGER_POSTING` rescale was a no-op for every amount
+  Money can hold). Reads, events and the confirmation document serialise at the currency scale
+  (`100.50`, not `100.500000`), numerically equal. **Not changed here:** no CZK-only rule exists today;
+  any ISO 4217 currency with a minor unit is accepted — tracked in #12059. Rollback: revert the commit.

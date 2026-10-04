@@ -130,6 +130,17 @@ export const currencyScenarioSchema = z.object({
 export const scenarioSchema = z.object({
   scenario: z.enum(SCENARIOS), currencies: z.array(currencyScenarioSchema), aggregateLoss: nullableMoney.optional(),
 })
+export const IRRBB_GAP_CODES = [
+  'CURVE_EXTRAPOLATED_FLAT', 'PREPAYMENT_NOT_MODELLED', 'NMD_BEHAVIOUR_SIMPLIFIED', 'COMMERCIAL_MARGIN_INCLUDED', 'INSTRUMENTS_NOT_PROJECTED',
+] as const
+export const irrbbDataGapSchema = z.object({
+  // x-extensible-enum on the engine side: an unknown code still parses and is shown by its detail.
+  code: z.string(), currency: z.string().nullable().optional(), curveIndex: z.string().nullable().optional(),
+  lastPillarDate: z.string().nullable().optional(), lastFlowDate: z.string().nullable().optional(),
+  flowsBeyond: z.number().int().nullable().optional(), basePvBeyond: nullableMoney.optional(),
+  count: z.number().int().nullable().optional(), detail: z.string(),
+})
+export type IrrbbDataGap = z.infer<typeof irrbbDataGapSchema>
 export const irrbbSchema = z.object({
   runId: z.string(), asOf: z.string(), provenance, curveSetId: z.string(), curveSetProvenance: provenance, curveSetSource: z.string(),
   gaps: z.array(currencyGapSchema),
@@ -141,9 +152,25 @@ export const irrbbSchema = z.object({
   outlierTest: z.object({
     tier1Supplied: z.boolean(), tier1Capital: nullableMoney.optional(), currency: z.string().nullable().optional(),
     threshold: money, ratio: nullableMoney.optional(), breached: z.boolean().nullable().optional(), note: z.string(),
+    // risk-engine openapi 1.23.0: Tier 1 falls back to own funds; evaluated against the
+    // `irrbb-eve-outlier` limit. Optional so an older engine still parses.
+    tier1Source: z.string().nullable().optional(), tier1Gap: z.string().nullable().optional(),
+    earlyWarning: nullableMoney.optional(), limitId: z.string().nullable().optional(),
+    status: z.enum(['OK', 'EARLY_WARNING', 'BREACH', 'NOT_EVALUABLE']).optional(),
   }),
+  // risk-engine openapi 1.23.0: what the figures do not capture (never silently).
+  dataGaps: z.array(irrbbDataGapSchema).optional(),
   shockNotConfigured: z.array(z.string()),
   unpriced: z.array(z.string()),
+  // risk-engine openapi 1.22.0: a multi-currency book's d368 aggregate in CZK at ČNB fixings.
+  // Optional+nullable so an older engine (and a single-currency book) both parse.
+  reportingAggregate: z.object({
+    currency: z.string(),
+    scenarios: z.array(z.object({ scenario: z.enum(SCENARIOS), loss: money })),
+    worstScenario: z.enum(SCENARIOS).nullable().optional(), worstLoss: nullableMoney.optional(),
+    fxRates: z.array(z.object({ currency: z.string(), rate: money, fixingDate: z.string(), source: z.string() })),
+    notStated: z.string().nullable().optional(),
+  }).nullable().optional(),
   assumptions: z.object({
     model: z.object({ id: z.string(), version: z.string() }).passthrough(),
     shockSizes: z.array(z.object({ currency: z.string(), parallelBp: money, shortBp: money, longBp: money })),

@@ -990,7 +990,7 @@ def check(root: Path) -> list[str]:
         ('--active-ids', "synthetic CI does not validate every active runtime artifact"),
         ('--synthetic-summary', "synthetic workflow does not publish compatible Test Intelligence evidence"),
         ('test-intelligence-run-openbank-platform-', "synthetic run envelope is not retained in immutable history"),
-        ('grafana/k6:1.2.0@sha256:', "synthetic CI image is not pinned to the runtime k6 digest"),
+        ('grafana/k6:2.3.0@sha256:', "synthetic CI image is not pinned to the runtime k6 digest"),
     ):
         if needle not in synthetic_workflow:
             errors.append(message)
