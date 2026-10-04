@@ -14,7 +14,7 @@ vi.mock('@/components/entities/EntityChip', () => ({ EntityChip: ({ id }: { id: 
 import ApplicationFlowPage from '@/app/lending/applications/[id]/page'
 
 const APP = {
-  id: 'app-1', partyId: 'party-1', status: 'FOUR_EYES', proposedBy: 'alice@openbank.local',
+  id: 'app-1', partyId: 'party-1', status: 'FOUR_EYES', proposedBy: 'alice@example.test',
   requestedAmount: { amount: '10000.00', currency: 'EUR' },
 }
 
@@ -41,24 +41,24 @@ afterEach(() => {
 
 describe('lending application in the four-eyes state', () => {
   it('says it awaits a second person and names the proposer, with no advance action anywhere', async () => {
-    authState.user = { id: 'bob-sub', email: 'bob@openbank.local' }
+    authState.user = { id: 'bob-sub', email: 'bob@example.test' }
     await mount(APP)
     expect(await screen.findByTestId('four-eyes-waiting')).toHaveTextContent('Čeká na rozhodnutí druhé osoby (čtyři oči)')
-    expect(screen.getByTestId('four-eyes-proposer')).toHaveTextContent('alice@openbank.local')
+    expect(screen.getByTestId('four-eyes-proposer')).toHaveTextContent('alice@example.test')
     expect(screen.queryByRole('button', { name: /posun|advance/i })).toBeNull()
     expect(screen.queryByTestId('four-eyes-own')).toBeNull()
     expect(screen.getByTestId('decide-disabled')).toBeDisabled()
   })
 
   it('tells the proposer why they cannot decide their own application', async () => {
-    authState.user = { id: 'alice-sub', email: 'Alice@openbank.local' }
+    authState.user = { id: 'alice-sub', email: 'Alice@example.test' }
     await mount(APP)
     expect(await screen.findByTestId('four-eyes-own')).toHaveTextContent('nemůžete rozhodnout')
     expect(screen.getByTestId('decide-disabled')).toHaveAttribute('aria-describedby', 'four-eyes-own')
   })
 
   it('shows no four-eyes notice outside the four-eyes state', async () => {
-    authState.user = { id: 'alice-sub', email: 'alice@openbank.local' }
+    authState.user = { id: 'alice-sub', email: 'alice@example.test' }
     await mount({ ...APP, status: 'OFFERED' })
     await screen.findByTestId('decide-disabled')
     expect(screen.queryByTestId('four-eyes-waiting')).toBeNull()

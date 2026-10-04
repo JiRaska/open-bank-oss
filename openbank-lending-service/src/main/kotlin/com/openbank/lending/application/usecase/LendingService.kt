@@ -322,7 +322,13 @@ class LendingService @Inject constructor(
         refusal: OriginationRefusedException,
     ): Uni<T> = events.emit(refusalEvidence(application, attempted, actor, refusal))
         .onFailure().invoke { e ->
-            log.errorf(e, "refusal evidence NOT recorded for application %s (%s)", application.id.value, refusal.code)
+            // Persistence exceptions can include rejected payload values; keep them out of logs.
+            log.errorf(
+                "refusal evidence NOT recorded for application %s (%s), cause=%s",
+                application.id.value,
+                refusal.code,
+                e.javaClass.simpleName,
+            )
         }
         .onItemOrFailure().transformToUni { _, _ -> Uni.createFrom().failure<T>(refusal) }
 
