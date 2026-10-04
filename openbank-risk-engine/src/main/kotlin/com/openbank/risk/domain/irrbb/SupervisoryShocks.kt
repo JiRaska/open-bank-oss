@@ -28,9 +28,13 @@ enum class ShockScenario(val wire: String) {
  *
  * NOT defaulted in code for any currency: the values reach the domain from configuration so that
  * a currency the operator has not sourced has no shock at all — reported as "not configured" —
- * rather than one someone guessed. The shipped configuration carries EUR = 200 / 250 / 100
- * (d368 Table 1, EUR column). CZK is not in d368 Table 1; its calibration is set in the EU by the
- * EBA supervisory-outlier-test RTS, and the operator must take it from that text.
+ * rather than one someone guessed. The shipped configuration carries, for both CZK and EUR,
+ * parallel 200 / short 250 / long 100 bp: Commission Delegated Regulation (EU) 2024/856 (RTS on the
+ * supervisory outlier tests, CRD Art. 98(5a)), Annex Part A, which lists both currencies by name.
+ * The EUR values equal BCBS d368 Annex 2 Table 1; CZK is NOT in d368 Table 1. EBA/GL/2022/14
+ * (IRRBB guidelines) takes the six scenarios for the SOT from that RTS rather than restating sizes.
+ * A currency outside Annex Part A is calibrated per its Part B method — a POLICY CHOICE the
+ * operator configures, never a code default.
  */
 data class ShockSizes(val parallelBp: BigDecimal, val shortBp: BigDecimal, val longBp: BigDecimal) {
     init {

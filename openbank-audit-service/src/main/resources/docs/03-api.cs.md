@@ -4,6 +4,10 @@ REST povrch je definován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `i
 
 Major API verze je `1` (`openbank.api.version`), takže všechny cesty žijí pod `/api/v1` (ADR-0048 — osa API-kontraktu je nezávislá na release `version.txt`).
 
+## Autorizace
+
+Obě čtení stopy (`GET /entries/{aggregateId}`, `GET /entries/by-actor/{actorId}`) vyžadují `@RolesAllowed` AUDITOR / ADMIN / COMPLIANCE **a** OPA akci `audit.trail.inspect`; endpointy integrity a kotev používají `audit.verify`. Žádné z těchto sloves není v množině `{list, read}` základního `rest.rego`, takže jedinou povolující cestou v OPA je pravidlo `auditor-audit-oversight-read` v `audit_rest_ext.rego`, které vylučuje servisní účty Keycloaku (`service-account-*`). Strojová identita je tak odmítnuta samotným rozhodnutím politiky, nejen kontrolou rolí. Zákaznický pohled na soukromí (`/customer/{partyId}`) je samostatná akce `audit.customerRead`.
+
 ## Endpointy
 
 ### `GET /api/v1/audit/evidence/{aggregateId}`
