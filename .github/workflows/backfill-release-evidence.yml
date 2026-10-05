@@ -39,14 +39,40 @@ jobs:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
     steps:
+      - name: Require main workflow ref
+        run: |
+          [ "${GITHUB_REF}" = refs/heads/main ] || {
+            echo "::error::run release backfill from main so SLSA provenance has the reviewed workflow identity"
+            exit 1
+          }
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.tag }}   # build the SBOM from the released source
+      - name: Inspect existing release evidence
+        id: existing
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          python3 - "$TAG" >> "$GITHUB_OUTPUT" <<'PY'
+          import json, sys
+          tag = sys.argv[1]
+          sbom = f"{tag}.cdx.json"
+          required = set()
+          for doc in (sbom, f"{tag}.slsa.json", f"{tag}.vex.json", f"{tag}.evidence.json"):
+              required.update((doc, f"{doc}.sig"))
+          assets = json.load(open("release.json")).get("assets", [])
+          present = {a["name"] for a in assets if a.get("size", 0) > 0}
+          print(f"sbom_present={str(sbom in present).lower()}")
+          print(f"bundle_complete={str(required <= present).lower()}")
+          PY
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        if: steps.existing.outputs.sbom_present != 'true'
         with:
           distribution: temurin
           java-version: "25"
       - name: Validate Gradle wrapper
+        if: steps.existing.outputs.sbom_present != 'true'
         uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -74,6 +100,7 @@ jobs:
           echo "Backfilling $TAG → component=$comp version=$ver path=$path"
 
       - name: Build SBOM
+        if: steps.existing.outputs.sbom_present != 'true'
         run: ./gradlew :${{ steps.map.outputs.path }}:cyclonedxBom --console=plain --no-daemon || true
 
       # trivy is NOT preinstalled on hosted runners — without it the non-Gradle SBOM
@@ -81,6 +108,7 @@ jobs:
       # backfill hard-fails for any module without the cyclonedx plugin (admin-ui).
       # Same maintained, commit-pinned setup action security.yml / auto-deploy.yml use.
       - name: Install Trivy (SBOM fallback for non-Gradle modules)
+        if: steps.existing.outputs.bundle_complete != 'true'
         uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
         with:
           version: v0.72.0
@@ -178,24 +206,29 @@ jobs:
           PY
           fi
 
-          # Always source the current evidence builder and its support-period helper.
-          # The checked-out release tag may predate either file.
-          git fetch --depth=1 origin main
-          mkdir -p "${RUNNER_TEMP}/release-evidence"
-          for script in build-release-evidence.sh release_support_period.py; do
-            git show "FETCH_HEAD:.github/scripts/$script" > "${RUNNER_TEMP}/release-evidence/$script"
-            [ -s "${RUNNER_TEMP}/release-evidence/$script" ]
-          done
-          GITHUB_SHA="$(git rev-parse HEAD)" \
-            bash "${RUNNER_TEMP}/release-evidence/build-release-evidence.sh" \
-              "$COMP" "$VER" "$TAG" "$MOD" "$sbom_out"
-          for doc in "${TAG}.slsa.json" "${TAG}.vex.json"; do
-            [ ! -f "existing/$doc" ] || cp "existing/$doc" "$doc"
-          done
-          # A newly generated manifest must describe the immutable published
-          # documents, even when only one member of the bundle was missing.
-          if [ ! -f "existing/${TAG}.evidence.json" ]; then
-            python3 - "$TAG" <<'PY'
+          if [ "${{ steps.existing.outputs.bundle_complete }}" = true ]; then
+            # The common 8/9 case only needs the official provenance job. No
+            # release-time scan or document regeneration is needed here.
+            for f in "${assets[@]}"; do cp "existing/$f" "$f"; done
+          else
+            # Source the current evidence builder and support-period helper. The
+            # checked-out release tag may predate either file.
+            git fetch --depth=1 origin main
+            mkdir -p "${RUNNER_TEMP}/release-evidence"
+            for script in build-release-evidence.sh release_support_period.py; do
+              git show "FETCH_HEAD:.github/scripts/$script" > "${RUNNER_TEMP}/release-evidence/$script"
+              [ -s "${RUNNER_TEMP}/release-evidence/$script" ]
+            done
+            GITHUB_SHA="$(git rev-parse HEAD)" \
+              bash "${RUNNER_TEMP}/release-evidence/build-release-evidence.sh" \
+                "$COMP" "$VER" "$TAG" "$MOD" "$sbom_out"
+            for doc in "${TAG}.slsa.json" "${TAG}.vex.json"; do
+              [ ! -f "existing/$doc" ] || cp "existing/$doc" "$doc"
+            done
+            # A newly generated manifest must describe the immutable published
+            # documents, even when only one member of the bundle was missing.
+            if [ ! -f "existing/${TAG}.evidence.json" ]; then
+              python3 - "$TAG" <<'PY'
           import hashlib, json, sys
           tag = sys.argv[1]
           path = f"{tag}.evidence.json"
@@ -208,8 +241,9 @@ jobs:
               json.dump(manifest, out, indent=2)
               out.write("\n")
           PY
-          else
-            cp "existing/${TAG}.evidence.json" "${TAG}.evidence.json"
+            else
+              cp "existing/${TAG}.evidence.json" "${TAG}.evidence.json"
+            fi
           fi
           for doc in "$sbom_out" "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
             [ -s "$doc" ] || { echo "::error::missing evidence document $doc"; exit 1; }
@@ -285,6 +319,7 @@ jobs:
     needs: [backfill, provenance]
     if: always() && needs.backfill.result == 'success' && (needs.provenance.result == 'success' || needs.provenance.result == 'skipped')
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
     env:
@@ -311,3 +346,27 @@ jobs:
               sys.exit("missing, empty or duplicate release evidence: " + ", ".join(invalid))
           print(f"verified all {len(expected)} release assets for {tag}")
           PY
+      - name: Verify signed SLSA provenance against published SBOM
+        run: |
+          set -euo pipefail
+          sbom="${TAG}.cdx.json"
+          provenance="${sbom}.intoto.jsonl"
+          for f in "$sbom" "$provenance"; do
+            aid="$(python3 - "$f" <<'PY'
+          import json, sys
+          assets = [a for a in json.load(open("release.json")).get("assets", [])
+                    if a.get("name") == sys.argv[1] and a.get("size", 0) > 0]
+          print(assets[0]["id"] if len(assets) == 1 else "")
+          PY
+            )"
+            [ -n "$aid" ] || { echo "::error::release missing $f"; exit 1; }
+            curl -fLsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+              -o "$f" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
+          done
+          verifier="${RUNNER_TEMP}/slsa-verifier"
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+            -o "$verifier" "https://github.com/slsa-framework/slsa-verifier/releases/download/v2.7.1/slsa-verifier-linux-amd64"
+          echo "946dbec729094195e88ef78e1734324a27869f03e2c6bd2f61cbc06bd5350339  $verifier" | sha256sum -c -
+          chmod +x "$verifier"
+          "$verifier" verify-artifact "$sbom" --provenance-path "$provenance" \
+            --source-uri "github.com/${GITHUB_REPOSITORY}" --source-branch main
