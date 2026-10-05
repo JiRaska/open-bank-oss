@@ -553,6 +553,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      actions: read
     steps:
       - name: Verify no service failed
         run: |
@@ -574,6 +576,44 @@ jobs:
             echo "verification-metadata has no successful verdict for changed build files (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
+      # `needs.build.result` can report success when a reusable matrix child was cancelled
+      # before receiving a runner (run 37347641780: Treasury cancelled, all-green passed).
+      # Audit every selected build in this exact attempt instead of trusting that summary.
+      - name: Require every selected service build to pass
+        if: needs.changes.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICES_JSON: ${{ needs.changes.outputs.services }}
+          JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          services = json.loads(os.environ["SERVICES_JSON"])
+          if not isinstance(services, list) or not services or len(services) != len(set(services)):
+              raise SystemExit("Invalid selected-service matrix")
+          expected = {f"build ({service}) / {service} (build)" for service in services}
+          observed = {}
+          for line in Path(os.environ["JOB_FILE"]).read_text().splitlines():
+              job = json.loads(line)
+              name = job["name"]
+              if name.startswith("build (") and name.endswith(" (build)"):
+                  observed.setdefault(name, []).append(job["conclusion"])
+          if set(observed) != expected:
+              missing = sorted(expected - set(observed))
+              extra = sorted(set(observed) - expected)
+              raise SystemExit(f"Service build roster mismatch: missing={missing}, extra={extra}")
+          bad = {name: verdicts for name, verdicts in observed.items() if verdicts != ["success"]}
+          if bad:
+              raise SystemExit(f"Service builds without one successful verdict: {bad}")
+          print(f"Verified {len(expected)} selected service builds in this workflow attempt")
+          PY
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)
