@@ -64,21 +64,10 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 
 `lending_outbox` maže doručené řádky jako každý jiný outbox (ADR-0329), ale přepínač je tu **vypnutý** (`LENDING_OUTBOX_RETENTION_ENABLED`, výchozí `false`), dokud jednou neprojde tato kontrola shody. audit-service odebírá `openbank.lending.events` od 2026-07-31; události starší než retence topicu v tu chvíli se do řetězce nemusely nikdy dostat a jejich smazání z outboxu by je ztratilo.
 
-1. Přesná shoda podle id události (audit použije `eventId` producenta jako `entry_id`, pokud ho payload nese). Vyexportujte id z lendingu a dohledejte je v auditu:
-   ```sql
-   -- DB lendingu
-   SELECT event_id FROM lending_outbox WHERE status = 'SENT';
-   -- DB auditu, s těmito id v dočasné tabulce `lending_ids(event_id uuid)`
-   SELECT l.event_id FROM lending_ids l LEFT JOIN audit_entries a ON a.entry_id = l.event_id WHERE a.entry_id IS NULL;
-   ```
-2. Pojistka pro payloady bez `eventId` (audit pak záznam klíčuje podle adresy v Kafce): počty na žádost nesmí být v auditu nižší.
-   ```sql
-   -- DB lendingu
-   SELECT aggregate_id, count(*) FROM lending_outbox WHERE status = 'SENT' GROUP BY 1;
-   -- DB auditu
-   SELECT aggregate_id, count(*) FROM audit_entries WHERE source_service LIKE '%lending%' GROUP BY 1;
-   ```
-3. Žádné chybějící id a žádná žádost s menším počtem v auditu ⇒ nastavte `LENDING_OUTBOX_RETENTION_ENABLED=true`. Cokoli chybí ⇒ **nezapínejte**; důkazy těch úvěrů existují jen v outboxu a nejdřív je třeba je přehrát do řetězce.
+1. Použijte stabilní snímek obou úložišť pouze pro čtení a sečtěte SENT řádky podle typu události. Payloady ani identifikátory neexportujte do logů nebo verzovaných souborů. `lending.allowance.posting` posuzujte zvlášť: publisher odešle vnořený `eventPayload` jako `loan.provisioned`, pokud existuje; bez něj provede účetní zápis, ale žádnou událost do Kafky nepošle. Tyto příkazy odsouhlaste zvlášť s trvalými důkazy v ledgeru.
+2. Pro řádky publikované do Kafky porovnejte **multimnožinu** dvojic `(publikovaný typ události, SHA-256 přesných bytů publikovaného payloadu)` s typem události a uloženým payloadem v auditu, včetně násobnosti duplicit. Nespárované nebo nejednoznačné řádky dořešte jednotlivě ve schváleném prostředí; do výsledku kontroly uložte jen souhrnné počty. U každého spárovaného záznamu ověřte, že `aggregate_id` odpovídá žádosti či úvěru, který má vracet důkazní endpoint. Historické záznamy auditu mohou mít odvozené či chybějící aggregate id; shoda počtů payloadů sama nedokazuje dostupnost přes endpoint.
+3. `lending_outbox.event_id = audit_entries.entry_id` použijte jen pro payload, který skutečně obsahuje toto `eventId` producenta. Většina ručně sestavených lending payloadů ho neobsahuje: id outboxu jde v hlavičce Kafka `ce-id`, zatímco audit-service odvozuje `entry_id` z topicu, partition a offsetu. Plošné spojení podle id proto hlásí jako chybějící i správně přijaté události. Počty na žádost jsou diagnostika, nikoli náhrada shody skutečně publikovaných událostí.
+4. `LENDING_OUTBOX_RETENTION_ENABLED=false` ponechte, dokud každý SENT řádek nemá přezkoumané zařazení, důkazní endpoint nevrací požadovanou historii bez nevysvětlené mezery nebo zkrácení a starší historie před odběrem topicu není odsouhlasená. Chybějící nebo nejistá shoda znamená **zastavit**, nikoli povolení purge.
 
 ### Selhává účetní zápis
 Při `LENDING_LEDGER_BACKEND=rest` jdou zápisy přes `LedgerCallGuard` (fault tolerance) do `ledger-service POST /api/v1/journals`. Selhání se projeví v disburse/repay/writeoff. Ověř `LEDGER_SERVICE_URL`, OIDC token služby a že GL účty `LENDING_GL_*` existují v účtové osnově. Zápisy jsou idempotentní (reference = idempotency key ledgeru), takže je bezpečné je opakovat.

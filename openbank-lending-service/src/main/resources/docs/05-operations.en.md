@@ -64,21 +64,10 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 
 `lending_outbox` purges delivered rows like every other outbox (ADR-0329), but the switch is **off** here (`LENDING_OUTBOX_RETENTION_ENABLED`, default `false`) until this parity check passes once. audit-service subscribed to `openbank.lending.events` on 2026-07-31; events older than the topic's retention at that moment may never have reached the chain, and purging them from the outbox would lose them.
 
-1. Exact match by event id (audit uses the producer's `eventId` as `entry_id` when the payload carries one). Export the lending ids, then look them up in audit:
-   ```sql
-   -- lending DB
-   SELECT event_id FROM lending_outbox WHERE status = 'SENT';
-   -- audit DB, with those ids loaded into a temp table `lending_ids(event_id uuid)`
-   SELECT l.event_id FROM lending_ids l LEFT JOIN audit_entries a ON a.entry_id = l.event_id WHERE a.entry_id IS NULL;
-   ```
-2. Backstop for payloads without an `eventId` (audit then keys the entry by Kafka address): per-application counts must not be lower in audit.
-   ```sql
-   -- lending DB
-   SELECT aggregate_id, count(*) FROM lending_outbox WHERE status = 'SENT' GROUP BY 1;
-   -- audit DB
-   SELECT aggregate_id, count(*) FROM audit_entries WHERE source_service LIKE '%lending%' GROUP BY 1;
-   ```
-3. Zero missing ids and no application with fewer audit rows ⇒ set `LENDING_OUTBOX_RETENTION_ENABLED=true`. Anything missing ⇒ do **not** enable; those loans' evidence exists only in the outbox and needs a replay into the chain first.
+1. Work from a stable, read-only snapshot of both stores and inventory SENT rows by event type. Do not export payloads or identifiers into logs or tracked files. Classify `lending.allowance.posting` separately: the publisher emits its nested `eventPayload` as `loan.provisioned` when present; without one it makes a ledger posting but emits no Kafka event. Reconcile those commands against durable ledger evidence separately.
+2. For rows that publish to Kafka, compare the **multiset** of `(published event type, SHA-256 of the exact published payload bytes)` with audit entries' event type and stored payload, including duplicate counts. Reconcile unmatched or ambiguous rows individually in the approved evidence environment; record only aggregate counts in the review result. Check each matched audit row's `aggregate_id` against the application or loan whose evidence endpoint must return it. Historical audit rows can have an inferred or missing aggregate id, so matching payload counts alone does not prove that the endpoint can retrieve them.
+3. Use `lending_outbox.event_id = audit_entries.entry_id` only for a payload that actually contains that producer `eventId`. Most hand-built lending payloads omit it: the outbox id travels in the Kafka `ce-id` header, while audit-service derives `entry_id` from topic, partition and offset. A blanket id join therefore reports correctly ingested events as missing. Per-application counts are a diagnostic, not a substitute for matching the actual published events.
+4. Keep `LENDING_OUTBOX_RETENTION_ENABLED=false` until every SENT row has a reviewed disposition, the audit evidence endpoint returns the required history without an unexplained gap or truncation, and any pre-subscription history has been reconciled. A missing or uncertain match is a **stop**, not evidence that the outbox can be purged.
 
 ### Ledger posting failing
 When `LENDING_LEDGER_BACKEND=rest`, postings go through `LedgerCallGuard` (fault tolerance) to `ledger-service POST /api/v1/journals`. Failures surface in disburse/repay/writeoff. Verify `LEDGER_SERVICE_URL`, the service OIDC token, and that GL `LENDING_GL_*` accounts exist in the chart. Postings are idempotent (reference = ledger idempotency key), so safe to retry.

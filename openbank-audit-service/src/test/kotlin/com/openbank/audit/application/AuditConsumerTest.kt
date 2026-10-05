@@ -39,6 +39,31 @@ class AuditConsumerTest {
     }
 
     @Test
+    fun `lending payload without eventId is stored under the Kafka address, not the outbox id`(): Unit = runBlocking {
+        // Lending's transitionEvidence payload has no eventId. Its publisher sends the outbox id
+        // in the ce-id header, but AuditConsumer currently derives entry_id from topic/partition/offset.
+        // Historical parity must therefore not join every lending_outbox.event_id to audit_entries.entry_id.
+        val outboxId = UUID.fromString("f91608b1-a6ce-4f5a-8b8c-5794bcbe1955")
+        val applicationId = UUID.fromString("dd27aae3-bba0-414c-a748-d83ad1a60cd8")
+        val payload = """{"eventType":"credit.application.transition","aggregateType":"LOAN_APPLICATION",""" +
+            """"aggregateId":"$applicationId","sourceService":"lending"}"""
+        val address = EventAddress(topic = "openbank.lending.events", partition = 2, offset = 41)
+        val expectedEntryId = UUID.nameUUIDFromBytes("openbank.audit.kafka:openbank.lending.events:2:41".toByteArray())
+        coEvery { repo.save(any()) } returns Unit
+
+        consumer.consume(payload, address)
+
+        assertThat(expectedEntryId).isNotEqualTo(outboxId)
+        coVerify {
+            repo.save(
+                match {
+                    it.id == expectedEntryId && it.aggregateId == applicationId.toString() && it.payload == payload
+                },
+            )
+        }
+    }
+
+    @Test
     fun `consume records audit entry with inferred aggregate type and fallback actor fields`(): Unit = runBlocking {
         val transactionId = UUID.randomUUID()
         val occurredAt = Instant.parse("2026-05-27T12:00:00Z")
