@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [api-contract, psd2-api, governance]
 summary: "Adopt an API deprecation policy on top of the existing header mechanism: oasdiff decides what is breaking, external paths keep a 180-day sunset window, notification is two-channel, and removal requires evidence of zero live traffic."
-followup: "#11602 — developer-portal changelog and the zero-traffic check before removal are unbuilt"
+followup: "#11602 — portal notices and a static gate exist; outbound webhook and automated live zero-traffic removal proof remain unbuilt"
 ---
 
 # ADR-0145 — API deprecation and sunset policy
@@ -19,15 +19,14 @@ ADR-0048 D6 already ships the *mechanism*: `ApiVersionResponseFilter`
 reads `openbank.api.deprecated-paths` and `openbank.api.sunset-date` and
 emits `Deprecation` / `Sunset` / `Link: rel=successor-version` headers;
 `rules.yaml: api_deprecation.min_sunset_window_days: 180` is a real,
-already-declared constant. What is missing is not plumbing — it is the
+already-declared constant. At decision time, what was missing was the
 *policy* that decides when to populate `deprecated_paths`, who decides a
 change is breaking enough to require a new major, and how TPP/partner
 consumers (PSD2 XS2A per ADR-0090) are notified outside of an HTTP header
 they may never read (e.g. a developer-portal changelog, a webhook per
-ADR-0059). None of that is decided; `deprecated_paths` is an empty list
-today, and it is undocumented whether it stays empty because nothing has
-ever been deprecated, or because nobody has decided the process for
-deprecating something.
+ADR-0059). The list was empty then, with no published deprecation process.
+The first deployed deprecated paths are now
+`/api/v1/products` and `/api/v1/fees`; both lead to `/api/v2/offerings`.
 
 This matters more for OpenBank than for an average API: a breaking change
 to `/api/v1/*` propagates to real TPPs under a PSD2 authorization, and
@@ -76,6 +75,23 @@ We will adopt the following as policy, on top of the existing D6 mechanism:
   operational signal.
 
 ## Consequences
+
+The developer portal now carries a dated entry for each path in
+`rules.yaml: api_deprecation.deprecated_paths`. The enforced
+`api-deprecation-notices` gate rejects a missing entry, a sunset shorter
+than 180 days, and drift from the owning service's emitted `Sunset` and
+successor headers. For a newly added or changed notice in a PR, it also
+requires the sunset to remain at least 180 days after the CI run date,
+so a delayed merge cannot silently shorten the public window. The original
+2027-02-10 product-catalog sunset was extended to 2027-07-01 because the
+developer-portal notice did not exist when response headers first shipped.
+
+The [portal changelog](../../openbank-developer-portal/site/changelog/index.html)
+specifies a 30-day zero-traffic measurement using the owning service's
+`http_server_requests_seconds_count` metric, plus coverage and retention
+checks before a removal PR. This is a review procedure, not an automated
+query against live telemetry. The ADR-0059 outbound webhook notice is also
+unbuilt. Those two gaps keep `delivery-status` at `partial`.
 
 **Positive**
 - Closes the last undecided piece of the API-contract version axis

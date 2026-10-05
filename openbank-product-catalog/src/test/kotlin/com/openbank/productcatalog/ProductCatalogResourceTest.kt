@@ -44,14 +44,14 @@ class ProductCatalogResourceTest {
             statusCode(200)
             header("X-API-Version", equalTo("v1"))
             header("Deprecation", equalTo("true"))
-            header("Sunset", equalTo("Wed, 10 Feb 2027 00:00:00 GMT"))
+            header("Sunset", equalTo("Thu, 01 Jul 2027 00:00:00 GMT"))
             header("Link", equalTo("</api/v2/offerings>; rel=\"successor-version\""))
         }
         Given { this } When { get("/api/v1/fees") } Then {
             statusCode(200)
             header("X-API-Version", equalTo("v1"))
             header("Deprecation", equalTo("true"))
-            header("Sunset", equalTo("Wed, 10 Feb 2027 00:00:00 GMT"))
+            header("Sunset", equalTo("Thu, 01 Jul 2027 00:00:00 GMT"))
             header("Link", equalTo("</api/v2/offerings>; rel=\"successor-version\""))
         }
     }

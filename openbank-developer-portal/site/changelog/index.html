@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API deprecation changelog — OpenBank Developer</title>
+  <meta name="description" content="OpenBank API deprecation notices, successor paths and earliest sunset dates." />
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+<header class="topbar"><div class="wrap">
+  <a class="brand" href="/">OpenBank <span>Developer</span></a>
+  <nav aria-label="Developer portal"><a href="/">Home</a><a href="/api/">API reference</a></nav>
+</div></header>
+<main class="wrap">
+  <h1>API deprecation changelog</h1>
+  <p>The paths below continue to work during the migration window. The response headers
+    <code>Deprecation</code>, <code>Sunset</code> and <code>Link: rel="successor-version"</code>
+    carry the machine-readable notice. The sunset date is the earliest possible removal date;
+    a path stays available while it still has live traffic.</p>
+  <div class="card">
+    <table>
+      <caption>Current deprecated API path prefixes</caption>
+      <thead><tr><th scope="col">Path prefix</th><th scope="col">Notice filed</th>
+        <th scope="col">Earliest sunset</th><th scope="col">Successor</th></tr></thead>
+      <tbody>
+        <tr data-api-path="/api/v1/products" data-notice-on="2026-10-05"
+            data-sunset-on="2027-07-01" data-successor="/api/v2/offerings"
+            data-service="openbank-product-catalog">
+          <th scope="row"><code>/api/v1/products</code></th><td>2026-10-05</td>
+          <td>2027-07-01</td><td><code>/api/v2/offerings</code></td>
+        </tr>
+        <tr data-api-path="/api/v1/fees" data-notice-on="2026-10-05"
+            data-sunset-on="2027-07-01" data-successor="/api/v2/offerings"
+            data-service="openbank-product-catalog">
+          <th scope="row"><code>/api/v1/fees</code></th><td>2026-10-05</td>
+          <td>2027-07-01</td><td><code>/api/v2/offerings</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <p>The earlier bespoke <code>/open-banking/v2</code> interface is also deprecated in favor of
+    the Berlin Group <code>/v1</code> contract. Its removal remains a separate decision.</p>
+  <h2>Before a deprecated path is removed</h2>
+  <ol>
+    <li>Keep the notice visible and the old path serving for at least 180 days after the
+      changelog is actually published. If publication is delayed, extend <code>Sunset</code>
+      before release; the dates above are verified in CI against the notice filing date and
+      the CI run date for a newly added notice.</li>
+    <li>For each path prefix, query the owning service's Tier-B
+      <code>http_server_requests_seconds_count</code> counter with its <code>uri</code> label
+      covering the prefix and child routes. Require <strong>zero increase over the complete
+      preceding 30 days</strong>, across methods, statuses and replicas. For example, the
+      products prefix uses the selector below (substitute <code>fees</code> for the other row):
+      <pre><code>sum(increase(http_server_requests_seconds_count{namespace="accounts",service="openbank-product-catalog",uri=~"/api/v1/products(/.*)?"}[30d]))</code></pre>
+    </li>
+    <li>An absent series is <strong>unknown, not zero</strong>. Verify the service was scraped
+      throughout the window, its other HTTP route counters were populated, and Prometheus
+      retained the full 30 days (<code>prometheus_tsdb_lowest_timestamp_seconds</code>).
+      Check gateway access evidence for paths that may fail before reaching the service.
+      Record the query, UTC window, count and coverage evidence in the removal PR.</li>
+    <li>Only after the window and complete zero-traffic evidence, remove the old route and
+      its deprecation entry in the same reviewed PR. Any positive or unknown traffic resets
+      the 30-day observation window. Keep the historical changelog entry after removal.</li>
+  </ol>
+</main>
+</body>
+</html>

@@ -44,6 +44,10 @@ code { background: #eef1f8; border: 1px solid var(--line); border-radius: 6px;
 .tag { display: inline-block; font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
   background: #e7f0ff; color: var(--brand-ink); border-radius: 5px; padding: .1rem .4rem; margin-right: .5rem; }
 .tag.warn { background: #fdeede; color: var(--warn); }
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th, td { padding: .65rem .5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+caption { text-align: left; font-weight: 700; margin-bottom: .5rem; }
+pre { overflow-x: auto; padding: .8rem; background: #eef1f8; }
 
 .footer { background: var(--bg); color: #aab3c8; padding: 1.6rem 0; }
 .footer a { color: #9fc3ff; }

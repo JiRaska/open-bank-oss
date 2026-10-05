@@ -109,7 +109,7 @@ openbank:
     successor-links:
       - /api/v1/products=>/api/v2/offerings
       - /api/v1/fees=>/api/v2/offerings
-    sunset-date: "Wed, 10 Feb 2027 00:00:00 GMT"
+    sunset-date: "Thu, 01 Jul 2027 00:00:00 GMT"
 
 "%test":
   quarkus:

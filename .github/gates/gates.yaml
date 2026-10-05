@@ -3904,6 +3904,17 @@ gates:
   # against what main actually was, and raises an issue when one is mis-versioned
   # (#1465). Detection, not prevention: it cannot block a merge that already
   # happened — see that workflow's header for why neither prevention was viable.
+  - id: api-deprecation-notices
+    name: "API deprecation notices, sunset window and runtime headers (ADR-0145, enforced)"
+    group: api
+    mode: enforced
+    needs_base: optional
+    selftest: python3 .github/scripts/check-api-deprecation-notices.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-api-deprecation-notices.py"]
+    run: |
+      python3 .github/scripts/check-api-deprecation-notices.py --base "${PR_DIFF_BASE:-}"
+
   - id: api-contract-gate
     name: "api-contract gate — OpenAPI diff classification (ADR-0048 D5, enforced)"
     group: api
