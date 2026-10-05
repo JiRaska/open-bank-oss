@@ -822,6 +822,19 @@ resource "kubernetes_config_map" "dind_mirror_certs" {
 # ---------------------------------------------------------------------------
 # build scale set — runs-on: openbank-build
 # ---------------------------------------------------------------------------
+locals {
+  # ARC 0.14.2 listener metrics are opt-in. Keep only scale-set labels so a
+  # per-job/repository label cannot grow Prometheus cardinality with CI load.
+  arc_listener_metrics = {
+    gauges = {
+      gha_assigned_jobs      = { labels = ["name", "namespace"] }
+      gha_running_jobs       = { labels = ["name", "namespace"] }
+      gha_registered_runners = { labels = ["name", "namespace"] }
+      gha_busy_runners       = { labels = ["name", "namespace"] }
+    }
+  }
+}
+
 resource "helm_release" "arc_build" {
   count            = var.arc_runner_enabled ? 1 : 0
   name             = "openbank-build"
@@ -836,6 +849,7 @@ resource "helm_release" "arc_build" {
     githubConfigUrl    = var.github_config_url
     githubConfigSecret = "arc-github-app" # pre-created secret; key never in state
     runnerScaleSetName = "openbank-build"
+    listenerMetrics    = local.arc_listener_metrics
     minRunners         = var.arc_min_runners # 0 => scale-to-zero
     maxRunners         = var.arc_max_runners
     # No containerMode: we supply the dind sidecar manually (see locals) so we
@@ -909,6 +923,7 @@ resource "helm_release" "arc_deploy" {
     githubConfigUrl    = var.github_config_url
     githubConfigSecret = "arc-github-app"
     runnerScaleSetName = "openbank-deploy"
+    listenerMetrics    = local.arc_listener_metrics
     minRunners         = 0
     maxRunners         = var.arc_deploy_max_runners
     # No containerMode: manual dind sidecar (see locals), same as the build pool.
@@ -1148,6 +1163,7 @@ resource "helm_release" "arc_batch" {
     githubConfigUrl    = var.github_config_url
     githubConfigSecret = "arc-github-app"
     runnerScaleSetName = "openbank-batch"
+    listenerMetrics    = local.arc_listener_metrics
     minRunners         = 0 # weekly lanes only; idle cost must be $0 (ADR-0053)
     maxRunners         = var.arc_batch_max_runners
     template = {
@@ -1220,6 +1236,7 @@ resource "helm_release" "arc_dr" {
     githubConfigUrl    = var.github_config_url
     githubConfigSecret = "arc-github-app"
     runnerScaleSetName = "openbank-dr"
+    listenerMetrics    = local.arc_listener_metrics
     minRunners         = 0
     maxRunners         = var.arc_dr_max_runners
     template = {

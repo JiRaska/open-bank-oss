@@ -1017,4 +1017,14 @@ resource "helm_release" "arc_controller" {
   repository       = "oci://ghcr.io/actions/actions-runner-controller-charts"
   chart            = "gha-runner-scale-set-controller"
   version          = var.arc_controller_version
+
+  # ARC 0.14.2 disables listener metrics unless the controller supplies this
+  # address. Each scale set opts into its low-cardinality gauges below.
+  values = [yamlencode({
+    metrics = {
+      controllerManagerAddr = ":8080"
+      listenerAddr          = ":8080"
+      listenerEndpoint      = "/metrics"
+    }
+  })]
 }

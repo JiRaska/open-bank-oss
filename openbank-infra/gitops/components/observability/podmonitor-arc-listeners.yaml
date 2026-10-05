@@ -1,0 +1,45 @@
+# ARC 0.14.2 listener metrics use the named pod port exposed when the controller
+# and each scale set enable listener metrics. The runners themselves are not scraped.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: arc-listeners
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: arc-listeners
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - arc-systems
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: runner-scale-set-listener
+      app.kubernetes.io/part-of: gha-runner-scale-set
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
+---
+# The controller chart also opens its own named metrics port when listener
+# metrics are enabled; scrape it to observe exporter health and reconciles.
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: arc-controller
+  namespace: observability
+  labels:
+    app.kubernetes.io/name: arc-controller
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - arc-systems
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: controller-manager
+      app.kubernetes.io/name: gha-rs-controller
+  podMetricsEndpoints:
+    - port: metrics
+      path: /metrics
+      interval: 30s
