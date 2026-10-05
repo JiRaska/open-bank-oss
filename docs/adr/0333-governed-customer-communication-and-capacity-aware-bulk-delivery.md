@@ -164,6 +164,11 @@ evidence projection yet. The workflow-start/enrolment-write boundary also needs 
 before a crash there can be called exactly once. Mass activation must remain disabled until those
 controls and the D7 end-to-end/load evidence are complete.
 
+Campaign notification handoffs now reuse the durable send-log id as both `correlationId` and
+`deduplicationKey`; a Kafka replay therefore addresses the same notification fact. This protects
+the campaign producer only. Other notification producers still need stable keys before the
+transport can make a general idempotency claim.
+
 The existing email/push path persists a `PENDING` row before provider handoff. If a failure occurs
 after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key.
 It now refuses to acknowledge an unresolved duplicate and sends it to the configured dead-letter
