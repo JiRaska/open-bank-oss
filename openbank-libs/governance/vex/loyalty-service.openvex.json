@@ -2,6 +2,7 @@
   "@context": "https://openvex.dev/ns/v0.2.0",
   "@id": "https://open-bank.tech/vex/loyalty-service",
   "author": "OpenBank Security",
+  "timestamp": "2026-10-05T21:04:22Z",
   "version": 1,
   "notes": [
     "Triage on 2026-10-05 used the loyalty-service runtimeClasspath CycloneDX SBOM and the built Quarkus fast-jar. All 321 resolved Maven components are an exact subset of account-service; Trivy 0.74.0 with its 2026-10-04 vulnerability DB and 2026-10-05 Java DB reported only CVE-2025-14969 for both SBOMs. Reassess this artifact-specific verdict if the resolved Hibernate Reactive version changes."
@@ -11,6 +12,11 @@
       "vulnerability": {
         "name": "CVE-2025-14969"
       },
+      "products": [
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final?type=jar"
+        }
+      ],
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
       "impact_statement": "Resolved org.hibernate.reactive:hibernate-reactive-core is 3.4.2.Final; the loyalty fast-jar packages that artifact with SHA-256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching gradle/verification-metadata.xml and the already triaged account-service artifact. The advisory's single <4.2.1 range crosses parallel Hibernate Reactive release lines. Disassembly of this exact packaged jar shows SqlClientConnection.close() calls validateNoTransactionInProgressOnClose(), the class has the post-fix closed field, and Log has liveTransactionDetectedOnClose(); these are the upstream fix cd7f104e10de918004707ca0e26e3840976f780a. The vulnerable pre-fix close path is absent from the shipped dependency.",
