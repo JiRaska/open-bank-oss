@@ -34,11 +34,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * openbank-product-catalog verifies anything, so its consumers (openbank-card-issuance-service) stayed
  * permanently UNVERIFIED and could not be deployed (issue #3232).
  *
- * A second `@Provider("openbank-product-catalog")` class is safe here for the reason
- * CLAUDE.md gives for ledger-service's identical pair: the collision it warns about is HTTP vs
- * MESSAGE target dispatch fighting over the same `@BeforeEach`, and both classes here use the
- * same target type, so verifying the same interactions from two pact sources is at worst
- * redundant, never colliding.
+ * Both classes replay mutating Product Studio interactions with pact-pinned UUIDs. They must
+ * have separate test databases: the first replay publishes an immutable revision, so the second
+ * cannot reset that provider state by deleting it. `restrictToAnnotatedClass` restarts the
+ * Quarkus test resource between the folder and broker verifiers.
  *
  * Gated on `pactbroker.url`: skipped locally and on the PR lane, which have no broker
  * configured. It runs on the main push, where `_service-ci.yml` sets `PUBLISH_RESULTS=true`
@@ -49,6 +48,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-product-catalog")
