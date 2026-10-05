@@ -1,5 +1,5 @@
 # -----------------------------------------------------------------------------
-# External public-feed watch (issue #2204).
+# External public-feed watch (issue #12177; originated from #2204).
 #
 # WHY THIS EXISTS
 #   `openbank-fx-service`'s ČNB fixing URL was a 404 for the whole life of the
@@ -21,7 +21,7 @@
 #
 #   LIVENESS is a property of the internet at this moment. It never blocks a
 #   merge: a third-party outage must not wedge the repo. It escalates instead —
-#   a red scheduled run is addressed to nobody, so a dead feed posts on #2204.
+#   a red scheduled run is addressed to nobody, so a dead feed posts on #12177.
 #
 # WHY IT IS NOT A REQUIRED CHECK
 #   `paths:`-filtered workflows cannot be required contexts (a required context
@@ -109,7 +109,7 @@ jobs:
             0) echo "Every declared feed is live and correctly shaped." ;;
             1) echo "::error::Declaration drift on the default branch — reconcile the script with the YAMLs."
                exit 1 ;;
-            2) echo "::warning::A declared external feed is dead, misshapen or undeterminable — escalating to #2204." ;;
+            2) echo "::warning::A declared external feed is dead, misshapen or undeterminable — escalating to #12177." ;;
             3) echo "::error::NO feed could be reached. That points at this runner's network, not"
                echo "::error::at the feeds — and it is NOT a 'feeds are fine' verdict."
                exit 3 ;;
@@ -125,7 +125,7 @@ jobs:
             const fs = require('fs')
             const report = fs.readFileSync('/tmp/feeds.txt', 'utf8')
             const MARKER = '<!-- external-feed-watch -->'
-            const issue_number = 2204
+            const issue_number = 12177
             const body = [
               MARKER,
               '## External feed watch — a declared feed is dead, misshapen or undeterminable',
@@ -143,7 +143,7 @@ jobs:
               'the URL in the service\'s `application.yaml` (the probe reads it from',
               'there, so the fix and the check can never disagree).',
               '',
-              'This is the OUTSIDE-IN canary (issue #2204) — it can fire before anything is',
+              'This is the OUTSIDE-IN canary (issue #12177; origin #2204) — it can fire before anything is',
               'deployed. For the live/authoritative verdict once the fix ships, check the',
               'in-cluster fetch-outcome contract instead of re-deriving health from this run',
               '(issue #4743, ADR-0237 point 2): `openbank_feed_fetch_total{outcome!="FETCHED"}`',
