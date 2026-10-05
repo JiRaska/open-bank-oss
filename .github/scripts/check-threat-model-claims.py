@@ -31,6 +31,10 @@ WHAT IT CHECKS (the mechanically detectable subset — deliberately narrow)
              T1 cites `workflowRunId` / `activityId`.)
   STUB       a mitigation cites a symbol whose own DECLARATION opens with a stub marker
              (`stub:`, `TODO`, `FIXME`, `not implemented`) — the control exists as a name only.
+  OWNER      a globally present citation has no backing in the model's own module or its
+             declared shared libraries. This is a separate advisory verdict pending triage of
+             historical entries, infrastructure controls and model stems without a module
+             (#12122); it does not weaken the existing global PHANTOM check.
   SELF-REF   the threat is precisely "the record says it happened / it reported success" and
              the mitigation's only named mechanism IS record-keeping (a status transition, an
              audit entry, an execution history). The mitigation cannot distinguish the good
@@ -499,6 +503,9 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._scope_memo: dict[tuple[str, str], bool | None] = {}
+        self._owner_memo: dict[str, set[str] | None] = {}
+        self.scope_findings: list[tuple[str, str, str]] = []
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -517,9 +524,11 @@ class Corpus:
         # the old substring resolve() answered TRUE for both, because the document's own false
         # claim was echoed in a comment next to the code. Prose cannot witness prose.
         self.config_keys: set[str] = set()
+        self.config_keys_by_file: dict[str, set[str]] = {}
         for f, b in self.blobs.items():
             if f.endswith((".yaml", ".yml", ".properties")):
-                self.config_keys |= self.yaml_paths(b)
+                self.config_keys_by_file[f] = self.yaml_paths(b)
+                self.config_keys |= self.config_keys_by_file[f]
         # A generated OPA-bundle ConfigMap (`gen-*opa-bundle*.sh`) embeds a `.rego` file's
         # content under a literal `<name>.rego: |` key rather than checking it in as its own
         # file — domestic-payment, settlement and swift all ship this way (#11088/#11089). A
@@ -528,16 +537,80 @@ class Corpus:
         # Anchored on the YAML key spelling, not a directory prefix, so it also finds a bundle
         # this gate has never been told about by name.
         self.embedded_rego: set[str] = set()
+        self.embedded_rego_by_file: dict[str, set[str]] = {}
         for f, b in self.blobs.items():
             if not f.endswith((".yaml", ".yml")):
                 continue
-            for m in EMBEDDED_REGO_KEY.finditer(b):
-                self.embedded_rego.add(m.group(1))
+            self.embedded_rego_by_file[f] = set(EMBEDDED_REGO_KEY.findall(b))
+            self.embedded_rego |= self.embedded_rego_by_file[f]
         for f, b in self.blobs.items():
             self.code[f] = "\n".join(
                 ln for ln in b.splitlines()
                 if not ln.lstrip().startswith(("//", "*", "/*", "#", "<!--", "--"))
             )
+
+    def owner_modules(self, service: str) -> set[str] | None:
+        """The model's module and its declared, transitively reachable shared libraries.
+
+        A model without a same-named module has no mechanically defensible owner yet. Other
+        services are never included, even if a Gradle project dependency names one of them.
+        """
+        if service in self._owner_memo:
+            return self._owner_memo[service]
+        if not (self.root / service).is_dir():
+            self._owner_memo[service] = None
+            return None
+        modules = {service}
+        pending = [service]
+        while pending:
+            module = pending.pop()
+            build = self.root / module / "build.gradle.kts"
+            if not build.is_file():
+                continue
+            declarations = "\n".join(line for line in build.read_text(encoding="utf-8").splitlines()
+                                     if not line.lstrip().startswith("//"))
+            for dep in re.findall(
+                    r'\b(?:api|implementation|compileOnly|runtimeOnly|testImplementation|'
+                    r'testRuntimeOnly)\s*\(\s*project\s*\(\s*["\']:([^"\']+)["\']\s*\)',
+                    declarations):
+                if (dep.startswith("openbank-libs") and dep not in modules
+                        and (self.root / dep).is_dir()):
+                    modules.add(dep)
+                    pending.append(dep)
+        self._owner_memo[service] = modules
+        return modules
+
+    def resolve_scoped(self, sym: str, service: str) -> bool | None:
+        """Resolve a citation only in its owner and declared shared libraries.
+
+        None means the document does not map to a module. This is a separate verdict from
+        global existence: historical and infrastructure references remain globally audited.
+        """
+        key = (service, sym)
+        if key in self._scope_memo:
+            return self._scope_memo[key]
+        modules = self.owner_modules(service)
+        if modules is None:
+            self._scope_memo[key] = None
+            return None
+        files = [f for f in self.blobs if f.split("/", 1)[0] in modules]
+        if SRCPATH.match(sym):
+            hit = any(f == sym or f.endswith("/" + sym) or
+                      pathlib.Path(f).name == pathlib.Path(sym).name for f in files)
+            if not hit and sym.endswith(".rego"):
+                hit = any(pathlib.Path(sym).name in self.embedded_rego_by_file.get(f, set())
+                          for f in files)
+        else:
+            hit = False
+            if CONFIGKEY.match(sym) and not POLICYRULE.match(sym):
+                hit = any(any(sym.endswith(k) or k.endswith(sym)
+                              for k in self.config_keys_by_file.get(f, set())) for f in files)
+            if not hit:
+                needle = sym.rsplit(".", 1)[-1] if POLICYRULE.match(sym) else sym
+                pat = self._word(needle)
+                hit = any(pat.search(self.code[f]) for f in files if needle in self.code[f])
+        self._scope_memo[key] = hit
+        return hit
 
     @staticmethod
     def yaml_paths(blob: str) -> set[str]:
@@ -745,10 +818,13 @@ def money_path(root: pathlib.Path) -> list[str]:
 def audit(root: pathlib.Path):
     services = subjects_all(root)
     mp = set(money_path(root))
+    corpus = Corpus(root)
     subjects, n_claims, n_uncited, n_disclaimed, findings, used = \
-        audit_models(root, services, Corpus(root))
+        audit_models(root, services, corpus)
     stale = sorted(set(ALLOWED_UNRESOLVED) - used)
-    return services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale
+    unmapped = sum(corpus.owner_modules(svc) is None for svc in services)
+    return (services, mp, subjects, n_claims, n_uncited, n_disclaimed,
+            findings, stale, corpus.scope_findings, unmapped)
 
 
 def audit_models(root: pathlib.Path, services: list[str], corpus: "Corpus"):
@@ -780,6 +856,11 @@ def audit_models(root: pathlib.Path, services: list[str], corpus: "Corpus"):
                     findings.append(("PHANTOM", svc, rid,
                                      f"cites `{sym}` — present in no tracked backend source"))
                     continue
+                # A global hit in another service is not proof for this owner. Keep this
+                # verdict separate and advisory while historical entries, infrastructure
+                # controls and models without a matching module are triaged (#12122).
+                if "change log" not in rid.lower() and corpus.resolve_scoped(sym, svc) is False:
+                    corpus.scope_findings.append((svc, rid, sym))
                 site = corpus.stub_site(sym)
                 if site:
                     if key in ALLOWED_UNRESOLVED:
@@ -922,19 +1003,24 @@ def self_test() -> int:
 
     # (3) RESOLUTION. Both of these answered TRUE under the old substring-over-all-lines rule.
     class _FakeCorpus(Corpus):
-        def __init__(self, blobs):  # test double: no git, no filesystem
+        def __init__(self, blobs, root=REPO):  # test double: no git
+            self.root = root
             self.files, self.names, self.paths = [], set(), set()
-            self.blobs, self._memo = blobs, {}
+            self.blobs, self._memo, self._scope_memo, self._owner_memo = blobs, {}, {}, {}
+            self.scope_findings = []
             self.main = {}
             self.config_keys = set()
+            self.config_keys_by_file = {}
             for _f, _b in blobs.items():
                 if _f.endswith((".yaml", ".yml", ".properties")):
-                    self.config_keys |= Corpus.yaml_paths(_b)
+                    self.config_keys_by_file[_f] = Corpus.yaml_paths(_b)
+                    self.config_keys |= self.config_keys_by_file[_f]
             self.embedded_rego = set()
+            self.embedded_rego_by_file = {}
             for _f, _b in blobs.items():
                 if _f.endswith((".yaml", ".yml")):
-                    for _m in EMBEDDED_REGO_KEY.finditer(_b):
-                        self.embedded_rego.add(_m.group(1))
+                    self.embedded_rego_by_file[_f] = set(EMBEDDED_REGO_KEY.findall(_b))
+                    self.embedded_rego |= self.embedded_rego_by_file[_f]
             self.code = {f: "\n".join(ln for ln in b.splitlines()
                                       if not ln.lstrip().startswith(("//", "*", "/*", "#", "<!--", "--")))
                          for f, b in blobs.items()}
@@ -1018,6 +1104,38 @@ def self_test() -> int:
              sorted({d.split('`')[1] for k, _, _, d in got if k == "PHANTOM"}),
              ["PhantomGuardFilter"])
 
+    # A service's current claim cannot borrow a class from an unrelated service. A declared
+    # shared library is valid backing, including a transitive library dependency.
+    with tempfile.TemporaryDirectory() as td:
+        r = pathlib.Path(td)
+        for module in ("openbank-x", "openbank-y", "openbank-libs-runtime", "openbank-libs-domain"):
+            (r / module).mkdir()
+        (r / "openbank-x" / "build.gradle.kts").write_text(
+            'dependencies { implementation(project(":openbank-libs-runtime")) }')
+        (r / "openbank-libs-runtime" / "build.gradle.kts").write_text(
+            'dependencies { api(project(":openbank-libs-domain")) }')
+        owner = _FakeCorpus({
+            "openbank-y/src/main/kotlin/ForeignGuard.kt": "class ForeignGuard {}",
+            "openbank-x/src/main/kotlin/LocalGuard.kt": "class LocalGuard {}",
+            "openbank-libs-domain/src/main/kotlin/SharedGuard.kt": "class SharedGuard {}",
+        }, r)
+        case("a class in another service exists globally", owner.resolve("ForeignGuard"), True)
+        case("another service cannot back the owner's claim",
+             owner.resolve_scoped("ForeignGuard", "openbank-x"), False)
+        case("the owner's own class backs its claim",
+             owner.resolve_scoped("LocalGuard", "openbank-x"), True)
+        case("a transitively declared shared library backs its claim",
+             owner.resolve_scoped("SharedGuard", "openbank-x"), True)
+        case("unmapped model is not guessed to belong to another service",
+             owner.resolve_scoped("ForeignGuard", "unmapped-model"), None)
+        (r / "docs" / "threat-models").mkdir(parents=True)
+        (r / "docs" / "threat-models" / "openbank-x.md").write_text(
+            "## Current controls\n\n`ForeignGuard` and `LocalGuard` protect requests.\n\n"
+            "## 6. Change log\n\n`ForeignGuard` was mentioned in a historical change.\n")
+        audit_models(r, ["openbank-x"], owner)
+        case("the audit records the cross-service current claim, not the historical entry",
+             owner.scope_findings, [("openbank-x", "Current controls", "ForeignGuard")])
+
     for f in fails:
         print(f"SELF-TEST FAIL: {f}")
     print(f"self-test: {'FAILED' if fails else 'ok'} ({len(fails)} failure(s))")
@@ -1035,7 +1153,8 @@ def main() -> int:
         return self_test()
 
     root = pathlib.Path(a.root).resolve()
-    services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale = audit(root)
+    services, mp, subjects, n_claims, n_uncited, n_disclaimed, findings, stale, scoped, unmapped = \
+        audit(root)
 
     print(f"SUBJECTS={subjects}")
     print(f"threat-model claim audit: {subjects}/{len(services)} models "
@@ -1052,6 +1171,15 @@ def main() -> int:
     for key in stale:
         print(f"::{lvl} title=stale exclusion::ALLOWED_UNRESOLVED['{key}'] matched nothing — "
               f"the claim it excused is gone; delete the entry")
+    if a.report:
+        for svc, rid, sym in scoped:
+            print(f"OWNER-UNBACKED {svc} {rid}: `{sym}` exists in the backend corpus but not "
+                  "in the owner's module or its declared shared libraries")
+    if scoped or unmapped:
+        print(f"::warning title=threat-model owner scope::"
+              f"{len(scoped)} non-change-log citation(s) lack owner backing; "
+              f"{unmapped} model(s) have no matching module. Run --report for the citations. "
+              "Owner scope is advisory pending historical and infrastructure triage (#12122).")
 
     if a.report:
         return 0
@@ -1059,7 +1187,7 @@ def main() -> int:
         print(f"FAIL: {len(findings)} false/self-referential claim(s), "
               f"{len(stale)} stale exclusion(s)")
         return 1 if a.enforce else 0
-    print("OK: every mechanically checkable mitigation claim resolves to real, non-stub code")
+    print("OK: every mechanically checkable mitigation claim resolves globally to real, non-stub code")
     return 0
 
 
