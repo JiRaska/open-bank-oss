@@ -60,7 +60,7 @@ class SanctionsChangePublisherImpl(
                     session.createNativeQuery<Any>("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
                         .executeUpdate().awaitSuspending()
                     // A concurrent refresh may have committed only its first batch. Its JDBC
-                    // transaction holds this key until every batch finishes (or its pod dies).
+                    // session holds this key until every batch finishes (or its pod dies).
                     // Try rather than wait: a deferred tick never selects or deletes partial evidence.
                     if (permit == null) {
                         val importFinished = session.createNativeQuery(

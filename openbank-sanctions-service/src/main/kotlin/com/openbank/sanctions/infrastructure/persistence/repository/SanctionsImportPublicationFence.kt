@@ -7,10 +7,12 @@ package com.openbank.sanctions.infrastructure.persistence.repository
 import com.openbank.sanctions.application.port.out.SanctionsPublicationPermit
 import com.openbank.sanctions.domain.model.SanctionsListType
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.withContext
 import java.sql.Connection
+import java.time.Duration
 import javax.sql.DataSource
 
 /**
@@ -21,7 +23,22 @@ import javax.sql.DataSource
  * on connection loss; the next owner increments the generation before its first batch.
  */
 @ApplicationScoped
-class SanctionsImportPublicationFence(private val dataSource: DataSource) {
+class SanctionsImportPublicationFence private constructor(
+    private val dataSource: DataSource,
+    private val lockTimeoutSeconds: Int,
+) {
+    private companion object {
+        const val LOCK_TIMEOUT_SECONDS = 30
+    }
+
+    @Inject
+    constructor(dataSource: DataSource) : this(dataSource, LOCK_TIMEOUT_SECONDS)
+
+    internal constructor(dataSource: DataSource, lockTimeout: Duration) :
+        this(dataSource, lockTimeout.seconds.toInt()) {
+        require(lockTimeout.seconds in 1..LOCK_TIMEOUT_SECONDS)
+    }
+
     suspend fun <T> duringRefresh(listType: SanctionsListType, refresh: suspend (SanctionsPublicationPermit) -> T): T {
         val (connection, generation) = withContext(NonCancellable + Dispatchers.IO) {
             acquire(listType)
@@ -42,16 +59,17 @@ class SanctionsImportPublicationFence(private val dataSource: DataSource) {
         val connection = dataSource.connection
         var locked = false
         try {
-            // The timeout is LOCAL to this acquisition transaction, never leaked to the pool.
+            // Bound both the advisory wait and the generation row update in one transaction.
+            // SET LOCAL expires at commit and cannot leak into a pooled connection.
             connection.autoCommit = false
-            connection.createStatement().use { it.execute("SET LOCAL lock_timeout = '30s'") }
+            connection.createStatement().use {
+                it.execute("SET LOCAL lock_timeout = '${lockTimeoutSeconds}s'")
+            }
             connection.prepareStatement("SELECT pg_advisory_lock(11492, hashtext(?))").use { statement ->
                 statement.setString(1, listType.name)
                 statement.execute()
             }
             locked = true
-            connection.commit()
-            connection.autoCommit = true
             val generation = connection.prepareStatement(
                 "UPDATE sanctions_change_publication SET refresh_generation = refresh_generation + 1, " +
                     "refresh_active = TRUE WHERE list_type = ? RETURNING refresh_generation",
@@ -62,6 +80,8 @@ class SanctionsImportPublicationFence(private val dataSource: DataSource) {
                     rows.getLong(1)
                 }
             }
+            connection.commit()
+            connection.autoCommit = true
             return connection to generation
         } catch (failure: Throwable) {
             runCatching { connection.rollback() }

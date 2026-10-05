@@ -37,11 +37,14 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.sql.Connection
 import java.sql.DriverManager
+import java.sql.SQLException
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
+import javax.sql.DataSource
 
 /** Exercise the migration-installed trigger through the same independent PgPool used by imports. */
 @Suppress("LargeClass") // one PostgreSQL fixture verifies journal, publication, and lost-owner fencing together
@@ -56,6 +59,9 @@ class SanctionsChangeJournalIT {
 
     @Inject
     lateinit var publicationFence: SanctionsImportPublicationFence
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     @Inject
     lateinit var entryRepository: SanctionsEntryRepositoryImpl
@@ -376,6 +382,61 @@ class SanctionsChangeJournalIT {
         assertThat(names).contains("old-first", "new-owner").doesNotContain("old-stale")
         assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
         assertThat(journalCount()).isZero()
+    }
+
+    @Test
+    fun `advisory lock wait times out without consuming journal and next refresh retries`() {
+        seedPopulation()
+        changeRange(1, 1, "Pending while another refresh owns the list")
+        val type = SanctionsListType.PEP_GLOBAL
+        val shortFence = SanctionsImportPublicationFence(dataSource, Duration.ofSeconds(1))
+        jdbc().use { holder ->
+            holder.prepareStatement("SELECT pg_advisory_lock(11492, hashtext(?))").use { statement ->
+                statement.setString(1, type.name)
+                statement.execute()
+            }
+            val waiting = CompletableFuture.supplyAsync {
+                runCatching { runBlocking { shortFence.duringRefresh(type) { } } }.exceptionOrNull()
+            }
+            assertThat(awaitAdvisoryWait()).isTrue()
+            assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+            val failure = waiting.get(5, TimeUnit.SECONDS)
+            assertThat(failure).isInstanceOf(SQLException::class.java)
+            assertThat((failure as SQLException).sqlState).isEqualTo("55P03")
+            assertThat(journalCount()).isEqualTo(1)
+        }
+        runBlocking {
+            shortFence.duringRefresh(type) { permit ->
+                assertThat(onEventLoop { publisher.publishFenced(listId(type), type, permit) })
+                    .isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
+            }
+        }
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isEqualTo(1)
+        assertThat(journalCount()).isZero()
+    }
+
+    @Test
+    fun `generation row wait is bounded and a later refresh can acquire the fence`() {
+        val type = SanctionsListType.PEP_GLOBAL
+        val shortFence = SanctionsImportPublicationFence(dataSource, Duration.ofSeconds(1))
+        jdbc().use { holder ->
+            holder.autoCommit = false
+            holder.prepareStatement(
+                "SELECT refresh_generation FROM sanctions_change_publication WHERE list_type = ? FOR UPDATE",
+            ).use { statement ->
+                statement.setString(1, type.name)
+                statement.executeQuery().close()
+            }
+            val waiting = CompletableFuture.supplyAsync {
+                runCatching { runBlocking { shortFence.duringRefresh(type) { } } }.exceptionOrNull()
+            }
+            val failure = waiting.get(5, TimeUnit.SECONDS)
+            assertThat(failure).isInstanceOf(SQLException::class.java)
+            assertThat((failure as SQLException).sqlState).isEqualTo("55P03")
+            holder.rollback()
+        }
+        runBlocking { shortFence.duringRefresh(type) { } }
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.NO_CHANGES)
     }
 
     private fun entry(externalId: String): SanctionsEntry = SanctionsEntry(

@@ -103,6 +103,9 @@ refresh takes the lock, advances the generation, and supersedes any stale writer
 publication stays deferred. Committed batches from a failed or interrupted import remain in the
 journal; the next publisher evaluates them together against the current list population. A storm
 withholds the change event and retains the journal for investigation.
+Waiting for the per-list lock or generation row is limited to 30 seconds. A timed-out refresh
+leaves journal evidence intact. The scheduler continues to the other lists and retries pending
+publication on its next tick; the import itself runs at its next due time or on a new request.
 
 ### Large backlog of POTENTIAL_HIT reviews
 
