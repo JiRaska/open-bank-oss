@@ -4,6 +4,8 @@
 
 package com.openbank.notification.infrastructure.observability
 
+import com.openbank.libs.observability.DomainMetrics
+import com.openbank.libs.observability.WorkflowLivenessRecorder
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
 import io.micrometer.core.instrument.Gauge
 import io.micrometer.core.instrument.MeterRegistry
@@ -26,9 +28,11 @@ class PendingNotificationGauge(
     private val repository: NotificationRepository,
     private val registry: MeterRegistry,
     private val clock: Clock,
+    private val domainMetrics: DomainMetrics,
 ) {
     private val stale = AtomicLong(UNKNOWN)
     private val log = Logger.getLogger(PendingNotificationGauge::class.java)
+    private lateinit var liveness: WorkflowLivenessRecorder
 
     @PostConstruct
     fun register() {
@@ -36,6 +40,7 @@ class PendingNotificationGauge(
             .tag("service", "notification")
             .description("Notifications without a terminal outcome after 15 minutes; -1 means the query failed")
             .register(registry)
+        liveness = domainMetrics.registerWorkflowLiveness("notification-pending-observation", Duration.ofMinutes(1))
     }
 
     @Scheduled(every = "1m", delayed = "1m", concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
@@ -43,6 +48,7 @@ class PendingNotificationGauge(
     suspend fun refresh() {
         try {
             stale.set(repository.countStalePending(Instant.now(clock).minus(STALE_AFTER)).awaitSuspending())
+            liveness.recordSuccess()
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
