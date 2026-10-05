@@ -3,11 +3,14 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Exercise admission boundaries and workflow wiring without credentials or network."""
 import importlib.util
+import io
 import json
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest.mock import patch
 
 import yaml
 
@@ -111,6 +114,61 @@ class AdmissionTest(unittest.TestCase):
                 admission.admit_current_pr(pages, self.prefixes, self.limit, number, cutoff)
         with self.assertRaises(ValueError):
             admission.admit_current_pr([[pr(1, created_at=None)]], self.prefixes, self.limit, 1, self.cutoff)
+
+    def test_only_later_exact_head_owner_admission_counts(self):
+        head = 'a' * 40
+        created = '2026-10-05T10:00:00Z'
+        def comment(number, body, login='JiRaska', when='2026-10-05T10:01:00Z', kind='User'):
+            return {'id': number, 'body': body, 'user': {'login': login, 'type': kind}, 'created_at': when}
+        command = f'/agent-pr admit 12162 {head}'
+        good = comment(5, command)
+        self.assertTrue(admission.owner_admission_allows([good], 'JiRaska', 12162, head, created))
+        for bad in (comment(1, command, login='someone-else'),
+                    comment(2, command, kind='Bot'),
+                    comment(3, command, when='2026-10-05T09:59:59Z'),
+                    comment(4, f'/agent-pr admit 12163 {head}'),
+                    comment(6, f'/agent-pr admit 12162 {"b" * 40}')):
+            with self.subTest(bad=bad):
+                self.assertFalse(admission.owner_admission_allows([bad], 'JiRaska', 12162, head, created))
+        revoke = comment(6, f'/agent-pr revoke-admission 12162 {head}')
+        self.assertFalse(admission.owner_admission_allows([good, revoke], 'JiRaska', 12162, head, created))
+
+    def test_owner_admission_rechecks_live_head(self):
+        head = 'a' * 40
+        current = pr(12162, 'codex/fix', head={'ref': 'codex/fix', 'sha': head})
+        repo = {'owner': {'login': 'JiRaska'}}
+        live = {'state': 'open', 'head': {'sha': head}}
+        commit = {'commit': {'committer': {'date': '2026-10-05T10:00:00Z'}}}
+        comments = [[{'id': 1, 'body': f'/agent-pr admit 12162 {head}',
+                      'user': {'login': 'JiRaska', 'type': 'User'}, 'created_at': '2026-10-05T10:01:00Z'}]]
+        with patch.dict('os.environ', {'GITHUB_REPOSITORY': 'JiRaska/open-bank-oss', 'GH_TOKEN': 'test'}), \
+                patch.object(admission, '_gh_api', side_effect=[live, repo, commit, comments, live]):
+            self.assertTrue(admission.approved_owner_admission(current))
+        changed = {'state': 'open', 'head': {'sha': 'b' * 40}}
+        with patch.dict('os.environ', {'GITHUB_REPOSITORY': 'JiRaska/open-bank-oss', 'GH_TOKEN': 'test'}), \
+                patch.object(admission, '_gh_api', side_effect=[live, repo, commit, comments, changed]):
+            with self.assertRaises(ValueError):
+                admission.approved_owner_admission(current)
+
+    def test_exact_head_owner_admission_only_unblocks_current_pr(self):
+        import tempfile
+        head = 'a' * 40
+        pages = [[pr(1), pr(2), pr(3), pr(4, 'codex/fix', head={'ref': 'codex/fix', 'sha': head})]]
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json') as snapshot:
+            json.dump(pages, snapshot)
+            snapshot.flush()
+            with patch.object(sys, 'argv', ['agent-admission.py', snapshot.name, '--current-pr', '4']), \
+                    patch.object(admission, 'approved_owner_admission', return_value=True) as owner_check, \
+                    redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+                self.assertEqual(admission.main(), 0)
+            self.assertIn('proceed=true', output.getvalue())
+            owner_check.assert_called_once()
+            with patch.object(sys, 'argv', ['agent-admission.py', snapshot.name, '--current-pr', '1']), \
+                    patch.object(admission, 'approved_owner_admission') as owner_check, \
+                    redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()):
+                self.assertEqual(admission.main(), 0)
+            self.assertIn('proceed=true', output.getvalue())
+            owner_check.assert_not_called()
 
 
 if __name__ == '__main__':

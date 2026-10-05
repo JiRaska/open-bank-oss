@@ -3,6 +3,9 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Bound new autonomous work; a full queue is backpressure, unreadable data is failure."""
 import json
+import os
+import re
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +13,7 @@ from pathlib import Path
 import yaml
 
 RULES = Path("openbank-libs/governance/rules.yaml")
+OWNER_ADMISSION = re.compile(r"^/agent-pr (admit|revoke-admission) ([0-9]+) ([0-9a-f]{40})$")
 
 
 def parse_utc(value, name):
@@ -83,6 +87,54 @@ def admit_current_pr(pages, prefixes, limit, number, grandfather_before):
     return created < cutoff or rank <= limit, rank
 
 
+def owner_admission_allows(comments, owner, number, head, head_created_at):
+    """A later exact-head owner decision may admit one existing PR over the WIP cap."""
+    decisions = []
+    for comment in comments:
+        user = comment.get('user') or {}
+        if user.get('login', '').lower() != owner.lower() or user.get('type') != 'User':
+            continue
+        match = OWNER_ADMISSION.fullmatch((comment.get('body') or '').strip())
+        if not match or int(match.group(2)) != number or match.group(3) != head:
+            continue
+        if (comment.get('created_at') or '') < head_created_at:
+            continue
+        decisions.append((comment['id'], match.group(1)))
+    return bool(decisions) and max(decisions)[1] == 'admit'
+
+
+def _gh_api(path, paginate=False):
+    args = ['gh', 'api']
+    if paginate:
+        args.extend(['--paginate', '--slurp'])
+    args.append(path)
+    return json.loads(subprocess.run(args, check=True, capture_output=True, text=True).stdout)
+
+
+def approved_owner_admission(current):
+    """Read owner consent from GitHub, never from the untrusted PR snapshot alone."""
+    repo = os.environ.get('GITHUB_REPOSITORY', '')
+    if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+', repo) or not os.environ.get('GH_TOKEN'):
+        raise ValueError('GitHub repository or token unavailable for owner admission')
+    number = current['number']
+    head = (current.get('head') or {}).get('sha')
+    if not isinstance(head, str) or not re.fullmatch(r'[0-9a-f]{40}', head):
+        raise ValueError('current PR head SHA unavailable')
+    live_pr = _gh_api(f'repos/{repo}/pulls/{number}')
+    if live_pr.get('state') != 'open' or (live_pr.get('head') or {}).get('sha') != head:
+        raise ValueError('current PR changed during owner admission')
+    owner = _gh_api(f'repos/{repo}')['owner']['login']
+    head_created_at = _gh_api(f'repos/{repo}/commits/{head}')['commit']['committer']['date']
+    pages = _gh_api(f'repos/{repo}/issues/{number}/comments?per_page=100', paginate=True)
+    if not isinstance(pages, list) or any(not isinstance(page, list) for page in pages):
+        raise ValueError('owner comments could not be verified')
+    allowed = owner_admission_allows([c for page in pages for c in page], owner, number, head, head_created_at)
+    if (live_pr := _gh_api(f'repos/{repo}/pulls/{number}')).get('state') != 'open' or \
+            (live_pr.get('head') or {}).get('sha') != head:
+        raise ValueError('current PR changed during owner admission')
+    return allowed
+
+
 def main():
     args = sys.argv[1:]
     try:
@@ -99,13 +151,21 @@ def main():
                 raise ValueError("current PR number must be positive")
             proceed, count = admit_current_pr(pages, prefixes, limit, number, cutoff)
             current_mode = True
+            owner_exception = False
+            if not proceed:
+                current = next(pr for pr in validate_snapshot(pages) if pr['number'] == number)
+                owner_exception = approved_owner_admission(current)
+                proceed = owner_exception
         else:
             raise ValueError("usage: agent-admission.py SNAPSHOT [--current-pr NUMBER]")
-    except (ValueError, OSError, IndexError) as error:
+    except (ValueError, OSError, IndexError, KeyError, TypeError,
+            subprocess.CalledProcessError, json.JSONDecodeError) as error:
         print(f'::error::Agent admission could not verify the queue: {error}', file=sys.stderr)
         return 1
     print(f'proceed={str(proceed).lower()}')
-    if current_mode and proceed and count > limit:
+    if current_mode and owner_exception:
+        reason = 'repository owner admitted this exact PR head'
+    elif current_mode and proceed and count > limit:
         reason = 'grandfathered existing PR may finish'
     else:
         reason = 'capacity available' if proceed else 'finish existing work before opening another PR'
