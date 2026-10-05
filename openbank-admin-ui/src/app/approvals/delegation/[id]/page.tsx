@@ -12,6 +12,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { StatusBadge } from '@/components/ui/StatusBadge'
+import { HumanReference } from '@/components/ui/HumanReference'
 import type { Tone } from '@/components/ui/tone'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure } from '@/lib/services/bff'
@@ -110,7 +111,13 @@ export default function DelegationApprovalDetailPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div>
               <h2 id="approval-summary" style={{ fontSize: 16, margin: 0 }}>{operationLabel(approval.operation, language)}</h2>
-              <div className="mono" style={{ fontSize: 11, color: 'var(--text-tertiary)', marginTop: 4 }}>{approval.id}</div>
+              <div style={{ marginTop: 4 }}>
+                <HumanReference
+                  label={t('Schválení delegace', 'Delegation approval')}
+                  reference={approval.id}
+                  copyLabel={t('Kopírovat ID schválení', 'Copy approval ID')}
+                />
+              </div>
             </div>
             <ApprovalStatusBadge state={approval.state} lang={language} />
           </div>

@@ -6,6 +6,7 @@
 
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { StatusBadge, type Tone } from '@/components/ui'
+import { EntityChip } from '@/components/entities/EntityChip'
 
 /**
  * Where the people in a campaign currently are, counted by state.
@@ -109,11 +110,7 @@ export function PeopleSummary({
             <tbody>
               {rows.map(e => (
                 <tr key={e.id} data-state={e.state}>
-                  {/* Name when we have it, short id when we do not — the full id stays in `title`,
-                      because the id is what goes into a support ticket. */}
-                  <td className="text-xs" title={e.partyId}>
-                    {partyNames[e.partyId] ?? <span className="font-mono">{e.partyId.slice(0, 8)}</span>}
-                  </td>
+                  <td className="text-xs"><EntityChip type="party" id={e.partyId} label={partyNames[e.partyId]} /></td>
                   <td>
                     <StatusBadge status={e.state} label={stateLabel(e.state)} tone={STATE_TONE[e.state] ?? 'neutral'} />
                   </td>

@@ -6,6 +6,7 @@ import React from 'react'
 import { describe, expect, it } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
+import { SessionProvider } from 'next-auth/react'
 import { PeopleSummary } from '@/components/campaigns/PeopleSummary'
 
 const ENROLMENTS = [
@@ -16,8 +17,12 @@ const ENROLMENTS = [
   { id: 'e', partyId: '9c0ffee0-0000-0000-0000-000000000000', state: 'STOPPED_MAX_SENDS', currentStep: 1 },
 ]
 
-const show = (rows = ENROLMENTS) =>
-  render(React.createElement(LanguageProvider, null, React.createElement(PeopleSummary, { enrolments: rows })))
+const show = (rows = ENROLMENTS, partyNames: Record<string, string> = {}) =>
+  render(
+    <SessionProvider session={{ user: { roles: [] } } as never}>
+      <LanguageProvider><PeopleSummary enrolments={rows} partyNames={partyNames} /></LanguageProvider>
+    </SessionProvider>,
+  )
 
 describe('people summary', () => {
   /**
@@ -68,6 +73,14 @@ describe('people summary', () => {
     expect(details).toBeTruthy()
     expect(details?.hasAttribute('open')).toBe(false)
     expect(screen.getByText(/for debugging/)).toBeTruthy()
+  })
+
+  it('shows the supplied party name while retaining the full reference', () => {
+    const id = ENROLMENTS[0].partyId
+    show(ENROLMENTS, { [id]: 'Marie Nováková' })
+
+    expect(screen.getByText('Marie Nováková')).toBeTruthy()
+    expect(screen.getByTitle(`party: ${id}`)).toBeTruthy()
   })
 
   it('says nobody is enrolled rather than rendering an empty table', () => {

@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatCard, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatCard, StatusBadge } from '@/components/ui'
 import { parseCustomer360Evidence, type Customer360Evidence } from '@/lib/customer360/evidence'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { AdverseStatePanel } from '@/components/party/AdverseStatePanel'
@@ -257,7 +257,13 @@ export default function Customer360Page() {
                 <tbody>
                   {data.consents.map(c => (
                     <tr key={c.consentId}>
-                      <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px' }}>{c.consentId}</td>
+                      <td>
+                        <HumanReference
+                          label={c.scopes.length > 0 ? c.scopes.join(', ') : t('Souhlas', 'Consent')}
+                          reference={c.consentId}
+                          copyLabel={t('Kopírovat ID souhlasu', 'Copy consent ID')}
+                        />
+                      </td>
                       <td><StatusBadge status={c.status} withDot /></td>
                       <td>
                         <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
