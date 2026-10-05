@@ -172,6 +172,11 @@ in PREPARING before any journey starts, and resume rebuilds the partial snapshot
 audience bound, not a measured release rate. The destination environment, completion deadline,
 click fraction and provider/landing throughput are still required for D4 preflight and cannot be
 deduced from audience size.
+At the current hard page maximum of 500 and one global page per minute, 100000 recipients require
+at least 200 shared admission slots before any provider or click load is counted. Other campaigns,
+start-intent recovery, failures and observed headroom can only lengthen that schedule. The operator
+view exposes this lower bound as slots, never as a delivery ETA. A deadline shorter than this bound
+cannot be approved even if every downstream system had infinite capacity.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
