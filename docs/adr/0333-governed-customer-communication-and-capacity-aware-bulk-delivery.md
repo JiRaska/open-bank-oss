@@ -165,10 +165,12 @@ before a crash there can be called exactly once. Mass activation must remain dis
 controls and the D7 end-to-end/load evidence are complete.
 
 The existing email/push path persists a `PENDING` row before provider handoff. If a failure occurs
-after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key and
-skips the request; the row can remain `PENDING`. Provider ambiguity also cannot be resolved from a
-Kafka ack. D4 therefore requires a durable dispatch queue and reconciliation, with an idempotent
-provider key where supported, before claiming resilient non-inbox delivery.
+after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key.
+It now refuses to acknowledge an unresolved duplicate and sends it to the configured dead-letter
+path for reconciliation; a terminal duplicate remains an idempotent no-op. This stops the former
+silent skip but does not prove whether the provider took the message. Provider ambiguity cannot be
+resolved from a Kafka ack. D4 therefore requires a durable dispatch queue and reconciliation,
+with an idempotent provider key where supported, before claiming resilient non-inbox delivery.
 
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic

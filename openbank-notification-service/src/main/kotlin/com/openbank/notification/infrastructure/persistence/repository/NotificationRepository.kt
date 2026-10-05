@@ -17,6 +17,10 @@ import java.util.UUID
 @Suppress("TooManyFunctions") // query methods per read/write path; grows with notification features
 class NotificationRepository : PanacheRepository<NotificationEntity> {
 
+    fun findByDeduplicationKey(key: UUID): Uni<NotificationEntity?> = Panache.withSession {
+        find("deduplicationKey", key).firstResult()
+    }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 

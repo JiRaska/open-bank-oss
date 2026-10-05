@@ -367,6 +367,46 @@ class NotificationConsumerIT {
         assertThat(correlationIdFor(partyId)).isEqualTo(grantId)
     }
 
+    @Test
+    fun `replay of an unresolved provider handoff is nacked for reconciliation`() {
+        val partyId = UUID.randomUUID()
+        val key = UUID.randomUUID()
+        val notificationId = UUID.randomUUID()
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO notifications
+                    (id, notification_id, party_id, channel, template, recipient, body, status, deduplication_key)
+                VALUES (?, ?, ?, 'PUSH', 'ACCOUNT_OPENED', ?, 'stored copy', 'PENDING', ?)
+                """.trimIndent(),
+            ).use { statement ->
+                // Keep a JDBC fixture outside Hibernate's pooled positive-id sequence.
+                statement.setLong(1, -System.currentTimeMillis())
+                statement.setObject(2, notificationId)
+                statement.setObject(3, partyId)
+                statement.setString(4, partyId.toString())
+                statement.setObject(5, key)
+                statement.executeUpdate()
+            }
+        }
+
+        val result = sendAndAwaitOutcome(
+            NotificationRequest(
+                partyId = partyId,
+                channel = NotificationChannel.PUSH,
+                template = NotificationTemplate.ACCOUNT_OPENED,
+                recipient = partyId.toString(),
+                variables = mapOf("accountNumber" to "CZ1234"),
+                deduplicationKey = key,
+            ),
+        )
+
+        assertThat(result).isEqualTo("nacked")
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("PENDING")
+        assertThat(outcomeRowsFor(notificationId)).isEmpty()
+    }
+
     /**
      * The redaction must bite at the storage boundary and nowhere earlier: the customer still
      * receives the real OTP, the database never holds it. Asserting both halves in one test is

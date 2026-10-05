@@ -430,8 +430,26 @@ class NotificationConsumer @Inject constructor(
             .onFailure()
             .recoverWithUni { failure ->
                 if (deduplicationKey != null && failure.isDeduplicationConflict()) {
-                    log.debugf("Skipping duplicate notification fact %s", deduplicationKey)
-                    Uni.createFrom().item(false)
+                    notificationRepo.findByDeduplicationKey(deduplicationKey).chain { existing ->
+                        when (existing?.status) {
+                            null -> Uni.createFrom().failure(failure)
+                            NotificationStatus.PENDING.name -> {
+                                log.errorf(
+                                    "notification.dispatch.in_doubt deduplicationKey=%s notificationId=%s " +
+                                        "— replay held for reconciliation; provider handoff may have happened",
+                                    deduplicationKey,
+                                    existing.notificationId,
+                                )
+                                Uni.createFrom().failure(
+                                    IllegalStateException("notification dispatch outcome is unresolved"),
+                                )
+                            }
+                            else -> {
+                                log.debugf("Skipping completed notification fact %s", deduplicationKey)
+                                Uni.createFrom().item(false)
+                            }
+                        }
+                    }
                 } else {
                     Uni.createFrom().failure(failure)
                 }
