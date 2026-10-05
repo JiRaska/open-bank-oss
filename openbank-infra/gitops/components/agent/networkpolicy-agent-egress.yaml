@@ -123,14 +123,14 @@ spec:
       ports:
         - protocol: TCP
           port: 8101
-    # aml: aml-service :8117
+    # aml: aml-service :8443 (private-CA mTLS listener)
     - to:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: aml
       ports:
         - protocol: TCP
-          port: 8117
+          port: 8443
     # sanctions: sanctions-service :8123
     - to:
         - namespaceSelector:

@@ -112,9 +112,15 @@ permissions:
   contents: read
 
 concurrency:
-  # Serialise per watched workflow so two completions cannot race the same issue.
-  # O(1) in the fleet size: a group name is not a place to carry data (#3082).
-  group: main-red-watch-${{ github.event.workflow_run.name || github.ref }}
+  # Serialise real verdicts per watched workflow so two completions cannot race
+  # the same issue. GitHub replaces an older PENDING run in a group even with
+  # cancel-in-progress=false; a cancelled/skipped/neutral source event must not
+  # evict a pending red or green verdict. Those events get a separate group and
+  # skip the watch job without allocating a runner.
+  group: >-
+    main-red-watch-${{ github.event.workflow_run.name || github.ref }}-${{
+    contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion)
+    && 'ignored' || 'verdict' }}
   cancel-in-progress: false
 
 jobs:
@@ -144,7 +150,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push')
+       github.event.workflow_run.event == 'push' &&
+       !contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

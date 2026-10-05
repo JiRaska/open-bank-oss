@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/wealth-service-v0.2.2...wealth-service-v0.3.0) (2026-10-04)
+
+
+### Features
+
+* **wealth:** keep a canary's holding synthetic in state and on every event ([#12052](https://github.com/JiRaska/open-bank-oss/issues/12052)) ([ee4047d](https://github.com/JiRaska/open-bank-oss/commit/ee4047d491009cfc3beb8d88363c8acebc8559a4)), closes [#4348](https://github.com/JiRaska/open-bank-oss/issues/4348) [#9829](https://github.com/JiRaska/open-bank-oss/issues/9829)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.2.2](https://github.com/JiRaska/open-bank-oss/compare/wealth-service-v0.2.1...wealth-service-v0.2.2) (2026-10-02)
 
 
