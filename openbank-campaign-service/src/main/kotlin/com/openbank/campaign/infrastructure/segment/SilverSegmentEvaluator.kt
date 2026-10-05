@@ -5,16 +5,19 @@
 package com.openbank.campaign.infrastructure.segment
 
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.domain.model.Segment
 import jakarta.enterprise.context.ApplicationScoped
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.eclipse.microprofile.config.inject.ConfigProperty
-import org.jboss.logging.Logger
 import java.net.URI
 import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.charset.StandardCharsets
+import java.time.Duration
 import java.util.Optional
 import java.util.UUID
 
@@ -41,14 +44,74 @@ class SilverSegmentEvaluator(
     private val database: String,
 ) : SegmentEvaluationPort {
 
-    private val log = Logger.getLogger(SilverSegmentEvaluator::class.java)
     private val http: HttpClient = HttpClient.newHttpClient()
+
+    override suspend fun count(segment: Segment): Long {
+        val (where, params) = segment.toWhereClause()
+        val sql = "SELECT count(DISTINCT aggregate_id) AS cohort_size FROM $database.silver_current_state " +
+            "WHERE $where FORMAT JSONEachRow"
+        val query = params.entries.joinToString("&") { (key, value) ->
+            "param_$key=" + URLEncoder.encode(value.toString(), StandardCharsets.UTF_8)
+        }
+        val request = HttpRequest.newBuilder(URI.create("$clickHouseUrl?$query"))
+            .POST(HttpRequest.BodyPublishers.ofString(sql))
+            .header("Content-Type", "text/plain")
+            .timeout(QUERY_TIMEOUT)
+        clickHouseUser.filter { it.isNotBlank() }.ifPresent { request.header("X-ClickHouse-User", it) }
+        clickHousePassword.filter { it.isNotBlank() }.ifPresent { request.header("X-ClickHouse-Key", it) }
+        val response = withContext(Dispatchers.IO) {
+            http.send(request.build(), HttpResponse.BodyHandlers.ofString())
+        }
+        check(response.statusCode() == HTTP_OK) { "segment count failed: ClickHouse ${response.statusCode()}" }
+        return requireNotNull(COHORT_SIZE.find(response.body())?.groupValues?.get(1)) {
+            "segment count contained no cohort_size"
+        }.toLong()
+    }
+
+    /** ClickHouse enforces the page bound before its HTTP response reaches the JVM. */
+    override suspend fun page(segment: Segment, after: UUID?, limit: Int): SegmentPage {
+        require(limit in 1..SegmentPage.MAX_PAGE_SIZE) { "invalid segment page limit" }
+        val (where, params) = segment.toWhereClause()
+        val sql = buildString {
+            append("SELECT DISTINCT aggregate_id FROM ").append(database).append(".silver_current_state")
+            append(" WHERE (").append(where).append(")")
+            if (after != null) append(" AND aggregate_id > {p_cursor:String}")
+            append(" ORDER BY aggregate_id LIMIT {p_limit:UInt32} FORMAT JSONEachRow")
+        }
+        val bound = params + mapOf("p_limit" to limit) +
+            (after?.let { mapOf("p_cursor" to it.toString()) } ?: emptyMap())
+        val query = bound.entries.joinToString("&") { (key, value) ->
+            "param_$key=" + URLEncoder.encode(value.toString(), StandardCharsets.UTF_8)
+        }
+        val builder = HttpRequest.newBuilder(URI.create("$clickHouseUrl?$query"))
+            .POST(HttpRequest.BodyPublishers.ofString(sql))
+            .header("Content-Type", "text/plain")
+            .timeout(QUERY_TIMEOUT)
+        clickHouseUser.filter { it.isNotBlank() }.ifPresent { builder.header("X-ClickHouse-User", it) }
+        clickHousePassword.filter { it.isNotBlank() }.ifPresent { builder.header("X-ClickHouse-Key", it) }
+        val response = withContext(Dispatchers.IO) {
+            http.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+        }
+        check(response.statusCode() == HTTP_OK) {
+            "segment page failed: ClickHouse " + response.statusCode() + " — " +
+                response.body().take(ERROR_PREVIEW_CHARS)
+        }
+        val ids = response.body().lineSequence().filter { it.isNotBlank() }.map { line ->
+            UUID.fromString(
+                requireNotNull(AGGREGATE_ID.find(line)?.groupValues?.get(1)) {
+                    "segment page contained no aggregate_id"
+                },
+            )
+        }.toList()
+        check(ids.size <= limit && ids.distinct().size == ids.size) { "invalid segment page" }
+        return SegmentPage(ids, ids.lastOrNull())
+    }
 
     /**
      * One-party membership: the same generated WHERE clause plus an `aggregate_id` predicate.
      *
-     * Built from [evaluate]'s own query rather than a second hand-written one — the whole risk here
-     * is the two drifting, so that a trigger enrols someone the segment would not have returned.
+     * Uses the same typed rule conversion as count and page, so trigger membership follows the
+     * same segment predicate as bulk enrolment.
      * `LIMIT 1` because the answer is a boolean; the party id travels as a bound parameter like
      * every other rule value, so it cannot become SQL.
      */
@@ -83,59 +146,13 @@ class SilverSegmentEvaluator(
         return response.body().isNotBlank()
     }
 
-    override suspend fun evaluate(segment: Segment): List<UUID> {
-        val (where, params) = segment.toWhereClause()
-        val sql = buildString {
-            append("SELECT DISTINCT aggregate_id FROM ").append(database).append(".silver_current_state")
-            append(" WHERE ").append(where)
-            append(" FORMAT JSONEachRow")
-        }
-        // Bind values travel as `?param_<name>=` on the URL — ClickHouse's only supported form for
-        // query parameters over HTTP. They used to be sent as `X-ClickHouse-Parameter-<name>`
-        // headers, which ClickHouse ignores entirely, so every evaluation died with
-        // `Code: 456 ... Substitution 'p0_status' is not set` (#2749). Still parameters, not
-        // interpolation: the values are URL-encoded here and substituted by ClickHouse, so a rule
-        // value cannot become SQL.
-        val query = params.entries.joinToString("&") { (k, v) ->
-            "param_$k=" + URLEncoder.encode(v.toString(), StandardCharsets.UTF_8)
-        }
-        val uri = URI.create(if (query.isEmpty()) clickHouseUrl else "$clickHouseUrl?$query")
-        val requestBuilder = HttpRequest.newBuilder(uri)
-            .POST(HttpRequest.BodyPublishers.ofString(sql))
-            .header("Content-Type", "text/plain")
-        clickHouseUser.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-User", it) }
-        clickHousePassword.filter { it.isNotBlank() }.ifPresent { requestBuilder.header("X-ClickHouse-Key", it) }
-
-        val response = http.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() != HTTP_OK) {
-            log.errorf("ClickHouse segment evaluation failed (%d): %s", response.statusCode(), response.body())
-            // ANY non-200 throws. An earlier version of this only threw on 4xx, reasoning that a
-            // rejected query is a bug while a 5xx is an outage worth failing closed on. That split
-            // does not survive contact with ClickHouse: it answers **500** for SQL it cannot
-            // execute, so the exact defect the split existed to surface — an unbound parameter,
-            // `Code: 456 ... Substitution is not set` — came back as 5xx and was swallowed into an
-            // empty cohort anyway. "Nobody matched" and "the query never ran" must not look alike,
-            // and no status-code split can tell them apart here.
-            throw IllegalStateException(
-                "segment ${segment.name}@${segment.version} could not be evaluated: " +
-                    "ClickHouse returned ${response.statusCode()} — ${response.body().trim()}",
-            )
-        }
-        return response.body().lineSequence()
-            .filter { it.isNotBlank() }
-            .mapNotNull { line ->
-                runCatching {
-                    UUID.fromString(AGGREGATE_ID.find(line)?.groupValues?.get(1))
-                }.getOrNull()
-            }
-            .toList()
-    }
-
     companion object {
         private const val HTTP_OK = 200
+        private val QUERY_TIMEOUT = Duration.ofSeconds(10)
 
         /** Enough of a ClickHouse error to identify it, short enough not to dump a page into a log. */
         private const val ERROR_PREVIEW_CHARS = 200
         private val AGGREGATE_ID = Regex("\"aggregate_id\"\\s*:\\s*\"([0-9a-fA-F-]{36})\"")
+        private val COHORT_SIZE = Regex("\"cohort_size\"\\s*:\\s*\"?(\\d+)\"?")
     }
 }

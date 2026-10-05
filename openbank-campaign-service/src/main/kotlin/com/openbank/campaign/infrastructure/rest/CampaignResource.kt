@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.infrastructure.rest
 
+import com.openbank.campaign.application.usecase.BulkAdmissionService
 import com.openbank.campaign.application.usecase.CampaignNotFoundException
 import com.openbank.campaign.application.usecase.CampaignReferenceNotFoundException
 import com.openbank.campaign.application.usecase.CampaignService
@@ -224,7 +225,11 @@ private fun CreateCampaignRequest.toDefinition(): CampaignDefinition = CampaignD
 @Path("/api/v1/campaigns")
 @ApplicationScoped
 @Suppress("TooManyFunctions") // Each method is a separately authorised lifecycle endpoint.
-class CampaignResource(private val service: CampaignService, private val jwt: JsonWebToken) {
+class CampaignResource(
+    private val service: CampaignService,
+    private val admission: BulkAdmissionService,
+    private val jwt: JsonWebToken,
+) {
 
     @GET
     @Authorize(action = "campaign.read", resource = "#id")
@@ -337,7 +342,7 @@ class CampaignResource(private val service: CampaignService, private val jwt: Js
     @Path("/{id}/enrol")
     @Authorize(action = "campaign.enrol", resource = "#id")
     suspend fun enrol(@PathParam("id") id: UUID): Response = runCatching {
-        val outcome = service.enrol(id)
+        val outcome = admission.enrolSmall(id)
         Response.ok(mapOf("enrolled" to outcome.enrolled, "failed" to outcome.failed)).build()
     }.getOrElse { Response.status(Response.Status.CONFLICT).entity(mapOf("error" to it.message)).build() }
 

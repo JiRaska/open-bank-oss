@@ -4,7 +4,7 @@ openapi: 3.1.0
 info:
   title: Campaign Service API
   # major == openbank.api.version == URL /api/v1 (ADR-0048).
-  version: 1.45.0
+  version: 1.46.0
   description: >-
     Campaign management first slice (ADR-0200 / ADR-0209 D3): deterministic, versioned segments;
     per-enrolment Temporal journeys; consent-gated delivery through notification-service.
@@ -402,8 +402,11 @@ paths:
   /api/v1/campaigns/{id}/enrol:
     post:
       tags: [Campaigns]
-      summary: Enrol the segment membership (starts one journey per party)
+      summary: Synchronously enrol a small segment under the global admission lease
       operationId: enrolCampaign
+      description: >-
+        Compatibility endpoint. Requires the measured deployment budget and refuses an audience
+        larger than that budget before starting any journey. Use bulk-runs for a larger audience.
       parameters:
         - $ref: '#/components/parameters/CampaignId'
       responses:
@@ -426,7 +429,7 @@ paths:
                       Parties whose journey start or enrolment write threw. Nothing is persisted
                       for them, so a later `enrol` retries them.
         '409':
-          description: Campaign not ACTIVE
+          description: Campaign inactive, budget unavailable or audience too large
   /api/v1/campaigns/{id}/enrolments:
     get:
       tags: [Campaigns]
@@ -443,6 +446,78 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Enrolment'
+  /api/v1/campaigns/{id}/bulk-runs:
+    post:
+      tags: [Campaigns]
+      summary: Start a bounded bulk admission run for an active, approved campaign
+      operationId: startCampaignBulkRun
+      description: >-
+        Requires a deployment-configured, measured global admission budget. A run admits one
+        keyset page at a time, at most once per minute across all campaigns and replicas.
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '201':
+          description: Run created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkRun' }
+        '409':
+          description: Campaign inactive, another run active, or capacity budget unavailable
+    get:
+      tags: [Campaigns]
+      summary: List recent bulk admission runs for one campaign
+      operationId: listCampaignBulkRuns
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+      responses:
+        '200':
+          description: At most 20 recent runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/BulkRun' }
+  /api/v1/campaigns/{id}/bulk-runs/{runId}:
+    get:
+      tags: [Campaigns]
+      summary: Read bulk admission progress
+      operationId: getCampaignBulkRun
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current run state
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkRun' }
+        '404':
+          description: Run not found for this campaign
+  /api/v1/campaigns/{id}/bulk-runs/{runId}/resume:
+    post:
+      tags: [Campaigns]
+      summary: Resume a held run as a different operator
+      operationId: resumeCampaignBulkRun
+      parameters:
+        - $ref: '#/components/parameters/CampaignId'
+        - name: runId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Run resumed from its durable cursor
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BulkRun' }
+        '404':
+          description: Run not found for this campaign
+        '409':
+          description: Campaign inactive, run not held, or creator attempted self-resume
 
   /api/v1/campaigns/{id}/experiment:
     get:
@@ -731,7 +806,8 @@ paths:
       tags: [Segments]
       summary: How many parties this segment currently matches
       description: >-
-        Runs the same evaluation enrolment runs, so a preview can differ from the send only by time.
+        Counts matching parties at the segment source without transferring the audience, so a
+        preview can differ from the send only by time.
         `asOf` carries that: ADR-0201 D1 requires the previewed cohort and the sent-to cohort to be
         the same set or provably a different version.
       operationId: previewSegment
@@ -774,6 +850,21 @@ components:
         type: string
         format: uuid
   schemas:
+    BulkRun:
+      type: object
+      required: [id, campaignId, state, pageSize, admitted, failures, createdBy, createdAt, updatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        campaignId: { type: string, format: uuid }
+        state: { type: string, enum: [RUNNING, HELD, COMPLETED] }
+        cursor: { type: string, format: uuid, nullable: true }
+        pageSize: { type: integer, minimum: 1, maximum: 500 }
+        admitted: { type: integer, format: int64 }
+        failures: { type: integer, format: int64 }
+        lastError: { type: string, nullable: true }
+        createdBy: { type: string }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
     OutcomeCount:
       type: object
       required: [outcome, count]
@@ -1348,7 +1439,7 @@ components:
       properties:
         name: { type: string }
         version: { type: integer, minimum: 1 }
-        size: { type: integer, minimum: 0 }
+        size: { type: integer, format: int64, minimum: 0 }
         asOf: { type: string, format: date-time }
 
     CreateAudienceRequest:
@@ -1374,7 +1465,7 @@ components:
       properties:
         name: { type: string }
         version: { type: integer }
-        size: { type: integer, description: Parties matched at asOf. }
+        size: { type: integer, format: int64, description: Parties matched at asOf. }
         asOf: { type: string, format: date-time }
 
 

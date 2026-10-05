@@ -67,7 +67,7 @@ class CampaignRestContractIT {
         every { audienceJwt.name } returns "maker@openbank.test"
         every { audienceJwt.subject } returns "maker@openbank.test"
         QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
-        coEvery { segmentEvaluator.evaluate(any()) } returns emptyList()
+        coEvery { segmentEvaluator.count(any()) } returns 0L
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
         QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
     }
@@ -78,11 +78,33 @@ class CampaignRestContractIT {
      */
     class NoBrokerNoWorkerResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
-            val props = InMemoryConnector.switchOutgoingChannelsToInMemory("notification-requests-out").toMutableMap()
-            props.putAll(InMemoryConnector.switchIncomingChannelsToInMemory("consent-events-in"))
+            val props = InMemoryConnector.switchOutgoingChannelsToInMemory(
+                "notification-requests-out",
+                "campaign-banner-placements-out",
+            ).toMutableMap()
+            props.putAll(
+                InMemoryConnector.switchIncomingChannelsToInMemory(
+                    "incentive-events-in",
+                    "engagement-events-in",
+                    "notification-outcomes-in",
+                    "account-conversions-in",
+                    "card-conversions-in",
+                    "account-triggers-in",
+                    "card-triggers-in",
+                    "consent-events-in",
+                ),
+            )
             props["campaign.worker.enabled"] = "false"
             props["openbank.campaign.worker.enabled"] = "false"
             props["openbank.temporal.enabled"] = "false"
+            props["quarkus.scheduler.enabled"] = "false"
+            props["quarkus.oidc-client.enabled"] = "false"
+            props["quarkus.oidc-client.m2m.enabled"] = "false"
+            props["quarkus.oidc-client.discovery-enabled"] = "false"
+            props["quarkus.oidc-client.token-path"] = "/protocol/openid-connect/token"
+            props["quarkus.oidc-client.m2m.discovery-enabled"] = "false"
+            props["quarkus.oidc-client.m2m.token-path"] = "/protocol/openid-connect/token"
+            props["openbank.campaign.bulk-admission-per-minute"] = "1"
             return props
         }
 
@@ -468,6 +490,53 @@ class CampaignRestContractIT {
                     statement.setInt(15, incentiveOfferRef.version)
                 }
                 statement.executeUpdate()
+            }
+        }
+    }
+
+    @Test
+    fun `bulk run is persisted and served over the operator API`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+
+        val runId = When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(201)
+            body("campaignId", equalTo(campaignId.toString()))
+            body("pageSize", equalTo(1))
+        } Extract {
+            path<String>("id")
+        }
+
+        When {
+            get("/api/v1/campaigns/$campaignId/bulk-runs/$runId")
+        } Then {
+            statusCode(200)
+            body("id", equalTo(runId))
+        }
+
+        When {
+            get("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(200)
+            body("findAll { it.id == '$runId' }.size()", equalTo(1))
+        }
+
+        When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("campaign already has an active bulk run"))
+        }
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT page_size FROM campaign_bulk_runs WHERE id = ?").use { statement ->
+                statement.setObject(1, UUID.fromString(runId))
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
             }
         }
     }

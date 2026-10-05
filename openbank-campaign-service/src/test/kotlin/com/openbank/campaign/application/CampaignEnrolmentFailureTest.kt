@@ -12,6 +12,7 @@ import com.openbank.campaign.application.port.out.EnrolmentRepository
 import com.openbank.campaign.application.port.out.JourneySignaller
 import com.openbank.campaign.application.port.out.JourneyType
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.application.usecase.EnrolmentOutcome
@@ -30,6 +31,7 @@ import com.openbank.campaign.infrastructure.observability.CampaignMetricsAdapter
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Instant
 import java.util.UUID
@@ -136,7 +138,12 @@ class CampaignEnrolmentFailureTest {
             override suspend fun list(): List<Segment> = listOf(segment)
         },
         segmentEvaluation = object : SegmentEvaluationPort {
-            override suspend fun evaluate(segment: Segment): List<UUID> = audience
+            override suspend fun count(segment: Segment): Long = audience.size.toLong()
+            override suspend fun page(segment: Segment, after: UUID?, limit: Int): SegmentPage {
+                val start = if (after == null) 0 else audience.indexOf(after) + 1
+                val members = audience.drop(start).take(limit)
+                return SegmentPage(members, members.lastOrNull())
+            }
             override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
         },
         journeys = journeys,
@@ -159,6 +166,19 @@ class CampaignEnrolmentFailureTest {
         override fun pause(campaignId: UUID) = error("enrol must not touch the scheduler")
         override fun unpause(campaignId: UUID) = error("enrol must not touch the scheduler")
         override fun delete(campaignId: UUID) = error("enrol must not touch the scheduler")
+    }
+
+    @Test
+    fun `synchronous path refuses an oversized audience before starting any journey`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments()
+        val journeys = FlakyJourneys(emptySet())
+        val campaignService = service(enrolments, journeys)
+
+        assertThatThrownBy { runBlocking { campaignService.enrolWithinLimit(campaignId, 2) } }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        assertThat(enrolments.saved).isEmpty()
+        assertThat(journeys.started).isEmpty()
     }
 
     @Test

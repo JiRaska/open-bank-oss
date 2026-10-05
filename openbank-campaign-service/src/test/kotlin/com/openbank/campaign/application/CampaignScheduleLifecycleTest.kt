@@ -140,7 +140,9 @@ class CampaignScheduleLifecycleTest {
                 override suspend fun list(): List<Segment> = listOf(segment)
             },
             segmentEvaluation = object : SegmentEvaluationPort {
-                override suspend fun evaluate(segment: Segment): List<UUID> = emptyList()
+                override suspend fun count(segment: Segment): Long = 0
+                override suspend fun page(segment: Segment, after: UUID?, limit: Int) =
+                    com.openbank.campaign.application.port.out.SegmentPage(emptyList(), null)
                 override suspend fun matches(segment: Segment, partyId: UUID): Boolean = true
             },
             journeys = journeys,
