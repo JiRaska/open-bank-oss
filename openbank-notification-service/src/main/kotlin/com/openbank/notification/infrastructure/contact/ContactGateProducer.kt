@@ -32,8 +32,8 @@ import java.util.UUID
  *   campaign-service's send log (no shared Valkey counter exists yet).
  *   `impressionsInWindow` is unused by `OUTBOUND_SEND` and returns 0 rather than being wired to
  *   anything invented.
- * - `suppression`: the honest empty port, same reason as campaign/engagement — no ADR-0219 D3
- *   platform suppression *store* exists yet.
+ * - `suppression`: the live consent-service list, shared with campaign-service. An unavailable
+ *   read propagates so the gate denies counted traffic with GATE_UNAVAILABLE.
  */
 @ApplicationScoped
 class ContactGateProducer {
@@ -43,6 +43,7 @@ class ContactGateProducer {
     fun contactPolicyGate(
         @RestClient consentServiceClient: ConsentServiceClient,
         notificationRepo: NotificationRepository,
+        suppression: ContactSuppressionPort,
     ): ContactPolicyGate {
         val marketingTemplates = NotificationTemplate.entries
             .filter { it.category == NotificationCategory.MARKETING }
@@ -57,7 +58,7 @@ class ContactGateProducer {
 
                 override suspend fun impressionsInWindow(partyId: UUID, windowStart: Instant): Int = 0
             },
-            suppression = ContactSuppressionPort { emptyList() },
+            suppression = suppression,
             policy = ContactPolicy(),
         )
     }

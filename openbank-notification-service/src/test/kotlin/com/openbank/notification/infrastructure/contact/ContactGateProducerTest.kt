@@ -6,6 +6,10 @@ package com.openbank.notification.infrastructure.contact
 
 import com.openbank.libs.contact.ContactClass
 import com.openbank.libs.contact.ContactDenyReason
+import com.openbank.libs.contact.ContactSuppressionPort
+import com.openbank.libs.contact.SuppressionEntry
+import com.openbank.libs.contact.SuppressionReason
+import com.openbank.libs.contact.SuppressionScope
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.infrastructure.client.ConsentCheckResponse
@@ -37,8 +41,11 @@ class ContactGateProducerTest {
 
     private val consentClient = mockk<ConsentServiceClient>()
     private val repo = mockk<NotificationRepository>()
+    private val suppressions = mockk<ContactSuppressionPort> {
+        coEvery { activeSuppressions(any()) } returns emptyList()
+    }
 
-    private val gate = ContactGateProducer().contactPolicyGate(consentClient, repo)
+    private val gate = ContactGateProducer().contactPolicyGate(consentClient, repo, suppressions)
 
     private val partyId: UUID = UUID.randomUUID()
 
@@ -79,6 +86,29 @@ class ContactGateProducerTest {
 
         assertThat(decision.allowed).isFalse()
         assertThat(decision.denyReason).isEqualTo(ContactDenyReason.GATE_UNAVAILABLE)
+    }
+
+    @Test
+    fun `a platform suppression denies notification marketing before counters and consent`(): Unit = runBlocking {
+        coEvery { suppressions.activeSuppressions(partyId) } returns listOf(
+            SuppressionEntry(SuppressionScope.ALL, null, SuppressionReason.CUSTOMER_OPTOUT, "test"),
+        )
+
+        val decision = gate.check(partyId, ContactClass.OUTBOUND_SEND, "MARKETING_COMMS_EMAIL")
+
+        assertThat(decision.denyReason).isEqualTo(ContactDenyReason.SUPPRESSED_LIST)
+        coVerify(exactly = 0) { repo.countSince(any(), any(), any()) }
+        coVerify(exactly = 0) { consentClient.hasActiveConsent(any(), any(), any()) }
+    }
+
+    @Test
+    fun `unavailable suppression list fails notification marketing closed`(): Unit = runBlocking {
+        coEvery { suppressions.activeSuppressions(partyId) } throws IllegalStateException("consent unavailable")
+
+        val decision = gate.check(partyId, ContactClass.OUTBOUND_SEND, "MARKETING_COMMS_EMAIL")
+
+        assertThat(decision.denyReason).isEqualTo(ContactDenyReason.GATE_UNAVAILABLE)
+        coVerify(exactly = 0) { repo.countSince(any(), any(), any()) }
     }
 
     @Test

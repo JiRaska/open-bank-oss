@@ -182,6 +182,10 @@ before run creation and holds a prepared run when its frozen audience needs more
 admission slots than that deadline. This rejects a mathematically impossible deadline before any
 journey starts, including after a budget reduction. It does not yet prove a feasible deadline:
 provider dispatch, shared slot contention and landing bursts still need measured D4 limits.
+Notification-service's marketing ContactPolicyGate now reads the same live consent-service
+suppression list as campaign-service. A matching entry denies before counters or consent; an
+unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count
+contacts locally, so this does not satisfy D2's atomic cross-origin reservation.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
