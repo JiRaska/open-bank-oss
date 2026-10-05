@@ -109,6 +109,7 @@ class CampaignRestContractIT {
             props["quarkus.oidc-client.m2m.token-path"] = "/protocol/openid-connect/token"
             props["openbank.campaign.bulk-admission-per-minute"] = "1"
             props["openbank.campaign.mass-activation-enabled"] = "true"
+            props["openbank.campaign.mass-completion-deadline-minutes"] = "10"
             return props
         }
 
@@ -591,6 +592,47 @@ class CampaignRestContractIT {
             }
         }
         finishContractRun(runUuid)
+    }
+
+    @Test
+    fun `infeasible deadline holds frozen audience with no enrolments`() {
+        val campaignId = UUID.randomUUID()
+        insertCampaignForSendLog(campaignId)
+        coEvery { segmentEvaluator.stream(any(), any()) } coAnswers {
+            secondArg<suspend (List<UUID>) -> Unit>()(List(11) { UUID.randomUUID() })
+        }
+        releaseAdmissionBudgetForContract()
+        val runId = When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs")
+        } Then {
+            statusCode(201)
+        } Extract {
+            path<String>("id")
+        }
+        val runUuid = UUID.fromString(runId)
+        assertThat(awaitBulkStateChange(runUuid, "PREPARING")).isEqualTo("RUNNING")
+        releaseAdmissionBudgetForContract()
+
+        assertThat(awaitBulkStateChange(runUuid, "RUNNING")).isEqualTo("HELD")
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT audience_count, last_error FROM campaign_bulk_runs WHERE id = ?",
+            ).use { statement ->
+                statement.setObject(1, runUuid)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong(1)).isEqualTo(11)
+                    assertThat(rows.getString(2)).isEqualTo("ADMISSION_DEADLINE_INFEASIBLE")
+                }
+            }
+            connection.prepareStatement("SELECT count(*) FROM enrolments WHERE campaign_id = ?").use { statement ->
+                statement.setObject(1, campaignId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getLong(1)).isZero()
+                }
+            }
+        }
     }
 
     private fun finishContractRun(runId: UUID) {

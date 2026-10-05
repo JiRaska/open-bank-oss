@@ -177,6 +177,11 @@ at least 200 shared admission slots before any provider or click load is counted
 start-intent recovery, failures and observed headroom can only lengthen that schedule. The operator
 view exposes this lower bound as slots, never as a delivery ETA. A deadline shorter than this bound
 cannot be approved even if every downstream system had infinite capacity.
+Campaign-service now requires an explicit mass completion deadline configuration (zero by default)
+before run creation and holds a prepared run when its frozen audience needs more one-minute
+admission slots than that deadline. This rejects a mathematically impossible deadline before any
+journey starts, including after a budget reduction. It does not yet prove a feasible deadline:
+provider dispatch, shared slot contention and landing bursts still need measured D4 limits.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and

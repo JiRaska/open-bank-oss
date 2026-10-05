@@ -81,6 +81,8 @@ class BulkAdmissionService @Inject constructor(
     private val massActivationEnabled: Boolean = false,
     @ConfigProperty(name = "openbank.campaign.max-bulk-audience", defaultValue = "100000")
     private val maxBulkAudience: Long = MAX_BULK_AUDIENCE,
+    @ConfigProperty(name = "openbank.campaign.mass-completion-deadline-minutes", defaultValue = "0")
+    private val deadlineMinutes: Long = 0,
 ) {
     @Inject lateinit var segments: SegmentRegistry
 
@@ -100,6 +102,7 @@ class BulkAdmissionService @Inject constructor(
         check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
         check(maxBulkAudience in 1..MAX_BULK_AUDIENCE) { "bulk audience limit must be between 1 and 100000" }
+        check(deadlineMinutes > 0) { "mass completion deadline is not configured" }
         val campaign = campaigns.findById(campaignId) ?: throw CampaignNotFoundException(campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can start a bulk run" }
         return runs.create(Ids.newId(), campaignId, pageSize, actor)
@@ -123,6 +126,7 @@ class BulkAdmissionService @Inject constructor(
 
     suspend fun resume(id: UUID, actor: String): BulkRun {
         check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
+        check(deadlineMinutes > 0) { "mass completion deadline is not configured" }
         val run = runs.find(id) ?: throw NoSuchElementException("bulk run $id not found")
         val campaign = campaigns.findById(run.campaignId) ?: throw CampaignNotFoundException(run.campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "campaign must be ACTIVE to resume a run" }
@@ -186,8 +190,14 @@ class BulkAdmissionService @Inject constructor(
         pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || run.pageSize > pageSize -> "CAPACITY_BUDGET_REDUCED"
         maxBulkAudience !in 1..MAX_BULK_AUDIENCE -> "AUDIENCE_LIMIT_INVALID"
         (run.audienceCount ?: 0) > maxBulkAudience -> "AUDIENCE_LIMIT_REDUCED"
+        deadlineMinutes <= 0 -> "DEADLINE_NOT_CONFIGURED"
+        run.audienceCount != null && admissionSlots(run.audienceCount, run.pageSize) > deadlineMinutes ->
+            "ADMISSION_DEADLINE_INFEASIBLE"
         else -> null
     }
+
+    private fun admissionSlots(audienceCount: Long, runPageSize: Int): Long =
+        audienceCount / runPageSize + if (audienceCount % runPageSize == 0L) 0 else 1
 
     private suspend fun prepareAudience(claim: ClaimedBulkRun) {
         val campaign = campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)

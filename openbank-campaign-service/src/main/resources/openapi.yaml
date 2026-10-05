@@ -456,6 +456,9 @@ paths:
         keyset page at a time, at most once per minute across all campaigns and replicas. Mass
         activation has a separate default-off flag. The audience snapshot is held before any
         journey starts if it exceeds the configured ceiling, which cannot exceed 100000 parties.
+        A completion deadline must be configured; after the snapshot, an infeasible admission
+        lower bound holds the run before any journey starts. Provider and click capacity require
+        separate evidence before mass activation.
       parameters:
         - $ref: '#/components/parameters/CampaignId'
       responses:

@@ -23,6 +23,10 @@ cannot be raised above 100000. The streamed snapshot holds a larger run before s
 resume rebuilds its partial snapshot. This audience ceiling does not prove that 100000 contacts can
 meet a delivery deadline. `openbank.campaign.mass-activation-enabled` separately defaults to false
 until the provider, destination and end-to-end capacity controls in ADR-0333 are demonstrated.
+`openbank.campaign.mass-completion-deadline-minutes` defaults to `0` and blocks run creation. When
+configured, a run with a completed snapshot is held before the next page if even the minimum number
+of one-minute admission slots exceeds this deadline. The check is a necessary condition only:
+provider delivery, other users of the global slot and destination clicks add time and load.
 
 ## Interface
 
