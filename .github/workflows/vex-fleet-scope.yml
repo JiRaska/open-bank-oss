@@ -12,6 +12,8 @@ on:
     paths:
       - openbank-libs/governance/vex/**
       - .github/scripts/check-vex-fleet-scope.py
+      - .github/scripts/check-vex-statement-completeness.py
+      - .github/scripts/vex-incomplete-baseline.json
       - .github/workflows/vex-fleet-scope.yml
 
 permissions:
@@ -35,3 +37,11 @@ jobs:
 
       - name: Enforce fleet scope
         run: python3 .github/scripts/check-vex-fleet-scope.py
+
+      - name: Set up Trivy
+        uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+        with:
+          cache: true
+
+      - name: Prove VEX scanner effect
+        run: python3 .github/scripts/check-vex-statement-completeness.py --scanner-self-test

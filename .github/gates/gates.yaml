@@ -5939,6 +5939,28 @@ gates:
     run: |
       python3 .github/scripts/check-vex-overlay-coverage.py
 
+  # Standalone OpenVEX statements need a product PURL and time to reach Trivy. Existing
+  # incomplete statements are tracked as invalid debt; a new one is never grandfathered.
+  - id: vex-statement-completeness
+    name: "OpenVEX statements carry product PURLs and timestamps"
+    group: supplychain
+    mode: enforced
+    rationale: >-
+      A productless OpenVEX statement parses but does not suppress its CVE in Trivy. PURLs
+      and timestamps are necessary; matching each claim to an artifact remains a separate
+      security review. The legacy incomplete set is an explicit ratchet baseline, not a
+      valid disposition;
+      additions and stale baseline entries fail. The VEX fleet-scope workflow separately
+      probes Trivy's actual product matching with a vulnerable CycloneDX fixture.
+    review_after: "2027-04-05"
+    selftest: python3 .github/scripts/check-vex-statement-completeness.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-vex-statement-completeness.py"]
+    min_subjects: 1200
+    budget_seconds: 20
+    run: |
+      python3 .github/scripts/check-vex-statement-completeness.py
+
   - id: vex-range-reasoning
     name: "a VEX verdict reasoned across release lines is anchored to a pinned artifact (#4716, enforced)"
     group: supplychain
