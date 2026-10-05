@@ -3801,6 +3801,29 @@ gates:
     run: |
       python3 .github/scripts/check-pact-provider-replay.py
 
+  # Issue #11685. The release-time postcondition below checks only tags cut in THAT run;
+  # the old weekly verifier checked one newest tag across the whole fleet. This advisory
+  # gate reads all published releases and checks every versioned component's latest tag
+  # for the complete asset set. The scheduled verifier consumes that same inventory and
+  # cryptographically verifies each bundle. A missing release or unreadable API is red,
+  # so an empty inventory cannot look like an observed clean window.
+  - id: provenance
+    name: "latest release evidence across the fleet (issue #11685, advisory)"
+    group: supplychain
+    mode: advisory
+    rationale: "Graduation requires every deployable component's latest release to carry a complete, independently verified evidence bundle; a single newest-tag check cannot prove fleet coverage."
+    review_after: "2027-03-31"
+    budget_seconds: 90
+    min_subjects: 60
+    selftest_inputs:
+      - ".github/scripts/check-fleet-release-evidence.py"
+      - ".github/workflows/verify-release-evidence.yml"
+      - "release-please-config.json"
+    selftest: |
+      python3 .github/scripts/check-fleet-release-evidence.py --self-test
+    run: |
+      python3 .github/scripts/check-fleet-release-evidence.py
+
   # Issue #7597. release-please.yml's "Map released components -> tags" step builds released.tsv
   # from release-please-config.json's per-package `component` field; a package with a version.txt
   # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that

@@ -15,8 +15,8 @@ name: Verify release evidence
 # was wrong with the workflow: the first dispatch (run 31278713964, tag
 # notification-service-v0.18.1) verified 4 cosign/KMS signatures and 3 manifest digests
 # and passed. A control whose only trigger is a human remembering is a control that does
-# not run; the cron makes it run against the newest release each week. The tag input still
-# takes precedence, so auditing a specific tag by hand is unchanged.
+# not run. Since #11685 the cron checks the latest release of EVERY versioned component;
+# the tag input still takes precedence for a one-release audit by hand.
 
 on:
   schedule:
@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to verify (default on a schedule: the newest release)"
+        description: "Release tag to verify (default on a schedule: every component's latest release)"
         required: false
         type: string
 
@@ -40,52 +40,35 @@ jobs:
     # rendered as a bare "Verify ".
     name: Verify release evidence bundle
     runs-on: ubuntu-latest  # public repo => hosted runners free+unlimited (FinOps: hosted-first)
-    timeout-minutes: 15
+    timeout-minutes: 60  # full fleet: release downloads and KMS verification per component
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      # TAG is resolved here, not in job-level `env:`, so the scheduled run has one at all.
-      # An empty tag must FAIL rather than fall through to a URL ending in `/tags/`, which
-      # 404s into a "no signed evidence found" error that reads like a provenance defect
-      # instead of an unresolved input.
-      - name: Resolve tag
+      # The same fleet inventory powers the advisory PR gate and this cryptographic
+      # consumer. A missing component/release/asset or a too-young latest release is
+      # never substituted with an older tag and never counted as a clean observation.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Resolve release tags
         env:
           REQUESTED: ${{ inputs.tag }}
-          # Grace window (issue #6729): a scheduled run must not verify a JUST-CUT
-          # release. Evidence assets (SBOM/SLSA/cosign signatures) attach
-          # asynchronously after the release object exists — measured 2026-08-24:
-          # admin-ui-v0.189.3 had ZERO assets at +4m35s and nine minutes later. The
-          # Monday 08:00 cron racing a release-please cut then red-gates a
-          # regulator-facing control on a release whose evidence simply has not
-          # landed yet. A release older than the window that STILL has no assets is
-          # a real finding and still fails below.
-          GRACE_MINUTES: 120
         run: |
           set -euo pipefail
           tag="${REQUESTED:-}"
           if [ -n "$tag" ]; then
-            # An explicitly requested tag is verified exactly as asked — the operator
-            # owns the timing then.
+            [[ "$tag" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "::error::invalid tag"; exit 1; }
+            echo "$tag" > tags.txt
+            echo "INVENTORY_RC=0" >> "$GITHUB_ENV"
             echo "::notice::explicit tag requested; grace window does not apply"
           else
-            tag="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases?per_page=20" \
-              | jq -r --argjson grace "${GRACE_MINUTES}" '
-                  (now - ($grace * 60)) as $cutoff
-                  | [ .[] | select(.draft | not)
-                      | select((.created_at | fromdateiso8601) < $cutoff) ]
-                  | (sort_by(.created_at) | reverse | .[0].tag_name) // empty')"
-            if [ -z "$tag" ]; then
-              # Every recent release is inside the grace window. That is a scheduling
-              # coincidence, not an evidence failure — say so and pass; next week's
-              # cron verifies them once they are outside it.
-              echo "::notice::all recent releases are younger than the ${GRACE_MINUTES}m grace window (#6729); nothing verified this run, nothing claimed either"
-              exit 0
-            fi
+            # Keep verifying resolved tags even when another component lacks a release
+            # or asset. The inventory verdict is carried into the final result.
+            inventory_rc=0
+            python3 .github/scripts/check-fleet-release-evidence.py --tags-output tags.txt || inventory_rc=$?
+            echo "INVENTORY_RC=$inventory_rc" >> "$GITHUB_ENV"
           fi
-          echo "TAG=${tag}" >> "$GITHUB_ENV"
-          echo "::notice::verifying evidence bundle for ${tag}"
+          [ -s tags.txt ] || { echo "::error::no release tags resolved"; exit 1; }
+          echo "::notice::verifying $(wc -l < tags.txt) evidence bundles"
 
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -97,16 +80,31 @@ jobs:
         run: |
           set -euo pipefail
           # Use the REST API (gh CLI is absent on part of the openbank-batch runner pool).
-          mkdir -p ev && cd ev
-          api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
-          rel="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}")"
-          echo "$rel" | python3 -c "import json,sys; [print(a['id'], a['name']) for a in json.load(sys.stdin).get('assets',[])]" \
-            | while read -r aid aname; do
-                curl -sSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
-                  -o "$aname" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
-              done
-          echo "Downloaded:"; ls -la
-          compgen -G '*.sig' >/dev/null || { echo "::error::no assets found on release ${TAG}"; exit 1; }
+          mkdir -p ev
+          api() { curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          download_rc=0
+          while IFS= read -r tag; do
+            mkdir -p "ev/$tag"
+            if ! rel="$(api "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"; then
+              echo "::error::release API lookup failed for ${tag}"
+              download_rc=1
+              continue
+            fi
+            if ! echo "$rel" | python3 -c "import json,sys; [print(a['id'], a['name']) for a in json.load(sys.stdin).get('assets',[])]" \
+              | while read -r aid aname; do
+                  [ "$aname" = "$(basename "$aname")" ] || { echo "::error::invalid asset name"; exit 1; }
+                  curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+                    -o "ev/$tag/$aname" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}" || exit 1
+                done; then
+              echo "::error::asset download failed for ${tag}"
+              download_rc=1
+            fi
+            if ! compgen -G "ev/$tag/*.sig" >/dev/null; then
+              echo "::error::no signed evidence found on release ${tag}"
+              download_rc=1
+            fi
+          done < tags.txt
+          echo "DOWNLOAD_RC=$download_rc" >> "$GITHUB_ENV"
 
       - name: Verify signatures (cosign + KMS) and manifest digests
         run: |
@@ -134,25 +132,27 @@ jobs:
               || { echo "::error::cosign ${COSIGN_VERSION} download failed checksum verification"; exit 1; }
             chmod +x "$bin"
           fi
-          cd ev
           rc=0
-          shopt -s nullglob
-          sigs=( *.sig )
-          [ ${#sigs[@]} -gt 0 ] || { echo "::error::no signed evidence found for $TAG"; exit 1; }
-          for sig in "${sigs[@]}"; do
-            doc="${sig%.sig}"
-            if [ ! -f "$doc" ]; then echo "::error::signature $sig without document $doc"; rc=1; continue; fi
-            if "$bin" verify-blob --key "$COSIGN_KEY" --signature "$sig" "$doc"; then
-              echo "OK signature: $doc"
-            else
-              echo "::error::cosign verify-blob FAILED for $doc"; rc=1
-            fi
-          done
-
-          # A missing manifest or omitted digest is a failed audit, not a clean no-op.
-          python3 ../.github/scripts/verify-release-evidence-manifest.py "$TAG" || rc=1
-          if [ "$rc" -eq 0 ]; then
-            echo "✅ evidence bundle for $TAG verified"
+          while IFS= read -r tag; do
+            pushd "ev/$tag" >/dev/null
+            shopt -s nullglob
+            sigs=( *.sig )
+            [ ${#sigs[@]} -gt 0 ] || { echo "::error::no signed evidence found for $tag"; rc=1; }
+            for sig in "${sigs[@]}"; do
+              doc="${sig%.sig}"
+              if [ ! -f "$doc" ]; then echo "::error::signature $sig without document $doc"; rc=1; continue; fi
+              if "$bin" verify-blob --key "$COSIGN_KEY" --signature "$sig" "$doc"; then
+                echo "OK signature: $doc"
+              else
+                echo "::error::cosign verify-blob FAILED for $doc"; rc=1
+              fi
+            done
+            # A missing manifest or omitted digest is a failed audit, not a clean no-op.
+            python3 ../../.github/scripts/verify-release-evidence-manifest.py "$tag" || rc=1
+            popd >/dev/null
+          done < tags.txt
+          if [ "$rc" -eq 0 ] && [ "${INVENTORY_RC:-2}" -eq 0 ] && [ "${DOWNLOAD_RC:-2}" -eq 0 ]; then
+            echo "✅ every latest evidence bundle verified"
           else
             echo "❌ verification failed"
             exit 1
