@@ -1,0 +1,33 @@
+# The offline security.txt gate proves repository syntax and public policy targets.
+# This watch also checks what the three public hosts actually serve (#9880).
+name: Published security.txt watch
+
+on:
+  schedule:
+    - cron: "20 6 * * *"
+  pull_request:
+    paths:
+      - ".github/scripts/check-security-txt.py"
+      - ".github/workflows/security-txt-live-watch.yml"
+      - "**/.well-known/security.txt"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: published-security-txt
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Test the verifier
+        run: python3 .github/scripts/check-security-txt.py --self-test
+      - name: Check tracked or published copies
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            python3 .github/scripts/check-security-txt.py
+          else
+            python3 .github/scripts/check-security-txt.py --live
+          fi

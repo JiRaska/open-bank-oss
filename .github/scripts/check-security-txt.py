@@ -31,7 +31,7 @@ The last rule is deliberately narrower than "some reachable URL". Reachability i
 fact this gate cannot establish, and the defect above was a URL that *looked* reachable. A path
 this repository contains is a claim the gate can verify, and this repository is public.
 
-Usage:  check-security-txt.py [--root .]
+Usage:  check-security-txt.py [--root .] [--live]
         check-security-txt.py --self-test
 """
 from __future__ import annotations
@@ -42,8 +42,58 @@ import pathlib
 import re
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 
 REPO_BLOB = re.compile(r"^https://github\.com/JiRaska/open-bank-oss/blob/main/(?P<path>[^?#]+)$")
+MAX_LIVE_BYTES = 64 * 1024
+
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+def fetch_live(url: str) -> bytes:
+    request = urllib.request.Request(url, headers={"User-Agent": "openbank-security-txt-watch/1"})
+    with urllib.request.build_opener(NoRedirect).open(request, timeout=10) as response:
+        if response.status != 200:
+            raise ValueError(f"HTTP {response.status}")
+        body = response.read(MAX_LIVE_BYTES + 1)
+        if len(body) > MAX_LIVE_BYTES:
+            raise ValueError("response exceeds size limit")
+        return body
+
+
+def live_problem(path: pathlib.Path, root: pathlib.Path, fetch=fetch_live) -> str | None:
+    rel = path.relative_to(root).as_posix()
+    source = path.read_bytes()
+    try:
+        canonicals = fields(source.decode("utf-8")).get("canonical", [])
+    except UnicodeDecodeError:
+        return f"{rel}: tracked security.txt is not UTF-8"
+    if len(canonicals) != 1:
+        return f"{rel}: expected exactly one Canonical field for live verification"
+    url = canonicals[0]
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        valid = (parsed.scheme == "https" and parsed.hostname and not parsed.username
+                 and not parsed.password and not parsed.port and not parsed.query
+                 and not parsed.fragment and parsed.path == "/.well-known/security.txt")
+    except ValueError:
+        valid = False
+    if not valid:
+        return f"{rel}: Canonical is not an HTTPS /.well-known/security.txt URL"
+    try:
+        published = fetch(url)
+    except (OSError, ValueError, urllib.error.URLError) as exc:
+        # Never print the URL, response, or exception text: the check only needs to
+        # identify which tracked copy requires attention.
+        return f"{rel}: published security.txt could not be read ({type(exc).__name__})"
+    if published != source:
+        return f"{rel}: published security.txt differs from the tracked source"
+    return None
 
 
 def fields(text: str) -> dict[str, list[str]]:
@@ -102,6 +152,13 @@ def scan(root: pathlib.Path, now: dt.datetime) -> tuple[int, list[str]]:
     return len(files), found
 
 
+def scan_live(root: pathlib.Path) -> tuple[int, list[str]]:
+    files = sorted(p for p in root.rglob(".well-known/security.txt")
+                   if "node_modules" not in p.parts and ".git" not in p.parts)
+    found = [problem for p in files if (problem := live_problem(p, root))]
+    return len(files), found
+
+
 def self_test() -> int:
     now = dt.datetime(2026, 9, 13, tzinfo=dt.timezone.utc)
     good = ("Contact: mailto:security@example.org\nExpires: 2027-06-11T00:00:00.000Z\n"
@@ -133,7 +190,18 @@ def self_test() -> int:
             ok = (not want and not got) or (want and len(got) == len(want) and all(w in g for w, g in zip(want, got, strict=True)))
             print(f"  {'ok ' if ok else 'BAD'} {name}: {got}")
             bad += 0 if ok else 1
-    print(f"SUBJECTS={len(cases)}")
+        live_file = root / "site0" / ".well-known" / "security.txt"
+        for name, fetch, expected in [
+            ("published copy matches", lambda _: good.encode(), None),
+            ("stale published copy", lambda _: b"Policy: stale\n", "differs from the tracked source"),
+            ("published copy unavailable", lambda _: (_ for _ in ()).throw(OSError("hidden address")),
+             "could not be read"),
+        ]:
+            got = live_problem(live_file, root, fetch=fetch)
+            ok = (got is None) if expected is None else (got is not None and expected in got and "hidden address" not in got)
+            print(f"  {'ok ' if ok else 'BAD'} {name}")
+            bad += 0 if ok else 1
+    print(f"SUBJECTS={len(cases) + 3}")
     print("security.txt self-test: " + ("PASS" if not bad else f"FAIL ({bad})"))
     return 1 if bad else 0
 
@@ -142,15 +210,20 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--root", default=".")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--live", action="store_true", help="compare public Canonical URLs to the tracked copies")
     args = ap.parse_args()
     if args.self_test:
         return self_test()
     root = pathlib.Path(args.root).resolve()
     count, found = scan(root, dt.datetime.now(dt.timezone.utc))
+    if args.live and not found:
+        _, live_found = scan_live(root)
+        found.extend(live_found)
     print(f"SUBJECTS={count}")
     for p in found:
         print(f"::error::{p}")
-    print(f"check-security-txt: {count} security.txt file(s), {len(found)} problem(s)")
+    print(f"check-security-txt: {count} security.txt file(s), {len(found)} problem(s)"
+          + (" (including published copies)" if args.live else ""))
     return 1 if found else 0
 
 
