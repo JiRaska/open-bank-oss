@@ -110,3 +110,7 @@ Resolved from `libs.versions.toml` at build, surfaced in `/api/v1/info`:
 ## Deploy / release
 
 Per-service CI pipeline + release-please (per-service component, `version.txt`). As a **money-path** service, a merge needs **2 approvals + an up-to-date threat model**. Image builds are fast-jar, host-side gradle then Docker COPY of `quarkus-app/`. CD via ArgoCD picks up the new image tag from the GitOps manifest.
+
+## AML service mTLS in production
+
+The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.

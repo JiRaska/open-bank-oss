@@ -151,6 +151,10 @@ DECLARED: dict[str, tuple[str, str]] = {
         "read-only",
         "Consumer; restores fleet-lint's home.",
     ),
+    "dast-zap-baseline.yml::zap-api-scan": (
+        "read-only",
+        "Consumer; boots one service via quarkusDev like api-fuzz-authenticated (#12097).",
+    ),
     "swift-boot-it-probe.yml::probe": (
         "disabled",
         "Boot probe; builds one service and needs no cross-run Gradle state.",

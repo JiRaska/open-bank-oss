@@ -190,12 +190,19 @@ class Money private constructor(val amount: BigDecimal, val currency: CurrencyCo
          * is an [InvalidMoneyException] carrying its [InvalidMoneyReason] and the field it came from,
          * which libs-runtime renders as `AMOUNT_SCALE_EXCEEDED`, `CURRENCY_UNSUPPORTED` or
          * `VALIDATION_ERROR` (ADR-0326). The rejected value is never part of the client message.
+         *
+         * [requirePositive] (off by default, so existing callers are unchanged) additionally refuses
+         * an amount that is zero or negative as [InvalidMoneyReason.NOT_POSITIVE] →
+         * `AMOUNT_NOT_POSITIVE`, attributed to [amountField]. A payment or credit amount is almost
+         * always required to be strictly positive; asking the kernel for it gives every service the
+         * same code and shape instead of a service-local check. JPY `0` is zero like EUR `0.00`.
          */
         fun parseInbound(
             amount: BigDecimal?,
             currency: String?,
             amountField: String = "amount",
             currencyField: String = "currency",
+            requirePositive: Boolean = false,
         ): Money {
             val presentAmount = requireParam(amount, amountField)
             val presentCurrency = requireParam(currency, currencyField)
@@ -204,10 +211,23 @@ class Money private constructor(val amount: BigDecimal, val currency: CurrencyCo
             } catch (e: InvalidMoneyException) {
                 throw e.forField(currencyField)
             }
-            return try {
+            val money = try {
                 invoke(presentAmount, code)
             } catch (e: InvalidMoneyException) {
                 throw e.forField(amountField)
+            }
+            if (requirePositive) requirePositive(money, amountField)
+            return money
+        }
+
+        private fun requirePositive(money: Money, field: String) {
+            if (money.amount.signum() <= 0) {
+                throw InvalidMoneyException(
+                    InvalidMoneyReason.NOT_POSITIVE,
+                    "Amount must be greater than zero",
+                    clientMessage = "Amount must be greater than zero",
+                    field = field,
+                )
             }
         }
 

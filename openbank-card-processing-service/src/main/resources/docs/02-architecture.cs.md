@@ -180,6 +180,7 @@ Každý port má router, který čte jeden konfigurační klíč a vybere vazbu.
 
 - Vendor BIN adaptér bez nakonfigurovaných přihlašovacích údajů odpoví `NOT_BOUND` a žádný požadavek neodešle. U Mastercardu se bez consumer key nebo podpisového klíče nevytvoří žádný signer bean.
 - Výsledky jsou hodnoty `SchemeResult` nesoucí `CardScheme`, který odpověděl (`VISA`, `MASTERCARD`, `SIMULATOR`), nebo `SchemeFailure` (`NOT_BOUND`, `NOT_FOUND`, `UNAVAILABLE`, `UNAUTHENTICATED`, `MALFORMED`).
+- `SimulatedTokenisationAdapter` vydává `tokenReference` jako `sim-tok-` a náhodné UUID, jehož číslice jsou převedeny na `g-p`, takže reference nikdy neobsahuje desítkovou číslici a nemůže vypadat jako PAN. `last4` je vždy `0000`.
 - **Volající:** `MerchantDataPort` používá tok autorizace, `TokenisationPort` `CardTokenService` a `DisputePort` `CardDisputeService`. `BinLookupPort` je napojený, ale žádný use case ani REST endpoint ho zatím nevolá. Matice schopností je v [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
 
 ## Zrcadlo síťových tokenů (ADR-0283 fáze 3)

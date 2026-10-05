@@ -84,6 +84,14 @@ jobs:
           #   consent 119 mutations, 78 killed = 66%  (just under; the gap is worth a look, not a gate)
           - openbank-sca-service
           - openbank-consent-service
+          # 2026-09-30 (#8349): the two money_path_services pitest.yml had never measured. Both clear
+          # the substantive-domain bar above — card-issuance 49 branch sites across 7 domain files,
+          # treasury 142 across 6 — so both are in. Measured baselines (`./gradlew :<svc>:pitest`):
+          #   card-issuance 222 mutations, 173 killed = 78%
+          #   treasury      517 mutations, 292 killed = 56%. 173 of its 225 survivors are
+          #     NO_COVERAGE, mostly the Nostro* reconciliation classes, which no unit test reaches.
+          - openbank-card-issuance-service
+          - openbank-treasury-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

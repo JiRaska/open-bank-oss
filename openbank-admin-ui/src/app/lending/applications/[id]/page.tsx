@@ -27,8 +27,10 @@
 
 import { use, useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, GitBranch, RefreshCw, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, GitBranch, RefreshCw, ShieldAlert, Users } from 'lucide-react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
+import { useAuth } from '@/lib/auth/useAuth'
+import { FOUR_EYES_STATE, isProposer } from '@/lib/lending/fourEyes'
 import { svcUrl } from '@/lib/services/bff'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { EntityChip } from '@/components/entities/EntityChip'
@@ -73,6 +75,7 @@ function readStateFor(status: number): ReadState {
 export default function ApplicationFlowPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
   const { t, language } = useLanguage()
+  const { user } = useAuth()
   const numberLocale = language === 'cs' ? 'cs-CZ' : 'en-GB'
   const dateLocale = numberLocale
 
@@ -217,14 +220,47 @@ export default function ApplicationFlowPage({ params }: { params: Promise<{ id: 
             <OriginationFlow current={app.status} history={history} lang={language} />
           </div>
 
+          {app.status === FOUR_EYES_STATE && (
+            <div className="card" data-testid="four-eyes-waiting" role="status" style={{ padding: 14, marginBottom: 16, borderLeft: '3px solid var(--warning)', display: 'flex', gap: 10, alignItems: 'flex-start', fontSize: 13 }}>
+              <Users size={16} aria-hidden="true" style={{ marginTop: 2, color: 'var(--warning)' }} />
+              <div>
+                <div style={{ fontWeight: 600 }}>
+                  {t('Čeká na rozhodnutí druhé osoby (čtyři oči)', 'Awaiting a second person\'s decision (four-eyes)')}
+                </div>
+                <div style={{ color: 'var(--text-secondary)', marginTop: 4 }}>
+                  {t('Navrhl(a): ', 'Proposed by: ')}<strong data-testid="four-eyes-proposer">{app.proposedBy ?? '—'}</strong>
+                  {'. '}
+                  {t(
+                    'Žádost se z tohoto stavu neposouvá — schválit nebo zamítnout ji může jen jiná osoba než navrhovatel.',
+                    'An application does not advance out of this state — only someone other than the proposer can approve or decline it.',
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="section-title">{t('Zásahy', 'Interventions')}</div>
           <div className="card" style={{ padding: 14, marginBottom: 16, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
             <span role="status" style={{ fontSize: 12, color: 'var(--text-tertiary)' }}>
               {t('Ruční posun není v této instalaci nakonfigurován.', 'Manual advance is not configured in this installation.')}
             </span>
-            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled data-testid="decide-disabled">
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12 }}
+              disabled
+              data-testid="decide-disabled"
+              aria-describedby={app.status === FOUR_EYES_STATE && isProposer(app.proposedBy, user) ? 'four-eyes-own' : undefined}
+            >
               {t('Rozhodnout (4 oči)', 'Decide (four-eyes)')}
             </button>
+            {app.status === FOUR_EYES_STATE && isProposer(app.proposedBy, user) && (
+              <span id="four-eyes-own" data-testid="four-eyes-own" style={{ fontSize: 12, color: 'var(--warning)' }}>
+                {t(
+                  'Tuto žádost jste navrhl(a) vy, proto o ní nemůžete rozhodnout.',
+                  'You proposed this application, so you cannot decide it.',
+                )}
+              </span>
+            )}
             <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled data-testid="disburse-disabled">
               {t('Vyčerpat', 'Disburse')}
             </button>
