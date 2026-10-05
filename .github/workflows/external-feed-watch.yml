@@ -100,6 +100,8 @@ jobs:
         id: probe
         if: ${{ github.event_name != 'pull_request' }}
         run: |
+          # Probe stdout is public in Actions and copied verbatim into an issue. Its self-test
+          # proves that URL credentials, query strings, exceptions and payload snippets stay out.
           set +e
           python3 .github/scripts/check-external-feeds.py --root . | tee /tmp/feeds.txt
           code=${PIPESTATUS[0]}

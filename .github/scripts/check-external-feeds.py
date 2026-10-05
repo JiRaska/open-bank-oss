@@ -77,12 +77,15 @@
 # Run:  python3 .github/scripts/check-external-feeds.py [--root .] [--self-test] [--offline]
 
 import argparse
+import contextlib
+import io
 import pathlib
 import re
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+from unittest import mock
 
 try:
     import yaml
@@ -479,7 +482,7 @@ def load_feed_urls(root, problems):
             continue
         url = strip_config_default(raw)
         if is_internal(url):
-            problems.append(f"DRIFT {feed['name']}: `{feed['yaml_path']}` is not an external URL: {url}")
+            problems.append(f"DRIFT {feed['name']}: `{feed['yaml_path']}` is not an external URL")
             continue
         resolved.append({**feed, "url": url})
     return resolved
@@ -507,15 +510,13 @@ def check_drift(root, resolved):
                 seen_excused.add(match)
                 continue
             problems.append(
-                f"DRIFT undeclared external URL {path}:{lineno} -> {url}\n"
+                f"DRIFT undeclared external URL at {path}:{lineno}\n"
                 f"       Declare it in FEEDS (with a shape matcher) or in NOT_PROBED (with a reason).",
             )
 
-    for url, reason in NOT_PROBED:
+    for index, (url, _) in enumerate(NOT_PROBED, 1):
         if url not in seen_excused:
-            problems.append(
-                f"DRIFT stale NOT_PROBED entry: {url} ({reason}) is no longer in any scanned YAML",
-            )
+            problems.append(f"DRIFT stale NOT_PROBED entry #{index} is no longer in any scanned YAML")
     return problems
 
 
@@ -588,25 +589,28 @@ def check_liveness(resolved):
     """
     dead, unreachable, live = [], [], []
     for feed in resolved:
+        # The source URL can contain a query credential. This output goes to public Actions logs
+        # and, on failure, a public GitHub issue. Identify the YAML declaration rather than ever
+        # formatting the URL, an exception (which may embed it), or response-body snippets.
+        source = f"{feed['file']} :: {feed['yaml_path']}"
         try:
             status, body = fetch(feed["url"])
         except urllib.error.HTTPError as exc:
-            dead.append(f"DEAD {feed['name']}: HTTP {exc.code} for {feed['url']}\n       {feed['why']}")
+            dead.append(f"DEAD {feed['name']}: HTTP {exc.code}; source {source}\n       {feed['why']}")
             continue
         except (urllib.error.URLError, OSError, TimeoutError) as exc:
-            unreachable.append(f"UNREACHABLE {feed['name']}: {exc} ({feed['url']})")
+            unreachable.append(f"UNREACHABLE {feed['name']}: {type(exc).__name__}; source {source}")
             continue
         if status != 200:
-            dead.append(f"DEAD {feed['name']}: HTTP {status} for {feed['url']}\n       {feed['why']}")
+            dead.append(f"DEAD {feed['name']}: HTTP {status}; source {source}\n       {feed['why']}")
             continue
-        reason = SHAPES[feed["shape"]](body)
-        if reason:
+        if SHAPES[feed["shape"]](body):
             dead.append(
-                f"DEAD {feed['name']}: HTTP 200 but the payload is not the feed — {reason}\n"
-                f"       {feed['url']}\n       {feed['why']}",
+                f"DEAD {feed['name']}: HTTP 200, invalid {feed['shape']} payload; source {source}\n"
+                f"       {feed['why']}",
             )
         else:
-            print(f"OK   {feed['name']}: {feed['url']}")
+            print(f"OK   {feed['name']}: source {source}")
             live.append(feed["name"])
     return dead, unreachable, live
 
@@ -744,6 +748,45 @@ def self_test():
         print(f"{'pass' if ok else 'FAIL'}  {name}" + ("" if ok else f"  (got {code}, want {want})"))
         failures += 0 if ok else 1
 
+    # Public reports must never contain URL query credentials, userinfo, exception text, or
+    # upstream payload snippets. Falsify all four liveness branches with a fake token-bearing URL.
+    marker = "TEST_SENTINEL_CREDENTIAL"
+    secret_url = f"https://user:{marker}@example.test/feed.xml?token={marker}"
+    fake_feed = {
+        "name": "credential-probe",
+        "file": "test/application.yaml",
+        "yaml_path": "feed.url",
+        "shape": "xml_document",
+        "why": "Test feed",
+        "url": secret_url,
+    }
+    leak_cases = [
+        ("healthy feed", (200, '<?xml version="1.0"?><feed/>'), None, (0, 0, 1)),
+        ("HTTP error", None, urllib.error.HTTPError(secret_url, 307, marker, {}, None), (1, 0, 0)),
+        ("unreachable feed", None, urllib.error.URLError(marker), (0, 1, 0)),
+        ("invalid payload", (200, marker), None, (1, 0, 0)),
+    ]
+    for name, answer, error, expected_counts in leak_cases:
+        output = io.StringIO()
+        with mock.patch.object(sys.modules[__name__], "fetch", return_value=answer, side_effect=error):
+            with contextlib.redirect_stdout(output):
+                dead, unreachable, live = check_liveness([fake_feed])
+        report = output.getvalue() + "\n".join(dead + unreachable)
+        ok = (len(dead), len(unreachable), len(live)) == expected_counts
+        ok = ok and marker not in report and secret_url not in report and "?token=" not in report
+        ok = ok and "credential-probe" in report
+        print(f"{'pass' if ok else 'FAIL'}  {name} omits URL credentials from public report")
+        failures += 0 if ok else 1
+
+    with tempfile.TemporaryDirectory() as tmp:
+        yaml_path = pathlib.Path(tmp) / "openbank-test-service/src/main/resources/application.yaml"
+        yaml_path.parent.mkdir(parents=True)
+        yaml_path.write_text(f"feed: {secret_url}\n", encoding="utf-8")
+        drift_report = "\n".join(check_drift(tmp, []))
+        ok = "DRIFT undeclared external URL" in drift_report and marker not in drift_report
+        print(f"{'pass' if ok else 'FAIL'}  drift report identifies source line without URL credentials")
+        failures += 0 if ok else 1
+
     # kotlin_liveness name-consistency: the two lanes (this file's FEEDS, the in-cluster
     # `FeedFetchRecorder`'s `const val FEED_NAME`) must be checked for agreement, not just
     # assumed by hand as #4943's own comment did. Falsify both ways — the agreeing case must
@@ -778,7 +821,7 @@ def self_test():
     print(f"{'pass' if ok else 'FAIL'}  a feed with no kotlin_liveness entry is skipped" + ("" if ok else f"  (got {skip_problems!r})"))
     failures += 0 if ok else 1
 
-    total = len(cases) + 2 + len(triage_cases) + len(kotlin_cases) + 1
+    total = len(cases) + 2 + len(triage_cases) + len(leak_cases) + len(kotlin_cases) + 2
     print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 3
 
