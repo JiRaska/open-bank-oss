@@ -200,7 +200,10 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `missing provider or landing capacity prevents a mass run`(): Unit = runBlocking {
-        val missing = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+        val missing = configuredService(
+            campaigns, enrolment, store, 2, true, deadline = 10,
+            dispatchPerMinute = 0, landingRps = 0.0, clicks = 0.0, burst = 0.0,
+        )
         assertThatThrownBy { runBlocking { missing.start(campaignId, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
             .hasMessageContaining("provider and landing capacity")
@@ -251,7 +254,10 @@ class BulkAdmissionServiceTest {
     fun `removed provider evidence holds an already prepared run`(): Unit = runBlocking {
         store.run = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
             .start(campaignId, "maker").copy(audienceCount = 2)
-        val unconfigured = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+        val unconfigured = configuredService(
+            campaigns, enrolment, store, 2, true, deadline = 10,
+            dispatchPerMinute = 0, landingRps = 0.0, clicks = 0.0, burst = 0.0,
+        )
 
         unconfigured.tick()
 

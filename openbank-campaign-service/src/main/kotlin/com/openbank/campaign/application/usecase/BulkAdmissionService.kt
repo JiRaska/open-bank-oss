@@ -71,6 +71,7 @@ enum class RecipientAdmissionState { STARTING, ADMITTED, SKIPPED, FAILED }
  * set a measured safe budget before an operator can start a mass run.
  */
 @ApplicationScoped
+@Suppress("LongParameterList") // Explicit injected config values must not have Kotlin defaults.
 class BulkAdmissionService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val campaignService: CampaignService,
@@ -78,19 +79,19 @@ class BulkAdmissionService @Inject constructor(
     @ConfigProperty(name = "openbank.campaign.bulk-admission-per-minute", defaultValue = "0")
     private val pageSize: Int,
     @ConfigProperty(name = "openbank.campaign.mass-activation-enabled", defaultValue = "false")
-    private val massActivationEnabled: Boolean = false,
+    private val massActivationEnabled: Boolean,
     @ConfigProperty(name = "openbank.campaign.max-bulk-audience", defaultValue = "100000")
-    private val maxBulkAudience: Long = MAX_BULK_AUDIENCE,
+    private val maxBulkAudience: Long,
     @ConfigProperty(name = "openbank.campaign.mass-completion-deadline-minutes", defaultValue = "0")
-    private val deadlineMinutes: Long = 0,
+    private val deadlineMinutes: Long,
     @ConfigProperty(name = "openbank.campaign.mass-dispatch-capacity-per-minute", defaultValue = "0")
-    private val dispatchCapacityPerMinute: Long = 0,
+    private val dispatchCapacityPerMinute: Long,
     @ConfigProperty(name = "openbank.campaign.mass-landing-capacity-rps", defaultValue = "0")
-    private val landingCapacityRps: Double = 0.0,
+    private val landingCapacityRps: Double,
     @ConfigProperty(name = "openbank.campaign.mass-click-fraction", defaultValue = "0")
-    private val clickFraction: Double = 0.0,
+    private val clickFraction: Double,
     @ConfigProperty(name = "openbank.campaign.mass-click-burst-factor", defaultValue = "0")
-    private val clickBurstFactor: Double = 0.0,
+    private val clickBurstFactor: Double,
 ) {
     @Inject lateinit var segments: SegmentRegistry
 
