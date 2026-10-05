@@ -131,10 +131,10 @@ def claim_staged_component_paths(root: pathlib.Path) -> set[str]:
 def claim_app_backup_exemptions(root: pathlib.Path) -> dict[str, str]:
     """ArgoCD Application name -> the backup exemption its manifest declares, if any.
 
-    The live annotation is the primary route and stays so. This is the fallback for a cluster
-    whose metadata nobody in this repository controls: `glitchtip-pg` is rendered by a chart
-    whose `postgresql.cluster` passthrough accepts only instances and storage, so the annotation
-    can never reach it, and without a second route the check reports a settled decision forever.
+    The live annotation is the primary route and stays so. This fallback only
+    applies to a chart-owned cluster whose metadata this repository cannot
+    control. GlitchTip used it before its Cluster moved to a first-party
+    manifest; no current Application needs it.
     A permanently red check is one people learn to skip, which reproduces #9834 one level up.
 
     It is deliberately NOT a list of cluster names beside the manifests — that is the drift the
@@ -553,8 +553,7 @@ def collect() -> dict:
             "backup_exempt_reason": (meta.get("annotations") or {}).get(BACKUP_EXEMPT_ANNOTATION),
             # Which ArgoCD Application renders this object, read off the object itself. The
             # annotation above is the right home for an exemption and is not always reachable:
-            # a third-party chart decides its own metadata, and glitchtip's passes through only
-            # instances and storage. This is the join key that lets such a cluster be excused
+            # a third-party chart may decide its own metadata. This is the join key for such a cluster
             # from its Application instead — without a list of cluster names that could drift.
             "argocd_app": ((meta.get("annotations") or {}).get(
                 "argocd.argoproj.io/tracking-id") or "").split(":", 1)[0].strip(),

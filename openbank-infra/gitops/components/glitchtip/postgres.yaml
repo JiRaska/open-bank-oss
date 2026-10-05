@@ -1,0 +1,37 @@
+# The GlitchTip chart cannot set a CNPG image or Cluster annotations. This is the
+# same Cluster previously rendered by the chart, now owned by the second source
+# of the glitchtip Application. Keep name, namespace, bootstrap and storage
+# unchanged so Argo CD updates the existing object in place.
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: glitchtip-pg
+  namespace: observability
+  labels:
+    helm.sh/chart: glitchtip-9.0.1
+    app.kubernetes.io/name: glitchtip
+    app.kubernetes.io/instance: glitchtip
+    app.kubernetes.io/version: "6.2.3"
+    app.kubernetes.io/managed-by: Helm
+  annotations:
+    # Crash events are short lived and disposable; this database holds no
+    # banking records. The exemption now lives on the Cluster it excuses.
+    openbank.io/backup-exempt-reason: "crash-event sink only — pseudonymous, short-retention, re-emitted by clients; no customer or money-path data"
+spec:
+  instances: 2
+  # On image/placement updates, reconcile the standby and promote it before
+  # restarting the old primary. The PVC and database identity stay unchanged.
+  primaryUpdateMethod: switchover
+  primaryUpdateStrategy: unsupervised
+  affinity:
+    enablePodAntiAffinity: true
+    topologyKey: kubernetes.io/hostname
+    podAntiAffinityType: required
+  imageName: ghcr.io/cloudnative-pg/postgresql:18.6
+  storage:
+    size: 5Gi
+    storageClass: gp3
+  bootstrap:
+    initdb:
+      database: glitchtip
+      owner: glitchtip

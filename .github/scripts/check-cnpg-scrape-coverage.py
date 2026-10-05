@@ -77,21 +77,9 @@ SKIP_PATH_PARTS = ("dr-restore-templates",)
 # Clusters deliberately not scraped. Reason required; stale in either direction is a failure.
 NOT_SCRAPED: dict[str, str] = {}
 
-# Clusters created by a third-party Helm chart rather than by a `kind: Cluster` manifest in this
-# repo. They are INVISIBLE to the derivation above, which is exactly the failure mode this gate
-# exists for, so they are declared here and still get an expected-series. `evidence` must appear
-# in the named file or the declaration is stale.
-CHART_CREATED: dict[str, dict[str, str]] = {
-    "observability/glitchtip-pg": {
-        "file": "openbank-infra/gitops/apps/glitchtip.yaml",
-        "evidence": "glitchtip-pg",
-        "reason": (
-            "Created by the GlitchTip chart's bundled `postgresql.cluster` values, not by a "
-            "kind: Cluster manifest here. UNBACKED-UP BY DESIGN (#1444) — but 'no backup' and "
-            "'not scraped' are separate facts, and the second one is what hides the first."
-        ),
-    },
-}
+# A chart-owned Cluster would be invisible to discover_clusters; there are none
+# after GlitchTip's Cluster became a first-party GitOps manifest.
+CHART_CREATED: dict[str, dict[str, str]] = {}
 
 UNSCRAPED_DESC = (
     "This cluster is DEPLOYED (its namespace exists) and Prometheus has no scrape target for it, "
@@ -206,6 +194,34 @@ def discover_clusters() -> tuple[dict[str, dict], list[str]]:
                 "instances": int(spec.get("instances") or 1),
             }
     return found, errors
+
+
+def declared_podmonitors() -> set[str]:
+    """Clusters scraped by a separately managed PodMonitor.
+
+    GlitchTip keeps the existing PodMonitor in observability-components while
+    this Application takes over its Cluster. Verify selector and metrics port;
+    a PodMonitor with the right name but no matching target proves nothing.
+    """
+    found: set[str] = set()
+    for path in sorted(gatelib.rglob(REPO / GITOPS, "*.yaml")):
+        if path.name.startswith(".network-policies-"):
+            continue
+        try:
+            docs = gatelib.load_yaml_all(path, errors="replace")
+        except (yaml.YAMLError, FileNotFoundError):
+            continue  # discover_clusters already reports unparseable YAML
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "PodMonitor":
+                continue
+            meta, spec = doc.get("metadata") or {}, doc.get("spec") or {}
+            labels = ((spec.get("selector") or {}).get("matchLabels") or {})
+            cluster = labels.get("cnpg.io/cluster")
+            endpoints = spec.get("podMetricsEndpoints") or []
+            if (cluster and meta.get("namespace") and
+                    any(isinstance(ep, dict) and ep.get("port") == "metrics" for ep in endpoints)):
+                found.add(_cluster_key(meta["namespace"], cluster))
+    return found
 
 
 def _namespace_from_kustomization(path: Path) -> str | None:
@@ -563,8 +579,11 @@ def render_fixture(clusters: dict[str, dict]) -> str:
 
 def build(strict: bool = True) -> tuple[dict[str, dict], list[str]]:
     clusters, errors = discover_clusters()
+    manual_scrapes = declared_podmonitors()
     for c in clusters.values():
         c["origin"] = "manifest"
+    for key in manual_scrapes & clusters.keys():
+        clusters[key]["scraped"] = True
 
     for key, decl in CHART_CREATED.items():
         if key in clusters:
@@ -699,11 +718,33 @@ def self_test() -> int:
         if any("good-db" in e for e in errors):
             print("SELF-TEST FAIL: a scraped cluster was reported"); ok = False
 
+        # A separately managed monitor only counts when it selects the cluster
+        # and actually scrapes the CNPG metrics port.
+        manual = d / "manual-monitor.yaml"
+        monitor = {
+            "kind": "PodMonitor",
+            "metadata": {"name": "bad-db", "namespace": "st"},
+            "spec": {"selector": {"matchLabels": {"cnpg.io/cluster": "bad-db"}},
+                     "podMetricsEndpoints": [{"port": "metrics"}]},
+        }
+        manual.write_text(yaml.safe_dump(monitor))
+        gatelib.clear()
+        _, errors = build()
+        if any("bad-db" in e for e in errors):
+            print("SELF-TEST FAIL: matching manual PodMonitor did not cover cluster"); ok = False
+        monitor["spec"]["podMetricsEndpoints"][0]["port"] = "wrong"
+        manual.write_text(yaml.safe_dump(monitor))
+        gatelib.clear()
+        _, errors = build()
+        if not any("bad-db" in e for e in errors):
+            print("SELF-TEST FAIL: wrong PodMonitor port falsely covered cluster"); ok = False
+        manual.unlink()
+
         # 2. remove the offender: the gate must go quiet (it is not vacuously red)
         (d / "bad.yaml").unlink()
         gatelib.clear()
         clusters, errors = build()
-        if any(e for e in errors if "glitchtip" not in e and "CHART_CREATED" not in e):
+        if errors:
             print(f"SELF-TEST FAIL: clean corpus still errors: {errors}"); ok = False
         if "st/good-db" not in clusters:
             print("SELF-TEST FAIL: the scraped cluster was not discovered at all"); ok = False

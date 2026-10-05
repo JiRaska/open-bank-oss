@@ -168,6 +168,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
@@ -596,6 +598,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
@@ -1000,6 +1004,8 @@ tests:
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
@@ -1411,6 +1417,8 @@ tests:
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
@@ -1826,6 +1834,8 @@ tests:
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
         values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
+        values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-2",job="goalert-db"}'
@@ -2230,6 +2240,8 @@ tests:
       - series: 'up{container="postgres",namespace="notifications",pod="notifications-db-2",job="notifications-db"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-1",job="glitchtip-pg"}'
+        values: "1+0x40"
+      - series: 'up{container="postgres",namespace="observability",pod="glitchtip-pg-2",job="glitchtip-pg"}'
         values: "1+0x40"
       - series: 'up{container="postgres",namespace="observability",pod="goalert-db-1",job="goalert-db"}'
         values: "1+0x40"

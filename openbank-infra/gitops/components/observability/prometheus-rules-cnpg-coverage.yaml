@@ -249,7 +249,7 @@ spec:
           labels:
             namespace: observability
             cluster: glitchtip-pg
-            origin: chart
+            origin: manifest
         - record: openbank:cnpg_cluster_expected
           expr: vector(1)
           labels:
@@ -637,6 +637,11 @@ spec:
           labels:
             namespace: notifications
             cluster: notifications-db
+        - record: openbank:cnpg_cluster_instances_declared
+          expr: vector(2)
+          labels:
+            namespace: observability
+            cluster: glitchtip-pg
         - record: openbank:cnpg_cluster_instances_declared
           expr: vector(2)
           labels:

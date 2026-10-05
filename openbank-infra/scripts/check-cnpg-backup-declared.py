@@ -33,11 +33,9 @@ outlive the cluster it excuses.
 
 WHAT IT CANNOT SEE, STATED SO NOBODY READS ITS SILENCE AS COVERAGE
 
-A database that is not in gitops at all. `glitchtip-pg` in the observability namespace
-is live and has no backup, and it is deployed by a third-party chart rather than by a
-manifest in this tree, so no gitops-scoped check can reach it. This gate's subject is
-the gitops tree, and that is a smaller set than "the databases that exist". Comparing
-the two needs cluster access and belongs in a runtime control, not here.
+A database that is not in gitops at all. This gate's subject is the gitops tree,
+and that is a smaller set than "the databases that exist". Comparing the two
+needs cluster access and belongs in a runtime control, not here.
 """
 from __future__ import annotations
 
