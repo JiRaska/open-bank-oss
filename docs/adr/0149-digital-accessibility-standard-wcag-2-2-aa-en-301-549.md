@@ -8,7 +8,7 @@ superseded-by: []
 delivery-repos: []
 tags: [i18n-a11y, compliance, admin-ui]
 summary: "Adopt WCAG 2.2 AA aligned with EN 301 549 as the conformance target for customer-facing surfaces; the internal admin UI gets only a non-blocking axe-core guard test, being outside European Accessibility Act scope."
-followup: "#11603 — only admin-ui is checked by axe; developer-portal has no accessibility check"
+followup: "#11603 — automated scans cover the admin UI and developer portal; route and manual WCAG coverage remain incomplete"
 ---
 
 # ADR-0149 — Digital accessibility standard (WCAG 2.2 AA / EN 301 549)
@@ -66,6 +66,16 @@ that repository, cross-referenced here per ADR-0147.
   with a stated target date (per ADR-0144) is the appropriate weight.
 
 ## Consequences
+
+The static developer portal's landing and API reference pages run through axe in the
+admin UI Playwright CI job. A seeded image without alternative text proves that the
+same browser setup detects a known violation. The admin UI route inventory is derived
+from `src/app/**/page.tsx` and literal navigations in axe specs by
+`.github/scripts/check-admin-ui-a11y-route-coverage.py`; it reports uncovered routes
+on every UI CI run. This is source-level evidence of browser scan coverage, not proof
+that every page state or WCAG success criterion has been checked. Manual keyboard and
+screen-reader review remains outstanding, as does the customer app work in its own
+repository. `delivery-status` therefore remains `partial`.
 
 **Positive**
 - Closes a genuine, previously undecided regulatory gap for the actual

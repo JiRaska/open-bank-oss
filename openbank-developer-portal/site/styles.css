@@ -1,7 +1,7 @@
 /* OpenBank Developer Portal — self-contained styles (no external fonts/CDN, strict-CSP friendly). */
 :root {
   --bg: #0b1020; --bg2: #11182e; --card: #ffffff; --ink: #1b2333; --muted: #5b6478;
-  --line: #e6e9f0; --brand: #2f6df6; --brand-ink: #1b4fd0; --warn: #b9551b; --ok: #1d7a4d;
+  --line: #e6e9f0; --brand: #2f6df6; --brand-ink: #1b4fd0; --warn: #9b3b10; --ok: #1d7a4d;
   --radius: 12px; --wrap: 980px;
 }
 * { box-sizing: border-box; }
@@ -46,6 +46,7 @@ code { background: #eef1f8; border: 1px solid var(--line); border-radius: 6px;
 .tag.warn { background: #fdeede; color: var(--warn); }
 
 .footer { background: var(--bg); color: #aab3c8; padding: 1.6rem 0; }
+.footer .muted { color: #aab3c8; }
 .footer a { color: #9fc3ff; }
 
 @media (max-width: 680px) {

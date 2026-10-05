@@ -59,7 +59,8 @@ jobs:
   # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
-  # Admin UI — path-scoped: runs when openbank-admin-ui/** changes, OR when a file
+  # Admin UI — path-scoped: runs when openbank-admin-ui/** or the static developer
+  # portal changes, OR when a file
   # the ADR-0071 governance gate READS changes. That gate lives in this job but
   # validates every openbank-*/governance.yaml in the fleet, so scoping the job to
   # admin-ui files alone let a backend PR add a service and never reach it: the job
@@ -104,10 +105,11 @@ jobs:
             # against. The generator itself lives under openbank-admin-ui/.
             N=$(git diff --name-only "${BASE}...HEAD" -- \
                   openbank-admin-ui/ \
+                  openbank-developer-portal/ \
                   '*/governance.yaml' \
                   openbank-libs/governance/governance.schema.json | wc -l | tr -d ' ')
             echo "changed=$( [ "$N" -gt 0 ] && echo 'true' || echo 'false' )" >> "$GITHUB_OUTPUT"
-            echo "Admin UI or governance files changed: $N"
+            echo "Admin UI, developer portal or governance files changed: $N"
             # Derive cross-package guard inputs from literal backend paths.
             # Backend-only RBAC changes get a focused test lane; UI changes run
             # the full UI suite above. A missing/dynamic input fails detection.
@@ -222,6 +224,11 @@ jobs:
         run: sudo npx playwright install-deps chromium
         timeout-minutes: 5
         continue-on-error: true
+
+      - name: Inventory admin UI routes covered by axe specs
+        run: |
+          python3 ../.github/scripts/check-admin-ui-a11y-route-coverage.py --self-test
+          python3 ../.github/scripts/check-admin-ui-a11y-route-coverage.py
 
       - name: E2E tests (Playwright)
         id: browser_e2e
