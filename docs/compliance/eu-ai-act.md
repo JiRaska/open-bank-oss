@@ -79,7 +79,7 @@ a high-risk system (credit decisioning) ships. What is open is the article-by-ar
 | Art. 12 Record-keeping / logging | AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain). | control exists; evidence pack open |
 | Art. 13 Transparency to deployers | Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable. | control exists; evidence pack open |
 | Art. 14 Human oversight | requires_human on every write; approver_must_differ_from author (segregation of duties). | control exists; evidence pack open |
-| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity. | control exists; evidence pack open |
+| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; in-cluster NetworkPolicy allow-lists. Mesh/SPIFFE identity remains an open decision (#1914). | control exists; evidence pack open |
 
 > No high-risk system is declared today, so the obligations are pre-satisfied in
 > substance and tracked here in advance. The first `HIGH-RISK` row that appears in the

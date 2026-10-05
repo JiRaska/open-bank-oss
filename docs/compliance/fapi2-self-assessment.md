@@ -25,8 +25,9 @@ run — each is a common hard fail:
 - [ ] **PAR (Pushed Authorization Requests) required** — the client must not accept a plain
       front-channel `authorization_request`; `require_pushed_authorization_requests = true`.
 - [ ] **Sender-constrained tokens** — **DPoP** or **mTLS** client-certificate-bound access tokens.
-      A plain bearer token fails FAPI 2.0. Decide which (mTLS fits the existing mesh; DPoP fits
-      public clients).
+      A plain bearer token fails FAPI 2.0. Decide which mechanism fits each client and verify it
+      in the conformance suite. No service mesh is deployed (#1914); mTLS token binding would need
+      its own client-certificate validation, while DPoP is another sender-constraining option.
 - [ ] **PKCE with S256** enforced (no `plain`).
 - [ ] **Strict `iss` / `aud`** validation on every token and the authorization response.
 - [ ] **JARM** (JWT-secured authorization response) if response signing is used — else confirm the

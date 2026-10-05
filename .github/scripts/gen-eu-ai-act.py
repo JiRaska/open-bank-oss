@@ -68,7 +68,8 @@ OBLIGATIONS = [
     ("Art. 14 Human oversight",
      "requires_human on every write; approver_must_differ_from author (segregation of duties)."),
     ("Art. 15 Accuracy, robustness, cybersecurity",
-     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity."),
+     "Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; "
+     "in-cluster NetworkPolicy allow-lists. Mesh/SPIFFE identity remains an open decision (#1914)."),
 ]
 
 

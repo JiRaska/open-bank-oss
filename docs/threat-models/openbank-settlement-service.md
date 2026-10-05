@@ -109,7 +109,7 @@ replacing the former in-memory stub), so settlement state is durable across rest
 | ID | Threat | Mitigation |
 |----|--------|------------|
 | E1 | Attacker injects a workflow that calls `reverseBookToLedger` on a legitimate settlement | **Corrected 2026-08-20 (#6055) — no activity-level authorization exists; see Residual risk 2.** No policy gate mediates activity dispatch, and no `compensation=true` context is ever evaluated — the word `compensation` appeared nowhere in the policy file that this row cited. The residual constraints are structural, not authorization: only the seven methods registered on the worker are dispatchable, and `reverseBookToLedger` is not implemented — it throws a non-retryable failure and records `LEDGER_REVERSAL_UNSUPPORTED` (#6037), so it moves no money whoever invokes it. Ordering (that a compensation runs only after its forward leg) is a property of `SettlementWorkflowImpl`'s saga, which registers each compensation after the corresponding forward activity returns — it is not enforced by any external policy. |
-| E2 | Service account token used to submit arbitrary workflows | Temporal namespace ACL restricts task queue submission to settlement-service service account (SPIFFE `spiffe://openbank/ns/openbank-settlement/sa/settlement-service`) |
+| E2 | Service account token used to submit arbitrary workflows | No SPIFFE issuer or Temporal task-queue submit ACL is declared in GitOps. The Temporal frontend NetworkPolicy limits callers by namespace, and the worker registers only its known workflow/activity types; neither control authenticates a submitter within an admitted namespace. Transport authentication and submit authorization remain open (#6066, #1914). |
 
 ---
 
