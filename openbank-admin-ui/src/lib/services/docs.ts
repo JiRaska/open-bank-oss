@@ -64,6 +64,11 @@ export interface DocsDocument {
   markdown: string
 }
 
+export type DocsDocumentResult =
+  | { status: 'available'; document: DocsDocument }
+  | { status: 'missing' }
+  | { status: 'unavailable' }
+
 const SAFE_NAME_RE = /^[a-z][a-z0-9-]{2,40}$/
 const SAFE_SLUG_RE = /^[a-z0-9-]{1,60}$/
 const SAFE_LANG_RE = /^[a-z]{2}$/
@@ -215,10 +220,10 @@ async function docsBaseUrl(id: string): Promise<string | null> {
 }
 
 async function indexFromLive(id: string, requestedLang: string): Promise<DocsIndex | null> {
-  const base = await docsBaseUrl(id)
-  if (!base) return null
-  const url = `${base}/q/openbank/docs?lang=${requestedLang}`
   try {
+    const base = await docsBaseUrl(id)
+    if (!base) return null
+    const url = `${base}/q/openbank/docs?lang=${requestedLang}`
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
     const res = await fetch(url, { signal: ctrl.signal, cache: 'no-store' })
@@ -254,12 +259,12 @@ async function indexFromLive(id: string, requestedLang: string): Promise<DocsInd
   }
 }
 
-async function docFromLive(id: string, slug: string, requestedLang: string): Promise<DocsDocument | null> {
-  if (!SAFE_SLUG_RE.test(slug)) return null
-  const base = await docsBaseUrl(id)
-  if (!base) return null
-  const url = `${base}/q/openbank/docs/${slug}?lang=${requestedLang}`
+async function docFromLive(id: string, slug: string, requestedLang: string): Promise<DocsDocumentResult> {
+  if (!SAFE_SLUG_RE.test(slug)) return { status: 'missing' }
   try {
+    const base = await docsBaseUrl(id)
+    if (!base) return { status: 'unavailable' }
+    const url = `${base}/q/openbank/docs/${slug}?lang=${requestedLang}`
     const ctrl = new AbortController()
     const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS)
     const res = await fetch(url, {
@@ -267,20 +272,24 @@ async function docFromLive(id: string, slug: string, requestedLang: string): Pro
       headers: { Accept: 'text/markdown' },
     })
     clearTimeout(timer)
-    if (!res.ok) return null
+    if (res.status === 404) return { status: 'missing' }
+    if (!res.ok) return { status: 'unavailable' }
     const markdown = await res.text()
     const contentLanguage = res.headers.get('content-language') ?? ''
     // Fetch index to discover available languages — cheap (cached upstream).
     const idx = await indexFromLive(id, requestedLang)
     const slugEntry = idx?.items.find(i => i.slug === slug)
     return {
-      source: 'live',
-      lang: contentLanguage === 'any' ? '' : contentLanguage,
-      availableLanguages: slugEntry?.availableLanguages ?? [],
-      markdown,
+      status: 'available',
+      document: {
+        source: 'live',
+        lang: contentLanguage === 'any' ? '' : contentLanguage,
+        availableLanguages: slugEntry?.availableLanguages ?? [],
+        markdown,
+      },
     }
   } catch {
-    return null
+    return { status: 'unavailable' }
   }
 }
 
@@ -293,9 +302,22 @@ export async function loadDocsIndex(id: string, requestedLang: string = DEFAULT_
   return indexFromLive(id, lang)
 }
 
-export async function loadDocsDocument(id: string, slug: string, requestedLang: string = DEFAULT_LANG): Promise<DocsDocument | null> {
-  if (!SAFE_NAME_RE.test(id)) return null
+export async function loadDocsDocumentResult(
+  id: string,
+  slug: string,
+  requestedLang: string = DEFAULT_LANG,
+): Promise<DocsDocumentResult> {
+  if (!SAFE_NAME_RE.test(id)) return { status: 'missing' }
   const lang = normaliseLang(requestedLang)
-  if (id === 'libs') return docFromBundle('openbank-libs', slug, lang)
+  if (id === 'libs') {
+    const document = await docFromBundle('openbank-libs', slug, lang)
+    return document ? { status: 'available', document } : { status: 'missing' }
+  }
   return docFromLive(id, slug, lang)
+}
+
+// Retain the original nullable API for callers that only need the document body.
+export async function loadDocsDocument(id: string, slug: string, requestedLang: string = DEFAULT_LANG): Promise<DocsDocument | null> {
+  const result = await loadDocsDocumentResult(id, slug, requestedLang)
+  return result.status === 'available' ? result.document : null
 }

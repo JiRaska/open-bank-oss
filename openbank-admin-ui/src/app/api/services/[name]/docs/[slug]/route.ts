@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server'
 import { cookies } from 'next/headers'
-import { loadDocsDocument } from '@/lib/services/docs'
+import { loadDocsDocumentResult } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 
 // Per-slug docs fetch. Language resolution: ?lang → cookie → 'en'.
@@ -22,13 +22,14 @@ export async function GET(
   const langCookie = (await cookies()).get(LANG_COOKIE)?.value
   const lang = langQuery ?? langCookie ?? 'en'
 
-  const doc = await loadDocsDocument(name, slug, lang)
-  if (!doc) {
+  const result = await loadDocsDocumentResult(name, slug, lang)
+  if (result.status !== 'available') {
     return NextResponse.json(
-      { error: 'doc not available', service: name, slug, lang },
-      { status: 404 },
+      { error: result.status === 'unavailable' ? 'docs endpoint unavailable' : 'doc not found', service: name, slug, lang },
+      { status: result.status === 'unavailable' ? 503 : 404 },
     )
   }
+  const doc = result.document
   return new NextResponse(doc.markdown, {
     status: 200,
     headers: {

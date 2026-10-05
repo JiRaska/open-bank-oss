@@ -18,12 +18,12 @@ vi.mock('@/components/docs/MarkdownView', () => ({
 }))
 vi.mock('@/lib/services/docs', () => ({
   loadDocsIndex: vi.fn(),
-  loadDocsDocument: vi.fn(),
+  loadDocsDocumentResult: vi.fn(),
 }))
 
 import { cookies } from 'next/headers'
 import ServiceDocsPage from '@/app/services/[name]/docs/[[...slug]]/page'
-import { loadDocsDocument, loadDocsIndex, type DocsIndex } from '@/lib/services/docs'
+import { loadDocsDocumentResult, loadDocsIndex, type DocsIndex } from '@/lib/services/docs'
 
 const index: DocsIndex = {
   service: 'openbank-example-service',
@@ -43,7 +43,7 @@ async function renderPage() {
 describe('service documentation state', () => {
   beforeEach(() => {
     vi.mocked(cookies).mockResolvedValue({ get: vi.fn() } as never)
-    vi.mocked(loadDocsDocument).mockResolvedValue(null)
+    vi.mocked(loadDocsDocumentResult).mockResolvedValue({ status: 'missing' })
   })
   afterEach(() => {
     cleanup()
@@ -52,6 +52,7 @@ describe('service documentation state', () => {
 
   it('labels a missing endpoint as unavailable, not a missing source document', async () => {
     vi.mocked(loadDocsIndex).mockResolvedValue(null)
+    vi.mocked(loadDocsDocumentResult).mockResolvedValue({ status: 'unavailable' })
     await renderPage()
     expect(screen.getByText('Documentation endpoint unavailable')).toBeInTheDocument()
     expect(screen.queryByText('Document not found')).not.toBeInTheDocument()
@@ -62,6 +63,14 @@ describe('service documentation state', () => {
     await renderPage()
     expect(screen.getByText('Source documents missing')).toBeInTheDocument()
     expect(screen.queryByText('Documentation endpoint unavailable')).not.toBeInTheDocument()
+  })
+
+  it('labels a document timeout as unavailable even when the index lists that slug', async () => {
+    vi.mocked(loadDocsIndex).mockResolvedValue(index)
+    vi.mocked(loadDocsDocumentResult).mockResolvedValue({ status: 'unavailable' })
+    await renderPage()
+    expect(screen.getByText('Documentation endpoint unavailable')).toBeInTheDocument()
+    expect(screen.queryByText('Document not found')).not.toBeInTheDocument()
   })
 
   it('labels a missing slug in a populated index as a missing document', async () => {

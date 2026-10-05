@@ -7,7 +7,7 @@ vi.mock('@/lib/discovery', () => ({
 }))
 
 import { inCluster, resolveInClusterBaseUrl } from '@/lib/discovery'
-import { loadDocsIndex } from '@/lib/services/docs'
+import { loadDocsDocumentResult, loadDocsIndex } from '@/lib/services/docs'
 
 afterEach(() => {
   vi.resetAllMocks()
@@ -50,6 +50,19 @@ describe('newly discovered service documentation', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unreachable')))
 
     expect(await loadDocsIndex('context')).toBeNull()
+  })
+
+  it('distinguishes a missing document from a failing document endpoint', async () => {
+    vi.mocked(inCluster).mockReturnValue(true)
+    vi.mocked(resolveInClusterBaseUrl).mockResolvedValue('https://example.com')
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockRejectedValueOnce(new DOMException('timed out', 'AbortError'))
+    vi.stubGlobal('fetch', fetch)
+
+    expect(await loadDocsDocumentResult('context', '00-build')).toEqual({ status: 'missing' })
+    expect(await loadDocsDocumentResult('context', '00-build')).toEqual({ status: 'unavailable' })
+    expect(await loadDocsDocumentResult('context', '00-build')).toEqual({ status: 'unavailable' })
   })
 
   it('does not compose an outbound URL for an unknown local service', async () => {

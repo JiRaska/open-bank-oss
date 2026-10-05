@@ -15,7 +15,7 @@ import { cookies } from 'next/headers'
 import { BookOpen, ChevronLeft, FileText, AlertCircle, Wifi, HardDrive, ExternalLink, FileJson, Heart, Activity, Info, Hash, Globe } from 'lucide-react'
 import { MarkdownView } from '@/components/docs/MarkdownView'
 import { MermaidEnhancer } from '@/components/docs/MermaidEnhancer'
-import { loadDocsIndex, loadDocsDocument } from '@/lib/services/docs'
+import { loadDocsIndex, loadDocsDocumentResult } from '@/lib/services/docs'
 import { LANG_COOKIE } from '@/lib/i18n/LanguageContext'
 
 interface PageProps {
@@ -64,11 +64,12 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
   const lang = langCookie === 'cs' ? 'cs' : 'en'
   const t = (cs: string, en: string) => (lang === 'cs' ? cs : en)
 
-  const [index, doc] = await Promise.all([
+  const [index, docResult] = await Promise.all([
     loadDocsIndex(name, requestedLang),
-    loadDocsDocument(name, slug, requestedLang),
+    loadDocsDocumentResult(name, slug, requestedLang),
   ])
 
+  const doc = docResult.status === 'available' ? docResult.document : null
   const items = index?.items ?? []
   const source = doc?.source ?? index?.source
   const docLangs = doc?.availableLanguages ?? []
@@ -245,7 +246,7 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
             <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
             <div>
               <div style={{ fontWeight: 600, marginBottom: '4px' }}>
-                {index === null
+                {docResult.status === 'unavailable' || index === null
                   ? t('Dokumentační endpoint nedostupný', 'Documentation endpoint unavailable')
                   : items.length === 0
                     ? t('Zdrojové dokumenty chybí', 'Source documents missing')
