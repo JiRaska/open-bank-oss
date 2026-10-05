@@ -162,28 +162,31 @@ class ProvisioningCycleScheduler(
         // Commit the start BEFORE any loan-level transaction. An abrupt stop leaves durable RUNNING
         // evidence; a later date cannot certify that earlier reporting date as complete.
         runs.markStarted(asOf, OffsetDateTime.now(clock))
-            .flatMap { runs.countUnresolvedBefore(asOf) }
-            .invoke { unresolved ->
-                unresolvedPriorDays.set(unresolved)
-                if (unresolved > 0) {
-                    log.errorf("IFRS 9 provisioning has %d unresolved prior reporting day(s)", unresolved)
-                }
-            }
-            .flatMap { unresolved ->
-                cycle.runProvisioningCycle(period, asOf, batchSize)
-                    .invoke { outcome ->
-                        log.infof(
-                            "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
-                            outcome.period,
-                            outcome.loansAssessed,
-                            outcome.journalsQueued,
-                        )
+            .flatMap { attemptId ->
+                runs.countUnresolvedBefore(asOf)
+                    .invoke { unresolved ->
+                        unresolvedPriorDays.set(unresolved)
+                        if (unresolved > 0) {
+                            log.errorf("IFRS 9 provisioning has %d unresolved prior reporting day(s)", unresolved)
+                        }
                     }
-                    .flatMap { publishCoverage(period) }
-                    .flatMap { missing ->
-                        runs.markResult(asOf, missing, OffsetDateTime.now(clock)).replaceWith(missing)
+                    .flatMap { unresolved ->
+                        cycle.runProvisioningCycle(period, asOf, batchSize)
+                            .invoke { outcome ->
+                                log.infof(
+                                    "IFRS 9 provisioning cycle %s: %d loans assessed, %d allowance commands queued",
+                                    outcome.period,
+                                    outcome.loansAssessed,
+                                    outcome.journalsQueued,
+                                )
+                            }
+                            .flatMap { publishCoverage(period) }
+                            .flatMap { missing ->
+                                runs.markResult(asOf, attemptId, missing, OffsetDateTime.now(clock))
+                                    .replaceWith(missing)
+                            }
+                            .map { missing -> missing == 0L && unresolved == 0L }
                     }
-                    .map { missing -> missing == 0L && unresolved == 0L }
             }
             .invoke { complete -> if (complete) liveness?.recordSuccess() }
             .onFailure().invoke { e -> log.error("IFRS 9 provisioning cycle failed", e) }

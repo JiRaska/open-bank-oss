@@ -192,7 +192,8 @@ interface ProvisioningCoverageRepository {
 
 /** Durable reporting-day evidence; an unfinished earlier day must survive a later successful pass. */
 interface ProvisioningCycleRunRepository {
-    fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<Unit>
-    fun markResult(period: LocalDate, missingLoans: Long?, at: OffsetDateTime): Uni<Unit>
+    /** Persist a new attempt before any loan transaction; the returned id binds its eventual result. */
+    fun markStarted(period: LocalDate, at: OffsetDateTime): Uni<UUID>
+    fun markResult(period: LocalDate, attemptId: UUID, missingLoans: Long?, at: OffsetDateTime): Uni<Unit>
     fun countUnresolvedBefore(period: LocalDate): Uni<Long>
 }
