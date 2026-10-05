@@ -237,6 +237,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: observability
+    # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
+    # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
+    # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
+    # Admitted by the ReferenceGrant in customer-edge/httproute.yaml, which landed in an EARLIER
+    # change on purpose (the Phase-1 RefNotPermitted lesson).
+    - name: https-customer-edge
+      protocol: HTTPS
+      port: 443
+      hostname: customer.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: customer-edge-tls
+            namespace: customer-edge
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
     # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
     # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
     # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
