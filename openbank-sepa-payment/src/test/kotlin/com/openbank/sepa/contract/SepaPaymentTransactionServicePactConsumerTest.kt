@@ -97,7 +97,7 @@ class SepaPaymentTransactionServicePactConsumerTest {
      * to catch: nothing else replays this exact request against the real provider.
      *
      * The state name is not free text — it is the literal
-     * `TransactionNegativeAuthPactVerificationTest.NEGATIVE_AUTH_STATE`. transaction-service splits
+     * `TransactionNegativeAuthProviderVerificationTest.NEGATIVE_AUTH_STATE`. transaction-service splits
      * its replay in two because a class-level `@TestSecurity` authenticates every request it makes,
      * so a 401 interaction routed to the positive class would be served a 201 and the pact would
      * fail for a reason that has nothing to do with authz (#8993). This state is what routes the

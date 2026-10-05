@@ -50,7 +50,7 @@ import java.util.UUID
  * [TransactionServiceClient]'s `@Path` (CLAUDE.md "Contract tests", #2269/#2290). The request body
  * is serialised from the REAL client DTO. Replayed on every PR by
  * `TransactionPactFolderProviderVerificationTest`, and the 401 by
- * `TransactionNegativeAuthPactVerificationTest`.
+ * `TransactionNegativeAuthProviderVerificationTest`.
  *
  * IMPORTANT — regenerate on change: re-run this test and commit the updated pact JSON in the same
  * PR; `pact-drift-check.yml` fails the build if they diverge.

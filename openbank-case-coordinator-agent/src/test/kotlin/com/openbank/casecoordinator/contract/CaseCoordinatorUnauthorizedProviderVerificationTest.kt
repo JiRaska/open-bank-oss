@@ -39,7 +39,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @PactFolder("../pacts")
 @PactFilter(NEGATIVE_AUTH_STATE)
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
-class CaseCoordinatorUnauthorizedPactVerificationTest {
+class CaseCoordinatorUnauthorizedProviderVerificationTest {
 
     @ConfigProperty(name = "quarkus.http.test-port")
     lateinit var port: String

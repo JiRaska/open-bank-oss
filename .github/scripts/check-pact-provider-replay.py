@@ -88,8 +88,13 @@ class VerificationClass:
     excluded_by_build: str = ""
 
     @property
+    def selected_by_task(self) -> bool:
+        # providerPactTest compiles only this filename suffix from src/test/kotlin.
+        return self.path.endswith("ProviderVerificationTest.kt")
+
+    @property
     def runs_on_pr(self) -> bool:
-        return self.source == "folder" and not self.gates and not self.excluded_by_build
+        return self.source == "folder" and self.selected_by_task and not self.gates and not self.excluded_by_build
 
     @property
     def publishes_to_broker(self) -> bool:
@@ -99,9 +104,11 @@ class VerificationClass:
         lane has no broker (ADR-0056) and the class runs on main-push. What disqualifies it is the
         build excluding it outright, which stops it running anywhere.
         """
-        return self.source == "broker" and not self.excluded_by_build
+        return self.source == "broker" and self.selected_by_task and not self.excluded_by_build
 
     def why_not(self) -> str:
+        if not self.selected_by_task:
+            return "filename excluded from providerPactTest source set"
         if self.source == "broker":
             return "@PactBroker-sourced, so it needs a broker the PR lane cannot reach"
         if self.source == "none":
@@ -214,6 +221,12 @@ def check_no_orphan_providers(pacts: dict[str, str], classes: list[VerificationC
             )
 
 
+def check_task_selection(classes: list[VerificationClass]) -> None:
+    for c in classes:
+        if not c.selected_by_task:
+            fail(f"{c.path} is an @Provider class excluded by the providerPactTest filename filter")
+
+
 def check_allowlist_is_live(pacts: dict[str, str], allow: set[str]) -> None:
     for pact in sorted(allow):
         if pact not in pacts:
@@ -289,23 +302,26 @@ def selftest() -> int:
         if caught:
             print(f"      first message: {caught[0][:150]}")
 
-    folder = VerificationClass("a/FolderTest.kt", "p", "folder")
-    broker = VerificationClass("a/BrokerTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
-    gated_folder = VerificationClass("a/GatedTest.kt", "p", "folder", gates=["@Disabled"])
-    build_excluded = VerificationClass("a/ExcludedTest.kt", "p", "folder", excluded_by_build='exclude("**/ExcludedTest*")')
+    folder = VerificationClass("a/FolderProviderVerificationTest.kt", "p", "folder")
+    broker = VerificationClass("a/BrokerProviderVerificationTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
+    gated_folder = VerificationClass("a/GatedProviderVerificationTest.kt", "p", "folder", gates=["@Disabled"])
+    build_excluded = VerificationClass("a/ExcludedProviderVerificationTest.kt", "p", "folder", excluded_by_build='exclude("**/ExcludedProviderVerificationTest*")')
+    unselected = VerificationClass("a/NegativeAuthPactVerificationTest.kt", "p", "folder")
     one_pact = {"pacts/c-p.json": "p"}
 
     run("pact whose only replay is broker-gated", lambda: check_coverage(one_pact, [broker], set()))
     run("pact whose replay is @Disabled", lambda: check_coverage(one_pact, [gated_folder], set()))
     run("pact whose replay is excluded by build.gradle.kts", lambda: check_coverage(one_pact, [build_excluded], set()))
+    run("pact whose replay is excluded by task filename filter", lambda: check_coverage(one_pact, [unselected], set()))
+    run("unselected @Provider class is rejected", lambda: check_task_selection([unselected]))
     run("pact with no @Provider class at all", lambda: check_coverage(one_pact, [], set()))
     run("covered pact still in KNOWN_UNCOVERED", lambda: check_coverage(one_pact, [folder], {"pacts/c-p.json"}))
     run("KNOWN_UNCOVERED names a pact that no longer exists", lambda: check_allowlist_is_live(one_pact, {"pacts/gone.json"}))
     run("@Provider name matches no pact", lambda: check_no_orphan_providers(one_pact, [VerificationClass("a/T.kt", "typo", "folder")]))
     # --- broker-publication direction (#7621) ---
-    broker_ok = VerificationClass("a/BrokerTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
+    broker_ok = VerificationClass("a/BrokerProviderVerificationTest.kt", "p", "broker", gates=["@EnabledIfSystemProperty"])
     broker_excluded = VerificationClass(
-        "a/BrokerTest.kt", "p", "broker", excluded_by_build='exclude("**/BrokerTest*")'
+        "a/BrokerProviderVerificationTest.kt", "p", "broker", excluded_by_build='exclude("**/BrokerProviderVerificationTest*")'
     )
     run(
         "provider whose only class is @PactFolder — nothing reaches the broker",
@@ -367,6 +383,7 @@ def selftest() -> int:
     saved, errors = errors, []
     try:
         check_broker_publication(one_pact, [folder, broker_ok], set())
+        check_task_selection([folder, broker_ok])
         accepted = not errors
     finally:
         errors = saved
@@ -390,6 +407,7 @@ def main() -> int:
 
     check_coverage(pacts, classes, KNOWN_UNCOVERED)
     check_no_orphan_providers(pacts, classes)
+    check_task_selection(classes)
     check_allowlist_is_live(pacts, KNOWN_UNCOVERED)
     check_broker_publication(pacts, classes, KNOWN_NO_BROKER_PUBLICATION)
     check_broker_allowlist_is_live(pacts, KNOWN_NO_BROKER_PUBLICATION)
