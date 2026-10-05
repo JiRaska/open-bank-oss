@@ -2587,6 +2587,23 @@ gates:
     run: |
       bash .github/scripts/spot-kill-retry.sh --self-test
 
+  - id: dast-zap-coverage-selftest
+    name: "DAST coverage verdict tells a scan from a non-scan (issue #12097, enforced)"
+    group: registry
+    mode: enforced
+    selftest_exempt: >-
+      is-a-test-suite — the run: below IS the self-test. It drives evaluate() over synthetic access
+      logs and asserts the spec/requested/auth-blocked counts and every non-scan verdict (zero ops,
+      >=95% 401/403, never ready); falsified by weakening the threshold, the template ordering and
+      the readiness check, each of which turned it red.
+    budget_seconds: 10
+    rationale: "dast-zap-baseline.yml runs only on schedule, so without this its non-scan detection would first be exercised by the run it is meant to judge — the shape that let the lane go green on 6 unauthenticated 4xx URLs and still back a pentest attestation (#12097)."
+    review_after: "2027-04-04"
+    min_subjects: 13
+    run: |
+      python3 .github/scripts/dast-zap-coverage.py --self-test
+      python3 .github/scripts/e2e/dast-zap-coverage.test.py
+
   - id: ci-reconcile-selector-selftest
     name: "CI reconciler verifies bounded queries and recent retry/flake candidates (issues #9645, #10262, enforced)"
     group: registry
@@ -4208,6 +4225,7 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
+      python3 .github/scripts/service-ci-library-dependents.py --self-test
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`

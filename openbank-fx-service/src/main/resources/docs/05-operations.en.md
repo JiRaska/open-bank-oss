@@ -97,3 +97,7 @@ PENDING means screening said REVIEW or the sanctions service was unavailable.
 - Per-service CI builds only on changed paths; `version.txt` is owned by **release-please** (do not hand-bump in a feature/fix PR).
 - `openapi.yaml:info.version` is a separate axis (ADR-0048) classified from the OpenAPI diff.
 - GitOps: ArgoCD picks up the new image tag; for image-tag merge conflicts take `--ours` (freshly-built), never blind `--theirs`.
+
+## AML service mTLS in production
+
+The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.

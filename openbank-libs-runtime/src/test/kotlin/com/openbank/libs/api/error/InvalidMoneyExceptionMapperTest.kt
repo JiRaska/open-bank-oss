@@ -66,6 +66,29 @@ class InvalidMoneyExceptionMapperTest {
     }
 
     @Test
+    fun `a non-positive amount renders AMOUNT_NOT_POSITIVE as a 400 problem`() {
+        val e = refusal {
+            Money.parseInbound(BigDecimal("-7.50"), "EUR", amountField = "instructedAmount", requirePositive = true)
+        }
+        val response = mapper.toResponse(e)
+        val body = response.entity as ProblemDetail
+
+        assertThat(response.status).isEqualTo(400)
+        assertThat(response.mediaType.toString()).isEqualTo("application/json")
+        assertThat(body.status).isEqualTo(400)
+        assertThat(body.code).isEqualTo("AMOUNT_NOT_POSITIVE")
+        assertThat(body.type).isEqualTo("urn:openbank:error:amount-not-positive")
+        assertThat(body.title).isEqualTo("The amount must be greater than zero")
+        assertThat(body.detail).isEqualTo("instructedAmount: Amount must be greater than zero")
+        assertThat(body.message).isEqualTo(body.detail)
+        assertThat(body.retryable).isFalse()
+        assertThat(body.violations).containsExactly(
+            ProblemViolation("instructedAmount", "Amount must be greater than zero", "AMOUNT_NOT_POSITIVE"),
+        )
+        assertThat(body.detail).doesNotContain("7.5")
+    }
+
+    @Test
     fun `the generic IllegalArgumentException mapper still answers it with 400 as before`() {
         // Where only the generic mapper is registered (or a catch site widens to IAE), nothing changes.
         val e = refusal { Money.of("1.005", "EUR") }

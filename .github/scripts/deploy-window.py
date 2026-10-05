@@ -22,7 +22,10 @@ moment a deploy PR's auto-merge is ARMED does:
                 every pending service and supersede-deploy-prs.sh closes the older ones. That
                 is what turns "several pushes inside one window" into ONE commit. A pin is
                 carried only while main still holds the tag that PR replaced — if main moved
-                that service since, the old pin is stale and carrying it would rewind it.
+                that service since, the old pin is stale and carrying it would rewind it. It is
+                also refused when build inputs changed after that image's source commit.
+  * `verify`  — before either deploy workflow arms a GitOps PR, proves every image in its diff
+                still represents the current main build inputs. Unknown sources fail closed.
 
 NO LOST DEPLOY. A deferred deploy is an open PR: the same durable record the pipeline used
 before this change. Nothing here closes a PR; the only closer is supersede-deploy-prs.sh, which
@@ -35,8 +38,11 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from functools import lru_cache
 
 DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
@@ -95,8 +101,41 @@ def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
     return list(dict.fromkeys(out))
 
 
-def carry(root: str, diff: str, skip_images: set[str]) -> list[str]:
-    """Apply an older PR's pins onto the tree at `root` where main has not moved since."""
+@lru_cache(maxsize=128)
+def global_build_inputs_unchanged(root: str, source: str) -> bool:
+    """Cheap rejection shared by every service built from the same source commit."""
+    result = subprocess.run(
+        ["git", "diff", "--quiet", source, "HEAD", "--", "build-logic", "gradle", "config"],
+        cwd=root, capture_output=True, check=False,
+    )
+    return result.returncode == 0
+
+
+def image_source_is_current(root: str, image: str, tag: str) -> bool:
+    """Only carry an image when its source still builds the same service artifact."""
+    service = image.rsplit("/", 1)[-1]
+    match = re.fullmatch(r"sandbox-([0-9a-f]{8})", tag)
+    if not service.startswith("openbank-") or not match:
+        return False
+    source = subprocess.run(
+        ["git", "rev-parse", "--verify", f"{match[1]}^{{commit}}"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if source.returncode != 0:
+        return False
+    if not global_build_inputs_unchanged(root, source.stdout.strip()):
+        return False
+    equivalent = subprocess.run(
+        ["bash", ".github/scripts/pact-version-tree-equivalent.sh", service,
+         source.stdout.strip(), "HEAD"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    return equivalent.returncode == 0
+
+
+def carry(root: str, diff: str, skip_images: set[str],
+          fresh: Callable[[str, str], bool]) -> list[str]:
+    """Apply an older PR's pins only when main and its image source remain equivalent."""
     carried = []
     for rel, image, old, new in pins_from_diff(diff):
         if image in skip_images:
@@ -108,9 +147,22 @@ def carry(root: str, diff: str, skip_images: set[str]) -> list[str]:
         cur = {m["tag"] for m in PIN_RE.finditer(text) if m["image"] == image}
         if cur != {old}:
             continue  # main moved this service since that PR was cut: carrying would rewind it
+        if not fresh(image, new):
+            continue  # a newer build input changed; this image cannot be carried safely
         open(path, "w", encoding="utf-8").write(text.replace(f"{image}:{old}", f"{image}:{new}"))
         carried.append(f"{image}:{new} in {rel}")
     return carried
+
+
+def verify_pins(diff: str, fresh: Callable[[str, str], bool]) -> list[str]:
+    """Return the first stale or unverifiable pin; one is enough to refuse arming."""
+    pins = pins_from_diff(diff)
+    if not pins:
+        return ["no image pins found in the GitOps diff"]
+    for rel, image, _old, new in pins:
+        if not fresh(image, new):
+            return [f"{image.rsplit('/', 1)[-1]}:{new} in {rel}"]
+    return []
 
 
 def last_deploy_from_commits(commits: list[dict]) -> int | None:
@@ -175,7 +227,7 @@ def self_test() -> int:
             f"--- a/g/{s}.yaml\n+++ b/g/{s}.yaml\n@@ -1 +1 @@\n-image: {reg}/openbank-{s}:{o}\n+image: {reg}/openbank-{s}:sandbox-111\n"
             for s, o in (("billing", "sandbox-aaa"), ("lending", "sandbox-bbb"), ("party", "sandbox-ccc"))
         )
-        got = carry(d, older, {f"{reg}/openbank-lending"})
+        got = carry(d, older, {f"{reg}/openbank-lending"}, lambda image, tag: True)
         read = lambda s: open(os.path.join(d, "g", f"{s}.yaml")).read()
         check("two pushes in one window -> newest PR pins BOTH (billing carried)", "openbank-billing:sandbox-111" in read("billing"))
         check("carry never overrides this run's own newer pin", "openbank-lending:sandbox-222" in read("lending"))
@@ -183,7 +235,16 @@ def self_test() -> int:
         check("carry reports exactly what it applied", len(got) == 1 and "billing" in got[0])
         # Negative control: without carry the newest PR would NOT cover billing, so
         # supersede-deploy-prs.sh (coverage gate) would leave the older PR open -> two commits.
-        check("carry is idempotent (second run changes nothing)", carry(d, older, {f"{reg}/openbank-lending"}) == [])
+        check("carry is idempotent (second run changes nothing)",
+              carry(d, older, {f"{reg}/openbank-lending"}, lambda image, tag: True) == [])
+        open(os.path.join(d, "g", "billing.yaml"), "w").write(
+            f"image: {reg}/openbank-billing:sandbox-aaa\n")
+        check("carry rejects an image whose source predates changed build inputs",
+              carry(d, older, set(), lambda image, tag: False) == []
+              and "sandbox-aaa" in read("billing"))
+        check("verify refuses stale GitOps pins", len(verify_pins(older, lambda image, tag: False)) == 1)
+        check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
+        check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
 
     if fails:
         print(f"self-test: FAILED ({len(fails)})")
@@ -206,6 +267,8 @@ def main() -> int:
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
+    v = sub.add_parser("verify")
+    v.add_argument("--root", default=".")
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -225,9 +288,16 @@ def main() -> int:
         print(f"arm_head={pick['head'] if pick else ''}")
         return 0
     if a.cmd == "carry":
-        for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split())):
+        for line in carry(a.root, sys.stdin.read(), set(a.skip_images.split()),
+                          lambda image, tag: image_source_is_current(a.root, image, tag)):
             print(f"  [carried] {line}")
         return 0
+    if a.cmd == "verify":
+        stale = verify_pins(sys.stdin.read(),
+                            lambda image, tag: image_source_is_current(a.root, image, tag))
+        for pin in stale:
+            print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
+        return 1 if stale else 0
     ap.print_help()
     return 2
 

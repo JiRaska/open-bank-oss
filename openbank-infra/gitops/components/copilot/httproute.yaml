@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# copilot.open-bank.tech on the shared Gateway (ADR-0324 Phase 4), the Gateway API translation
+# of copilot-ingress.yaml. copilot-service still validates the customer session bearer itself
+# (OIDC resource server, ADR-0089); this file carries only the edge controls.
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, which external-dns skips, so copilot.open-bank.tech keeps
+# resolving to ingress-nginx. Three steps, each its own change, in this order:
+#   1. this file — the Certificate, the ReferenceGrant, the route and its policy;
+#   2. the Gateway's https-copilot listener (envoy-gateway/gateway.yaml), once the grant is
+#      live — switching a listener in the same sync as its grant left langfuse's listener
+#      RefNotPermitted (2026-10-03), because the two are different Argo apps with no ordering;
+#   3. the DNS cutover: the annotation moves from this route to the Ingress.
+#
+# WHY ITS OWN CERTIFICATE and not `copilot-tls`. cert-manager runs with
+# --enable-certificate-owner-ref, so `copilot-tls` is owned by the `copilot` Ingress; deleting
+# that Ingress after the cutover would garbage-collect the Secret a listener served. This host
+# is deliberately NOT pinned (copilot-ingress.yaml: kept off customer.open-bank.tech so the
+# ADR-0066 S3 pin is untouched), so a fresh key is harmless. Same shape as pact-edge-tls.
+#
+# Annotation mapping from copilot-ingress.yaml:
+#   ssl-redirect              -> the Gateway's http listener redirects every host (301)
+#   limit-rps 10 x burst 3    -> local rate limit PER CLIENT IP (sourceCIDR Distinct), 10/s. Envoy's
+#                                local limit is a token bucket whose size equals its refill, so the
+#                                burst is 10 where nginx allowed 30; the sustained rate is the
+#                                same. Per client because the Gateway Service runs
+#                                externalTrafficPolicy: Local. Like nginx's, the bucket is per
+#                                proxy replica.
+#   proxy-buffering off       -> nothing to configure: Envoy streams response bodies as they
+#                                arrive (no proxy_buffering equivalent), so SSE tokens reach the
+#                                app incrementally. No response-side buffer filter is attached.
+#   proxy-read-timeout 3600   -> streamIdleTimeout 3600s (time without upstream OR downstream
+#   proxy-send-timeout 3600      activity; Envoy's default is 5 min) and requestTimeout 3600s (the
+#                                whole SSE response must finish inside the hour, as a turn does)
+#   controller HSTS (2y, includeSubDomains, preload), nosniff, hide-headers X-Powered-By
+#                             -> ResponseHeaderModifier below, same values
+#   (nginx default) client_max_body_size 1m
+#                             -> requestBuffer 1Mi (buffers the REQUEST only; a chat turn is a
+#                                small JSON body, and the response stream is untouched)
+#   path /api/v1/copilot Prefix -> PathPrefix /api/v1/copilot, nothing else routes on this host
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: copilot-edge-tls
+  namespace: platform
+spec:
+  secretName: copilot-edge-tls
+  dnsNames:
+    - copilot.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+# The Gateway may read the edge certificate. `copilot-tls` is admitted too, so pointing the
+# listener back at the Ingress-owned Secret needs no grant change while that Secret exists.
+# Named for copilot: `platform` is shared by agent, ap2, copilot and mcp.
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: copilot-edge-gateway-tls
+  namespace: platform
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: copilot-tls
+    - group: ""
+      kind: Secret
+      name: copilot-edge-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: copilot
+  namespace: platform
+  annotations:
+    # Held out of DNS until the cutover change (step 3 above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-copilot
+  hostnames:
+    - copilot.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/copilot
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: copilot-service
+          port: 8131
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: copilot
+  namespace: platform
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: copilot
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 3600s
+      streamIdleTimeout: 3600s
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling: a shared bucket would let one noisy client starve every other.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 10
+            unit: Second

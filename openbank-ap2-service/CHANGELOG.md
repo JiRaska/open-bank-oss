@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.4.0...ap2-service-v0.4.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/ap2-service-v0.3.1...ap2-service-v0.4.0) (2026-10-02)
 
 

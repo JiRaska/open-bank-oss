@@ -17,6 +17,10 @@ ENV GRADLE_OPTS="-Xmx2g -Xms256m -XX:MaxMetaspaceSize=512m"
 # Surface failures from the inner gradlew command (the original `for attempt ... exit 0` loop
 # swallowed the exit code so docker compose reported success on a failed build — that bit us
 # during the SBOM-2 rollout). Stop on first failure, no retries.
+# The build context has no .git (.dockerignore), so the commit recorded in the service's
+# build facts must arrive as an explicit input: --build-arg SOURCE_COMMIT=<40-hex sha>.
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 RUN chmod +x gradlew && \
     ./gradlew :${SERVICE_DIR}:quarkusBuild \
       -Dquarkus.package.jar.type=uber-jar \
