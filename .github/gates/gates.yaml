@@ -1303,6 +1303,26 @@ gates:
       # was latent rather than actively hiding one, which is exactly when it is cheap to fix.
       python3 openbank-infra/scripts/check-cnpg-backup-declared.py --enforce
 
+  # A new auto-synced service Application can create its workload and database
+  # before a later PR supplies the threat model, policy bundle or first base
+  # backup. Check the transition on the introducing PR; existing Applications
+  # stay owned by the fleet-wide source gates above (#9908).
+  - id: new-auto-sync-app-readiness
+    name: "new auto-synced service Application is ready at introduction"
+    group: gitops
+    mode: enforced
+    when: pull_request
+    needs_base: required
+    budget_seconds: 30
+    min_subjects: 50  # parsed Application corpus; newly automated transitions may legitimately be zero
+    rationale: "An auto-synced service Application can create an unrecoverable database or run without its threat model and mounted policy bundle before unrelated fleet gates expose the gap."
+    review_after: "2027-04-06"
+    selftest: python3 openbank-infra/scripts/check-new-auto-sync-app.py --self-test
+    selftest_expect: pass
+    selftest_inputs: ["openbank-infra/scripts/check-new-auto-sync-app.py"]
+    run: |
+      python3 openbank-infra/scripts/check-new-auto-sync-app.py --base "$PR_DIFF_BASE"
+
   - id: db-backup-prefix-scope
     name: "CNPG backup prefix == ServiceAccount the S3 grant is scoped to (enforced)"
     group: gitops
