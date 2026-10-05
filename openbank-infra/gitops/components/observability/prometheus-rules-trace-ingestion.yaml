@@ -10,11 +10,11 @@
 #
 # Measured live 2026-09-30: ~12.5 spans/s steady state through the day (05:40-17:30Z, never
 # below 11.6 over any 10m window), which is what makes ZERO a threshold rather than a guess.
-# Off-hours volume was NOT measurable — the cluster Prometheus keeps 12h and finops-scaledown
-# scales services to zero at 22:00 Europe/Prague — so the stalled rule starts at `warning`
-# (Slack, no page) until a weekend has been observed; raising it to critical is the recorded
-# follow-up. The absent rule is critical from day one: a missing series is a broken scrape or
-# a dead Tempo, never a quiet night.
+# A full weekend had nonzero ingestion in all 289 sampled 10-minute windows. Of 2,881
+# one-minute scrape checks, one was missing; there was no sustained scrape gap. With
+# regular scrapes, a complete halt takes roughly 10m to satisfy rate(...[10m]) == 0,
+# then 15m more to fire. That sustained loss is critical trace blindness, like
+# LokiLogIngestionStalled. A missing series instead fires the separate absent rule.
 #
 # Picked up automatically (ruleSelectorNilUsesHelmValues=false).
 apiVersion: monitoring.coreos.com/v1
@@ -37,7 +37,7 @@ spec:
             sum(rate(tempo_distributor_spans_received_total[10m])) == 0
           for: 15m
           labels:
-            severity: warning
+            severity: critical
             team: platform
           annotations:
             # Subject: real span traffic from every instrumented workload via the OTel

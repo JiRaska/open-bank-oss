@@ -19,11 +19,14 @@ tests:
       - eval_time: 20m
         alertname: TempoTraceIngestionStalled
         exp_alerts: []
-      - eval_time: 40m
+      - eval_time: 33m
+        alertname: TempoTraceIngestionStalled
+        exp_alerts: []
+      - eval_time: 34m
         alertname: TempoTraceIngestionStalled
         exp_alerts:
           - exp_labels:
-              severity: warning
+              severity: critical
               team: platform
             exp_annotations:
               subject_period: continuous
