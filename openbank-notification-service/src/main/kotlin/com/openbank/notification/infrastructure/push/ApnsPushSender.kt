@@ -98,11 +98,12 @@ class ApnsPushSender {
             .timeout(REQUEST_TIMEOUT)
             .POST(HttpRequest.BodyPublishers.ofString(payload))
             .build()
+        // A transport exception may follow APNs acceptance. Propagate it so the persisted
+        // notification stays PENDING and the request is held for reconciliation.
         return Uni.createFrom().completionStage(http.sendAsync(request, HttpResponse.BodyHandlers.ofString()))
             .map { resp ->
                 mapResponse(resp.statusCode(), resp.headers().firstValue("apns-id").orElse(null), resp.body())
             }
-            .onFailure().recoverWithItem { e -> PushResult.failed("APNS_ERROR", e.message) }
     }
 
     private fun providerToken(key: PrivateKey): String {

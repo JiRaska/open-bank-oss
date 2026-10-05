@@ -139,7 +139,7 @@ class NotificationConsumer @Inject constructor(
         }
 
         /**
-         * Terminal status of one EMAIL send from its three-state [EmailSendOutcome] (issue #4737).
+         * Terminal status of one EMAIL handoff, or null while provider acceptance is uncertain.
          *
          * Visible for tests, and deliberately a pure function of one value: like [pushOutcomeOf],
          * this mapping *is* the defect. The previous form asked only "did the `Uni` fail?", and a
@@ -153,17 +153,17 @@ class NotificationConsumer @Inject constructor(
          * map to SENT — that is the whole bug, and the sandbox's mock is deliberate (its gitops
          * manifest says so), so the record's honesty has to hold independently of the config.
          */
-        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome = when (outcome) {
+        fun emailOutcomeOf(outcome: EmailSendOutcome): NotificationOutcome? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> NotificationOutcome.SENT
             EmailSendOutcome.MOCKED -> NotificationOutcome.SUPPRESSED
-            EmailSendOutcome.FAILED -> NotificationOutcome.FAILED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
-        /** Reason code accompanying [emailOutcomeOf]; null exactly when the mailer accepted. */
+        /** A terminal reason; unresolved handoffs have no terminal outcome event. */
         fun emailReasonOf(outcome: EmailSendOutcome): String? = when (outcome) {
             EmailSendOutcome.ACCEPTED -> null
             EmailSendOutcome.MOCKED -> NotificationOutcomeEvent.REASON_MAILER_MOCKED
-            EmailSendOutcome.FAILED -> NotificationOutcomeEvent.REASON_MAILER_REFUSED
+            EmailSendOutcome.IN_DOUBT -> null
         }
 
         /** Reason code accompanying [pushOutcomeOf]; null exactly when something was accepted. */
@@ -728,13 +728,14 @@ class NotificationConsumer @Inject constructor(
      *   byte-identical status and telemetry to a working one. Exactly the `PushResult.skipped()`
      *   defect (ADR-0252 phase 0) on the channel #4363 is considering re-routing *to* — and that
      *   one was found by a customer, not by any signal.
-     * - **FAILED** / `mailer_refused` — the mailer rejected the message or the call failed.
+     * - **IN_DOUBT** — the mailer call failed. The relay might already have accepted it, so the
+     *   PENDING row remains unresolved and the record is nacked for dead-letter reconciliation.
      *
      * The deployed sandbox mocks the mailer deliberately, and that stays true; what changes is
      * that the record now says so. A configuration choice must not be able to make the database
      * assert a delivery that never occurred.
      */
-    private fun deliverEmail(
+    internal fun deliverEmail(
         req: NotificationRequest,
         recipient: String,
         subject: String,
@@ -749,30 +750,29 @@ class NotificationConsumer @Inject constructor(
             // Three states, not two (issue #4737). A mocked mailer completes with no failure, so
             // `failure == null` on its own means "the call did not throw", never "the mail left".
             val sendOutcome = when {
-                failure != null -> EmailSendOutcome.FAILED
+                failure != null -> EmailSendOutcome.IN_DOUBT
                 mailerMocked -> EmailSendOutcome.MOCKED
                 else -> EmailSendOutcome.ACCEPTED
             }
             emailMetrics.recordSend(req.template, sendOutcome)
-            if (sendOutcome != EmailSendOutcome.ACCEPTED) {
-                if (failure != null) {
-                    log.warnf(failure, "Email send failed: party=%s template=%s", req.partyId, req.template)
-                } else {
-                    // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
-                    // no-op is greppable, and counted as MOCKED so it is alertable — a log line is
-                    // not a signal anyone watches, which is how the push channel's identical
-                    // no-op went unnoticed until a customer reported it.
-                    log.infof(
-                        "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
-                            "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
-                        req.partyId,
-                        req.template,
-                        NotificationOutcomeEvent.REASON_MAILER_MOCKED,
-                    )
-                }
+            if (sendOutcome == EmailSendOutcome.IN_DOUBT) {
+                log.warnf(failure, "Email handoff in doubt: party=%s template=%s", req.partyId, req.template)
+                // A timeout or disconnect can happen after SMTP accepted the message. Terminal
+                // FAILED would invite a second contact on replay; keep PENDING and dead-letter.
+                Uni.createFrom().failure(failure ?: IllegalStateException("email handoff outcome is unresolved"))
+            } else if (sendOutcome == EmailSendOutcome.MOCKED) {
+                // Not a warning: the sandbox mocks the mailer on purpose. Logged at INFO so the
+                // no-op is greppable, and counted as MOCKED so it is alertable.
+                log.infof(
+                    "Email NOT sent: mailer is mocked (quarkus.mailer.mock=true) — party=%s " +
+                        "template=%s recorded SUPPRESSED/%s, never SENT (#4737)",
+                    req.partyId,
+                    req.template,
+                    NotificationOutcomeEvent.REASON_MAILER_MOCKED,
+                )
                 // sent = false, so `sent_at` stays NULL: the column means "when did this leave the
                 // process", and nothing left it.
-                markStatus(req, entity, emailOutcomeOf(sendOutcome), emailReasonOf(sendOutcome))
+                markStatus(req, entity, requireNotNull(emailOutcomeOf(sendOutcome)), emailReasonOf(sendOutcome))
             } else {
                 markStatus(req, entity, NotificationOutcome.SENT, reason = null, sent = true)
                     .onItem().invoke { _ ->

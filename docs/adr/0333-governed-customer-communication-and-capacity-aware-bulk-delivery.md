@@ -204,6 +204,16 @@ with an idempotent provider key where supported, before claiming resilient non-i
 An always-registered gauge and alert now surface rows still PENDING after 15 minutes, including
 ones whose terminal write failed after provider handoff and were acknowledged without replay.
 The alert is evidence for investigation, not permission to resend an ambiguous message.
+Transport exceptions from the SMTP mailer and APNs/FCM adapters now also leave the row PENDING
+and fail the Kafka record into its dead-letter path. A timeout can occur after the provider
+accepted the message, so turning that exception into a terminal FAILED outcome would invite a
+duplicate contact. A definitive HTTP rejection can still be FAILED; the exception case is
+IN_DOUBT. SMTP, APNs and FCM do not provide a universal queryable exactly-once receipt, so
+automated redelivery of an ambiguous handoff is prohibited. Reconciliation must use any
+provider-specific evidence available and otherwise record an explicit unresolved decision.
+A push fan-out can mix accepted and in-doubt device sends; the current aggregate row cannot
+reconstruct each device's result. A durable per-device attempt ledger and provider-specific
+receipts are still required before claiming automatic reconciliation for that case.
 
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic

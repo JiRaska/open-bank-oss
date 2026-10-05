@@ -295,6 +295,9 @@ class NotificationConsumerIT {
         )
 
         assertThat(outcome).isEqualTo("nacked")
+        assertThat(countFor(partyId)).isEqualTo(1L)
+        assertThat(statusFor(partyId)).isEqualTo("PENDING")
+        assertThat(outcomeRowsFor(notificationIdFor(partyId)!!)).isEmpty()
     }
 
     @Test
