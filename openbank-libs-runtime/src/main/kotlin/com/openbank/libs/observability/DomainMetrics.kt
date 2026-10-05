@@ -14,6 +14,8 @@ import jakarta.enterprise.inject.Instance
 import jakarta.inject.Inject
 import java.math.BigDecimal
 import java.time.Duration
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Central façade for all OpenBank domain metrics (ADR-0077 Phase 2).
@@ -53,6 +55,8 @@ class DomainMetrics {
     lateinit var registryInstance: Instance<MeterRegistry>
 
     private fun reg(): MeterRegistry? = if (registryInstance.isResolvable) registryInstance.get() else null
+
+    private val outboxPurgeCapStates = ConcurrentHashMap<String, AtomicInteger>()
 
     companion object {
         /**
@@ -406,6 +410,19 @@ class DomainMetrics {
     /** Increment when one outbox's SENT-row retention run fails; the other outboxes still run. */
     fun outboxPurgeFailed(service: String) {
         counter("openbank.outbox.purge.failed", "service", service)
+    }
+
+    /** A full retention cap cannot prove that every eligible SENT row was deleted; retain that state until a short run. */
+    fun outboxPurgeCapReached(service: String, reached: Boolean) {
+        val registry = reg() ?: return
+        val state = outboxPurgeCapStates.computeIfAbsent(service) {
+            AtomicInteger().also { value ->
+                Gauge.builder("openbank.outbox.purge.cap.reached", value) { it.get().toDouble() }
+                    .tag("service", service)
+                    .register(registry)
+            }
+        }
+        state.set(if (reached) 1 else 0)
     }
 
     /**

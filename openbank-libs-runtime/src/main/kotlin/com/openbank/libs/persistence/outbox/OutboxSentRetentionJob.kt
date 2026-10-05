@@ -86,6 +86,7 @@ class OutboxSentRetentionJob(
         require(sentDays > 0) { "openbank.outbox.retention.sent-days must be positive, was $sentDays" }
         if (targets.stream().findAny().isPresent) {
             liveness = metrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
+            targets.forEach { metrics.outboxPurgeCapReached(it.retentionLabel, reached = false) }
         }
     }
 
@@ -117,6 +118,16 @@ class OutboxSentRetentionJob(
                 val count = OutboxRetention.purgeSentUntilShort(target, retention, batchSize, maxBatches, now)
                 purged[label] = count
                 metrics.outboxPurged(label, count)
+                val capReached = count == batchSize.toLong() * maxBatches
+                metrics.outboxPurgeCapReached(label, reached = capReached)
+                if (capReached) {
+                    log.warnf(
+                        "outbox.retention.cap_reached service=%s batches=%d batch_size=%d; older SENT rows may remain",
+                        label,
+                        maxBatches,
+                        batchSize,
+                    )
+                }
                 if (count >
                     0
                 ) {

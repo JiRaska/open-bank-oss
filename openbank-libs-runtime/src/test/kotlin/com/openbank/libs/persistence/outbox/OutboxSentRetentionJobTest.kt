@@ -94,6 +94,26 @@ class OutboxSentRetentionJobTest {
     }
 
     @Test
+    fun `a full purge cap is observable even when the bounded run succeeds`(): Unit = runBlocking {
+        val full = Target("full", rows = 201)
+        val quiet = Target("quiet", rows = 0)
+        val j = job(full, quiet)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(j.purgeAll(now)).containsEntry("full", 200L).containsEntry("quiet", 0L)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(1.0)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "quiet").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(j.purgeAll(now.plusSeconds(86_400))).containsEntry("full", 1L)
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
+            .isEqualTo(0.0)
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
     fun `a service with no outbox registers no liveness gauge`() {
         job().registerLiveness(StartupEvent())
         assertThat(successRecorded()).isNull()
