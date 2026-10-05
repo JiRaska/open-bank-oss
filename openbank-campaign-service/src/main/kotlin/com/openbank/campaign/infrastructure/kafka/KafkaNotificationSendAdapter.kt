@@ -51,7 +51,7 @@ class KafkaNotificationSendAdapter(
             "correlationId" to request.correlationId.toString(),
             // The send-log row is one logical handoff. Kafka replay must resolve against that
             // durable fact rather than minting another notification (ADR-0333 D1/D4).
-            "deduplicationKey" to request.correlationId.toString(),
+            "deduplicationKey" to request.deduplicationKey.toString(),
         )
         // This is transport metadata, never a template variable. The notification renderer's
         // closed variable schema therefore cannot accidentally interpolate a navigation route.
