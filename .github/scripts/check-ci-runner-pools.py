@@ -71,41 +71,15 @@ import yaml
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gatelib  # noqa: E402  (path must be set first)
 
-# Declared in rules.yaml: ci_runners.pools, provisioned by no OpenTofu scale set.
-# Removing an entry requires either provisioning the pool or deleting its declaration.
-# Both entries here are also in KNOWN_UNAPPLIED: their OpenTofu exists but has never
-# been applied, so they are declared capacity that does not exist (#6458).
-KNOWN_UNPROVISIONED: dict[str, str] = {
-    "openbank-batch": "#6458 — OpenTofu added by #8388, never applied",
-    "openbank-dr": "#6458 — OpenTofu added by #8388, never applied",
-}
+# Declared pools without a matching OpenTofu scale set are an explicit baseline.
+# Remove an entry when the pool is provisioned or its declaration is deleted.
+KNOWN_UNPROVISIONED: dict[str, str] = {}
 
-# Scale sets whose OpenTofu resource EXISTS but which no `tofu apply` has ever created.
-# This map is the only way CI can tell "written" from "running": the gate has no cluster
-# credentials, so `load_provisioned` reads *.tf and would otherwise call a resource that
-# has never been applied "provisioned".
-#
-# EVIDENCE for the two entries below, measured 2026-09-03 against the live sandbox
-# cluster (read-only) and the workflow history — three independent reads agreeing:
-#   * `kubectl get autoscalingrunnersets -n arc-runners` lists exactly openbank-build
-#     and openbank-deploy. No openbank-batch, no openbank-dr.
-#   * The helm release secrets in that namespace are sh.helm.release.v1.openbank-build.*
-#     and .openbank-deploy.* only — arc_batch/arc_dr have never been installed.
-#   * `kubectl get sa -n arc-runners` has no openbank-dr service account, which the same
-#     OpenTofu creates, so the apply cannot have run even partially.
-#   * Platform OpenTofu run 33728996592 (push of #8388's merge commit b547afe8c) shows
-#     `tofu plan (preview)` success and `tofu apply (manual dispatch)` SKIPPED; the last
-#     real apply was the 2026-08-31 workflow_dispatch, before #8388 merged.
-#
-# REMOVING AN ENTRY is a human act after a cluster read — this gate cannot detect the
-# apply, so it will not tell you when the debt is paid. Verify with the first command
-# above, then delete the entry here and in KNOWN_UNPROVISIONED. The ratchet still fails
-# if the OpenTofu resource disappears while the entry remains (STALE-UNAPPLIED), and any
-# NEW job routed at an unapplied pool is reported, so the set cannot silently grow.
-KNOWN_UNAPPLIED: dict[str, str] = {
-    "openbank-batch": "#6458 — helm_release.arc_batch (arc-runners.tf) added by #8388, never applied",
-    "openbank-dr": "#6458 — helm_release.arc_dr (arc-runners.tf) added by #8388, never applied",
-}
+# An OpenTofu resource does not prove that the scale set has been applied. Add a pool
+# here while its declared resource is still absent from the cluster; remove it only
+# after a read-only cluster check confirms the scale set and its listener are ready.
+# The CI gate cannot perform that check because it has no cluster credentials.
+KNOWN_UNAPPLIED: dict[str, str] = {}
 
 SCALE_SET_RE = re.compile(r'runnerScaleSetName\s*=\s*"([^"]+)"')
 PR_EVENTS = {"pull_request", "pull_request_target"}
