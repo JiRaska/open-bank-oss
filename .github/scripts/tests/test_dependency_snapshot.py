@@ -15,7 +15,7 @@ import dependency_snapshot as subject
 SHA = '1' * 40
 IDENTITY = {'version': 0, 'sha': SHA, 'ref': 'refs/heads/example',
                 'job': {'id': '123', 'correlator': 'Dependency submission-submit'},
-                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
+                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                               'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
 
 
