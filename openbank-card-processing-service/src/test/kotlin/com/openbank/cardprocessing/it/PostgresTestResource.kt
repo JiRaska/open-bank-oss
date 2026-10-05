@@ -4,6 +4,7 @@
 
 package com.openbank.cardprocessing.it
 
+import com.openbank.libs.testing.containers.PostgresBase
 import com.openbank.libs.testing.evidence.TestInfrastructureEvidence
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import org.opentest4j.TestAbortedException
@@ -54,7 +55,7 @@ class PostgresTestResource : QuarkusTestResourceLifecycleManager {
     }
 
     private companion object {
-        const val POSTGRES_IMAGE = "postgres:16.3-alpine"
+        const val POSTGRES_IMAGE = PostgresBase.POSTGRES_IMAGE
         const val DATABASE = "openbank_card_processing_it"
     }
 }

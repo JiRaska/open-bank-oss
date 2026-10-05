@@ -116,6 +116,20 @@ gates:
     run: |
       python3 .github/scripts/filter-lib-test-only-paths.py --census 2>&1
 
+  - id: testcontainers-postgres-production-parity
+    name: "stock Testcontainers PostgreSQL matches production CNPG (#11317)"
+    group: kotlin
+    mode: enforced
+    rationale: "A service-local Testcontainers image stayed on PostgreSQL 16 while its production CNPG cluster moved to 18; compile-only checks could not see the dialect gap. The check covers real container references and exempts the intentional pgvector and Pact Broker images."
+    review_after: "2027-10-05"
+    min_subjects: 50
+    budget_seconds: 15
+    selftest: python3 .github/scripts/check-testcontainers-postgres-parity.py --self-test
+    selftest_expect: pass
+    selftest_inputs: [".github/scripts/check-testcontainers-postgres-parity.py"]
+    run: |
+      python3 .github/scripts/check-testcontainers-postgres-parity.py
+
   - id: synthetic-taint-rest-client-boundaries
     name: "Synthetic taint reaches every internal REST edge (ADR-0252, enforced)"
     group: kotlin
