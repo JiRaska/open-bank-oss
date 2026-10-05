@@ -34,6 +34,24 @@ describe('newly discovered service documentation', () => {
     expect(index).toMatchObject({ source: 'live', version: '0.3.0', gitCommit: 'abc123' })
   })
 
+  it('retains an empty index from a reachable service', async () => {
+    vi.mocked(inCluster).mockReturnValue(true)
+    vi.mocked(resolveInClusterBaseUrl).mockResolvedValue('https://example.com')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      service: 'openbank-context-service', available: false, items: [],
+    }), { status: 200 })))
+
+    expect(await loadDocsIndex('context')).toMatchObject({ source: 'live', items: [] })
+  })
+
+  it('reports an unreachable endpoint as unavailable', async () => {
+    vi.mocked(inCluster).mockReturnValue(true)
+    vi.mocked(resolveInClusterBaseUrl).mockResolvedValue('https://example.com')
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unreachable')))
+
+    expect(await loadDocsIndex('context')).toBeNull()
+  })
+
   it('does not compose an outbound URL for an unknown local service', async () => {
     vi.mocked(inCluster).mockReturnValue(false)
     const fetch = vi.fn()

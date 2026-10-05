@@ -145,9 +145,9 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
           })}
           {items.length === 0 && (
             <div style={{ fontSize: '12px', color: 'var(--text-tertiary)', padding: '8px', lineHeight: 1.5 }}>
-              {t('Žádné dokumenty. Služba buď nemá ', 'No documents. The service either has no ')}
-              <code>src/main/resources/docs/</code>
-              {t(', nebo neběží, nebo neodpovídá v limitu 2 s.', ', or is not running, or does not respond within the 2 s limit.')}
+              {index === null
+                ? t('Dokumentační endpoint služby je nyní nedostupný.', 'The service documentation endpoint is currently unavailable.')
+                : t('Služba odpovídá, ale nepublikuje žádné dokumenty.', 'The service responds but publishes no documents.')}
             </div>
           )}
         </nav>
@@ -244,7 +244,13 @@ export default async function ServiceDocsPage({ params, searchParams }: PageProp
           }}>
             <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '1px' }} />
             <div>
-              <div style={{ fontWeight: 600, marginBottom: '4px' }}>{t('Dokument nenalezen', 'Document not found')}</div>
+              <div style={{ fontWeight: 600, marginBottom: '4px' }}>
+                {index === null
+                  ? t('Dokumentační endpoint nedostupný', 'Documentation endpoint unavailable')
+                  : items.length === 0
+                    ? t('Zdrojové dokumenty chybí', 'Source documents missing')
+                    : t('Dokument nenalezen', 'Document not found')}
+              </div>
               <div style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '12px' }}>
                 {name}/{slug} (lang={requestedLang})
               </div>
