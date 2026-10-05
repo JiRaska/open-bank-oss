@@ -385,7 +385,7 @@ class CustomerEdgeResource(
 
     @PUT
     @Path("/balances/{accountId}/{currency}/low-balance-alert")
-    @Authorize(action = "customer.balances.read", resource = "#accountId")
+    @Authorize(action = "customer.balances.alert.update", resource = "#accountId")
     @Blocking
     fun setLowBalanceAlert(
         @PathParam("accountId") accountId: UUID,
