@@ -182,6 +182,14 @@ before run creation and holds a prepared run when its frozen audience needs more
 admission slots than that deadline. This rejects a mathematically impossible deadline before any
 journey starts, including after a budget reduction. It does not yet prove a feasible deadline:
 provider dispatch, shared slot contention and landing bursts still need measured D4 limits.
+Run creation and every leased page now also require nonzero configured provider dispatch capacity,
+landing safe requests per second, expected click fraction and burst factor; all default to zero.
+A frozen audience is held if its one-message-per-party provider lower bound exceeds the deadline,
+or if one page's estimated click burst exceeds the configured destination budget. Removing evidence
+holds a running run before the next page. These values are still operator-supplied and unmeasured
+for the target environment, and live saturation does not yet trigger an automatic hold. Multi-step
+journeys can exceed the one-message lower bound. This is a fail-closed necessary-condition check,
+not D4 capacity proof or authority to enable the mass flag.
 Notification-service's marketing ContactPolicyGate now reads the same live consent-service
 suppression list as campaign-service. A matching entry denies before counters or consent; an
 unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count

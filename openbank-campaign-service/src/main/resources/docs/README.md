@@ -27,6 +27,16 @@ until the provider, destination and end-to-end capacity controls in ADR-0333 are
 configured, a run with a completed snapshot is held before the next page if even the minimum number
 of one-minute admission slots exceeds this deadline. The check is a necessary condition only:
 provider delivery, other users of the global slot and destination clicks add time and load.
+Mass runs also require positive measured values for
+`openbank.campaign.mass-dispatch-capacity-per-minute`,
+`openbank.campaign.mass-landing-capacity-rps`,
+`openbank.campaign.mass-click-fraction` (0–1) and
+`openbank.campaign.mass-click-burst-factor` (at least 1). All default to zero and block run
+creation or hold a prepared run. The frozen audience must fit the provider's minimum number of
+one-minute slots within the deadline. The estimated click burst from one admission page
+(`pageSize / 60 * fraction * burstFactor`) must fit the destination budget. These are necessary
+checks against configured evidence; they do not monitor live provider or destination health,
+account for multiple messages per journey, or establish that a 100000-person send is safe.
 
 ## Interface
 

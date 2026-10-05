@@ -83,6 +83,14 @@ class BulkAdmissionService @Inject constructor(
     private val maxBulkAudience: Long = MAX_BULK_AUDIENCE,
     @ConfigProperty(name = "openbank.campaign.mass-completion-deadline-minutes", defaultValue = "0")
     private val deadlineMinutes: Long = 0,
+    @ConfigProperty(name = "openbank.campaign.mass-dispatch-capacity-per-minute", defaultValue = "0")
+    private val dispatchCapacityPerMinute: Long = 0,
+    @ConfigProperty(name = "openbank.campaign.mass-landing-capacity-rps", defaultValue = "0")
+    private val landingCapacityRps: Double = 0.0,
+    @ConfigProperty(name = "openbank.campaign.mass-click-fraction", defaultValue = "0")
+    private val clickFraction: Double = 0.0,
+    @ConfigProperty(name = "openbank.campaign.mass-click-burst-factor", defaultValue = "0")
+    private val clickBurstFactor: Double = 0.0,
 ) {
     @Inject lateinit var segments: SegmentRegistry
 
@@ -91,6 +99,7 @@ class BulkAdmissionService @Inject constructor(
 
     private companion object {
         const val MAX_BULK_AUDIENCE = 100_000L
+        const val SECONDS_PER_MINUTE = 60.0
 
         // The database lease lasts one hour. End work before it can be reclaimed by another pod.
         const val MAX_PAGE_MINUTES = 55L
@@ -103,6 +112,7 @@ class BulkAdmissionService @Inject constructor(
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
         check(maxBulkAudience in 1..MAX_BULK_AUDIENCE) { "bulk audience limit must be between 1 and 100000" }
         check(deadlineMinutes > 0) { "mass completion deadline is not configured" }
+        check(capacityPlanConfigured()) { "mass provider and landing capacity evidence is not configured" }
         val campaign = campaigns.findById(campaignId) ?: throw CampaignNotFoundException(campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can start a bulk run" }
         return runs.create(Ids.newId(), campaignId, pageSize, actor)
@@ -127,6 +137,7 @@ class BulkAdmissionService @Inject constructor(
     suspend fun resume(id: UUID, actor: String): BulkRun {
         check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
         check(deadlineMinutes > 0) { "mass completion deadline is not configured" }
+        check(capacityPlanConfigured()) { "mass provider and landing capacity evidence is not configured" }
         val run = runs.find(id) ?: throw NoSuchElementException("bulk run $id not found")
         val campaign = campaigns.findById(run.campaignId) ?: throw CampaignNotFoundException(run.campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "campaign must be ACTIVE to resume a run" }
@@ -191,13 +202,27 @@ class BulkAdmissionService @Inject constructor(
         maxBulkAudience !in 1..MAX_BULK_AUDIENCE -> "AUDIENCE_LIMIT_INVALID"
         (run.audienceCount ?: 0) > maxBulkAudience -> "AUDIENCE_LIMIT_REDUCED"
         deadlineMinutes <= 0 -> "DEADLINE_NOT_CONFIGURED"
-        run.audienceCount != null && admissionSlots(run.audienceCount, run.pageSize) > deadlineMinutes ->
+        !capacityPlanConfigured() -> "CAPACITY_PLAN_NOT_CONFIGURED"
+        run.audienceCount != null && admissionSlots(run.audienceCount, run.pageSize.toLong()) > deadlineMinutes ->
             "ADMISSION_DEADLINE_INFEASIBLE"
+        run.audienceCount != null && admissionSlots(run.audienceCount, dispatchCapacityPerMinute) > deadlineMinutes ->
+            "DISPATCH_DEADLINE_INFEASIBLE"
+        run.pageSize.toDouble() / SECONDS_PER_MINUTE * clickFraction * clickBurstFactor > landingCapacityRps ->
+            "LANDING_BURST_INFEASIBLE"
         else -> null
     }
 
-    private fun admissionSlots(audienceCount: Long, runPageSize: Int): Long =
-        audienceCount / runPageSize + if (audienceCount % runPageSize == 0L) 0 else 1
+    private fun capacityPlanConfigured(): Boolean = dispatchCapacityPerMinute > 0 &&
+        landingCapacityRps.isFinite() &&
+        landingCapacityRps > 0 &&
+        clickFraction.isFinite() &&
+        clickFraction > 0 &&
+        clickFraction <= 1 &&
+        clickBurstFactor.isFinite() &&
+        clickBurstFactor >= 1
+
+    private fun admissionSlots(audienceCount: Long, capacityPerMinute: Long): Long =
+        audienceCount / capacityPerMinute + if (audienceCount % capacityPerMinute == 0L) 0 else 1
 
     private suspend fun prepareAudience(claim: ClaimedBulkRun) {
         val campaign = campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)

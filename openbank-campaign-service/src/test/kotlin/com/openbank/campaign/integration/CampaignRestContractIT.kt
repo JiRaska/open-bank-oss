@@ -110,6 +110,10 @@ class CampaignRestContractIT {
             props["openbank.campaign.bulk-admission-per-minute"] = "1"
             props["openbank.campaign.mass-activation-enabled"] = "true"
             props["openbank.campaign.mass-completion-deadline-minutes"] = "10"
+            props["openbank.campaign.mass-dispatch-capacity-per-minute"] = "500"
+            props["openbank.campaign.mass-landing-capacity-rps"] = "100"
+            props["openbank.campaign.mass-click-fraction"] = "0.1"
+            props["openbank.campaign.mass-click-burst-factor"] = "2"
             return props
         }
 

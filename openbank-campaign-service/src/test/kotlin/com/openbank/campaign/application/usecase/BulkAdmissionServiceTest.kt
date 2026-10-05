@@ -32,6 +32,23 @@ class BulkAdmissionServiceTest {
     private val enrolment = mockk<CampaignService>()
     private val store = RecordingRuns()
 
+    private fun configuredService(
+        campaignStore: CampaignRepository,
+        enrollment: CampaignService,
+        runStore: BulkRunStore,
+        pageSize: Int,
+        enabled: Boolean = false,
+        maxAudience: Long = 100_000,
+        deadline: Long = 0,
+        dispatchPerMinute: Long = 500,
+        landingRps: Double = 100.0,
+        clicks: Double = 0.1,
+        burst: Double = 2.0,
+    ) = BulkAdmissionService(
+        campaignStore, enrollment, runStore, pageSize, enabled, maxAudience, deadline,
+        dispatchPerMinute, landingRps, clicks, burst,
+    )
+
     @Test
     fun `a run freezes its audience before admitting any journey`(): Unit = runBlocking {
         val segment = mockk<Segment>()
@@ -51,7 +68,7 @@ class BulkAdmissionServiceTest {
                 accept(listOf(partyId))
             }
         }
-        val service = BulkAdmissionService(campaignStore, enrolment, store, 2, true, deadlineMinutes = 10).also {
+        val service = configuredService(campaignStore, enrolment, store, 2, true, deadline = 10).also {
             it.segments = registry
             it.snapshots = source
         }
@@ -84,7 +101,7 @@ class BulkAdmissionServiceTest {
                 accept(listOf(UUID.randomUUID()))
             }
         }
-        val service = BulkAdmissionService(campaignStore, enrolment, store, 2, true, 2, 10).also {
+        val service = configuredService(campaignStore, enrolment, store, 2, true, 2, 10).also {
             it.segments = registry
             it.snapshots = source
         }
@@ -102,7 +119,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `audience limit cannot exceed the supported maximum`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2, true, 100_001, 10)
+        val service = configuredService(campaigns, enrolment, store, 2, true, 100_001, 10)
 
         assertThatThrownBy { runBlocking { service.start(campaignId, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
@@ -111,10 +128,10 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `lowering audience limit holds a prepared run before the next page`(): Unit = runBlocking {
-        val started = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+        val started = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
             .start(campaignId, "maker")
         store.run = started.copy(audienceCount = 3)
-        val reduced = BulkAdmissionService(campaigns, enrolment, store, 2, true, 2, 10)
+        val reduced = configuredService(campaigns, enrolment, store, 2, true, 2, 10)
 
         reduced.tick()
 
@@ -144,7 +161,7 @@ class BulkAdmissionServiceTest {
                 if (attempts == 1) error("source stopped mid-snapshot")
             }
         }
-        val service = BulkAdmissionService(campaignStore, enrolment, store, 2, true, deadlineMinutes = 10).also {
+        val service = configuredService(campaignStore, enrolment, store, 2, true, deadline = 10).also {
             it.segments = registry
             it.snapshots = source
         }
@@ -165,7 +182,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `missing measured budget prevents a mass run`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 0, true, deadlineMinutes = 10)
+        val service = configuredService(campaigns, enrolment, store, 0, true, deadline = 10)
         assertThatThrownBy { runBlocking { service.start(campaignId, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
         assertThat(store.run).isNull()
@@ -173,7 +190,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `missing completion deadline prevents a mass run`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2, true)
+        val service = configuredService(campaigns, enrolment, store, 2, true)
 
         assertThatThrownBy { runBlocking { service.start(campaignId, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
@@ -182,8 +199,69 @@ class BulkAdmissionServiceTest {
     }
 
     @Test
+    fun `missing provider or landing capacity prevents a mass run`(): Unit = runBlocking {
+        val missing = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+        assertThatThrownBy { runBlocking { missing.start(campaignId, "maker") } }
+            .isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("provider and landing capacity")
+        assertThat(store.run).isNull()
+    }
+
+    @Test
+    fun `insufficient provider throughput holds before the first journey`(): Unit = runBlocking {
+        val service = configuredService(
+            campaigns,
+            enrolment,
+            store,
+            2,
+            true,
+            deadline = 10,
+            dispatchPerMinute = 1,
+        )
+        store.run = service.start(campaignId, "maker").copy(audienceCount = 11)
+
+        service.tick()
+
+        assertThat(store.run?.lastError).isEqualTo("DISPATCH_DEADLINE_INFEASIBLE")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `click burst above landing budget holds before the first journey`(): Unit = runBlocking {
+        val service = configuredService(
+            campaigns,
+            enrolment,
+            store,
+            2,
+            true,
+            deadline = 10,
+            landingRps = 0.001,
+            clicks = 1.0,
+            burst = 1.0,
+        )
+        store.run = service.start(campaignId, "maker").copy(audienceCount = 2)
+
+        service.tick()
+
+        assertThat(store.run?.lastError).isEqualTo("LANDING_BURST_INFEASIBLE")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `removed provider evidence holds an already prepared run`(): Unit = runBlocking {
+        store.run = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
+            .start(campaignId, "maker").copy(audienceCount = 2)
+        val unconfigured = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+
+        unconfigured.tick()
+
+        assertThat(store.run?.lastError).isEqualTo("CAPACITY_PLAN_NOT_CONFIGURED")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `infeasible admission deadline holds before a recipient starts`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 50)
+        val service = configuredService(campaigns, enrolment, store, 2, true, deadline = 50)
         val started = service.start(campaignId, "maker")
         store.run = started.copy(audienceCount = 101)
 
@@ -196,7 +274,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `small-run capacity does not unlock mass activation`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2)
+        val service = configuredService(campaigns, enrolment, store, 2)
 
         assertThatThrownBy { runBlocking { service.start(campaignId, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
@@ -206,8 +284,8 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `disabling mass activation holds an existing run before another party is admitted`(): Unit = runBlocking {
-        BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10).start(campaignId, "maker")
-        val disabled = BulkAdmissionService(campaigns, enrolment, store, 2)
+        configuredService(campaigns, enrolment, store, 2, true, deadline = 10).start(campaignId, "maker")
+        val disabled = configuredService(campaigns, enrolment, store, 2)
 
         disabled.tick()
 
@@ -218,7 +296,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `legacy enrolment uses and releases the shared capacity lease`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2)
+        val service = configuredService(campaigns, enrolment, store, 2)
         coEvery { enrolment.enrolWithinLimit(campaignId, 2) } returns EnrolmentOutcome(1, 0)
 
         assertThat(service.enrolSmall(campaignId).enrolled).isEqualTo(1)
@@ -229,7 +307,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `legacy admission cannot bypass an occupied global lease`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2)
+        val service = configuredService(campaigns, enrolment, store, 2)
         store.manualOwner = UUID.randomUUID()
 
         assertThatThrownBy { runBlocking { service.enrolSmall(campaignId) } }
@@ -239,7 +317,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `a failed party holds the run at its last successful cursor`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 2, true, deadlineMinutes = 10)
+        val service = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
         val first = UUID.randomUUID()
         val started = service.start(campaignId, "maker")
         coEvery { enrolment.enrolParties(campaignId, null, any(), 2, any()) } returns
@@ -268,7 +346,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `an unavailable segment holds without moving the cursor`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 1, true, deadlineMinutes = 10)
+        val service = configuredService(campaigns, enrolment, store, 1, true, deadline = 10)
         service.start(campaignId, "maker")
         coEvery { enrolment.enrolParties(campaignId, null, any(), 1, any()) } throws
             IllegalStateException("source unavailable")
@@ -282,7 +360,7 @@ class BulkAdmissionServiceTest {
 
     @Test
     fun `paused campaign holds the run without counting a party failure`(): Unit = runBlocking {
-        val service = BulkAdmissionService(campaigns, enrolment, store, 1, true, deadlineMinutes = 10)
+        val service = configuredService(campaigns, enrolment, store, 1, true, deadline = 10)
         service.start(campaignId, "maker")
         coEvery { enrolment.enrolParties(campaignId, null, any(), 1, any()) } returns
             EnrolmentPageOutcome(0, 0, null, false, "CAMPAIGN_NOT_ACTIVE")
