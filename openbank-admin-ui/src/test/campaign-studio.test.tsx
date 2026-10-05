@@ -660,7 +660,7 @@ describe('campaign studio', () => {
     }))
     renderDetail()
 
-    const trigger = await screen.findByRole('button', { name: 'Enrol audience' }, { timeout: 8000 })
+    const trigger = await screen.findByRole('button', { name: 'Start batch enrolment' }, { timeout: 8000 })
     fireEvent.click(trigger)
     fireEvent.click(screen.getByRole('button', { name: 'Confirm action' }))
 
