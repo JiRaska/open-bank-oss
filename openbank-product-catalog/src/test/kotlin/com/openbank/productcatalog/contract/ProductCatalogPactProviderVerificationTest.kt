@@ -53,6 +53,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
+    restrictToAnnotatedClass = true,
 )
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-product-catalog")
