@@ -169,6 +169,9 @@ data class CampaignInteractionAttribution(
 @Suppress("TooManyFunctions") // One aggregate port; see PanacheSendLogRepository's matching rationale.
 interface SendLogRepository {
     suspend fun record(send: SendRecord)
+
+    /** A completed logical delivery step must not hand off again when Temporal retries its activity. */
+    suspend fun wasHandedOff(sendId: UUID): Boolean = false
     suspend fun countRecentForParty(partyId: UUID, sinceEpochSeconds: Long): Int
 
     /**

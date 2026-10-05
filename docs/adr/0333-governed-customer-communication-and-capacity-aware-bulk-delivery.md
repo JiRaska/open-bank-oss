@@ -164,10 +164,18 @@ evidence projection yet. The workflow-start/enrolment-write boundary also needs 
 before a crash there can be called exactly once. Mass activation must remain disabled until those
 controls and the D7 end-to-end/load evidence are complete.
 
-Campaign notification handoffs now reuse the durable send-log id as both `correlationId` and
-`deduplicationKey`; a Kafka replay therefore addresses the same notification fact. This protects
-the campaign producer only. Other notification producers still need stable keys before the
-transport can make a general idempotency claim.
+Campaign handoffs derive a stable send-log id from campaign, party, step and dry-run mode. Temporal
+activity retry and Kafka replay therefore use the same `correlationId` and `deduplicationKey` for
+one logical notification. Repeated send-log writes preserve SENT and can advance FAILED to SENT.
+When a SENT row already exists, activity retry returns that result before another handoff or
+counter increment.
+This protects the campaign producer only. Other notification producers still need stable keys
+before the transport can make a general idempotency claim. The send-log write still follows the
+broker handoff, so a crash in that window can leave an uncorrelated delivery outcome; the durable
+dispatch/reconciliation work in D4 remains required.
+Existing in-flight journeys created before this deterministic id change can still retry with a
+new identity after deployment. Drain or reconcile those executions before relying on this guard;
+the new key cannot retroactively identify their random send-log ids.
 
 The existing email/push path persists a `PENDING` row before provider handoff. If a failure occurs
 after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key.

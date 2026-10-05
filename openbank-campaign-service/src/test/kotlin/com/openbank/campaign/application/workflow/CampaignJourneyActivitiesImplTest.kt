@@ -140,6 +140,7 @@ class CampaignJourneyActivitiesImplTest {
             updatedAt = Instant.now(),
         )
         coEvery { sendLog.countRecentForParty(partyId, any()) } returns 0
+        coEvery { sendLog.wasHandedOff(any()) } returns false
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
@@ -189,6 +190,60 @@ class CampaignJourneyActivitiesImplTest {
         assertThat(sends("email", "failed")).isEqualTo(0.0)
         // And specifically not as a dry run — the two must never be the same number.
         assertThat(sends("email", "dry_run")).isEqualTo(0.0)
+    }
+
+    @Test
+    fun `a retried activity reuses the logical send identity`() {
+        givenDeliverableStep()
+        val wireIds = mutableListOf<UUID>()
+        val rowIds = mutableListOf<UUID>()
+        coEvery { notificationSend.requestSend(any()) } answers {
+            wireIds += firstArg<com.openbank.campaign.application.port.out.NotificationSendRequest>().correlationId
+        }
+        coEvery { sendLog.record(any()) } answers {
+            rowIds += firstArg<SendRecord>().id
+        }
+
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+
+        assertThat(wireIds).hasSize(2).containsOnly(wireIds.first())
+        assertThat(rowIds).hasSize(2).containsOnly(wireIds.first())
+    }
+
+    @Test
+    fun `a retry after transport refusal uses the same correlation id`() {
+        givenDeliverableStep()
+        val wireIds = mutableListOf<UUID>()
+        val rowIds = mutableListOf<UUID>()
+        coEvery { notificationSend.requestSend(any()) } answers {
+            wireIds += firstArg<com.openbank.campaign.application.port.out.NotificationSendRequest>().correlationId
+            if (wireIds.size == 1) error("broker refused the publish")
+        }
+        coEvery { sendLog.record(any()) } answers { rowIds += firstArg<SendRecord>().id }
+
+        assertThatThrownBy { activities.deliverStep(campaignId, partyId, 1) }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+
+        assertThat(wireIds).hasSize(2).containsOnly(wireIds.first())
+        assertThat(rowIds).hasSize(2).containsOnly(wireIds.first())
+    }
+
+    @Test
+    fun `a completed handoff is not repeated when Temporal retries the activity`() {
+        givenDeliverableStep()
+        var rowRecorded = false
+        coEvery { sendLog.wasHandedOff(any()) } answers { rowRecorded }
+        coEvery { notificationSend.requestSend(any()) } just Runs
+        coEvery { sendLog.record(any()) } answers { rowRecorded = true }
+
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+        assertThat(activities.deliverStep(campaignId, partyId, 1)).isEqualTo(StepOutcome.SENT)
+
+        coVerify(exactly = 1) { notificationSend.requestSend(any()) }
+        coVerify(exactly = 1) { sendLog.record(any()) }
+        assertThat(sends("email", "handed_off")).isEqualTo(1.0)
     }
 
     @Test

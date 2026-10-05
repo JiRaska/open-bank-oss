@@ -139,6 +139,7 @@ class CampaignJourneyMetricsTest {
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
         coEvery { sendLog.record(any()) } just Runs
+        coEvery { sendLog.wasHandedOff(any()) } returns false
     }
 
     @Test
