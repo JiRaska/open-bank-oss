@@ -19,18 +19,12 @@ GitHub Release, a tag). Nothing in the pipeline says "this one has no evidence" 
 visible only by reading `released.tsv` on a specific run, or by diffing every `version.txt`
 against `release-please-config.json`'s `packages` map by hand.
 
-Measured today: `openbank-campaign-service` and `openbank-tax-reporting-service` both carry a
-`version.txt` (so release-please treats them as released, versioned components) and both have a
-`packages` entry with `"release-type": "simple"` and NO `component` key.
-
-THIS SCRIPT DOES NOT FIX THAT. Adding a `component` key changes the release TAG NAME
-(`include-component-in-tag: true`), and `version.txt` / `release-please-config.json` /
-`.release-please-manifest.json` are a three-way lockstep for an ALREADY-RELEASED package
-(ADR-0029 rule 2) — retagging an existing package's release history is a deliberate call for the
-repo owner, not a drive-by fix bundled with a CI gate. What this script guards is the DURABLE half
-of the issue: a package with a `version.txt` must resolve to a component that reaches
+The two missing component keys were added for #7597 without rewriting existing tags. Future
+releases of campaign-service and tax-reporting-service use component-prefixed tags; the
+historical unprefixed releases remain intact. This script guards the durable half of the issue:
+a package with a `version.txt` must resolve to a component that reaches
 `released.tsv`, derived from the same config the workflow reads — never from a hand-kept list —
-so a THIRD package cannot join the two above silently.
+so another package cannot be omitted silently.
 
 DERIVED, NOT LISTED: "released package" is discovered the same way
 `check-test-intelligence-ecosystem.py` counts released packages — `openbank-*/version.txt` on
@@ -58,21 +52,14 @@ import gatelib  # noqa: E402
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = ROOT / "release-please-config.json"
 
-# Packages known TODAY to have a version.txt but no `component` in release-please-config.json, so
-# their releases carry no SBOM/provenance/VEX (#7597). Adding a `component` key is a deliberate,
-# separate decision for the repo owner (it changes the release tag name — ADR-0029 rule 2 lockstep
-# for an already-released package). This baseline keeps the gate GREEN today and red the moment a
-# THIRD package joins without either a component or a declared reason here.
+# Explicit exceptions must explain why a released package has no evidence. Keep this empty when
+# every released package has a component; the checker rejects stale entries after a fix.
 #
 # Kept here rather than in rules.yaml on purpose, same reasoning as check-pact-provider-replay.py:
 # most gen-*opa-bundle*.sh scripts hash rules.yaml into every service's OPA bundle checksum, and
 # this list belongs next to the code that reads it, not in a file that restamps ~40 unrelated
 # artifacts when it changes.
-KNOWN_UNCOVERED: dict[str, str] = {
-    "openbank-campaign-service": "#7597 — release-please-config.json has no `component`; adding one "
-    "changes the release tag name, a repo-owner decision, not a drive-by fix",
-    "openbank-tax-reporting-service": "#7597 — same as openbank-campaign-service",
-}
+KNOWN_UNCOVERED: dict[str, str] = {}
 
 errors: list[str] = []
 
@@ -453,7 +440,7 @@ def main() -> int:
     gatelib.subjects(len(released), "released packages (version.txt on disk)")
     print(f"Released packages (version.txt on disk): {len(released)}")
     print(f"Resolve to a component that reaches released.tsv: {covered}")
-    print(f"Declared uncovered (backlog, #7597): {len(KNOWN_UNCOVERED)}")
+    print(f"Declared uncovered: {len(KNOWN_UNCOVERED)}")
     print()
 
     if errors:

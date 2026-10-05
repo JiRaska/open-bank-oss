@@ -123,6 +123,7 @@
       ]
     },
     "openbank-campaign-service": {
+      "component": "campaign-service",
       "release-type": "simple"
     },
     "openbank-incentive-service": {
@@ -408,6 +409,7 @@
       ]
     },
     "openbank-tax-reporting-service": {
+      "component": "tax-reporting-service",
       "release-type": "simple"
     },
     "openbank-tpp-registry-service": {
