@@ -74,6 +74,28 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
+    fun `reserve save and release reject invalid request hashes without storing records`(): Unit = runBlocking {
+        for (invalidHash in listOf("", "bad|hash")) {
+            assertThatThrownBy { runBlocking { store.reserve("k1", invalidHash, 60) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { runBlocking { store.save("k1", invalidHash, 200, "{}", 60) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThatThrownBy { runBlocking { store.release("k1", invalidHash) } }
+                .isInstanceOf(IllegalArgumentException::class.java)
+            assertThat(backing).isEmpty()
+        }
+    }
+
+    @Test
+    fun `malformed versioned record is not replayed`(): Unit = runBlocking {
+        backing["idempotency:broken"] = "v2|hash-only"
+
+        assertThat(store.get("broken")).isNull()
+        assertThat(store.reserve("broken", first)).isEqualTo(ReserveResult.Mismatch)
+        assertThat(backing["idempotency:broken"]).isEqualTo("v2|hash-only")
+    }
+
+    @Test
     fun `legacy record without a fingerprint is refused, never replayed`(): Unit = runBlocking {
         store.save("legacy", 200, """{"a":"b|c"}""")
         backing["idempotency:old"] = "201|2026-09-01T00:00Z|{\"x\":1}"
