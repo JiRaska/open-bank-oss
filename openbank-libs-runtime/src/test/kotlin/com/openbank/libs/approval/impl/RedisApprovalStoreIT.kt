@@ -7,8 +7,8 @@ package com.openbank.libs.approval.impl
 import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.ApprovalStoreContractTest
-import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.InvalidApprovalStateException
+import com.openbank.libs.approval.MakerActorKind
 import com.openbank.libs.approval.SelfApprovalNotAllowedException
 import io.mockk.every
 import io.mockk.mockk
@@ -135,7 +135,12 @@ class RedisApprovalStoreIT : ApprovalStoreContractTest() {
     @Test
     fun `verified maker kind survives the hash and decision transitions`(): Unit = runBlocking {
         val store = newStore()
-        val pending = store.create("agent.propose", "case-1", "agent:reviewer", makerActorKind = MakerActorKind.AI_AGENT)
+        val pending = store.create(
+            "agent.propose",
+            "case-1",
+            "agent:reviewer",
+            makerActorKind = MakerActorKind.AI_AGENT,
+        )
 
         assertThat(cmd("HGET", "approval-v2:svc-a:${pending.id}", "actorKind")).isEqualTo("AI_AGENT")
         assertThat(store.find(pending.id)?.makerActorKind).isEqualTo(MakerActorKind.AI_AGENT)

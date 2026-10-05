@@ -425,7 +425,8 @@ class AuthorizeInterceptor {
             )
         }
 
-        val pending = store.create(annotation.action, resourceId, maker, binding = binding, makerActorKind = makerActorKind(query))
+        val actorKind = makerActorKind(query, identity.get())
+        val pending = store.create(annotation.action, resourceId, maker, binding = binding, makerActorKind = actorKind)
         meters?.authzFourEyes(annotation.action, "pending_approval")
         log.infof(
             "four-eyes: action=%s resource=%s maker=%s requires a second approver — approvalId=%s",
@@ -512,14 +513,8 @@ class AuthorizeInterceptor {
         // record separately preserves their SERVICE_ACCOUNT provenance.
         val name = sc.userPrincipal?.name ?: return "ANONYMOUS"
         val subject = (authenticatedIdentity.principal as? JsonWebToken)?.subject
-        if (name.startsWith("agent:")) {
-            return when {
-                subject == name -> "AI_AGENT"
-                subject == null -> "UNKNOWN"
-                else -> "HUMAN"
-            }
-        }
-        return if (subject?.startsWith("agent:") == true) "UNKNOWN" else "HUMAN"
+        if (subject?.startsWith("agent:") == true) return "AI_AGENT"
+        return if (name.startsWith("agent:") && subject == null) "UNKNOWN" else "HUMAN"
     }
 
     private companion object {
@@ -599,12 +594,20 @@ internal fun m2mDecisionLine(action: String, principalId: String, outcome: Strin
  * [AuthorizeInterceptor] sits at detekt's `TooManyFunctions` bound — which fires AT the threshold,
  * not above it.
  */
-private fun makerActorKind(query: AuthzQuery): MakerActorKind = when {
-    query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) -> MakerActorKind.SERVICE_ACCOUNT
-    query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
-    query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
-    query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
-    else -> MakerActorKind.UNKNOWN
+private fun makerActorKind(query: AuthzQuery, authenticatedIdentity: SecurityIdentity): MakerActorKind {
+    val jwt = authenticatedIdentity.principal as? JsonWebToken
+    val clientId = jwt?.getClaim<String>("azp")
+    val verifiedServiceAccount = jwt?.subject?.isNotBlank() == true &&
+        !clientId.isNullOrBlank() &&
+        jwt?.getClaim<String>("preferred_username") == "$SERVICE_ACCOUNT_PREFIX$clientId"
+    return when {
+        query.principal.type == "AI_AGENT" -> MakerActorKind.AI_AGENT
+        verifiedServiceAccount -> MakerActorKind.SERVICE_ACCOUNT
+        query.principal.id.startsWith(SERVICE_ACCOUNT_PREFIX) && jwt == null -> MakerActorKind.UNKNOWN
+        query.principal.type == "HUMAN" && "ROLE_CUSTOMER" in query.principal.roles -> MakerActorKind.CUSTOMER_PARTY
+        query.principal.type == "HUMAN" -> MakerActorKind.HUMAN
+        else -> MakerActorKind.UNKNOWN
+    }
 }
 
 private fun PendingApproval?.satisfies(

@@ -10,8 +10,8 @@ import com.openbank.libs.approval.ApprovalStatus
 import com.openbank.libs.approval.ApprovalStore
 import com.openbank.libs.approval.InMemoryApprovalStore
 import com.openbank.libs.approval.InvalidApprovalStateException
-import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.approval.MakerActorKind
+import com.openbank.libs.approval.PendingApproval
 import com.openbank.libs.observability.DomainMetrics
 import com.openbank.libs.security.SecurityTelemetry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
@@ -714,15 +714,20 @@ class AuthorizeInterceptorTest {
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
 
-        every { sc.userPrincipal } returns JavaPrincipal { "agent:reviewer" }
+        every { sc.userPrincipal } returns JavaPrincipal { "Review Desk" }
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "agent:reviewer"
+            every { getClaim<String>("azp") } returns null
         }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
-        every { sc.userPrincipal } returns JavaPrincipal { "service-account-openbank-test" }
-        every { identity.principal } returns JavaPrincipal { "service-account-openbank-test" }
+        every { sc.userPrincipal } returns JavaPrincipal { "Batch Worker" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "service-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns "openbank-test"
+        }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
@@ -737,6 +742,7 @@ class AuthorizeInterceptorTest {
         every { sc.userPrincipal } returns JavaPrincipal { "customer-42" }
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "customer-subject-42"
+            every { getClaim<String>("azp") } returns null
         }
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
@@ -757,6 +763,7 @@ class AuthorizeInterceptorTest {
         every { sc.userPrincipal } returns JavaPrincipal { "agent:forged-display" }
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "human-subject-id"
+            every { getClaim<String>("azp") } returns null
         }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
@@ -768,6 +775,38 @@ class AuthorizeInterceptorTest {
 
         assertThat(store.created.map { it.makerActorKind })
             .containsExactly(MakerActorKind.HUMAN, MakerActorKind.UNKNOWN)
+    }
+
+    @Test
+    fun `four-eyes does not trust a service-account-looking display name without token provenance`() {
+        every { identity.roles } returns setOf("ROLE_OPERATOR")
+        val store = InMemoryApprovalStore()
+        wirePdpAndStore(store)
+
+        every { sc.userPrincipal } returns JavaPrincipal { "service-account-forged-display" }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "human-user"
+            every { getClaim<String>("azp") } returns "openbank-test"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns "browser-client"
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+        every { identity.principal } returns JavaPrincipal { "service-account-unverified" }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
+
+        assertThat(store.created.map { it.makerActorKind })
+            .containsExactly(MakerActorKind.HUMAN, MakerActorKind.HUMAN, MakerActorKind.UNKNOWN)
     }
 
     @Test
