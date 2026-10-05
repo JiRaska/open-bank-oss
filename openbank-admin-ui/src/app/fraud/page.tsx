@@ -14,6 +14,7 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatCard, StatusBadge, type Tone } from '@/components/ui'
+import { EntityChip } from '@/components/entities/EntityChip'
 import { parseFraudReviewQueue, type FraudReviewEvidence } from '@/lib/fraud/fraudReviewContract'
 
 function scoreTone(score: number): Tone {
@@ -116,8 +117,8 @@ export default function FraudPage() {
                     {r.amount.toLocaleString(numberLocale)} {r.currency}
                   </td>
                   <td style={{ padding: '10px 14px' }}><span className="pill">{r.rail}</span></td>
-                  <td style={{ padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, color: 'var(--text-secondary)' }}>
-                    {r.accountId ? `${r.accountId.slice(0, 8)}…` : '—'}
+                  <td style={{ padding: '10px 14px' }}>
+                    {r.accountId ? <EntityChip type="account" id={r.accountId} /> : '—'}
                   </td>
                   <td style={{ padding: '10px 14px' }}>
                     <StatusBadge status={String(r.score)} label={String(r.score)} tone={tone} />
