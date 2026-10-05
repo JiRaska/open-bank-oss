@@ -79,6 +79,14 @@ class AmortizationSmallPrincipalTest {
     }
 
     @Test
+    fun `rounded long-term annuity does not grow beyond Money range`() {
+        // CI property-test counterexample: the rounded classic payment initially covers only
+        // interest. Building every classic row before checking it grew the balance to 20 digits.
+        val s = schedule("3680.655", "KWD", "0.3000", 191, 1, AmortizationMethod.ANNUITY)
+        assertClean(s, "3680.655")
+    }
+
+    @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
         checkAll(

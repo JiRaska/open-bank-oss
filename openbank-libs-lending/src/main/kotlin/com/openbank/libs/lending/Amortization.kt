@@ -111,7 +111,7 @@ object Amortization {
         }
 
         val classic = classicSchedule(principal, periodRate, termPeriods, firstDueDate, monthsPerPeriod, method, scale)
-        val installments = if (isWellFormed(classic, method, unit)) {
+        val installments = if (classic != null && isWellFormed(classic, method, unit)) {
             classic
         } else {
             reamortizedSchedule(principal, periodRate, termPeriods, firstDueDate, monthsPerPeriod, method, scale)
@@ -129,7 +129,7 @@ object Amortization {
         monthsPerPeriod: Long,
         method: AmortizationMethod,
         scale: Int,
-    ): List<Installment> {
+    ): List<Installment>? {
         val installments = ArrayList<Installment>(termPeriods)
         var opening = principal
         val fixedPayment = if (method == AmortizationMethod.ANNUITY) {
@@ -155,7 +155,12 @@ object Amortization {
                 else -> fixedPayment!! - interest // ANNUITY: principal is payment net of interest
             }
 
+            // A rounded annuity can fail to cover interest on an extreme long-term loan.
+            // Stop before negative amortization compounds beyond Money's bounded range;
+            // the remaining-period construction below can still produce a valid schedule.
+            if (principalDue.amount.signum() < 0) return null
             val closing = opening - principalDue
+            if (closing.amount.signum() < 0) return null
             val payment = principalDue + interest
             installments += Installment(n, dueDate, opening, principalDue, interest, payment, closing)
             opening = closing
