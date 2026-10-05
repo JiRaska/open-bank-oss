@@ -79,6 +79,13 @@ class AmortizationSmallPrincipalTest {
     }
 
     @Test
+    fun `annuity whose rounded payment is below interest falls back before balance overflow`() {
+        // The rounded level payment is below the first year's interest. The classic path
+        // compounded a negative principal portion until Money rejected a 20-digit installment.
+        assertClean(schedule("1473595", "JPY", "0.3000", 164, 1, AmortizationMethod.ANNUITY), "1473595")
+    }
+
+    @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
         checkAll(
