@@ -249,21 +249,38 @@ EOF
   # (measured twice: the first two runs of this control extracted themselves and the stub
   # never started — the self-matching trap the control-3 comment above already documents).
   sed -n "/STUBEOF' &\$/,/^STUBEOF/p" "$0" | sed '1d;$d' > "${ST_TMP}/stub.py"
-  FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 >/dev/null 2>&1 &
+  FUZZ_OPA_STUB_PORT=18181 python3 "${ST_TMP}/stub.py" 18181 18199 >/dev/null 2>&1 &
   ST_STUB_PID=$!
   sleep 1
   ST_POST="$(curl -s -w '|%{http_code}' -X POST http://127.0.0.1:18181/v1/data/openbank/rest/allow \
               -H 'Content-Type: application/json' -d '{"input":{"principal":{"id":"anonymous"}}}' \
               http://127.0.0.1:18181/v1/data/openbank/rest/allow 2>/dev/null || true)"
-  kill "${ST_STUB_PID}" 2>/dev/null; wait "${ST_STUB_PID}" 2>/dev/null || true
   # curl prints -w per URL, so two responses on one reused connection read
   # `{"result": true}|200{"result": true}|200` — any 501 from an undrained body shows up here.
   case "${ST_POST}" in
     '{"result": true}|200{"result": true}|200') ;;
     *) echo "SELF-TEST FAIL 5: OPA stub did not answer two keep-alive POSTs with the allow body (got: ${ST_POST})"; ST_RC=1 ;;
   esac
+  # The outbound M2M client must discover a reachable issuer and receive a token
+  # before it can call the 404 cross-service stub. Exercise both routes, rather
+  # than accepting a textual mention of the OIDC stub as proof (#8575).
+  ST_DISCOVERY="$(curl -s --max-time 3 -w '|%{http_code}' \
+    http://127.0.0.1:18199/realms/openbank/.well-known/openid-configuration || true)"
+  case "${ST_DISCOVERY}" in
+    *'"issuer":"http://127.0.0.1:18199/realms/openbank"'*'"token_endpoint":"http://127.0.0.1:18199/realms/openbank/protocol/openid-connect/token"'*'|200') ;;
+    *) echo "SELF-TEST FAIL 6: OIDC discovery did not identify the reachable token issuer"; ST_RC=1 ;;
+  esac
+  ST_TOKEN="$(curl -s --max-time 3 -w '|%{http_code}' -X POST \
+    http://127.0.0.1:18199/realms/openbank/protocol/openid-connect/token \
+    -d grant_type=client_credentials \
+    http://127.0.0.1:18199/realms/openbank/protocol/openid-connect/token || true)"
+  case "${ST_TOKEN}" in
+    '{"access_token":"fuzz-stub-token","token_type":"Bearer","expires_in":3600}|200{"access_token":"fuzz-stub-token","token_type":"Bearer","expires_in":3600}|200') ;;
+    *) echo "SELF-TEST FAIL 7: OIDC token endpoint did not answer two keep-alive POSTs"; ST_RC=1 ;;
+  esac
+  kill "${ST_STUB_PID}" 2>/dev/null; wait "${ST_STUB_PID}" 2>/dev/null || true
   rm -rf "${ST_TMP}"
-  [ "${ST_RC}" = 0 ] && echo "self-test OK (5 controls)" || echo "self-test FAILED"
+  [ "${ST_RC}" = 0 ] && echo "self-test OK (7 controls)" || echo "self-test FAILED"
   exit "${ST_RC}"
 fi
 
