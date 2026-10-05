@@ -25,6 +25,33 @@ concurrency:
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
+  agent-admission:
+    name: Agent PR admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.admit.outputs.proceed }}
+    steps:
+      - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = 'push' ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------------
   # JVM / Kotlin / Gradle builds moved to services-ci.yml, which builds every
   # Gradle module as its own path-scoped matrix job (per-service status checks +
@@ -45,6 +72,8 @@ jobs:
   # ---------------------------------------------------------------------------
   changes-ui:
     name: Detect UI or governance changes
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -356,6 +385,8 @@ jobs:
   # ---------------------------------------------------------------------------
   gates:
     name: gates (${{ matrix.slug }})
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -627,11 +658,20 @@ jobs:
   # in-repo fix the ruleset can't ship itself.
   validate:
     name: Validate manifests
-    needs: [gates, ui]
+    needs: [agent-admission, gates, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Verify agent PR admission
+        env:
+          RESULT: ${{ needs.agent-admission.result }}
+          PROCEED: ${{ needs.agent-admission.outputs.proceed }}
+        run: |
+          if [ "$RESULT" != 'success' ] || [ "$PROCEED" != 'true' ]; then
+            echo "::error::Agent PR admission refused or failed ($RESULT, proceed=$PROCEED)."
+            exit 1
+          fi
       - name: Verify no gate shard failed
         env:
           RESULT: ${{ needs.gates.result }}
@@ -676,7 +716,8 @@ jobs:
 
   app-status:
     name: Customer-app dossier
-    if: github.event_name == 'pull_request'
+    needs: agent-admission
+    if: github.event_name == 'pull_request' && needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
