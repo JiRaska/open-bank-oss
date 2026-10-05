@@ -15,6 +15,7 @@ import com.openbank.treasury.application.port.out.CurveSetPort
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
+import com.openbank.treasury.application.port.out.TreasuryFundingExceededException
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
 import com.openbank.treasury.application.usecase.TreasuryDealService
@@ -49,6 +50,7 @@ class TreasuryDealServiceTest {
 
     private val deals = InMemoryDeals()
     private val ledger = RecordingLedger()
+    private val fundingRead = RecordingFundingRead()
     private val cps = object : CounterpartyRepository {
         val all = listOf(
             DealFixtures.bankA,
@@ -71,6 +73,9 @@ class TreasuryDealServiceTest {
         TreasuryDealService(
             deals, cps, ledger, mapper, clock, fxMid, tolerance, confirmationRequired, quotes,
             DealFixtures.permissiveProductLimits,
+            fundingRead,
+            ALWAYS_FUNDING_LOCK,
+            deals,
         )
 
     /** A flat 3.5 % CZEONIA curve: 30-day mid 3.4570 %, SIMBK-A (5 bp) bid 3.4070 / ask 3.5070. */
@@ -117,6 +122,20 @@ class TreasuryDealServiceTest {
         service.submit(d.id, DealFixtures.dealer)
         return service.approve(d.id, DealFixtures.approver)
     }
+
+    @Test
+    fun `a placement equal to the funding balance is bookable but one minor unit more is refused`(): Unit =
+        runBlocking {
+            fundingRead.balances[Triple("1001", "CZK", monday)] = BigDecimal("100000.00")
+            val first = book(cmd(principal = "100000.00"))
+            assertThat(first.state).isEqualTo(DealState.BOOKED)
+            val second = service.draft(cmd(principal = "0.01"), DealFixtures.dealer)
+            service.submit(second.id, DealFixtures.dealer)
+            assertThatThrownBy { runBlocking { service.approve(second.id, DealFixtures.approver) } }
+                .isInstanceOf(TreasuryFundingExceededException::class.java)
+                .hasMessageContaining("placements require 100000.01")
+            assertThat(deals.findById(second.id)!!.state).isEqualTo(DealState.PENDING_APPROVAL)
+        }
 
     @Test
     fun `an unknown counterparty is a bad request`(): Unit = runBlocking {

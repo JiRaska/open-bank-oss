@@ -5,9 +5,11 @@
 package com.openbank.treasury.infrastructure.rest
 
 import com.openbank.treasury.application.port.out.DealNotFoundException
+import com.openbank.treasury.application.port.out.FundingCheckBusyException
 import com.openbank.treasury.application.port.out.LedgerUnavailableException
 import com.openbank.treasury.application.port.out.NostroAccountNotFoundException
 import com.openbank.treasury.application.port.out.StatementNotFoundException
+import com.openbank.treasury.application.port.out.TreasuryFundingExceededException
 import com.openbank.treasury.domain.model.ActorNotPermittedException
 import com.openbank.treasury.domain.model.FourEyesViolationException
 import com.openbank.treasury.domain.model.LimitBreachedException
@@ -58,6 +60,14 @@ class ExceptionMappers {
 
     @ServerExceptionMapper
     fun limit(e: LimitBreachedException): Response = error(UNPROCESSABLE, "LIMIT_BREACHED", e.message)
+
+    @ServerExceptionMapper
+    fun funding(e: TreasuryFundingExceededException): Response =
+        error(UNPROCESSABLE, "TREASURY_FUNDING_EXCEEDED", e.message)
+
+    @ServerExceptionMapper
+    fun fundingBusy(e: FundingCheckBusyException): Response =
+        error(Response.Status.CONFLICT.statusCode, "FUNDING_CHECK_BUSY", e.message)
 
     /**
      * ADR-0315 D4: outside the product mandate, at submit or at approval. `breaches` lists each rule

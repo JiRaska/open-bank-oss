@@ -7,6 +7,7 @@ package com.openbank.treasury.application.usecase
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
+import com.openbank.libs.persistence.lock.ClusterLock
 import com.openbank.treasury.application.port.`in`.AccrualRun
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
@@ -21,10 +22,15 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealNotFoundException
 import com.openbank.treasury.application.port.out.DealRepository
+import com.openbank.treasury.application.port.out.FundingCheckBusyException
 import com.openbank.treasury.application.port.out.FxMidRatePort
 import com.openbank.treasury.application.port.out.FxRateTolerance
 import com.openbank.treasury.application.port.out.LedgerJournalRef
 import com.openbank.treasury.application.port.out.LedgerPostingPort
+import com.openbank.treasury.application.port.out.LedgerReadPort
+import com.openbank.treasury.application.port.out.LedgerUnavailableException
+import com.openbank.treasury.application.port.out.PendingFundingPort
+import com.openbank.treasury.application.port.out.TreasuryFundingExceededException
 import com.openbank.treasury.application.port.out.UnknownCounterpartyException
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.Counterparty
@@ -43,6 +49,7 @@ import com.openbank.treasury.domain.model.PostingRules
 import com.openbank.treasury.domain.model.ProductLimitApplied
 import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
+import com.openbank.treasury.domain.model.Side
 import java.math.BigDecimal
 import java.time.Clock
 import java.time.LocalDate
@@ -79,6 +86,9 @@ class TreasuryDealService(
      * service constructed without a mandate must not book as though every product were permitted.
      */
     private val productLimits: ProductLimitPolicy,
+    private val ledgerRead: LedgerReadPort,
+    private val fundingLock: ClusterLock,
+    private val pendingFunding: PendingFundingPort,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -125,11 +135,23 @@ class TreasuryDealService(
 
     override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
+        val account = fundingAccount(load(dealId))
+        if (account != null) {
+            return fundingLock.tryRunExclusively("treasury-funding:$account") {
+                approveAfterFundingLock(dealId, actor, key)
+            } ?: throw FundingCheckBusyException(account)
+        }
+        return approveAfterFundingLock(dealId, actor, key)
+    }
+
+    private suspend fun approveAfterFundingLock(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
         val deal = load(dealId)
         // Re-checked at approval: exposure may have moved, and the product mandate may have been
         // tightened, since submission (ADR-0315 D4).
         val productCheck = productLimits.evaluate(deal)
         val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
+        if (fundingAccount(booked) != null) requireFunding(booked, pendingAlreadyIncludesDeal = false)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -196,8 +218,20 @@ class TreasuryDealService(
 
     override suspend fun settle(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
+        val account = fundingAccount(load(dealId))
+        if (account != null) {
+            return fundingLock.tryRunExclusively("treasury-funding:$account") {
+                settleAfterFundingLock(dealId, actor, key)
+            } ?: throw FundingCheckBusyException(account)
+        }
+        return settleAfterFundingLock(dealId, actor, key)
+    }
+
+    private suspend fun settleAfterFundingLock(dealId: UUID, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
+        if (fundingAccount(settled) != null) requireFunding(settled, pendingAlreadyIncludesDeal = true)
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
@@ -218,6 +252,39 @@ class TreasuryDealService(
             ),
         )
         return deals.save(settled, ref, event, cmd(key, SETTLE, dealId))
+    }
+
+    /** The credited cash account comes from the posting rule, including a later 1010 switch. */
+    private fun fundingAccount(deal: Deal): String? = if (deal.product.isAsset) {
+        PostingRules.settlement(deal).lines.single { it.side == Side.CREDIT }.glCode
+    } else {
+        null
+    }
+
+    /**
+     * Ledger has only POSTED cash movement. Reserve every BOOKED/CONFIRMED placement until its
+     * settlement reaches the ledger. Check the new value date and every later reserved date: an
+     * earlier approval must not make a previously approved future placement unfundable.
+     */
+    private suspend fun requireFunding(deal: Deal, pendingAlreadyIncludesDeal: Boolean) {
+        val account = checkNotNull(fundingAccount(deal))
+        val pending = pendingFunding.pendingPlacements(deal.currency).filter { fundingAccount(it) == account }
+        val dates = (
+            pending.map {
+                it.valueDate
+            } + deal.valueDate
+            ).filter { !it.isBefore(deal.valueDate) }.distinct().sorted()
+        for (date in dates) {
+            val balance = ledgerRead.accountBalance(account, deal.currency, date)
+                ?: throw LedgerUnavailableException("ledger does not hold funding account $account")
+            val reserved = pending.filter { !it.valueDate.isAfter(date) }.sumOf { it.principal } +
+                if (pendingAlreadyIncludesDeal) BigDecimal.ZERO else deal.principal
+            if (balance <
+                reserved
+            ) {
+                throw TreasuryFundingExceededException(account, deal.currency, date, balance, reserved)
+            }
+        }
     }
 
     override suspend fun mature(dealId: UUID, actor: Actor, key: String?): Deal {

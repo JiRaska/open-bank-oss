@@ -5,6 +5,7 @@
 package com.openbank.treasury.infrastructure
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.persistence.lock.ClusterLock
 import com.openbank.treasury.application.port.`in`.NostroBreakUseCase
 import com.openbank.treasury.application.port.`in`.NostroReconciliationUseCase
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
@@ -18,6 +19,7 @@ import com.openbank.treasury.application.port.out.LedgerPostingPort
 import com.openbank.treasury.application.port.out.LedgerReadPort
 import com.openbank.treasury.application.port.out.NostroBreakRepository
 import com.openbank.treasury.application.port.out.NostroStatementRepository
+import com.openbank.treasury.application.port.out.PendingFundingPort
 import com.openbank.treasury.application.usecase.NostroBreakService
 import com.openbank.treasury.application.usecase.NostroReconciliationService
 import com.openbank.treasury.application.usecase.SimulatedQuoteService
@@ -69,6 +71,9 @@ class TreasuryServiceProducer {
         confirmationRequired: Boolean,
         quotes: SimulatedQuoteService,
         productLimits: ProductLimitConfig,
+        ledgerRead: LedgerReadPort,
+        fundingLock: ClusterLock,
+        pendingFunding: PendingFundingPort,
     ): TreasuryDealUseCase = TreasuryDealService(
         deals,
         counterparties,
@@ -82,6 +87,9 @@ class TreasuryServiceProducer {
         confirmationRequired,
         quotes,
         productLimits.toPolicy(),
+        ledgerRead,
+        fundingLock,
+        pendingFunding,
     )
 
     @Produces

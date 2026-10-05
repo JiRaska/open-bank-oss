@@ -37,6 +37,7 @@ class TreasuryDealProductLimitsTest {
 
     private val deals = InMemoryDeals()
     private val ledger = RecordingLedger()
+    private val fundingRead = RecordingFundingRead()
     private val cps = object : CounterpartyRepository {
         val all = listOf(
             DealFixtures.bankA,
@@ -50,6 +51,7 @@ class TreasuryDealProductLimitsTest {
     private val service get() =
         TreasuryDealService(
             deals, cps, ledger, mapper, clock, FxMidRatePort.NONE, FxRateTolerance.DISABLED, true, null, productLimits,
+            fundingRead, ALWAYS_FUNDING_LOCK, deals,
         )
 
     private fun cmd(

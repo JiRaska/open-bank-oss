@@ -10,6 +10,7 @@ import com.openbank.treasury.application.port.out.CounterpartyRepository
 import com.openbank.treasury.application.port.out.DealEvent
 import com.openbank.treasury.application.port.out.DealRepository
 import com.openbank.treasury.application.port.out.LedgerJournalRef
+import com.openbank.treasury.application.port.out.PendingFundingPort
 import com.openbank.treasury.application.port.out.TreasuryOutboxRepository
 import com.openbank.treasury.domain.model.Actor
 import com.openbank.treasury.domain.model.ActorType
@@ -84,6 +85,7 @@ class DealRepositoryImpl(
     private val commands: DealCommandPanacheRepository,
     private val clock: Clock,
 ) : DealRepository,
+    PendingFundingPort,
     PanacheRepository<DealEntity> {
 
     /**
@@ -176,6 +178,17 @@ class DealRepositoryImpl(
         }.awaitSuspending()
         return withHistories(rows)
     }
+
+    override suspend fun pendingPlacements(currency: String): List<Deal> = withHistories(
+        Panache.withSession {
+            find(
+                "currency = ?1 and state in ?2 and product in ?3",
+                currency,
+                listOf(DealState.BOOKED.name, DealState.CONFIRMED.name),
+                listOf(ProductType.MM_PLACEMENT.name, ProductType.CNB_DEPOSIT_FACILITY.name),
+            ).list()
+        }.awaitSuspending(),
+    )
 
     override suspend fun dueForSettlement(today: LocalDate, states: Set<DealState>): List<Deal> = withHistories(
         Panache.withSession {

@@ -1,0 +1,45 @@
+# SPDX-License-Identifier: Apache-2.0
+rule_files:
+  - prometheus-rules-reconciliation.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - interval: 1m
+    name: "negative closing balance fires for the affected account"
+    input_series:
+      - series: 'openbank_treasury_funding_overdraft{account="1001",currency="CZK",pod="treasury-a"}'
+        values: "0.01+0x150"
+      - series: 'openbank_treasury_funding_overdraft{account="1001",currency="CZK",pod="treasury-b"}'
+        values: "NaN+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryFundingExceeded
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              account: "1001"
+              currency: CZK
+            exp_annotations:
+              summary: "Funding account 1001/CZK ended the day negative"
+              description: "The ledger's real booked balance for this funding account was negative at the previous Prague bank day close. Investigate the journal and treasury placement sequence; do not correct the balance with a database edit."
+
+  - interval: 1m
+    name: "zero closing balance does not fire"
+    input_series:
+      - series: 'openbank_treasury_funding_overdraft{account="1001",currency="CZK"}'
+        values: "0+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryFundingExceeded
+        exp_alerts: []
+
+  - interval: 1m
+    name: "unobserved balance does not claim an overdraft"
+    input_series:
+      - series: 'openbank_treasury_funding_overdraft{account="1010",currency="CZK"}'
+        values: "NaN+0x150"
+    alert_rule_test:
+      - eval_time: 125m
+        alertname: TreasuryFundingExceeded
+        exp_alerts: []

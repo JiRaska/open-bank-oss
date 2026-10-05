@@ -36,6 +36,15 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TreasuryConfirmationNotRequiredIT {
 
+    @jakarta.inject.Inject
+    lateinit var fundingLedger: FakeLedgerRead
+
+    @org.junit.jupiter.api.BeforeEach
+    fun fundTestLedger() {
+        fundingLedger.reset()
+        fundingLedger.defaultBalance = java.math.BigDecimal("1000000000000.00")
+    }
+
     /** Literal values only: a profile loads in a different classloader from the test (root CLAUDE.md). */
     class NotRequired : QuarkusTestProfile {
         override fun getConfigOverrides(): Map<String, String> =

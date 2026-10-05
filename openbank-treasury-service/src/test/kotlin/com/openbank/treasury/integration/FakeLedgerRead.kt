@@ -23,6 +23,7 @@ class FakeLedgerRead : LedgerReadPort {
 
     /** Native-currency balances keyed by (glCode, currency, asOf); absent = zero. */
     val balances = ConcurrentHashMap<Triple<String, String, LocalDate>, BigDecimal>()
+    var defaultBalance: BigDecimal = BigDecimal.ZERO
 
     /** GL codes the fake ledger answers 404 for (the one "not stated" case). */
     val unknownAccounts = java.util.concurrent.CopyOnWriteArraySet<String>()
@@ -44,12 +45,13 @@ class FakeLedgerRead : LedgerReadPort {
             )
         }
         if (glCode in unknownAccounts) return null
-        return balances[Triple(glCode, currency, asOf)] ?: BigDecimal.ZERO
+        return balances[Triple(glCode, currency, asOf)] ?: defaultBalance
     }
 
     fun reset() {
         lines.clear()
         balances.clear()
+        defaultBalance = BigDecimal.ZERO
         unknownAccounts.clear()
         unavailableAccounts.clear()
         queries.clear()

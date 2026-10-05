@@ -24,6 +24,18 @@ class DealNotFoundException(dealId: UUID) : NoSuchElementException("deal $dealId
 /** Raised when a deal names a counterparty not in the master. Mapped to 400 via IllegalArgumentException. */
 class UnknownCounterpartyException(id: String) : IllegalArgumentException("unknown counterparty '$id'")
 
+/** A placement would consume more cash than the ledger and outstanding treasury commitments hold. */
+class TreasuryFundingExceededException(
+    account: String,
+    currency: String,
+    date: LocalDate,
+    balance: BigDecimal,
+    reserved: BigDecimal,
+) : RuntimeException("funding account $account/$currency has $balance on $date; placements require $reserved")
+
+/** Another pod is booking or settling against this cash account; retry after that decision commits. */
+class FundingCheckBusyException(account: String) : RuntimeException("funding account $account is being checked; retry")
+
 /** A journal the ledger accepted for one deal event. */
 data class LedgerJournalRef(
     val dealId: UUID,
@@ -83,6 +95,11 @@ interface DealRepository {
 
     /** Record a journal that changes no deal state (a daily accrual, ADR-0315 D5). */
     suspend fun recordJournal(journal: LedgerJournalRef)
+}
+
+/** Unsettled placement commitments; the ledger has not yet booked these cash outflows. */
+interface PendingFundingPort {
+    suspend fun pendingPlacements(currency: String): List<Deal>
 }
 
 interface CounterpartyRepository {

@@ -66,3 +66,19 @@ spec:
               threshold. A break is never auto-posted: investigate each one on the admin-ui nostro
               page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the
               correspondent or by a ledger booking through the normal deal lifecycle.
+
+    # Treasury booking guards its own placements. This catches an end-of-day overdraft from any
+    # flow, including direct ledger postings outside treasury. Each gauge is NaN until observed.
+    - name: openbank.treasury.funding
+      rules:
+        - alert: TreasuryFundingExceeded
+          expr: max by (account, currency) (openbank_treasury_funding_overdraft) > 0
+          for: 2h
+          labels:
+            severity: critical
+          annotations:
+            summary: "Funding account {{ $labels.account }}/{{ $labels.currency }} ended the day negative"
+            description: >-
+              The ledger's real booked balance for this funding account was negative at the previous
+              Prague bank day close. Investigate the journal and treasury placement sequence; do
+              not correct the balance with a database edit.

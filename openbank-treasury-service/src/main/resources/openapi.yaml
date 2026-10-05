@@ -36,7 +36,9 @@ info:
   # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
   #         principal and maximum tenor, declared in configuration. Enforced at submit and
   #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
-  version: 1.18.0
+  # 1.19.0: a placement whose funding account cannot cover committed settlements answers 422
+  #         TREASURY_FUNDING_EXCEEDED; a concurrent funding decision answers 409 FUNDING_CHECK_BUSY.
+  version: 1.19.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -196,12 +198,18 @@ paths:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No such deal }
-        '409': { $ref: '#/components/responses/InvalidState' }
+        '409':
+          description: INVALID_STATE or FUNDING_CHECK_BUSY (retry after concurrent account decision)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '422':
           description: >-
             FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
             limit, not covered by a senior override) or PRODUCT_LIMIT_BREACHED (the deal is outside its
-            product limit as declared NOW — re-checked at approval; not overridable)
+            product limit as declared NOW — re-checked at approval; not overridable), or
+            TREASURY_FUNDING_EXCEEDED (the placement would overdraw its funding account)
           content:
             application/json:
               schema:
@@ -308,7 +316,18 @@ paths:
       responses:
         '200': { $ref: '#/components/responses/DealOk' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '409': { $ref: '#/components/responses/InvalidState' }
+        '409':
+          description: INVALID_STATE or FUNDING_CHECK_BUSY (retry after concurrent account decision)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '422':
+          description: TREASURY_FUNDING_EXCEEDED — the funding account changed since booking
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/deals/{id}/mature:
     post:
@@ -694,7 +713,8 @@ components:
         error:
           type: string
           description: >-
-            FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
+            FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED,
+            TREASURY_FUNDING_EXCEEDED, FUNDING_CHECK_BUSY, ACTOR_NOT_PERMITTED,
             INVALID_STATE, NOT_FOUND
         message:
           type: [string, 'null']

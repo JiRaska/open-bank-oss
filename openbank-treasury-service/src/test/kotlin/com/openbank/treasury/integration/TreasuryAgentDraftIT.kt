@@ -42,6 +42,15 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TreasuryAgentDraftIT {
 
+    @jakarta.inject.Inject
+    lateinit var fundingLedger: FakeLedgerRead
+
+    @org.junit.jupiter.api.BeforeEach
+    fun fundTestLedger() {
+        fundingLedger.reset()
+        fundingLedger.defaultBalance = java.math.BigDecimal("1000000000000.00")
+    }
+
     private val today: LocalDate = AccountingClock.bank(Clock.systemUTC()).today()
 
     private fun body(rationale: String? = RATIONALE, inputs: String? = INPUTS): String {

@@ -43,6 +43,15 @@ import java.util.UUID
 @TestMethodOrder(MethodOrderer.OrderAnnotation::class)
 class TreasuryDealApiIT {
 
+    @jakarta.inject.Inject
+    lateinit var fundingLedger: FakeLedgerRead
+
+    @org.junit.jupiter.api.BeforeEach
+    fun fundTestLedger() {
+        fundingLedger.reset()
+        fundingLedger.defaultBalance = java.math.BigDecimal("1000000000000.00")
+    }
+
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("treasury-events-out")
