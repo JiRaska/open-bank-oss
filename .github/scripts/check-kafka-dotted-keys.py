@@ -2,61 +2,37 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 #
-# Kafka dotted-key guard: a `group.id` / `auto.offset.reset` written as a YAML leaf key does not
-# reach the connector, so the file says one thing and the consumer does another (issues #686, #2945).
+# Kafka dotted-key guard (#11683): SmallRye quotes dotted YAML leaf keys under mp.messaging.
+# The quoted property is not the plain property the Kafka connector reads. This applies to every
+# observed family in both directions: group/offset, client ID, serializers/deserializers and
+# bootstrap servers. See DottedMessagingKeyResolutionTest for real YamlConfigSource controls.
 #
 # THE MECHANISM
-#   SmallRye Config's YAML source quotes any leaf map key containing a literal dot: `group.id:` under
-#   a channel registers as the property name `"group.id"`, quotes included, and
-#   `KafkaConnectorIncomingConfiguration`'s plain `getOptionalValue("group.id", …)` never finds it.
-#   The connector then uses its own default. Nothing errors. `openbank-transaction-service`'s
-#   application.yaml documents this in place, and `PartyEventsConsumerGroupIdBootIT` proves it.
+#   SmallRye Config's YAML source quotes any leaf map key containing a literal dot. For example,
+#   `value.serializer:` registers as `...channel."value.serializer"`, while the Kafka connector
+#   reads `...channel.value.serializer`. The real YamlConfigSource regression test covers all nine
+#   direction/key families seen in the fleet, including the nested spelling that does resolve.
+#   An inert YAML entry can be masked by a default or another config source; the gate does not
+#   claim that every baselined service fails at runtime.
 #
-#   The established fix is NOT to delete the key — local dev and tests read YAML fine, and it is the
-#   deployed path that breaks — but to set the property from a real config source: a
-#   `*-msg-override.yaml` ConfigMap carrying `override.properties` with `config_ordinal=500`.
-#
-# WHAT THIS CHECKS, AND WHY THE TWO KEYS DIFFER
-#   `group.id`         — the fallback is `quarkus.application.name`. Six services USED TO get away
-#                        with the broken key purely because the value they wanted happened to equal
-#                        their application name — correct by coincidence, not by design: it breaks
-#                        the day a service is renamed, or a channel wants its own group (exactly
-#                        what transaction-service did). All six now carry a `*-msg-override`
-#                        ConfigMap setting the same value (#2945), so an override is the ONLY thing
-#                        that makes a dotted `group.id` acceptable and the coincidence exemption is
-#                        gone. Removing it is what stops the next service re-introducing the
-#                        latent version of this bug: matching the app name would otherwise pass CI
-#                        while resolving through a fallback nobody chose.
-#   `auto.offset.reset`— there is no such coincidence available. The fallback is the connector's own
-#                        default, so a channel declaring a NON-default value and having no override
-#                        is running on the default while its config file says otherwise. This is the
-#                        finding that made #2945 more than a latent-risk note.
-#
-# WHY IT IS A RATCHET, NOT A FLAT FAIL
-#   The remediation is NOT mechanical. Making `auto.offset.reset: earliest` actually take effect on a
-#   consumer that has been running as `latest` re-reads the topic from the beginning — a mass replay
-#   with real downstream consequences on money-path channels. That is a deliberate, per-channel
-#   operational decision, not a config tidy-up. So today's set is BASELINED with its issue, CI stays
-#   green, and a NEW occurrence fails. A baseline entry that becomes covered is also reported, so the
-#   list cannot quietly rot in either direction.
-#
-#   That last property only holds if every baseline entry names ONE channel — see the BASELINE
-#   comment (#3928). A `*` channel makes the ratchet unable to see a channel added later, and the
-#   symptom is a confident `OK`, never a red.
+# WHY IT IS A RATCHET
+#   Current occurrences are frozen by exact service, direction, channel and key in the JSON
+#   baseline. Making an existing `auto.offset.reset: earliest` effective could replay a whole
+#   topic, so remediation is a channel-by-channel operational decision. New occurrences fail;
+#   removals and entries newly covered by a msg-override ConfigMap become stale and also fail
+#   until the baseline is trimmed. A wildcard channel is forbidden (#3928).
 #
 # EXIT CODES
 #   0  no new occurrences, no stale baseline entries
-#   1  a dotted `group.id` with no override ConfigMap, a dotted `auto.offset.reset` asking for a
-#      non-default value with no override — or a baseline entry that is now covered and should be
-#      removed
+#   1  a new dotted leaf without an exact override, or a stale baseline entry
 #   2  the check could not run (PyYAML missing, tree not found) or the BASELINE itself is malformed
-#      (a wildcard channel, an unwatched key). Never conflated with 0.
+#      (a wildcard channel, duplicate row). Never conflated with 0.
 #
 # Run:  python3 .github/scripts/check-kafka-dotted-keys.py [--root .] [--self-test]
 
 import argparse
+import json
 import pathlib
-import re
 import sys
 
 import gatelib
@@ -66,14 +42,10 @@ try:
 except ImportError:  # pragma: no cover - reported as exit 2 by main()
     yaml = None
 
-# The connector's own default for auto.offset.reset. A channel declaring exactly this is a no-op
-# even when the key does not resolve, so it is not reported.
-CONNECTOR_DEFAULT_OFFSET_RESET = "latest"
+BASELINE_PATH = pathlib.Path(".github/gates/kafka-dotted-keys-baseline.json")
 
-WATCHED_KEYS = ("group.id", "auto.offset.reset")
-
-# Occurrences that exist today. Each entry is (service, CHANNEL, key) -> why it is tolerated.
-# Adding to this list is a deliberate act that needs a reason; see the ratchet note above.
+# Occurrences that exist today. Each entry pins a single service, direction, channel and key.
+# Adding one needs an issue-backed reason; the checked-in JSON is the migration inventory.
 #
 # THE CHANNEL IS PINNED, AND `*` IS REJECTED OUTRIGHT (#3928)
 #   This list used to carry six `(service, "*", "auto.offset.reset")` entries. A wildcard channel
@@ -86,70 +58,120 @@ WATCHED_KEYS = ("group.id", "auto.offset.reset")
 #   separately from the artifacts it covers, and never let an exclusion be broader than what was
 #   actually justified. `validate_baseline()` now refuses a `*` channel with exit 2, so the shape
 #   cannot come back by hand.
-BASELINE = {
-    # EMPTY since #8370: all eleven auto.offset.reset entries were resolved by option 1 (accept
-    # `latest`) — the inert dotted YAML key was deleted from every service's application.yaml, so
-    # the file now matches the connector's running reality and there is nothing left to baseline.
-    # Flipping any channel to a real `earliest` remains an owner decision with a replay window,
-    # done through a msg-override ConfigMap (config_ordinal=500), never through the YAML key.
-    # The historical per-entry notes lived at #2945/#3928 and in git history before this edit.
-}
+BASELINE = {}
 
 
-def app_name(doc):
+def load_baseline(root):
+    """Frozen exact (service, direction, channel, key) occurrences, never a live inventory."""
+    rows = json.loads((pathlib.Path(root) / BASELINE_PATH).read_text(encoding="utf-8"))
+    if not isinstance(rows, list) or any(not isinstance(row, list) or len(row) != 4 for row in rows):
+        raise ValueError(f"{BASELINE_PATH} must contain a list of four-string entries")
+    entries = [tuple(row) for row in rows]
+    if any(not all(isinstance(value, str) for value in row) for row in entries):
+        raise ValueError(f"{BASELINE_PATH} entries must contain only strings")
+    if len(entries) != len(set(entries)):
+        raise ValueError(f"{BASELINE_PATH} has duplicate entries")
+    return {entry: "#11683: pre-existing dotted YAML leaf" for entry in entries}
+
+
+def channels(doc):
+    """Yield (direction, channel, config-map) for both mp.messaging directions."""
     try:
-        return doc["quarkus"]["application"]["name"]
-    except (KeyError, TypeError):
-        return None
-
-
-def incoming_channels(doc):
-    """Yield (channel, config-map) for every mp.messaging.incoming.<channel>."""
-    try:
-        incoming = doc["mp"]["messaging"]["incoming"]
+        messaging = doc["mp"]["messaging"]
     except (KeyError, TypeError):
         return
-    if not isinstance(incoming, dict):
+    if not isinstance(messaging, dict):
         return
-    for channel, cfg in incoming.items():
-        if isinstance(cfg, dict):
-            yield channel, cfg
+    for direction in ("incoming", "outgoing"):
+        entries = messaging.get(direction)
+        if not isinstance(entries, dict):
+            continue
+        for channel, cfg in entries.items():
+            if isinstance(cfg, dict):
+                yield direction, channel, cfg
+
+
+def mounted_override_names(directory):
+    """ConfigMaps loaded as a properties source by a container in this GitOps component."""
+    mounted = set()
+    for path in directory.glob("*.yaml"):
+        for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")):
+            if not isinstance(doc, dict) or doc.get("kind") not in ("Deployment", "Rollout"):
+                continue
+            pod = (((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
+            volumes = {
+                volume.get("name"): (volume.get("configMap") or {}).get("name")
+                for volume in pod.get("volumes") or [] if isinstance(volume, dict)
+            }
+            for container in pod.get("containers") or []:
+                if not isinstance(container, dict):
+                    continue
+                locations = {
+                    env.get("value") for env in container.get("env") or []
+                    if isinstance(env, dict) and env.get("name") in
+                    ("QUARKUS_CONFIG_LOCATIONS", "SMALLRYE_CONFIG_LOCATIONS")
+                }
+                for mount in container.get("volumeMounts") or []:
+                    if not isinstance(mount, dict):
+                        continue
+                    name = volumes.get(mount.get("name"))
+                    base = mount.get("mountPath")
+                    if isinstance(name, str) and isinstance(base, str):
+                        if f"{base.rstrip('/')}/override.properties" in locations:
+                            mounted.add(name)
+    return mounted
 
 
 def load_overrides(root):
-    """Every `(service, channel, key)` actually set by a *-msg-override ConfigMap.
+    """Every `(service, full property name)` loaded with the same declared value.
 
     Derived from the gitops manifests themselves — never a hand-kept list — so a service that gains
     an override stops being reported without anyone editing this script.
 
-    Two things this got wrong on the first run, both worth keeping in mind:
+    Two things the earlier text matcher got wrong, both worth keeping in mind:
 
     1. **Keyed by service, not just channel.** Channel names are NOT globally unique — `party-events-in`
        is consumed by account, aml, card-issuance, kyc, onboarding and others. Keying on the channel
        alone let card-issuance's override silently vouch for account's and aml's, which is how the
        guard reported "0 new occurrences" about services it had never actually cleared.
-    2. **Comments are stripped first.** Every one of these ConfigMaps explains the bug in a comment
-       that contains the literal string `mp.messaging.incoming.<channel>.group.id`. Matching raw text
-       counts that prose as coverage — the repo's recurring "a text guard flags the text explaining
-       the thing it guards" failure, here in its silent direction.
+    2. **Only parsed data.override.properties counts.** Prose or a similarly named but unmounted
+       ConfigMap cannot vouch for the channel. The properties source must declare ordinal >= 500.
     """
-    covered = set()
+    covered = {}
     gitops = pathlib.Path(root) / "openbank-infra" / "gitops" / "components"
     for path in gitops.rglob("*msg-override*.yaml"):
-        raw = path.read_text(encoding="utf-8")
-        body = "\n".join(ln for ln in raw.splitlines() if not ln.lstrip().startswith("#"))
-        name = re.search(r"^\s*name:\s*([\w-]+)-msg-override\s*$", body, re.M)
-        if not name:
-            continue
-        service = f"openbank-{name.group(1)}"
-        for m in re.finditer(r"mp\.messaging\.incoming\.([\w.-]+?)\.(group\.id|auto\.offset\.reset)\s*=", body):
-            covered.add((service, m.group(1), m.group(2)))
+        mounts = mounted_override_names(path.parent)
+        for doc in yaml.safe_load_all(path.read_text(encoding="utf-8")):
+            if not isinstance(doc, dict) or doc.get("kind") != "ConfigMap":
+                continue
+            name = (doc.get("metadata") or {}).get("name")
+            if not isinstance(name, str) or not name.endswith("-msg-override") or name not in mounts:
+                continue
+            body = (doc.get("data") or {}).get("override.properties")
+            if not isinstance(body, str):
+                continue
+            properties = {}
+            for line in body.splitlines():
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                properties[key.strip()] = value.strip()
+            try:
+                if int(properties.get("config_ordinal", "0")) < 500:
+                    continue
+            except ValueError:
+                continue
+            service = f"openbank-{name[:-len('-msg-override')]}"
+            for key, value in properties.items():
+                if key.startswith(("mp.messaging.incoming.", "mp.messaging.outgoing.")):
+                    covered[(service, key)] = value
     return covered
 
 
-def baseline_key(service, channel, key):
-    """Exact `(service, channel, key)` only — a baseline entry can never span channels (#3928)."""
-    candidate = (service, channel, key)
+def baseline_key(service, direction, channel, key):
+    """Exact occurrence only — neither channels nor directions can share an exemption."""
+    candidate = (service, direction, channel, key)
     return candidate if candidate in BASELINE else None
 
 
@@ -164,20 +186,22 @@ def validate_baseline(baseline=None):
         baseline = BASELINE
     errors = []
     for entry in sorted(baseline):
-        service, channel, key = entry
-        if channel == "*":
+        if len(entry) != 4:
+            errors.append(f"baseline entry {entry} must name service, direction, channel and key")
+            continue
+        service, direction, channel, key = entry
+        if channel == "*" or "*" in key or "*" in service:
             errors.append(
-                f"baseline entry {entry} uses a wildcard channel. A baseline pins ONE channel, "
+                f"baseline entry {entry} uses a wildcard. A baseline pins ONE channel and key, "
                 f"or it pre-absorbs every channel {service} gains later (#3928). Enumerate them.",
             )
-        if key not in WATCHED_KEYS:
-            errors.append(f"baseline entry {entry} names {key!r}, which is not in WATCHED_KEYS.")
+        if direction not in ("incoming", "outgoing") or "." not in key:
+            errors.append(f"baseline entry {entry} must name a direction and a dotted leaf key")
     return errors
 
 
 def config_paths(root):
-    """The corpus: the application.yaml set, not the occurrences found in it. A moved resource
-    root yields zero of both, and zero findings is the ordinary green."""
+    """The corpus is every service application.yaml, even where no dotted key exists."""
     return sorted(pathlib.Path(root).glob("openbank-*/src/main/resources/application.yaml"))
 
 
@@ -190,45 +214,29 @@ def scan(root):
     for path in config_paths(root):
         service = path.parts[-5] if len(path.parts) >= 5 else path.parent.name
         doc = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        name = app_name(doc)
-
-        for channel, cfg in incoming_channels(doc):
-            for key in WATCHED_KEYS:
-                if key not in cfg:
+        for direction, channel, cfg in channels(doc):
+            for key, raw_value in cfg.items():
+                if not isinstance(key, str) or "." not in key:
                     continue
-                value = str(cfg[key])
+                value = str(raw_value)
+                property_name = f"mp.messaging.{direction}.{channel}.{key}"
 
                 # Covered by a real config source — the intended value actually reaches the connector.
-                if (service, channel, key) in overrides:
+                if overrides.get((service, property_name)) == value:
                     continue
 
-                # NOTE: `group.id == quarkus.application.name` used to be accepted here. It is not
-                # any more (#2945) — see the header. A value that merely happens to equal the
-                # fallback still does not RESOLVE, so accepting it means the config file and the
-                # running consumer agree by accident, which is not a property a gate can keep.
-                # auto.offset.reset survives only when it asks for the connector default anyway.
-                if key == "auto.offset.reset" and value == CONNECTOR_DEFAULT_OFFSET_RESET:
-                    continue
-
-                bk = baseline_key(service, channel, key)
+                bk = baseline_key(service, direction, channel, key)
                 if bk:
                     matched.add(bk)
                     continue
 
-                fallback = name if key == "group.id" else CONNECTOR_DEFAULT_OFFSET_RESET
-                effect = (
-                    f"the effective value is the fallback ({fallback!r}) — which happens to equal "
-                    f"the declared one, so nothing is broken TODAY and everything breaks on the "
-                    f"first rename or channel-specific group (#2945)"
-                    if str(fallback) == value
-                    else f"the effective value is the fallback ({fallback!r}), not {value!r}"
-                )
                 findings.append(
-                    f"{path}: channel '{channel}' sets `{key}: {value}` as a dotted YAML key with no "
+                    f"{path}: {direction} channel '{channel}' sets `{key}: {value}` as a dotted YAML key with no "
                     f"*-msg-override ConfigMap.\n"
-                    f"       That key does not reach the connector (#686), so {effect}.\n"
-                    f"       Fix: add `mp.messaging.incoming.{channel}.{key}={value}` to a "
-                    f"`*-msg-override.yaml` ConfigMap (config_ordinal=500), as transaction-service does.",
+                    f"       Its plain property name does not resolve through YamlConfigSource (#11683). "
+                    f"The effective value comes from another source, a default, or fails validation.\n"
+                    f"       Fix: use a nested YAML mapping or set `{property_name}` from a "
+                    f"`*-msg-override.yaml` ConfigMap (config_ordinal=500).",
                 )
     return findings, matched
 
@@ -277,6 +285,13 @@ mp:
         auto.offset.reset: latest
       asks-for-non-default-in:
         auto.offset.reset: earliest
+      deserializer-in:
+        value.deserializer: example.CustomDeserializer
+    outgoing:
+      serializer-out:
+        value.serializer: example.CustomSerializer
+      broker-out:
+        bootstrap.servers: example.invalid:9092
 """,
         None,
     ),
@@ -287,8 +302,11 @@ SELF_TEST_EXPECT = {
     "covered-in": False,           # override ConfigMap sets it — the only acceptable shape
     "coincidence-in": True,        # equal to quarkus.application.name, still does not resolve
     "differs-in": True,            # differs from the fallback — the loud case
-    "asks-for-default-in": False,  # asks for the connector default anyway, so a no-op
+    "asks-for-default-in": True,   # still a quoted property; fallback equality is coincidence
     "asks-for-non-default-in": True,
+    "deserializer-in": True,
+    "serializer-out": True,
+    "broker-out": True,
 }
 
 
@@ -310,6 +328,16 @@ def _build_self_test_tree(root):
             f"# explains mp.messaging.incoming.covered-in.group.id=... and why it is here\n"
             f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: {short}-msg-override\n"
             f"data:\n  override.properties: |\n    " + override.replace("\n", "\n    "),
+            encoding="utf-8",
+        )
+        (comp / f"{short}-deployment.yaml").write_text(
+            f"apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: {short}\n"
+            f"spec:\n  template:\n    spec:\n      containers:\n        - name: {short}\n"
+            f"          env:\n            - name: QUARKUS_CONFIG_LOCATIONS\n"
+            f"              value: /mnt/msg/override.properties\n"
+            f"          volumeMounts:\n            - name: msg\n              mountPath: /mnt/msg\n"
+            f"      volumes:\n        - name: msg\n          configMap:\n"
+            f"            name: {short}-msg-override\n",
             encoding="utf-8",
         )
 
@@ -334,7 +362,7 @@ def baseline_self_test():
             _build_self_test_tree(root)
 
             # 1. A pinned entry silences its own channel...
-            BASELINE = {(svc, "asks-for-non-default-in", "auto.offset.reset"): "self-test"}
+            BASELINE = {(svc, "incoming", "asks-for-non-default-in", "auto.offset.reset"): "self-test"}
             findings, matched = scan(str(root))
             cases.append((
                 "pinned entry silences its own channel",
@@ -347,7 +375,7 @@ def baseline_self_test():
             ))
 
             # 2. An entry matching nothing on the tree is reported stale (the reverse ratchet).
-            BASELINE = {(svc, "channel-that-does-not-exist", "auto.offset.reset"): "self-test"}
+            BASELINE = {(svc, "incoming", "channel-that-does-not-exist", "auto.offset.reset"): "self-test"}
             _, matched = scan(str(root))
             cases.append((
                 "baseline entry matching no channel is stale",
@@ -359,9 +387,10 @@ def baseline_self_test():
     # 3. The shape guard refuses the wildcard that caused #3928, and accepts the real baseline.
     cases.append((
         "wildcard channel rejected",
-        len(validate_baseline({(svc, "*", "auto.offset.reset"): "self-test"})) == 1,
+        len(validate_baseline({(svc, "incoming", "*", "auto.offset.reset"): "self-test"})) == 1,
     ))
-    cases.append(("shipped BASELINE is well-formed", validate_baseline() == []))
+    shipped = load_baseline(pathlib.Path(__file__).resolve().parents[2])
+    cases.append(("shipped BASELINE is well-formed", validate_baseline(shipped) == [] and len(shipped) > 0))
 
     failures = 0
     for label, ok in cases:
@@ -378,7 +407,7 @@ def self_test():
     — "is there an override ConfigMap" — was the one rule it never exercised. It also could not have
     caught the change it was written alongside.
 
-    The must-NOT half is the half that matters: a guard that flags every dotted key is noise.
+    The must-NOT half matters too: an exact override must not be called a new occurrence.
     """
     import tempfile
 
@@ -387,6 +416,26 @@ def self_test():
         root = pathlib.Path(tmp)
         _build_self_test_tree(root)
         findings, _ = scan(str(root))
+        comp = root / "openbank-infra" / "gitops" / "components" / "demo-covered-service"
+        override = comp / "demo-covered-service-msg-override.yaml"
+        deployment = comp / "demo-covered-service-deployment.yaml"
+        original = override.read_text(encoding="utf-8")
+        manifest = deployment.read_text(encoding="utf-8")
+        negative_overrides = (
+            ("wrong override value is not coverage", original.replace("group.id=openbank-demo-covered-service", "group.id=wrong")),
+            ("wrong properties field is not coverage", original.replace("override.properties: |", "other.properties: |")),
+            ("low source ordinal is not coverage", original.replace("config_ordinal=500", "config_ordinal=100")),
+        )
+        override_cases = []
+        for label, body in negative_overrides:
+            override.write_text(body, encoding="utf-8")
+            bad, _ = scan(str(root))
+            override_cases.append((label, any("channel 'covered-in'" in f for f in bad)))
+        override.write_text(original, encoding="utf-8")
+        deployment.unlink()
+        bad, _ = scan(str(root))
+        override_cases.append(("unmounted ConfigMap is not coverage", any("channel 'covered-in'" in f for f in bad)))
+        deployment.write_text(manifest, encoding="utf-8")
 
     flagged = {ch for ch in SELF_TEST_EXPECT if any(f"channel '{ch}'" in f for f in findings)}
     for channel, want in sorted(SELF_TEST_EXPECT.items()):
@@ -401,17 +450,53 @@ def self_test():
     print(f"{'pass' if ok else 'FAIL'}  finding count == expected" + ("" if ok else f" (got {len(findings)})"))
     failures += 0 if ok else 1
 
-    total = len(SELF_TEST_EXPECT) + 1
+    for label, ok in override_cases:
+        print(f"{'pass' if ok else 'FAIL'}  {label}")
+        failures += 0 if ok else 1
+
+    total = len(SELF_TEST_EXPECT) + 1 + len(override_cases)
 
     bl_failures, bl_total = baseline_self_test()
     failures += bl_failures
     total += bl_total
+
+    # Run the real CLI against a tiny frozen inventory. A newly added sibling must exit 1,
+    # removing a frozen entry must also exit 1, and a matching baseline must exit 0.
+    import subprocess
+    with tempfile.TemporaryDirectory() as tmp:
+        root = pathlib.Path(tmp)
+        app = root / "openbank-demo" / "src" / "main" / "resources" / "application.yaml"
+        app.parent.mkdir(parents=True)
+        baseline = root / BASELINE_PATH
+        baseline.parent.mkdir(parents=True)
+        original = "mp:\n  messaging:\n    outgoing:\n      first:\n        client.id: first\n"
+        app.write_text(original, encoding="utf-8")
+        baseline.write_text(json.dumps([["openbank-demo", "outgoing", "first", "client.id"]]), encoding="utf-8")
+
+        def run_cli():
+            return subprocess.run(
+                [sys.executable, __file__, "--root", str(root)],
+                capture_output=True, text=True, check=False,
+            )
+
+        controls = [("exact baseline remains green", run_cli().returncode == 0)]
+        app.write_text(original + "      second:\n        value.serializer: example.Serializer\n", encoding="utf-8")
+        added = run_cli()
+        controls.append(("new outgoing serializer exits 1", added.returncode == 1 and "NEW" in added.stdout))
+        app.write_text("mp:\n  messaging:\n    outgoing:\n      first:\n        topic: clean\n", encoding="utf-8")
+        removed = run_cli()
+        controls.append(("removed baseline entry exits 1", removed.returncode == 1 and "STALE" in removed.stdout))
+        for label, ok in controls:
+            print(f"{'pass' if ok else 'FAIL'}  {label}")
+            failures += 0 if ok else 1
+        total += len(controls)
 
     print(f"\nself-test: {total - failures} passed, {failures} failed")
     return 0 if failures == 0 else 2
 
 
 def main():
+    global BASELINE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=".")
     parser.add_argument("--self-test", action="store_true")
@@ -423,13 +508,23 @@ def main():
     if args.self_test:
         return self_test()
 
+    try:
+        BASELINE = load_baseline(args.root)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        print(f"::error::Cannot load {BASELINE_PATH}: {error}")
+        return 2
+
     shape_errors = validate_baseline()
     if shape_errors:
         for e in shape_errors:
             print(f"::error::{e}")
         return 2
 
-    gatelib.subjects(len(config_paths(args.root)), "service application.yaml globbed")
+    paths = config_paths(args.root)
+    if not paths:
+        print("::error::No service application.yaml found — the scan scope may have moved")
+        return 2
+    gatelib.subjects(len(paths), "service application.yaml globbed")
     findings, matched = scan(args.root)
     stale = [k for k in BASELINE if k not in matched]
 
@@ -438,15 +533,15 @@ def main():
     for k in stale:
         print(
             f"STALE  baseline entry {k} no longer occurs — it is either fixed or the service is gone.\n"
-            f"       Remove it from BASELINE in this script so the list keeps meaning something.",
+            f"       Remove it from {BASELINE_PATH} so the list keeps meaning something.",
         )
 
     if findings or stale:
         print(f"\n{len(findings)} new occurrence(s), {len(stale)} stale baseline entr(ies).")
         return 1
     print(
-        f"kafka dotted keys: OK — {len(BASELINE)} baselined occurrence(s), no new ones. "
-        f"See #2945 for why the baselined set is an operational decision, not a pending tidy-up.",
+        f"kafka dotted keys: OK — {len(BASELINE)} exact baselined occurrence(s), no new ones. "
+        f"See #11683 for the rollout decision behind this inventory.",
     )
     return 0
 

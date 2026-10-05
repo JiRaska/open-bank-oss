@@ -7,7 +7,7 @@
     "observed_gate_ids": 204
   },
   "allowed": {
-    "missing_budget_seconds": 159,
+    "missing_budget_seconds": 158,
     "missing_min_subjects": 2
   },
   "known": {
@@ -59,7 +59,6 @@
       "dockerfile-runtime-only",
       "domain-purity-gate",
       "domainevent-occurredat-constructor-guard",
-      "dotted-mp-messaging-key-guard",
       "duplicate-yaml-key-guard",
       "enforcement-reachability",
       "ensure-ecr-repository",

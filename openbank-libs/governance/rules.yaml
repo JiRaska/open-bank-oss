@@ -734,48 +734,6 @@ change_requirements:
     # alone: nothing cross-checks a rule's `enforced:` against the mode of the gate that
     # implements it, so this record could drift for as long as it did.
     ci_producer: "openbank-infra/scripts/check-threat-model-diff.py"
-  mp_messaging_dotted_keys:
-    # SmallRye reactive-messaging config written as a DOTTED key
-    # (`mp.messaging.incoming.x.topic: …`) inside a nested YAML mapping is silently ignored by
-    # SnakeYAML — the channel keeps its default and the consumer subscribes to nothing, with no
-    # error at boot (issue #686). The guard rewrites the shape it can prove wrong.
-    detect: ["<service>/src/main/resources/application.yaml", "mp.messaging.* written as a dotted key under a nested mapping"]
-    require:
-      - "mp.messaging channel config expressed as nested YAML, not a dotted key inside a mapping"
-    gate: dotted-mp-messaging-keys
-    enforced: advisory
-    # Moved 2026-09-30 -> 2026-12-31 (#11683): re-measured 2026-10-01 at 185 occurrences (still
-    # growing); retirement needs a ruling on the ~170 keys the enforced ratchet never reads.
-    target_enforce_date: "2026-12-31"   # ADR-0144
-    # RE-MEASURED 2026-09-05, and this note had gone stale in exactly the way it warns about.
-    # Both issues it sequences on are CLOSED (#3928, #3931), and the count is not 16:
-    # `check-dotted-mp-messaging-keys.sh --enforce` reports 171 occurrences today.
-    #
-    # 171 is not "the debt grew 10x" — the two gates count different things, which IS the point:
-    #   * kafka-dotted-key-ratchet (ENFORCED) baselines today's set as an operational decision
-    #     (#2945) and fails only on a NEW occurrence. It reports clean: 11 baselined, 0 new.
-    #   * dotted-mp-messaging-key-guard (ADVISORY, this rule) has NO baseline at all and counts
-    #     every occurrence, including the ones its enforced sibling deliberately accepted.
-    #
-    # So graduating this on 2026-09-30 would fail the build on 171 occurrences the enforced gate
-    # has already decided to keep. The previous note's recommendation — retire the advisory
-    # duplicate rather than graduate two overlapping gates — is therefore confirmed by
-    # measurement. What is NOT established here is how many of the 171 are genuine defects
-    # rather than the accepted set; that needs a ruling on the Kafka semantics and is the real
-    # work behind this date.
-    blocked_on: "graduating would fail the build on 175 occurrences (re-measured 2026-09-05;
-      an earlier note said 171, which was wrong). Only 24 of the 175 are even in the enforced
-      sibling's watch set — kafka-dotted-key-ratchet reads group.id and auto.offset.reset,
-      incoming only — and 11 of those it baselines (#2945). The remaining ~151 are
-      value.deserializer / value.serializer / key.serializer / client.id / bootstrap.servers
-      keys the enforced gate has never looked at: UNASSESSED, not deliberately accepted, so the
-      earlier note's attribution overstated that gate's decision by an order of magnitude.
-      #3928 and #3931, which the previous note sequenced on, are both closed. The action is
-      still to retire this duplicate rather than flip it, but the ~151 need a ruling first."
-    # Registered here as part of issue #2392: this gate ran advisory with no rules.yaml rule at
-    # all, so check-gate-graduation.sh could not see it and it had no deadline. That class is now
-    # itself gated by .github/scripts/check-advisory-gate-registration.py.
-    ci_producer: ".github/scripts/check-dotted-mp-messaging-keys.sh"
   role_only_write_rule_naming:
     # GHSA-58jq-9hq3-66jr. `service-account-openbank-services` — the identity nearly every
     # backend service authenticates as — carries ROLE_OPERATOR in the realm, and
@@ -2339,30 +2297,22 @@ noop_outcomes:
   ci_producer: .github/scripts/check-noop-not-success.py
 
 kafka_dotted_keys:
-  # SmallRye Config's YAML source quotes any leaf map key containing a literal dot, so
-  # `group.id: foo` under `mp.messaging.incoming.<channel>:` registers as the property
-  # `…<channel>."group.id"` — quotes included — and KafkaConnectorIncomingConfiguration's plain
-  # getOptionalValue("group.id", …) never finds it. Nothing errors; the connector silently uses
-  # its own default (#686).
-  #
-  # THE RULE: a dotted `group.id` / `auto.offset.reset` must either resolve to the same value its
-  # fallback produces, or be set from a real config source — a `<svc>-msg-override.yaml` ConfigMap
-  # carrying override.properties with config_ordinal=500. Do NOT simply delete the YAML key: local
-  # dev and tests read it fine, and it is only the deployed path that breaks.
-  must_match_fallback_or_be_overridden: true
-  #
-  # WHY IT IS A RATCHET rather than a sweep. Six services currently satisfy the rule for
-  # `group.id` only by COINCIDENCE — the value they wanted equals quarkus.application.name, which
-  # is exactly what the fallback produces — and that holds until a service is renamed or a channel
-  # wants its own group (which is what transaction-service did). The SAME six declare
-  # `auto.offset.reset: earliest`, where no such coincidence is available, so the effective value
-  # is the connector default and not the one in the file.
-  #
-  # Those six are NOT a pending tidy-up. Forcing `earliest` onto a consumer group that has been
-  # running as the default re-reads the topic from the beginning — a mass replay on money-path
-  # channels, and a deliberate per-channel operational decision (#2945). So they are baselined in
-  # the script against that issue, a NEW occurrence fails, and a baseline entry that becomes
-  # covered is reported too, so the list cannot rot in either direction.
+  # The enforced fleet ratchet supersedes the advisory mp_messaging_dotted_keys rule (#11683).
+  # YamlConfigSource quotes a literal dot in a channel's leaf key. The nine observed
+  # direction/key families all fail to resolve at the plain property name the Kafka connector
+  # reads; DottedMessagingKeyResolutionTest proves both the broken and nested spellings.
+  # group.id/auto.offset.reset therefore use fallbacks unless overridden (offset changes require
+  # replay planning). client.id loses its declared broker-side identity. The key/value
+  # serializer and deserializer declarations are absent; defaults or another source may mask that,
+  # while a required value codec may fail validation. bootstrap.servers falls back to the global
+  # connector setting or its default. These are key-family verdicts about RESOLUTION, not claims
+  # that every currently running channel is broken.
+  # An override.properties ConfigMap is accepted when it supplies that exact property.
+  dotted_leaf_requires_nested_yaml_or_override: true
+  # Existing uncovered occurrences are frozen by exact service, direction, channel and key in
+  # .github/gates/kafka-dotted-keys-baseline.json. The checker fails on new occurrences and on
+  # stale baseline entries. Baseline is a migration inventory, not proof each live channel fails:
+  # other sources and connector defaults can make individual deployments work.
   baseline_is_checked_both_ways: true
   ci_producer: .github/scripts/check-kafka-dotted-keys.py
 

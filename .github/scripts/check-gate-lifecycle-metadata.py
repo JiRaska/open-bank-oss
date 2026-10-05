@@ -169,7 +169,6 @@ DEBT = {
     "libs-change-dependents": DEBT_MARKER,
     "kafka-acl-coverage": DEBT_MARKER,
     "duplicate-yaml-key-guard": DEBT_MARKER,
-    "dotted-mp-messaging-key-guard": DEBT_MARKER,
     "db-migration-gate": DEBT_MARKER,
     "event-contract-coverage-ratchet": DEBT_MARKER,
     "schema-compat-gate": DEBT_MARKER,

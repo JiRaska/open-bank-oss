@@ -32,6 +32,7 @@ USAGE
       --format TSVWithNames > stats.tsv
     derive-gate-observability-budgets.py --stats stats.tsv            # print proposals
     derive-gate-observability-budgets.py --stats stats.tsv --baseline # rewrite the baseline
+    derive-gate-observability-budgets.py --prune-retired             # remove only retired IDs
 """
 from __future__ import annotations
 
@@ -94,10 +95,27 @@ def main() -> int:
     ap.add_argument("--print-query", action="store_true")
     ap.add_argument("--stats", type=pathlib.Path)
     ap.add_argument("--baseline", action="store_true", help="rewrite observability-baseline.json")
+    ap.add_argument("--prune-retired", action="store_true",
+                    help="remove retired gate ids from the existing derived baseline without a new warehouse query")
     args = ap.parse_args()
 
     if args.print_query:
         print(QUERY)
+        return 0
+    if args.prune_retired:
+        if args.stats or args.baseline:
+            print("::error::--prune-retired cannot be combined with --stats or --baseline", file=sys.stderr)
+            return 2
+        ids = {g["id"] for g in yaml.safe_load(MANIFEST.read_text(encoding="utf-8"))["gates"]}
+        base = json.loads(BASELINE.read_text(encoding="utf-8"))
+        removed = set()
+        for field, values in base["known"].items():
+            removed.update(set(values) - ids)
+            base["known"][field] = sorted(set(values) & ids)
+            base["allowed"][field] = len(base["known"][field])
+        base["subject_emitting_gate_ids"] = sorted(set(base["subject_emitting_gate_ids"]) & ids)
+        BASELINE.write_text(json.dumps(base, indent=2) + "\n", encoding="utf-8")
+        print(f"[derive] pruned {len(removed)} retired gate id(s) from the existing baseline")
         return 0
     if not args.stats:
         print("::error::--stats <tsv> is required (see --print-query)", file=sys.stderr)
