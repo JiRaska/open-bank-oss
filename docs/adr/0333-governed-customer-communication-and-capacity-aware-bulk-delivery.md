@@ -186,6 +186,11 @@ Notification-service's marketing ContactPolicyGate now reads the same live conse
 suppression list as campaign-service. A matching entry denies before counters or consent; an
 unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count
 contacts locally, so this does not satisfy D2's atomic cross-origin reservation.
+Notification dispatch now treats GATE_UNAVAILABLE as a retryable dependency failure rather than a
+terminal customer suppression. Its committed notification row remains PENDING, no provider is
+called and the Kafka record fails to the configured dead-letter path for reconciliation. The
+stale-PENDING alert surfaces work that is not resolved automatically. A real Quarkus/PostgreSQL
+test proves no provider handoff or terminal outcome is recorded on this path.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and

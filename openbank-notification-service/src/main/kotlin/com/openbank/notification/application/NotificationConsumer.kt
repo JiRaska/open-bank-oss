@@ -574,13 +574,11 @@ class NotificationConsumer @Inject constructor(
      * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
      * gate itself is a `suspend fun`; this dispatch pipeline is Mutiny `Uni`, not coroutines).
      *
-     * Fail-closed in every deny reason, deliberately distinguishable in the audit (#2660 §3,
-     * carried forward): `NO_CONSENT` -> `no_active_consent` (a genuine refusal),
-     * `GATE_UNAVAILABLE` -> `consent_check_unavailable` (a port outage — consent, counter or
-     * suppression) — a gate outage must never read as a grant, and the two numbers must never
-     * merge into one. `SEND_CAP_REACHED`/`QUIET_HOURS`/`SUPPRESSED_LIST` are new reasons this
-     * service could not previously produce; each gets its own outcome code rather than folding
-     * into one of the two above.
+     * Fail-closed in every deny reason. `NO_CONSENT` is a terminal policy refusal;
+     * `GATE_UNAVAILABLE` is a dependency outage and leaves the committed row PENDING, with the
+     * Kafka record failed to its DLQ. It must not be counted as a customer suppression. The
+     * stale-PENDING gauge makes the required reconciliation visible. `SEND_CAP_REACHED`,
+     * `QUIET_HOURS` and `SUPPRESSED_LIST` remain distinct terminal reasons.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
@@ -605,9 +603,15 @@ class NotificationConsumer @Inject constructor(
                     NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
                 }
             } else {
+                if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
+                    // The row was committed before the gate. No provider was called, but this is
+                    // an unavailable dependency rather than a customer policy refusal. Keep
+                    // PENDING and fail the record into the DLQ for reconciliation/replay.
+                    return@chain Uni.createFrom().failure(IllegalStateException("contact gate unavailable"))
+                }
                 val reason = when (decision.denyReason) {
                     ContactDenyReason.NO_CONSENT -> NotificationOutcomeEvent.REASON_NO_CONSENT
-                    ContactDenyReason.GATE_UNAVAILABLE -> NotificationOutcomeEvent.REASON_CONSENT_UNAVAILABLE
+                    ContactDenyReason.GATE_UNAVAILABLE -> error("handled above")
                     ContactDenyReason.SEND_CAP_REACHED -> NotificationOutcomeEvent.REASON_SEND_CAP_REACHED
                     ContactDenyReason.QUIET_HOURS -> NotificationOutcomeEvent.REASON_QUIET_HOURS
                     ContactDenyReason.SUPPRESSED_LIST -> NotificationOutcomeEvent.REASON_SUPPRESSED_LIST
