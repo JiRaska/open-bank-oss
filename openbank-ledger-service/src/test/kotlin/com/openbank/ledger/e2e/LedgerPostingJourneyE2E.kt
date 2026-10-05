@@ -6,14 +6,18 @@ package com.openbank.ledger.e2e
 
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.RestAssured
 import io.restassured.response.Response
+import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.util.UUID
+import javax.sql.DataSource
 
 /**
  * End-to-end journey for the ledger money path: **post a balanced journal, see the trial balance
@@ -45,8 +49,16 @@ import java.util.UUID
  * unchanged while history stays immutable.
  */
 @QuarkusTest
+@TestProfile(LedgerPostingJourneyE2E.NoDispatchProfile::class)
 @QuarkusTestResource(com.openbank.ledger.it.PostgresRedpandaTestResource::class)
 class LedgerPostingJourneyE2E {
+
+    class NoDispatchProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf("openbank.outbox.dispatch-enabled" to "false")
+    }
+
+    @Inject
+    lateinit var dataSource: DataSource
 
     /**
      * The whole journey in one test, in order, because each step's precondition is the previous
@@ -72,6 +84,8 @@ class LedgerPostingJourneyE2E {
         assertThat(posted.jsonPath().getString("status")).isEqualTo("POSTED")
         val journalId = posted.jsonPath().getString("id")
         assertThat(journalId).isNotNull()
+
+        assertPostingAtomicity(UUID.fromString(journalId), LocalDate.parse(today))
 
         // 2. Read the entry back through the API — the write must be durable and complete.
         val readBack = RestAssured.given().get("/api/v1/journals/$journalId")
@@ -149,6 +163,43 @@ class LedgerPostingJourneyE2E {
         .contentType("application/json")
         .body(body)
         .post(path)
+
+    private fun assertPostingAtomicity(journalId: UUID, entryDate: LocalDate) {
+        // A presence assertion would also pass if the journal and outbox were committed in
+        // separate transactions. Postgres xmin identifies the transaction that wrote each row.
+        // The dispatcher is off for this class so its claim UPDATE cannot rewrite outbox xmin.
+        val (journalWriter, outboxWriter) = postingWriters(journalId, entryDate)
+        assertThat(outboxWriter)
+            .describedAs(
+                "journal and JournalPosted outbox row must commit together (journal xmin=%s, outbox xmin=%s)",
+                journalWriter,
+                outboxWriter,
+            )
+            .isEqualTo(journalWriter)
+    }
+
+    private fun postingWriters(journalId: UUID, entryDate: LocalDate): Pair<String, String> =
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """SELECT j.xmin::text, o.xmin::text
+                   FROM journal_entries j
+                   JOIN ledger_outbox o ON o.aggregate_id = j.id AND o.event_type = 'JournalPosted'
+                   WHERE j.id = ? AND j.entry_date = ?""",
+            ).use { statement ->
+                statement.setObject(1, journalId)
+                statement.setObject(2, entryDate)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next())
+                        .describedAs("one JournalPosted outbox row for journal %s", journalId)
+                        .isTrue()
+                    val writers = rows.getString(1) to rows.getString(2)
+                    assertThat(rows.next())
+                        .describedAs("no duplicate JournalPosted outbox row for journal %s", journalId)
+                        .isFalse()
+                    writers
+                }
+            }
+        }
 
     /** Per-account signed net (credit - debit) in CZK, as the API renders it. */
     private fun trialBalanceNet(asOf: String): Map<String, BigDecimal> {
