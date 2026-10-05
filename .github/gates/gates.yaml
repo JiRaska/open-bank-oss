@@ -4205,6 +4205,7 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/libs-change-dependents.sh --selftest
+      python3 .github/scripts/service-ci-library-dependents.py --self-test
 
   # analytics-sink owns no OLTP DB and runs no migration runner (ADR-0022): its ClickHouse DDL lives
   # once as `clickhouse/V*.sql` resources an operator applies, and once in the `clickhouse-init`
