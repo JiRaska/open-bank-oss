@@ -22,7 +22,6 @@ import { findRawIdentifiers } from './raw-identifier-detector'
 
 // Burn down; never add to. Measured 2026-10-01 at the introduction of this guard.
 const BASELINE: Record<string, number> = {
-  'src/app/accounts/page.tsx': 1,
   'src/app/approvals/delegation/[id]/page.tsx': 1,
   'src/app/approvals/page.tsx': 1,
   'src/app/audit/page.tsx': 2,
@@ -32,7 +31,6 @@ const BASELINE: Record<string, number> = {
   'src/app/communication/[personaId]/page.tsx': 1,
   'src/app/communication/edit/[personaKey]/page.tsx': 1,
   'src/app/communication/page.tsx': 1,
-  'src/app/consents/page.tsx': 2,
   'src/app/customer-360/page.tsx': 1,
   'src/app/day-end/page.tsx': 1,
   'src/app/delegations/page.tsx': 1,

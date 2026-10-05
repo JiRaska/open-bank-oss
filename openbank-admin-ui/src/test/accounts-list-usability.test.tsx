@@ -2,9 +2,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import React from 'react'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { LanguageProvider } from '@/lib/i18n/LanguageContext'
+import { SessionProvider } from 'next-auth/react'
 import AccountsPage from '@/app/accounts/page'
 
 vi.mock('@/components/auth/AuthGuard', () => ({ Can: ({ children }: { children: React.ReactNode }) => <>{children}</> }))
+
+function renderPage() {
+  return render(
+    <SessionProvider session={{ user: { roles: [] } } as never}>
+      <LanguageProvider><AccountsPage /></LanguageProvider>
+    </SessionProvider>,
+  )
+}
 
 const account = {
   id: 'account-1', accountNumber: '1234567890', accountType: 'CURRENT', currencyCode: 'CZK',
@@ -21,7 +30,7 @@ describe('account search accessibility', () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [account], pagination: {} }), {
       status: 200, headers: { 'content-type': 'application/json' },
     })))
-    render(React.createElement(LanguageProvider, null, React.createElement(AccountsPage)))
+    renderPage()
 
     const query = screen.getByLabelText('Search accounts by number, IBAN, or Party ID')
     expect(query).toHaveAttribute('aria-describedby', 'accounts-query-help')
@@ -45,7 +54,7 @@ describe('account search accessibility', () => {
         pagination: { limit: 25, hasNextPage: false },
       }), { status: 200, headers: { 'content-type': 'application/json' } }))
     vi.stubGlobal('fetch', fetchMock)
-    render(React.createElement(LanguageProvider, null, React.createElement(AccountsPage)))
+    renderPage()
 
     fireEvent.change(screen.getByLabelText('Search accounts by number, IBAN, or Party ID'), { target: { value: '12' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search accounts' }))
@@ -70,7 +79,7 @@ describe('account search accessibility', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } }))
       .mockResolvedValueOnce(new Response('', { status: 503 }))
     vi.stubGlobal('fetch', fetchMock)
-    render(React.createElement(LanguageProvider, null, React.createElement(AccountsPage)))
+    renderPage()
 
     fireEvent.change(screen.getByLabelText('Search accounts by number, IBAN, or Party ID'), { target: { value: '12' } })
     fireEvent.click(screen.getByRole('button', { name: 'Search accounts' }))

@@ -10,7 +10,8 @@ import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PartySearch, partyDisplayName, type PartyHit } from '@/components/party/PartySearch'
 import { classifyBffFailure } from '@/lib/services/bff'
-import { PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { HumanReference, PageHeader, StatCard, StatusBadge, statusTone } from '@/components/ui'
+import { EntityChip } from '@/components/entities/EntityChip'
 import { parseConsentEvidenceList, type ConsentEvidence } from '@/lib/consents/consentContract'
 
 // consent-service (ADR-0126) exposes NO "list all consents" endpoint — every read is keyed by
@@ -268,10 +269,13 @@ export default function ConsentsPage() {
             <tbody>
               {rows.map(c => (
                 <tr key={c.id}>
-                  <td style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '11px' }}>{c.partyId}</td>
+                  <td><EntityChip type="party" id={c.partyId} /></td>
                   <td>
-                    <div style={{ fontWeight: 600 }}>{c.granteeName}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{c.granteeId}</div>
+                    <HumanReference
+                      label={c.granteeName}
+                      reference={c.granteeId}
+                      copyLabel={t('Kopírovat ID příjemce', 'Copy grantee ID')}
+                    />
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>

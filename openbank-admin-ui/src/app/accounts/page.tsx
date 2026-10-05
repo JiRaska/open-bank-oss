@@ -14,6 +14,7 @@ import { DataUnavailable, type UnavailableKind } from '@/components/feedback/Dat
 import { hasIbanShape, isValidIban, looksLikeUuid, normalizeIban } from '@/lib/validation/iban'
 import { LoadMoreControl, PageHeader, StatusBadge } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
+import { EntityChip } from '@/components/entities/EntityChip'
 import { PartySearch, type PartyHit } from '@/components/party/PartySearch'
 
 const ACCOUNT_SERVICE = '/api/svc/account-service'
@@ -353,7 +354,7 @@ export default function AccountsPage() {
                   <th>{t('Typ', 'Type')}</th>
                   <th>{t('Měna', 'CCY')}</th>
                   <th>{t('Stav', 'Status')}</th>
-                  <th>{t('Party ID', 'Party ID')}</th>
+                  <th>{t('Klient', 'Party')}</th>
                   <th>{t('Otevřen', 'Opened')}</th>
                   <th style={{ textAlign: 'right' }}>{t('Akce', 'Actions')}</th>
                 </tr>
@@ -382,7 +383,7 @@ export default function AccountsPage() {
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{a.accountType}</span></td>
                     <td><span className="tag">{a.currencyCode}</span></td>
                     <td><StatusBadge status={a.status} /></td>
-                    <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{a.partyId}</span></td>
+                    <td><EntityChip type="party" id={a.partyId} /></td>
                     <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{new Date(a.openedAt).toLocaleDateString(numberLocale)}</span></td>
                     <td style={{ textAlign: 'right' }}>
                       <Link href={`/accounts/${a.id}`} className="btn btn-ghost" style={{ padding: '4px 10px', fontSize: '12px' }}>
