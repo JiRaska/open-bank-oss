@@ -119,16 +119,25 @@ jobs:
         working-directory: ${{ env.ENV_DIR }}
         run: |
           set -o pipefail
-          tofu plan -input=false -lock=false -no-color -detailed-exitcode \
-            2>&1 | tee /tmp/plan.txt && code=0 || code=$?
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            # A scheduled probe publishes only a verdict; its plan may contain
+            # sensitive resource values, so keep stdout out of public logs too.
+            tofu plan -input=false -lock=false -no-color -detailed-exitcode \
+              > "${RUNNER_TEMP}/tofu-plan.txt" 2>&1 && code=0 || code=$?
+          else
+            tofu plan -input=false -lock=false -no-color -detailed-exitcode \
+              2>&1 | tee "${RUNNER_TEMP}/tofu-plan.txt" && code=0 || code=$?
+          fi
           {
             echo "### \`tofu plan\` — ${ENV_DIR}"
             if [ "$code" = "2" ]; then echo "_Changes pending._";
             elif [ "$code" = "0" ]; then echo "_No changes._";
             else echo "_Plan errored (exit $code)._"; fi
-            echo '```'
-            tail -c 60000 /tmp/plan.txt
-            echo '```'
+            if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
+              echo '```'
+              tail -c 60000 "${RUNNER_TEMP}/tofu-plan.txt"
+              echo '```'
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
           python3 "$GITHUB_WORKSPACE/.github/scripts/tofu-plan-drift-report.py" --classify "$code" >> "$GITHUB_OUTPUT"
           [ "$code" = "0" ] || [ "$code" = "2" ]
