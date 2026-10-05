@@ -87,6 +87,12 @@ jobs:
           echo "TAG=${tag}" >> "$GITHUB_ENV"
           echo "::notice::verifying evidence bundle for ${tag}"
 
+      # The verification step runs a repository script after cd ev. Without checkout,
+      # every signed bundle fails with "No such file or directory" instead of being audited.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - name: Configure AWS credentials (OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
         with:
