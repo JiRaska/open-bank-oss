@@ -20,7 +20,8 @@ When any of those change for a money-path service (rules.yaml:
 money_path_services, parsed by check-threat-models.py's parser) and
 docs/threat-models/<service>.md is NOT part of the same diff, emit a finding.
 
-stdlib-only; shells out to `git` unless --changed-files supplies the list.
+Uses PyYAML for exact NetworkPolicy ownership (installed by the CI gate runner);
+shells out to `git` unless --changed-files supplies the list.
 
 Usage:
     check-threat-model-diff.py [--base <ref>] [--changed-files <path>] [--enforce]
@@ -48,6 +49,7 @@ import pathlib
 import re
 import subprocess
 import sys
+from unittest.mock import patch
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
@@ -270,6 +272,78 @@ def own_document_diff(service: str, rel: str, base: str | None, head: str) -> st
     )
 
 
+def network_policy_documents(service: str, full_text: str) -> list[dict] | None:
+    """Parsed NetworkPolicies selecting exactly this service, or None if ownership is uncertain.
+
+    A malformed or duplicate-key document cannot safely prove that a neighbour's edit is
+    unrelated. In that case the caller keeps the conservative finding.
+    """
+    try:
+        import yaml
+    except ImportError:
+        return None
+
+    class UniqueKeyLoader(yaml.SafeLoader):
+        def construct_mapping(self, node, deep=False):
+            mapping = {}
+            for key_node, value_node in node.value:
+                key = self.construct_object(key_node, deep=deep)
+                if key in mapping:
+                    raise yaml.constructor.ConstructorError(
+                        None, None, f"duplicate YAML key: {key}", key_node.start_mark,
+                    )
+                mapping[key] = self.construct_object(value_node, deep=deep)
+            return mapping
+
+    selected = []
+    try:
+        for doc in yaml.load_all(full_text, Loader=UniqueKeyLoader):
+            if doc is None:
+                continue
+            if not isinstance(doc, dict):
+                raise ValueError("YAML document is not a mapping")
+            if doc.get("kind") != "NetworkPolicy":
+                continue
+            metadata = doc.get("metadata")
+            if not isinstance(metadata, dict) or not isinstance(metadata.get("name"), str):
+                raise ValueError("NetworkPolicy has no metadata.name")
+            spec = doc.get("spec")
+            selector = spec.get("podSelector") if isinstance(spec, dict) else None
+            labels = selector.get("matchLabels") if isinstance(selector, dict) else None
+            if not isinstance(labels, dict) or not isinstance(labels.get("app.kubernetes.io/name"), str):
+                raise ValueError("NetworkPolicy has no exact workload selector")
+            if labels["app.kubernetes.io/name"] == service.removeprefix("openbank-"):
+                selected.append(doc)
+    except (yaml.YAMLError, ValueError, TypeError):
+        return None
+    return sorted(selected, key=lambda doc: doc["metadata"]["name"])
+
+
+def network_policy_changed(service: str, rel: str, base: str | None, head: str) -> bool | None:
+    """Whether S's parsed policy changed; None means inspectability is insufficient."""
+    if base is None:
+        # --changed-files provides paths only. Without two versions to compare, a shared
+        # policy file conservatively flags every money-path service checked by the caller.
+        return None
+    before = read_at_ref(base, rel)
+    after = read_at_ref(head, rel)
+    if before is None or after is None:
+        # An absent file is an addition/deletion only when both refs resolve. A bad/shallow
+        # ref must never make a changed service disappear from the gate's result.
+        for ref in (base, head):
+            resolved = subprocess.run(
+                ["git", "rev-parse", "--verify", f"{ref}^{{commit}}"],
+                capture_output=True, cwd=REPO,
+            )
+            if resolved.returncode != 0:
+                return None
+    own_before = network_policy_documents(service, before or "")
+    own_after = network_policy_documents(service, after or "")
+    if own_before is None or own_after is None:
+        return None
+    return own_before != own_after
+
+
 def file_diff(base: str | None, head: str, rel: str) -> str | None:
     """Unified diff of one path, or None when it cannot be inspected."""
     if base is None:
@@ -324,36 +398,18 @@ def gitops_hit(
     A NetworkPolicy is a boundary by construction — its entire content is reach — so any
     change to one counts. A Deployment/Rollout is not: see hunk_moves_boundary.
     """
+    rel = f"openbank-infra/gitops/components/{comp}/{fname}"
+    if fname == "network-policies.yaml":
+        # Shared components do not have to name a service (payments hosts card-issuance).
+        # Compare parsed policies selected by the exact workload label at both refs.
+        # Unknown content stays a finding rather than hiding a boundary change.
+        changed = network_policy_changed(service, rel, base, head)
+        if changed is False:
+            return None
+        return f"{rel} (ingress/egress)"
     tokens = gitops_tokens(service)
     if not (token_in(tokens, comp) or token_in(tokens, fname)):
         return None
-    rel = f"openbank-infra/gitops/components/{comp}/{fname}"
-    if fname == "network-policies.yaml":
-        # A NetworkPolicy is a boundary by construction, so ANY change to this service's own
-        # policy counts — there is no hunk filter here, unlike the Deployment branch below.
-        #
-        # What there IS, is the shared-file problem: one `network-policies.yaml` holds a policy per
-        # service in the namespace, and the generator rewrites it whenever a service is added. So
-        # adding card-processing's policy made this gate demand a threat-model update from
-        # sepa-payment and domestic-payment, neither of whose documents changed by a byte
-        # (#8809). Narrow to the documents whose own `metadata.name` names this service and ask
-        # whether THOSE changed.
-        #
-        # This stays correct in the direction that matters: a rule added to sepa-payment's own
-        # policy to admit a new caller changes sepa-payment's document, so it is still a finding
-        # for sepa-payment. Only a neighbour's untouched policy stops being one.
-        #
-        # It does NOT make the attribution exact, and must not be read as if it did. `gitops_tokens`
-        # is deliberately loose — openbank-domestic-payment carries the token `payment`, which
-        # matches a document named `sepa-payment-...` — so a change to one payments service's policy
-        # still reports for its same-token neighbours. Measured: sabotaging a port in sepa-payment's
-        # own policy flags both sepa-payment and domestic-payment. That over-reporting is the safe
-        # direction and is left alone here; what this narrowing removes is the case where NO document
-        # naming the service changed at all.
-        own_diff = own_document_diff(service, rel, base, head)
-        if own_diff is not None and not own_diff.strip():
-            return None
-        return f"{rel} (ingress/egress)"
     path = REPO / rel
     if path.is_file():
         try:
@@ -494,6 +550,72 @@ DOC_SELF_TEST_CASES: list[tuple[str, str, str, bool]] = [
 ]
 
 
+# Exercise gitops_hit, including its entry condition. The original gap returned before it ever
+# read the shared payments file, so a parser-only self-test would have stayed green (#9844).
+CARD_POLICY = (
+    "kind: NetworkPolicy\nmetadata:\n  name: card-issuance-service-ingress-allow-list\n"
+    "spec:\n  podSelector:\n    matchLabels:\n"
+    "      app.kubernetes.io/name: card-issuance-service\n"
+    "  ingress:\n    - ports:\n        - port: 8118\n"
+)
+SEPA_POLICY = (
+    "kind: NetworkPolicy\nmetadata:\n  name: sepa-payment-ingress-allow-list\n"
+    "spec:\n  podSelector:\n    matchLabels:\n"
+    "      app.kubernetes.io/name: sepa-payment\n"
+    "  ingress:\n    - ports:\n        - port: 8119\n"
+)
+NETPOL_SELF_TEST_CASES: list[tuple[str, str, str, str, bool]] = [
+    (
+        "card-issuance policy changes inside shared payments component",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY.replace("8118", "9443") + "---\n" + SEPA_POLICY, True,
+    ),
+    (
+        "card-issuance change does not implicate sepa-payment",
+        "openbank-sepa-payment", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY.replace("8118", "9443") + "---\n" + SEPA_POLICY, False,
+    ),
+    (
+        "sepa-payment change does not implicate same-token domestic-payment",
+        "openbank-domestic-payment", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY + "---\n" + SEPA_POLICY.replace("8119", "9443"), False,
+    ),
+    (
+        "neighbour sepa-payment change flags sepa-payment",
+        "openbank-sepa-payment", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY + "---\n" + SEPA_POLICY.replace("8119", "9443"), True,
+    ),
+    (
+        "deleted card-issuance document flags card-issuance",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        SEPA_POLICY, True,
+    ),
+    (
+        "malformed shared YAML falls back to conservative finding",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY + "---\n" + SEPA_POLICY + "  broken: [\n", True,
+    ),
+    (
+        "duplicate YAML key falls back to conservative finding",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY.replace("  ingress:\n", "  ingress: []\n  ingress:\n") + "---\n" + SEPA_POLICY,
+        True,
+    ),
+    (
+        "missing workload selector falls back to conservative finding",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY.replace("app.kubernetes.io/name:", "app.kubernetes.io/part-of:")
+        + "---\n" + SEPA_POLICY, True,
+    ),
+    (
+        "nonstring workload selector falls back to conservative finding",
+        "openbank-card-issuance-service", CARD_POLICY + "---\n" + SEPA_POLICY,
+        CARD_POLICY.replace("card-issuance-service\n  ingress", "42\n  ingress")
+        + "---\n" + SEPA_POLICY, True,
+    ),
+]
+
+
 def doc_scoped_flags(before: str, after: str) -> bool:
     """Same comparison gitops_hit makes: scope both sides to boundary docs, diff, classify."""
     base_scoped = boundary_docs_text(before)
@@ -522,6 +644,39 @@ def self_test() -> int:
         print(f"  [{mark}] {name}: flagged={got} expected={expected}")
     for name, before, after, expected in DOC_SELF_TEST_CASES:
         got = doc_scoped_flags(before, after)
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    for name, service, before, after, expected in NETPOL_SELF_TEST_CASES:
+        with patch.object(
+            sys.modules[__name__], "read_at_ref",
+            side_effect=lambda ref, _rel: before if ref == "base" else after,
+        ):
+            got = bool(gitops_hit(service, "payments", "network-policies.yaml", "base", "head"))
+        mark = "ok" if got == expected else "FAIL"
+        if got != expected:
+            ok = False
+        print(f"  [{mark}] {name}: flagged={got} expected={expected}")
+    # A missing git object must not be mistaken for a deleted document. Conversely, with
+    # valid refs, adding/removing the whole file should implicate only its selected owner.
+    for name, before, after, ref_rc, service, expected in [
+        ("unreadable base ref stays conservative", None, SEPA_POLICY, 1,
+         "openbank-card-issuance-service", True),
+        ("whole-file addition flags its owner", None, CARD_POLICY, 0,
+         "openbank-card-issuance-service", True),
+        ("whole-file addition spares neighbour", None, CARD_POLICY, 0,
+         "openbank-sepa-payment", False),
+        ("whole-file deletion flags its owner", CARD_POLICY, None, 0,
+         "openbank-card-issuance-service", True),
+        ("whole-file deletion spares neighbour", CARD_POLICY, None, 0,
+         "openbank-sepa-payment", False),
+    ]:
+        with patch.object(
+            sys.modules[__name__], "read_at_ref",
+            side_effect=lambda ref, _rel: before if ref == "base" else after,
+        ), patch.object(subprocess, "run", return_value=subprocess.CompletedProcess([], ref_rc)):
+            got = bool(gitops_hit(service, "payments", "network-policies.yaml", "base", "head"))
         mark = "ok" if got == expected else "FAIL"
         if got != expected:
             ok = False
