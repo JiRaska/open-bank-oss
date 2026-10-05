@@ -200,6 +200,27 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: ai-platform
+    # copilot.open-bank.tech (ADR-0324 Phase 4, copilot/httproute.yaml). Its own Certificate
+    # `copilot-edge-tls` (the host is not pinned), admitted by the ReferenceGrant
+    # copilot-edge-gateway-tls, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson). `platform` also hosts agent, ap2 and mcp; the hostname pins this
+    # listener to the copilot route's host, and no other host is served from it.
+    - name: https-copilot
+      protocol: HTTPS
+      port: 443
+      hostname: copilot.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
     - name: https-rum
       protocol: HTTPS
       port: 443
