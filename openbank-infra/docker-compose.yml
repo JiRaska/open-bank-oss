@@ -256,7 +256,7 @@ services:
   # Prometheus
   # ─────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:v3.12.0
+    image: quay.io/prometheus/prometheus:v3.15.0-distroless
     container_name: openbank-prometheus
     restart: unless-stopped
     command:
@@ -281,7 +281,7 @@ services:
   # Grafana
   # ─────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:13.0.2
+    image: grafana/grafana:13.2.3
     container_name: openbank-grafana
     restart: unless-stopped
     environment:
@@ -306,7 +306,7 @@ services:
   # Loki (log aggregation)
   # ─────────────────────────────────────────────
   loki:
-    image: grafana/loki:3.6.7
+    image: grafana/loki:3.7.8
     container_name: openbank-loki
     restart: unless-stopped
     command: -config.file=/etc/loki/local-config.yaml
@@ -321,7 +321,7 @@ services:
   # Tempo (distributed tracing)
   # ─────────────────────────────────────────────
   tempo:
-    image: grafana/tempo:2.10.8
+    image: grafana/tempo:3.1.0
     container_name: openbank-tempo
     restart: unless-stopped
     user: root
