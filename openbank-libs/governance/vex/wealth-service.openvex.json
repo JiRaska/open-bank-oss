@@ -1,0 +1,46 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/wealth-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "notes": [
+    "Verified 2026-10-05: current-main :openbank-wealth-service:cyclonedxBom and the ready nonproduction wealth container embedded /app/sbom/bom.json each contain the same 322 Maven purls. Embedded SBOM SHA-256 26515aa978e01b9e2ebac25f01d4d9111f86a27dcf5845ccd1d9e54105c316df. trivy sbom --offline-scan --skip-db-update --skip-java-db-update --scanners vuln on that SBOM (2026-10-04 vulnerability DB and 2026-10-05 Java DB) found only CVE-2025-14969. Reassess on artifact or DB changes.",
+    "Verified 2026-10-05 from the ready nonproduction wealth container with read-only sha256sum and dpkg-query -W. A local Trivy rootfs scan of the exact bundled Pebble binary reports eight HIGH Go CVEs. Those Go findings remain undispositioned here pending CVE-specific reachable-code review, even though a process snapshot showed only Java; the VEX does not suppress them. Trivy 0.74.0 did not identify Ubuntu 26.04 from the partial rootfs, so the OpenSSL package finding uses the hosted 2026-10-05 image rescan and matching installed versions. The hosted rescan image digest differs from the running nonproduction image digest."
+  ],
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The running wealth fast-jar contains org.hibernate.reactive:hibernate-reactive-core 3.4.2.Final with SHA-256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching its embedded CycloneDX SBOM and gradle/verification-metadata.xml. Disassembly of this exact artifact shows the upstream fix cd7f104e10de918004707ca0e26e3840976f780a: SqlClientConnection.close() invokes validateNoTransactionInProgressOnClose(), the class has the post-fix closed field, and Log has liveTransactionDetectedOnClose(). The advisory range <4.2.1 crosses parallel Hibernate Reactive release lines; the vulnerable close implementation is absent from this artifact.",
+      "timestamp": "2026-10-05T21:21:49Z",
+      "products": [
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final?type=jar"
+        }
+      ]
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-84782"
+      },
+      "status": "affected",
+      "action_statement": "The running wealth image has libssl3t64, openssl and openssl-provider-legacy 3.5.5-1ubuntu3.3 (read-only dpkg-query -W, 2026-10-05). The hosted image rescan flags this version for CVE-2026-84782 and identifies 3.5.5-1ubuntu3.6 as fixed. Refresh the shared runtime base, rebuild and redeploy this service, then rescan the exact deployed digest. No non-reachability claim is made for the OpenSSL DTLS code path.",
+      "timestamp": "2026-10-05T21:21:49Z",
+      "products": [
+        {
+          "@id": "pkg:deb/ubuntu/libssl3t64@3.5.5-1ubuntu3.3"
+        },
+        {
+          "@id": "pkg:deb/ubuntu/openssl@3.5.5-1ubuntu3.3"
+        },
+        {
+          "@id": "pkg:deb/ubuntu/openssl-provider-legacy@3.5.5-1ubuntu3.3"
+        }
+      ]
+    }
+  ],
+  "timestamp": "2026-10-05T21:23:14Z"
+}
