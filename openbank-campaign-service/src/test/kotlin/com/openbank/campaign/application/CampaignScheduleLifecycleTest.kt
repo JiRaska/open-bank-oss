@@ -120,6 +120,7 @@ class CampaignScheduleLifecycleTest {
     ): CampaignService {
         val segment = Segment("dormant-parties", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
         return CampaignService(
+            startIntents = InMemoryJourneyStartIntentStore(),
             campaigns = object : CampaignRepository {
                 override suspend fun findById(id: UUID): Campaign? = stored.takeIf { it.id == id }
                 override suspend fun list(): List<Campaign> = listOf(stored)

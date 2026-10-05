@@ -87,6 +87,7 @@ class CampaignService @Inject constructor(
     private val journeys: JourneySignaller,
     private val scheduler: CampaignScheduler,
     private val metrics: CampaignMetricsPort,
+    private val startIntents: JourneyStartIntentStore,
     /**
      * ADR-0269 rule 1. A live per-call check, never cached (ADR-0195): a cached credit consent
      * outlives its own revocation, and the whole point of this consent is that switching it off
@@ -430,7 +431,7 @@ class CampaignService @Inject constructor(
                 return EnrolmentPageOutcome(started, 0, cursor, false, "CAMPAIGN_NOT_ACTIVE")
             }
             try {
-                val enrolled = enrolParty(campaign, partyId) {
+                val enrolled = enrolParty(campaign, partyId, source = null) {
                     record(partyId, RecipientAdmissionState.STARTING)
                 }
                 record(partyId, if (enrolled) RecipientAdmissionState.ADMITTED else RecipientAdmissionState.SKIPPED)
@@ -446,7 +447,12 @@ class CampaignService @Inject constructor(
         return EnrolmentPageOutcome(started, 0, cursor, page.partyIds.size < limit)
     }
 
-    private suspend fun enrolParty(campaign: Campaign, partyId: UUID, beforeStart: suspend () -> Unit = {}): Boolean {
+    private suspend fun enrolParty(
+        campaign: Campaign,
+        partyId: UUID,
+        source: JourneyStartSource? = JourneyStartSource.DIRECT,
+        beforeStart: suspend () -> Unit = {},
+    ): Boolean {
         if (skipParty(campaign, partyId)) return false
         beforeStart()
         val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
@@ -466,23 +472,23 @@ class CampaignService @Inject constructor(
             )
             metrics.enrolmentRecorded(EnrolmentAttempt.HOLDOUT)
         } else {
-            // Start first: a committed ACTIVE row without a workflow is permanently stranded.
-            journeys.startJourney(campaign.id, partyId, campaign.journeyType())
             val contentVariant = ContentVariant.assign(campaign.id, partyId)
                 .takeIf { campaign.hasContentExperiment }
-            enrolments.save(
-                Enrolment(
-                    id = Ids.newId(),
-                    campaignId = campaign.id,
-                    partyId = partyId,
-                    state = EnrolmentState.ACTIVE,
-                    currentStep = 0,
-                    startedAt = Instant.now(),
-                    completedAt = null,
-                    experimentCohort = cohort,
-                    contentVariant = contentVariant,
-                ),
+            val candidate = JourneyStartIntent(
+                campaign.id,
+                partyId,
+                Ids.newId(),
+                campaign.journeyType(),
+                source ?: JourneyStartSource.DIRECT,
+                contentVariant,
+                Instant.now(),
             )
+            // Bulk runs use their durable recipient ledger and cursor. Direct requests persist an
+            // independent intent so a process crash can be recovered without another HTTP call.
+            val intent = if (source == null) candidate else startIntents.begin(candidate)
+            journeys.startJourney(campaign.id, partyId, intent.journeyType)
+            enrolments.save(intent.enrolment())
+            if (source != null) startIntents.complete(campaign.id, partyId)
             metrics.enrolmentRecorded(EnrolmentAttempt.STARTED)
         }
         return true

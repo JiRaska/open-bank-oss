@@ -101,6 +101,7 @@ class TriggeredEnrolmentTest {
         segmentPresent: Boolean = true,
         creditConsent: (UUID) -> Boolean = { true },
     ) = TriggeredEnrolmentService(
+        startIntents = InMemoryJourneyStartIntentStore(),
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID) = stored?.takeIf { it.id == id }
             override suspend fun list() = listOfNotNull(stored)

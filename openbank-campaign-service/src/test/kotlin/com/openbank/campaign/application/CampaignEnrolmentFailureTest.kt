@@ -134,7 +134,9 @@ class CampaignEnrolmentFailureTest {
         selectedCampaign: Campaign = campaign,
         audience: List<UUID> = parties,
         creditConsent: (UUID) -> Boolean = { true },
+        intentStore: InMemoryJourneyStartIntentStore = InMemoryJourneyStartIntentStore(),
     ) = CampaignService(
+        startIntents = intentStore,
         campaigns = object : CampaignRepository {
             override suspend fun findById(id: UUID): Campaign? = selectedCampaign.takeIf { it.id == id }
             override suspend fun list(): List<Campaign> = listOf(selectedCampaign)
@@ -218,18 +220,22 @@ class CampaignEnrolmentFailureTest {
     fun `a failed enrolment write after workflow start is recovered by replay`(): Unit = runBlocking {
         val enrolments = RecordingEnrolments().apply { failNextSaveFor = parties[0] }
         val journeys = FlakyJourneys(emptySet())
-        val campaignService = service(enrolments, journeys)
+        val intents = InMemoryJourneyStartIntentStore()
+        val campaignService = service(enrolments, journeys, intentStore = intents)
 
         val first = campaignService.enrol(campaignId)
         assertThat(first).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
         assertThat(enrolments.saved.map { it.partyId }).doesNotContain(parties[0])
         assertThat(journeys.started).containsExactlyElementsOf(parties)
+        val originalIdentity = intents.pending.getValue(campaignId to parties[0]).enrolmentId
 
         val replay = campaignService.enrol(campaignId)
         assertThat(replay).isEqualTo(EnrolmentOutcome(enrolled = 1, failed = 0))
         assertThat(journeys.startCalls.count { it == parties[0] }).isEqualTo(2)
         assertThat(journeys.started).containsExactlyElementsOf(parties)
         assertThat(enrolments.saved.map { it.partyId }).containsExactlyElementsOf(parties.drop(1) + parties[0])
+        assertThat(enrolments.saved.last().id).isEqualTo(originalIdentity)
+        assertThat(intents.pending).isEmpty()
     }
 
     @Test

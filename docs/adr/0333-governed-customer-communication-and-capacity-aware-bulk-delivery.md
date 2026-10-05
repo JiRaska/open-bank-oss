@@ -160,18 +160,26 @@ preparation holds the run; an approved resume discards the partial extraction an
 The recipient ledger records starts, admissions, skips and failures. These are individual controls,
 not proof of the full communication system. Provider dispatch and click destinations lack measured
 shared capacity limits, and there is no cross-origin atomic contact reservation or single operator
-evidence projection yet. The workflow-start/enrolment-write boundary also needs reconciliation
-before a crash there can be called exactly once. Mass activation must remain disabled until those
-controls and the D7 end-to-end/load evidence are complete.
+evidence projection yet. Mass activation must remain disabled until those controls and the D7
+end-to-end/load evidence are complete.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
 retryable. A process crash after workflow start but before the write can still leave an orphan
 execution. For a RUNNING bulk run, its STARTING recipient and unadvanced cursor cause the leased
 page to retry; a focused crash-after-start test proves the later enrolment write completes against
-the same running workflow. Triggered enrolment relies on Kafka redelivery, and a direct operator
-request still needs a repeat request. Durable start intent and reconciliation across all three
-entry paths remain required before claiming automatic recovery in every case.
+the same running workflow. Triggered and direct treatment enrolment now persist a stable start
+intent before calling Temporal. A background claim reconciles intents older than 30 seconds
+against the enrolment row, then restarts the same journey identity if necessary and commits the
+pinned enrolment identity. The claim takes the same global one-minute admission budget as bulk
+pages; it is disabled with the default zero budget. PAUSED campaigns are not claimed, CLOSED
+campaigns have their orphan workflow signalled and intent cleared, and live credit consent is
+checked again before recovery. Failures back off for five minutes so one poison intent cannot
+starve newer work. An always-registered stale-intent gauge and alert expose work unresolved after
+15 minutes, including the case where recovery capacity was never configured. Bulk treatment
+continues to use its recipient ledger and unadvanced cursor; a HELD run is not restarted by this
+background job. Provider handoff still needs the separate D4 reconciliation work before
+end-to-end exactly-once contact can be claimed.
 
 Campaign handoffs derive a stable send-log id from campaign, party, step and dry-run mode. Temporal
 activity retry and Kafka replay therefore use the same `correlationId` and `deduplicationKey` for
