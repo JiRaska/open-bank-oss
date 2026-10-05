@@ -75,7 +75,8 @@ def findings(name, doc):
         for item in [job, *job.get('steps', [])]:
             uses = item.get('uses', '')
             if uses and not (uses.startswith('./') or re.fullmatch(r'.+@[0-9a-f]{40}', uses)
-                             or (name == 'release-please.yml' and item is job and uses == SLSA)):
+                             or (name in ('release-please.yml', 'backfill-release-evidence.yml')
+                                 and key == 'provenance' and item is job and uses == SLSA)):
                 errors.append(f'{key}: action must use a full commit SHA: {uses}')
     if name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):
         events = doc.get('on', doc.get(True, {}))

@@ -80,9 +80,13 @@ class SupplyChainTest(unittest.TestCase):
     def test_slsa_exception_cannot_spread(self):
         doc = {'permissions': {}, 'jobs': {'provenance': {'uses': guard.SLSA}}}
         self.assertFalse(guard.findings('release-please.yml', doc))
+        self.assertFalse(guard.findings('backfill-release-evidence.yml', doc))
         self.assertTrue(guard.findings('other.yml', doc))
+        self.assertTrue(guard.findings('backfill-release-evidence.yml',
+                                       {'permissions': {}, 'jobs': {'unrelated': {'uses': guard.SLSA}}}))
         doc['jobs']['provenance']['uses'] = guard.SLSA.replace('v2.1.0', 'main')
         self.assertTrue(guard.findings('release-please.yml', doc))
+        self.assertTrue(guard.findings('backfill-release-evidence.yml', doc))
 
     def test_trigger_filter_regression(self):
         for name in ('main-red-watch.yml', 'admin-ui-deploy.yml'):

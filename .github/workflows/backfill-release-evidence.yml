@@ -8,8 +8,8 @@ name: Backfill release evidence
 # AWS-KMS cosign signing + REST upload as release-please.yml; the only difference is the tag
 # comes from the dispatch input (and the source is checked out AT that tag).
 #
-# Manual, read-mostly (only attaches release assets). Idempotent: re-attaches with HTTP 422
-# tolerated.
+# Manual, read-mostly (only attaches missing release assets). Existing assets are
+# immutable; a failed upload or an incomplete release fails the run.
 
 on:
   workflow_dispatch:
@@ -32,6 +32,9 @@ jobs:
       contents: write   # upload release assets
       id-token: write   # OIDC → assume the build-runner role for KMS cosign
     timeout-minutes: 30
+    outputs:
+      sbom_subject: ${{ steps.evidence.outputs.sbom_subject }}
+      provenance_needed: ${{ steps.evidence.outputs.provenance_needed }}
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       TAG: ${{ inputs.tag }}
@@ -55,7 +58,7 @@ jobs:
         id: map
         run: |
           set -euo pipefail
-          api() { curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
+          api() { curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" "$@"; }
           # tag = "<component>-v<version>" → component, version.
           comp="${TAG%-v*}"; ver="${TAG##*-v}"
           # Reverse-map component → package path via release-please-config.json.
@@ -83,22 +86,16 @@ jobs:
           version: v0.72.0
 
       - name: Build, sign and attach the evidence bundle
+        id: evidence
         env:
           COMP: ${{ steps.map.outputs.comp }}
           VER: ${{ steps.map.outputs.ver }}
           MOD: ${{ steps.map.outputs.path }}
           UPURL: ${{ steps.map.outputs.upurl }}
         run: |
-          set -uo pipefail
+          set -euo pipefail
           sbom_out="${TAG}.cdx.json"
           bom="${MOD}/build/reports/bom.json"
-          if [ -f "$bom" ]; then
-            cp "$bom" "$sbom_out"
-          elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$MOD" 2>/dev/null && [ -s "$sbom_out" ]; then
-            echo "::notice::${MOD} has no gradle SBOM — generated via trivy fs"
-          else
-            echo "::error::no SBOM for ${MOD} (no gradle plugin and trivy fs produced none) — cannot backfill ${TAG}"; exit 1
-          fi
           # cosign v2 + KMS (same as release-please.yml).
           COSIGN_KEY="awskms:///alias/openbank-cosign-signing"; COSIGN_VERSION="v2.4.3"
           arch="$(uname -m)"; case "$arch" in aarch64) arch=arm64 ;; x86_64) arch=amd64 ;; esac
@@ -123,37 +120,194 @@ jobs:
             chmod +x "$bin"
           fi
           sign() { COSIGN_YES=true "$bin" sign-blob --key "$COSIGN_KEY" --output-signature "${1}.sig" "$1"; }
+          # Capture the release's current bytes before generating anything. An existing
+          # SBOM is the provenance subject; regenerating it months later can change it.
+          curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          mkdir -p existing
+          assets=("$sbom_out" "${sbom_out}.sig")
+          for doc in "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
+            assets+=("$doc" "${doc}.sig")
+          done
+          for f in "${assets[@]}" "${sbom_out}.intoto.jsonl"; do
+            aid="$(python3 - "$f" <<'PY'
+          import json, sys
+          assets = json.load(open("release.json")).get("assets", [])
+          matches = [a for a in assets if a.get("name") == sys.argv[1]]
+          if len(matches) > 1 or (matches and matches[0].get("size", 0) <= 0):
+              sys.exit("existing release asset is empty or duplicated")
+          print(matches[0]["id"] if matches else "")
+          PY
+            )"
+            if [ -n "$aid" ]; then
+              curl -fLsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+                -o "existing/$f" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
+              [ -s "existing/$f" ] || { echo "::error::empty existing asset $f"; exit 1; }
+            fi
+          done
+          if [ -f "existing/$sbom_out" ]; then
+            cp "existing/$sbom_out" "$sbom_out"
+          elif [ -s "$bom" ]; then
+            cp "$bom" "$sbom_out"
+          elif command -v trivy >/dev/null 2>&1 && trivy fs --format cyclonedx --output "$sbom_out" "$MOD" 2>/dev/null && [ -s "$sbom_out" ]; then
+            echo "::notice::${MOD} has no gradle SBOM — generated via trivy fs"
+          else
+            echo "::error::no SBOM for ${MOD} (no gradle plugin and trivy fs produced none) — cannot backfill ${TAG}"; exit 1
+          fi
+          if [ -f "existing/${sbom_out}.intoto.jsonl" ]; then
+            # An already attached provenance must actually name this release's
+            # published SBOM digest. Signature verification remains the verifier's job.
+            python3 - "$sbom_out" <<'PY'
+          import base64, hashlib, json, sys
+          sbom = sys.argv[1]
+          with open(sbom, "rb") as source:
+              digest = hashlib.sha256(source.read()).hexdigest()
+          path = "existing/" + sbom + ".intoto.jsonl"
+          statements = []
+          with open(path) as source:
+              for line in source:
+                  bundle = json.loads(line)
+                  envelope = bundle["dsseEnvelope"]
+                  if not envelope.get("signatures") or not bundle.get("verificationMaterial"):
+                      sys.exit("existing SLSA provenance lacks a signature or verification material")
+                  statements.append(json.loads(base64.b64decode(envelope["payload"], validate=True)))
+          if not any(any(s.get("name") == sbom and s.get("digest", {}).get("sha256") == digest
+                             for s in statement.get("subject", []))
+                     for statement in statements):
+              sys.exit("existing SLSA provenance does not name the published SBOM digest")
+          PY
+          fi
+
+          # Always source the current evidence builder and its support-period helper.
+          # The checked-out release tag may predate either file.
+          git fetch --depth=1 origin main
+          mkdir -p "${RUNNER_TEMP}/release-evidence"
+          for script in build-release-evidence.sh release_support_period.py; do
+            git show "FETCH_HEAD:.github/scripts/$script" > "${RUNNER_TEMP}/release-evidence/$script"
+            [ -s "${RUNNER_TEMP}/release-evidence/$script" ]
+          done
+          GITHUB_SHA="$(git rev-parse HEAD)" \
+            bash "${RUNNER_TEMP}/release-evidence/build-release-evidence.sh" \
+              "$COMP" "$VER" "$TAG" "$MOD" "$sbom_out"
+          for doc in "${TAG}.slsa.json" "${TAG}.vex.json"; do
+            [ ! -f "existing/$doc" ] || cp "existing/$doc" "$doc"
+          done
+          # A newly generated manifest must describe the immutable published
+          # documents, even when only one member of the bundle was missing.
+          if [ ! -f "existing/${TAG}.evidence.json" ]; then
+            python3 - "$TAG" <<'PY'
+          import hashlib, json, sys
+          tag = sys.argv[1]
+          path = f"{tag}.evidence.json"
+          manifest = json.load(open(path))
+          for key in ("slsa_provenance", "vex"):
+              ref = manifest[key]
+              with open(ref["file"], "rb") as source:
+                  ref["sha256"] = hashlib.sha256(source.read()).hexdigest()
+          with open(path, "w") as out:
+              json.dump(manifest, out, indent=2)
+              out.write("\n")
+          PY
+          else
+            cp "existing/${TAG}.evidence.json" "${TAG}.evidence.json"
+          fi
+          for doc in "$sbom_out" "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
+            [ -s "$doc" ] || { echo "::error::missing evidence document $doc"; exit 1; }
+            if [ -f "existing/${doc}.sig" ]; then
+              cp "existing/${doc}.sig" "${doc}.sig"
+            else
+              sign "$doc"
+            fi
+            "$bin" verify-blob --key "$COSIGN_KEY" --signature "${doc}.sig" "$doc"
+          done
+          python3 - "$TAG" <<'PY'
+          import hashlib, json, sys
+          tag = sys.argv[1]
+          manifest = json.load(open(f"{tag}.evidence.json"))
+          for key in ("sbom", "slsa_provenance", "vex"):
+              ref = manifest[key]
+              with open(ref["file"], "rb") as source:
+                  actual = hashlib.sha256(source.read()).hexdigest()
+              if ref["sha256"] != actual:
+                  sys.exit(f"manifest digest mismatch: {ref['file']}")
+          PY
           upload_asset() {
             local code
+            [ ! -f "existing/$1" ] || return 0
             code="$(curl -sS -o /dev/null -w '%{http_code}' -X POST \
               -H "Authorization: Bearer ${GH_TOKEN}" -H "Content-Type: application/octet-stream" \
               --data-binary @"$1" "${UPURL}?name=$(basename "$1")")"
-            case "$code" in
-              201) echo "  uploaded $1" ;;
-              422) echo "::notice::$1 already present (HTTP 422)" ;;
-              *)   echo "::warning::upload of $1 failed (HTTP $code)"; return 1 ;;
-            esac
+            [ "$code" = 201 ] || { echo "::error::upload of $1 failed (HTTP $code)"; return 1; }
+            echo "uploaded $1"
           }
-
-          sign "$sbom_out" || { echo "::error::cosign sign-blob failed for $sbom_out"; exit 1; }
-          # The workspace is checked out AT THE TAG, where build-release-evidence.sh may not
-          # exist yet (older releases predate the pipeline). Source the script from main so the
-          # full bundle (SLSA+VEX+manifest) is always assembled; the SBOM itself stays tag-sourced.
-          EV_SCRIPT=".github/scripts/build-release-evidence.sh"
-          if [ ! -f "$EV_SCRIPT" ]; then
-            git fetch --depth=1 origin main 2>/dev/null || true
-            EV_SCRIPT="${RUNNER_TEMP}/build-release-evidence.sh"
-            git show origin/main:.github/scripts/build-release-evidence.sh > "$EV_SCRIPT" 2>/dev/null || true
-          fi
-          bash "$EV_SCRIPT" "$COMP" "$VER" "$TAG" "$MOD" "$sbom_out" \
-            || echo "::warning::evidence assembly had issues for $TAG"
-
-          assets="$sbom_out ${sbom_out}.sig"
-          for doc in "${TAG}.slsa.json" "${TAG}.vex.json" "${TAG}.evidence.json"; do
-            [ -f "$doc" ] || continue
-            sign "$doc" && assets="$assets $doc ${doc}.sig" || echo "::warning::sign failed for $doc"
+          for f in "${assets[@]}"; do upload_asset "$f"; done
+          # Re-read release state: a successful POST alone is not proof the complete
+          # bundle is downloadable. Compare every remote byte to the local file.
+          curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          for f in "${assets[@]}"; do
+            aid="$(python3 - "$f" <<'PY'
+          import json, sys
+          assets = [a for a in json.load(open("release.json")).get("assets", [])
+                    if a.get("name") == sys.argv[1] and a.get("size", 0) > 0]
+          print(assets[0]["id"] if len(assets) == 1 else "")
+          PY
+            )"
+            [ -n "$aid" ] || { echo "::error::release missing $f"; exit 1; }
+            curl -fLsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/octet-stream" \
+              -o "${RUNNER_TEMP}/$f" "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/assets/${aid}"
+            cmp -s "$f" "${RUNNER_TEMP}/$f" || { echo "::error::release asset differs: $f"; exit 1; }
           done
-          rc=0
-          for f in $assets; do upload_asset "$f" || rc=1; done
-          echo "Backfilled $TAG: $assets"
-          [ "$rc" -eq 0 ] || echo "::warning::some assets failed to upload for $TAG"
+          echo "sbom_subject=$(sha256sum "$sbom_out" | base64 -w0)" >> "$GITHUB_OUTPUT"
+          if [ -f "existing/${sbom_out}.intoto.jsonl" ]; then
+            echo "provenance_needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "provenance_needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  provenance:
+    name: SLSA provenance (${{ inputs.tag }})
+    needs: backfill
+    if: needs.backfill.outputs.provenance_needed == 'true'
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    # The generator checks its own workflow identity against this semver ref.
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: ${{ needs.backfill.outputs.sbom_subject }}
+      upload-assets: true
+      upload-tag-name: ${{ inputs.tag }}
+
+  verify:
+    name: Verify nine release assets
+    needs: [backfill, provenance]
+    if: always() && needs.backfill.result == 'success' && (needs.provenance.result == 'success' || needs.provenance.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Check complete release asset set
+        run: |
+          set -euo pipefail
+          curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${TAG}" > release.json
+          python3 - "$TAG" <<'PY'
+          import json, sys
+          tag = sys.argv[1]
+          sbom = f"{tag}.cdx.json"
+          expected = {sbom, f"{sbom}.intoto.jsonl"}
+          for doc in (sbom, f"{tag}.slsa.json", f"{tag}.vex.json", f"{tag}.evidence.json"):
+              expected.update((doc, f"{doc}.sig"))
+          assets = json.load(open("release.json")).get("assets", [])
+          invalid = sorted(name for name in expected
+                           if len([a for a in assets if a.get("name") == name]) != 1
+                           or next(a for a in assets if a.get("name") == name).get("size", 0) <= 0)
+          if invalid:
+              sys.exit("missing, empty or duplicate release evidence: " + ", ".join(invalid))
+          print(f"verified all {len(expected)} release assets for {tag}")
+          PY
