@@ -34,6 +34,6 @@ class ComplaintRevisionContractTest {
         assertThat(response.path("aggregateRevision").asLong())
             .isEqualTo(7L)
         val contract = checkNotNull(javaClass.getResource("/openapi.yaml")).readText()
-        assertThat(contract).contains("aggregateRevision:", "version: 1.5.0")
+        assertThat(contract).contains("aggregateRevision:", "version: 1.5.1")
     }
 }

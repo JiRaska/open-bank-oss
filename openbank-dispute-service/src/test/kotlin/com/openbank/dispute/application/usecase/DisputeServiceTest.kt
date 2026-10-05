@@ -27,6 +27,7 @@ import io.mockk.slot
 import io.mockk.verify
 import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -176,6 +177,71 @@ class DisputeServiceTest {
         verify(exactly = 1) { disputeRepo.update(any(), any()) }
         verify(exactly = 1) { timelineRepo.save(any()) }
         assertThat(outbox.captured.single().payload).contains(""""eventType":"dispute.resolved"""")
+    }
+
+    @Test
+    fun `explicit chargeback is rejected before a local resolution can be persisted`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-chargeback-guard",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            amount = BigDecimal("50.00"),
+            transactionDate = today,
+            filingDate = today,
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+
+        assertThatThrownBy {
+            service.update(
+                id,
+                UpdateDisputeRequest(
+                    status = DisputeStatus.RESOLVED_CUSTOMER,
+                    resolution = DisputeResolution.CHARGEBACK,
+                    chargebackAmount = BigDecimal("50.00"),
+                ),
+            ).await().indefinitely()
+        }.isInstanceOf(ChargebackCaseRequiredException::class.java)
+
+        verify(exactly = 0) { disputeRepo.update(any()) }
+        verify(exactly = 0) { disputeRepo.update(any(), any()) }
+        verify(exactly = 0) { timelineRepo.save(any()) }
+    }
+
+    @Test
+    fun `updating a legacy chargeback without setting resolution preserves its stored value`() {
+        val id = UUID.randomUUID()
+        val existing = Dispute(
+            id = id,
+            reference = "DSP-legacy-chargeback",
+            transactionId = UUID.randomUUID(),
+            accountId = UUID.randomUUID(),
+            partyId = UUID.randomUUID(),
+            disputeType = DisputeType.UNAUTHORIZED,
+            status = DisputeStatus.RESOLVED_CUSTOMER,
+            resolution = DisputeResolution.CHARGEBACK,
+            amount = BigDecimal("50.00"),
+            transactionDate = today,
+            filingDate = today,
+            resolvedAt = now,
+            createdAt = now,
+            updatedAt = now,
+        )
+        every { disputeRepo.findById(id) } returns Uni.createFrom().item(existing)
+        every { disputeRepo.update(any()) } answers { Uni.createFrom().item(firstArg<Dispute>()) }
+        every { timelineRepo.save(any()) } answers { Uni.createFrom().item(firstArg<DisputeTimelineEvent>()) }
+
+        val result = service.update(id, UpdateDisputeRequest(resolvedBy = "auditor")).await().indefinitely()
+
+        assertThat(result.resolution).isEqualTo(DisputeResolution.CHARGEBACK)
+        assertThat(result.resolvedBy).isEqualTo("auditor")
+        verify(exactly = 1) { disputeRepo.update(any()) }
+        verify(exactly = 0) { disputeRepo.update(any(), any()) }
     }
 
     @Test

@@ -34,6 +34,9 @@ import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.util.UUID
 
+/** Generic dispute updates cannot claim a scheme chargeback before a network case exists. */
+class ChargebackCaseRequiredException : IllegalStateException("CHARGEBACK requires a confirmed network case")
+
 @ApplicationScoped
 class DisputeService(
     private val disputeRepo: DisputeRepository,
@@ -101,6 +104,10 @@ class DisputeService(
         disputeRepo.findById(id).flatMap { dispute ->
             if (dispute == null) {
                 Uni.createFrom().failure(IllegalArgumentException("Dispute not found: $id"))
+            } else if (request.resolution == DisputeResolution.CHARGEBACK) {
+                // There is no scheme-case reference on this aggregate yet (#8869). A local enum
+                // write must never claim that the card network accepted a chargeback.
+                Uni.createFrom().failure(ChargebackCaseRequiredException())
             } else {
                 val updated = dispute.copy(
                     status = request.status ?: dispute.status,

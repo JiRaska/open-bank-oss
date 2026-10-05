@@ -4,12 +4,29 @@
 
 package com.openbank.dispute.infrastructure.rest
 
-import com.openbank.dispute.application.port.`in`.*
-import com.openbank.dispute.domain.model.*
+import com.openbank.dispute.application.port.`in`.GetDisputeUseCase
+import com.openbank.dispute.application.port.`in`.OpenDisputeUseCase
+import com.openbank.dispute.application.port.`in`.UpdateDisputeUseCase
+import com.openbank.dispute.application.usecase.ChargebackCaseRequiredException
+import com.openbank.dispute.domain.model.Dispute
+import com.openbank.dispute.domain.model.DisputeEvidence
+import com.openbank.dispute.domain.model.DisputeStatus
+import com.openbank.dispute.domain.model.DisputeTimelineEvent
+import com.openbank.dispute.domain.model.EvidenceChainVerification
+import com.openbank.dispute.domain.model.OpenDisputeRequest
+import com.openbank.dispute.domain.model.ResolveDisputeRequest
+import com.openbank.dispute.domain.model.UpdateDisputeRequest
 import com.openbank.libs.authz.Authorize
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
-import jakarta.ws.rs.*
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
 import jakarta.ws.rs.core.MediaType
 import jakarta.ws.rs.core.Response
 import org.eclipse.microprofile.openapi.annotations.Operation
@@ -68,6 +85,9 @@ class DisputeResource(
     @Operation(summary = "Update dispute status/resolution")
     fun update(@PathParam("id") id: UUID, request: UpdateDisputeRequest): Uni<Response> =
         updateUseCase.update(id, request).map { Response.ok(it).build() }
+            .onFailure(ChargebackCaseRequiredException::class.java).recoverWithItem { e ->
+                Response.status(Response.Status.CONFLICT).entity(mapOf("error" to e.message)).build()
+            }
 
     @POST
     @Path("/{id}/evidence")

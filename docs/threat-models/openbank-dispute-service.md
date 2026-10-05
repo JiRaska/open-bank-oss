@@ -134,6 +134,13 @@ Trust-boundary crossings:
 7. **No outbound HTTP clients.** The service has no `@RegisterRestClient` or HTTP producer;
    its only external surface is the Kafka outbox. A compromise of the service cannot directly
    exfiltrate data to an attacker-controlled HTTP endpoint.
+8. **A local dispute resolution cannot assert a network chargeback by itself.** The generic
+   dispute update rejects an explicit `CHARGEBACK` resolution with HTTP 409 before writing the
+   dispute, outbox, or timeline. No `networkCaseId` is stored here yet, so there is no verified
+   scheme case that could satisfy this precondition. Existing rows already marked `CHARGEBACK`
+   remain readable and can receive unrelated updates with the resolution omitted; this guard
+   does not retroactively prove or repair their network state. Wiring the card-processing case,
+   its network reference, and status/deadline events remains issue #8869's residual work.
 
 ---
 
@@ -174,4 +181,5 @@ context (corresponding to ADR-0085 §3–§5, which are **not yet implemented**)
 
 | Date | Change | Author |
 |---|---|---|
+| 2026-10-06 | Guard explicit local CHARGEBACK without a network case; record legacy and integration residual (#8869) | Engineering review pending |
 | 2026-06-23 | Initial draft — ADR-0085 Phase 1 (complaints + disputes, STRIDE §3, invariants §4) | ADR-0030 D2 requirement |

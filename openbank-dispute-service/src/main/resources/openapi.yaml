@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Dispute Service API
-  version: 1.5.0
+  version: 1.5.1
   description: >-
     Payment dispute management — open, evidence, escalate, withdraw, resolve, timeline — plus
     regulatory complaints handling with a statutory deadline clock (ADR-0085). Evidence is a
@@ -61,6 +61,9 @@ paths:
     put:
       tags: [Disputes]
       summary: Update dispute status/resolution
+      description: >-
+        Explicit CHARGEBACK resolution is rejected until a confirmed card-network case is
+        linked to the dispute; other updates retain the existing lifecycle behavior.
       operationId: updateDispute
       parameters:
         - $ref: '#/components/parameters/disputeId'
@@ -73,6 +76,16 @@ paths:
       responses:
         '200':
           description: Updated
+        '409':
+          description: CHARGEBACK requires a confirmed network case
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
 
   /api/v1/disputes/reference/{ref}:
     get:
@@ -407,6 +420,7 @@ components:
           type: string
         resolution:
           type: string
+          description: CHARGEBACK cannot be set through this endpoint without a confirmed network case.
         chargebackAmount:
           type: number
           nullable: true
