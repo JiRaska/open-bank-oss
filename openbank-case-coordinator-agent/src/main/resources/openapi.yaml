@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Case Coordinator Agent API
-  version: 1.7.0
+  version: 1.8.0
   description: >-
     Agent-swarm case coordination (ADR-0244): opens durable Temporal case workflows, accepts
     mid-flight agent signals (join / contribute / supersede / request-synthesis), and projects
@@ -82,7 +82,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `openedBy` agent identity, or
@@ -196,7 +196,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ErrorBody'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           description: >-
             The authenticated caller may not act as the requested `agentId`, or the signal type is
@@ -535,3 +535,48 @@ components:
       properties:
         error:
           type: string
+
+    ProblemDetail:
+      type: object
+      description: >-
+        Validation errors from libs-runtime. The body is either ApiError or the
+        ADR-0326 problem document, which includes all ApiError members. Branch
+        on `code`; the hand-built case denial and availability responses still
+        use ErrorBody. Verified over HTTP by CaseErrorBodySpecConformanceIT.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        violations:
+          type: array
+          items: { $ref: '#/components/schemas/ProblemViolation' }
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items: { $ref: '#/components/schemas/FieldError' }
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        code: { type: string }
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue:
+          description: The rejected value is never echoed.
