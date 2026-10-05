@@ -3805,20 +3805,15 @@ gates:
   # from release-please-config.json's per-package `component` field; a package with a version.txt
   # but no `component` produces no row, silently — no SBOM, no cosign provenance, no VEX for that
   # package's release, while the release itself (tag, GitHub Release) looks completely normal.
-  # Measured today: openbank-campaign-service and openbank-tax-reporting-service both have a
-  # version.txt and a `packages` entry with no `component` key.
+  # #7597 added component keys for campaign-service and tax-reporting-service. Their historical
+  # unprefixed tags stay intact; future tags use the component names.
   #
-  # This gate deliberately does NOT add the missing `component` keys — that changes the release
-  # tag name (`include-component-in-tag: true`), and version.txt / release-please-config.json /
-  # .release-please-manifest.json are a three-way lockstep for an ALREADY-RELEASED package
-  # (ADR-0029 rule 2), so retagging existing release history is a repo-owner decision, not CI-gate
-  # material. What this enforces is the durable half: a package with a version.txt must resolve to
+  # This gate enforces the durable half: a package with a version.txt must resolve to
   # a component that reaches released.tsv, derived from release-please-config.json every run —
-  # never a hand-kept list — so a THIRD package cannot join the two above silently.
+  # never a hand-kept list — so another package cannot be omitted silently.
   #
-  # RATCHET: today's two are baselined in the script with a reason citing #7597; the check fails on
-  # a stale baseline entry in either direction (fixed but still listed, or listed but no longer
-  # released), same contract as check-pact-provider-replay.py above.
+  # RATCHET: no released package is exempted now. The checker rejects new unmapped packages
+  # and stale baseline entries in either direction, like check-pact-provider-replay.py above.
   - id: release-evidence-coverage
     name: "released packages have identities and complete evidence bundles (issue #7597, enforced)"
     group: supplychain
