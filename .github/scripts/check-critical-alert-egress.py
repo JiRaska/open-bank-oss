@@ -167,6 +167,36 @@ def goalert_routes_with_unstable_grouping(root: dict, receivers: dict) -> list[s
     return bad
 
 
+def delivery_failure_route_errors(root: dict, receivers: dict) -> list[str]:
+    """The two notification-failure alerts must stop at Slack before paging routes."""
+    routes = root.get("routes") or []
+    names = ("AlertmanagerFailedToSendAlerts", "AlertmanagerClusterFailedToSendAlerts")
+    for index, route in enumerate(routes):
+        matchers = route.get("matchers") or []
+        if len(matchers) != 1 or not isinstance(matchers[0], str):
+            continue
+        match = re.fullmatch(r'alertname\s*=~\s*"([^"]+)"', matchers[0])
+        if not match or not all(re.fullmatch(match.group(1), name) for name in names):
+            continue
+        receiver = receivers.get(route.get("receiver"), {})
+        errors = []
+        if not receiver.get("slack_configs") or any(
+            key.endswith("_configs") and key != "slack_configs" and value
+            for key, value in receiver.items()
+        ):
+            errors.append("delivery-failure receiver must send to Slack only")
+        if route.get("continue", False):
+            errors.append("delivery-failure route must stop before GoAlert")
+        if any(
+            _matchers_select_critical(earlier)
+            or receiver_is_goalert(earlier.get("receiver", ""), receivers.get(earlier.get("receiver"), {}))
+            for earlier in routes[:index]
+        ):
+            errors.append("delivery-failure route must precede severity/paging routes")
+        return errors
+    return ["missing route covering both Alertmanager notification-failure alerts"]
+
+
 def critical_rules_with_volatile_summary(rules_root: pathlib.Path) -> list[str]:
     bad: list[str] = []
     for path in sorted(rules_root.rglob("*.yaml")):
@@ -297,12 +327,28 @@ def self_test() -> int:
     if VOLATILE_SUMMARY.search("{{ $labels.pod }} down"):
         fails.append("a $labels summary was classified volatile")
 
+    # Delivery-failure alerts cannot report a broken GoAlert receiver through GoAlert.
+    failure_route = {"matchers": ['alertname =~ "^Alertmanager(Cluster)?FailedToSendAlerts$"'],
+                     "receiver": "slack-alerts"}
+    receiver_set = {"slack-alerts": {"slack_configs": [{}]}, "goalert": recv["goalert"]}
+    if delivery_failure_route_errors({"routes": [failure_route,
+            {"matchers": ['severity = "critical"'], "receiver": "goalert"}]}, receiver_set):
+        fails.append("Slack-only delivery-failure route was rejected")
+    if not delivery_failure_route_errors({"routes": [{**failure_route, "continue": True}]}, receiver_set):
+        fails.append("delivery-failure route falling through to GoAlert was accepted")
+    if not delivery_failure_route_errors({"routes": [
+            {**failure_route, "receiver": "goalert"}]}, receiver_set):
+        fails.append("delivery-failure route targeting GoAlert was accepted")
+    if not delivery_failure_route_errors({"routes": [
+            {"matchers": ['severity = "critical"'], "receiver": "goalert"}, failure_route]}, receiver_set):
+        fails.append("delivery-failure route after GoAlert was accepted")
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: critical-alert-egress is falsifiable (22 cases)")
+    print("self-test ok: critical-alert-egress is falsifiable")
     return 0
 
 
@@ -359,6 +405,7 @@ def main() -> int:
 
     unstable = goalert_routes_with_unstable_grouping(root, receivers)
     volatile = critical_rules_with_volatile_summary(RULES_ROOT)
+    delivery_errors = delivery_failure_route_errors(root, receivers)
     for item in unstable:
         print(
             "::error::check-critical-alert-egress: GoAlert route does not group by ['...']: "
@@ -372,7 +419,9 @@ def main() -> int:
             f"$value: {item}. GoAlert dedups on the summary, so each re-notification opens a "
             "new alert that no resolve closes. Move the value into `description` (#11136)."
         )
-    if unstable or volatile:
+    for item in delivery_errors:
+        print(f"::error::check-critical-alert-egress: {item} (#11136).")
+    if unstable or volatile or delivery_errors:
         return 1
 
     print(

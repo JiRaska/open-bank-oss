@@ -160,15 +160,14 @@ spec:
                 # by alertname here, ahead of everything else, means delivery to Slack
                 # no longer depends on severity staying whatever it happens to be
                 # today — a future relabel or mixin bump can't silently regress this.
-                # continue: true so the alert still falls through into the ordinary
-                # severity-based routes underneath: Slack is the guaranteed leg,
-                # GoAlert stays a best-effort second attempt on top of it, matching the
-                # same "Slack first, GoAlert always attempted too" asymmetry already
-                # used for `severity = "critical"` below.
+                # Stop here: delivery-failure alerts must reach Slack only, even when
+                # critical. Falling through to GoAlert would send the failure signal
+                # back to the receiver whose rejection it reports.
                 - matchers:
                     - alertname =~ "^Alertmanager(Cluster)?FailedToSendAlerts$"
                   receiver: 'slack-alerts'
-                  continue: true
+                  group_wait: 0s
+                  repeat_interval: 1h
                 # Davis-lite (ADR-0088): auto root-cause enrichment via HolmesGPT.
                 # `continue: true` so the SAME critical alert ALSO falls through to the
                 # delivery routes below — Holmes enriches, it never pages.
