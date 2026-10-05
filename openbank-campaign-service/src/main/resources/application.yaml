@@ -114,11 +114,8 @@ quarkus:
     # because none of its resources inject the token.
     oidc:
       tenant-enabled: false
-  # `authz.enforce` has no key in this file, so the interceptor's safe default (true) applies — and
-  # with no PolicyDecisionPoint bean in a test JVM every @Authorize call fails closed before the
-  # handler ever runs. Advisory HERE ONLY (note the %test nesting): CampaignRestContractIT is about
-  # the HTTP contract — media types, headers, serialisation — not about who may call what. The
-  # policy is covered by the OPA gate and the rego tests, neither of which needs the app running.
+  # Keep the HTTP contract tests advisory: their test JVM has no OPA sidecar. The policy is
+  # exercised by the per-service OPA tests; production evaluates it through the wired PDP.
   authz:
     enforce: false
   openbank:
@@ -129,7 +126,20 @@ quarkus:
         ready: true
 
 
+# Campaign opts in to the shared OPA PDP producer below. Keep enforcement advisory
+# until the deployed decision metrics have been reviewed against real callers.
+opa:
+  url: "${OPA_URL:http://localhost:8181}"
+  path: "${OPA_PATH:/v1/data/openbank/rest/allow}"
+  timeout-ms: "${OPA_TIMEOUT_MS:500}"
+
+authz:
+  enforce: "${AUTHZ_ENFORCE:false}"
+
 openbank:
+  authz:
+    opa-pdp-producer:
+      enabled: true
   temporal:
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
