@@ -15,6 +15,8 @@ import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
@@ -34,11 +36,10 @@ import org.junit.jupiter.api.extension.ExtendWith
  * openbank-product-catalog verifies anything, so its consumers (openbank-card-issuance-service) stayed
  * permanently UNVERIFIED and could not be deployed (issue #3232).
  *
- * A second `@Provider("openbank-product-catalog")` class is safe here for the reason
- * CLAUDE.md gives for ledger-service's identical pair: the collision it warns about is HTTP vs
- * MESSAGE target dispatch fighting over the same `@BeforeEach`, and both classes here use the
- * same target type, so verifying the same interactions from two pact sources is at worst
- * redundant, never colliding.
+ * Both verifiers replay mutating Product Studio interactions with deterministic provider-state
+ * IDs and codes. They therefore need separate Quarkus test lifecycles and fresh PostgreSQL
+ * containers; otherwise whichever runs second sees 409/412 responses from the first replay.
+ * This dedicated test profile forces that separation while keeping both contract sources.
  *
  * Gated on `pactbroker.url`: skipped locally and on the PR lane, which have no broker
  * configured. It runs on the main push, where `_service-ci.yml` sets `PUBLISH_RESULTS=true`
@@ -46,6 +47,7 @@ import org.junit.jupiter.api.extension.ExtendWith
  * keeps running unconditionally, so PR-time contract coverage is unchanged by this addition.
  */
 @QuarkusTest
+@TestProfile(BrokerPactProfile::class)
 @QuarkusTestResource(
     value = PostgresTestResource::class,
     initArgs = [ResourceArg(name = "db", value = "openbank_products")],
@@ -141,3 +143,6 @@ class ProductCatalogPactBrokerProviderVerificationTest {
     @State("a published priced loan revision exists for lending originations")
     fun publishedPricedLoanRevisionExists() = catalogFixtures.publishedPricedLoanRevisionExists()
 }
+
+/** Keep broker replay data isolated from the committed-folder verifier. */
+class BrokerPactProfile : QuarkusTestProfile
