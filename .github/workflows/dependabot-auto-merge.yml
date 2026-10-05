@@ -17,10 +17,10 @@
 # defense against a poisoned upstream release riding an auto-merge — human review
 # of minors is.
 #
-# Token: GITHUB_TOKEN with `contents: write` is enough for auto-merge on a repo
-# without environment protection (GitHub Free / public repos). The workflow
-# enables native GitHub auto-merge — merges only after the required status checks
-# pass (all-green gate).
+# This unprivileged PR workflow only classifies the update. The default-branch
+# workflow_run listener in dependabot-auto-merge-arm.yml uses a GitHub App token
+# to enable native auto-merge after rechecking the PR and this run. A merge armed
+# with GITHUB_TOKEN suppresses the resulting main push workflows (#12161).
 #
 # Ref: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions#enabling-auto-merge-on-a-pull-request
 
@@ -78,20 +78,19 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  auto-merge:
-    name: Auto-merge patch/minor Dependabot PRs
+  classify:
+    name: Classify patch Dependabot PR
     runs-on: ubuntu-latest
     timeout-minutes: 10  # API calls only
-    if: github.actor == 'dependabot[bot]'
+    if: |
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main'
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read
+      pull-requests: read
 
-    # This job has no actions/checkout, so `gh` has nothing to infer the target repo from
-    # and every subcommand dies with `failed to determine base repo: fatal: not a git
-    # repository`. Set it explicitly (same fix, same reason as record-deployment-on-merge.yml).
-    env:
-      GH_REPO: ${{ github.repository }}
     steps:
       - name: Fetch Dependabot metadata
         id: metadata
@@ -99,24 +98,22 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # Auto-merge patch updates only, and never for github-actions / docker
-      # (see the policy header). Ecosystem ids are fetch-metadata's: github_actions
-      # uses an underscore.
-      - name: Enable auto-merge (patch only, gradle/npm)
+      # The successful conclusion of this step is the eligibility marker read by
+      # the privileged workflow_run listener. Do not merge or mint a write token
+      # in this job. Only these two ecosystems are in the policy; the previous
+      # negative checks also admitted Terraform patch updates by mistake.
+      - name: Eligible patch for Gradle or npm
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
-          steps.metadata.outputs.package-ecosystem != 'github_actions' &&
-          steps.metadata.outputs.package-ecosystem != 'docker'
-        run: gh pr merge --auto --squash "$PR_URL"
-        env:
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          (steps.metadata.outputs.package-ecosystem == 'gradle' ||
+           steps.metadata.outputs.package-ecosystem == 'npm')
+        run: echo "Dependabot patch is eligible for trusted auto-merge arming."
 
       - name: Skip — requires human review
         if: |
           steps.metadata.outputs.update-type != 'version-update:semver-patch' ||
-          steps.metadata.outputs.package-ecosystem == 'github_actions' ||
-          steps.metadata.outputs.package-ecosystem == 'docker'
+          (steps.metadata.outputs.package-ecosystem != 'gradle' &&
+           steps.metadata.outputs.package-ecosystem != 'npm')
         # PR_TITLE via env, not `${{ }}` interpolated straight into the script: the title is
         # attacker-influenceable and direct interpolation is a script-injection vector
         # (Scorecard Dangerous-Workflow). Env-var passing is not subject to shell expansion.
