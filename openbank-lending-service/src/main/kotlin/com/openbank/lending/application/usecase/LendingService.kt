@@ -58,6 +58,7 @@ import com.openbank.libs.lending.Delinquency
 import com.openbank.libs.lending.EclInputs
 import com.openbank.libs.lending.Ifrs9
 import com.openbank.libs.lending.compliance.CompliancePackEvaluator
+import com.openbank.libs.lending.origination.FourEyesDecision
 import com.openbank.libs.lending.origination.OriginationActorKind
 import com.openbank.libs.lending.origination.OriginationAdvance
 import com.openbank.libs.lending.origination.OriginationState
@@ -274,6 +275,73 @@ class LendingService @Inject constructor(
     }
 
     /**
+     * Refused-command evidence: a control that said no is as much a part of the record as one that
+     * said yes. A separate event type from `credit.application.transition`, because nothing moved —
+     * a reader rebuilding the lifecycle from transitions must not see a step that did not happen.
+     * Same PII-minimised envelope: identifiers and codes, never application data.
+     */
+    private fun refusalEvidence(
+        application: LoanApplication,
+        attempted: String,
+        actor: String,
+        refusal: OriginationRefusedException,
+    ): LendingOutboxMessage {
+        val id = application.id.value
+        // Serialised, not concatenated: actorId is a principal name, and every field must be escaped.
+        val payload = REFUSAL_JSON.writeValueAsString(
+            linkedMapOf(
+                "eventType" to REFUSED_EVENT_TYPE,
+                "aggregateType" to "LOAN_APPLICATION",
+                "aggregateId" to id.toString(),
+                "loanApplicationId" to id.toString(),
+                "partyId" to application.partyId.toString(),
+                "state" to application.status.name,
+                "attemptedAction" to attempted,
+                "outcome" to "REFUSED",
+                "code" to refusal.code,
+                "actorId" to actor,
+                "actorKind" to OriginationActorKind.HUMAN.name,
+                "packVersion" to application.packVersion,
+                "occurredAt" to clock.instant().toString(),
+                "correlationId" to id.toString(),
+                "sourceService" to "lending",
+            ),
+        )
+        return LendingOutboxMessage(aggregateId = id, eventType = REFUSED_EVENT_TYPE, payload = payload)
+    }
+
+    /**
+     * Record the refusal durably, then fail with it. The evidence write is its own outbox commit (the
+     * refused command has no transaction to join). If that write itself fails the command is STILL
+     * refused — failing open to keep an audit line would invert the control — and the loss is logged.
+     */
+    private fun <T> refuse(
+        application: LoanApplication,
+        attempted: String,
+        actor: String,
+        refusal: OriginationRefusedException,
+    ): Uni<T> = events.emit(refusalEvidence(application, attempted, actor, refusal))
+        .onFailure().invoke { e ->
+            // Persistence exceptions can include rejected payload values; keep them out of logs.
+            log.errorf(
+                "refusal evidence NOT recorded for application %s (%s), cause=%s",
+                application.id.value,
+                refusal.code,
+                e.javaClass.simpleName,
+            )
+        }
+        .onItemOrFailure().transformToUni { _, _ -> Uni.createFrom().failure<T>(refusal) }
+
+    /** An application past the decision point must name its decider; one that does not was never decided. */
+    private fun lacksDecision(application: LoanApplication): Boolean =
+        OriginationAdvance.requiresRecordedDecision(application.status) && application.decidedBy.isNullOrBlank()
+
+    private fun decisionMissing(application: LoanApplication) = OriginationRefusedException(
+        OriginationRefusedException.DECISION_MISSING,
+        "No recorded four-eyes decision on an application in ${application.status}; it cannot proceed",
+    )
+
+    /**
      * Canonical credit evidence event (ADR-0214 D1/D2): every origination transition lands in the
      * transactional outbox in the same commit as the state change, in a PII-minimised envelope —
      * identifiers, versions and hashes, never application data. correlationId == applicationId, so
@@ -419,9 +487,15 @@ class LendingService @Inject constructor(
         val mandatory = mandatoryStepsFor(application)
         var state = application.status
         while (state != OriginationState.READY_TO_DISBURSE) {
-            val next = OriginationAdvance.nextState(state, mandatory)
-                ?: return application.copy(status = state)
-            val result = machine.apply(transition(application, state, next, OriginationConfig.SANDBOX_ACTOR))
+            // A decision state has no forward drive; the sandbox STP records an explicit approval by
+            // its own actor instead, through the same four-eyes guard every human decision passes.
+            val decision = OriginationAdvance.requiresDecision(state)
+            val next = if (decision) OriginationState.OFFERED else OriginationAdvance.nextState(state, mandatory)
+            if (next == null) return application.copy(status = state)
+            val base = transition(application, state, next, OriginationConfig.SANDBOX_ACTOR)
+            val result = machine.apply(
+                if (decision) base.copy(metadata = FourEyesDecision.metadata(true, application.proposedBy)) else base,
+            )
             check(result is OriginationTransitionResult.Applied) {
                 "STP drive refused at $state -> $next: ${(result as OriginationTransitionResult.Rejected).reason}"
             }
@@ -437,6 +511,21 @@ class LendingService @Inject constructor(
                     Uni.createFrom().failure(IllegalArgumentException("Application not found: $id"))
                 actor.isBlank() ->
                     Uni.createFrom().failure(IllegalArgumentException("Actor identity is required"))
+                // A decision state is left only through decide() by a second person. Refuse here,
+                // before the state machine, so the caller gets a typed answer naming the right action.
+                OriginationAdvance.requiresDecision(existing.status) ->
+                    refuse(
+                        existing,
+                        "ADVANCE",
+                        actor,
+                        OriginationRefusedException(
+                            OriginationRefusedException.DECISION_REQUIRED,
+                            "Application is in ${existing.status} and awaits a four-eyes decision by someone other " +
+                                "than the proposer; use POST /api/v1/lending/applications/{id}/decision instead of advance",
+                        ),
+                    )
+                lacksDecision(existing) ->
+                    refuse(existing, "ADVANCE", actor, decisionMissing(existing))
                 else -> {
                     val next = OriginationAdvance.nextState(existing.status, mandatoryStepsFor(existing))
                     when {
@@ -521,12 +610,20 @@ class LendingService @Inject constructor(
                 // Four-eyes: the decider must not be the proposer. Both identities are the authenticated
                 // JWT subject (never client-supplied), so the separation cannot be spoofed (ADR-0028 D5).
                 decidedBy == existing.proposedBy ->
-                    Uni.createFrom().failure(
-                        IllegalStateException("Four-eyes violation: approver must differ from proposer"),
+                    refuse(
+                        existing,
+                        "DECIDE",
+                        decidedBy,
+                        OriginationRefusedException(
+                            OriginationRefusedException.SEGREGATION_OF_DUTIES,
+                            "Four-eyes violation: approver must differ from proposer",
+                        ),
                     )
                 else -> {
                     val target = if (decision.approve) OriginationState.OFFERED else OriginationState.DECLINED
-                    when (val result = machine.apply(transition(existing, existing.status, target, decidedBy))) {
+                    val command = transition(existing, existing.status, target, decidedBy)
+                        .copy(metadata = FourEyesDecision.metadata(decision.approve, existing.proposedBy))
+                    when (val result = machine.apply(command)) {
                         is OriginationTransitionResult.Rejected ->
                             Uni.createFrom().failure(IllegalStateException(result.reason))
                         is OriginationTransitionResult.Applied -> claimTransition(
@@ -580,11 +677,21 @@ class LendingService @Inject constructor(
                     )
                 disbursedBy.isBlank() ->
                     Uni.createFrom().failure(IllegalArgumentException("Disburser identity is required"))
-                // Segregation of duties: the officer releasing cash must not be the one who approved it
-                // (three-eyes over the money-out step, EBA/GL/2020/06). Identities are trusted JWT subjects.
-                disbursedBy == application.decidedBy ->
-                    Uni.createFrom().failure(
-                        IllegalStateException("Segregation of duties: disburser must differ from approver"),
+                // Fail closed: a disbursable application must carry the four-eyes decision that made it so.
+                // A null decider would make the approver comparison below vacuous.
+                lacksDecision(application) ->
+                    refuse(application, "DISBURSE", disbursedBy, decisionMissing(application))
+                // Segregation of duties: the officer releasing cash must be neither the one who proposed
+                // the loan nor the one who approved it (EBA/GL/2020/06). Identities are trusted JWT subjects.
+                disbursedBy == application.decidedBy || disbursedBy == application.proposedBy ->
+                    refuse(
+                        application,
+                        "DISBURSE",
+                        disbursedBy,
+                        OriginationRefusedException(
+                            OriginationRefusedException.SEGREGATION_OF_DUTIES,
+                            "Segregation of duties: disburser must differ from the proposer and the approver",
+                        ),
                     )
                 else -> bookLoan(application, disbursedBy)
             }
@@ -1564,6 +1671,8 @@ class LendingService @Inject constructor(
     }
 
     private companion object {
+        const val REFUSED_EVENT_TYPE = "credit.application.transition.refused"
+        val REFUSAL_JSON: com.fasterxml.jackson.databind.ObjectMapper = com.fasterxml.jackson.databind.ObjectMapper()
         const val MAX_LIST_LIMIT = 100
         const val MONTHS_PER_YEAR = 12
     }

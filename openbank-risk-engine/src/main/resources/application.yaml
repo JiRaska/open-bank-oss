@@ -139,6 +139,27 @@ mp:
           topic: openbank.dlq.risk-engine.fx-fixing-in
         value:
           deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      # fx-service's ČNB policy rates and minimum-reserve facts: the reserve ratio and its
+      # remuneration in effect on a snapshot's as-of date come from here, never from constants.
+      # Same rules as above: nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write
+      # ACL in openbank-infra). The topic is COMPACTED on (instrument, effectiveFrom), so a new
+      # group reading from `earliest` rebuilds the full history however late it starts — the
+      # facts change a few times a year and would be long gone from a time-retained topic.
+      cnb-policy-rate-in:
+        connector: smallrye-kafka
+        topic: openbank.fx.cnb-policy-rate.published
+        client:
+          id: risk-engine-cnb-policy-rate-${quarkus.uuid}
+        group:
+          id: risk-engine-cnb-policy-rate
+        auto:
+          offset:
+            reset: earliest
+        failure-strategy: dead-letter-queue
+        dead-letter-queue:
+          topic: openbank.dlq.risk-engine.cnb-policy-rate-in
+        value:
+          deserializer: org.apache.kafka.common.serialization.StringDeserializer
       # treasury-service's `treasury.deal.*` events (ADR-0315 D6): the bank's own money-market deals,
       # kept in treasury_deal and carried into every snapshot as instruments. Same rules as above:
       # nested keys only, an explicit per-service DLQ (KafkaTopic CR + Write ACL in openbank-infra).
@@ -614,10 +635,12 @@ openbank:
     # rounding of the requirement, and whether foreign-currency liabilities enter the base.
     min-reserves:
       parameter-set-id: cnb-pmr
-      parameter-set-version: "2"     # 2: GL 2320 (ČNB lombard borrowing) excluded-bank-or-cnb
-      source: "Opatření ČNB o povinných minimálních rezervách: 2 % of liabilities up to 2 years excl. banks subject to PMR and the ČNB; unremunerated since 2023-10-05"
-      rate: 0.02                     # the PMR ratio, 2 % of the reserve base
-      remuneration-rate: 0           # ČNB has not remunerated minimum reserves since 2023-10-05
+      parameter-set-version: "3"     # 3: ratio + remuneration from ČNB facts, not config; 2: GL 2320 excluded-bank-or-cnb
+      # The reserve RATIO and its REMUNERATION are not configured here (they were, as 2 % / 0 — and
+      # 2 % had been wrong since 2025-01-02, when the ratio became 4 %). They are ČNB facts read per
+      # as-of date from cnb_policy_rate_fact, fed by fx-service (fx.cnb-policy-rate.published.v1);
+      # with no fact in effect the requirement is NOT_EVALUABLE, never defaulted.
+      source: "Opatření ČNB o povinných minimálních rezervách: liabilities up to 2 years excl. banks subject to PMR and the ČNB; ratio and remuneration per ČNB fact in effect on the as-of date"
       holding-currency: CZK          # held on the bank's current account at the ČNB
       classification:
         # GL code -> class. Customer deposits need no entry: they are sub-ledger positions on
