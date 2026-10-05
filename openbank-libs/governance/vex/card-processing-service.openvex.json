@@ -13,7 +13,7 @@
       },
       "status": "not_affected",
       "justification": "vulnerable_code_not_present",
-      "impact_statement": "Card-processing's built fast-jar contains org.hibernate.reactive:hibernate-reactive-core 3.4.2.Final with SHA-256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching gradle/verification-metadata.xml. Disassembly of this artifact shows the upstream fix cd7f104e10de918004707ca0e26e3840976f780a: SqlClientConnection.close() calls validateNoTransactionInProgressOnClose(), the class has the post-fix closed field, and Log declares liveTransactionDetectedOnClose(). The advisory's <4.2.1 version range spans parallel release lines; the vulnerable close implementation is absent from this resolved artifact.",
+      "impact_statement": "Card-processing's built fast-jar contains org.hibernate.reactive:hibernate-reactive-core 3.4.2.Final with SHA-256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching gradle/verification-metadata.xml. Bytecode matches upstream fix cd7f104e10de918004707ca0e26e3840976f780a beyond symbol names: SqlClientConnection.close() invokes validateNoTransactionInProgressOnClose() at offset 1, before any branch; that guard tests whether SqlConnection.transaction() is non-null, invokes rollbackTransaction() for an open transaction, and returns a failed validation stage. The close continuation handles that stage and still invokes SqlConnection.close() when the connection is not already closed. The advisory's <4.2.1 range spans parallel release lines; the vulnerable close implementation is absent from this resolved artifact.",
       "timestamp": "2026-10-05T22:41:27Z",
       "products": [
         {
