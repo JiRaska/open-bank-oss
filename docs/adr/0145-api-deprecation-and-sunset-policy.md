@@ -80,9 +80,11 @@ The developer portal now carries a dated entry for each path in
 `rules.yaml: api_deprecation.deprecated_paths`. The enforced
 `api-deprecation-notices` gate rejects a missing entry, a sunset shorter
 than 180 days, and drift from the owning service's emitted `Sunset` and
-successor headers. For a newly added or changed notice in a PR, it also
-requires the sunset to remain at least 180 days after the CI run date,
-so a delayed merge cannot silently shorten the public window. The original
+successor headers. For a newly added or changed notice, it also requires
+the sunset to remain at least 180 days after the CI run date, using the PR
+base or the previous main commit. A stale PR check must be rerun before
+publication; the postmerge gate detects a shortened window if it was not.
+The original
 2027-02-10 product-catalog sunset was extended to 2027-07-01 because the
 developer-portal notice did not exist when response headers first shipped.
 

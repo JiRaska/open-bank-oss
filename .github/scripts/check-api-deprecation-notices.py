@@ -143,6 +143,12 @@ def baseline_notices(root: Path, ref: str) -> dict[str, Notice]:
     return {row.path: row for row in notices(result.stdout) if row.status == "active"}
 
 
+def parent_ref(root: Path) -> str:
+    result = subprocess.run(["git", "-C", str(root), "rev-parse", "--verify", "HEAD^"],
+                            capture_output=True, text=True, check=False)
+    return "HEAD^" if result.returncode == 0 else ""
+
+
 def self_test() -> None:
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
@@ -192,7 +198,8 @@ def main() -> int:
         self_test()
         return 0
     try:
-        baseline = baseline_notices(args.root, args.base) if args.base else None
+        base = args.base or parent_ref(args.root)
+        baseline = baseline_notices(args.root, base) if base else None
         errors = check(args.root, baseline)
     except (OSError, ValueError, yaml.YAMLError) as error:
         errors = [str(error)]
