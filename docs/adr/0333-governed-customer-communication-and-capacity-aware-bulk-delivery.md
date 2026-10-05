@@ -2,6 +2,7 @@
 date: 2026-10-05
 decision-status: proposed
 delivery-status: partial
+followup: "#12165 — shared contact reservation, measured capacity, operator evidence and rollout proof"
 authors: [OpenBank contributors]
 supersedes: []
 superseded-by: []
