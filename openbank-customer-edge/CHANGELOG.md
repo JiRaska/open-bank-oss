@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.86.0...customer-edge-v0.87.0) (2026-10-04)
+
+
+### Features
+
+* **customer-edge:** carry the synthetic taint to every upstream ([#12050](https://github.com/JiRaska/open-bank-oss/issues/12050)) ([8bb3106](https://github.com/JiRaska/open-bank-oss/commit/8bb31061b6589daf405f80d1270844ef5b5faa5f)), closes [#4348](https://github.com/JiRaska/open-bank-oss/issues/4348)
+* **customer-edge:** share nearby-pay sessions across replicas via Redis ([#12090](https://github.com/JiRaska/open-bank-oss/issues/12090)) ([65250e7](https://github.com/JiRaska/open-bank-oss/commit/65250e7842938536bc34d3443439a169543f7425)), closes [#4728](https://github.com/JiRaska/open-bank-oss/issues/4728)
+
 ## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.85.0...customer-edge-v0.86.0) (2026-10-03)
 
 

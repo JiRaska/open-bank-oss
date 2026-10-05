@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.11.1...treasury-service-v0.12.0) (2026-10-04)
+
+
+### Features
+
+* **treasury:** enforce product limits at submit and re-check at approval ([#11997](https://github.com/JiRaska/open-bank-oss/issues/11997)) ([b17185e](https://github.com/JiRaska/open-bank-oss/commit/b17185e44d1ac92709f178ea663ef0cef84d5bdd))
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
+
+### Security
+
+* **libs,infra:** harden XML/TLS and patch LiteLLM PyJWT ([#12036](https://github.com/JiRaska/open-bank-oss/issues/12036)) ([66a1099](https://github.com/JiRaska/open-bank-oss/commit/66a109909a55ada01edea51509d33c9190ec666f))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/treasury-service-v0.11.0...treasury-service-v0.11.1) (2026-10-03)
 
 

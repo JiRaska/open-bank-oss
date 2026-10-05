@@ -287,3 +287,19 @@ and nothing alerts on a queue that fails to drain (the same class as #3273).
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+The `/api/v1/sanctions` HTTPRoute is staged beside `sanctions-api` on ingress-nginx.
+The generated `sanctions-service-ingress-allow-list` adds `envoy-gateway-system` on TCP
+8123 while retaining nginx. DNS still points to nginx; this introduces an internal proxy
+peer now, with public traffic changing only after the coordinated cutover. The service's
+OIDC, OPA and sanctions decision logic remain the authorization and compliance boundary.
+
+**D1 residual risk at cutover:** the nginx per-client-IP cap of ten concurrent connections
+has no Envoy Gateway equivalent. The 20/s per-client request rate, per-backend circuit
+breaker and separately staged listener-wide connection limit bound aggregate load, but
+slow connections from one client can consume more than ten slots and delay other screening
+requests. Verify the listener policy and 401/429 behavior on the Gateway address before
+moving DNS. Roll back all four `api.open-bank.tech` routes together to nginx; its Ingress
+and network allowance remain until Phase 5.

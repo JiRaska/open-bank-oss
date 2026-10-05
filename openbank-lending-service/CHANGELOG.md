@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.0...lending-service-v0.40.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **lending:** require a decision to leave the four-eyes state ([#12081](https://github.com/JiRaska/open-bank-oss/issues/12081)) ([9ea7d14](https://github.com/JiRaska/open-bank-oss/commit/9ea7d1494450d9a1522bfbce9c6da65dc0e35c8f))
+
 ## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.3...lending-service-v0.40.0) (2026-10-02)
 
 
