@@ -52,6 +52,17 @@ class DomesticPaymentDelegationContractTest {
     }
 
     @Test
+    fun `domestic create contract documents CZK rail and distinct currency refusal`() {
+        val create = openApi.substringAfter("  /api/v1/domestic-payments:").substringBefore("    get:")
+        assertThat(create).contains("#/components/responses/InvalidMoney")
+        val errors = openApi.substringAfter("    InvalidMoney:").substringBefore("    Forbidden:")
+        assertThat(errors).contains("CURRENCY_NOT_ALLOWED", "valid ISO currency other than CZK")
+        val currency = openApi.substringAfter("    CreateDomesticPaymentRequest:")
+            .substringBefore("    TransitionStatusRequest:")
+        assertThat(currency).contains("CZK only for domestic clearing")
+    }
+
+    @Test
     fun `payment contracts expose the additive durable aggregate revision`() {
         val createdMessage = asyncApi.substringAfter("    DOMESTIC_PAYMENT_CREATED:\n      name:")
             .substringBefore("    DOMESTIC_PAYMENT_STATUS_CHANGED:")

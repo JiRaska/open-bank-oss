@@ -80,6 +80,26 @@ class DomesticPaymentIdempotencyIT {
 
     @Test
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
+    fun `non-CZK request returns CURRENCY_NOT_ALLOWED without binding its idempotency key`() {
+        val key = "idempotency-it-currency-${UUID.randomUUID()}"
+        val debtorAccountId = UUID.randomUUID()
+        val valid = requestBody(debtorAccountId, BigDecimal("1500.00"))
+        val invalid = valid.replace(" czk ", "EUR")
+
+        val refused = post(key, invalid)
+        assertThat(refused.statusCode).isEqualTo(400)
+        assertThat(refused.jsonPath().getString("code")).isEqualTo("CURRENCY_NOT_ALLOWED")
+        assertThat(refused.jsonPath().getString("violations[0].field")).isEqualTo("currency")
+        assertThat(countPayments(key)).isZero()
+
+        val accepted = post(key, valid)
+        assertThat(accepted.statusCode).isEqualTo(201)
+        assertThat(accepted.header("X-Idempotency-Replayed")).isNull()
+        assertThat(countPayments(key)).isEqualTo(1)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
     fun `a forged legacy Redis response cannot short-circuit Postgres creation`() {
         val key = "idempotency-it-redis-${UUID.randomUUID()}"
         redis.value(String::class.java)
