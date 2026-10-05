@@ -1,9 +1,10 @@
-#!/usr/bin/env python3
 """Negative controls for fast backend-to-Admin-UI contract selection."""
 import importlib.util
-from pathlib import Path
+import os
+import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'select-admin-ui-rbac-tests.py'
 spec = importlib.util.spec_from_file_location('selector', SCRIPT)
@@ -86,6 +87,44 @@ class SelectionTest(unittest.TestCase):
             'openbank-treasury-service/src/main/TreasuryResource.kt',
             'openbank-risk-engine/src/main/RiskResource.kt',
         }))
+
+
+class AggregateTest(unittest.TestCase):
+    def test_selected_guard_must_succeed_in_required_aggregate(self):
+        workflow = (SCRIPT.parents[1] / 'workflows/ci.yml').read_text()
+        marker = '      - name: Check build result\n'
+        self.assertEqual(workflow.count(marker), 1)
+        block = workflow.split(marker, 1)[1].split('        run: |\n', 1)[1]
+        lines = []
+        for line in block.splitlines():
+            if line and not line.startswith('          '):
+                break
+            lines.append(line[10:] if line else '')
+        script = '\n'.join(lines)
+        self.assertIn('Admin UI cross-package guards did not pass', script)
+
+        base = dict(os.environ, DETECTION_RESULT='success', UI_CHANGED='false',
+                    RBAC_TESTS='treasury-rbac.guard.test.ts', REGISTRY_TEST='false',
+                    RBAC_RESULT='success', RESULT='skipped', EVENT='pull_request', REF='refs/pull/1/merge')
+        cases = [
+            ('selected RBAC passed', {}, 0),
+            ('selected registry passed', {'RBAC_TESTS': '', 'REGISTRY_TEST': 'true'}, 0),
+            ('selected RBAC skipped', {'RBAC_RESULT': 'skipped'}, 1),
+            ('selected RBAC cancelled', {'RBAC_RESULT': 'cancelled'}, 1),
+            ('selected RBAC failed', {'RBAC_RESULT': 'failure'}, 1),
+            ('selected registry skipped', {'RBAC_TESTS': '', 'REGISTRY_TEST': 'true',
+                                           'RBAC_RESULT': 'skipped'}, 1),
+            ('selected registry cancelled on push', {'RBAC_TESTS': '', 'REGISTRY_TEST': 'true',
+                                                     'RBAC_RESULT': 'cancelled', 'EVENT': 'push'}, 1),
+            ('unselected guard skipped', {'RBAC_TESTS': '', 'RBAC_RESULT': 'skipped'}, 0),
+            ('change detection failed', {'DETECTION_RESULT': 'failure'}, 1),
+        ]
+        for label, changes, expected in cases:
+            with self.subTest(label=label):
+                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                        env={**base, **changes}, capture_output=True, text=True,
+                                        check=False)
+                self.assertEqual(result.returncode, expected, result.stdout + result.stderr)
 
 
 if __name__ == '__main__':
