@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.infrastructure.segment
 
+import com.openbank.campaign.application.port.out.AudienceSnapshotPort
 import com.openbank.campaign.application.port.out.SegmentEvaluationPort
 import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.domain.model.Segment
@@ -42,9 +43,58 @@ class SilverSegmentEvaluator(
     private val clickHousePassword: Optional<String>,
     @ConfigProperty(name = "analytics.clickhouse-database", defaultValue = "openbank_analytics")
     private val database: String,
-) : SegmentEvaluationPort {
+) : SegmentEvaluationPort,
+    AudienceSnapshotPort {
 
     private val http: HttpClient = HttpClient.newHttpClient()
+
+    /**
+     * A single ClickHouse SELECT fixes the source view for the extraction. The HTTP body is read
+     * as a stream and only one 500-party batch is retained in the JVM at any point. The caller
+     * persists every batch before admitting anyone; a failed extraction is discarded and retried.
+     */
+    override suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit) {
+        val (where, params) = segment.toWhereClause()
+        val sql = "SELECT DISTINCT aggregate_id FROM $database.silver_current_state " +
+            "WHERE ($where) ORDER BY aggregate_id FORMAT JSONEachRow"
+        val query = params.entries.joinToString("&") { (key, value) ->
+            "param_$key=" + URLEncoder.encode(value.toString(), StandardCharsets.UTF_8)
+        }
+        val builder = HttpRequest.newBuilder(URI.create("$clickHouseUrl?$query"))
+            .POST(HttpRequest.BodyPublishers.ofString(sql))
+            .header("Content-Type", "text/plain")
+            .timeout(SNAPSHOT_TIMEOUT)
+        clickHouseUser.filter { it.isNotBlank() }.ifPresent { builder.header("X-ClickHouse-User", it) }
+        clickHousePassword.filter { it.isNotBlank() }.ifPresent { builder.header("X-ClickHouse-Key", it) }
+        withContext(Dispatchers.IO) {
+            val response = http.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream())
+            check(response.statusCode() == HTTP_OK) { "audience snapshot failed: ClickHouse ${response.statusCode()}" }
+            response.body().bufferedReader().use { reader ->
+                val batch = ArrayList<UUID>(SegmentPage.MAX_PAGE_SIZE)
+                var previous: String? = null
+                while (true) {
+                    val line = reader.readLine() ?: break
+                    if (line.isNotBlank()) {
+                        val id = UUID.fromString(
+                            requireNotNull(AGGREGATE_ID.find(line)?.groupValues?.get(1)) {
+                                "audience snapshot contained no aggregate_id"
+                            },
+                        )
+                        val ordered = id.toString()
+                        val last = previous
+                        check(last == null || ordered > last) { "audience snapshot is not strictly ordered" }
+                        previous = ordered
+                        batch.add(id)
+                        if (batch.size == SegmentPage.MAX_PAGE_SIZE) {
+                            accept(batch.toList())
+                            batch.clear()
+                        }
+                    }
+                }
+                if (batch.isNotEmpty()) accept(batch.toList())
+            }
+        }
+    }
 
     override suspend fun count(segment: Segment): Long {
         val (where, params) = segment.toWhereClause()
@@ -149,6 +199,7 @@ class SilverSegmentEvaluator(
     companion object {
         private const val HTTP_OK = 200
         private val QUERY_TIMEOUT = Duration.ofSeconds(10)
+        private val SNAPSHOT_TIMEOUT = Duration.ofMinutes(55)
 
         /** Enough of a ClickHouse error to identify it, short enough not to dump a page into a log. */
         private const val ERROR_PREVIEW_CHARS = 200

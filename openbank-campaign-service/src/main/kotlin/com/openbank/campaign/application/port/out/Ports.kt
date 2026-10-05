@@ -296,6 +296,11 @@ data class SegmentPage(val partyIds: List<UUID>, val nextCursor: UUID?) {
     }
 }
 
+/** Streams one bounded-memory, single-query audience snapshot before any journey is admitted. */
+interface AudienceSnapshotPort {
+    suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit)
+}
+
 /** ADR-0210: evaluates a segment against the silver layer. */
 interface SegmentEvaluationPort {
     /** Count at the data source; never transfer an entire audience for a preview. */

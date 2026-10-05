@@ -4,11 +4,13 @@
 
 package com.openbank.campaign.infrastructure.persistence
 
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.usecase.BulkRun
 import com.openbank.campaign.application.usecase.BulkRunState
 import com.openbank.campaign.application.usecase.BulkRunStore
 import com.openbank.campaign.application.usecase.ClaimedBulkRun
 import com.openbank.campaign.application.usecase.EnrolmentPageOutcome
+import com.openbank.campaign.application.usecase.RecipientAdmissionState
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import io.vertx.mutiny.pgclient.PgPool
 import io.vertx.mutiny.sqlclient.Row
@@ -17,7 +19,11 @@ import jakarta.enterprise.context.ApplicationScoped
 import java.util.UUID
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Run, snapshot and recipient writes share one database lease.
 class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
+    private companion object {
+        const val FIRST_PARTY_PARAMETER = 3
+    }
     override suspend fun claimManual(owner: UUID): Boolean = pool.preparedQuery(
         """
         UPDATE campaign_admission_budget
@@ -40,7 +46,7 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
             """
             INSERT INTO campaign_bulk_runs
                 (id, campaign_id, state, page_size, created_by, created_at, updated_at)
-            VALUES ($1, $2, 'RUNNING', $3, $4, now(), now())
+            VALUES ($1, $2, 'PREPARING', $3, $4, now(), now())
             ON CONFLICT DO NOTHING
             RETURNING *
             """.trimIndent(),
@@ -56,7 +62,7 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
     override suspend fun list(campaignId: UUID): List<BulkRun> = pool.preparedQuery(
         """
         SELECT * FROM campaign_bulk_runs WHERE campaign_id = $1
-        ORDER BY CASE state WHEN 'RUNNING' THEN 0 WHEN 'HELD' THEN 1 ELSE 2 END,
+        ORDER BY CASE state WHEN 'PREPARING' THEN 0 WHEN 'RUNNING' THEN 1 WHEN 'HELD' THEN 2 ELSE 3 END,
                  created_at DESC
         LIMIT 20
         """.trimIndent(),
@@ -72,7 +78,7 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
             """
             WITH candidate AS (
                 SELECT id FROM campaign_bulk_runs
-                WHERE state = 'RUNNING'
+                WHERE state IN ('PREPARING', 'RUNNING')
                   AND (lease_until IS NULL OR lease_until < now())
                 ORDER BY updated_at, id
                 FOR UPDATE SKIP LOCKED LIMIT 1
@@ -93,6 +99,101 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
         ).execute(Tuple.of(owner)).awaitSuspending().firstOrNull() ?: return null
         return ClaimedBulkRun(row.toBulkRun(), owner)
     }
+
+    override suspend fun clearAudience(claim: ClaimedBulkRun) {
+        check(leaseValid(claim)) { "audience snapshot lease was lost" }
+        pool.preparedQuery(
+            """
+            DELETE FROM campaign_bulk_recipients AS recipient
+            USING campaign_bulk_runs AS run
+            WHERE recipient.run_id = run.id AND run.id = $1 AND run.state = 'PREPARING'
+              AND run.lease_owner = $2 AND run.lease_until > now()
+            """.trimIndent(),
+        ).execute(Tuple.of(claim.run.id, claim.leaseOwner)).awaitSuspending()
+    }
+
+    override suspend fun appendAudience(claim: ClaimedBulkRun, partyIds: List<UUID>) {
+        require(partyIds.size in 1..SegmentPage.MAX_PAGE_SIZE)
+        val values = partyIds.indices.joinToString(", ") { "($${it + FIRST_PARTY_PARAMETER}::uuid)" }
+        val sql = """
+            INSERT INTO campaign_bulk_recipients (run_id, party_id)
+            SELECT $1, value.party_id FROM (VALUES $values) AS value(party_id)
+            WHERE EXISTS (
+                SELECT 1 FROM campaign_bulk_runs
+                WHERE id = $1 AND state = 'PREPARING' AND lease_owner = $2 AND lease_until > now()
+            )
+            ON CONFLICT (run_id, party_id) DO NOTHING
+        """.trimIndent()
+        val args = Tuple.tuple().addValue(claim.run.id).addValue(claim.leaseOwner)
+        partyIds.forEach { args.addValue(it) }
+        pool.preparedQuery(sql).execute(args).awaitSuspending()
+        check(leaseValid(claim)) { "audience snapshot lease was lost" }
+    }
+
+    override suspend fun completeAudience(claim: ClaimedBulkRun) {
+        val result = pool.preparedQuery(
+            """
+            WITH settled AS (
+                UPDATE campaign_bulk_runs
+                SET state = 'RUNNING', snapshot_at = now(),
+                    audience_count = (SELECT count(*) FROM campaign_bulk_recipients WHERE run_id = $1),
+                    lease_owner = NULL, lease_until = NULL, updated_at = now()
+                WHERE id = $1 AND state = 'PREPARING' AND lease_owner = $2 AND lease_until > now()
+                  AND EXISTS (SELECT 1 FROM campaign_admission_budget
+                              WHERE id = 1 AND lease_owner = $2 AND lease_until > now())
+                RETURNING id
+            )
+            UPDATE campaign_admission_budget SET lease_owner = NULL, lease_until = NULL
+            WHERE id = 1 AND lease_owner = $2 AND EXISTS (SELECT 1 FROM settled)
+            RETURNING id
+            """.trimIndent(),
+        ).execute(Tuple.of(claim.run.id, claim.leaseOwner)).awaitSuspending()
+        check(result.rowCount() == 1) { "audience snapshot lease was lost" }
+    }
+
+    override suspend fun audiencePage(runId: UUID, after: UUID?, limit: Int): SegmentPage {
+        require(limit in 1..SegmentPage.MAX_PAGE_SIZE)
+        val rows = pool.preparedQuery(
+            """
+            SELECT party_id FROM campaign_bulk_recipients
+            WHERE run_id = $1 AND ($2::uuid IS NULL OR party_id > $2::uuid)
+            ORDER BY party_id LIMIT $3
+            """.trimIndent(),
+        ).execute(Tuple.of(runId, after, limit)).awaitSuspending()
+        val ids = rows.map { it.getUUID("party_id") }
+        return SegmentPage(ids, ids.lastOrNull())
+    }
+
+    override suspend fun markRecipient(claim: ClaimedBulkRun, partyId: UUID, state: RecipientAdmissionState) {
+        val result = pool.preparedQuery(
+            """
+            UPDATE campaign_bulk_recipients AS recipient
+            SET state = CASE
+                WHEN recipient.state = 'ADMITTED' THEN 'ADMITTED'
+                WHEN $3 = 'SKIPPED' AND recipient.state IN ('STARTING', 'FAILED')
+                     AND EXISTS (
+                        SELECT 1 FROM enrolments AS enrolment
+                        JOIN campaign_bulk_runs AS run ON run.id = $1
+                        WHERE enrolment.campaign_id = run.campaign_id
+                          AND enrolment.party_id = $2
+                          AND enrolment.started_at >= run.snapshot_at
+                     ) THEN 'ADMITTED'
+                ELSE $3 END,
+                updated_at = now()
+            WHERE run_id = $1 AND party_id = $2 AND EXISTS (
+                SELECT 1 FROM campaign_bulk_runs
+                WHERE id = $1 AND state = 'RUNNING' AND lease_owner = $4 AND lease_until > now()
+            )
+            """.trimIndent(),
+        ).execute(Tuple.of(claim.run.id, partyId, state.name, claim.leaseOwner)).awaitSuspending()
+        check(result.rowCount() == 1) { "recipient admission lease was lost" }
+    }
+
+    private suspend fun leaseValid(claim: ClaimedBulkRun): Boolean = pool.preparedQuery(
+        """
+        SELECT id FROM campaign_bulk_runs WHERE id = $1 AND lease_owner = $2 AND lease_until > now()
+        """.trimIndent(),
+    ).execute(Tuple.of(claim.run.id, claim.leaseOwner)).awaitSuspending().rowCount() == 1
 
     override suspend fun finish(claim: ClaimedBulkRun, outcome: EnrolmentPageOutcome) {
         settle(
@@ -132,8 +233,14 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
                 FOR UPDATE
             ), settled AS (
                 UPDATE campaign_bulk_runs
-                SET state = $3, cursor_party_id = $4, admitted = admitted + $5,
-                    failures = failures + $6, last_error = $7,
+                SET state = $3, cursor_party_id = $4,
+                    admitted = CASE WHEN snapshot_at IS NULL THEN admitted + $5 ELSE
+                        (SELECT count(*) FROM campaign_bulk_recipients
+                         WHERE run_id = $1 AND state = 'ADMITTED') END,
+                    failures = CASE WHEN snapshot_at IS NULL THEN failures + $6 ELSE
+                        (SELECT count(*) FROM campaign_bulk_recipients
+                         WHERE run_id = $1 AND state = 'FAILED') END,
+                    last_error = $7,
                     lease_owner = NULL, lease_until = NULL, updated_at = now()
                 WHERE id = $1 AND lease_owner = $2 AND lease_until > now()
                   AND EXISTS (SELECT 1 FROM valid_budget_lease)
@@ -160,7 +267,8 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
     override suspend fun resume(id: UUID, actor: String): BulkRun? = pool.preparedQuery(
         """
         UPDATE campaign_bulk_runs
-        SET state = 'RUNNING', last_error = NULL, last_resumed_by = $2,
+        SET state = CASE WHEN snapshot_at IS NULL THEN 'PREPARING' ELSE 'RUNNING' END,
+            last_error = NULL, last_resumed_by = $2,
             last_resumed_at = now(), updated_at = now()
         WHERE id = $1 AND state = 'HELD' AND created_by <> $2
         RETURNING *
@@ -180,6 +288,8 @@ private fun Row.toBulkRun(): BulkRun = BulkRun(
     createdBy = getString("created_by"),
     createdAt = getOffsetDateTime("created_at").toInstant(),
     updatedAt = getOffsetDateTime("updated_at").toInstant(),
+    snapshotAt = getOffsetDateTime("snapshot_at")?.toInstant(),
+    audienceCount = getLong("audience_count"),
     lastResumedBy = getString("last_resumed_by"),
     lastResumedAt = getOffsetDateTime("last_resumed_at")?.toInstant(),
 )

@@ -4,11 +4,14 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.AudienceSnapshotPort
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.SegmentPage
+import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
@@ -19,7 +22,7 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-enum class BulkRunState { RUNNING, HELD, COMPLETED }
+enum class BulkRunState { PREPARING, RUNNING, HELD, COMPLETED }
 
 data class BulkRun(
     val id: UUID,
@@ -33,12 +36,16 @@ data class BulkRun(
     val createdBy: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val snapshotAt: Instant? = null,
+    val audienceCount: Long? = null,
     val lastResumedBy: String? = null,
     val lastResumedAt: Instant? = null,
 )
 
 data class ClaimedBulkRun(val run: BulkRun, val leaseOwner: UUID)
 
+/** One authority owns both run state and its frozen recipient ledger under the same lease. */
+@Suppress("TooManyFunctions")
 interface BulkRunStore {
     suspend fun create(id: UUID, campaignId: UUID, pageSize: Int, actor: String): BulkRun
     suspend fun find(id: UUID): BulkRun?
@@ -49,7 +56,14 @@ interface BulkRunStore {
     suspend fun resume(id: UUID, actor: String): BulkRun?
     suspend fun claimManual(owner: UUID): Boolean
     suspend fun releaseManual(owner: UUID)
+    suspend fun clearAudience(claim: ClaimedBulkRun)
+    suspend fun appendAudience(claim: ClaimedBulkRun, partyIds: List<UUID>)
+    suspend fun completeAudience(claim: ClaimedBulkRun)
+    suspend fun audiencePage(runId: UUID, after: UUID?, limit: Int): SegmentPage
+    suspend fun markRecipient(claim: ClaimedBulkRun, partyId: UUID, state: RecipientAdmissionState)
 }
+
+enum class RecipientAdmissionState { STARTING, ADMITTED, SKIPPED, FAILED }
 
 /**
  * Admission, not delivery. One global database lease grants one bounded page per minute across
@@ -64,6 +78,9 @@ class BulkAdmissionService(
     @ConfigProperty(name = "openbank.campaign.bulk-admission-per-minute", defaultValue = "0")
     private val pageSize: Int,
 ) {
+    @Inject lateinit var segments: SegmentRegistry
+
+    @Inject lateinit var snapshots: AudienceSnapshotPort
     private val log = Logger.getLogger(BulkAdmissionService::class.java)
 
     private companion object {
@@ -120,8 +137,26 @@ class BulkAdmissionService(
                 runs.hold(claim, "CAMPAIGN_NOT_ACTIVE")
                 return
             }
+            if (claim.run.state == BulkRunState.PREPARING) {
+                val campaign =
+                    campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)
+                val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
+                    ?: error("approved campaign segment is unavailable")
+                runs.clearAudience(claim)
+                withTimeout(PAGE_TIMEOUT_MILLIS) {
+                    snapshots.stream(segment) { batch -> runs.appendAudience(claim, batch) }
+                }
+                runs.completeAudience(claim)
+                return
+            }
+            val page = runs.audiencePage(claim.run.id, claim.run.cursor, claim.run.pageSize)
             val result = withTimeout(PAGE_TIMEOUT_MILLIS) {
-                campaignService.enrolPage(claim.run.campaignId, claim.run.cursor, claim.run.pageSize)
+                campaignService.enrolParties(
+                    claim.run.campaignId,
+                    claim.run.cursor,
+                    page,
+                    claim.run.pageSize,
+                ) { partyId, state -> runs.markRecipient(claim, partyId, state) }
             }
             if (result.holdReason != null) {
                 runs.hold(claim, result.holdReason, result)

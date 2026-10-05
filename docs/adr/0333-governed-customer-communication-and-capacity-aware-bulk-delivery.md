@@ -154,11 +154,15 @@ cannot become a customer message merely by adding an enum value.
 The first PR for this ADR adds bounded campaign admission with a database lease and a default-off
 budget, a staff-managed notification copy registry with separate maker and publisher, and an
 inbox-only notification outcome backed by the existing customer feed. Published copy is pinned to
-the notification row. These are individual controls, not proof of the full communication system.
-The audience still reads mutable segment data; it is not a frozen snapshot. Provider dispatch and
-click destinations lack measured shared capacity limits, and there is no cross-origin atomic contact
-reservation or single operator evidence projection yet. Mass activation must remain disabled until
-those controls and the D7 end-to-end/load evidence are complete.
+the notification row. A bulk run now prepares its audience through one streamed silver query,
+persists the ordered party ids in PostgreSQL, and admits only from the completed snapshot. Failed
+preparation holds the run; an approved resume discards the partial extraction and restarts it.
+The recipient ledger records starts, admissions, skips and failures. These are individual controls,
+not proof of the full communication system. Provider dispatch and click destinations lack measured
+shared capacity limits, and there is no cross-origin atomic contact reservation or single operator
+evidence projection yet. The workflow-start/enrolment-write boundary also needs reconciliation
+before a crash there can be called exactly once. Mass activation must remain disabled until those
+controls and the D7 end-to-end/load evidence are complete.
 
 The existing email/push path persists a `PENDING` row before provider handoff. If a failure occurs
 after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key and

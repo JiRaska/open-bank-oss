@@ -399,26 +399,56 @@ class CampaignService @Inject constructor(
         val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
             ?: throw NoSuchElementException("segment " + campaign.segmentRef + " not found")
         val page = segmentEvaluation.page(segment, after, limit)
+        return enrolPartiesPage(campaign, after, page, limit) { _, _ -> }
+    }
+
+    /** Admit only parties in the completed durable snapshot; persist each recipient decision. */
+    suspend fun enrolParties(
+        id: UUID,
+        after: UUID?,
+        page: SegmentPage,
+        limit: Int,
+        record: suspend (UUID, RecipientAdmissionState) -> Unit,
+    ): EnrolmentPageOutcome {
+        val campaign = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
+        check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can enrol" }
+        return enrolPartiesPage(campaign, after, page, limit, record)
+    }
+
+    @Suppress("TooGenericExceptionCaught")
+    private suspend fun enrolPartiesPage(
+        campaign: Campaign,
+        after: UUID?,
+        page: SegmentPage,
+        limit: Int,
+        record: suspend (UUID, RecipientAdmissionState) -> Unit,
+    ): EnrolmentPageOutcome {
         var cursor = after
         var started = 0
         for (partyId in page.partyIds) {
-            if (campaigns.findById(id)?.state != CampaignState.ACTIVE) {
+            if (campaigns.findById(campaign.id)?.state != CampaignState.ACTIVE) {
                 return EnrolmentPageOutcome(started, 0, cursor, false, "CAMPAIGN_NOT_ACTIVE")
             }
             try {
-                if (enrolParty(campaign, partyId)) started++
+                val enrolled = enrolParty(campaign, partyId) {
+                    record(partyId, RecipientAdmissionState.STARTING)
+                }
+                record(partyId, if (enrolled) RecipientAdmissionState.ADMITTED else RecipientAdmissionState.SKIPPED)
+                if (enrolled) started++
                 cursor = partyId
             } catch (e: Exception) {
+                record(partyId, RecipientAdmissionState.FAILED)
                 metrics.enrolmentRecorded(EnrolmentAttempt.FAILED)
-                log.errorf(e, "campaign.enrolPage failed campaign=%s party=%s", id, partyId)
+                log.errorf(e, "campaign.enrolPage failed campaign=%s party=%s", campaign.id, partyId)
                 return EnrolmentPageOutcome(started, 1, cursor, false)
             }
         }
         return EnrolmentPageOutcome(started, 0, cursor, page.partyIds.size < limit)
     }
 
-    private suspend fun enrolParty(campaign: Campaign, partyId: UUID): Boolean {
+    private suspend fun enrolParty(campaign: Campaign, partyId: UUID, beforeStart: suspend () -> Unit = {}): Boolean {
         if (skipParty(campaign, partyId)) return false
+        beforeStart()
         val cohort = ExperimentCohort.assign(campaign.id, partyId, campaign.holdoutPercent)
         if (cohort == ExperimentCohort.HOLDOUT) {
             enrolments.save(

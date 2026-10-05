@@ -16,6 +16,42 @@ import java.util.UUID
 
 class SilverSegmentPageTest {
     @Test
+    fun `snapshot uses one ordered query and gives the caller bounded batches`(): Unit = runBlocking {
+        val ids = (1..501).map { UUID(0L, it.toLong()) }
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        var queries = 0
+        var sql = ""
+        server.createContext("/") { exchange ->
+            queries++
+            sql = exchange.requestBody.bufferedReader().readText()
+            val bytes = ids.joinToString("\n") { """{"aggregate_id":"$it"}""" }.toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }
+        server.start()
+        try {
+            val evaluator = SilverSegmentEvaluator(
+                "http://127.0.0.1:${server.address.port}/",
+                Optional.empty(),
+                Optional.empty(),
+                "openbank_analytics",
+            )
+            val segment = Segment("actives", 1, listOf(SegmentRule.PartyStatusIs("ACTIVE")))
+            val batches = mutableListOf<List<UUID>>()
+
+            evaluator.stream(segment) { batches += it }
+
+            assertThat(queries).isEqualTo(1)
+            assertThat(sql).contains("SELECT DISTINCT aggregate_id", "ORDER BY aggregate_id FORMAT JSONEachRow")
+            assertThat(sql).doesNotContain("LIMIT")
+            assertThat(batches.map { it.size }).containsExactly(500, 1)
+            assertThat(batches.flatten()).containsExactlyElementsOf(ids)
+        } finally {
+            server.stop(0)
+        }
+    }
+
+    @Test
     fun `preview count stays at the source and accepts quoted ClickHouse UInt64`(): Unit = runBlocking {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         var sql = ""

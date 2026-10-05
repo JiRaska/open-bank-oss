@@ -4,9 +4,14 @@
 
 package com.openbank.campaign.application.usecase
 
+import com.openbank.campaign.application.port.out.AudienceSnapshotPort
 import com.openbank.campaign.application.port.out.CampaignRepository
+import com.openbank.campaign.application.port.out.SegmentPage
+import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignState
+import com.openbank.campaign.domain.model.Segment
+import com.openbank.campaign.domain.model.SegmentRef
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -26,6 +31,80 @@ class BulkAdmissionServiceTest {
     }
     private val enrolment = mockk<CampaignService>()
     private val store = RecordingRuns()
+
+    @Test
+    fun `a run freezes its audience before admitting any journey`(): Unit = runBlocking {
+        val segment = mockk<Segment>()
+        val approved = mockk<Campaign> {
+            every { state } returns CampaignState.ACTIVE
+            every { segmentRef } returns SegmentRef("actives", 1)
+        }
+        val campaignStore = mockk<CampaignRepository> {
+            coEvery { findById(campaignId) } returns approved
+        }
+        val registry = mockk<SegmentRegistry> {
+            coEvery { load("actives", 1) } returns segment
+        }
+        val partyId = UUID.randomUUID()
+        val source = object : AudienceSnapshotPort {
+            override suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit) {
+                accept(listOf(partyId))
+            }
+        }
+        val service = BulkAdmissionService(campaignStore, enrolment, store, 2).also {
+            it.segments = registry
+            it.snapshots = source
+        }
+        val started = service.start(campaignId, "maker")
+        store.run = started.copy(state = BulkRunState.PREPARING, snapshotAt = null, audienceCount = null)
+
+        service.tick()
+
+        assertThat(store.run?.state).isEqualTo(BulkRunState.RUNNING)
+        assertThat(store.run?.audienceCount).isEqualTo(1)
+        assertThat(store.audience).containsExactly(partyId)
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `failed snapshot is discarded and rebuilt before admission`(): Unit = runBlocking {
+        val partyId = UUID.randomUUID()
+        val approved = mockk<Campaign> {
+            every { state } returns CampaignState.ACTIVE
+            every { segmentRef } returns SegmentRef("actives", 1)
+        }
+        val campaignStore = mockk<CampaignRepository> {
+            coEvery { findById(campaignId) } returns approved
+        }
+        val registry = mockk<SegmentRegistry> {
+            coEvery { load("actives", 1) } returns mockk<Segment>()
+        }
+        var attempts = 0
+        val source = object : AudienceSnapshotPort {
+            override suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit) {
+                attempts++
+                accept(listOf(partyId))
+                if (attempts == 1) error("source stopped mid-snapshot")
+            }
+        }
+        val service = BulkAdmissionService(campaignStore, enrolment, store, 2).also {
+            it.segments = registry
+            it.snapshots = source
+        }
+        store.run = service.start(campaignId, "maker")
+            .copy(state = BulkRunState.PREPARING, snapshotAt = null, audienceCount = null)
+
+        service.tick()
+        assertThat(store.run?.state).isEqualTo(BulkRunState.HELD)
+        assertThat(store.run?.snapshotAt).isNull()
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+
+        service.resume(requireNotNull(store.run).id, "checker")
+        service.tick()
+        assertThat(store.run?.state).isEqualTo(BulkRunState.RUNNING)
+        assertThat(store.audience).containsExactly(partyId)
+        assertThat(attempts).isEqualTo(2)
+    }
 
     @Test
     fun `missing measured budget prevents a mass run`(): Unit = runBlocking {
@@ -61,7 +140,8 @@ class BulkAdmissionServiceTest {
         val service = BulkAdmissionService(campaigns, enrolment, store, 2)
         val first = UUID.randomUUID()
         val started = service.start(campaignId, "maker")
-        coEvery { enrolment.enrolPage(campaignId, null, 2) } returns EnrolmentPageOutcome(1, 1, first, false)
+        coEvery { enrolment.enrolParties(campaignId, null, any(), 2, any()) } returns
+            EnrolmentPageOutcome(1, 1, first, false)
 
         service.tick()
 
@@ -74,21 +154,22 @@ class BulkAdmissionServiceTest {
         service.resume(started.id, "checker")
         assertThat(store.run?.lastResumedBy).isEqualTo("checker")
         assertThat(store.run?.lastResumedAt).isNotNull()
-        coEvery { enrolment.enrolPage(campaignId, first, 2) } returns
+        coEvery { enrolment.enrolParties(campaignId, first, any(), 2, any()) } returns
             EnrolmentPageOutcome(1, 0, UUID.randomUUID(), true)
 
         service.tick()
 
         assertThat(store.run?.state).isEqualTo(BulkRunState.COMPLETED)
         assertThat(store.run?.admitted).isEqualTo(2)
-        coVerify(exactly = 1) { enrolment.enrolPage(campaignId, first, 2) }
+        coVerify(exactly = 1) { enrolment.enrolParties(campaignId, first, any(), 2, any()) }
     }
 
     @Test
     fun `an unavailable segment holds without moving the cursor`(): Unit = runBlocking {
         val service = BulkAdmissionService(campaigns, enrolment, store, 1)
         service.start(campaignId, "maker")
-        coEvery { enrolment.enrolPage(campaignId, null, 1) } throws IllegalStateException("source unavailable")
+        coEvery { enrolment.enrolParties(campaignId, null, any(), 1, any()) } throws
+            IllegalStateException("source unavailable")
 
         service.tick()
 
@@ -101,7 +182,7 @@ class BulkAdmissionServiceTest {
     fun `paused campaign holds the run without counting a party failure`(): Unit = runBlocking {
         val service = BulkAdmissionService(campaigns, enrolment, store, 1)
         service.start(campaignId, "maker")
-        coEvery { enrolment.enrolPage(campaignId, null, 1) } returns
+        coEvery { enrolment.enrolParties(campaignId, null, any(), 1, any()) } returns
             EnrolmentPageOutcome(0, 0, null, false, "CAMPAIGN_NOT_ACTIVE")
 
         service.tick()
@@ -114,6 +195,7 @@ class BulkAdmissionServiceTest {
     private class RecordingRuns : BulkRunStore {
         var run: BulkRun? = null
         var manualOwner: UUID? = null
+        val audience = mutableListOf<UUID>()
 
         override suspend fun claimManual(owner: UUID): Boolean {
             if (manualOwner != null) return false
@@ -124,6 +206,25 @@ class BulkAdmissionServiceTest {
         override suspend fun releaseManual(owner: UUID) {
             if (manualOwner == owner) manualOwner = null
         }
+
+        override suspend fun clearAudience(claim: ClaimedBulkRun) {
+            audience.clear()
+        }
+        override suspend fun appendAudience(claim: ClaimedBulkRun, partyIds: List<UUID>) {
+            audience.addAll(partyIds)
+        }
+        override suspend fun completeAudience(claim: ClaimedBulkRun) {
+            run = requireNotNull(run).copy(
+                state = BulkRunState.RUNNING,
+                snapshotAt = Instant.now(),
+                audienceCount = audience.size.toLong(),
+            )
+        }
+        override suspend fun audiencePage(runId: UUID, after: UUID?, limit: Int): SegmentPage {
+            val ids = List(limit) { UUID.randomUUID() }
+            return SegmentPage(ids, ids.lastOrNull())
+        }
+        override suspend fun markRecipient(claim: ClaimedBulkRun, partyId: UUID, state: RecipientAdmissionState) = Unit
 
         override suspend fun create(id: UUID, campaignId: UUID, pageSize: Int, actor: String): BulkRun {
             val created = BulkRun(
@@ -138,6 +239,8 @@ class BulkAdmissionServiceTest {
                 createdBy = actor,
                 createdAt = Instant.now(),
                 updatedAt = Instant.now(),
+                snapshotAt = Instant.now(),
+                audienceCount = 0,
             )
             run = created
             return created
@@ -146,7 +249,9 @@ class BulkAdmissionServiceTest {
         override suspend fun find(id: UUID): BulkRun? = run?.takeIf { it.id == id }
         override suspend fun list(campaignId: UUID): List<BulkRun> =
             run?.takeIf { it.campaignId == campaignId }?.let(::listOf) ?: emptyList()
-        override suspend fun claim(owner: UUID): ClaimedBulkRun? = run?.takeIf { it.state == BulkRunState.RUNNING }
+        override suspend fun claim(owner: UUID): ClaimedBulkRun? = run?.takeIf {
+            it.state == BulkRunState.PREPARING || it.state == BulkRunState.RUNNING
+        }
             ?.let { ClaimedBulkRun(it, owner) }
 
         override suspend fun finish(claim: ClaimedBulkRun, outcome: EnrolmentPageOutcome) {
@@ -169,7 +274,14 @@ class BulkAdmissionServiceTest {
 
         override suspend fun resume(id: UUID, actor: String): BulkRun? = run?.takeIf {
             it.id == id && it.state == BulkRunState.HELD && it.createdBy != actor
-        }?.copy(state = BulkRunState.RUNNING, lastError = null, lastResumedBy = actor, lastResumedAt = Instant.now())
+        }?.let { held ->
+            held.copy(
+                state = if (held.snapshotAt == null) BulkRunState.PREPARING else BulkRunState.RUNNING,
+                lastError = null,
+                lastResumedBy = actor,
+                lastResumedAt = Instant.now(),
+            )
+        }
             ?.also { run = it }
     }
 }
