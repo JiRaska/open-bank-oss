@@ -3,6 +3,8 @@
 #
 #   pull_request / push -> `plan` job: read-only `tofu plan` to the job summary
 #       (PLAN role, batch lane). On a PR this is the pre-merge preview.
+#   schedule             -> the same read-only plan, with a separate issue-only
+#       job reconciling clean/changed/error without access to plan contents.
 #   workflow_dispatch   -> `apply` job: manual "Run workflow" on main (deploy
 #       lane, admin APPLY role). It re-plans with `-out=tfplan` and applies THAT
 #       file in the same job, so the executed change is exactly the freshly
@@ -25,12 +27,18 @@ on:
     paths:
       - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
+      - ".github/scripts/tofu-plan-drift-report.py"
   push:
     branches: [main]
     paths:
       - "openbank-infra/aws/envs/sandbox-platform/**"
       - ".github/workflows/platform-tofu.yml"
+      - ".github/scripts/tofu-plan-drift-report.py"
   workflow_dispatch: {}
+  # Unfiltered default-branch probe: derived resources can change when only
+  # GitOps manifests change, outside this workflow's push paths (#9725).
+  schedule:
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
@@ -48,6 +56,8 @@ env:
 
 jobs:
   plan:
+    outputs:
+      verdict: ${{ steps.plan_result.outputs.verdict }}
     permissions:
       contents: read
       id-token: write  # OIDC -> tofu plan role
@@ -59,6 +69,9 @@ jobs:
       TF_VAR_governance_gh_pat: ${{ secrets.GOVERNANCE_GH_PAT }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test plan verdict and issue lifecycle
+        run: python3 .github/scripts/tofu-plan-drift-report.py --self-test
 
       - name: Configure AWS credentials (OIDC, read-only plan role)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
@@ -102,6 +115,7 @@ jobs:
         run: tofu init -input=false
 
       - name: tofu plan (read-only, no lock)
+        id: plan_result
         working-directory: ${{ env.ENV_DIR }}
         run: |
           set -o pipefail
@@ -116,7 +130,29 @@ jobs:
             tail -c 60000 /tmp/plan.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          [ "$code" = "1" ] && exit 1 || exit 0
+          python3 "$GITHUB_WORKSPACE/.github/scripts/tofu-plan-drift-report.py" --classify "$code" >> "$GITHUB_OUTPUT"
+          [ "$code" = "0" ] || [ "$code" = "2" ]
+
+  # The reporting token never coexists with cloud credentials or plan output.
+  report-scheduled-plan:
+    name: Report scheduled plan verdict
+    needs: plan
+    if: ${{ always() && github.event_name == 'schedule' }}
+    permissions:
+      contents: read
+      issues: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Reconcile one finding without plan contents
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_VERDICT: ${{ needs.plan.outputs.verdict || 'error' }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 .github/scripts/tofu-plan-drift-report.py --root platform --verdict "$PLAN_VERDICT" --run-url "$RUN_URL"
 
   # ── Infracost cost delta ───────────────────────────────────────────────────
   # Posts a PR comment with the AWS cost delta introduced by this change.

@@ -60,6 +60,7 @@ platform-images.yml|job:build|id-token
 platform-tofu.yml|job:apply|id-token
 platform-tofu.yml|job:infracost|pull-requests
 platform-tofu.yml|job:plan|id-token
+platform-tofu.yml|job:report-scheduled-plan|issues
 release-please.yml|job:provenance|contents
 release-please.yml|job:provenance|id-token
 release-please.yml|job:release-evidence|attestations
@@ -79,6 +80,7 @@ standing-critical-digest.yml|job:digest|issues
 substrate-tofu.yml|job:apply|id-token
 substrate-tofu.yml|job:infracost|pull-requests
 substrate-tofu.yml|job:plan|id-token
+substrate-tofu.yml|job:report-scheduled-plan|issues
 upstream-unblock-watch.yml|job:watch|issues
 verification-metadata-drift.yml|job:raise-issue|issues
 verify-provider.yml|job:verify|id-token
