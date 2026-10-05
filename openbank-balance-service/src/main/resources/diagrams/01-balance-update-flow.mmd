@@ -38,5 +38,5 @@ sequenceDiagram
         Outbox->>KafkaOut: BalanceUpdated\n{accountId, currency, bookedAmount,\navailableAmount, updatedAt}
 
         KafkaOut-->>AccountSvc: update denorm balance cache
-        KafkaOut-->>NotifSvc: check low-balance threshold\n→ push notification if triggered
+        Note over KafkaOut,NotifSvc: Planned in ADR-0333; no low-balance consumer is deployed
     end

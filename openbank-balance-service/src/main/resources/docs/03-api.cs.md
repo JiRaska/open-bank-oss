@@ -135,13 +135,12 @@ záporná delta zůstává validní (jde o zaúčtovaná fakta z ledgeru).
 
 | Event | Trigger | Klíčové fieldy |
 |---|---|---|
-| `balance.opened.v1` | inicializace pro nový účet | accountId, currency, openedAt |
-| `balance.updated.v1` | každá změna (booked/reserved/pending) | accountId, currency, deltas, version |
-| `balance.hold.created.v1` | POST /holds | holdId, accountId, amount, reason, expiresAt |
-| `balance.hold.captured.v1` | POST /capture | holdId, actualAmount |
-| `balance.hold.released.v1` | DELETE /holds | holdId, reason (manual/expired) |
-| `balance.low.v1` | `available < threshold` (per účet config) | accountId, currency, available, threshold |
-| `balance.overdraft.changed.v1` | PATCH /overdraft | accountId, currency, oldLimit, newLimit |
+| `BALANCE_UPDATED` | kredit/debet, projekce ledgeru nebo value-date roll | eventId, accountId, currency, bookedAmount, availableAmount, reservedAmount, occurredAt |
+| `HOLD_PLACED` | vytvoření blokace | eventId, accountId, currency, amount, availableAmount, occurredAt |
+| `HOLD_RELEASED` | uvolnění blokace nebo spotřeba krytí v ledgeru | eventId, accountId, currency, amount, availableAmount, occurredAt |
+
+`balance.low.v1` je plánované v ADR-0333 a dnes se neemituje. Před vznikem zákaznického záměru
+musí být nastavení pro účet, sestup přes práh, cooldown a ověření vlastnictví.
 
 ## Backward compatibility
 

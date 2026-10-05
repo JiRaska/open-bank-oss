@@ -135,13 +135,12 @@ written. Zero and negative deltas remain valid (they are posted ledger facts).
 
 | Event | Trigger | Key fields |
 |---|---|---|
-| `balance.opened.v1` | initialise for new account | accountId, currency, openedAt |
-| `balance.updated.v1` | every change (booked/reserved/pending) | accountId, currency, deltas, version |
-| `balance.hold.created.v1` | POST /holds | holdId, accountId, amount, reason, expiresAt |
-| `balance.hold.captured.v1` | POST /capture | holdId, actualAmount |
-| `balance.hold.released.v1` | DELETE /holds | holdId, reason (manual/expired) |
-| `balance.low.v1` | `available < threshold` (per-account config) | accountId, currency, available, threshold |
-| `balance.overdraft.changed.v1` | PATCH /overdraft | accountId, currency, oldLimit, newLimit |
+| `BALANCE_UPDATED` | credit/debit, ledger projection or value-date roll | eventId, accountId, currency, bookedAmount, availableAmount, reservedAmount, occurredAt |
+| `HOLD_PLACED` | hold creation | eventId, accountId, currency, amount, availableAmount, occurredAt |
+| `HOLD_RELEASED` | hold release or ledger cover consumption | eventId, accountId, currency, amount, availableAmount, occurredAt |
+
+`balance.low.v1` is planned in ADR-0333 and is not emitted. Account-level opt-in, a downward
+threshold crossing, cooldown and ownership checks must exist before it becomes a customer intent.
 
 ## Backward compatibility
 

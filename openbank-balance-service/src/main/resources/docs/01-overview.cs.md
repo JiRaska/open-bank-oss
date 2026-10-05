@@ -39,6 +39,9 @@ A povolený debet:
                               (low-balance alert)
 ```
 
+Větev notification-service je cílový návrh z ADR-0333, nikoli nasazený konzument. Surový event
+`BALANCE_UPDATED` není zákaznický notifikační záměr.
+
 ## Klíčové use-cases
 
 | Use-case | API | Stav balance |

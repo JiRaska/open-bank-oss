@@ -39,6 +39,9 @@ Plus an arranged overdraft:
                               (low-balance alert)
 ```
 
+The notification branch is a target design from ADR-0333, not a deployed consumer. The raw
+`BALANCE_UPDATED` event is not a customer notification intent.
+
 ## Key use cases
 
 | Use case | API | Balance state |
