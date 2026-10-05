@@ -34,7 +34,7 @@ data class ManagedTemplateDraftRequest(
     val body: String,
 )
 
-data class ManagedTemplatePreviewRequest(val draft: ManagedTemplateDraftRequest, val variables: Map<String, String>)
+data class ManagedTemplatePreviewRequest(val draft: ManagedTemplateDraftRequest, val variables: Map<String, String?>)
 
 /** Staff-only editorial surface. No customer or edge token can publish customer copy. */
 @Path("/api/v1/notification-templates")
@@ -80,7 +80,10 @@ class ManagedTemplateResource(private val store: PgManagedTemplateStore, private
             Ids.newId(), draft.template, draft.language, draft.channel, 0,
             draft.subject, draft.body, ManagedTemplateState.DRAFT, actor(), Instant.now(),
         )
-        val (subject, body) = copy.render(request.variables)
+        val variables = request.variables.mapValues { (name, value) ->
+            requireNotNull(value) { "preview variable '$name' must not be null" }
+        }
+        val (subject, body) = copy.render(variables)
         return Response.ok(mapOf("subject" to subject, "body" to body)).build()
     }
 

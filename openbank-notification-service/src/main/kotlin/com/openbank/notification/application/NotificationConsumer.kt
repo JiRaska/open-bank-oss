@@ -449,6 +449,8 @@ class NotificationConsumer @Inject constructor(
                     outboxRepo.persistInTransaction(outcomeMessage(req, entity, NotificationOutcome.VISIBLE, null))
                 }
         }.replaceWithVoid()
+            // observed-by: a deduplicated replay already has a visible row and outcome in the DB.
+            // Every other failure is rethrown to the Kafka failure strategy.
             .onFailure().recoverWithUni { failure ->
                 if (req.deduplicationKey != null && failure.isDeduplicationConflict()) {
                     Uni.createFrom().voidItem()

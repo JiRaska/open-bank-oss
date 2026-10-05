@@ -38,6 +38,10 @@ class ManagedTemplateResourceIT {
             .body("""{"draft":$draft,"variables":{"amount":"<10>","currency":"CZK"}}""")
             .post("/api/v1/notification-templates/preview")
             .then().statusCode(200).body("body", equalTo("<p>Přijato &lt;10&gt; CZK</p>"))
+        given().contentType("application/json")
+            .body("""{"draft":$draft,"variables":{"amount":null,"currency":"CZK"}}""")
+            .post("/api/v1/notification-templates/preview")
+            .then().statusCode(400)
 
         val id = given().contentType("application/json").body(draft)
             .post("/api/v1/notification-templates")
