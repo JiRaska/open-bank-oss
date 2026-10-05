@@ -23,7 +23,8 @@ info:
   # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
   # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
   # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
-  version: 1.35.0
+  # 1.37.0: document the existing Money response shape separately from accepted requests (#10558).
+  version: 1.37.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -74,6 +75,9 @@ paths:
       responses:
         '201':
           description: Application accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':
@@ -97,6 +101,11 @@ paths:
       responses:
         '200':
           description: Applications for the party
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/intake/applications:
@@ -298,7 +307,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The application }
+        '200':
+          description: The application
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -508,7 +521,13 @@ paths:
           description: Clamped server-side into 1..100.
           schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: Recent applications }
+        '200':
+          description: Recent applications
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400': { description: Unknown status value }
         '403':
           $ref: '#/components/responses/Forbidden'
@@ -694,7 +713,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '201': { description: Loan disbursed and booked }
+        '201':
+          description: Loan disbursed and booked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -1590,7 +1613,7 @@ components:
         loanId: { type: string, format: uuid }
         asOf: { type: string, format: date }
         outstandingBalance:
-          $ref: '#/components/schemas/Money'
+          $ref: '#/components/schemas/MoneyResponse'
         daysPastDue: { type: integer }
         bucket:
           type: string
@@ -1602,7 +1625,7 @@ components:
           type: string
           enum: [TWELVE_MONTH, LIFETIME]
         expectedCreditLoss:
-          $ref: '#/components/schemas/Money'
+          $ref: '#/components/schemas/MoneyResponse'
         modelVersion:
           type: string
           description: >-
@@ -1612,9 +1635,29 @@ components:
     Money:
       type: object
       required: [amount, currency]
+      description: Request form; the reader accepts a decimal number or string and an ISO-4217 code.
+      properties:
+        amount:
+          oneOf:
+            - { type: number }
+            - { type: string }
+        currency: { type: string, description: ISO-4217 currency code }
+    MoneyResponse:
+      type: object
+      required: [amount, currency, isNonNegative, isZero, isNegative, isPositive]
+      description: Existing lending response form; the wire shape is pinned while readers use nested currency codes.
       properties:
         amount: { type: number }
-        currency: { type: string, description: ISO-4217 currency code }
+        currency:
+          type: object
+          required: [code, defaultFractionDigits]
+          properties:
+            code: { type: string, description: ISO-4217 currency code }
+            defaultFractionDigits: { type: integer, minimum: 0 }
+        isNonNegative: { type: boolean }
+        isZero: { type: boolean }
+        isNegative: { type: boolean }
+        isPositive: { type: boolean }
     MoneyTotal:
       type: object
       required: [currency, amount]
@@ -1934,6 +1977,24 @@ components:
           description: >-
             Optional published catalog offering. When supplied, its immutable revision sets the
             rate, currency, tenor and amortization constraints and is retained with the application.
+    LoanApplicationResponse:
+      type: object
+      required: [requestedAmount]
+      description: The application carries other workflow fields; Money values use the existing response form.
+      properties:
+        requestedAmount: { $ref: '#/components/schemas/MoneyResponse' }
+        verifiedIncomeMonthly:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        existingDebtServiceMonthly:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
+        existingDebtOutstanding:
+          anyOf:
+            - { $ref: '#/components/schemas/MoneyResponse' }
+            - { type: 'null' }
     DecisionRequest:
       type: object
       required: [approve]
@@ -2033,6 +2094,7 @@ components:
         A booked loan. Only the fields this contract pins are listed; the response carries the
         loan's other terms as well.
       properties:
+        principal: { $ref: '#/components/schemas/MoneyResponse' }
         contractNumber:
           type: string
           pattern: '^UV-[0-9]{4}-[0-9]{6,}$'

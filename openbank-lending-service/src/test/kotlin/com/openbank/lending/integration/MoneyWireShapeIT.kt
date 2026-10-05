@@ -14,9 +14,11 @@ import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
+import io.restassured.path.json.JsonPath
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import java.time.LocalDate
 import java.util.UUID
 
@@ -40,6 +42,11 @@ import java.util.UUID
     initArgs = [ResourceArg(name = "db", value = "openbank_lending_it")],
 )
 class MoneyWireShapeIT {
+
+    private val schemas: Map<*, *> = run {
+        val document = Yaml().load<Map<String, Any>>(javaClass.classLoader.getResourceAsStream("openapi.yaml")!!)
+        (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
+    }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> {
@@ -77,14 +84,26 @@ class MoneyWireShapeIT {
     fun `a response carries Money in the shape this API has always written`() {
         val body = apply("""{"amount":"10000.00","currency":{"code":"EUR"}}""")
         assertThat(body).contains(legacyTenThousandEur)
+        val amount = JsonPath.from(body).get<Map<String, Any>>("requestedAmount")
+        val response = schemas["MoneyResponse"] as Map<*, *>
+        val properties = response["properties"] as Map<*, *>
+        assertThat(amount["amount"]).isInstanceOf(Number::class.java)
+        assertThat(amount["currency"]).isInstanceOf(Map::class.java)
+        assertThat((properties["amount"] as Map<*, *>)["type"]).isEqualTo("number")
+        assertThat((properties["currency"] as Map<*, *>)["type"]).isEqualTo("object")
+        val application = schemas["LoanApplicationResponse"] as Map<*, *>
+        val applicationProperties = application["properties"] as Map<*, *>
+        assertThat((applicationProperties["requestedAmount"] as Map<*, *>)["\$ref"])
+            .isEqualTo("#/components/schemas/MoneyResponse")
     }
 
     @Test
     @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
     fun `a request may use the documented shape - a plain currency code, a numeric amount, any scale`() {
-        // openapi.yaml has always described `currency` as a string; until the reader accepted it,
-        // only the undocumented object form worked. The response is unchanged either way, and the
-        // amount comes back at the currency scale whatever scale it was sent in.
+        // Requests keep the string currency code. Responses use the separate MoneyResponse schema.
+        val request = schemas["Money"] as Map<*, *>
+        val requestProperties = request["properties"] as Map<*, *>
+        assertThat((requestProperties["currency"] as Map<*, *>)["type"]).isEqualTo("string")
         listOf(
             """{"amount":"10000.00","currency":"EUR"}""",
             """{"amount":10000,"currency":"EUR"}""",

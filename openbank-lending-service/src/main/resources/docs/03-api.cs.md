@@ -54,7 +54,8 @@ historie nepovažoval za provedený přechod.
 - **DecisionRequest** — `approve` (bool, povinné), `reason` (string, nullable). **Žádné `decidedBy`** — checker je JWT subjekt.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, výchozí 0, validováno na `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). Jednající principal je JWT subjekt.
-- **Money** — `{ amount: number, currency: ISO-4217 }`.
+- **Money v požadavku** — `{ amount: number|string, currency: "EUR" }`; měna je kód ISO-4217.
+- **Money v odpovědi** — dosavadní tvar je `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. Schéma OpenAPI `MoneyResponse` jej popisuje samostatně, aby generovaný klient nepovažoval vstupní řetězec měny za zaručený tvar odpovědi.
 
 Validace (aplikační služba): požadovaná částka musí být kladná, term ≥ 1 období, nominální sazba ≥ 0, identita navrhovatele neprázdná, haircut v `[0,1]`.
 
