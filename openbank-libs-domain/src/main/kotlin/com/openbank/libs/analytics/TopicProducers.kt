@@ -38,6 +38,7 @@ object TopicProducers {
     private val TOPIC_TO_SERVICE = mapOf(
         "openbank.settlement.events" to "settlement-service",
         "openbank.accounts.account.created" to "account-service",
+        "openbank.accounts.account.status-changed" to "account-service",
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
         "openbank.party.events" to "party-service",

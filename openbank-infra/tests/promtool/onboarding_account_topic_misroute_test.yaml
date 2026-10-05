@@ -1,0 +1,37 @@
+# Issue #9073, consumer-first stage. The current producer still puts status events on
+# account.created. An offset cannot distinguish those events from account creation.
+# Keep this negative proof until the producer routes lifecycle events separately.
+evaluation_interval: 1m
+rule_files:
+- prometheus-rules-onboarding.yaml
+tests:
+- name: missing account creations are detected when the created topic is quiet
+  interval: 1m
+  input_series:
+  - series: openbank_parties_created_total
+    values: 0+1x100
+  - series: 'kafka_topic_partition_current_offset{topic="openbank.accounts.account.created"}'
+    values: 0+0x100
+  alert_rule_test:
+  - eval_time: 95m
+    alertname: OnboardingAccountsNotFollowingParties
+    exp_alerts:
+    - exp_labels:
+        severity: critical
+      exp_annotations:
+        summary: Parties are being created but no accounts are opening
+        description: openbank_parties_created_total rose over the last hour while openbank_accounts_created_total did not — new customers are registering but the PARTY_CREATED → account.created pipeline is not producing accounts. This is the onboarding outage signature (party-service → Kafka → account-service). Check the party-events consumer lag, the DLQ (PartyEventDeadLettered), and account-service's dependencies (sanctions-service, product-catalog).
+- name: status-only traffic on created topic masks missing account creations
+  interval: 1m
+  input_series:
+  - series: openbank_parties_created_total
+    values: 0+1x100
+  # This increase is solely status-changed events under the CURRENT misrouted producer.
+  - series: 'kafka_topic_partition_current_offset{topic="openbank.accounts.account.created"}'
+    values: 0+1x100
+  - series: 'kafka_topic_partition_current_offset{topic="openbank.accounts.account.status-changed"}'
+    values: 0+0x100
+  alert_rule_test:
+  - eval_time: 95m
+    alertname: OnboardingAccountsNotFollowingParties
+    exp_alerts: []

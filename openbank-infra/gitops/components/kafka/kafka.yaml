@@ -219,6 +219,22 @@ spec:
     retention.ms: 604800000
     cleanup.policy: delete
 ---
+# Account lifecycle status events (#9073). Create this topic before the producer switches;
+# audit and analytics-sink subscribe to both account topics during the transition.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.accounts.account.status-changed
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete
+---
 # billing-service's single outbox topic (#4217, ADR-0248) — carries all its events
 # (billing.fee.post-intent.v1, billing.fee.reversal-intent.v1, and the new
 # AnnualFeeSummaryReady) via its one "billing-events-out" channel. Single partition

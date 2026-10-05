@@ -4,6 +4,7 @@
 
 package com.openbank.libs.analytics
 
+import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.io.File
@@ -28,6 +29,15 @@ import java.io.File
  * compiler behind it.
  */
 class TopicProducersCoverageTest {
+
+    @Test
+    fun `account status topic is ready on both consumers before producer migration`() {
+        val topic = "openbank.accounts.account.status-changed"
+        consumers.forEach { consumer ->
+            assertTrue(topic in subscribedTopics(consumer), "$consumer does not subscribe to $topic")
+        }
+        assertEquals("account-service", TopicProducers.sourceService(topic))
+    }
 
     private val consumers = listOf(
         "../openbank-audit-service/src/main/resources/application.yaml",
