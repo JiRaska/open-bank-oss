@@ -4,25 +4,17 @@
 
 package com.openbank.cardissuance.integration
 
-import com.openbank.cardissuance.application.port.`in`.CardStatusCommand
-import com.openbank.cardissuance.application.port.`in`.CardUseCase
-import com.openbank.cardissuance.application.port.`in`.IssueCardCommand
 import com.openbank.cardissuance.application.usecase.CardService
-import com.openbank.cardissuance.domain.model.CardNetwork
-import com.openbank.cardissuance.domain.model.CardStatus
-import com.openbank.cardissuance.domain.model.CardType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.junit.QuarkusTest
-import io.quarkus.vertx.VertxContextSupport
-import io.smallrye.mutiny.coroutines.asUni
+import io.quarkus.test.security.TestSecurity
+import io.restassured.RestAssured.given
+import io.restassured.http.ContentType
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
-import jakarta.inject.Inject
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
 import org.eclipse.microprofile.config.ConfigProvider
+import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Test
 import java.sql.DriverManager
 import java.util.UUID
@@ -50,10 +42,13 @@ import java.util.UUID
  *
  * The scheduled dispatcher is switched off for this class: its claim UPDATE would restamp `xmin` on
  * the outbox rows and race the assertions.
+ * Both writes run through the served REST routes with a test operator identity. This exercises the
+ * HTTP/CDI/Vert.x context that a direct call from a bare test thread cannot establish.
  */
 @QuarkusTest
 @QuarkusTestResource(CardOutboxAtomicityIT.NoDispatchInMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.cardissuance.it.PostgresRedisTestResource::class)
+@TestSecurity(user = "atomicity-operator", roles = ["ROLE_OPERATOR"])
 class CardOutboxAtomicityIT {
 
     class NoDispatchInMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -62,13 +57,6 @@ class CardOutboxAtomicityIT {
                 mapOf("openbank.outbox.dispatch-enabled" to "false")
 
         override fun stop() = InMemoryConnector.clear()
-    }
-
-    @Inject
-    lateinit var cards: CardUseCase
-
-    private fun <T> onVertxContext(block: suspend () -> T): T = VertxContextSupport.subscribeAndAwait {
-        CoroutineScope(Dispatchers.Unconfined).async { block() }.asUni()
     }
 
     @Test
@@ -100,9 +88,13 @@ class CardOutboxAtomicityIT {
         val cardId = issue()
         val issuedXmin = outboxXmin(cardId, CardService.EVENT_CARD_ISSUED).single()
 
-        val blocked = onVertxContext { cards.blockCard(CardStatusCommand(cardId, "atomicity IT", "it-operator")) }
+        given()
+            .contentType(ContentType.JSON)
+            .header("X-Operator-Id", "atomicity-operator")
+            .body("""{"reason":"atomicity IT"}""")
+            .`when`().post("/api/v1/cards/$cardId/block")
+            .then().statusCode(200).body("status", equalTo("BLOCKED"))
         // Arrangement assertion: only a transition that actually happened writes anything.
-        assertThat(blocked.status).isEqualTo(CardStatus.BLOCKED)
 
         val cardAfter = cardXmin(cardId).single()
         val changed = outboxXmin(cardId, CardService.EVENT_CARD_STATUS_CHANGED)
@@ -122,24 +114,20 @@ class CardOutboxAtomicityIT {
         assertThat(outboxXmin(UUID.randomUUID(), CardService.EVENT_CARD_ISSUED)).isEmpty()
     }
 
-    private fun issue(): UUID = onVertxContext {
-        cards.issueCard(
-            IssueCardCommand(
-                idempotencyKey = "atomicity-it-${UUID.randomUUID()}",
-                partyId = UUID.randomUUID(),
-                accountId = UUID.randomUUID(),
-                productCode = "ATOMICITY-IT",
-                cardType = CardType.VIRTUAL,
-                network = CardNetwork.VISA,
-                cardholderName = "Jan Novak",
-                embossedName = "JAN NOVAK",
-                currency = "CZK",
-                dailyLimitMinorUnits = 100_000,
-                monthlyLimitMinorUnits = 1_000_000,
-                deliveryAddress = null,
-            ),
-        )
-    }.id
+    private fun issue(): UUID {
+        val partyId = UUID.randomUUID()
+        val accountId = UUID.randomUUID()
+        val response = given()
+            .contentType(ContentType.JSON)
+            .header("Idempotency-Key", "atomicity-it-${UUID.randomUUID()}")
+            .body(
+                """{"partyId":"$partyId","accountId":"$accountId","productCode":"ATOMICITY-IT","cardType":"VIRTUAL","network":"VISA","cardholderName":"Jan Novak","embossedName":"JAN NOVAK","currency":"CZK","dailyLimitMinorUnits":100000,"monthlyLimitMinorUnits":1000000}""",
+            )
+            .`when`().post("/api/v1/cards")
+            .then().statusCode(201).body("status", equalTo("ACTIVE"))
+            .extract().response()
+        return UUID.fromString(response.jsonPath().getString("id"))
+    }
 
     private fun cardXmin(cardId: UUID): List<String> = jdbc { connection ->
         connection.prepareStatement("select xmin::text from cards where id = ?").use { statement ->
