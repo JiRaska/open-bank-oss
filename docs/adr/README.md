@@ -336,7 +336,7 @@ is whether the decision stands, **Delivery** is whether it was built.
 | [0330](0330-classify-a-required-idempotency-key-on-a-money-path-post-as-a-minor-api-change.md) | Classify a required Idempotency-Key on a money-path POST as a MINOR API change | Accepted | Shipped | api-contract,governance,ci | — |
 | [0331](0331-bank-owned-synthetic-customer-identity-a-customers-realm-service-account-bound-to-one-synthetic-party.md) | Bank-owned synthetic customer identity: a customers-realm service account bound to one SYNTHETIC party | Proposed | Partial | authn,customer-edge,testing,security | — |
 | [0332](0332-cnb-settlement-and-reserve-account-in-the-ledger-chart.md) | ČNB settlement and reserve account in the ledger chart | Proposed | Planned | ledger,payments,regulatory-reporting,accounting-close | — |
-| [0333](0333-governed-customer-communication-and-capacity-aware-bulk-delivery.md) | Governed customer communication and capacity-aware bulk delivery | Proposed | Planned | notifications,capacity,compliance | — |
+| [0333](0333-governed-customer-communication-and-capacity-aware-bulk-delivery.md) | Governed customer communication and capacity-aware bulk delivery | Proposed | Partial | notifications,capacity,compliance | — |
 
 ## By tag
 
