@@ -67,6 +67,62 @@ class BulkAdmissionServiceTest {
     }
 
     @Test
+    fun `audience above configured limit holds preparation before any journey starts`(): Unit = runBlocking {
+        val approved = mockk<Campaign> {
+            every { state } returns CampaignState.ACTIVE
+            every { segmentRef } returns SegmentRef("actives", 1)
+        }
+        val campaignStore = mockk<CampaignRepository> {
+            coEvery { findById(campaignId) } returns approved
+        }
+        val registry = mockk<SegmentRegistry> {
+            coEvery { load("actives", 1) } returns mockk<Segment>()
+        }
+        val source = object : AudienceSnapshotPort {
+            override suspend fun stream(segment: Segment, accept: suspend (List<UUID>) -> Unit) {
+                accept(List(2) { UUID.randomUUID() })
+                accept(listOf(UUID.randomUUID()))
+            }
+        }
+        val service = BulkAdmissionService(campaignStore, enrolment, store, 2, true, 2).also {
+            it.segments = registry
+            it.snapshots = source
+        }
+        store.run = service.start(campaignId, "maker")
+            .copy(state = BulkRunState.PREPARING, snapshotAt = null, audienceCount = null)
+
+        service.tick()
+
+        assertThat(store.run?.state).isEqualTo(BulkRunState.HELD)
+        assertThat(store.run?.lastError).isEqualTo("AUDIENCE_LIMIT_EXCEEDED")
+        assertThat(store.run?.snapshotAt).isNull()
+        assertThat(store.audience).hasSize(2)
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `audience limit cannot exceed the supported maximum`(): Unit = runBlocking {
+        val service = BulkAdmissionService(campaigns, enrolment, store, 2, true, 100_001)
+
+        assertThatThrownBy { runBlocking { service.start(campaignId, "maker") } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(store.run).isNull()
+    }
+
+    @Test
+    fun `lowering audience limit holds a prepared run before the next page`(): Unit = runBlocking {
+        val started = BulkAdmissionService(campaigns, enrolment, store, 2, true).start(campaignId, "maker")
+        store.run = started.copy(audienceCount = 3)
+        val reduced = BulkAdmissionService(campaigns, enrolment, store, 2, true, 2)
+
+        reduced.tick()
+
+        assertThat(store.run?.state).isEqualTo(BulkRunState.HELD)
+        assertThat(store.run?.lastError).isEqualTo("AUDIENCE_LIMIT_REDUCED")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `failed snapshot is discarded and rebuilt before admission`(): Unit = runBlocking {
         val partyId = UUID.randomUUID()
         val approved = mockk<Campaign> {

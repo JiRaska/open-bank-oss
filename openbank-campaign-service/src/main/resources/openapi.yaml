@@ -453,7 +453,9 @@ paths:
       operationId: startCampaignBulkRun
       description: >-
         Requires a deployment-configured, measured global admission budget. A run admits one
-        keyset page at a time, at most once per minute across all campaigns and replicas.
+        keyset page at a time, at most once per minute across all campaigns and replicas. Mass
+        activation has a separate default-off flag. The audience snapshot is held before any
+        journey starts if it exceeds the configured ceiling, which cannot exceed 100000 parties.
       parameters:
         - $ref: '#/components/parameters/CampaignId'
       responses:

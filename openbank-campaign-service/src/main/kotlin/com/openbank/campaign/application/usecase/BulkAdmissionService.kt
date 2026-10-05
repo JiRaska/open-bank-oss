@@ -79,6 +79,8 @@ class BulkAdmissionService @Inject constructor(
     private val pageSize: Int,
     @ConfigProperty(name = "openbank.campaign.mass-activation-enabled", defaultValue = "false")
     private val massActivationEnabled: Boolean = false,
+    @ConfigProperty(name = "openbank.campaign.max-bulk-audience", defaultValue = "100000")
+    private val maxBulkAudience: Long = MAX_BULK_AUDIENCE,
 ) {
     @Inject lateinit var segments: SegmentRegistry
 
@@ -86,6 +88,8 @@ class BulkAdmissionService @Inject constructor(
     private val log = Logger.getLogger(BulkAdmissionService::class.java)
 
     private companion object {
+        const val MAX_BULK_AUDIENCE = 100_000L
+
         // The database lease lasts one hour. End work before it can be reclaimed by another pod.
         const val MAX_PAGE_MINUTES = 55L
         val PAGE_TIMEOUT_MILLIS: Long = Duration.ofMinutes(MAX_PAGE_MINUTES).toMillis()
@@ -95,6 +99,7 @@ class BulkAdmissionService @Inject constructor(
         require(actor.isNotBlank()) { "actor is required" }
         check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
+        check(maxBulkAudience in 1..MAX_BULK_AUDIENCE) { "bulk audience limit must be between 1 and 100000" }
         val campaign = campaigns.findById(campaignId) ?: throw CampaignNotFoundException(campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can start a bulk run" }
         return runs.create(Ids.newId(), campaignId, pageSize, actor)
@@ -137,8 +142,9 @@ class BulkAdmissionService @Inject constructor(
                 runs.hold(claim, "MASS_ACTIVATION_DISABLED")
                 return
             }
-            if (pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || claim.run.pageSize > pageSize) {
-                runs.hold(claim, "CAPACITY_BUDGET_REDUCED")
+            val capacityHold = capacityHoldReason(claim.run)
+            if (capacityHold != null) {
+                runs.hold(claim, capacityHold)
                 return
             }
             if (campaigns.findById(claim.run.campaignId)?.state != CampaignState.ACTIVE) {
@@ -146,15 +152,7 @@ class BulkAdmissionService @Inject constructor(
                 return
             }
             if (claim.run.state == BulkRunState.PREPARING) {
-                val campaign =
-                    campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)
-                val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
-                    ?: error("approved campaign segment is unavailable")
-                runs.clearAudience(claim)
-                withTimeout(PAGE_TIMEOUT_MILLIS) {
-                    snapshots.stream(segment) { batch -> runs.appendAudience(claim, batch) }
-                }
-                runs.completeAudience(claim)
+                prepareAudience(claim)
                 return
             }
             val page = runs.audiencePage(claim.run.id, claim.run.cursor, claim.run.pageSize)
@@ -173,6 +171,8 @@ class BulkAdmissionService @Inject constructor(
             } else {
                 runs.finish(claim, result)
             }
+        } catch (_: AudienceLimitExceededException) {
+            runs.hold(claim, "AUDIENCE_LIMIT_EXCEEDED")
         } catch (e: TimeoutCancellationException) {
             log.errorf(e, "bulk admission timed out run=%s", claim.run.id)
             runs.hold(claim, "ADMISSION_TIMEOUT")
@@ -181,4 +181,31 @@ class BulkAdmissionService @Inject constructor(
             runs.hold(claim, "ADMISSION_UNAVAILABLE")
         }
     }
+
+    private fun capacityHoldReason(run: BulkRun): String? = when {
+        pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || run.pageSize > pageSize -> "CAPACITY_BUDGET_REDUCED"
+        maxBulkAudience !in 1..MAX_BULK_AUDIENCE -> "AUDIENCE_LIMIT_INVALID"
+        (run.audienceCount ?: 0) > maxBulkAudience -> "AUDIENCE_LIMIT_REDUCED"
+        else -> null
+    }
+
+    private suspend fun prepareAudience(claim: ClaimedBulkRun) {
+        val campaign = campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)
+        val segment = segments.load(campaign.segmentRef.name, campaign.segmentRef.version)
+            ?: error("approved campaign segment is unavailable")
+        runs.clearAudience(claim)
+        var extracted = 0L
+        withTimeout(PAGE_TIMEOUT_MILLIS) {
+            snapshots.stream(segment) { batch ->
+                if (batch.size.toLong() > maxBulkAudience - extracted) {
+                    throw AudienceLimitExceededException()
+                }
+                runs.appendAudience(claim, batch)
+                extracted += batch.size
+            }
+        }
+        runs.completeAudience(claim)
+    }
 }
+
+private class AudienceLimitExceededException : IllegalStateException("bulk audience exceeds the configured limit")

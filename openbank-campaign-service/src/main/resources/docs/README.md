@@ -18,7 +18,11 @@ run and global budget leases to remain owned by the worker.
 it to a measured value from 1 to 500 only after the target environment has a capacity exercise.
 The value limits journey starts; it does not establish email/push provider capacity or the load from
 customers opening links. A run against the current analytics projection is not a frozen audience
-snapshot. ADR-0333 tracks the additional controls required before whole-audience release.
+snapshot until preparation completes. `openbank.campaign.max-bulk-audience` defaults to 100000 and
+cannot be raised above 100000. The streamed snapshot holds a larger run before starting a journey;
+resume rebuilds its partial snapshot. This audience ceiling does not prove that 100000 contacts can
+meet a delivery deadline. `openbank.campaign.mass-activation-enabled` separately defaults to false
+until the provider, destination and end-to-end capacity controls in ADR-0333 are demonstrated.
 
 ## Interface
 

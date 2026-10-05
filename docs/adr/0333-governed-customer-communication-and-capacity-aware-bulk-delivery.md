@@ -166,6 +166,12 @@ The bulk API also requires a separate `openbank.campaign.mass-activation-enabled
 defaulting to false. A positive admission budget for small scheduled sweeps cannot activate mass
 delivery by itself. Turning the flag off holds an existing run before its next page and requires
 the normal reviewed resume path after the missing controls are proven.
+The planning maximum supplied for the first mass audience is 100000 parties. The streamed snapshot
+now has a separate configurable ceiling capped at 100000; an over-limit extraction holds the run
+in PREPARING before any journey starts, and resume rebuilds the partial snapshot. This is an
+audience bound, not a measured release rate. The destination environment, completion deadline,
+click fraction and provider/landing throughput are still required for D4 preflight and cannot be
+deduced from audience size.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
