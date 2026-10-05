@@ -22,7 +22,7 @@ import javax.sql.DataSource
 
 /**
  * `POST /api/v1/domestic-payments` builds a kernel `Money` from `amount` + `currency` (#11604) and
- * requires it to be strictly positive, BEFORE the Idempotency-Key is looked up or bound. On main
+ * requires it to be strictly positive and CZK-only (#12059), BEFORE the Idempotency-Key is bound. On main
  * before this change every refused case below answered 201 and persisted a payment, an outbox
  * event and a started workflow — including negative and zero amounts and sub-haléř amounts that the
  * settlement adapter later rounded. Each refusal is pinned as the whole problem body, and is shown
@@ -45,13 +45,16 @@ class DomesticPaymentMoneyBoundaryIT {
         "10.00, XYZ, CURRENCY_UNSUPPORTED, currency",
         "10.00, CZ, CURRENCY_UNSUPPORTED, currency",
         "10.00, XAU, CURRENCY_UNSUPPORTED, currency",
+        "10.00, EUR, CURRENCY_NOT_ALLOWED, currency",
+        "10.00, USD, CURRENCY_NOT_ALLOWED, currency",
+        "10.00, gbp, CURRENCY_NOT_ALLOWED, currency",
         "1E+19, CZK, VALIDATION_ERROR, amount",
         "-5.00, CZK, VALIDATION_ERROR, amount",
         "0, CZK, VALIDATION_ERROR, amount",
         "0.00, CZK, VALIDATION_ERROR, amount",
     )
     @TestSecurity(user = ACTOR_ID, roles = ["ROLE_PAYMENTS"])
-    fun `an amount Money cannot hold or a non-positive amount is refused and consumes nothing`(
+    fun `an invalid amount or a currency outside the domestic scheme is refused and consumes nothing`(
         amount: String,
         currency: String,
         code: String,
@@ -115,6 +118,11 @@ class DomesticPaymentMoneyBoundaryIT {
                 "urn:openbank:error:currency-unsupported",
                 "The currency is not supported",
                 "Currency must be an ISO 4217 code with a minor unit",
+            )
+            "CURRENCY_NOT_ALLOWED" -> Triple(
+                "urn:openbank:error:currency-not-allowed",
+                "The currency is not allowed by the payment scheme",
+                "Czech domestic payments accept CZK only",
             )
             else -> Triple(
                 "urn:openbank:error:validation-error",
