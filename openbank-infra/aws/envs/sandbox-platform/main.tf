@@ -99,13 +99,11 @@ resource "helm_release" "karpenter" {
     }
   }
 
-  name                = "karpenter"
-  namespace           = "kube-system"
-  repository          = "oci://public.ecr.aws/karpenter"
-  repository_username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
-  repository_password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
-  chart               = "karpenter"
-  version             = var.karpenter_version
+  name       = "karpenter"
+  namespace  = "kube-system"
+  repository = "oci://public.ecr.aws/karpenter"
+  chart      = "karpenter"
+  version    = var.karpenter_version
 
   set = [
     # Single replica for sandbox FinOps; prod should run 2 for HA.

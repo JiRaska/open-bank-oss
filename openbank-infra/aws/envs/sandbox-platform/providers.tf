@@ -76,6 +76,13 @@ provider "helm" {
       args        = ["eks", "get-token", "--cluster-name", local.cluster_name, "--region", local.region]
     }
   }
+  # Keep the short-lived OCI token in provider configuration, not in the
+  # Karpenter release state where each refresh appears as a chart change.
+  registries = [{
+    url      = "oci://public.ecr.aws"
+    username = data.aws_ecrpublic_authorization_token.karpenter_chart.user_name
+    password = data.aws_ecrpublic_authorization_token.karpenter_chart.password
+  }]
 }
 
 provider "kubectl" {
