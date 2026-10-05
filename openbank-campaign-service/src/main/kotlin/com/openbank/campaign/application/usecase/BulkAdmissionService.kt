@@ -33,6 +33,8 @@ data class BulkRun(
     val createdBy: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+    val lastResumedBy: String? = null,
+    val lastResumedAt: Instant? = null,
 )
 
 data class ClaimedBulkRun(val run: BulkRun, val leaseOwner: UUID)

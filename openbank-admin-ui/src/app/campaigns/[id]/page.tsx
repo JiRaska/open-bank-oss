@@ -88,6 +88,8 @@ interface BulkRun {
   failures: number
   pageSize: number
   lastError: string | null
+  lastResumedBy?: string | null
+  lastResumedAt?: string | null
   updatedAt: string
 }
 
@@ -958,6 +960,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                     </div>
                     <p>{t('Zařazeno', 'Admitted')}: {run.admitted.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')} · {t('Chyby', 'Failures')}: {run.failures}</p>
                     <p className="text-xs text-muted-foreground">{t('Limit', 'Budget')}: {run.pageSize} {t('za minutu', 'per minute')}{run.lastError ? ` · ${run.lastError}` : ''}</p>
+                    {run.lastResumedBy && <p className="text-xs text-muted-foreground">{t('Obnovil', 'Resumed by')}: {run.lastResumedBy}{run.lastResumedAt ? ` · ${new Date(run.lastResumedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}` : ''}</p>}
                     {run.state === 'HELD' && c.state === 'ACTIVE' && (
                       <button type="button" className="mt-2 rounded border px-3 py-1" disabled={resumingRun === run.id} onClick={() => resumeBulkRun(run.id)}>
                         {t('Obnovit po kontrole', 'Resume after review')}

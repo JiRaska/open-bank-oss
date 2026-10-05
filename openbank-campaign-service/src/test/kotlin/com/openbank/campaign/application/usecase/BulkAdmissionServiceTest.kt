@@ -72,6 +72,8 @@ class BulkAdmissionServiceTest {
         assertThatThrownBy { runBlocking { service.resume(started.id, "maker") } }
             .isInstanceOf(IllegalStateException::class.java)
         service.resume(started.id, "checker")
+        assertThat(store.run?.lastResumedBy).isEqualTo("checker")
+        assertThat(store.run?.lastResumedAt).isNotNull()
         coEvery { enrolment.enrolPage(campaignId, first, 2) } returns
             EnrolmentPageOutcome(1, 0, UUID.randomUUID(), true)
 
@@ -167,6 +169,7 @@ class BulkAdmissionServiceTest {
 
         override suspend fun resume(id: UUID, actor: String): BulkRun? = run?.takeIf {
             it.id == id && it.state == BulkRunState.HELD && it.createdBy != actor
-        }?.copy(state = BulkRunState.RUNNING, lastError = null)?.also { run = it }
+        }?.copy(state = BulkRunState.RUNNING, lastError = null, lastResumedBy = actor, lastResumedAt = Instant.now())
+            ?.also { run = it }
     }
 }

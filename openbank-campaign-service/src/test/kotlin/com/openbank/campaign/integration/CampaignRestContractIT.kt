@@ -527,13 +527,15 @@ class CampaignRestContractIT {
 
         val conflictCampaignId = UUID.randomUUID()
         insertCampaignForSendLog(conflictCampaignId)
-        insertHeldBulkRun(conflictCampaignId)
+        val heldRunId = insertHeldBulkRun(conflictCampaignId)
         When {
             post("/api/v1/campaigns/$conflictCampaignId/bulk-runs")
         } Then {
             statusCode(409)
             body("error", equalTo("campaign already has an active bulk run"))
         }
+
+        assertResumedAudit(conflictCampaignId, heldRunId)
 
         dataSource.connection.use { connection ->
             connection.prepareStatement("SELECT page_size FROM campaign_bulk_runs WHERE id = ?").use { statement ->
@@ -567,7 +569,29 @@ class CampaignRestContractIT {
         }
     }
 
-    private fun insertHeldBulkRun(campaignId: UUID) {
+    private fun assertResumedAudit(campaignId: UUID, runId: UUID) {
+        When {
+            post("/api/v1/campaigns/$campaignId/bulk-runs/$runId/resume")
+        } Then {
+            statusCode(200)
+            body("state", equalTo("RUNNING"))
+            body("lastResumedBy", equalTo("maker@openbank.test"))
+        }
+        dataSource.connection.use { connection ->
+            connection.prepareStatement("SELECT last_resumed_by, last_resumed_at FROM campaign_bulk_runs WHERE id = ?")
+                .use { statement ->
+                    statement.setObject(1, runId)
+                    statement.executeQuery().use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getString(1)).isEqualTo("maker@openbank.test")
+                        assertThat(rows.getObject(2)).isNotNull()
+                    }
+                }
+        }
+    }
+
+    private fun insertHeldBulkRun(campaignId: UUID): UUID {
+        val runId = UUID.randomUUID()
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
@@ -576,12 +600,13 @@ class CampaignRestContractIT {
                 VALUES (?, ?, 'HELD', 1, ?, now(), now())
                 """.trimIndent(),
             ).use { statement ->
-                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(1, runId)
                 statement.setObject(2, campaignId)
                 statement.setString(3, "test-maker")
                 statement.executeUpdate()
             }
         }
+        return runId
     }
 
     /**

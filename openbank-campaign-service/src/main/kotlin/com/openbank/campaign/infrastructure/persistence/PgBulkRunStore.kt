@@ -54,7 +54,12 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
     ).execute(Tuple.of(id)).awaitSuspending().firstOrNull()?.toBulkRun()
 
     override suspend fun list(campaignId: UUID): List<BulkRun> = pool.preparedQuery(
-        "SELECT * FROM campaign_bulk_runs WHERE campaign_id = $1 ORDER BY created_at DESC LIMIT 20",
+        """
+        SELECT * FROM campaign_bulk_runs WHERE campaign_id = $1
+        ORDER BY CASE state WHEN 'RUNNING' THEN 0 WHEN 'HELD' THEN 1 ELSE 2 END,
+                 created_at DESC
+        LIMIT 20
+        """.trimIndent(),
     ).execute(Tuple.of(campaignId)).awaitSuspending().map { it.toBulkRun() }
 
     /**
@@ -155,7 +160,8 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
     override suspend fun resume(id: UUID, actor: String): BulkRun? = pool.preparedQuery(
         """
         UPDATE campaign_bulk_runs
-        SET state = 'RUNNING', last_error = NULL, updated_at = now()
+        SET state = 'RUNNING', last_error = NULL, last_resumed_by = $2,
+            last_resumed_at = now(), updated_at = now()
         WHERE id = $1 AND state = 'HELD' AND created_by <> $2
         RETURNING *
         """.trimIndent(),
@@ -174,4 +180,6 @@ private fun Row.toBulkRun(): BulkRun = BulkRun(
     createdBy = getString("created_by"),
     createdAt = getOffsetDateTime("created_at").toInstant(),
     updatedAt = getOffsetDateTime("updated_at").toInstant(),
+    lastResumedBy = getString("last_resumed_by"),
+    lastResumedAt = getOffsetDateTime("last_resumed_at")?.toInstant(),
 )

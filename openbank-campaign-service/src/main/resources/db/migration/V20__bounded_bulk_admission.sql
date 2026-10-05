@@ -14,6 +14,8 @@ CREATE TABLE campaign_bulk_runs (
     lease_owner UUID,
     last_error TEXT,
     created_by TEXT NOT NULL,
+    last_resumed_by TEXT,
+    last_resumed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL
 );

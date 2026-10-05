@@ -863,6 +863,8 @@ components:
         failures: { type: integer, format: int64 }
         lastError: { type: string, nullable: true }
         createdBy: { type: string }
+        lastResumedBy: { type: string, nullable: true }
+        lastResumedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
         updatedAt: { type: string, format: date-time }
     OutcomeCount:
