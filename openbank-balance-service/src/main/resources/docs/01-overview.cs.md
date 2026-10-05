@@ -63,7 +63,9 @@ Větev notification-service je cílový návrh z ADR-0333, nikoli nasazený konz
 ## Konzumenty našich eventů (`openbank.balance.events`)
 
 - `account-service` — denormalizovaný cache balance pro UI
-- `notification-service` — `balance.low.v1` event, push klientovi
+- Volitelný hlídač nízkého zůstatku v balance-service používá `BALANCE_UPDATED` jen jako podnět,
+  ověří aktuální disponibilní zůstatek a přes transakční outbox odešle deduplikovaný požadavek
+  `LOW_BALANCE_ALERT` do zákaznického inboxu. Topic `balance.low.v1` ani přímý push neexistuje.
 - `fraud-detection` (plánováno) — anomaly detection nad rychlostí změn
 
 ## Hodnota pro byznys

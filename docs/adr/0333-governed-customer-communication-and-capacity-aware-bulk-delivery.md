@@ -1,7 +1,7 @@
 ---
 date: 2026-10-05
 decision-status: proposed
-delivery-status: planned
+delivery-status: partial
 authors: [OpenBank contributors]
 supersedes: []
 superseded-by: []
@@ -137,7 +137,7 @@ idempotency keys and tests. Digests are a later distinct template, not an implic
 | Payment settled or failed | Payment/transaction domain | Authenticated inbox, optional generic push | Account activity preference; failures become required service notices only after compliance review |
 | Statement ready | Document domain | Authenticated inbox with app deep link | Required delivery follows the product/legal contract; promotional cap does not apply |
 | Consent or delegation changed | Owning consent/delegation domain | Generic push and authenticated detail | Security/authorisation; required controls cannot be muted inadvertently |
-| Low balance threshold crossed | Balance domain with customer alert settings | Generic push and authenticated account view | Explicit account threshold opt-in, cool-down and coalescing |
+| Low balance threshold crossed | Balance domain with customer alert settings | Authenticated inbox; generic push and account deep link require a later approved rollout | Explicit account threshold opt-in, cool-down and coalescing |
 | Service interruption | Incident communications owner | Inbox plus measured email/push waves | Service notice classification, separate approval and capacity plan |
 | Product offer | Campaign domain | Approved campaign channels | Marketing consent, shared fatigue reservation and spare capacity |
 
@@ -150,6 +150,16 @@ idempotency key. Visibility is not a read or a push acceptance. A technical bala
 cannot become a customer message merely by adding an enum value.
 
 ## Delivery record
+
+Balance-service now has a customer-owned, per-pocket low-balance preference, a current-state
+threshold decision with hysteresis and a 24-hour cooldown, and a transactional outbox intent
+addressed to notification-service's `INBOX` route. Customer-edge exposes the owner-only setting;
+notification-service owns the reviewed template identity and renders generic copy with no amount.
+The consumer uses a balance event only to wake evaluation, then locks and reads the current
+spendable pocket. The feature defaults off. Real HTTP, PostgreSQL and Kafka testing verifies one
+intent on a downward crossing and no duplicate after another low-balance movement; ownership,
+domain and authorisation tests cover the other guards. Generic push, authenticated account deep
+link, contact-history projection and target-environment rollout evidence remain outstanding.
 
 The first PR for this ADR adds bounded campaign admission with a database lease and a default-off
 budget, a staff-managed notification copy registry with separate maker and publisher, and an

@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: balance-service
     app.kubernetes.io/part-of: balances
   annotations:
-    openbank.tech/policy-checksum: "44770914807d8999"
+    openbank.tech/policy-checksum: "6ce88a5a439ddbb3"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -620,6 +620,7 @@ data:
     #   balance.overdraftLimit      — set the arranged overdraft limit (#accountId, supervisor-only)
     #   balance.reconciliation.read — latest control-account tie-out report
     #   balance.reconciliation.run  — on-demand tie-out re-run
+    #   balance.alert.read/update  — customer-edge owner-scoped optional alert setting
     #   balance.approval.decide     — a DIFFERENT operator decides a paused credit/debit four-eyes
     #                                 approval (#id, ADR-0155). Granted via rules.yaml's
     #                                 role_action_matrix (ROLE_OPERATOR/ROLE_ADMIN) + base rest.rego's
@@ -659,8 +660,8 @@ data:
     # (balance.credit/debit) — an unbounded privilege escalation, the same class fixed for interest
     # in #3698 and documented verbatim in dispute_rest_ext.rego. The shared client's legitimate
     # writes keep their own identity-scoped rule below (service-balance-m2m); the edge client has NO
-    # legitimate write caller (fleet audit: customer-edge only ever GETs /api/v1/balances/{id},
-    # CustomerEdgeResource.kt) and is additionally vetoed by the prohibition at the bottom of this
+    # legitimate money-moving write caller. Its optional alert setting uses a separate allow reason
+    # and is additionally vetoed for other write actions by the prohibition at the bottom of this
     # file, which beats the rules.yaml role_action_matrix grant that would otherwise still admit it
     # via base matrix-allows.
     allowed_reasons contains "operator-balance-write" if {
@@ -765,6 +766,20 @@ data:
     		"balance.debit",
     		"balance.initialize",
     	}
+    }
+
+    # Customer-edge derives the party id from the customer JWT and passes it in the trusted header.
+    # The resource rechecks account-service ownership. These actions change only an optional alert
+    # preference; they confer no ability to move or reserve money.
+    allowed_reasons contains "edge-owned-balance-alert" if {
+    	input.principal.type == "HUMAN"
+    	input.principal.id == "service-account-openbank-edge"
+    	input.action in {"balance.alert.read", "balance.alert.update"}
+    }
+
+    prohibited if {
+    	input.action in {"balance.alert.read", "balance.alert.update"}
+    	input.principal.id != "service-account-openbank-edge"
     }
 
     # Fail-closed veto for the customer-edge M2M identity on every balance write (#3734). The

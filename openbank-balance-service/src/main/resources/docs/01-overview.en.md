@@ -63,7 +63,9 @@ The notification branch is a target design from ADR-0333, not a deployed consume
 ## Consumers of our events (`openbank.balance.events`)
 
 - `account-service` — denormalised cache balance for the UI
-- `notification-service` — `balance.low.v1` event, push to the client
+- The opt-in low-balance evaluator in balance-service reads `BALANCE_UPDATED` as a wake-up,
+  checks the current spendable pocket, and sends a deduplicated `LOW_BALANCE_ALERT` inbox request
+  through the transactional outbox. There is no `balance.low.v1` topic or direct push route.
 - `fraud-detection` (planned) — anomaly detection on change-rate
 
 ## Business value

@@ -459,3 +459,30 @@ columns), so a stored row cannot fail to load; a sandbox read-only check on 2026
 off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
 `ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
 No new endpoint, caller, privilege or event. Rollback: revert the commit.
+
+### 2026-10-06 — Customer opt-in low-balance alerts (ADR-0333)
+
+The customer-edge checks direct account ownership before reading or writing one pocket's alert
+threshold; a delegated balance reader cannot opt in the owner. Balance-service independently checks
+account-service ownership against the JWT-derived party header. OPA grants the new alert actions
+only to the edge service identity, with a deny rule for every other identity. Threshold and rearm
+margin pass the kernel `Money` parser before persistence. The setting is absent by default, and the
+event evaluator is separately disabled by default during rollout.
+
+`BALANCE_UPDATED` is only a wake-up. The evaluator first finds an enabled setting, checks current
+ownership, then locks the current pocket and setting in a fixed order. It computes effective
+available funds after future-dated credits, applies downward crossing, hysteresis and cooldown,
+and commits the state transition with a stable-key inbox request in the same balance outbox
+transaction. Late or replayed balance events therefore do not reuse their stale amount or create a
+second alert. The inbox copy includes no amount, account number or link; the customer reads current
+balance through the authenticated account route. An ownership mismatch produces no alert. Broker
+or notification-service failure leaves the outbox retryable; the notification consumer deduplicates
+the stable request key.
+
+Residual risk: account ownership is checked immediately before the balance transaction but is not
+locked across services, so a transfer in that interval can race the decision. The customer-facing
+inbox still enforces party-scoped reads. The first rollout uses inbox only; a generic push and
+verified account deep link require a separate app-route contract and provider capacity proof.
+Rollback: disable `openbank.balance.low-alerts-enabled`, let pending outbox requests drain or
+reconcile them, then revert code. The preference table can be retained for later restoration; the
+V16 migration contains its explicit drop sequence.

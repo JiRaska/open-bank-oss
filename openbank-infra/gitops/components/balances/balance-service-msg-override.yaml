@@ -33,3 +33,4 @@ data:
     config_ordinal=500
     mp.messaging.incoming.ledger-events-in.group.id=openbank-balance-service
     mp.messaging.incoming.balance-init-in.group.id=openbank-balance-service
+    mp.messaging.incoming.balance-alerts-in.group.id=openbank-balance-low-alerts

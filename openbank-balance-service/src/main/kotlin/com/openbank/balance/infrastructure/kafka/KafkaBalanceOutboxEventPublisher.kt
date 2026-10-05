@@ -3,6 +3,7 @@
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 package com.openbank.balance.infrastructure.kafka
 
+import com.openbank.balance.application.usecase.LowBalanceAlertService
 import com.openbank.libs.persistence.outbox.OutboxEntry
 import com.openbank.libs.persistence.outbox.OutboxEventPublisher
 import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
@@ -15,8 +16,10 @@ import org.eclipse.microprofile.reactive.messaging.Channel
 import org.eclipse.microprofile.reactive.messaging.Message
 
 @ApplicationScoped
-class KafkaBalanceOutboxEventPublisher(@Channel("balance-outbox-out") private val emitter: MutinyEmitter<String>) :
-    OutboxEventPublisher {
+class KafkaBalanceOutboxEventPublisher(
+    @Channel("balance-outbox-out") private val emitter: MutinyEmitter<String>,
+    @Channel("notification-requests-out") private val notificationEmitter: MutinyEmitter<String>,
+) : OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
         val kafkaHeaders = RecordHeaders()
@@ -25,6 +28,11 @@ class KafkaBalanceOutboxEventPublisher(@Channel("balance-outbox-out") private va
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+        val selected = if (entry.eventType == LowBalanceAlertService.LOW_BALANCE_REQUEST) {
+            notificationEmitter
+        } else {
+            emitter
+        }
+        selected.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
     }
 }

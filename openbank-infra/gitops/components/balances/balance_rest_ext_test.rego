@@ -145,6 +145,20 @@ test_edge_may_read if {
 	decision.allow == true
 }
 
+test_edge_may_manage_own_balance_alert if {
+	read := rest.allow with input as {"principal": edge, "action": "balance.alert.read"}
+		with data.rules as rules_mock
+	update := rest.allow with input as {"principal": edge, "action": "balance.alert.update"}
+		with data.rules as rules_mock
+	read.allow == true
+	update.allow == true
+}
+
+test_other_service_may_not_change_balance_alert if {
+	rest.allow == false with input as {"principal": services_m2m, "action": "balance.alert.update"}
+		with data.rules as rules_mock
+}
+
 # Known-positive that the base policy and the extension are both loaded: a negative suite would
 # pass vacuously without them. operator-balance-write is the EXTENSION's reason, so its presence
 # proves the ext; matrix-allows proving the base+data wiring comes from test_edge_may_read above

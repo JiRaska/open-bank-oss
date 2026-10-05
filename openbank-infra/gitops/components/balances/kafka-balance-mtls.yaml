@@ -29,6 +29,18 @@ spec:
           type: topic
           name: openbank.balance.events
           patternType: literal
+        operations: [Read, Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.notification.requests
+          patternType: literal
+        operations: [Write, Describe]
+        host: "*"
+      - resource:
+          type: topic
+          name: openbank.dlq.balance.balance-alerts-in
+          patternType: literal
         operations: [Write, Describe]
         host: "*"
       - resource:
@@ -46,6 +58,12 @@ spec:
       - resource:
           type: group
           name: openbank-balance-service
+          patternType: literal
+        operations: [Read]
+        host: "*"
+      - resource:
+          type: group
+          name: openbank-balance-low-alerts
           patternType: literal
         operations: [Read]
         host: "*"
