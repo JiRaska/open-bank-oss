@@ -152,6 +152,29 @@ class CardAuthorizationOutboxIT {
         assertThat(held).isEqualTo(25_000)
         assertThat(events).isEqualTo(1)
         assertThat(eventType).isEqualTo("card.authorised.v1")
+
+        // Presence alone would pass if the authorisation and event committed separately.
+        // PostgreSQL assigns the same xmin to row versions written by one transaction.
+        val authorizationWriter = query("SELECT xmin::text FROM card_authorizations WHERE id = '$id'") {
+            it.getString(1)
+        }
+        val eventWriter = query(
+            "SELECT xmin::text FROM card_outbox WHERE aggregate_id = '$id' AND event_type = 'card.authorised.v1'",
+        ) { it.getString(1) }
+        assertThat(eventWriter).isNotBlank().isEqualTo(authorizationWriter)
+
+        // A separate HTTP request must have a different writer; this checks that the oracle
+        // distinguishes transactions rather than merely finding two existing rows.
+        val otherId = authorize(10_000, "it-atomicity-control-1")
+        val otherWriter = query("SELECT xmin::text FROM card_authorizations WHERE id = '$otherId'") {
+            it.getString(1)
+        }
+        assertThat(otherWriter).isNotBlank().isNotEqualTo(authorizationWriter)
+        assertThat(
+            query("SELECT count(*) FROM card_outbox WHERE aggregate_id = '${UUID.randomUUID()}'") {
+                it.getLong(1)
+            },
+        ).isZero()
     }
 
     @Test
