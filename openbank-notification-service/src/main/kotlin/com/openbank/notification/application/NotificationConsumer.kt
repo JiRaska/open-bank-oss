@@ -1175,6 +1175,10 @@ class NotificationConsumer @Inject constructor(
                     "<h2>Transaction Failed</h2><p>Your transaction of <b>${vars.v("amount")} " +
                     "${vars.v("currency")}</b> could not be completed. Reason: ${vars.v("reason")}. " +
                     "No funds have left your account.</p>"
+            NotificationTemplate.LOW_BALANCE_ALERT ->
+                "Low balance alert" to
+                    "<p>Your available balance fell below a threshold you set. " +
+                    "Open your authenticated account view for the current balance.</p>"
             NotificationTemplate.KYC_APPROVED ->
                 "Identity verification approved" to
                     "<h2>KYC Approved</h2><p>Your identity has been verified. You can now use all OpenBank services.</p>"

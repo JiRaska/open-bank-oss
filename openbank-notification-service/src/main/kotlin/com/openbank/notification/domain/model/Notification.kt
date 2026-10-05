@@ -35,6 +35,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
     ACCOUNT_FROZEN(setOf("accountNumber", "reason")),
     TRANSACTION_COMPLETED(setOf("amount", "currency")),
     TRANSACTION_FAILED(setOf("amount", "currency", "reason")),
+    LOW_BALANCE_ALERT(emptySet()),
     KYC_APPROVED(emptySet()),
     KYC_REJECTED(setOf("reason")),
     CONSENT_GRANTED(setOf("scope")),
@@ -155,6 +156,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             ACCOUNT_OPENED,
             ACCOUNT_CLOSED,
             TRANSACTION_COMPLETED,
+            LOW_BALANCE_ALERT,
             KYC_APPROVED,
             CONSENT_GRANTED,
             CONSENT_REVOKED,
@@ -196,7 +198,7 @@ enum class NotificationTemplate(val variables: Set<String>) {
             // muting it would silently stall every payment that needs this person's signature.
             APPROVAL_REQUIRED,
             -> NotificationCategory.SECURITY
-            TRANSACTION_COMPLETED, TRANSACTION_FAILED,
+            TRANSACTION_COMPLETED, TRANSACTION_FAILED, LOW_BALANCE_ALERT,
             APPROVAL_COMPLETED, APPROVAL_REJECTED, APPROVAL_EXPIRED, PAYMENT_RELEASE_FAILED,
             -> NotificationCategory.PAYMENTS
             ACCOUNT_OPENED, ACCOUNT_CLOSED, WELCOME -> NotificationCategory.PRODUCT

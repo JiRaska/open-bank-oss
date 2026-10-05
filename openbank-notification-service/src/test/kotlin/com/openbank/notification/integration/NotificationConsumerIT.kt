@@ -208,6 +208,26 @@ class NotificationConsumerIT {
     }
 
     @Test
+    fun `low balance alert is visible with generic copy and no amount`() {
+        val partyId = UUID.randomUUID()
+        val request = NotificationRequest(
+            partyId = partyId,
+            channel = NotificationChannel.INBOX,
+            template = NotificationTemplate.LOW_BALANCE_ALERT,
+            recipient = partyId.toString(),
+            variables = emptyMap(),
+            deduplicationKey = UUID.randomUUID(),
+        )
+        consumeAndAwait(request)
+        consumeAndAwait(request)
+
+        assertThat(countFor(partyId)).isEqualTo(1)
+        assertThat(statusFor(partyId)).isEqualTo("VISIBLE")
+        assertThat(bodyFor(partyId)).contains("threshold you set")
+        assertThat(bodyFor(partyId)).doesNotContain("CZK", "100")
+    }
+
+    @Test
     fun `inbox rejects a request without a stable idempotency key`() {
         val partyId = UUID.randomUUID()
         assertThat(

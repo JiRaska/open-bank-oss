@@ -69,6 +69,7 @@ data class ManagedNotificationTemplate(
             NotificationTemplate.ACCOUNT_CLOSED,
             NotificationTemplate.TRANSACTION_COMPLETED,
             NotificationTemplate.TRANSACTION_FAILED,
+            NotificationTemplate.LOW_BALANCE_ALERT,
         )
     }
 }
