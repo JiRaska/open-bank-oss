@@ -26,11 +26,13 @@ component, not per platform:
   extends to **5 years from that release's date**, aligned with the CRA default
   (Regulation (EU) 2024/2847, Art. 13(8)) — with free security updates for the whole
   period.
-- **End-of-support is data, not prose:** every release carries its evidence bundle
-  (`.evidence.json`, see the CRA section below); the end-of-support date of a release
-  is derived mechanically from the two rules above against its release date, and the
-  formal EOS field will be added to the evidence bundle before the first 1.x release
-  (tracked in #8488).
+- **End-of-support is data, not prose:** the release pipeline attaches an evidence
+  bundle (`.evidence.json`, see the CRA section below). Its `support` block is derived
+  mechanically from the rules above against the release date. A 1.x release carries
+  a determined `end_of_support`; a 0.x release carries an open-ended
+  `end_of_support_floor` until its superseding release exists. For releases with
+  a signed bundle, the public GitHub Release page displays its support value and
+  links to the bundle.
 
 ## Reporting a Vulnerability
 
@@ -135,4 +137,3 @@ If you are deploying OpenBank in any non-development environment, **you are resp
 - Obtaining all required banking, payment, and data-protection authorisations in your jurisdiction.
 
 The OpenBank maintainers are **not responsible** for security incidents in production deployments operated by third parties.
-

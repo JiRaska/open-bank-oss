@@ -3645,24 +3645,23 @@ gates:
     selftest_inputs: [".github/scripts/check-security-txt.py"]
     run: |
       python3 .github/scripts/check-security-txt.py
-  # End-of-support is DERIVED from SECURITY.md's policy and carried in every release's evidence
-  # bundle (#9881). The derivation has two ways to be quietly wrong — taking the build time instead
-  # of the release date, and inventing the "90 days after supersession" bound for a beta release
-  # that has no successor yet — and nothing else would ever notice either; this runs its table.
+  # End-of-support is DERIVED from SECURITY.md's policy and carried in each release's evidence
+  # bundle (#9881). The derivation must use release time, leave beta's supersession bound open,
+  # and render that same value on the public release page without replacing changelog text.
   - id: release-support-period-derivation
     selftest_exempt: "is-a-test-suite"
-    name: "release end-of-support is derived from the policy, not invented (#9881, enforced)"
+    name: "release support is derived and published from signed evidence (#9881, enforced)"
     group: supplychain
     mode: enforced
-    budget_seconds: 10   # pure date arithmetic over a fixture table
+    budget_seconds: 10   # pure date arithmetic and release-body fixtures
     rationale: >-
-      The end-of-support date in a release's evidence bundle is a public CRA commitment computed
-      by a script no other check reads; a wrong rule would publish wrong dates on every release
-      while every release still verified green.
+      The support date in a release's evidence bundle is a public CRA commitment; the release
+      page must render the signed value without inventing a beta end date or erasing changelog.
     review_after: 2027-03-13
     min_subjects: 6   # 8 derivation cases today (2026-09-13)
     run: |
       python3 .github/scripts/release_support_period.py --self-test
+      python3 .github/scripts/render-release-support.py --self-test
 
   - id: pacticipant-matches-module
     name: "pacticipant name is a module directory (Pact webhook contract)"

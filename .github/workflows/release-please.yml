@@ -556,6 +556,25 @@ jobs:
               upload_asset "$upurl" "$tag" "$f"
             done
             echo "Attached signed evidence bundle to release $tag: $assets"
+
+            # The public release page is the recipient-facing view of the signed bundle's
+            # support field (#9881). Read the just-uploaded evidence JSON; never calculate
+            # another date here. A rerun replaces only its marked block and leaves the
+            # release-please changelog intact.
+            release_json="$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${tag}")"
+            release_id="$(jq -er '.id' <<< "$release_json")"
+            printf '%s' "$release_json" | python3 .github/scripts/render-release-support.py \
+              "${tag}.evidence.json" --repository "$GITHUB_REPOSITORY" \
+              > "${tag}.support-patch.json"
+            curl -fsSL -X PATCH -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'Content-Type: application/json' \
+              --data-binary @"${tag}.support-patch.json" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+              > /dev/null
+            echo "Published support period from signed evidence on release $tag"
             echo "$tag" >> provenance_ok.tags
           done < released.tsv
 
