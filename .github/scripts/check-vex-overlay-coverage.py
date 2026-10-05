@@ -77,11 +77,6 @@ NO_OVERLAY_YET: dict[str, str] = {
     "wealth-service": "#9811 - released in #9771 (ADR-0301 D1) and deployed nowhere, moves no "
     "money and has no ingress, so nothing is exposed while the dispositions are verified "
     "against this service's own resolved runtime classpath rather than copied from a sibling.",
-    "loyalty-service": "#8830 - released in #8807 and not deployed anywhere, so nothing is exposed "
-                       "today. Its dependency set is the ordinary Quarkus reactive stack and is "
-                       "largely shared with services that already have overlays, but nobody has "
-                       "diffed it yet. Writing dispositions from that assumption rather than from "
-                       "the resolved artifacts is the fabrication this gate's own header refuses.",
     "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
                 "of the JVM dependency evidence used for the other three reaches it and there is "
                 "no npm triage material in the repository to write a disposition from.",
