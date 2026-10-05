@@ -82,9 +82,9 @@ NO_OVERLAY_YET: dict[str, str] = {
                        "largely shared with services that already have overlays, but nobody has "
                        "diffed it yet. Writing dispositions from that assumption rather than from "
                        "the resolved artifacts is the fabrication this gate's own header refuses.",
-    "admin-ui": "#6719 - released component, no triage overlay written yet. Node/Next.js, so none "
-                "of the JVM dependency evidence used for the other three reaches it and there is "
-                "no npm triage material in the repository to write a disposition from.",
+    "admin-ui": "#12179 - released Node/Next.js component without a VEX overlay. A current-source "
+                "production lockfile SBOM scan found no Node findings, but the exact packaged "
+                "image and its OS layers have not been reconciled; no VEX disposition is claimed.",
     "card-processing-service": "#9849 - new service (ADR-0283 phase 1), no VEX overlay written yet. "
                                "Its dependency set is the ordinary reactive Quarkus stack largely "
                                "shared with services that already carry overlays, but 'largely "
