@@ -385,6 +385,10 @@ jobs:
   # ---------------------------------------------------------------------------
   gates:
     name: gates (${{ matrix.slug }})
+    permissions:
+      actions: read       # readiness R8 verifies the exact api-fuzz run artifact
+      contents: read
+      pull-requests: read
     needs: agent-admission
     if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest

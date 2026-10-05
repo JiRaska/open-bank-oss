@@ -55,10 +55,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import pathlib
 import re
 import sys
 import tempfile
+from collections.abc import Callable
+
+from readiness_fuzz_evidence import EvidenceError, github_api, verify_fuzz_ops
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 FILE_REL = "openbank-libs/governance/attestations.yaml"
@@ -295,6 +299,7 @@ def check(
     today: dt.date,
     warn_within: int = DEFAULT_WARN_WITHIN_DAYS,
     stale_fail_days: int = DEFAULT_STALE_FAIL_DAYS,
+    fuzz_fetch: Callable[[str], bytes] = github_api,
 ) -> tuple[list[str], list[str], int]:
     """Return (errors, warnings, n_attestations)."""
     path = repo / file_rel
@@ -468,6 +473,27 @@ def check(
                         f"the run's fuzz-reports/<svc>-ops*.json (#9673)"
                     )
                     continue
+                # Only a live claim can raise readiness. Historical expired records follow
+                # the existing TTL/decay policy; their 30-day Actions artifact may be gone.
+                # The enforced gate always reads FILE_REL; synthetic att.yaml fixtures below
+                # exercise the older offline rules, with dedicated R8c fixtures at FILE_REL.
+                if file_rel == FILE_REL and "not_fuzzable" not in f and (today - date).days <= ttl:
+                    if f["by"] != "ci-schemathesis":
+                        errors.append(
+                            f"{where}: `{debt_key}` has no artifact verifier for `{f['by']}`; "
+                            "a CI ops count cannot be self-asserted"
+                        )
+                        continue
+                    try:
+                        verify_fuzz_ops(
+                            service=svc, ops=ops, attested=date, ttl_days=ttl,
+                            today=today, ref=f["ref"],
+                            repository=os.environ.get("GITHUB_REPOSITORY", "JiRaska/open-bank-oss"),
+                            fetch=fuzz_fetch,
+                        )
+                    except EvidenceError as exc:
+                        errors.append(f"{where}: `{debt_key}` has unverified fuzz ops: {exc}")
+                        continue
 
         # Freshness. Exact calendar arithmetic, deliberately: the collector approximates a
         # month as 30 days, which lets a TTL run a day or two past its own expiry.
