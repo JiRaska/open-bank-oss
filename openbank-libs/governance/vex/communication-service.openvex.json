@@ -1,0 +1,29 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://open-bank.tech/vex/communication-service",
+  "author": "OpenBank Security",
+  "version": 1,
+  "notes": [
+    "Verified 2026-10-05 against current-source communication-service runtimeClasspath, its built fast-jar and its 289-component CycloneDX SBOM. Trivy 0.74.0 reported CVE-2025-14969 on the exact Hibernate Reactive artifact. This review does not cover the deployed container's OS packages; retain their findings under investigation until that image is scanned. Reassess on artifact or scanner-database changes."
+  ],
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2025-14969"
+      },
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "Communication-service's built fast-jar contains org.hibernate.reactive:hibernate-reactive-core 3.4.2.Final with SHA-256 7e7443b2b5313b043af3d9448499f44059fa77729ddb9e369c4a2b9a9cea075c, matching gradle/verification-metadata.xml. The same exact JAR bytecode was checked against upstream fix cd7f104e10de918004707ca0e26e3840976f780a: SqlClientConnection.close() first invokes validateNoTransactionInProgressOnClose(); that guard checks SqlConnection.transaction(), rolls back an open transaction and returns a failed validation stage; the close continuation still closes the underlying SqlConnection. The advisory's <4.2.1 range spans parallel release lines; the vulnerable close implementation is absent from this resolved artifact.",
+      "timestamp": "2026-10-05T22:48:36Z",
+      "products": [
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final?type=jar"
+        },
+        {
+          "@id": "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final"
+        }
+      ]
+    }
+  ],
+  "timestamp": "2026-10-05T22:48:36Z"
+}
