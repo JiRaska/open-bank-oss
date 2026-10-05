@@ -80,6 +80,16 @@ class FakeApi:
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_classifier_covers_npm_rebases(self):
+        workflow = (
+            Path(__file__).parents[1] / "workflows/dependabot-auto-merge.yml"
+        ).read_text()
+        # fetch-metadata v3.1.0 emits the Dependabot branch ecosystem name.
+        self.assertIn("types: [opened, reopened, synchronize]", workflow)
+        self.assertIn("package-ecosystem == 'npm_and_yarn'", workflow)
+        self.assertIn("package-ecosystem != 'npm_and_yarn'", workflow)
+        self.assertNotIn("package-ecosystem == 'npm'", workflow)
+
     def test_eligible_patch_with_empty_workflow_run_pr_list(self):
         self.assertEqual(verifier.verify(event(), REPO, FakeApi()), 55)
 

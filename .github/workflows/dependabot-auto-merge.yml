@@ -28,10 +28,11 @@ name: Dependabot auto-merge
 
 on:
   pull_request:
-    # NOT `synchronize` (#9031). GitHub's native auto-merge is a property of the PR, not of a
-    # commit: the `--auto` merge enabled once at `opened` survives every later push, including
-    # Dependabot's own rebases. So `synchronize` could only ever re-assert a setting already in
-    # place — while firing this workflow on every push to every open PR in the repository.
+    # Reclassify after a Dependabot rebase: the privileged follow-up checks the exact
+    # head SHA and refuses the old run once the branch moves. Only a new successful
+    # classification can arm auto-merge for the new head (#12161).
+    # This restores some skipped non-Dependabot runs; the job-level actor guard
+    # prevents them from allocating a runner or making metadata API calls.
     #
     # Measured 2026-09-12 over a 0.32 h window of 300 workflow runs: this workflow ran 18 times
     # and SKIPPED 18 of 18, every one of them triggered by a push to one of five non-Dependabot
@@ -66,7 +67,7 @@ on:
     # still does, and a maintainer can re-run the workflow. That is a smaller affordance than four
     # wasted runs per deploy PR, and unlike the claim it replaces it is not asserted — nothing in
     # the window shows `labeled` ever doing work.
-    types: [opened, reopened]
+    types: [opened, reopened, synchronize]
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the auto-merge job below declares its own override for the write access it needs.
@@ -106,14 +107,14 @@ jobs:
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
           (steps.metadata.outputs.package-ecosystem == 'gradle' ||
-           steps.metadata.outputs.package-ecosystem == 'npm')
+           steps.metadata.outputs.package-ecosystem == 'npm_and_yarn')
         run: echo "Dependabot patch is eligible for trusted auto-merge arming."
 
       - name: Skip — requires human review
         if: |
           steps.metadata.outputs.update-type != 'version-update:semver-patch' ||
           (steps.metadata.outputs.package-ecosystem != 'gradle' &&
-           steps.metadata.outputs.package-ecosystem != 'npm')
+           steps.metadata.outputs.package-ecosystem != 'npm_and_yarn')
         # PR_TITLE via env, not `${{ }}` interpolated straight into the script: the title is
         # attacker-influenceable and direct interpolation is a script-injection vector
         # (Scorecard Dangerous-Workflow). Env-var passing is not subject to shell expansion.
