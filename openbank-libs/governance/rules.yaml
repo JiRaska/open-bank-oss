@@ -1851,15 +1851,14 @@ dependencies:
     # Gradle dependency verification (gradle/verification-metadata.xml): SHA-256 pins for
     # every resolved artifact — a repository-level tamper or dependency-confusion swap of an
     # existing version no longer resolves. Lockfiles/Dependabot pin VERSIONS; this pins BYTES.
-    # LENIENT (warn-only) while the metadata soaks across all CI lanes and developer
-    # platforms; flip = org.gradle.dependency.verification=strict in gradle.properties.
+    # STRICT verification fails builds on a missing or mismatched artifact checksum.
     # Dependabot PRs auto-refresh the metadata (dependabot-verification-metadata.yml).
     mechanism: gradle-verification-metadata-sha256
-    enforced: advisory
-    # Moved 2026-09-30 -> 2026-10-15 (#11686): criteria now measured as met (6/6 clean daily
-    # drift sweeps 09-25..09-30); the strict flip ships as its own revertible PR, not bundled here.
+    enforced: enforce
+    # Graduated ahead of the 2026-10-15 target after consecutive clean daily
+    # drift sweeps and a strict-mode spot check (#11686).
     target_enforce_date: "2026-10-15"   # ADR-0144
-    ci_producer: "gradle.properties org.gradle.dependency.verification=lenient + .github/workflows/dependabot-verification-metadata.yml"
+    ci_producer: "gradle.properties org.gradle.dependency.verification=strict + .github/workflows/dependabot-verification-metadata.yml"
 
 # ---------------------------------------------------------------------------------------
 # Architecture invariants (ADR-0002 hexagonal).
