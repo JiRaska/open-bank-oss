@@ -4,6 +4,7 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.calendar.BusinessCalendar
 import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
 import java.time.DayOfWeek
@@ -188,7 +189,10 @@ data class Deal(
             require(counterpartyId == CNB_COUNTERPARTY_ID) {
                 "the ČNB $facility's counterparty is $CNB_COUNTERPARTY_ID"
             }
-            require(maturityDate == DayCount.nextBusinessDay(valueDate)) {
+            // Historical deals used the weekend-only rule. Keep their booked maturity readable;
+            // draft() uses CERTIS for every new ČNB facility.
+            val certisMaturity = BusinessCalendar.certis().nextBusinessDay(valueDate)
+            require(maturityDate == certisMaturity || maturityDate == DayCount.nextBusinessDay(valueDate)) {
                 "the ČNB $facility is overnight: maturityDate must be the next business day"
             }
             if (product == ProductType.CNB_LOMBARD) {
@@ -558,7 +562,7 @@ data class Deal(
             }
             val maturity = when {
                 product == ProductType.FX_SPOT -> valueDate
-                product.isCnbFacility -> DayCount.nextBusinessDay(valueDate)
+                product.isCnbFacility -> BusinessCalendar.certis().nextBusinessDay(valueDate)
                 maturityDate == null -> DayCount.nextBusinessDay(valueDate) // overnight
                 else -> maturityDate
             }

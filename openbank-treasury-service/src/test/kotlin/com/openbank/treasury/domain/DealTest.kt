@@ -471,6 +471,14 @@ class DealTest {
         fun `the ČNB facility is always overnight, CZK, facing ČNB`() {
             val d = placement(product = ProductType.CNB_DEPOSIT_FACILITY, counterparty = "CNB", maturity = null)
             assertThat(d.maturityDate).isEqualTo(LocalDate.parse("2026-09-22"))
+            val beforeHoliday = placement(
+                product = ProductType.CNB_DEPOSIT_FACILITY,
+                counterparty = "CNB",
+                valueDate = FRIDAY,
+                maturity = null,
+            )
+            assertThat(beforeHoliday.maturityDate).isEqualTo(LocalDate.parse("2026-09-29"))
+            assertThat(beforeHoliday.days).isEqualTo(4)
             assertThatThrownBy {
                 placement(product = ProductType.CNB_DEPOSIT_FACILITY, counterparty = "CNB", currency = "EUR")
             }.isInstanceOf(IllegalArgumentException::class.java)
@@ -481,7 +489,7 @@ class DealTest {
         }
 
         @Test
-        fun `ČNB lombard is overnight, CZK, facing ČNB, with a positive rate, and Friday matures Monday`() {
+        fun `ČNB lombard is overnight, CZK, facing ČNB, with a positive rate, and skips a Czech holiday`() {
             fun lombard(
                 currency: String = "CZK",
                 counterparty: String = "CNB",
@@ -497,11 +505,11 @@ class DealTest {
             )
             assertThat(lombard().maturityDate).isEqualTo(LocalDate.parse("2026-09-22"))
             val fri = lombard(valueDate = FRIDAY)
-            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-28"))
-            assertThat(fri.days).isEqualTo(3)
-            // 1 000 000 × 5.75 % × 3 / 360 = 479.1666… -> 479.17
+            assertThat(fri.maturityDate).isEqualTo(LocalDate.parse("2026-09-29"))
+            assertThat(fri.days).isEqualTo(4)
+            // 1 000 000 × 5.75 % × 4 / 360 = 638.8888… -> 638.89
             assertThat(lombard(valueDate = FRIDAY).copy(principal = BigDecimal("1000000.00")).interest)
-                .isEqualByComparingTo("479.17")
+                .isEqualByComparingTo("638.89")
             assertThat(fri.product.isAsset).describedAs("a borrowing: consumes no limit").isFalse()
             assertThat(LimitCheck.of(bankA, fri, BigDecimal.ZERO).dealAmount).isEqualByComparingTo("0")
             assertThatThrownBy { lombard(currency = "EUR") }.isInstanceOf(IllegalArgumentException::class.java)
@@ -509,6 +517,8 @@ class DealTest {
             assertThatThrownBy { lombard(rate = "0") }.isInstanceOf(IllegalArgumentException::class.java)
             assertThatThrownBy { fri.copy(maturityDate = FRIDAY.plusDays(1)) }
                 .isInstanceOf(IllegalArgumentException::class.java)
+            // A previously booked weekend-only maturity remains readable after the calendar fix.
+            assertThat(fri.copy(maturityDate = LocalDate.parse("2026-09-28")).days).isEqualTo(3)
         }
 
         @Test
