@@ -86,6 +86,13 @@ class AmortizationSmallPrincipalTest {
     }
 
     @Test
+    fun `annuity whose rounded principal exceeds opening falls back before balance overflow`() {
+        // The fixed payment eventually overpays a nearly cleared balance. Continuing the
+        // classic schedule from a negative closing balance overflowed Money years later.
+        assertClean(schedule("161418", "JPY", "0.2500", 194, 1, AmortizationMethod.ANNUITY), "161418")
+    }
+
+    @Test
     fun `random schedules never go negative and repay exactly the principal`(): Unit = runBlocking {
         val ccyArb = Arb.element("EUR", "CZK", "JPY", "KWD")
         checkAll(

@@ -155,10 +155,10 @@ object Amortization {
                 else -> fixedPayment!! - interest // ANNUITY: principal is payment net of interest
             }
 
-            // A rounded annuity can cover less than this period's rounded interest. Letting
-            // negative principal compound may overflow Money before isWellFormed can reject
-            // the completed schedule; reamortize as soon as that first line appears.
-            if (principalDue.amount.signum() < 0) return null
+            // Rounding can put principal outside [0, opening]: a negative amount compounds
+            // the balance, while an overpayment makes it negative. Both can overflow Money
+            // before isWellFormed sees the completed schedule. Reamortize at the first line.
+            if (principalDue.amount.signum() < 0 || principalDue > opening) return null
 
             val closing = opening - principalDue
             val payment = principalDue + interest
