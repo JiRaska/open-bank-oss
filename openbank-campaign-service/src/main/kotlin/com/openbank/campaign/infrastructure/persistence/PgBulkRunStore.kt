@@ -121,12 +121,17 @@ class PgBulkRunStore(private val pool: PgPool) : BulkRunStore {
     ) {
         val updated = pool.preparedQuery(
             """
-            WITH settled AS (
+            WITH valid_budget_lease AS (
+                SELECT id FROM campaign_admission_budget
+                WHERE id = 1 AND lease_owner = $2 AND lease_until > now()
+                FOR UPDATE
+            ), settled AS (
                 UPDATE campaign_bulk_runs
                 SET state = $3, cursor_party_id = $4, admitted = admitted + $5,
                     failures = failures + $6, last_error = $7,
                     lease_owner = NULL, lease_until = NULL, updated_at = now()
-                WHERE id = $1 AND lease_owner = $2
+                WHERE id = $1 AND lease_owner = $2 AND lease_until > now()
+                  AND EXISTS (SELECT 1 FROM valid_budget_lease)
                 RETURNING id
             )
             UPDATE campaign_admission_budget

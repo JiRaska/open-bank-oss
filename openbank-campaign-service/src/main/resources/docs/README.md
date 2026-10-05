@@ -11,7 +11,8 @@ admits ordered audience pages under one global database lease; the list and deta
 progress and a hold reason. A different operator can resume a held run. Starting a second live run
 for the same campaign returns a conflict. The older synchronous enrol endpoint and scheduled sweep
 use the same global lease and reject an audience larger than one configured page before admitting
-anyone.
+anyone. A page times out before its one-hour lease can be reclaimed; settlement requires both the
+run and global budget leases to remain owned by the worker.
 
 `openbank.campaign.bulk-admission-per-minute` defaults to `0`, which blocks all bulk admission. Set
 it to a measured value from 1 to 500 only after the target environment has a capacity exercise.

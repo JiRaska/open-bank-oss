@@ -26,6 +26,9 @@ service release. Communication-service's existing style/playbook database is for
 AI and human scripts; moving security or payment templates there would add an agent-plane runtime
 dependency to a banking notice. A raw `BalanceUpdated` event is also not a notification intent:
 ledger projection, holds and value-date rolls can each change it, potentially many times a day.
+Notification-service already persists notification records and exposes a customer feed,
+party-scoped detail and read/unread operations through customer-edge. There is no inbox-only
+`NotificationChannel` or outcome for a message that never uses email or push.
 
 The current campaign segment evaluator materialises all party ids in a `List<UUID>`, then
 `CampaignService.enrol` starts one Temporal workflow per party in one request. ContactPolicyGate
@@ -139,12 +142,12 @@ idempotency keys and tests. Digests are a later distinct template, not an implic
 | Product offer | Campaign domain | Approved campaign channels | Marketing consent, shared fatigue reservation and spare capacity |
 
 The event owner decides *whether* a customer contact exists; notification-service decides the
-approved wording and transport. The inbox is a planned channel, not an alias for a push handoff:
+approved wording and transport. Inbox-only delivery is planned, not an alias for a push handoff:
 today `NotificationChannel` only implements EMAIL and PUSH, and `IN_APP` was removed after it
-silently reported success without delivery. Reintroduction requires durable inbox storage,
-read/unread semantics, party-scoped read API and an outcome contract before any template may
-select it. A technical balance event therefore cannot become a customer message merely by
-adding an enum value.
+silently reported success without delivery. Reuse the existing notification rows, customer feed,
+read/unread operations and party-scoped read API; add an explicit inbox-only creation path and an
+outcome that records when a row became visible. Visibility is not a read or a push acceptance. A
+technical balance event therefore cannot become a customer message merely by adding an enum value.
 
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic

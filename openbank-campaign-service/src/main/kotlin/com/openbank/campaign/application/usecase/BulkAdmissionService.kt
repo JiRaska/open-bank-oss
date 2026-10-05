@@ -7,11 +7,15 @@ package com.openbank.campaign.application.usecase
 import com.openbank.campaign.application.port.out.CampaignRepository
 import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.domain.model.CampaignState
+import com.openbank.libs.domain.identifiers.Ids
 import jakarta.enterprise.context.ApplicationScoped
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.jboss.logging.Logger
+import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
@@ -60,12 +64,18 @@ class BulkAdmissionService(
 ) {
     private val log = Logger.getLogger(BulkAdmissionService::class.java)
 
+    private companion object {
+        // The database lease lasts one hour. End work before it can be reclaimed by another pod.
+        const val MAX_PAGE_MINUTES = 55L
+        val PAGE_TIMEOUT_MILLIS: Long = Duration.ofMinutes(MAX_PAGE_MINUTES).toMillis()
+    }
+
     suspend fun start(campaignId: UUID, actor: String): BulkRun {
         require(actor.isNotBlank()) { "actor is required" }
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
         val campaign = campaigns.findById(campaignId) ?: throw CampaignNotFoundException(campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can start a bulk run" }
-        return runs.create(UUID.randomUUID(), campaignId, pageSize, actor)
+        return runs.create(Ids.newId(), campaignId, pageSize, actor)
     }
 
     suspend fun find(id: UUID): BulkRun? = runs.find(id)
@@ -75,10 +85,10 @@ class BulkAdmissionService(
     /** Legacy synchronous API is limited by the same global budget as durable runs. */
     suspend fun enrolSmall(campaignId: UUID): EnrolmentOutcome {
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
-        val owner = UUID.randomUUID()
+        val owner = Ids.randomId()
         check(runs.claimManual(owner)) { "admission capacity is busy" }
         try {
-            return campaignService.enrolWithinLimit(campaignId, pageSize)
+            return withTimeout(PAGE_TIMEOUT_MILLIS) { campaignService.enrolWithinLimit(campaignId, pageSize) }
         } finally {
             withContext(NonCancellable) { runs.releaseManual(owner) }
         }
@@ -98,7 +108,7 @@ class BulkAdmissionService(
      */
     @Suppress("TooGenericExceptionCaught")
     suspend fun tick() {
-        val claim = runs.claim(UUID.randomUUID()) ?: return
+        val claim = runs.claim(Ids.randomId()) ?: return
         try {
             if (pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || claim.run.pageSize > pageSize) {
                 runs.hold(claim, "CAPACITY_BUDGET_REDUCED")
@@ -108,7 +118,9 @@ class BulkAdmissionService(
                 runs.hold(claim, "CAMPAIGN_NOT_ACTIVE")
                 return
             }
-            val result = campaignService.enrolPage(claim.run.campaignId, claim.run.cursor, claim.run.pageSize)
+            val result = withTimeout(PAGE_TIMEOUT_MILLIS) {
+                campaignService.enrolPage(claim.run.campaignId, claim.run.cursor, claim.run.pageSize)
+            }
             if (result.holdReason != null) {
                 runs.hold(claim, result.holdReason, result)
             } else if (result.failed > 0) {
@@ -116,6 +128,9 @@ class BulkAdmissionService(
             } else {
                 runs.finish(claim, result)
             }
+        } catch (e: TimeoutCancellationException) {
+            log.errorf(e, "bulk admission timed out run=%s", claim.run.id)
+            runs.hold(claim, "ADMISSION_TIMEOUT")
         } catch (e: Exception) {
             log.errorf(e, "bulk admission held run=%s", claim.run.id)
             runs.hold(claim, "ADMISSION_UNAVAILABLE")

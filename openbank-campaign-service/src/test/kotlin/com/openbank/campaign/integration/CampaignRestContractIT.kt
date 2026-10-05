@@ -4,6 +4,7 @@
 
 package com.openbank.campaign.integration
 
+import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.domain.model.IncentiveOfferRef
 import com.openbank.campaign.infrastructure.incentive.LiveIncentiveOfferRegistry
 import com.openbank.campaign.infrastructure.segment.SilverSegmentEvaluator
@@ -30,6 +31,7 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.time.Duration
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -68,6 +70,7 @@ class CampaignRestContractIT {
         every { audienceJwt.subject } returns "maker@openbank.test"
         QuarkusMock.installMockForType(audienceJwt, JsonWebToken::class.java)
         coEvery { segmentEvaluator.count(any()) } returns 0L
+        coEvery { segmentEvaluator.page(any(), null, any()) } returns SegmentPage(emptyList(), null)
         QuarkusMock.installMockForType(segmentEvaluator, SilverSegmentEvaluator::class.java)
         QuarkusMock.installMockForType(incentiveRegistry, LiveIncentiveOfferRegistry::class.java)
     }
@@ -97,7 +100,6 @@ class CampaignRestContractIT {
             props["campaign.worker.enabled"] = "false"
             props["openbank.campaign.worker.enabled"] = "false"
             props["openbank.temporal.enabled"] = "false"
-            props["quarkus.scheduler.enabled"] = "false"
             props["quarkus.oidc-client.enabled"] = "false"
             props["quarkus.oidc-client.m2m.enabled"] = "false"
             props["quarkus.oidc-client.discovery-enabled"] = "false"
@@ -523,8 +525,11 @@ class CampaignRestContractIT {
             body("findAll { it.id == '$runId' }.size()", equalTo(1))
         }
 
+        val conflictCampaignId = UUID.randomUUID()
+        insertCampaignForSendLog(conflictCampaignId)
+        insertHeldBulkRun(conflictCampaignId)
         When {
-            post("/api/v1/campaigns/$campaignId/bulk-runs")
+            post("/api/v1/campaigns/$conflictCampaignId/bulk-runs")
         } Then {
             statusCode(409)
             body("error", equalTo("campaign already has an active bulk run"))
@@ -537,6 +542,44 @@ class CampaignRestContractIT {
                     assertThat(rows.next()).isTrue()
                     assertThat(rows.getInt(1)).isEqualTo(1)
                 }
+            }
+        }
+
+        // Let the real Quarkus cron claim and settle the run. Calling tick() directly would not
+        // prove that the scheduled coroutine has a Vert.x context for its reactive PgPool calls.
+        val runUuid = UUID.fromString(runId)
+        var state = bulkRunState(runUuid)
+        val deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos()
+        while (state != "COMPLETED" && System.nanoTime() < deadline) {
+            Thread.sleep(250)
+            state = bulkRunState(runUuid)
+        }
+        assertThat(state).isEqualTo("COMPLETED")
+    }
+
+    private fun bulkRunState(runId: UUID): String = dataSource.connection.use { connection ->
+        connection.prepareStatement("SELECT state FROM campaign_bulk_runs WHERE id = ?").use { statement ->
+            statement.setObject(1, runId)
+            statement.executeQuery().use { rows ->
+                assertThat(rows.next()).isTrue()
+                rows.getString(1)
+            }
+        }
+    }
+
+    private fun insertHeldBulkRun(campaignId: UUID) {
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                """
+                INSERT INTO campaign_bulk_runs
+                    (id, campaign_id, state, page_size, created_by, created_at, updated_at)
+                VALUES (?, ?, 'HELD', 1, ?, now(), now())
+                """.trimIndent(),
+            ).use { statement ->
+                statement.setObject(1, UUID.randomUUID())
+                statement.setObject(2, campaignId)
+                statement.setString(3, "test-maker")
+                statement.executeUpdate()
             }
         }
     }
