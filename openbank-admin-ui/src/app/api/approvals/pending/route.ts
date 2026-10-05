@@ -17,12 +17,20 @@ export const dynamic = 'force-dynamic'
 
 type SourceState = 'ok' | 'forbidden' | 'unavailable' | 'not-configured'
 
+type MakerActorKind = 'HUMAN' | 'AI_AGENT' | 'SERVICE_ACCOUNT' | 'CUSTOMER_PARTY' | 'UNKNOWN'
+
+function parseMakerActorKind(value: unknown): MakerActorKind {
+  return value === 'HUMAN' || value === 'AI_AGENT' || value === 'SERVICE_ACCOUNT' || value === 'CUSTOMER_PARTY'
+    ? value : 'UNKNOWN'
+}
+
 type InboxItem = {
   id: string
   domain: 'lending' | 'sanctions' | 'transaction' | 'domestic-payment' | 'clearing' | 'fx' | 'ledger' | 'swift' | 'sepa-payment' | 'sepa-instant' | 'notification' | 'party' | 'account' | 'consent' | 'balance' | 'billing' | 'delegation' | 'agent' | 'communication' | 'treasury' | 'ledger-backfill' | 'compliance-pack' | 'campaign' | 'audience' | 'identity-case' | 'sca' | 'settlement'
   action: string
   resourceId: string | null
   maker: string | null
+  makerActorKind?: MakerActorKind
   proposedAt: string | null
 }
 
@@ -31,6 +39,7 @@ type LendingApproval = {
   action: string
   resourceId: string | null
   makerId: string | null
+  makerActorKind?: string
   createdAt: string | null
 }
 
@@ -157,6 +166,7 @@ async function lendingPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'lending' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -172,6 +182,7 @@ async function sanctionsPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'sanctions' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -187,6 +198,7 @@ async function transactionPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'transaction' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -202,6 +214,7 @@ async function domesticPaymentPending(headers: HeadersInit): Promise<SourceResul
     items: rows.map(r => ({
       id: r.id, domain: 'domestic-payment' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -217,6 +230,7 @@ async function clearingPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'clearing' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -239,6 +253,7 @@ async function fxPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'fx' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -254,6 +269,7 @@ async function ledgerPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'ledger' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -269,6 +285,7 @@ async function swiftPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'swift' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -284,6 +301,7 @@ async function sepaPaymentPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'sepa-payment' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -302,6 +320,7 @@ async function sepaInstantPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'sepa-instant' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -317,6 +336,7 @@ async function notificationPending(headers: HeadersInit): Promise<SourceResult> 
     items: rows.map(r => ({
       id: r.id, domain: 'notification' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -332,6 +352,7 @@ async function partyPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'party' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -347,6 +368,7 @@ async function accountPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'account' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -362,6 +384,7 @@ async function consentPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'consent' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -377,6 +400,7 @@ async function balancePending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'balance' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -392,6 +416,7 @@ async function billingPending(headers: HeadersInit): Promise<SourceResult> {
     items: rows.map(r => ({
       id: r.id, domain: 'billing' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -437,6 +462,7 @@ async function communicationPending(headers: HeadersInit): Promise<SourceResult>
     items: rows.map(r => ({
       id: r.id, domain: 'communication' as const, action: r.action,
       resourceId: r.resourceId, maker: r.makerId, proposedAt: r.createdAt,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -561,6 +587,7 @@ async function operatorApprovalsPending(
     items: rows.map(r => ({
       id: r.id, domain, action: r.action,
       resourceId: r.resourceId ?? null, maker: r.makerId ?? null, proposedAt: r.createdAt ?? null,
+      makerActorKind: parseMakerActorKind(r.makerActorKind),
     })),
   }
 }
@@ -625,6 +652,7 @@ export async function GET() {
     settlementPending(headers).catch(() => unavailable),
   ])
   const items = [...lending.items, ...sanctions.items, ...transaction.items, ...domesticPayment.items, ...clearing.items, ...fx.items, ...ledger.items, ...swift.items, ...sepaPayment.items, ...sepaInstant.items, ...notification.items, ...party.items, ...account.items, ...consent.items, ...balance.items, ...billing.items, ...delegation.items, ...agent.items, ...communication.items, ...treasury.items, ...ledgerBackfill.items, ...compliancePack.items, ...campaign.items, ...audience.items, ...identityCase.items, ...sca.items, ...settlement.items]
+    .map(item => ({ ...item, makerActorKind: item.makerActorKind ?? 'UNKNOWN' }))
     .sort((a, b) => (a.proposedAt ?? '').localeCompare(b.proposedAt ?? ''))
   return NextResponse.json({
     items,

@@ -82,6 +82,7 @@ describe('Admin UI billing approval consumer contract', () => {
             action: 'billing.post',
             resourceId: 'fee-4',
             maker: 'maker.billing',
+            makerActorKind: 'UNKNOWN',
             proposedAt: '2026-08-31T11:00:42Z',
           },
         ])

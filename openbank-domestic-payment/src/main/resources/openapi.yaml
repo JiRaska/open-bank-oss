@@ -452,6 +452,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           description: >-
