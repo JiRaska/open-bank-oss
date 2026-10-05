@@ -195,7 +195,10 @@ class ScaOperatorApprovalDurabilityIT {
     fun `maker actor kind survives PostgreSQL reads and every audit transition`() {
         val approval = onContext {
             store.create(
-                "test-${UUID.randomUUID()}", "party", "durability-maker", 3600,
+                "test-${UUID.randomUUID()}",
+                "party",
+                "durability-maker",
+                3600,
                 makerActorKind = MakerActorKind.AI_AGENT,
             )
         }

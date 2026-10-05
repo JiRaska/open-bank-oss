@@ -87,7 +87,7 @@ interface ApprovalStore {
      * @param binding the request this approval may later execute; `null` for an approval that
      *   application code decides and consumes itself.
      * @throws ApprovalLimitExceededException when [makerId] already holds the store's configured
- *   maximum of PENDING approvals for [action].
+     *   maximum of PENDING approvals for [action].
      */
     suspend fun create(
         action: String,

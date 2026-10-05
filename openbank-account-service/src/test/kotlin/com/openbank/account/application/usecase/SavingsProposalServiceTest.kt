@@ -105,7 +105,7 @@ class SavingsProposalServiceTest {
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
         coEvery {
-            approvalStore.create(any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
         } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
@@ -171,7 +171,7 @@ class SavingsProposalServiceTest {
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             listOf(expired)
         coEvery {
-            approvalStore.create(any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
         } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
@@ -211,7 +211,7 @@ class SavingsProposalServiceTest {
         coEvery { proposalRepository.findByAccountAndStatus(accountId, WithdrawalProposalStatus.PENDING) } returns
             emptyList()
         coEvery {
-            approvalStore.create(any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
+            approvalStore.create(any(), any(), any(), any(), any(), MakerActorKind.CUSTOMER_PARTY)
         } returns pendingApproval(delegate)
         coEvery { proposalRepository.save(any<WithdrawalProposal>()) } answers { firstArg() }
 
