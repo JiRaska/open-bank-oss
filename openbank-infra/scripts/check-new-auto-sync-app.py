@@ -22,6 +22,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 APPS = pathlib.Path("openbank-infra/gitops/apps")
 COMPONENTS = pathlib.Path("openbank-infra/gitops/components")
 IMAGE = re.compile(r"(?:^|/)openbank-[a-z0-9-]+(?=[:@]|$)")
+INFRA_EXEMPT_REASON = "openbank.io/service-readiness-exempt-reason"
 
 
 def sibling(name: str):
@@ -73,11 +74,15 @@ def check_app(root: pathlib.Path, app: dict) -> list[str]:
     except (OSError, yaml.YAMLError) as exc:
         return [f"component YAML is unreadable: {type(exc).__name__}"]
 
-    workloads = [obj for obj in objects if obj.get("kind") in {"Deployment", "Rollout", "StatefulSet"}]
+    workloads = [obj for obj in objects if obj.get("kind") in
+                 {"Deployment", "Rollout", "StatefulSet", "DaemonSet", "Job", "CronJob"}]
     service_images: set[str] = set()
     bundle_refs: set[str] = set()
     for workload in workloads:
-        pod = (((workload.get("spec") or {}).get("template") or {}).get("spec") or {})
+        spec = workload.get("spec") or {}
+        if workload.get("kind") == "CronJob":
+            spec = ((spec.get("jobTemplate") or {}).get("spec") or {})
+        pod = ((spec.get("template") or {}).get("spec") or {})
         containers = pod.get("containers") or []
         for container in containers:
             match = IMAGE.search(str(container.get("image", "")))
@@ -95,6 +100,12 @@ def check_app(root: pathlib.Path, app: dict) -> list[str]:
             bundle_refs.update(mounted)
 
     findings: list[str] = []
+    if not service_images:
+        reason = (((app.get("metadata") or {}).get("annotations") or {}).get(INFRA_EXEMPT_REASON) or "")
+        if not isinstance(reason, str) or not reason.strip():
+            findings.append("auto-synced component has no openbank workload image; add the workload "
+                            f"or annotate the Application with a nonempty {INFRA_EXEMPT_REASON} "
+                            "for an infrastructure-only component")
     for service in sorted(service_images):
         status, detail = THREAT_MODELS.evaluate(service, root / "docs/threat-models")
         if status != "ok":
@@ -167,6 +178,16 @@ def self_test() -> int:
         assert automated(app) and not automated({"spec": {"syncPolicy": {}}})
         assert not automated({"spec": {"syncPolicy": {"automated": {"enabled": False}}}})
         assert not check_app(root, app)
+        write(bundle, cluster, backup)
+        assert any("no openbank workload image" in item for item in check_app(root, app))
+        infra = {**app, "metadata": {"annotations": {INFRA_EXEMPT_REASON: "shared policy data only"}}}
+        assert not check_app(root, infra)
+        non_service = {**workload, "spec": {"template": {"spec": {
+            "containers": [{"name": "app", "image": "example/third-party:test"}],
+        }}}}
+        write(non_service, cluster, backup)
+        assert any("no openbank workload image" in item for item in check_app(root, app))
+        write(workload, bundle, cluster, backup)
         app_file = root / APPS / "example.yaml"
         app_file.parent.mkdir(parents=True)
         staged = {"apiVersion": "argoproj.io/v1alpha1", **app}
@@ -202,7 +223,7 @@ def self_test() -> int:
         write(workload, bundle, cluster, backup)
         (root / "docs/threat-models/openbank-example-service.md").unlink()
         assert any("threat model" in item for item in check_app(root, app))
-    print("self-test ok: staged, complete and three incomplete auto-sync fixtures")
+    print("self-test ok: staged, complete, infrastructure exemption and incomplete auto-sync fixtures")
     return 0
 
 
