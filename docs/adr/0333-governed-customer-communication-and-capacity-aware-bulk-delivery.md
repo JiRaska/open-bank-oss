@@ -176,6 +176,9 @@ path for reconciliation; a terminal duplicate remains an idempotent no-op. This 
 silent skip but does not prove whether the provider took the message. Provider ambiguity cannot be
 resolved from a Kafka ack. D4 therefore requires a durable dispatch queue and reconciliation,
 with an idempotent provider key where supported, before claiming resilient non-inbox delivery.
+An always-registered gauge and alert now surface rows still PENDING after 15 minutes, including
+ones whose terminal write failed after provider handoff and were acknowledged without replay.
+The alert is evidence for investigation, not permission to resend an ambiguous message.
 
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic

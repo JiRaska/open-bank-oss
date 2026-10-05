@@ -21,6 +21,11 @@ class NotificationRepository : PanacheRepository<NotificationEntity> {
         find("deduplicationKey", key).firstResult()
     }
 
+    /** Includes ambiguous provider handoffs; no terminal outcome has been committed for these rows. */
+    fun countStalePending(cutoff: Instant): Uni<Long> = Panache.withSession {
+        count("status = ?1 and createdAt < ?2", "PENDING", cutoff)
+    }
+
     suspend fun listAll(page: Int, size: Int): List<NotificationEntity> =
         Panache.withSession { findAll().page(page, size).list() }.awaitSuspending()
 

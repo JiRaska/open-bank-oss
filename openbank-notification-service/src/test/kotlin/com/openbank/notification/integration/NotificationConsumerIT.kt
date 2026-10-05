@@ -372,12 +372,16 @@ class NotificationConsumerIT {
         val partyId = UUID.randomUUID()
         val key = UUID.randomUUID()
         val notificationId = UUID.randomUUID()
+        val cutoff = Instant.now().minusSeconds(15 * 60)
+        val staleBefore = VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) }
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """
                 INSERT INTO notifications
-                    (id, notification_id, party_id, channel, template, recipient, body, status, deduplication_key)
-                VALUES (?, ?, ?, 'PUSH', 'ACCOUNT_OPENED', ?, 'stored copy', 'PENDING', ?)
+                    (id, notification_id, party_id, channel, template, recipient, body, status,
+                     deduplication_key, created_at)
+                VALUES (?, ?, ?, 'PUSH', 'ACCOUNT_OPENED', ?, 'stored copy', 'PENDING', ?,
+                        now() - interval '1 hour')
                 """.trimIndent(),
             ).use { statement ->
                 // Keep a JDBC fixture outside Hibernate's pooled positive-id sequence.
@@ -405,6 +409,8 @@ class NotificationConsumerIT {
         assertThat(countFor(partyId)).isEqualTo(1)
         assertThat(statusFor(partyId)).isEqualTo("PENDING")
         assertThat(outcomeRowsFor(notificationId)).isEmpty()
+        assertThat(VertxContextSupport.subscribeAndAwait { repository.countStalePending(cutoff) })
+            .isEqualTo(staleBefore + 1)
     }
 
     /**
