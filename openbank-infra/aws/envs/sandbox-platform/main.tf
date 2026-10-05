@@ -858,6 +858,21 @@ resource "helm_release" "cnpg" {
   ]
 }
 
+# Stage 1 of #11129: install the plugin only after an explicit opt-in and
+# operator/backup preflight. No Cluster references it until a separate,
+# per-Cluster migration moves ObjectStore, WAL archiving and ScheduledBackup
+# together. Keeping this disabled by default preserves the existing backup path.
+resource "helm_release" "cnpg_barman_plugin" {
+  count      = var.cnpg_barman_plugin_enabled ? 1 : 0
+  name       = "plugin-barman-cloud"
+  namespace  = "cnpg-system"
+  repository = "https://cloudnative-pg.github.io/charts"
+  chart      = "plugin-barman-cloud"
+  version    = "0.8.1" # app v0.15.1; pin reviewed chart, not latest
+
+  depends_on = [helm_release.cnpg, helm_release.cert_manager]
+}
+
 # ---------------------------------------------------------------------------
 # KEDA — scale-to-zero controller for the FinOps workload tiers (ADR-0057).
 # Cluster-wide bootstrap operator (same tier as cert-manager/Karpenter/CNPG):

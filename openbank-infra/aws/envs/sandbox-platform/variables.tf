@@ -159,6 +159,12 @@ variable "cnpg_version" {
   default = "0.29.1"
 }
 
+variable "cnpg_barman_plugin_enabled" {
+  description = "Opt in to installing the Barman Cloud plugin beside CNPG; does not migrate any Cluster or backup."
+  type        = bool
+  default     = false
+}
+
 variable "arc_controller_version" {
   description = "gha-runner-scale-set-controller Helm chart version."
   type        = string
