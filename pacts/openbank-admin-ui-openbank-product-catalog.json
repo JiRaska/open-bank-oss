@@ -183,6 +183,13 @@
         "body": {
           "reason": "independent commercial approval"
         },
+        "generators": {
+          "path": {
+            "dataType": "STRING",
+            "expression": "/api/v2/offerings/${publishOfferingId}/revisions/${publishRevisionId}/publish",
+            "type": "ProviderState"
+          }
+        },
         "headers": {
           "Accept": "application/json",
           "Content-Type": "application/json",

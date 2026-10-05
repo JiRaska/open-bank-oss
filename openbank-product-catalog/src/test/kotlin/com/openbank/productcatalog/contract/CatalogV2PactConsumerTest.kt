@@ -78,7 +78,10 @@ class CatalogV2PactConsumerTest {
         .body(revisionResponse("DRAFT"))
         .given("Product Studio independently checkable draft exists")
         .uponReceiving("Product Studio publishes through an independent checker")
-        .path("/api/v2/offerings/$PUBLISH_OFFERING_ID/revisions/$PUBLISH_REVISION_ID/publish")
+        .pathFromProviderState(
+            "/api/v2/offerings/\${publishOfferingId}/revisions/\${publishRevisionId}/publish",
+            "/api/v2/offerings/$PUBLISH_OFFERING_ID/revisions/$PUBLISH_REVISION_ID/publish",
+        )
         .method("POST")
         .headers(JSON_HEADERS + ("If-Match" to "\"0\""))
         .body(PUBLISH_REQUEST)
