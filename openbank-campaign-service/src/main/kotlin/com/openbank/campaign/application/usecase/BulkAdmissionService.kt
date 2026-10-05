@@ -71,12 +71,14 @@ enum class RecipientAdmissionState { STARTING, ADMITTED, SKIPPED, FAILED }
  * set a measured safe budget before an operator can start a mass run.
  */
 @ApplicationScoped
-class BulkAdmissionService(
+class BulkAdmissionService @Inject constructor(
     private val campaigns: CampaignRepository,
     private val campaignService: CampaignService,
     private val runs: BulkRunStore,
     @ConfigProperty(name = "openbank.campaign.bulk-admission-per-minute", defaultValue = "0")
     private val pageSize: Int,
+    @ConfigProperty(name = "openbank.campaign.mass-activation-enabled", defaultValue = "false")
+    private val massActivationEnabled: Boolean = false,
 ) {
     @Inject lateinit var segments: SegmentRegistry
 
@@ -91,6 +93,7 @@ class BulkAdmissionService(
 
     suspend fun start(campaignId: UUID, actor: String): BulkRun {
         require(actor.isNotBlank()) { "actor is required" }
+        check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
         check(pageSize in 1..SegmentPage.MAX_PAGE_SIZE) { "bulk admission has no measured capacity configuration" }
         val campaign = campaigns.findById(campaignId) ?: throw CampaignNotFoundException(campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "only an ACTIVE campaign can start a bulk run" }
@@ -114,6 +117,7 @@ class BulkAdmissionService(
     }
 
     suspend fun resume(id: UUID, actor: String): BulkRun {
+        check(massActivationEnabled) { "mass activation has not passed its rollout gate" }
         val run = runs.find(id) ?: throw NoSuchElementException("bulk run $id not found")
         val campaign = campaigns.findById(run.campaignId) ?: throw CampaignNotFoundException(run.campaignId)
         check(campaign.state == CampaignState.ACTIVE) { "campaign must be ACTIVE to resume a run" }
@@ -129,6 +133,10 @@ class BulkAdmissionService(
     suspend fun tick() {
         val claim = runs.claim(Ids.randomId()) ?: return
         try {
+            if (!massActivationEnabled) {
+                runs.hold(claim, "MASS_ACTIVATION_DISABLED")
+                return
+            }
             if (pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || claim.run.pageSize > pageSize) {
                 runs.hold(claim, "CAPACITY_BUDGET_REDUCED")
                 return

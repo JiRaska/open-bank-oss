@@ -108,6 +108,7 @@ class CampaignRestContractIT {
             props["quarkus.oidc-client.m2m.discovery-enabled"] = "false"
             props["quarkus.oidc-client.m2m.token-path"] = "/protocol/openid-connect/token"
             props["openbank.campaign.bulk-admission-per-minute"] = "1"
+            props["openbank.campaign.mass-activation-enabled"] = "true"
             return props
         }
 

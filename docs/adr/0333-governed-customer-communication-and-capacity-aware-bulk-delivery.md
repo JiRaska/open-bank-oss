@@ -162,6 +162,10 @@ not proof of the full communication system. Provider dispatch and click destinat
 shared capacity limits, and there is no cross-origin atomic contact reservation or single operator
 evidence projection yet. Mass activation must remain disabled until those controls and the D7
 end-to-end/load evidence are complete.
+The bulk API also requires a separate `openbank.campaign.mass-activation-enabled` rollout flag,
+defaulting to false. A positive admission budget for small scheduled sweeps cannot activate mass
+delivery by itself. Turning the flag off holds an existing run before its next page and requires
+the normal reviewed resume path after the missing controls are proven.
 
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
