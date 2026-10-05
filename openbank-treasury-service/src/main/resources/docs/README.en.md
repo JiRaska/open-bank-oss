@@ -32,4 +32,4 @@ The rules reported in `breaches[]` are `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_PE
 
 ## Contract
 
-The API contract is `openapi.yaml` (`info.version` follows ADR-0048). Product limits are additive: 1.18.0, with a 422 on `submit` and `approve`.
+The API contract is `openapi.yaml` (`info.version` follows ADR-0048). Product limits were added in 1.18.0. Version 1.19.0 corrects the three validation 400 schemas: `GET /quotes` and both nostro statement uploads return the libs-runtime `ApiError`/`ProblemDetail` shape (`code`, `message`, `status`, `traceId`, `timestamp`). Treasury-owned business errors, including quote unavailability, retain `{ "error": ... }`.
