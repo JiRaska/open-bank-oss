@@ -187,6 +187,44 @@ class CustomerEdgeResourceTest {
     }
 
     @Test
+    fun `low balance alert setting rejects a delegated or foreign account before write`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        every { upstream.get("http://account/api/v1/accounts/$acct", caller.toString()) } returns
+            accountJson(acct, UUID.randomUUID())
+
+        val response = resourceFor(upstream, caller).setLowBalanceAlert(
+            acct,
+            "CZK",
+            """{"enabled":true,"threshold":100,"rearmMargin":20}""",
+        )
+
+        assertThat(response.status).isEqualTo(403)
+        verify(exactly = 0) { upstream.put(match { it.contains("low-balance-alert") }, any(), any()) }
+    }
+
+    @Test
+    fun `low balance alert setting forwards only an owned account and JWT party`() {
+        val caller = UUID.randomUUID()
+        val acct = UUID.randomUUID()
+        val upstream = mockk<UpstreamClient>()
+        val body = """{"enabled":true,"threshold":100,"rearmMargin":20}"""
+        every { upstream.get("http://account/api/v1/accounts/$acct", caller.toString()) } returns
+            accountJson(acct, caller)
+        every {
+            upstream.put("http://balance/api/v1/balances/$acct/CZK/low-balance-alert", caller.toString(), body)
+        } returns Response.ok(body).build()
+
+        val response = resourceFor(upstream, caller).setLowBalanceAlert(acct, "CZK", body)
+
+        assertThat(response.status).isEqualTo(200)
+        verify(exactly = 1) {
+            upstream.put("http://balance/api/v1/balances/$acct/CZK/low-balance-alert", caller.toString(), body)
+        }
+    }
+
+    @Test
     fun `getAccount rejects another party's account and serves the caller's own`() {
         val caller = UUID.randomUUID()
         val other = UUID.randomUUID()

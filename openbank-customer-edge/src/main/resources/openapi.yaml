@@ -44,7 +44,7 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.76.1
+  version: 1.77.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1070,6 +1070,44 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/Balance'
+
+  /balances/{accountId}/{currency}/low-balance-alert:
+    parameters:
+      - {name: accountId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: currency, in: path, required: true, schema: {type: string, minLength: 3, maxLength: 3}}
+    get:
+      tags: [Balances, Preferences]
+      summary: Read the caller's opt-in low-balance threshold for an owned account
+      operationId: getLowBalanceAlert
+      security:
+        - customerOidc: [accounts:read]
+      responses:
+        '200':
+          description: Current setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '403': {description: Account does not belong to caller}
+        '404': {description: No alert setting exists}
+    put:
+      tags: [Balances, Preferences]
+      summary: Set or disable the caller's low-balance alert for an owned account
+      operationId: setLowBalanceAlert
+      security:
+        - customerOidc: [accounts:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LowBalanceAlertRequest'}
+      responses:
+        '200':
+          description: Updated setting
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LowBalanceAlert'}
+        '400': {description: Invalid threshold, margin or currency}
+        '403': {description: Account does not belong to caller}
 
   /transactions:
     get:
@@ -6376,6 +6414,22 @@ components:
 
     # Mirrors openbank-balance-service BalanceResponse. GET /api/v1/balances/{accountId} returns
     # one entry per currency held on the account (an array), not a single balance.
+    LowBalanceAlertRequest:
+      type: object
+      required: [enabled, threshold, rearmMargin]
+      properties:
+        enabled: {type: boolean}
+        threshold: {type: number, minimum: 0}
+        rearmMargin: {type: number, exclusiveMinimum: 0}
+    LowBalanceAlert:
+      type: object
+      required: [accountId, currency, enabled, threshold, rearmMargin]
+      properties:
+        accountId: {type: string, format: uuid}
+        currency: {type: string}
+        enabled: {type: boolean}
+        threshold: {type: number}
+        rearmMargin: {type: number}
     Balance:
       type: object
       properties:
