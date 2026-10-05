@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: audit-service
     app.kubernetes.io/part-of: audit
   annotations:
-    openbank.tech/policy-checksum: "01963197ab910188"
+    openbank.tech/policy-checksum: "2d92e143dd451f65"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -252,6 +252,22 @@ data:
     	role in input.principal.roles
     	not startswith(input.principal.id, "service-account-")
     	input.action == "opsmessage.approval.decide"
+    }
+
+    # ADR-0333 D6: reviewed customer notification copy is edited and published by staff.
+    # Keep this outside notification.*: customer-edge has that whole prefix, and its M2M
+    # identity must never be able to change copy shown to a customer.
+    allowed_reasons contains "operator-manage-notification-template" if {
+        input.principal.type == "HUMAN"
+        some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
+        role in input.principal.roles
+        not startswith(input.principal.id, "service-account-")
+        input.action in {
+            "commstemplate.create",
+            "commstemplate.read",
+            "commstemplate.preview",
+            "commstemplate.publish",
+        }
     }
 
     # ADR-0285 D3/D6: publishing a style/playbook version. Own role family (`ROLE_COMMS_APPROVER`),

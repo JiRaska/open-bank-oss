@@ -24,9 +24,11 @@ import com.openbank.notification.domain.ApprovalCopy
 import com.openbank.notification.domain.HtmlEscape
 import com.openbank.notification.domain.RecipientAddress
 import com.openbank.notification.domain.model.EmailSendOutcome
+import com.openbank.notification.domain.model.ManagedNotificationTemplate
 import com.openbank.notification.domain.model.MobileDeepLink
 import com.openbank.notification.domain.model.NotificationCategory
 import com.openbank.notification.domain.model.NotificationChannel
+import com.openbank.notification.domain.model.NotificationLanguage
 import com.openbank.notification.domain.model.NotificationOutcome
 import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
@@ -44,6 +46,7 @@ import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
 import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
+import com.openbank.notification.infrastructure.persistence.PgManagedTemplateStore
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
 import com.openbank.notification.infrastructure.persistence.repository.DeviceTokenRepository
 import com.openbank.notification.infrastructure.persistence.repository.NotificationPreferenceRepository
@@ -73,7 +76,7 @@ import java.util.function.Function
 import java.util.function.Supplier
 
 @ApplicationScoped
-@Suppress("TooManyFunctions") // one delivery path per channel + shared helpers; grows with channels
+@Suppress("TooManyFunctions", "LargeClass") // channel delivery and its shared guards remain one dispatch owner
 class NotificationConsumer @Inject constructor(
     /** See the KDoc on the `mailerMocked` declaration site below (issue #4737). */
     @ConfigProperty(name = "quarkus.mailer.mock", defaultValue = "false")
@@ -114,6 +117,7 @@ class NotificationConsumer @Inject constructor(
         fun marketingScopeFor(channel: NotificationChannel): String = when (channel) {
             NotificationChannel.EMAIL -> "MARKETING_COMMS_EMAIL"
             NotificationChannel.PUSH -> "MARKETING_COMMS_PUSH"
+            NotificationChannel.INBOX -> error("marketing inbox requires a separate impression policy")
         }
 
         /**
@@ -225,6 +229,8 @@ class NotificationConsumer @Inject constructor(
 
     @Inject lateinit var contactGate: ContactPolicyGate
 
+    @Inject lateinit var managedTemplates: PgManagedTemplateStore
+
     /** Resolves the EMAIL envelope address from `partyId` (issue #3581) — see [resolveEmailRecipient]. */
     @Inject
     @RestClient
@@ -278,8 +284,9 @@ class NotificationConsumer @Inject constructor(
         val req = try {
             objectMapper.readValue(payload, NotificationRequest::class.java)
         } catch (e: Exception) {
-            // Un-parseable (poison) payload: log and ack so one bad record can't wedge the partition.
-            log.errorf(e, "Failed to parse notification payload: %s", payload)
+            // Un-parseable (poison) payload: ack so one bad record cannot wedge the partition.
+            // Raw requests and exception messages can contain customer values; log neither.
+            log.errorf("Failed to parse notification request (%s); poison record acknowledged", e.javaClass.simpleName)
             return Uni.createFrom().voidItem()
         }
         // Closed variable schema (ADR-0176 D1, issue #1325). A key the template does not declare
@@ -308,6 +315,16 @@ class NotificationConsumer @Inject constructor(
             log.errorf("Rejected notification with non-bank mobile deep-link for template=%s", req.template.name)
             return Uni.createFrom().voidItem()
         }
+        val invalidInboxRequest = req.template.category == NotificationCategory.MARKETING ||
+            req.recipient != req.partyId.toString() ||
+            req.deduplicationKey == null
+        if (req.channel == NotificationChannel.INBOX && invalidInboxRequest) {
+            log.errorf(
+                "Rejected inbox notification with invalid class, recipient or idempotency key template=%s",
+                req.template.name,
+            )
+            return Uni.createFrom().voidItem()
+        }
         return dispatch(req)
             .onFailure().invoke { e ->
                 // #5745 (sweep of #5698): a processing failure (e.g. transient DB error) used to be
@@ -323,7 +340,7 @@ class NotificationConsumer @Inject constructor(
                 // would insert a second row and could re-send — trading a lost notification for a
                 // duplicated one. A single attempt, then rethrow, hands the decision to the
                 // connector's own failure-strategy (dead-letter-queue, application.yaml) instead.
-                log.errorf(e, "Failed to process notification — rethrowing so it is not acked: %s", payload)
+                log.errorf("Failed to process notification template=%s; record not acknowledged", req.template.name)
             }
     }
 
@@ -342,14 +359,29 @@ class NotificationConsumer @Inject constructor(
         }
 
     private fun dispatchResolved(req: NotificationRequest): Uni<Void> {
-        // #10281: approval templates carry Czech copy and render through ApprovalCopy in the request language.
-        val (subject, body) = ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
-            ?: renderTemplate(req.template, req.variables)
+        if (req.template !in ManagedNotificationTemplate.EDITABLE_TEMPLATES) {
+            val (subject, body) = ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
+                ?: renderTemplate(req.template, req.variables)
+            return dispatchRendered(req, subject, body, null)
+        }
+        return managedTemplates.latestPublished(req.template, req.language ?: NotificationLanguage.EN, req.channel)
+            .chain { copy ->
+                val (subject, body) = copy?.render(req.variables)
+                    ?: (
+                        ApprovalCopy.renderOrNull(req.template, req.variables, req.language)
+                            ?: renderTemplate(req.template, req.variables)
+                        )
+                dispatchRendered(req, subject, body, copy?.revision)
+            }
+    }
+
+    private fun dispatchRendered(req: NotificationRequest, subject: String, body: String, revision: Long?): Uni<Void> {
         val entity = NotificationEntity().also {
             it.notificationId = Ids.newId()
             it.partyId = req.partyId
             it.channel = req.channel.name
             it.template = req.template.name
+            it.templateRevision = revision
             it.recipient = req.recipient
             it.subject = subject
             // Secret-bearing templates persist a placeholder; `body` below still carries the
@@ -359,6 +391,11 @@ class NotificationConsumer @Inject constructor(
             it.deduplicationKey = req.deduplicationKey
             it.status = "PENDING"
             it.createdAt = Instant.now(clock)
+        }
+        if (req.channel ==
+            NotificationChannel.INBOX
+        ) {
+            return persistInbox(req, entity).call { _ -> publishOversight(req) }
         }
         return persistOnce(entity, req.deduplicationKey)
             .chain { persisted ->
@@ -374,6 +411,7 @@ class NotificationConsumer @Inject constructor(
                     when (req.channel) {
                         NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
                         NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                        NotificationChannel.INBOX -> error("inbox has its own atomic visibility path")
                     }
                 }
             }
@@ -400,6 +438,25 @@ class NotificationConsumer @Inject constructor(
                     Uni.createFrom().failure(failure)
                 }
             }
+
+    /** The inbox row and VISIBLE outcome commit atomically; no provider acceptance is implied. */
+    private fun persistInbox(req: NotificationRequest, entity: NotificationEntity): Uni<Void> {
+        entity.status = NotificationOutcome.VISIBLE.name
+        entity.visibleAt = Instant.now(clock)
+        return Panache.withTransaction {
+            notificationRepo.persist(entity)
+                .chain { _ ->
+                    outboxRepo.persistInTransaction(outcomeMessage(req, entity, NotificationOutcome.VISIBLE, null))
+                }
+        }.replaceWithVoid()
+            .onFailure().recoverWithUni { failure ->
+                if (req.deduplicationKey != null && failure.isDeduplicationConflict()) {
+                    Uni.createFrom().voidItem()
+                } else {
+                    Uni.createFrom().failure(failure)
+                }
+            }
+    }
 
     /**
      * Hibernate Reactive adapts the Vert.x PgException into a PLAIN [java.sql.SQLException]
@@ -527,6 +584,7 @@ class NotificationConsumer @Inject constructor(
                 when (req.channel) {
                     NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
                     NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+                    NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
                 }
             } else {
                 val reason = when (decision.denyReason) {
@@ -1042,6 +1100,7 @@ class NotificationConsumer @Inject constructor(
             outcome = outcome,
             reason = reason,
             occurredAt = now,
+            templateRevision = entity.templateRevision,
         )
         return OutboxMessage(
             eventId = Ids.newId(),

@@ -1119,6 +1119,34 @@ test_deny_edge_service_account_decide_message_approval if {
 	}
 }
 
+test_allow_operator_create_managed_notification_template if {
+	decision := rest.allow with input as {
+		"principal": {"id": "operator-1", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "commstemplate.create",
+		"resource": "",
+	}
+		with data.openbank.bundle as bundle
+	decision.allow == true
+	decision.reason == "operator-manage-notification-template"
+}
+
+test_allow_admin_publish_managed_notification_template if {
+	rest.allow with input as {
+		"principal": {"id": "admin-1", "type": "HUMAN", "roles": ["ROLE_ADMIN"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+		with data.openbank.bundle as bundle
+}
+
+test_deny_edge_service_account_publish_managed_notification_template if {
+	not rest.allow with input as {
+		"principal": {"id": "service-account-openbank-edge", "type": "HUMAN", "roles": ["ROLE_OPERATOR"]},
+		"action": "commstemplate.publish",
+		"resource": "revision-1",
+	}
+}
+
 # four_eyes_required fires for opsmessage.compose via the NEW data.rules.four_eyes.actions
 # list, not via money_path_scopes — notification-service is not and will never be in
 # money_path_services, so this proves the exact-action clause is what is actually firing.

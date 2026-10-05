@@ -16,6 +16,7 @@ class NotificationModelTest {
         assertThat(NotificationChannel.values()).containsExactlyInAnyOrder(
             NotificationChannel.EMAIL,
             NotificationChannel.PUSH,
+            NotificationChannel.INBOX,
         )
     }
 
@@ -26,6 +27,7 @@ class NotificationModelTest {
             NotificationStatus.SENT,
             NotificationStatus.FAILED,
             NotificationStatus.BOUNCED,
+            NotificationStatus.VISIBLE,
         )
     }
 

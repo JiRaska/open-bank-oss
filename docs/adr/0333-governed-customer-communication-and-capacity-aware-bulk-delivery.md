@@ -142,12 +142,23 @@ idempotency keys and tests. Digests are a later distinct template, not an implic
 | Product offer | Campaign domain | Approved campaign channels | Marketing consent, shared fatigue reservation and spare capacity |
 
 The event owner decides *whether* a customer contact exists; notification-service decides the
-approved wording and transport. Inbox-only delivery is planned, not an alias for a push handoff:
-today `NotificationChannel` only implements EMAIL and PUSH, and `IN_APP` was removed after it
-silently reported success without delivery. Reuse the existing notification rows, customer feed,
-read/unread operations and party-scoped read API; add an explicit inbox-only creation path and an
-outcome that records when a row became visible. Visibility is not a read or a push acceptance. A
-technical balance event therefore cannot become a customer message merely by adding an enum value.
+approved wording and transport. Inbox-only delivery is an explicit `INBOX` channel and `VISIBLE`
+outcome, not an alias for a push handoff: `IN_APP` was removed after it silently reported success
+without delivery. Reuse the existing notification rows, customer feed, read/unread operations and
+party-scoped read API; commit the row and visibility outcome in one transaction, with a mandatory
+idempotency key. Visibility is not a read or a push acceptance. A technical balance event therefore
+cannot become a customer message merely by adding an enum value.
+
+## Delivery record
+
+The first PR for this ADR adds bounded campaign admission with a database lease and a default-off
+budget, a staff-managed notification copy registry with separate maker and publisher, and an
+inbox-only notification outcome backed by the existing customer feed. Published copy is pinned to
+the notification row. These are individual controls, not proof of the full communication system.
+The audience still reads mutable segment data; it is not a frozen snapshot. Provider dispatch and
+click destinations lack measured shared capacity limits, and there is no cross-origin atomic contact
+reservation or single operator evidence projection yet. Mass activation must remain disabled until
+those controls and the D7 end-to-end/load evidence are complete.
 
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic
