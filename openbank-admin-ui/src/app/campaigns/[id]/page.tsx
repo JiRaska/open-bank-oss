@@ -83,7 +83,9 @@ interface SendPage {
 
 interface BulkRun {
   id: string
-  state: 'RUNNING' | 'HELD' | 'COMPLETED'
+  state: 'PREPARING' | 'RUNNING' | 'HELD' | 'COMPLETED'
+  audienceCount: number | null
+  snapshotAt: string | null
   admitted: number
   failures: number
   pageSize: number
@@ -202,7 +204,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
       .finally(() => setLoading(false))
   }, [id, reloadToken])
 
-  const hasRunningBulkRun = detail?.bulkRuns?.some(run => run.state === 'RUNNING') ?? false
+  const hasRunningBulkRun = detail?.bulkRuns?.some(run => run.state === 'PREPARING' || run.state === 'RUNNING') ?? false
   useEffect(() => {
     if (!hasRunningBulkRun || !id) return
     const timer = window.setInterval(() => {
@@ -959,6 +961,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                       <span className="text-muted-foreground">{new Date(run.updatedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}</span>
                     </div>
                     <p>{t('Zařazeno', 'Admitted')}: {run.admitted.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')} · {t('Chyby', 'Failures')}: {run.failures}</p>
+                    <p className="text-xs text-muted-foreground">{t('Zmrazené publikum', 'Frozen audience')}: {run.audienceCount == null ? t('připravuje se', 'preparing') : run.audienceCount.toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}{run.snapshotAt ? ` · ${new Date(run.snapshotAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}` : ''}</p>
                     <p className="text-xs text-muted-foreground">{t('Limit', 'Budget')}: {run.pageSize} {t('za minutu', 'per minute')}{run.lastError ? ` · ${run.lastError}` : ''}</p>
                     {run.lastResumedBy && <p className="text-xs text-muted-foreground">{t('Obnovil', 'Resumed by')}: {run.lastResumedBy}{run.lastResumedAt ? ` · ${new Date(run.lastResumedAt).toLocaleString(language === 'cs' ? 'cs-CZ' : 'en-GB')}` : ''}</p>}
                     {run.state === 'HELD' && c.state === 'ACTIVE' && (
