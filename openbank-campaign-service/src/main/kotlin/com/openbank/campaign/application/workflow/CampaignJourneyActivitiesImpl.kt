@@ -159,6 +159,12 @@ open class CampaignJourneyActivitiesImpl(
         val campaign = campaigns.findById(campaignId)
             ?: return resolved(StepResolution.CAMPAIGN_CLOSED, StepOutcome.CAMPAIGN_CLOSED)
         campaign.deliveryStateOutcome()?.let { return resolved(resolutionFor(it), it) }
+        // Temporal may start executing before enrolParty commits its ACTIVE row. A missing or
+        // terminal enrolment is not authority to contact this party; retry while the start/write
+        // boundary is being reconciled, and never emit a message from an orphan workflow.
+        check(enrolments.findByCampaignAndParty(campaignId, partyId)?.state == EnrolmentState.ACTIVE) {
+            "active campaign enrolment is unavailable"
+        }
         if (sendLog.conversionContextFor(campaignId, partyId).alreadyConverted) {
             return resolved(StepResolution.GOAL_REACHED, StepOutcome.GOAL_REACHED)
         }

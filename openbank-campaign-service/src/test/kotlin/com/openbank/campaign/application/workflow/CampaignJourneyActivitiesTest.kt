@@ -22,6 +22,7 @@ import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
 import com.openbank.campaign.domain.model.DeliveryStatus
 import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.MobileDestination
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
@@ -118,7 +119,15 @@ class CampaignJourneyActivitiesTest {
             override suspend fun findActiveByTrigger(trigger: String) = emptyList<Campaign>()
         }
         val enrolments = object : EnrolmentRepository {
-            override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? = null
+            override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment = Enrolment(
+                id = UUID.randomUUID(),
+                campaignId = campaignId,
+                partyId = partyId,
+                state = EnrolmentState.ACTIVE,
+                currentStep = 1,
+                startedAt = Instant.now(),
+                completedAt = null,
+            )
             override suspend fun listByCampaign(campaignId: UUID) = emptyList<Enrolment>()
             override suspend fun countAllByCampaign() = emptyList<CampaignEnrolmentCount>()
             override suspend fun listByParty(partyId: UUID) = emptyList<Enrolment>()

@@ -18,6 +18,8 @@ import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
 import com.openbank.campaign.domain.model.CampaignStep
 import com.openbank.campaign.domain.model.Channel
+import com.openbank.campaign.domain.model.Enrolment
+import com.openbank.campaign.domain.model.EnrolmentState
 import com.openbank.campaign.domain.model.SegmentRef
 import com.openbank.campaign.domain.model.SendOutcome
 import com.openbank.campaign.domain.model.SendRecord
@@ -140,6 +142,15 @@ class CampaignJourneyActivitiesImplTest {
             updatedAt = Instant.now(),
         )
         coEvery { sendLog.countRecentForParty(partyId, any()) } returns 0
+        coEvery { enrolments.findByCampaignAndParty(campaignId, partyId) } returns Enrolment(
+            id = UUID.randomUUID(),
+            campaignId = campaignId,
+            partyId = partyId,
+            state = EnrolmentState.ACTIVE,
+            currentStep = 1,
+            startedAt = Instant.now(),
+            completedAt = null,
+        )
         coEvery { sendLog.wasHandedOff(any()) } returns false
         coEvery { sendLog.conversionContextFor(campaignId, partyId) } returns ConversionContext(null, false)
         coEvery { consentCheck.hasActiveConsent(partyId, any()) } returns true
@@ -244,6 +255,18 @@ class CampaignJourneyActivitiesImplTest {
         coVerify(exactly = 1) { notificationSend.requestSend(any()) }
         coVerify(exactly = 1) { sendLog.record(any()) }
         assertThat(sends("email", "handed_off")).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `a workflow started before enrolment commit cannot hand off`() {
+        givenDeliverableStep()
+        coEvery { enrolments.findByCampaignAndParty(campaignId, partyId) } returns null
+
+        assertThatThrownBy { activities.deliverStep(campaignId, partyId, 1) }
+            .isInstanceOf(IllegalStateException::class.java)
+
+        coVerify(exactly = 0) { notificationSend.requestSend(any()) }
+        coVerify(exactly = 0) { sendLog.record(any()) }
     }
 
     @Test

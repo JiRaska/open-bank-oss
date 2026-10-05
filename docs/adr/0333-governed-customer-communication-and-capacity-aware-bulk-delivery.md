@@ -164,6 +164,11 @@ evidence projection yet. The workflow-start/enrolment-write boundary also needs 
 before a crash there can be called exactly once. Mass activation must remain disabled until those
 controls and the D7 end-to-end/load evidence are complete.
 
+The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
+Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
+retryable. A process crash after workflow start but before the write can still leave an orphan
+execution; durable start intent and reconciliation are required to resolve it automatically.
+
 Campaign handoffs derive a stable send-log id from campaign, party, step and dry-run mode. Temporal
 activity retry and Kafka replay therefore use the same `correlationId` and `deduplicationKey` for
 one logical notification. Repeated send-log writes preserve SENT and can advance FAILED to SENT.
