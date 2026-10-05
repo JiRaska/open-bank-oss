@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 """Generate a complete, bounded-memory fleet snapshot. Publication is a separate step."""
 import json
+import re
 from copy import deepcopy
 
 IDENTITY = ('version', 'sha', 'ref', 'job', 'detector')
@@ -26,6 +27,13 @@ def validate_snapshot(snapshot):
     datetime.fromisoformat(scanned.replace('Z', '+00:00'))
     if not isinstance(snapshot['manifests'], dict):
         raise TypeError('invalid manifests')
+    detector = snapshot['detector']
+    if (not isinstance(detector, dict) or set(detector) != {'name', 'version', 'url'}
+            or detector['name'] != 'GitHub Dependency Graph Gradle Plugin'
+            or detector['url'] != 'https://github.com/gradle/github-dependency-graph-gradle-plugin'
+            or not isinstance(detector['version'], str)
+            or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', detector['version'])):
+        raise ValueError('unexpected dependency graph detector')
     for manifest in snapshot['manifests'].values():
         if not isinstance(manifest, dict) or set(manifest) != {'name', 'file', 'resolved'}:
             raise ValueError('unexpected manifest schema')
@@ -156,7 +164,6 @@ def verify_coverage(directory, projects, sha):
 
 def generate(repo, output, env, extra_arguments=()):
     import os
-    import re
     import subprocess
     import time
 
@@ -194,9 +201,7 @@ def generate(repo, output, env, extra_arguments=()):
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
     expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
-                    'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
-                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
-                                  'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
+                    'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator}}
     parts, receipts = {}, []
     for i in range(0, len(modules), 4):
         shard = output / expected[i // 4]
@@ -226,7 +231,13 @@ def generate(repo, output, env, extra_arguments=()):
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:
             raise ValueError('expected one fresh snapshot per shard')
-        parts[shard.name] = load_snapshot(snapshots[0])
+        part = load_snapshot(snapshots[0])
+        validate_snapshot(part)
+        if 'detector' not in identity:
+            # setup-gradle pins the producer by action SHA; its plugin version may
+            # change on an action upgrade. Require every shard to report the same one.
+            identity['detector'] = part['detector']
+        parts[shard.name] = part
         receipts.append({'shard': shard.name, 'projects': projects,
                              'seconds': round(time.monotonic() - started, 2)})
         (output / 'results.json').write_text(json.dumps(receipts, indent=2))
