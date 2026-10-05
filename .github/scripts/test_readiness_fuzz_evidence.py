@@ -41,6 +41,7 @@ def fixture() -> dict[str, bytes]:
             }],
         }).encode(),
         f"{root}/runs/42/artifacts?per_page=100": json.dumps({
+            "total_count": 1,
             "artifacts": [{"name": "api-fuzz-reports-openbank-audit-service",
                            "id": 7, "expired": False, "size_in_bytes": len(archive.getvalue())}],
         }).encode(),
@@ -90,7 +91,7 @@ class FuzzEvidenceTest(unittest.TestCase):
     def test_missing_artifact_and_wrong_lane_fail(self) -> None:
         root = f"repos/{REPO}/actions"
         data = fixture()
-        data[f"{root}/runs/42/artifacts?per_page=100"] = b'{"artifacts": []}'
+        data[f"{root}/runs/42/artifacts?per_page=100"] = b'{"total_count": 0, "artifacts": []}'
         with self.assertRaisesRegex(EvidenceError, "absent"):
             check_ops(data)
         data = fixture()
@@ -102,6 +103,15 @@ class FuzzEvidenceTest(unittest.TestCase):
             }))
         data[f"{root}/artifacts/7/zip"] = archive.getvalue()
         with self.assertRaisesRegex(EvidenceError, "different service, lane"):
+            check_ops(data)
+
+    def test_unseen_artifact_pages_fail_closed(self) -> None:
+        data = fixture()
+        path = f"repos/{REPO}/actions/runs/42/artifacts?per_page=100"
+        listing = json.loads(data[path])
+        listing["total_count"] = 101
+        data[path] = json.dumps(listing).encode()
+        with self.assertRaisesRegex(EvidenceError, "too many artifacts"):
             check_ops(data)
 
     def test_record_must_reconcile_selected_and_auth_blocked(self) -> None:

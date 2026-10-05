@@ -76,13 +76,17 @@ def verify_fuzz_ops(
 
     try:
         jobs = json.loads(fetch(f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"))
-        if jobs.get("total_count", 0) > 100:
-            raise EvidenceError("cited run has too many jobs to verify completely")
+        job_count = jobs["total_count"]
+        if type(job_count) is not int or job_count > 100 or job_count != len(jobs["jobs"]):
+            raise EvidenceError("cited run jobs cannot be verified completely")
         service_job = f"schemathesis (openbank-{service}-service)"
         matching_jobs = [job for job in jobs["jobs"] if job.get("name") == service_job]
         if len(matching_jobs) != 1 or matching_jobs[0].get("conclusion") != "success":
             raise EvidenceError("cited service fuzz job did not succeed")
         listing = json.loads(fetch(f"repos/{repository}/actions/runs/{run_id}/artifacts?per_page=100"))
+        artifact_count = listing["total_count"]
+        if type(artifact_count) is not int or artifact_count > 100 or artifact_count != len(listing["artifacts"]):
+            raise EvidenceError("cited run has too many artifacts to verify completely")
         artifact_name = f"api-fuzz-reports-openbank-{service}-service"
         matches = [item for item in listing["artifacts"] if item.get("name") == artifact_name]
         if len(matches) != 1 or matches[0].get("expired"):
