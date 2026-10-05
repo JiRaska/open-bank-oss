@@ -38,6 +38,9 @@ jobs:
           ref: ${{ github.sha }}
           persist-credentials: false
 
+      - name: Test trusted verifier
+        run: python3 .github/scripts/test-verify-dependabot-auto-merge.py
+
       - name: Verify source run and live PR
         id: verify
         run: python3 .github/scripts/verify-dependabot-auto-merge.py
