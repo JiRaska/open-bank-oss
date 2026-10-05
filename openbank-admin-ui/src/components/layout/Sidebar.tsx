@@ -183,6 +183,7 @@ const opsNav: NavItem[] = [
   // Notifications (what we send) rather than under the agent cockpit: the audience is the
   // contact centre and back-office, not agent operators.
   { nameCs: 'Komunikační studio',    nameEn: 'Communication Studio', href: '/communication', icon: MessagesSquare, permission: 'communication:view' },
+  { nameCs: 'Šablony zpráv',          nameEn: 'Message templates', href: '/communication/notification-templates', icon: Bell, permission: 'communication:templates:manage' },
   { nameCs: 'Security Excellence',   nameEn: 'Security Excellence', href: '/security/excellence', icon: Scale,   permission: 'system:view' },
   { nameCs: 'Bezpečnostní kontrola', nameEn: 'Security Scan',    href: '/security',          icon: ScanLine,     permission: 'system:view' },
 ]
