@@ -164,6 +164,26 @@ spec:
           selector:
             matchLabels:
               kubernetes.io/metadata.name: pact-broker
+    # pricing.open-bank.tech (ADR-0324 Phase 4, pricing/httproute.yaml). Its own Certificate
+    # `pricing-edge-tls` (no key pinning on this host), admitted by the ReferenceGrant in
+    # pricing/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-pricing
+      protocol: HTTPS
+      port: 443
+      hostname: pricing.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pricing-edge-tls
+            namespace: pricing
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: pricing
     - name: https-langfuse
       protocol: HTTPS
       port: 443
