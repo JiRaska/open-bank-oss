@@ -98,19 +98,18 @@ class PublicationWaitTest(unittest.TestCase):
         common = {"needs.changes.result": "success", "needs.build.result": "success"}
         # The service aggregate also requires verification metadata for changed build files.
         # Exercise both independent prerequisites so a merge cannot make either gate vacuous.
-        for admission, changed, publication, modules, metadata, expected_success in [
-            ("true", "true", "success", "", "skipped", True),
-            ("false", "true", "success", "", "skipped", False),
-            ("true", "true", "failure", "", "skipped", False),
-            ("true", "true", "skipped", "", "skipped", False),
-            ("true", "", "skipped", "", "skipped", True),
-            ("true", "", "skipped", "openbank-treasury-service", "skipped", False),
-            ("true", "", "skipped", "openbank-treasury-service", "success", True),
+        for changed, publication, modules, metadata, admission, expected_success in [
+            ("true", "success", "", "skipped", "true", True),
+            ("true", "failure", "", "skipped", "true", False),
+            ("true", "skipped", "", "skipped", "true", False),
+            ("", "skipped", "", "skipped", "true", True),
+            ("", "skipped", "openbank-treasury-service", "skipped", "true", False),
+            ("", "skipped", "openbank-treasury-service", "success", "true", True),
+            ("", "skipped", "", "skipped", "false", False),
         ]:
-            with self.subTest(admission=admission, changed=changed, publication=publication,
-                              modules=modules, metadata=metadata):
-                values = dict(common, **{"needs.changes.outputs.admin-ui-pact-changed": changed,
-                                         "needs.changes.outputs.admission": admission,
+            with self.subTest(changed=changed, publication=publication, modules=modules, metadata=metadata, admission=admission):
+                values = dict(common, **{"needs.changes.outputs.admission": admission,
+                                         "needs.changes.outputs.admin-ui-pact-changed": changed,
                                          "needs.changes.outputs.verification-modules": modules,
                                          "needs.verification-metadata.result": metadata,
                                          "needs.publication-ready.result": publication})
