@@ -22,6 +22,19 @@ class SepaPaymentTest {
     }
 
     @Test
+    fun `reject transition retains its reason and detail for the payment record`() {
+        val rejected = payment().transitionTo(
+            targetStatus = SepaPaymentStatus.REJECTED,
+            reason = SepaRejectReason.SANCTIONS_HIT,
+            detail = "Screening refused",
+            clock = Clock.fixed(Instant.parse("2026-01-02T00:00:00Z"), ZoneOffset.UTC),
+        )
+
+        assertThat(rejected.rejectReason).isEqualTo(SepaRejectReason.SANCTIONS_HIT)
+        assertThat(rejected.rejectDetail).isEqualTo("Screening refused")
+    }
+
+    @Test
     fun `completed transition sets submitted and completed timestamps`() {
         val now = Instant.parse("2026-01-02T00:00:00Z")
         val transactionId = UUID.randomUUID()

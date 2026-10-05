@@ -5,6 +5,7 @@
 package com.openbank.sepa.application.usecase
 
 import com.openbank.libs.domain.money.Money
+import com.openbank.libs.idempotency.IdempotencyKeyReusedException
 import com.openbank.libs.iso20022.Pacs004Builder
 import com.openbank.libs.iso20022.PaymentReturn
 import com.openbank.libs.iso20022.SettlementMethod
@@ -93,6 +94,36 @@ class SepaPaymentServiceTest {
             assertThat(result).isEqualTo(existing)
             coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
         }
+
+    @Test
+    fun `create payment replays a persisted matching request fingerprint`(): Unit = runBlocking {
+        val fingerprint = "a".repeat(64)
+        val existing = payment().copy(requestHash = fingerprint)
+        coEvery { paymentRepository.findByIdempotencyKey(existing.idempotencyKey) } returns existing
+
+        val result = service.createPayment(
+            createCommand(idempotencyKey = existing.idempotencyKey).copy(requestHash = fingerprint),
+        )
+
+        assertThat(result).isEqualTo(existing)
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+    }
+
+    @Test
+    fun `create payment refuses a reused key with a different persisted fingerprint`() {
+        val existing = payment().copy(requestHash = "a".repeat(64))
+        coEvery { paymentRepository.findByIdempotencyKey(existing.idempotencyKey) } returns existing
+
+        assertThatThrownBy {
+            runBlocking {
+                service.createPayment(
+                    createCommand(idempotencyKey = existing.idempotencyKey).copy(requestHash = "b".repeat(64)),
+                )
+            }
+        }.isInstanceOf(IdempotencyKeyReusedException::class.java)
+
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+    }
 
     @Test
     fun `transition to rejected requires reject reason`() {

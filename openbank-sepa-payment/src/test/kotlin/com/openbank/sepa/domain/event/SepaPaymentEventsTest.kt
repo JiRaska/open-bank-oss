@@ -4,6 +4,8 @@
 
 package com.openbank.sepa.domain.event
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
@@ -18,6 +20,8 @@ import java.time.ZoneOffset
 import java.util.UUID
 
 class SepaPaymentEventsTest {
+
+    private val mapper = ObjectMapper().registerModule(JavaTimeModule())
 
     private fun payment(
         status: SepaPaymentStatus = SepaPaymentStatus.RECEIVED,
@@ -100,5 +104,55 @@ class SepaPaymentEventsTest {
         assertThat(event.newStatus).isEqualTo(SepaPaymentStatus.VALIDATED)
         assertThat(event.rejectReason).isNull()
         assertThat(event.rejectDetail).isNull()
+    }
+
+    @Test
+    fun `return evidence wire record preserves caller attribution and reversal outcome`() {
+        val paymentId = UUID.randomUUID()
+        val evidence = SepaPaymentReturnedEvent(
+            paymentId = paymentId,
+            version = 5,
+            originalEndToEndId = "E2E-return",
+            returnReasonCode = "AC04",
+            actorId = "operator-example",
+            actorType = "ROLE_OPERATOR",
+            correlationId = "correlation-example",
+            reversalPerformed = true,
+            occurredAt = Instant.parse("2026-01-02T12:00:00Z"),
+        )
+
+        val json = mapper.readTree(mapper.writeValueAsString(evidence))
+
+        assertThat(json.path("paymentId").asText()).isEqualTo(paymentId.toString())
+        assertThat(json.path("version").asLong()).isEqualTo(5)
+        assertThat(json.path("originalEndToEndId").asText()).isEqualTo("E2E-return")
+        assertThat(json.path("returnReasonCode").asText()).isEqualTo("AC04")
+        assertThat(json.path("actorId").asText()).isEqualTo("operator-example")
+        assertThat(json.path("actorType").asText()).isEqualTo("ROLE_OPERATOR")
+        assertThat(json.path("correlationId").asText()).isEqualTo("correlation-example")
+        assertThat(json.path("reversalPerformed").asBoolean()).isTrue()
+        assertThat(json.path("eventType").asText()).isEqualTo(RETURN_EVIDENCE_EVENT_TYPE)
+        assertThat(json.path("sourceService").asText()).isEqualTo("sepa-payment")
+    }
+
+    @Test
+    fun `return evidence wire record can state that no reversal was performed`() {
+        val evidence = SepaPaymentReturnedEvent(
+            paymentId = UUID.randomUUID(),
+            version = 2,
+            originalEndToEndId = "E2E-no-reversal",
+            returnReasonCode = null,
+            actorId = "operator-example",
+            actorType = "ROLE_OPERATOR",
+            correlationId = null,
+            reversalPerformed = false,
+            occurredAt = Instant.parse("2026-01-02T12:00:00Z"),
+        )
+
+        val json = mapper.readTree(mapper.writeValueAsString(evidence))
+
+        assertThat(json.path("reversalPerformed").asBoolean()).isFalse()
+        assertThat(json.path("returnReasonCode").isNull).isTrue()
+        assertThat(json.path("correlationId").isNull).isTrue()
     }
 }
