@@ -63,12 +63,11 @@ spec:
     # refuses to reconcile at all. Pinned, the operator upgrade and the broker
     # upgrade are two separate, reviewable changes (Strimzi's documented order:
     # operator first, with a version BOTH operators support, then the broker).
-    # 4.2.0 / 4.2-IV1 is what operator 1.0.0 ran by default and what the live
-    # cluster reported in status.kafkaVersion / status.kafkaMetadataVersion when
-    # this was pinned, so pinning it changed nothing on the running broker.
-    # Bump metadataVersion only after the broker version is rolled and healthy —
-    # a KRaft metadata version cannot be downgraded.
-    version: 4.2.0
+    # Stage 1 of #11415: Strimzi 1.2.0 supports Kafka 4.3.1. Keep the KRaft
+    # metadata at 4.2-IV1 during the broker rollout and observation window.
+    # The separate metadata upgrade to 4.3 is not safely reversible to 4.2-IV1;
+    # see docs/runbooks/0028-kafka-43-staged-rollout.md before syncing.
+    version: 4.3.1
     metadataVersion: 4.2-IV1
     # SimpleAuthorizer for KafkaUser ACLs (ADR-0108 hardening, issue #2013;
     # ADR-0137 mTLS migration). KRaft inter-broker comms use the managed
