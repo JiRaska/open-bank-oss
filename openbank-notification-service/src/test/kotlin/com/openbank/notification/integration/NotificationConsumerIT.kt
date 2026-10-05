@@ -210,15 +210,17 @@ class NotificationConsumerIT {
     @Test
     fun `inbox rejects a request without a stable idempotency key`() {
         val partyId = UUID.randomUUID()
-        consumeAndAwait(
-            NotificationRequest(
-                partyId = partyId,
-                channel = NotificationChannel.INBOX,
-                template = NotificationTemplate.ACCOUNT_OPENED,
-                recipient = partyId.toString(),
-                variables = mapOf("accountNumber" to "CZ1234"),
+        assertThat(
+            sendAndAwaitOutcome(
+                NotificationRequest(
+                    partyId = partyId,
+                    channel = NotificationChannel.INBOX,
+                    template = NotificationTemplate.ACCOUNT_OPENED,
+                    recipient = partyId.toString(),
+                    variables = mapOf("accountNumber" to "CZ1234"),
+                ),
             ),
-        )
+        ).isEqualTo("nacked")
         assertThat(countFor(partyId)).isZero()
     }
 

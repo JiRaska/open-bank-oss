@@ -160,6 +160,12 @@ click destinations lack measured shared capacity limits, and there is no cross-o
 reservation or single operator evidence projection yet. Mass activation must remain disabled until
 those controls and the D7 end-to-end/load evidence are complete.
 
+The existing email/push path persists a `PENDING` row before provider handoff. If a failure occurs
+after that insert but before a terminal outcome, Kafka redelivery sees the deduplication key and
+skips the request; the row can remain `PENDING`. Provider ambiguity also cannot be resolved from a
+Kafka ack. D4 therefore requires a durable dispatch queue and reconciliation, with an idempotent
+provider key where supported, before claiming resilient non-inbox delivery.
+
 **D7 — Rollout and proof.** Deliver in reversible steps: instrument and exercise halt and
 outcomes; add keyset pages and durable run/wave state; add capacity permits and automatic
 hold; migrate to shared atomic reservations; add the unified operator projection; add

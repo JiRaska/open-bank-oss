@@ -319,11 +319,9 @@ class NotificationConsumer @Inject constructor(
             req.recipient != req.partyId.toString() ||
             req.deduplicationKey == null
         if (req.channel == NotificationChannel.INBOX && invalidInboxRequest) {
-            log.errorf(
-                "Rejected inbox notification with invalid class, recipient or idempotency key template=%s",
-                req.template.name,
-            )
-            return Uni.createFrom().voidItem()
+            // The producer can repair a dead-lettered request. Acknowledging it here would erase
+            // a required customer notice without a row or outcome.
+            return Uni.createFrom().failure(IllegalArgumentException("invalid inbox notification request"))
         }
         return dispatch(req)
             .onFailure().invoke { e ->
