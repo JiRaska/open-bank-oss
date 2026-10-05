@@ -109,6 +109,12 @@ on:
         type: boolean
         required: false
         default: false
+      runtime_base_refresh_sha:
+        description: >-
+          Optional exact main commit for a runtime-base refresh. Requires reconcile=true and
+          a completed Services CI on this commit. Refuses missing Pact versions or a moved main.
+        required: false
+        default: ""
       bootstrap_image_only:
         description: >-
           Build, sign and attest exactly one service image that has no GitOps manifest yet.
@@ -162,6 +168,8 @@ jobs:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
           INPUT_SERVICES: ${{ github.event.inputs.services }}
+          INPUT_RUNTIME_BASE_REFRESH_SHA: ${{ github.event.inputs.runtime_base_refresh_sha }}
+          PACT_BROKER_CONFIGURED: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
           set -euo pipefail
           # Full fleet — unlike services-ci.yml (which discovers every openbank-*/
@@ -273,6 +281,27 @@ jobs:
           # commit leaves the contract gate with no pact version for this SHA and produces the
           # wasted runs / NOT_ASKED failures behind #3318 / #3454.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -n "$INPUT_RUNTIME_BASE_REFRESH_SHA" ]; then
+              if [ "$PACT_BROKER_CONFIGURED" != "true" ]; then
+                echo "::error::runtime-base refresh requires the Pact contract gate"
+                exit 1
+              fi
+              if [ "${{ github.event.inputs.reconcile }}" != "true" ] \
+                || [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ] \
+                || [ -n "$INPUT_SERVICES" ] || [ "$INPUT_CODEPLOY" = "true" ] \
+                || [ -n "$INPUT_CODEPLOY_PACT_VERSIONS" ]; then
+                echo "::error::runtime-base refresh requires reconcile=true and no other dispatch mode"
+                exit 1
+              fi
+              if [[ ! "$INPUT_RUNTIME_BASE_REFRESH_SHA" =~ ^[0-9a-f]{40}$ ]] \
+                || [ "$GITHUB_REF" != "refs/heads/main" ] \
+                || [ "$GITHUB_SHA" != "$INPUT_RUNTIME_BASE_REFRESH_SHA" ] \
+                || [ "$(git rev-parse HEAD)" != "$INPUT_RUNTIME_BASE_REFRESH_SHA" ] \
+                || [ "$(git ls-remote origin refs/heads/main | cut -f1)" != "$INPUT_RUNTIME_BASE_REFRESH_SHA" ]; then
+                echo "::error::runtime-base refresh requires the exact current main commit"
+                exit 1
+              fi
+            fi
             if [ "${{ github.event.inputs.bootstrap_image_only }}" = "true" ]; then
               if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
                 echo "::error::bootstrap_image_only and reconcile are mutually exclusive"
@@ -1075,6 +1104,7 @@ jobs:
           SERVICES: ${{ needs.build-push.outputs.deployable_services }}
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
           INPUT_CODEPLOY_PACT_VERSIONS: ${{ github.event.inputs.codeploy_pact_versions }}
+          REQUIRE_EXACT_PACT_VERSION: ${{ github.event.inputs.runtime_base_refresh_sha != '' }}
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
@@ -1127,6 +1157,7 @@ jobs:
       github.event.inputs.bootstrap_image_only != 'true' &&
       needs.build-push.result == 'success' &&
       needs.can-i-deploy.result != 'cancelled' &&
+      (github.event_name != 'workflow_dispatch' || github.event.inputs.runtime_base_refresh_sha == '' || needs.can-i-deploy.outputs.gate_ran == 'true') &&
       needs.build-push.outputs.deployable_services != '[]'
     runs-on: ubuntu-latest  # manifest rewrite + PR only; hosted-first (public repo, free)
     permissions:
@@ -1145,6 +1176,7 @@ jobs:
       # the gate crashed before deciding — the fail-closed guard in the rewrite/record steps
       # keys on exactly that (issue #1348).
       GATE_RAN: ${{ needs.can-i-deploy.outputs.gate_ran || '' }}
+      RUNTIME_BASE_REFRESH_SHA: ${{ github.event.inputs.runtime_base_refresh_sha }}
       # Mirrored into env because the `secrets` context is NOT available in a step-level `if:`
       # — only job-level env can read it. Used solely to decide whether to mint an App token.
       GITOPS_APP_ID: ${{ secrets.GITOPS_APP_ID }}
@@ -1190,6 +1222,11 @@ jobs:
           # Safe because the rewrite is deterministic — pin each image: to the tag just built —
           # so recomputing against a newer main is always correct.
           git fetch --depth=100 origin main
+          if [ -n "$RUNTIME_BASE_REFRESH_SHA" ] \
+            && [ "$(git rev-parse origin/main)" != "$RUNTIME_BASE_REFRESH_SHA" ]; then
+            echo "::error::main advanced during runtime-base refresh; dispatch again after Services CI"
+            exit 1
+          fi
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()

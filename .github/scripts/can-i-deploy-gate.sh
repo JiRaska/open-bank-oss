@@ -227,6 +227,14 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
     -u "${PACT_BROKER_USERNAME}:${PACT_BROKER_PASSWORD}" \
     "${PACT_BROKER_URL}/pacticipants/${svc}" || echo 000)"
   if [ "$code" = "404" ]; then
+    if [ "${REQUIRE_EXACT_PACT_VERSION:-false}" = "true" ]; then
+      block_class["$svc"]="PENDING_BUILD"
+      block_reason["$svc"]="exact Pact version was not published"
+      echo "::error::can-i-deploy: ${svc} has no published Pact version for this exact runtime-base refresh"
+      printf '===SERVICE %s\t%s\n%s\n' "$svc" "PENDING_BUILD" "exact Pact version was not published" >> "$BLOCKS_FILE"
+      rc=1
+      continue
+    fi
     echo "  ✓ ${svc} has no contracts in the broker (not a Pacticipant) — deployable"
     deployable_list+=("$svc")
     continue

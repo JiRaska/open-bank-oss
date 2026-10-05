@@ -92,6 +92,17 @@ EVENT="${EVENT_NAME:-push}"
 
 emit() { printf '%s\t%s\n' "$1" "$2"; }
 
+# An explicitly pinned runtime-base refresh asks only about the image's exact source
+# commit. Ordinary push, schedule and manual recovery retain their existing selectors.
+if [ "${REQUIRE_EXACT_PACT_VERSION:-false}" = "true" ]; then
+  if [ "$PRESENT" = "yes" ]; then
+    emit "--version ${SHA}" "runtime-base refresh: exact commit's pact version is published"
+  else
+    emit "REFUSE" "runtime-base refresh: exact commit's pact version is unavailable"
+  fi
+  exit 0
+fi
+
 # A malformed `equivalent:` — no sha, or something that is not one — is not a proof of anything,
 # and must not become a bare `--version` with an empty argument, which the pact CLI would read as
 # the next flag. Demote it to plain `no`, which on a dispatch is #3318's REFUSE.

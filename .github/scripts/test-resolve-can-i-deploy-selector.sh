@@ -137,6 +137,28 @@ check "dispatch + proven-equivalent version → ask about THAT version" \
 check "schedule + proven-equivalent version → ask about THAT version, not latest/main" \
   "--version ${EQ_SHA}" "equivalent:${EQ_SHA}" schedule
 
+# #6717: an explicitly pinned runtime-base refresh must never borrow another commit's
+# verdict, even when ordinary scheduled reconcile would use latest/main or equivalence.
+for p in no unknown absent "equivalent:${EQ_SHA}"; do
+  got="$(REQUIRE_EXACT_PACT_VERSION=true PACT_VERSION_PRESENT="$p" EVENT_NAME=workflow_dispatch \
+    bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
+  if [ "$got" = REFUSE ]; then
+    echo "  ok   strict refresh + ${p} → REFUSE"
+  else
+    echo "  FAIL strict refresh + ${p}: want REFUSE, got '${got}'"
+    fails=$((fails + 1))
+  fi
+done
+got="$(REQUIRE_EXACT_PACT_VERSION=true PACT_VERSION_PRESENT=yes EVENT_NAME=workflow_dispatch \
+  bash "$RESOLVE" openbank-demo-service "$SHA" | cut -f1)"
+if [ "$got" = "--version ${SHA}" ]; then
+  echo "  ok   strict refresh + published version → exact SHA"
+else
+  echo "  FAIL strict refresh + published version: got '${got}'"
+  fails=$((fails + 1))
+fi
+check "ordinary schedule + missing version remains latest/main" "--latest main" no schedule
+
 # 11. THE GUARD THAT MATTERS MORE. The equivalence must never be reachable by accident: only
 #     the probe can produce this value, and it produces it only after a clean exit 0 from
 #     pact-version-tree-equivalent.sh. So a plain `no` on a dispatch — the same service, the

@@ -173,4 +173,17 @@ if [ "$(jq -c . <<< "$GOT2")" != "[]" ]; then
   exit 1
 fi
 
-echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib known-positive, docs/other-service known-negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"
+# #6717: a shared runtime-base Dockerfile change alone must re-offer a service even
+# when none of its own source or Gradle inputs changed.
+mkdir -p .github/workflows
+echo 'FROM runtime:old' > .github/workflows/Dockerfile.deploy
+commit "runtime base before refresh"
+BEFORE_BASE="$(short HEAD)"
+echo 'FROM runtime:new' > .github/workflows/Dockerfile.deploy
+commit "runtime base only"
+echo "image: repo/openbank-current-svc:sandbox-${BEFORE_BASE}" > gitops/deploy.yaml
+GOT_BASE="$(RECONCILE_SERVICES='openbank-current-svc' bash "$PROBE" "$WORK/gitops")"
+[ "$(jq -c . <<< "$GOT_BASE")" = '["openbank-current-svc"]' ] \
+  || fail "Dockerfile-only runtime base refresh" '["openbank-current-svc"]' "$GOT_BASE"
+
+echo "PASS: auto-deploy-reconcile-lag.sh — shared-lib and runtime-base positives, docs/other-service negative, own tests, release marker, non-Gradle, CWD, missing root, cap, fair rotation, allowlist, loop-stability"
