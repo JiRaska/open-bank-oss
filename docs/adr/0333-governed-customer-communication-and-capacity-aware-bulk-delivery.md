@@ -167,7 +167,11 @@ controls and the D7 end-to-end/load evidence are complete.
 The journey delivery activity now requires a committed ACTIVE enrolment before emitting a contact.
 Temporal can run ahead of the enrolment write, so this guard makes that race fail closed and
 retryable. A process crash after workflow start but before the write can still leave an orphan
-execution; durable start intent and reconciliation are required to resolve it automatically.
+execution. For a RUNNING bulk run, its STARTING recipient and unadvanced cursor cause the leased
+page to retry; a focused crash-after-start test proves the later enrolment write completes against
+the same running workflow. Triggered enrolment relies on Kafka redelivery, and a direct operator
+request still needs a repeat request. Durable start intent and reconciliation across all three
+entry paths remain required before claiming automatic recovery in every case.
 
 Campaign handoffs derive a stable send-log id from campaign, party, step and dry-run mode. Temporal
 activity retry and Kafka replay therefore use the same `correlationId` and `deduplicationKey` for

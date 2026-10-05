@@ -16,6 +16,7 @@ import com.openbank.campaign.application.port.out.SegmentPage
 import com.openbank.campaign.application.port.out.SegmentRegistry
 import com.openbank.campaign.application.usecase.CampaignService
 import com.openbank.campaign.application.usecase.EnrolmentOutcome
+import com.openbank.campaign.application.usecase.RecipientAdmissionState
 import com.openbank.campaign.domain.model.Campaign
 import com.openbank.campaign.domain.model.CampaignProductKind
 import com.openbank.campaign.domain.model.CampaignState
@@ -95,18 +96,26 @@ class CampaignEnrolmentFailureTest {
     /** Records what was written, so the test can assert on absence as well as presence. */
     private class RecordingEnrolments : EnrolmentRepository {
         val saved = mutableListOf<Enrolment>()
+        var failNextSaveFor: UUID? = null
         override suspend fun findByCampaignAndParty(campaignId: UUID, partyId: UUID): Enrolment? =
             saved.firstOrNull { it.campaignId == campaignId && it.partyId == partyId }
         override suspend fun listByCampaign(campaignId: UUID): List<Enrolment> =
             saved.filter { it.campaignId == campaignId }
         override suspend fun listByParty(partyId: UUID): List<Enrolment> = saved.filter { it.partyId == partyId }
         override suspend fun countAllByCampaign() = emptyList<CampaignEnrolmentCount>()
-        override suspend fun save(enrolment: Enrolment): Enrolment = enrolment.also { saved += it }
+        override suspend fun save(enrolment: Enrolment): Enrolment {
+            if (failNextSaveFor == enrolment.partyId) {
+                failNextSaveFor = null
+                error("enrolment write failed after workflow start")
+            }
+            return enrolment.also { saved += it }
+        }
     }
 
     /** Fails for exactly [failFor], the way a missing Temporal namespace fails for every party. */
     private class FlakyJourneys(private val failFor: Set<UUID>) : JourneySignaller {
         val started = mutableListOf<UUID>()
+        val startCalls = mutableListOf<UUID>()
         override fun signalConsentRevoked(campaignId: UUID, partyId: UUID) = Unit
         override fun signalCampaignPaused(campaignId: UUID, partyId: UUID) = Unit
         override fun signalCampaignResumed(campaignId: UUID, partyId: UUID) = Unit
@@ -114,7 +123,8 @@ class CampaignEnrolmentFailureTest {
         override fun signalGoalReached(campaignId: UUID, partyId: UUID) = Unit
         override fun startJourney(campaignId: UUID, partyId: UUID, type: JourneyType) {
             check(partyId !in failFor) { "Namespace default is not found" }
-            started += partyId
+            startCalls += partyId
+            if (partyId !in started) started += partyId // Temporal no-op while this id is RUNNING.
         }
     }
 
@@ -203,6 +213,51 @@ class CampaignEnrolmentFailureTest {
             assertThat(second.enrolled).isEqualTo(1)
             assertThat(second.failed).isZero()
         }
+
+    @Test
+    fun `a failed enrolment write after workflow start is recovered by replay`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments().apply { failNextSaveFor = parties[0] }
+        val journeys = FlakyJourneys(emptySet())
+        val campaignService = service(enrolments, journeys)
+
+        val first = campaignService.enrol(campaignId)
+        assertThat(first).isEqualTo(EnrolmentOutcome(enrolled = 2, failed = 1))
+        assertThat(enrolments.saved.map { it.partyId }).doesNotContain(parties[0])
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+
+        val replay = campaignService.enrol(campaignId)
+        assertThat(replay).isEqualTo(EnrolmentOutcome(enrolled = 1, failed = 0))
+        assertThat(journeys.startCalls.count { it == parties[0] }).isEqualTo(2)
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+        assertThat(enrolments.saved.map { it.partyId }).containsExactlyElementsOf(parties.drop(1) + parties[0])
+    }
+
+    @Test
+    fun `bulk cursor remains before a failed post-start write and retry admits the same party`(): Unit = runBlocking {
+        val enrolments = RecordingEnrolments().apply { failNextSaveFor = parties[0] }
+        val journeys = FlakyJourneys(emptySet())
+        val campaignService = service(enrolments, journeys)
+        val page = SegmentPage(parties, parties.last())
+        val decisions = mutableListOf<Pair<UUID, RecipientAdmissionState>>()
+
+        val first = campaignService.enrolParties(campaignId, null, page, 4) { partyId, state ->
+            decisions += partyId to state
+        }
+        assertThat(first.failed).isEqualTo(1)
+        assertThat(first.nextCursor).isNull()
+        assertThat(decisions.takeLast(2)).containsExactly(
+            parties[0] to RecipientAdmissionState.STARTING,
+            parties[0] to RecipientAdmissionState.FAILED,
+        )
+
+        val replay = campaignService.enrolParties(campaignId, first.nextCursor, page, 4) { partyId, state ->
+            decisions += partyId to state
+        }
+        assertThat(replay.enrolled).isEqualTo(3)
+        assertThat(replay.nextCursor).isEqualTo(parties.last())
+        assertThat(journeys.startCalls.count { it == parties[0] }).isEqualTo(2)
+        assertThat(journeys.started).containsExactlyElementsOf(parties)
+    }
 
     @Test
     fun `one failing party does not abort the parties after it`(): Unit = runBlocking {
