@@ -117,3 +117,9 @@ Nikdy needituj aplikovanou migraci. Pokud checksum mismatch blokuje start, nasta
 - Unit: `AmlCaseServiceTest`, `AmlCaseTest` (stavový automat), `AmlOutboxDispatchTest`.
 - Integrační: `AmlOutboxDispatchIT` s `PostgresRedisTestResource` (Testcontainers — izolovaný Postgres + Valkey na test JVM, CI infra sweep #578). V `%test` je scheduler vypnutý, takže IT řídí `dispatchScheduledBatch()` explicitně.
 - Coverage je ratchet-only (Kover, ADR-0020) — nikdy nesnižovat.
+
+## Interní mTLS listener
+
+V produkci vyžaduje TLS listener AML služby na portu 8443 klientský certifikát. Dosavadní HTTP listener na portu 8117 zůstává zapnutý pro readiness a objevování v Admin UI; jde o oddělenou cestu od mTLS volání. Při nasazení ověřte, že volající na 8443 předkládají certifikáty důvěryhodné privátní CA a že readiness stále kontroluje 8117. Připravený pod ani úspěšná HTTP sonda nedokazují funkčnost listeneru s ověřením klienta. Požadavek na klientský certifikát je konfigurační volba Quarkusu při buildu, proto patří do produkčního profilu, ne do proměnné prostředí nasazení.
+
+Generovaná politika příchozího provozu nyní povoluje migrovaným namespace pouze port 8443. Admin UI a bezpečnostní skener si ponechávají port 8117; provoz uvnitř namespace AML zůstává povolen. Volajícího, který stále potřebuje HTTP, je třeba určit před zpřísněním jeho pravidla.

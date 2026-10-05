@@ -73,3 +73,7 @@ _Toto jsou cílové návrhové SLO pro produkčně tvarované nasazení — v je
 ## Deploy
 
 GitOps přes ArgoCD (manifesty v `gitops/`). Při merge-konfliktu image tagů ber `--ours` pro image řádky (root CLAUDE.md). Commity musí být podepsané GPG-registrovaným e-mailem.
+
+## Auditní stopa sazeb ČNB
+
+Auditní konzument odebírá `openbank.fx.cnb-policy-rate.published` spolu s ostatními FX topicy. Při úpravách odběru ponechte tento topic v konfiguraci `audit-events-in`: nově publikovaná i opravená sazba pak prochází stejnou archivovanou auditní cestou jako ostatní obchodní události. Pokud záznamy chybí, před opakováním odběru zkontrolujte lag skupiny auditního konzumenta a retenci topicu.

@@ -32,3 +32,7 @@ The root build uses Gradle subprojects. Service modules generally declare `imple
 - **Failure:** a renderer exception refuses the call (503, `PolicyDecisionException`): no approval is issued with a missing summary or with the generic argument dump the renderer exists to replace.
 - **Informational only:** the fingerprint alone decides whether a retry matches, never the summary text.
 - **PII:** operators read the summary, so include only what the checker needs to recognise the target. Mask accounts and IBANs (e.g. last 4 characters), never print key material (a short SHA-256 prefix is enough), no secrets, and shape-check caller-supplied values rather than echoing them. Worked example: `ScaApprovalSummaryRenderer` in sca-service.
+
+## Policy-rate topic ownership
+
+`openbank-libs-domain` maps `openbank.fx.cnb-policy-rate.published` to `fx-service` in `TopicProducers`. This records the producing service for shared analytics and governance checks; it does not publish or consume the event. The producer is the FX ingestion pipeline, while risk-engine and audit-service consume its facts and audit trail. Keep the mapping in step with a topic rename or ownership change.

@@ -73,3 +73,7 @@ _These are design-target SLOs for a production-shaped deployment — they are no
 ## Deploy
 
 GitOps via ArgoCD (manifests in `gitops/`). On merge-conflict for image tags, take `--ours` for image lines (root CLAUDE.md). Commits must be signed with the GPG-registered email.
+
+## ČNB policy-rate evidence
+
+The audit consumer subscribes to `openbank.fx.cnb-policy-rate.published` alongside the existing FX topics. Keep this topic in the configured `audit-events-in` subscription when changing the consumer list: a newly published or revised policy-rate fact then has the same retained audit path as other business events. If records are absent, inspect the audit consumer group's lag and the topic's retention before replay.

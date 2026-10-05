@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.1...sepa-instant-v0.11.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.0...sepa-instant-v0.11.1) (2026-10-03)
 
 
