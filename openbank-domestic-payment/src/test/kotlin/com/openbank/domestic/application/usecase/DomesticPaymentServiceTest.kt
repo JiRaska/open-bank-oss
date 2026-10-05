@@ -10,10 +10,12 @@ import com.openbank.domestic.application.port.out.AccountLookupPort
 import com.openbank.domestic.application.port.out.DelegatedSpendBindingRepository
 import com.openbank.domestic.application.port.out.DomesticPaymentEventPublisher
 import com.openbank.domestic.application.port.out.DomesticPaymentRepository
+import com.openbank.domestic.domain.error.DomesticSchemeErrorCode
 import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.error.ValidationFailure
 import com.openbank.libs.domain.money.Money
 import com.openbank.libs.observability.DomainMetrics
 import io.mockk.coEvery
@@ -87,6 +89,21 @@ class DomesticPaymentServiceTest {
             assertThat(result.replayed).isTrue()
             coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
         }
+
+    @Test
+    fun `non-CZK owner command is rejected before idempotency lookup or persistence`() {
+        listOf("EUR", "USD").forEach { currency ->
+            assertThatThrownBy {
+                runBlocking { service.createPayment(createCommand(currency = currency)) }
+            }.isInstanceOfSatisfying(ValidationFailure::class.java) {
+                assertThat(it.errorCode).isEqualTo(DomesticSchemeErrorCode.CURRENCY_NOT_ALLOWED)
+            }
+        }
+
+        coVerify(exactly = 0) { paymentRepository.findByIdempotencyKey(any()) }
+        coVerify(exactly = 0) { paymentRepository.save(any(), any()) }
+        verify(exactly = 0) { eventPublisher.paymentCreatedPayload(any()) }
+    }
 
     @Test
     fun `idempotent replay refuses any changed request`() {
@@ -230,6 +247,7 @@ class DomesticPaymentServiceTest {
         technicalAccountCode: String? = null,
         creditorBankCode: String = " 0100 ",
         actorId: UUID? = null,
+        currency: String = " czk ",
     ) = CreateDomesticPaymentCommand(
         idempotencyKey = idempotencyKey,
         debtorAccountId = UUID.randomUUID(),
@@ -239,7 +257,7 @@ class DomesticPaymentServiceTest {
         creditorAccountNumber = " 9876543210 ",
         creditorBankCode = creditorBankCode,
         creditorName = "  Brno Utility ",
-        amount = Money.parseInbound(BigDecimal("1500.00"), " czk "),
+        amount = Money.parseInbound(BigDecimal("1500.00"), currency),
         variableSymbol = " 2026001 ",
         specificSymbol = null,
         constantSymbol = " 0308 ",
