@@ -14,6 +14,7 @@ import jakarta.inject.Inject
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
+import java.util.UUID
 
 /** A provider-state replay must not try to delete the first immutable published revision. */
 @QuarkusTest
@@ -36,6 +37,12 @@ class CatalogPactPublishedReplayTest {
         assertNotEquals(first["publishRevisionId"], second["publishRevisionId"])
         publishFixture(second)
         given().get(fixtureRevisionPath(first)).then().statusCode(200).body("state", equalTo("PUBLISHED"))
+    }
+
+    @Test
+    fun `unknown offering identity returns 404 during replay`() {
+        given().get("/api/v2/offerings/${UUID.randomUUID()}/revisions/${UUID.randomUUID()}")
+            .then().statusCode(404)
     }
 
     private fun publishFixture(state: Map<String, Any>) {

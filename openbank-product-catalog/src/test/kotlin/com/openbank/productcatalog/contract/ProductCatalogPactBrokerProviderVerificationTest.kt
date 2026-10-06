@@ -92,8 +92,10 @@ class ProductCatalogPactBrokerProviderVerificationTest {
      * catalogue already satisfies "no product exists with this code".
      */
     @State("no product exists with code NO_SUCH_CARD_PRODUCT")
-    fun unknownProductCodeIsAbsent() {
-        // Intentionally empty — see the KDoc above.
+    fun unknownProductCodeNotFound() {
+        // Assert the negative provider state before Pact replays its own 404 interaction.
+        io.restassured.RestAssured.given().get("/api/v1/products/by-code/NO_SUCH_CARD_PRODUCT")
+            .then().statusCode(404)
     }
 
     /**
@@ -111,7 +113,7 @@ class ProductCatalogPactBrokerProviderVerificationTest {
      * already satisfies the account consumer's negative lookup state.
      */
     @State("no product exists with id 00000000-0000-0000-0000-000000000fff")
-    fun unknownProductIdIsAbsent() {
+    fun unknownProductIdNotFound() {
         // Intentionally empty — see the KDoc above.
     }
 

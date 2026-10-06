@@ -310,6 +310,19 @@
       }
     },
     {
+      "description": "Product Studio rejects an unknown schema version",
+      "request": {
+        "headers": {
+          "Accept": "application/json"
+        },
+        "method": "GET",
+        "path": "/api/v2/product-types/org.openbank.insurance.term-life/versions/999"
+      },
+      "response": {
+        "status": 404
+      }
+    },
+    {
       "description": "Product Studio creates a schema-pinned specification",
       "providerStates": [
         {
