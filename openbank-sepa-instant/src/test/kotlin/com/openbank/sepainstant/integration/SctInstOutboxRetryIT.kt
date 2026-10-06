@@ -37,7 +37,8 @@ import javax.sql.DataSource
 @TestProfile(SctInstOutboxRetryIT.NoSchemeProfile::class)
 @QuarkusTestResource(
     value = com.openbank.libs.testing.containers.PostgresRedpandaRedisTestResource::class,
-    initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_it")],
+    initArgs = [ResourceArg(name = "db", value = "openbank_sepa_instant_retry_it")],
+    restrictToAnnotatedClass = true,
 )
 class SctInstOutboxRetryIT {
     @Inject lateinit var dataSource: DataSource
@@ -91,10 +92,6 @@ class SctInstOutboxRetryIT {
     @Test
     @TestSecurity(user = "operator-outbox-retry", roles = ["ROLE_OPERATOR"])
     fun `broker failure after payment commit remains retryable until a later successful send`() {
-        // This disposable PostgreSQL resource is shared by test classes; isolate the dispatcher work set.
-        dataSource.connection.use { connection ->
-            connection.createStatement().use { it.executeUpdate("DELETE FROM sct_inst_outbox") }
-        }
         val key = UUID.randomUUID().toString()
         val paymentId = UUID.fromString(
             given()
