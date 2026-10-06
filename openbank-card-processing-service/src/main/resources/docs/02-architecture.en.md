@@ -180,6 +180,7 @@ Each port has a router that reads one config key and picks a binding. An unrecog
 
 - A vendor BIN adapter with no credential configured answers `NOT_BOUND` and makes no request. For Mastercard, no signer bean is produced when the consumer key or signing key is missing.
 - Results are `SchemeResult` values carrying the `CardScheme` that answered (`VISA`, `MASTERCARD`, `SIMULATOR`) or a `SchemeFailure` (`NOT_BOUND`, `NOT_FOUND`, `UNAVAILABLE`, `UNAUTHENTICATED`, `MALFORMED`).
+- `SimulatedTokenisationAdapter` mints `tokenReference` as `sim-tok-` plus a random UUID whose digits are mapped onto `g-p`, so a reference never contains a decimal digit and can never look like a PAN. `last4` is always `0000`.
 - **Callers:** `MerchantDataPort` is used by the authorisation flow, `TokenisationPort` by `CardTokenService` and `DisputePort` by `CardDisputeService`. `BinLookupPort` is bound but no use case or REST endpoint consumes it yet. The capability matrix is in [`docs/cards/capability-matrix.md`](../../../../docs/cards/capability-matrix.md).
 
 ## Network-token mirror (ADR-0283 phase 3)

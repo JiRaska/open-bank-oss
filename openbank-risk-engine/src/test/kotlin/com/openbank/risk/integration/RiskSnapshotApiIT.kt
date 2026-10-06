@@ -39,7 +39,7 @@ class RiskSnapshotApiIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in")
+            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in", "cnb-policy-rate-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -90,7 +90,7 @@ class RiskSnapshotApiIT {
             .body("modelVersions.capitalSetId", equalTo("eu-crr3-sa"))
             .body("modelVersions.liquiditySetId", equalTo("eu-2015-61-crr2"))
             .body("modelVersions.minReservesSetId", equalTo("cnb-pmr"))
-            .body("modelVersions.minReservesSetVersion", equalTo("2"))
+            .body("modelVersions.minReservesSetVersion", equalTo("3"))
             .body("modelVersions.irrbbShockSetVersion", startsWith("sha256:"))
             .body("modelVersions.behaviouralModelId", equalTo("nmd-linear-core"))
             .body("ledgerCutOff", not(emptyOrNullString()))

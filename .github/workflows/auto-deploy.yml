@@ -538,9 +538,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: false   # deploy jobs update the cache too
 
@@ -1189,7 +1189,7 @@ jobs:
           #
           # Safe because the rewrite is deterministic — pin each image: to the tag just built —
           # so recomputing against a newer main is always correct.
-          git fetch origin main
+          git fetch --depth=100 origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
@@ -1371,6 +1371,20 @@ jobs:
           labels: |
             chore
             gitops
+
+      # A deferred PR may carry images from an older source commit. Check every proposed pin
+      # against the current main build inputs before the PR can close older proposals or arm
+      # auto-merge. This also catches a source commit that aged while the image was building.
+      - name: Verify GitOps image source freshness
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            | python3 .github/scripts/deploy-window.py verify --root .
 
       # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
       # to the newest build, so two are never additive and both edit the same manifest line — left

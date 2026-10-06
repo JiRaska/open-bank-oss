@@ -123,3 +123,7 @@ The caller attempted a transition the state machine forbids (see [03 — API](./
 - Release via release-please from Conventional Commits; do not hand-edit `version.txt` (current `0.3.0`) or `CHANGELOG.md`.
 - **Money-path:** 2 approvals + threat model required (`docs/threat-models/openbank-domestic-payment.md`); never auto-merged.
 - CD: ArgoCD picks up the image tag bump in the GitOps manifests.
+
+## AML service mTLS in production
+
+The production AML REST client uses the named `aml-authority` TLS configuration and the AML service's client-authenticated listener on port 8443. The deployment supplies a client certificate and the private CA trust bundle; TLS 1.3 is required. If AML calls fail after rollout, check the client certificate and CA mount, the production REST-client URL, and the network policy path to that listener together. Local development and tests continue to use their HTTP fixtures; a passing local HTTP test alone does not prove the deployed TLS handshake.

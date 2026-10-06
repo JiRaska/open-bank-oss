@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# The ONE certificate the https-api listener serves for api.open-bank.tech (ADR-0324 Phase 4).
+# Four nginx Ingresses (accounts, balances, payments, sanctions) share that host, each with its
+# own Ingress-shim Secret owned by its Ingress; a Gateway listener serves one certificate per
+# hostname, and none of those four may outlive its Ingress. So this Certificate lives in the
+# Gateway's own namespace — no ReferenceGrant needed — and lands one change BEFORE the listener
+# that names it. The host is not key-pinned by the mobile app (ADR-0086 pins customer and kc
+# only), so a fresh key with rotation Always is harmless.
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: api-edge-tls
+  namespace: envoy-gateway-system
+spec:
+  secretName: api-edge-tls
+  dnsNames:
+    - api.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always

@@ -52,6 +52,7 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
 
 ## 6. Change log
 
+- **2026-10-04** — Trust-boundary change: ČNB policy-rate ingestion. **New outbound edge** to four public, unauthenticated ČNB files (`openbank.cnb.policy-rates.{repo,discount,lombard,min-reserves}-url`, the same `www.cnb.cz` host as the fixing feed, probed daily by `check-external-feeds.py`), fetched daily and on boot by `CnbPolicyRateIngestionScheduler`. **New outbound Kafka topic** `openbank.fx.cnb-policy-rate.published` (compacted; Write/Describe ACL for the existing `fx-service` KafkaUser only; Read for audit-service and risk-engine), fed from `fx_outbox` in the same transaction as the `cnb_policy_rate` rows. **New read** `GET /api/v1/fx/cnb/policy-rates/{instrument}?asOf=` on the existing `fx.read` action and staff roles (no `ROLE_API`: the risk engine gets these facts by event, so no machine caller is added). **Tampering / integrity — the point of this change:** the risk engine computes the minimum-reserve requirement from these facts, so a wrong rate is a wrong regulatory figure. Mitigations: each file is parsed all-or-nothing against its exact header (an HTML error page or the wrong file is rejected, never stored); every malformed row fails the whole file with a count; bytes are decoded as strict UTF-8 and SHA-256 hashed into the row, so any served value is traceable to the exact file; a changed rate for a stored date is applied as a *revision* with the previous rate kept, a WARN, and `openbank_fx_cnb_policy_rate_rows_total{outcome="revised"}` — the ČNB does not revise history, so a revision is a signal, not routine. The minimum-reserve ratio and remuneration are DOWNLOADED too, from the ČNB workbook `PMR_historie_zmen.xlsx` (a fourth outbound file on the same host), not seeded: it is read by a JDK-only hardened reader (`SafeXlsxReader`: zip-bomb limits enforced while inflating, StAX with DTD and external entities disabled, entries looked up by name and never written to disk — no new third-party parser on the money path), the header row is located by its labels on every sheet, and the whole file is rejected on any anomaly (a sheet that is not a year, a date outside its sheet's year or going backwards, a percentage above 100, or a non-numeric/ambiguous ratio or remuneration after the history began). The history before the first single-number row is not stored. A day with no fact in effect is 404 here and NOT_EVALUABLE downstream — never a default. **Spoofing:** TLS to `www.cnb.cz`; a compromised upstream would be caught only by the revision signal for historical rows, not for a new row — accepted, as for the fixing. **DoS:** three ~2 KB files and one ~100 KB workbook per day behind the same retry/timeout/circuit-breaker as the fixing client; a dead feed records its own `openbank_feed_fetch_total` outcome and does not block the other two. Rollback: revert; `cnb_policy_rate` is forward-only and the topic may stay (compacted, no secrets).
 - **2026-09-30** — Fraud verdict mapping (#4403 prerequisite, PR #11614). `FraudScoringAdapter.mapVerdict`
   folded any verdict outside `ALLOW | CHALLENGE | REVIEW | DECLINE` — including a blank one — into
   a non-synthetic `ALLOW`, so an unreadable answer from fraud-service was indistinguishable from a
@@ -238,3 +239,20 @@ directly determines monetary outcomes — a manipulated rate is a financial-loss
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+
+- **2026-10-04** — **AML outbound mTLS boundary (#12106).** The production AML REST client in `fx-service` now selects
+  the named `aml-authority` TLS bucket: it presents a client certificate, trusts the AML
+  private CA and uses TLS 1.3 to the client-authenticated AML listener on port 8443.
+  The deployment changes the client's URL and mounts the certificate material; dev and
+  test HTTP fixtures retain their old transport. **STRIDE-S/T/I:** the TLS handshake
+  authenticates the caller and server and protects requests and responses in transit;
+  a missing, expired or wrong-CA certificate must fail the connection rather than fall
+  back to plaintext. **Residual boundary:** AML keeps HTTP 8117 for readiness, Admin UI discovery and
+  the security scanner. Its opt-in per-port NetworkPolicy admits migrated caller
+  namespaces only on 8443; Admin UI and the scanner still reach 8117, and same-namespace
+  traffic remains permitted. This enforces the migrated cross-namespace path but does
+  not make every AML HTTP access mTLS. A successful readiness probe or local HTTP test
+  therefore does not prove the production handshake.
+  Rollout verification must exercise this caller against 8443 with valid and invalid
+  client certificates and check that failures do not reroute to HTTP. Rollback restores
+  the previous client URL/configuration while the AML listener remains available.

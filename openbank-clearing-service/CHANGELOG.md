@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.12.1](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.12.0...clearing-service-v0.12.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **clearing:** clear each rail's own items and fit every cycle id ([#12035](https://github.com/JiRaska/open-bank-oss/issues/12035)) ([6da7979](https://github.com/JiRaska/open-bank-oss/commit/6da79798c03aa4f55656ea414c41a382a2018bca)), closes [#12004](https://github.com/JiRaska/open-bank-oss/issues/12004) [#12005](https://github.com/JiRaska/open-bank-oss/issues/12005)
+
 ## [0.12.0](https://github.com/JiRaska/open-bank-oss/compare/clearing-service-v0.11.4...clearing-service-v0.12.0) (2026-10-03)
 
 

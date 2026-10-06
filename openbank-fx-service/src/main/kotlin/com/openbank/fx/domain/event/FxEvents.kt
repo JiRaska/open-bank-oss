@@ -59,6 +59,29 @@ data class FxFixingPublished(
         const val EVENT_TYPE = "fx.fixing.published.v1"
     }
 }
+
+/**
+ * A ČNB policy-rate or minimum-reserve fact was stored for the first time, or its rate was revised
+ * ([revised] = true, with [previousRate]). One event per (instrument, effectiveFrom) row; the
+ * partition key is that pair, and the topic is compacted on it, so a consumer starting late still
+ * reads the whole history. [rate] is a fraction (0.0375 = 3,75 %).
+ */
+data class CnbPolicyRatePublished(
+    val instrument: String,
+    val effectiveFrom: LocalDate,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val fetchedAt: Instant,
+    val contentSha256: String,
+    val note: String?,
+    val revised: Boolean,
+    val previousRate: BigDecimal?,
+    override val occurredAt: Instant,
+) : FxEvent() {
+    companion object {
+        const val EVENT_TYPE = "fx.cnb-policy-rate.published.v1"
+    }
+}
 data class FxConversionExecuted(
     val conversionId: UUID,
     val partyId: UUID,

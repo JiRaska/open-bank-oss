@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.10](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.9...product-catalog-v0.18.10) (2026-10-04)
+
+
+### Bug Fixes
+
+* **context:** take the build-facts commit from an explicit input ([#12099](https://github.com/JiRaska/open-bank-oss/issues/12099)) ([214f182](https://github.com/JiRaska/open-bank-oss/commit/214f1824753a72daa1723d12050287f1474593fd))
+
 ## [0.18.9](https://github.com/JiRaska/open-bank-oss/compare/product-catalog-v0.18.8...product-catalog-v0.18.9) (2026-09-30)
 
 

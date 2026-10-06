@@ -1,0 +1,151 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# glitchtip.open-bank.tech on the shared Gateway (ADR-0324 Phase 4), the Gateway API translation
+# of the chart-rendered `ingress:` block in apps/glitchtip.yaml (ADR-0075). Same posture as that
+# block: ONLY the SDK ingest verbs and the three debug-symbol / source-map upload endpoints are
+# routed; the web UI, Django /admin/ and the rest of /api/0/ get no route and so answer 404 at
+# the edge.
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, which external-dns skips, so glitchtip.open-bank.tech keeps
+# resolving to ingress-nginx. Three steps, each its own change, in this order:
+#   1. this file — the Certificate, the ReferenceGrant, the route and its policy;
+#   2. the Gateway's https-glitchtip listener (envoy-gateway/gateway.yaml), once the grant and
+#      the Secret are live (the Phase-1 RefNotPermitted lesson);
+#   3. the DNS cutover: the annotation moves from this route to the chart's Ingress values.
+#
+# WHY ITS OWN CERTIFICATE and not `glitchtip-tls`: that Secret is owned by the chart's Ingress
+# (--enable-certificate-owner-ref), which Phase 5 deletes. Not key-pinned, so a fresh key is
+# harmless. The grant is named for glitchtip because `observability` already carries
+# `edge-gateway-tls` for rum (httproute-rum-gateway.yaml).
+#
+# Annotation mapping from apps/glitchtip.yaml:
+#   ssl-redirect (default)  -> the Gateway's http listener redirects every host (301)
+#   use-regex + the five ImplementationSpecific paths
+#                           -> RegularExpression matches below. ingress-nginx renders a regex
+#                              path as `location ~* ^<regex>`: anchored at the start, OPEN at the
+#                              end, case-INSENSITIVE. Envoy matches the WHOLE path, so each regex
+#                              carries a trailing `.*` to keep the open end. Case is NOT folded:
+#                              GlitchTip's Django URLs are case-sensitive, so a mixed-case path
+#                              nginx let through could only ever 404 upstream; Envoy now 404s it
+#                              at the edge instead. Strictly narrower, never wider.
+#   proxy-body-size 64m     -> NO edge body cap, deliberately (owner decision, ADR-0324 Phase 4
+#                              amendment). Envoy Gateway's only cap (requestBuffer) holds the body
+#                              in proxy memory, and 64 MiB per request against the proxies' 256Mi
+#                              limit would let a few concurrent uploads OOM the shared edge. Envoy
+#                              streams the body instead, and GlitchTip enforces its own limits:
+#                              chunk uploads above 32 MiB are refused (CHUNK_UPLOAD_BLOB_SIZE) and
+#                              other bodies above 15 MiB (Django DATA_UPLOAD_MAX_MEMORY_SIZE), both
+#                              read from the running image 2026-10-04 — neither is set in a
+#                              manifest, so a chart bump can move them.
+#   (nginx default) proxy_read_timeout 60s between reads
+#                           -> requestTimeout 300s: Envoy's is a WHOLE-request bound that also
+#                              covers the upload, and a 32 MiB dSYM chunk from a slow uplink can
+#                              exceed 60 s end to end where nginx's per-read timer would not fire
+#   controller HSTS / nosniff / hide-headers X-Powered-By
+#                           -> ResponseHeaderModifier below
+#   openbank.io/ungated-machine-callers (ADR-0234) -> carried onto the route (Kyverno
+#                              require-gated-or-declared-tool-httproute-cel)
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: glitchtip-edge-tls
+  namespace: observability
+spec:
+  secretName: glitchtip-edge-tls
+  dnsNames:
+    - glitchtip.open-bank.tech
+  issuerRef:
+    group: cert-manager.io
+    kind: ClusterIssuer
+    name: letsencrypt-prod
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: glitchtip-edge-gateway-tls
+  namespace: observability
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: glitchtip-tls
+    - group: ""
+      kind: Secret
+      name: glitchtip-edge-tls
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: glitchtip
+  namespace: observability
+  annotations:
+    # Held out of DNS until the cutover change (step 3 above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+    # ADR-0234 declaration carried over from apps/glitchtip.yaml.
+    openbank.io/ungated-machine-callers: >-
+      SDK event ingest (DSN-authenticated) and sentry-cli dSYM upload
+      (org-token-authenticated); neither can follow a login redirect.
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-glitchtip
+  hostnames:
+    - glitchtip.open-bank.tech
+  rules:
+    - matches:
+        # Per-project SDK ingest (store/envelope/security/minidump/unreal).
+        - path:
+            type: RegularExpression
+            value: "/api/[0-9]+/(store|envelope|security|minidump|unreal)/.*"
+        # dSYM chunk upload; the trailing slash is optional (sentry-cli GETs with it, POSTs without).
+        - path:
+            type: RegularExpression
+            value: "/api/0/organizations/[^/]+/chunk-upload/?.*"
+        # dSYM / debug-file assemble.
+        - path:
+            type: RegularExpression
+            value: "/api/0/projects/[^/]+/[^/]+/files/(difs|dsyms)/?.*"
+        # admin-ui source-map bundles (#3235).
+        - path:
+            type: RegularExpression
+            value: "/api/0/organizations/[^/]+/artifactbundle/assemble/?.*"
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: glitchtip-web
+          port: 80
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: glitchtip
+  namespace: observability
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: glitchtip
+  # No requestBuffer: see the proxy-body-size line above.
+  timeout:
+    http:
+      requestTimeout: 300s

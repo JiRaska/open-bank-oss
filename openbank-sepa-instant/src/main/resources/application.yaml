@@ -204,3 +204,24 @@ authz:
   # the decision to flip enforcement on.
   four-eyes:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
+"%prod":
+  quarkus:
+    # The aml-service rest-client uses a named TLS bucket over aml-service's private-CA mTLS
+    # listener (8443, client auth REQUIRED), the same shape as every other east-west caller.
+    # Local/test fixtures speak plain HTTP, so this stays under %prod: the client certificate
+    # only exists in the cluster.
+    tls:
+      # aml-service's private-CA mTLS listener (8443, client auth REQUIRED).
+      aml-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/aml-tls/tls.crt
+              key: /mnt/aml-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/aml-tls/ca.crt
+        protocols: TLSv1.3
+    rest-client:
+      aml-service:
+        tls-configuration-name: aml-authority
