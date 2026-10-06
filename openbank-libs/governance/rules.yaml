@@ -3384,17 +3384,13 @@ authz:
     # deliberately ONE read action rather than the role's full duty set. What is missing is
     # missing on purpose:
     #
-    #   commstyle.publish and commstyle.approval.decide are NOT here, and must not be added.
-    #   `matrix-allows` (rest.rego) gates on `principal.type == "HUMAN"` and the role alone — it
-    #   has no service-account exclusion, and cannot express one. Both of those actions are write
-    #   actions whose own rules (`commstyle-publish`, `commstyle-decide-publish-approval`) carry
-    #   an explicit `not startswith(input.principal.id, "service-account-")`, because a
-    #   client_credentials JWT is classified HUMAN (rules.yaml: authz_policy) and D6's rule is
-    #   that the bank's voice is set by people. Granting either through the matrix would add a
-    #   second permit path that drops that exclusion — a silent widening no policy layer can veto
-    #   (see shared_m2m_matrix_write_grants below for why the veto is reason-keyed and cannot
-    #   cover matrix-allows). `test_commstyle_publish_denies_service_account_with_every_role`
-    #   pins the intent; it would still pass, because it asserts the reason, not the decision.
+    #   commstyle.publish and commstyle.approval.decide are NOT here. Their action-specific rules
+    #   (`commstyle-publish`, `commstyle-decide-publish-approval`) carry an explicit exclusion of
+    #   `service-account-` principal IDs. `matrix-allows` carries the same exclusion since #3765;
+    #   a matrix entry would not bypass it. The current split retains the action-specific grant
+    #   and its independently testable Keycloak service-account exclusion.
+    #   `test_commstyle_publish_denies_service_account_with_every_role` checks the final allow
+    #   decision, including every role, not merely the reason.
     #
     #   commstyle.approval.read is safe and is here: its rule
     #   (`commstyle-read-publish-approval`) deliberately omits the service-account exclusion
@@ -3404,7 +3400,7 @@ authz:
     # ROLE_COMMS_EDITOR has no entry at all: the maker endpoints (draft, submit, golden-set
     # edits) carry `@RolesAllowed` only and no `@Authorize`, so the editor duty has no action
     # name for the matrix to key on. A future single-source migration needs governed action
-    # names and must preserve the action-specific human-only write policy.
+    # names and must preserve the service-account exclusion on any write grant.
     ROLE_COMMS_APPROVER:
       grant:
         - commstyle.approval.read

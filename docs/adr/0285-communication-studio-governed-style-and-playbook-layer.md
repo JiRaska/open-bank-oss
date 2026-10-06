@@ -154,13 +154,15 @@ Alternatives): sending and voice are different concerns with different editors.
 publish, retire) and assigns them to separate human operator identities. The communication-service
 endpoints enforce those roles with `@RolesAllowed`; publish and approval decisions additionally
 use their own `@Authorize` actions and four-eyes policy. `rules.yaml: authz.role_action_matrix`
-declares only the safe `commstyle.approval.read` grant for `ROLE_COMMS_APPROVER`. It cannot be
-the source of the maker role while maker endpoints have no `@Authorize` action, or of the
-write grants while its generic matrix permit path lacks the explicit service-account exclusion
-in the action-specific OPA rules. A service account must never publish the bank's voice.
+declares only `commstyle.approval.read` for `ROLE_COMMS_APPROVER`. The maker endpoints have no
+`@Authorize` action for a matrix entry. The publish and approval write actions currently use
+action-specific OPA rules, rather than matrix grants. Both those rules and `matrix-allows`
+exclude Keycloak `service-account-` principal IDs; the matrix exclusion was added in #3765.
+The four-eyes check and maker/checker separation still govern publication. A service account
+must never publish the bank's voice.
 
 When ADR-0229 supplies a single-source role pipeline, it may generate realm entries from a
-governed role definition after the maker action names and the human-only write policy are
+governed role definition after the maker action names and the service-account exclusion are
 represented without widening access. Until then, the realm template is the source of role
 membership; the endpoint annotations, action-specific policies and four-eyes check remain
 independent authorization controls.
