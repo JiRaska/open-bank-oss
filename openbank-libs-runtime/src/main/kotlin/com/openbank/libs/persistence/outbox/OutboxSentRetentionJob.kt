@@ -84,6 +84,8 @@ class OutboxSentRetentionJob(
             return
         }
         require(sentDays > 0) { "openbank.outbox.retention.sent-days must be positive, was $sentDays" }
+        require(batchSize > 0) { "openbank.outbox.retention.batch-size must be positive, was $batchSize" }
+        require(maxBatches > 0) { "openbank.outbox.retention.max-batches must be positive, was $maxBatches" }
         if (targets.stream().anyMatch { !it.sentRetentionExempt }) {
             liveness = metrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
             targets.forEach { target ->

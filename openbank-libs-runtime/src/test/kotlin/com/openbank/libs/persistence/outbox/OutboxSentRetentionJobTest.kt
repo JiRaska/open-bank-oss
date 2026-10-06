@@ -14,6 +14,7 @@ import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.inject.Instance
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.time.Duration
@@ -43,14 +44,24 @@ class OutboxSentRetentionJobTest {
         }
     }
 
-    private fun job(vararg targets: SentOutboxRetention, enabled: Boolean = true): OutboxSentRetentionJob {
+    private fun job(
+        vararg targets: SentOutboxRetention,
+        enabled: Boolean = true,
+        batchSize: Int = 2,
+        maxBatches: Int = 100,
+    ): OutboxSentRetentionJob {
         val regInst = mockk<Instance<MeterRegistry>>()
         every { regInst.isResolvable } returns true
         every { regInst.get() } returns registry
         val targetInst = mockk<Instance<SentOutboxRetention>>()
         every { targetInst.iterator() } answers { targets.toList().toMutableList().iterator() }
         every { targetInst.stream() } answers { Stream.of(*targets) }
-        return OutboxSentRetentionJob(enabled = enabled, sentDays = 7, batchSize = 2, maxBatches = 100).apply {
+        return OutboxSentRetentionJob(
+            enabled = enabled,
+            sentDays = 7,
+            batchSize = batchSize,
+            maxBatches = maxBatches,
+        ).apply {
             this.targets = targetInst
             metrics = DomainMetrics().apply { registryInstance = regInst }
             clock = Clock.fixed(now, ZoneOffset.UTC)
@@ -112,6 +123,19 @@ class OutboxSentRetentionJobTest {
         assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "full").gauge()?.value())
             .isEqualTo(0.0)
         assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `invalid batch limits fail service startup before a scheduled purge`() {
+        val invalidLimits = listOf(
+            "batch-size" to job(Target("sca", rows = 1), batchSize = 0),
+            "max-batches" to job(Target("sca", rows = 1), maxBatches = 0),
+        )
+        for ((name, invalid) in invalidLimits) {
+            assertThatThrownBy { invalid.registerLiveness(StartupEvent()) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("openbank.outbox.retention.$name must be positive")
+        }
     }
 
     @Test
