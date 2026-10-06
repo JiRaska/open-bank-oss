@@ -33,6 +33,7 @@ class AdmissionTest(unittest.TestCase):
         checkout = steps[0]
         admission = steps[1]
         self.assertIn('pull_request_review', checkout['if'])
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
 

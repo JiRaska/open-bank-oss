@@ -35,7 +35,9 @@ jobs:
       - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          # base.sha is frozen on older PRs; admission reads policy and pinned requirements
+          # from the current trusted base branch, never from the untrusted PR head.
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
       - id: admit
         env:
