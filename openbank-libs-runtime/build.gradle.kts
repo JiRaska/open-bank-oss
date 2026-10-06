@@ -175,6 +175,9 @@ dependencies {
     // Testcontainers Postgres — no Hibernate needed for a plan. Same driver line the fleet forces
     // (openbank.dependency-vulnerability-pins) and openbank-libs-testing already declares.
     testImplementation("org.postgresql:postgresql:42.7.12")
+    // A standalone Hibernate ORM session persists the actual PanacheOutboxEntity mapping into
+    // Testcontainers PostgreSQL without booting a service or changing the module's production API.
+    testImplementation("org.hibernate.orm:hibernate-core:7.2.14.Final")
     // KeyedCallFilterClientTest drives the REAL Quarkus REST client engine (the JAX-RS client under
     // quarkus-rest-client) against a stub HTTP server, so the keyed-only retry classification of
     // ADR-0321 D2 is proven on actual 5xx / connect-refused / timeout failures rather than mocks.
