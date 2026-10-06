@@ -81,6 +81,17 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int) -> di
     return [p for p in pending if p["head"].startswith(prefix)][-1]
 
 
+def flush_eligible(prs: list[dict], now: int, last_deploy: int | None, window: int,
+                   inspect: Callable[[dict], str]) -> dict | None:
+    """Skip covered or unverifiable PRs; never arm one without positive eligibility proof."""
+    remaining = list(prs)
+    while pick := flush(remaining, now, last_deploy, window):
+        if inspect(pick) == "eligible":
+            return pick
+        remaining = [pr for pr in remaining if pr["number"] != pick["number"]]
+    return None
+
+
 def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
     """(file, image, old_tag, new_tag) for every image pin a unified diff changes."""
     out, cur, removed = [], None, {}
@@ -99,6 +110,84 @@ def pins_from_diff(diff: str) -> list[tuple[str, str, str, str]]:
                 if old and old != m["tag"]:
                     out.append((cur, m["image"], old, m["tag"]))
     return list(dict.fromkeys(out))
+
+
+def pin_only_changes(diff: str) -> list[tuple[str, str, str, str]] | None:
+    """Accept only paired image-tag substitutions in GitOps component YAML files."""
+    changes: dict[str, dict[str, list[tuple[str, str, str]]]] = {}
+    current = None
+    for line in diff.splitlines():
+        if line.startswith("+++ "):
+            current = line[4:].removeprefix("b/")
+            if not current.startswith("openbank-infra/gitops/components/") or not current.endswith(".yaml") \
+                    or ".." in current.split("/"):
+                return None
+            changes.setdefault(current, {"old": [], "new": []})
+        elif line.startswith("--- "):
+            continue
+        elif line.startswith(("+", "-")):
+            if current is None:
+                return None
+            matches = list(PIN_RE.finditer(line[1:]))
+            if len(matches) != 1:
+                return None
+            match = matches[0]
+            normalized = PIN_RE.sub(lambda m: f"{m['image']}:<tag>", line[1:])
+            changes[current]["new" if line[0] == "+" else "old"].append(
+                (match["image"], match["tag"], normalized))
+    pins = []
+    for path, sides in changes.items():
+        if not sides["old"] or len(sides["old"]) != len(sides["new"]):
+            return None
+        for old, new in zip(sides["old"], sides["new"]):
+            if old[0] != new[0] or old[2] != new[2] or old[1] == new[1]:
+                return None
+            pins.append((path, old[0], old[1], new[1]))
+    return pins if pins and sorted(pins) == sorted(pins_from_diff(diff)) else None
+
+
+def classify_against_main(diff: str, read_main: Callable[[str], str | None],
+                          classify_source: Callable[[str, str], str],
+                          classify_files: Callable[[str, str], str]) -> str:
+    """Return covered, eligible, or unknown using the existing ancestry and coverage verdicts."""
+    pins = pin_only_changes(diff)
+    if not pins:
+        return "unknown"
+    main_files = {}
+    relations = []
+    for path, image, _old, proposed in pins:
+        if path not in main_files:
+            main_files[path] = read_main(path)
+        content = main_files[path]
+        if content is None:
+            return "unknown"
+        current = {m["tag"] for m in PIN_RE.finditer(content) if m["image"] == image}
+        if len(current) != 1:
+            return "unknown"
+        main_tag = current.pop()
+        if main_tag == proposed:
+            relations.append("covered")
+            continue
+        proposed_sha = re.fullmatch(r"sandbox-([0-9a-f]{8})", proposed)
+        main_sha = re.fullmatch(r"sandbox-([0-9a-f]{8})", main_tag)
+        if not proposed_sha or not main_sha:
+            return "unknown"
+        verdict = classify_source(main_sha[1], proposed_sha[1])
+        if verdict == "CLOSE":
+            relations.append("covered")
+        elif verdict == "STALE_KEEP":
+            relations.append("eligible")
+        else:
+            return "unknown"
+    paths = "\n".join(sorted(main_files))
+    if classify_files(paths, "\n".join(sorted({pin[0] for pin in pins}))) != "CLOSE":
+        return "unknown"
+    if all(relation == "covered" for relation in relations):
+        return "covered"
+    if all(relation == "eligible" for relation in relations):
+        return "eligible"
+    # A partly covered diff could rewind the covered pins while applying its other pins.
+    return "unknown"
 
 
 @lru_cache(maxsize=128)
@@ -173,6 +262,35 @@ def last_deploy_from_commits(commits: list[dict]) -> int | None:
     return None
 
 
+def inspect_deferred_pr(pr: dict, root: str, repo: str) -> str:
+    """Read-only eligibility proof for the flusher's chosen GitOps candidate."""
+    if not pr["head"].startswith(DEPLOY_PREFIXES[0]):
+        return "eligible"  # Admin UI has its own source gate, unchanged here.
+    diff = subprocess.run(["gh", "pr", "diff", str(pr["number"]), "--repo", repo],
+                          cwd=root, capture_output=True, text=True, check=False)
+    if diff.returncode != 0:
+        return "unknown"
+    helper = os.path.join(root, ".github/scripts/supersede-deploy-prs.sh")
+
+    def classify(*args: str) -> str:
+        result = subprocess.run(["bash", helper, *args], cwd=root, capture_output=True,
+                                text=True, check=False)
+        return result.stdout.strip() if result.returncode == 0 else "SKIP"
+
+    def read_main(path: str) -> str | None:
+        result = subprocess.run(["git", "show", f"origin/main:{path}"], cwd=root,
+                                capture_output=True, text=True, check=False)
+        return result.stdout if result.returncode == 0 else None
+
+    relation = classify_against_main(diff.stdout, read_main,
+                                     lambda current, proposed: classify("--classify", current, proposed),
+                                     lambda current, proposed: classify("--classify-coverage", current, proposed))
+    if relation != "eligible":
+        return relation
+    return "eligible" if not verify_pins(diff.stdout,
+                                         lambda image, tag: image_source_is_current(root, image, tag)) else "unknown"
+
+
 # ── self-test ─────────────────────────────────────────────────────────────────────────────────
 def self_test() -> int:
     fails = []
@@ -209,6 +327,43 @@ def self_test() -> int:
     check("last deploy read from main's subjects",
           last_deploy_from_commits([{"message": "feat(x): y", "epoch": 9},
                                     {"message": "chore(admin-ui): deploy sandbox-1-run2", "epoch": 7}]) == 7)
+
+    # A covered oldest GitOps PR must not block a later eligible deferred PR (#12182).
+    reg = "registry.invalid"
+    path = "openbank-infra/gitops/components/example/example-service.yaml"
+    def pin_diff(old: str, new: str) -> str:
+        return (f"--- a/{path}\n+++ b/{path}\n@@ -1 +1 @@\n"
+                f"-image: {reg}/openbank-example-service:sandbox-{old}\n"
+                f"+image: {reg}/openbank-example-service:sandbox-{new}\n")
+    main_text = f"image: {reg}/openbank-example-service:sandbox-22222222\n"
+    files = lambda main, pr: "CLOSE" if set(pr.splitlines()) <= set(main.splitlines()) else "SKIP"
+    relation = lambda main, proposed: {
+        ("22222222", "11111111"): "CLOSE",
+        ("22222222", "33333333"): "STALE_KEEP",
+    }.get((main, proposed), "SKIP")
+    stale = classify_against_main(pin_diff("00000000", "11111111"),
+                                  lambda _: main_text, relation, files)
+    eligible = classify_against_main(pin_diff("00000000", "33333333"),
+                                     lambda _: main_text, relation, files)
+    unknown = classify_against_main(pin_diff("00000000", "44444444"),
+                                    lambda _: main_text, relation, files)
+    check("main descendant pin covers stale deferred PR", stale == "covered")
+    check("proposed descendant pin remains eligible", eligible == "eligible")
+    check("unknown ancestry never proves coverage or eligibility", unknown == "unknown")
+    check("unknown file coverage never proves a stale PR safe to skip",
+          classify_against_main(pin_diff("00000000", "11111111"),
+                                lambda _: main_text, relation, lambda _a, _b: "SKIP") == "unknown")
+    queued = [
+        {"number": 101, "head": "chore/gitops-auto-deploy-old", "created_at": "a", "armed": False},
+        {"number": 102, "head": "chore/admin-ui-deploy-next", "created_at": "b", "armed": False},
+    ]
+    pick = flush_eligible(queued, T, T - W, W,
+                          lambda pr: stale if pr["number"] == 101 else "eligible")
+    check("covered oldest is skipped and later eligible PR is selected", pick is not None and pick["number"] == 102)
+    check("unknown oldest stays unarmed", flush_eligible(queued[:1], T, T - W, W,
+          lambda _: unknown) is None)
+    check("non-pin edits cannot prove coverage", pin_only_changes(pin_diff("00000000", "11111111")
+          + "+replicas: 2\n") is None)
 
     # 5. two pushes in one window -> ONE PR pins both (carry), and a moved service is not rewound
     reg = "123.dkr.ecr.eu-north-1.amazonaws.com"

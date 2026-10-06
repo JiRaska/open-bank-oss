@@ -365,6 +365,17 @@ if [ "${1:-}" = "--self-test" ]; then
   exit $?
 fi
 
+# The deploy-window flusher also needs the same ancestry and file-coverage verdicts when
+# comparing a deferred PR's image pins with main. Keep one fail-closed classifier (#12182).
+if [ "${1:-}" = "--classify" ]; then
+  classify "${2:?keep source required}" "${3:?proposed source required}"
+  exit 0
+fi
+if [ "${1:-}" = "--classify-coverage" ]; then
+  classify_coverage "${2:?main files required}" "${3:?PR files required}"
+  exit 0
+fi
+
 PREFIX="${1:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 KEEP="${2:?usage: supersede-deploy-prs.sh <branch-prefix> <keep-pr-number> | --self-test}"
 REPO="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY must be set}"
