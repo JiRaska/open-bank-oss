@@ -389,13 +389,13 @@ export interface AiEvalAssurance {
 export interface TestImpactEvidence {
   schemaVersion: 1 | 2
   mode: 'shadow'
-  mappingState: 'unknown' | 'partial'
+  mappingState: 'unknown'
   selectionState: 'unavailable'
   declaredByAllRetainedRuns: boolean
   detail: string
-  /** Direct JVM bytecode edges among observed test identities; incomplete by design. */
+  /** Unverified class references from build artifacts; no source mapping is asserted. */
   observedTests?: number
-  testsWithDirectEdges?: number
+  testsWithUnverifiedRefs?: number
   unknownTests?: number
 }
 

@@ -212,9 +212,9 @@ def validate_envelope(envelope: dict, service: Path | None = None) -> None:
     unknown_impact = {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown",
                       "selectionState": "unavailable"}
     if impact is not None and impact != unknown_impact:
-        # A v2 claim is accepted only when the checked-out bytecode and source tree
-        # reproduce it exactly. Missing/ambiguous edges remain unknown; neither state
-        # supports a selection verdict or a skipped test.
+        # A v2 bytecode observation is accepted only when the local build tree
+        # reproduces it exactly. Source lineage is unverified, so mapping remains
+        # unknown and cannot support selection or a skipped test.
         if service is None or impact != direct_bytecode_mapping(service, envelope.get("testCases", [])):
             raise ValueError("test impact mapping lacks verified source/bytecode evidence")
     for item in envelope.get("diagnostics", []):

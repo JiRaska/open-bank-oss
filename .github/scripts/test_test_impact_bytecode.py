@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Independent positive and falsification fixtures for partial test-impact edges."""
+"""Falsify unsafe source claims from stale and misidentified JVM class files."""
 
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -35,13 +35,14 @@ def run() -> None:
         case = {"fingerprint": "0" * 24, "kind": "unit", "classname": "example.FooTest",
                 "testDefinitionPath": "src/test/java/example/FooTest.java"}
 
-        mapped = direct_bytecode_mapping(service, [case])
-        assert mapped["mappingState"] == "partial", mapped
-        assert mapped["coverage"] == {"observedTests": 1, "testsWithDirectEdges": 1, "unknownTests": 0}
-        edge = next(item for item in mapped["mappings"][0]["edges"] if item["productionClass"] == "example/Foo$Inner")
-        assert edge["sourcePath"] == "src/main/java/example/Foo.java", edge
-        assert len(edge["sourceSha256"]) == len(edge["productionClassSha256"]) == len(edge["testClassSha256"]) == 64
-        assert "Foo.Inner.value" not in json.dumps(mapped)  # no source contents or invocation data
+        observed = direct_bytecode_mapping(service, [case])
+        assert observed["mappingState"] == "unknown" and observed["selectionState"] == "unavailable"
+        assert observed["evidenceState"] == "unverified-bytecode-references"
+        assert observed["coverage"] == {"observedTests": 1, "testsWithUnverifiedRefs": 1, "unknownTests": 0}
+        edge = next(ref for ref in observed["references"][0]["directClassRefs"]
+                    if ref["referencedClass"] == "example/Foo$Inner")
+        assert len(edge["productionClassSha256"]) == len(edge["testClassSha256"]) == 64
+        assert "src/main" not in json.dumps(observed)
 
         spec = importlib.util.spec_from_file_location("run_evidence", Path(__file__).with_name("collect-test-run-evidence.py"))
         assert spec is not None and spec.loader is not None
@@ -54,71 +55,58 @@ def run() -> None:
             "component": "openbank-example-service", "suites": [], "coverage": None,
             "testInfrastructure": {"declared": [], "observed": []},
             "testCases": [{**case, "name": "test", "state": "passed", "durationMs": 1}],
-            "testImpact": mapped,
+            "testImpact": observed,
         }
         collector.validate_envelope(envelope, service)
         for altered in (
-            {**mapped, "mappingState": "mapped"},
-            {**mapped, "mappings": [{**mapped["mappings"][0], "edges": [{**edge, "sourcePath": "../outside.java"}]}]},
-            {**mapped, "mappings": [{**mapped["mappings"][0], "edges": [{**edge, "sourceSha256": "0" * 64}]}]},
+            {**observed, "mappingState": "partial"},
+            {**observed, "selectionState": "selected"},
+            {**observed, "references": [{**observed["references"][0],
+                "directClassRefs": [{**edge, "testClassSha256": "0" * 64}]}]},
         ):
             try:
                 collector.validate_envelope({**envelope, "testImpact": altered}, service)
             except ValueError:
                 pass
             else:
-                raise AssertionError("invented test-impact claim was accepted")
+                raise AssertionError("invented mapping or class hash was accepted")
         try:
             collector.validate_envelope(envelope)
         except ValueError:
             pass
         else:
-            raise AssertionError("v2 mapping was accepted without the source tree")
+            raise AssertionError("v2 class reference was accepted without the build tree")
 
-        # A same-name source edit after compilation cannot retain an old edge.
-        original_test = test_source.read_text()
-        test_source.write_text(original_test + "// changed after compile\n")
-        class_mtime = (tests / "example/FooTest.class").stat().st_mtime_ns
-        os.utime(test_source, ns=(class_mtime + 1_000_000_000, class_mtime + 1_000_000_000))
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        test_source.write_text(original_test)
-        subprocess.run(["javac", "-cp", str(main), "-d", str(tests), str(test_source)], check=True)
+        # Falsification: old bytecode can have a NEWER mtime than changed source.
+        source.write_text(source.read_text().replace("return 1", "return 2"))
+        class_file = main / "example/Foo$Inner.class"
+        fresh_time = source.stat().st_mtime_ns + 1_000_000_000
+        os.utime(class_file, ns=(fresh_time, fresh_time))
+        stale = direct_bytecode_mapping(service, [case])
+        assert stale["mappingState"] == "unknown"
+        assert stale["evidenceState"] == "unverified-bytecode-references"
+        assert stale["references"][0]["directClassRefs"]  # useful bytes, not verified source
 
-        original_main = source.read_text()
-        source.write_text(original_main + "// changed after compile\n")
-        class_mtime = (main / "example/Foo$Inner.class").stat().st_mtime_ns
-        os.utime(source, ns=(class_mtime + 1_000_000_000, class_mtime + 1_000_000_000))
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        source.write_text(original_main)
-        subprocess.run(["javac", "-d", str(main), str(source)], check=True)
+        # Wrong this_class at a plausible path must not become an edge.
+        original_main = class_file.read_bytes()
+        class_file.write_bytes((main / "example/Foo.class").read_bytes())
+        wrong_main = direct_bytecode_mapping(service, [case])
+        assert all(ref["referencedClass"] != "example/Foo$Inner"
+                   for ref in wrong_main["references"][0]["directClassRefs"])
+        class_file.write_bytes(original_main)
+        test_class = tests / "example/FooTest.class"
+        original_test = test_class.read_bytes()
+        test_class.write_bytes((main / "example/Foo.class").read_bytes())
+        assert direct_bytecode_mapping(service, [case])["coverage"]["testsWithUnverifiedRefs"] == 0
+        test_class.write_bytes(original_test)
 
-        renamed = service / "src/main/java/example/Renamed.java"
-        source.rename(renamed)
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        renamed.rename(source)
-
-        test_source.rename(service / "src/test/java/example/RenamedTest.java")
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        (service / "src/test/java/example/RenamedTest.java").rename(test_source)
-
-        # A test class whose SourceFile names another declaration cannot inherit
-        # the original case's mapping, even when it references the same production class.
-        wrong_definition = {**case, "testDefinitionPath": "src/test/java/example/OtherTest.java"}
-        write(service / "src/test/java/example/OtherTest.java", "package example; class OtherTest {}\n")
-        assert direct_bytecode_mapping(service, [wrong_definition])["mappingState"] == "unknown"
-
-        compiled = tests / "example/FooTest.class"
-        compiled.unlink()
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        subprocess.run(["javac", "-cp", str(main), "-d", str(tests), str(test_source)], check=True)
-
-        # A symlink into a different tree can never become a retained production path.
-        source.unlink()
-        outside = Path(directory) / "outside.java"
-        outside.write_text("public class Outside {}\n")
-        source.symlink_to(outside)
-        assert direct_bytecode_mapping(service, [case])["mappingState"] == "unknown"
-        print("test-impact bytecode self-test: nested edge, stale/missing/renamed/outside paths and forged claims proven")
+        test_class.unlink()
+        assert direct_bytecode_mapping(service, [case])["coverage"]["testsWithUnverifiedRefs"] == 0
+        outside = Path(directory) / "outside.class"
+        outside.write_bytes(original_test)
+        test_class.symlink_to(outside)
+        assert direct_bytecode_mapping(service, [case])["coverage"]["testsWithUnverifiedRefs"] == 0
+        print("test-impact bytecode self-test: stale-newer bytes stay unverified; class identity, absent and outside paths fail closed")
 
 
 if __name__ == "__main__":

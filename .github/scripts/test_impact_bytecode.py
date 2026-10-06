@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Extract conservative, direct JVM test-to-production dependency evidence.
+"""Retain unverified JVM class references without claiming source impact.
 
-This is a partial map, not a coverage map. Constant-pool class references prove a
-compile-time edge, but cannot see CDI, reflection, configuration, or indirect calls.
-No caller may interpret an absent edge as an unaffected test.
+Class-file identity and hashes bind the observed bytes, but do not prove that
+cached bytecode was compiled from the checked-out sources. Mapping remains
+unknown until a separate compile/input attestation exists.
 """
 
 from __future__ import annotations
@@ -14,8 +14,8 @@ import struct
 from pathlib import Path
 
 
-def class_refs_and_source(data: bytes) -> tuple[set[str], str | None] | None:
-    """Read JVM class constants and its SourceFile attribute; malformed files stay unknown."""
+def class_refs_and_source(data: bytes) -> tuple[set[str], str | None, str] | None:
+    """Read JVM constants, SourceFile and this_class; malformed files stay unknown."""
     try:
         offset = 0
 
@@ -69,7 +69,12 @@ def class_refs_and_source(data: bytes) -> tuple[set[str], str | None] | None:
             return str(item[1])
 
         refs = {utf8(int(item[1])) for item in pool[1:] if item is not None and item[0] == 7}
-        take(6)  # access, this_class, super_class
+        take(2)  # access
+        self_entry = pool[u2()]
+        if self_entry is None or self_entry[0] != 7:
+            return None
+        self_name = utf8(int(self_entry[1]))
+        take(2)  # super_class
         take(2 * u2())  # interfaces
 
         def skip_attributes() -> None:
@@ -90,7 +95,7 @@ def class_refs_and_source(data: bytes) -> tuple[set[str], str | None] | None:
             value = take(length)
             if name == "SourceFile" and length == 2:
                 source = utf8(struct.unpack(">H", value)[0])
-        return refs, source
+        return refs, source, self_name
     except (IndexError, ValueError, struct.error):
         return None
 
@@ -108,18 +113,13 @@ def checked_source(service: Path, relative: str) -> str | None:
 
 
 def checked_class_file(service: Path, path: Path) -> bool:
-    return path.is_file() and path.resolve().is_relative_to((service / "build/classes").resolve())
-
-
-def current_class_for_source(class_file: Path, source_file: Path) -> bool:
-    # A source edit after compilation invalidates the edge. Build caches may retain
-    # older timestamps, in which case this deliberately reports unknown instead of
-    # pretending that stale bytes prove the checked-out source.
-    return class_file.stat().st_mtime_ns >= source_file.stat().st_mtime_ns
+    root = service.resolve()
+    return (path.is_file() and (service / "build/classes").resolve().is_relative_to(root)
+            and path.resolve().is_relative_to((root / "build/classes")))
 
 
 def direct_bytecode_mapping(service: Path, cases: list[dict]) -> dict:
-    """Return v2 partial evidence for observed JVM tests, or v1 unknown without bytes."""
+    """Return unverified class references; never infer a test-to-source mapping."""
     main_roots = [service / f"build/classes/{language}/main" for language in ("kotlin", "java")]
     test_roots = [service / f"build/classes/{language}/test" for language in ("kotlin", "java")]
     if not cases or not any(root.is_dir() for root in main_roots) or not any(root.is_dir() for root in test_roots):
@@ -138,6 +138,8 @@ def direct_bytecode_mapping(service: Path, cases: list[dict]) -> dict:
             if parsed is None or parsed[1] is None:
                 continue
             internal = class_file.relative_to(root).with_suffix("").as_posix()
+            if parsed[2] != internal:
+                continue
             package = internal.rpartition("/")[0]
             candidate = None
             for language in ("kotlin", "java"):
@@ -148,12 +150,10 @@ def direct_bytecode_mapping(service: Path, cases: list[dict]) -> dict:
                         candidate = None
                         break
                     candidate = found
-            if candidate is None or not current_class_for_source(class_file, service / candidate):
+            if candidate is None:
                 continue
             evidence = {
-                "sourcePath": candidate,
-                "sourceSha256": hashlib.sha256((service / candidate).read_bytes()).hexdigest(),
-                "productionClass": internal,
+                "referencedClass": internal,
                 "productionClassSha256": hashlib.sha256(class_bytes).hexdigest(),
             }
             if internal in production and production[internal] != evidence:
@@ -163,11 +163,11 @@ def direct_bytecode_mapping(service: Path, cases: list[dict]) -> dict:
     for internal in ambiguous:
         production.pop(internal, None)
 
-    mappings = []
+    references = []
     unique_cases = {case["fingerprint"]: case for case in cases}
     for fingerprint, case in sorted(unique_cases.items()):
         internal = case["classname"].replace(".", "/")
-        edges: dict[tuple[str, str], dict] = {}
+        edges: dict[str, dict] = {}
         for root in test_roots:
             class_file = root / f"{internal}.class"
             if not checked_class_file(service, class_file):
@@ -175,27 +175,26 @@ def direct_bytecode_mapping(service: Path, cases: list[dict]) -> dict:
             class_bytes = class_file.read_bytes()
             parsed = class_refs_and_source(class_bytes)
             definition = case.get("testDefinitionPath")
-            if (parsed is None or not isinstance(definition, str)
+            if (parsed is None or parsed[2] != internal or not isinstance(definition, str)
                     or parsed[1] != Path(definition).name
                     or not re.fullmatch(r"src/test/(?:kotlin|java)/[A-Za-z0-9_./-]+\.(?:kt|java)", definition)
                     or any(part in {".", ".."} for part in Path(definition).parts)
                     or not (service / definition).is_file()
-                    or not (service / definition).resolve().is_relative_to(service.resolve())
-                    or not current_class_for_source(class_file, service / definition)):
+                    or not (service / definition).resolve().is_relative_to(service.resolve())):
                 continue
             test_sha = hashlib.sha256(class_bytes).hexdigest()
             for ref in parsed[0]:
                 if ref in production:
                     item = {**production[ref], "testClassSha256": test_sha}
-                    edges[(item["sourcePath"], item["productionClass"])] = item
-        mappings.append({"fingerprint": fingerprint, "state": "partial" if edges else "unknown",
-                         "edges": [edges[key] for key in sorted(edges)]})
+                    edges[item["referencedClass"]] = item
+        references.append({"fingerprint": fingerprint, "state": "unverified" if edges else "unknown",
+                           "directClassRefs": [edges[key] for key in sorted(edges)]})
 
-    mapped = sum(item["state"] == "partial" for item in mappings)
+    with_refs = sum(item["state"] == "unverified" for item in references)
     return {
-        "schemaVersion": 2, "mode": "shadow", "mappingState": "partial" if mapped else "unknown",
-        "selectionState": "unavailable", "method": "jvm-bytecode-direct-class-reference",
-        "mappings": mappings,
-        "coverage": {"observedTests": len(mappings), "testsWithDirectEdges": mapped,
-                     "unknownTests": len(mappings) - mapped},
+        "schemaVersion": 2, "mode": "shadow", "mappingState": "unknown",
+        "selectionState": "unavailable", "evidenceState": "unverified-bytecode-references",
+        "method": "jvm-bytecode-direct-class-reference", "references": references,
+        "coverage": {"observedTests": len(references), "testsWithUnverifiedRefs": with_refs,
+                     "unknownTests": len(references) - with_refs},
     }

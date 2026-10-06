@@ -316,14 +316,16 @@ set: it is a guardrail propagated through the collector, operator UI and browser
 requires versioned, verified test-to-production coverage or dependency edges, plus a measured
 comparison of shadow recommendations against the preserved full suite (#7207).
 
-The v2 advisory observation may retain **partial** direct JVM bytecode-to-production-source edges
-for test identities observed in that run. It records source and class-file SHA-256 digests and
-rejects paths outside the checked-out service tree. A missing, ambiguous or older class file is
-`unknown`. A direct bytecode reference does not prove test coverage or enumerate CDI, reflection,
-configuration and indirect dependencies; absence of an edge never means unaffected. `selectionState`
-remains `unavailable`, and the full suite remains mandatory. Shadow recommendations require an
-explicit complete full-suite oracle, escaped-failure recall controls and falsification fixtures
-before they can appear as a candidate selection observation.
+The v2 advisory observation retains direct JVM class references from observed test bytecode as
+**unverified** evidence. Class-file identities and SHA-256 digests bind the bytes; they do not prove
+those bytes were compiled from the checked-out sources. A restored stale class file can have a newer
+timestamp than its source, so timestamps cannot establish that lineage. The checked-out source path
+is deliberately absent from v2. `mappingState` remains `unknown` and `selectionState` remains
+`unavailable`. Even a verified direct reference would omit CDI, reflection, configuration and
+indirect dependencies; absence of one never means unaffected. A compile/input attestation is needed
+before source mapping can advance. Shadow recommendations additionally require an explicit complete
+full-suite oracle, escaped-failure recall controls and falsification fixtures. Full suites remain
+mandatory throughout.
 
 Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
 emits a bounded marker only after at least one trace assertion has passed; the run collector turns

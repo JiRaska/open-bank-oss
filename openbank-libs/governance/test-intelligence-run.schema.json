@@ -119,28 +119,27 @@
         "additionalProperties": false
       }, {
         "type": "object",
-        "required": ["schemaVersion", "mode", "mappingState", "selectionState", "method", "mappings", "coverage"],
+        "required": ["schemaVersion", "mode", "mappingState", "selectionState", "evidenceState", "method", "references", "coverage"],
         "properties": {
           "schemaVersion": { "const": 2 },
           "mode": { "const": "shadow" },
-          "mappingState": { "enum": ["partial", "unknown"] },
+          "mappingState": { "const": "unknown" },
           "selectionState": { "const": "unavailable" },
+          "evidenceState": { "const": "unverified-bytecode-references" },
           "method": { "const": "jvm-bytecode-direct-class-reference" },
-          "mappings": {
+          "references": {
             "type": "array",
             "items": {
               "type": "object",
-              "required": ["fingerprint", "state", "edges"],
+              "required": ["fingerprint", "state", "directClassRefs"],
               "properties": {
                 "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{24}$" },
-                "state": { "enum": ["partial", "unknown"] },
-                "edges": { "type": "array", "uniqueItems": true, "items": {
+                "state": { "enum": ["unverified", "unknown"] },
+                "directClassRefs": { "type": "array", "uniqueItems": true, "items": {
                   "type": "object",
-                  "required": ["sourcePath", "sourceSha256", "productionClass", "productionClassSha256", "testClassSha256"],
+                  "required": ["referencedClass", "productionClassSha256", "testClassSha256"],
                   "properties": {
-                    "sourcePath": { "type": "string", "pattern": "^src/main/(?:kotlin|java)/[A-Za-z0-9_./-]+\\.(?:kt|java)$" },
-                    "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
-                    "productionClass": { "type": "string", "pattern": "^[A-Za-z0-9_/$-]+$" },
+                    "referencedClass": { "type": "string", "pattern": "^[A-Za-z0-9_/$-]+$" },
                     "productionClassSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
                     "testClassSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
                   },
@@ -152,10 +151,10 @@
           },
           "coverage": {
             "type": "object",
-            "required": ["observedTests", "testsWithDirectEdges", "unknownTests"],
+            "required": ["observedTests", "testsWithUnverifiedRefs", "unknownTests"],
             "properties": {
               "observedTests": { "type": "integer", "minimum": 0 },
-              "testsWithDirectEdges": { "type": "integer", "minimum": 0 },
+              "testsWithUnverifiedRefs": { "type": "integer", "minimum": 0 },
               "unknownTests": { "type": "integer", "minimum": 0 }
             },
             "additionalProperties": false

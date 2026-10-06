@@ -20,21 +20,19 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
-  it('shows partial bytecode edges as advisory and rejects a forged out-of-tree path', () => {
+  it('shows bytecode references as unverified and rejects a forged class identity', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-impact-partial-'))
     dirs.push(repo)
     write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
     write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
     write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
-    const edge = {
-      sourcePath: 'src/main/kotlin/example/Foo.kt', sourceSha256: 'a'.repeat(64),
-      productionClass: 'example/Foo', productionClassSha256: 'b'.repeat(64), testClassSha256: 'c'.repeat(64),
-    }
+    const edge = { referencedClass: 'example/Foo', productionClassSha256: 'b'.repeat(64), testClassSha256: 'c'.repeat(64) }
     const impact = {
-      schemaVersion: 2, mode: 'shadow', mappingState: 'partial', selectionState: 'unavailable',
+      schemaVersion: 2, mode: 'shadow', mappingState: 'unknown', selectionState: 'unavailable',
+      evidenceState: 'unverified-bytecode-references',
       method: 'jvm-bytecode-direct-class-reference',
-      mappings: [{ fingerprint: '0'.repeat(24), state: 'partial', edges: [edge] }],
-      coverage: { observedTests: 1, testsWithDirectEdges: 1, unknownTests: 0 },
+      references: [{ fingerprint: '0'.repeat(24), state: 'unverified', directClassRefs: [edge] }],
+      coverage: { observedTests: 1, testsWithUnverifiedRefs: 1, unknownTests: 0 },
     }
     const envelope = {
       schemaVersion: 1,
@@ -48,13 +46,13 @@ describe('test-intelligence collector', () => {
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
     expect(report.testImpact).toMatchObject({
-      schemaVersion: 2, mappingState: 'partial', selectionState: 'unavailable',
-      observedTests: 1, testsWithDirectEdges: 1, unknownTests: 0,
-      detail: expect.stringContaining('shadow recommendations and escaped-failure recall are not collected yet'),
+      schemaVersion: 2, mappingState: 'unknown', selectionState: 'unavailable',
+      observedTests: 1, testsWithUnverifiedRefs: 1, unknownTests: 0,
+      detail: expect.stringContaining('Shadow recommendations and escaped-failure recall are not collected yet'),
     })
 
     write(repo, runPath, JSON.stringify({ ...envelope, testImpact: {
-      ...impact, mappings: [{ ...impact.mappings[0], edges: [{ ...edge, sourcePath: 'src/main/kotlin/../../outside.kt' }] }],
+      ...impact, references: [{ ...impact.references[0], directClassRefs: [{ ...edge, referencedClass: '../outside' }] }],
     } }))
     execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
     const rejected = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
