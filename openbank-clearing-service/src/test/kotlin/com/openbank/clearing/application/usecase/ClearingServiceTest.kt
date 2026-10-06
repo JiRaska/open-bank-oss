@@ -156,6 +156,26 @@ class ClearingServiceTest {
     }
 
     @Test
+    fun `a different database failure is not mistaken for the payment unique-index race`() {
+        val request = SubmitPaymentCommand(
+            paymentId = UUID.fromString("11111111-1111-1111-1111-111111111111"),
+            paymentReference = "PAY-001",
+            debtorIban = "DE89370400440532013000",
+            creditorIban = "DE12500105170648489890",
+            amount = Money.of("125.50", "EUR"),
+            rail = PaymentRail.SEPA_SCT_INST,
+        )
+        val failure = java.sql.SQLException("database unavailable", "08006")
+        every { itemRepo.findByPaymentId(request.paymentId) } returns Uni.createFrom().item(emptyList())
+        every { itemRepo.save(any()) } returns Uni.createFrom().failure(failure)
+
+        assertThatThrownBy { service.submit(request).await().indefinitely() }
+            .hasRootCauseInstanceOf(java.sql.SQLException::class.java)
+            .hasRootCauseMessage("database unavailable")
+        verify(exactly = 1) { itemRepo.findByPaymentId(request.paymentId) }
+    }
+
+    @Test
     fun `settle batch transitions batch to settled, marks items settled, and publishes event`() {
         val batchId = UUID.fromString("22222222-2222-2222-2222-222222222222")
         val batch = ClearingBatch(
@@ -274,6 +294,29 @@ class ClearingServiceTest {
     }
 
     @Test
+    fun `reconcileBatch excludes reversed items from the stuck list`() {
+        val batchId = UUID.fromString("66666666-6666-6666-6666-666666666666")
+        val batch = ClearingBatch(
+            id = batchId,
+            batchReference = "BATCH-REVERSED",
+            rail = PaymentRail.SEPA_SCT,
+            status = ClearingStatus.SETTLED,
+            itemCount = 2,
+            createdAt = fixedNow,
+            updatedAt = fixedNow,
+        )
+        val reversed = clearingItem(batchId = batchId, status = ClearingStatus.REVERSED)
+        val pending = clearingItem(batchId = batchId, status = ClearingStatus.PENDING)
+        every { batchRepo.findById(batchId) } returns Uni.createFrom().item(batch)
+        every { itemRepo.findByBatchId(batchId) } returns Uni.createFrom().item(listOf(reversed, pending))
+
+        val report = service.reconcileBatch(batchId).await().indefinitely()
+
+        assertThat(report.settledItemCount).isZero()
+        assertThat(report.stuckItemIds).containsExactly(pending.id)
+    }
+
+    @Test
     fun `an empty cycle announces its settlement`() {
         val batchSlot: CapturingSlot<ClearingBatch> = slot()
         val eventSlot: CapturingSlot<OutboxMessage> = slot()
@@ -352,10 +395,22 @@ class ClearingServiceTest {
         assertThat(result.batches.map { it.cycleId }.distinct()).containsExactly(result.cycleId)
         // Each item is re-homed to the batch of its own currency.
         verify {
-            itemRepo.saveAll(match { l -> l.all { it.currency == "EUR" && it.batchId == byCcy.getValue("EUR").id } })
+            itemRepo.saveAll(
+                match { l ->
+                    l.all {
+                        it.currency == "EUR" && it.batchId == byCcy.getValue("EUR").id && it.revision == 1L
+                    }
+                },
+            )
         }
         verify {
-            itemRepo.saveAll(match { l -> l.all { it.currency == "CZK" && it.batchId == byCcy.getValue("CZK").id } })
+            itemRepo.saveAll(
+                match { l ->
+                    l.all {
+                        it.currency == "CZK" && it.batchId == byCcy.getValue("CZK").id && it.revision == 1L
+                    }
+                },
+            )
         }
     }
 

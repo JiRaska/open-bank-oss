@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -50,6 +51,21 @@ dependencies {
     testImplementation(libs.testcontainers.redpanda)
     // Consumer-driven contract for this service's outbound money-path call (issue #8345).
     testImplementation(libs.pact.consumer)
+}
+
+// The reactive facade decides idempotent payment admission, per-currency batches and
+// reconciliation; the direct unit suite probes those decisions without external brokers (#8349).
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.clearing.application.usecase.ClearingService")
+    targetTests = setOf("com.openbank.clearing.application.usecase.ClearingServiceTest")
+    // Kotlin inserts non-null checks in this reactive facade; removing them generated 27
+    // surviving compiler-shape mutants unrelated to clearing decisions in the first baseline.
+    avoidCallsTo = setOf("kotlin.jvm.internal.Intrinsics")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
 
 kover {
