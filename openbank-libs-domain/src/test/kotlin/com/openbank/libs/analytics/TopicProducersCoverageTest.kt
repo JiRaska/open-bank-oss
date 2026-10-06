@@ -39,6 +39,15 @@ class TopicProducersCoverageTest {
         assertEquals("account-service", TopicProducers.sourceService(topic))
     }
 
+    @Test
+    fun `savings withdrawal topic is ready on both consumers before outbox migration`() {
+        val topic = "openbank.accounts.savings-withdrawal.approved"
+        consumers.forEach { consumer ->
+            assertTrue(topic in subscribedTopics(consumer), "$consumer does not subscribe to $topic")
+        }
+        assertEquals("account-service", TopicProducers.sourceService(topic))
+    }
+
     private val consumers = listOf(
         "../openbank-audit-service/src/main/resources/application.yaml",
         "../openbank-analytics-sink/src/main/resources/application.yaml",

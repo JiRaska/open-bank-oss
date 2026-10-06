@@ -83,6 +83,12 @@ spec:
         host: "*"
       - resource:
           type: topic
+          name: openbank.accounts.savings-withdrawal.approved
+          patternType: literal
+        operations: [Read, Describe]
+        host: "*"
+      - resource:
+          type: topic
           name: openbank.transactions.transaction.initiated
           patternType: literal
         operations: [Read, Describe]

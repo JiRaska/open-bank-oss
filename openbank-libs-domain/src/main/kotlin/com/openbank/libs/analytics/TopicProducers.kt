@@ -39,6 +39,7 @@ object TopicProducers {
         "openbank.settlement.events" to "settlement-service",
         "openbank.accounts.account.created" to "account-service",
         "openbank.accounts.account.status-changed" to "account-service",
+        "openbank.accounts.savings-withdrawal.approved" to "account-service",
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
         "openbank.party.events" to "party-service",

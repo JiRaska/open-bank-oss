@@ -35,6 +35,7 @@ create_topic() {
 
 create_topic "openbank.accounts.account.created"
 create_topic "openbank.accounts.account.status-changed"
+create_topic "openbank.accounts.savings-withdrawal.approved"
 create_topic "openbank.accounts.balance.updated"
 create_topic "openbank.ledger.journal.posted"
 create_topic "openbank.ledger.journal.reversed"
