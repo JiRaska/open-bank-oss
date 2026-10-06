@@ -205,6 +205,15 @@ Notification-service's marketing ContactPolicyGate now reads the same live conse
 suppression list as campaign-service. A matching entry denies before counters or consent; an
 unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count
 contacts locally, so this does not satisfy D2's atomic cross-origin reservation.
+The local notification counter has a second defect that a query-only change cannot safely fix:
+the consumer persists its own `PENDING` row before checking the gate, then counts every recent
+marketing row, including that row and terminal suppressions. Filtering to accepted rows alone
+would stop counting ambiguous provider handoffs and permit a cap overrun under concurrency.
+D2 must reserve before handoff under a per-party database serialization point, exclude the
+current intent from its prior-contact count, and keep unresolved handoffs reserved. A definitive
+pre-handoff denial or failure releases the reservation; replay of the same intent returns its
+recorded decision. Prove the cap with concurrent campaign and operator intents at the boundary,
+plus denial, timeout and replay cases against PostgreSQL before replacing local counters.
 Notification dispatch now treats GATE_UNAVAILABLE as a retryable dependency failure rather than a
 terminal customer suppression. Its committed notification row remains PENDING, no provider is
 called and the Kafka record fails to the configured dead-letter path for reconciliation. The
