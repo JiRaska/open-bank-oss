@@ -76,8 +76,14 @@ class SnapshotWaitTests(unittest.TestCase):
             return json.dumps({"check_runs": []})
 
         self.assertFalse(MODULE.wait_for_head_producer(query, lambda _: None))
-        self.assertEqual(len(calls), 7)
+        self.assertEqual(len(calls), 10)
         self.assertEqual(sum(MODULE.PRODUCER_DELAYS), 1800)
+        self.assertLessEqual(max(MODULE.PRODUCER_DELAYS), 300)
+        probe_seconds = [
+            sum(MODULE.PRODUCER_DELAYS[:i])
+            for i in range(1, len(MODULE.PRODUCER_DELAYS) + 1)
+        ]
+        self.assertIn(960, probe_seconds)
 
     def test_main_queries_head_producer_before_snapshot(self):
         base = "a" * 40

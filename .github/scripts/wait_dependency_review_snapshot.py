@@ -16,7 +16,11 @@ import sys
 import time
 
 DELAYS = (0, 60, 120, 240, 480, 600, 300)  # 30 minutes, seven probes
-PRODUCER_DELAYS = DELAYS  # allow the producer's full 30-minute job budget
+# The fleet producer commonly completes around minute 15. A probe at minute 15
+# followed by minute 25 can miss that completion by seconds and add ten idle
+# minutes to every dependency review. Keep the same 30-minute budget, but bound
+# producer-observation gaps to five minutes (ten probes total).
+PRODUCER_DELAYS = (0, 60, 120, 240, 300, 240, 180, 240, 240, 180)
 FINAL_DELAYS = (0, 10, 30, 60)  # indexing can briefly regress after the first ready response
 WARNING = "x-github-dependency-graph-snapshot-warnings"
 PRODUCER = "Submit fleet dependency graph"
