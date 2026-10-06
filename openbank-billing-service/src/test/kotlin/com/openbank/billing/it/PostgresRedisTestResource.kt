@@ -21,10 +21,15 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
 
     private var postgres: PostgreSQLContainer<*>? = null
     private var redis: GenericContainer<*>? = null
+    private var databaseName = "openbank_billing_it"
 
     private companion object {
         const val POSTGRES_IMAGE = "postgres:18.6-alpine"
         const val VALKEY_IMAGE = "valkey/valkey:7.2-alpine"
+    }
+
+    override fun init(args: Map<String, String>) {
+        databaseName = args["db"] ?: databaseName
     }
 
     override fun start(): Map<String, String> {
@@ -34,7 +39,7 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
         val pg = PostgreSQLContainer(DockerImageName.parse(POSTGRES_IMAGE))
             .withUsername("openbank")
             .withPassword("openbank_secret")
-            .withDatabaseName("openbank_billing_it")
+            .withDatabaseName(databaseName)
         pg.start()
         postgres = pg
         TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started")
@@ -46,7 +51,7 @@ class PostgresRedisTestResource : QuarkusTestResourceLifecycleManager {
 
         val pgHost = pg.host
         val pgPort = pg.getMappedPort(PostgreSQLContainer.POSTGRESQL_PORT)
-        val db = "openbank_billing_it"
+        val db = databaseName
         return mapOf(
             "quarkus.datasource.reactive.url" to "vertx-reactive:postgresql://$pgHost:$pgPort/$db",
             "quarkus.datasource.jdbc.url" to "jdbc:postgresql://$pgHost:$pgPort/$db",
