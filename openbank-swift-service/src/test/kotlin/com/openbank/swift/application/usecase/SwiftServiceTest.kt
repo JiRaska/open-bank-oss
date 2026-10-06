@@ -308,6 +308,50 @@ class SwiftServiceTest {
     }
 
     @Test
+    fun `accepted scheme response without a settlement account stays SENT`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
+        coEvery { repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
+        coEvery { settlementPort.settle(any()) } returns SettlementOutcome(settled = false, transactionId = null)
+
+        val result = serviceWithFlag.send(command())
+
+        assertThat(result.status).isEqualTo(SwiftStatus.SENT)
+        coVerify(exactly = 1) { settlementPort.settle(match { it.status == SwiftStatus.SENT }) }
+        coVerify(exactly = 0) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
+    }
+
+    @Test
+    fun `unexpected settlement failure leaves the accepted scheme response in SENT`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { schemeGatewayPort.submit(any()) } returns
+            SchemeSubmissionOutcome(accepted = true, reasonCode = null, rawMt = "<pacs.008/>")
+        coEvery { repo.saveWithOutbox(match { it.status == SwiftStatus.SENT }, any()) } answers { firstArg() }
+        coEvery { settlementPort.settle(any()) } throws IllegalStateException("unexpected downstream failure")
+
+        val result = serviceWithFlag.send(command())
+
+        assertThat(result.status).isEqualTo(SwiftStatus.SENT)
+        coVerify(exactly = 0) { repo.saveWithOutbox(match { it.status == SwiftStatus.COMPLETED }, any()) }
+    }
+
+    @Test
+    fun `unexpected scheme failure leaves the message VALIDATED without a verdict event`(): Unit = runBlocking {
+        coEvery { repo.findByIdempotencyKey("idem-1") } returns null
+        coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
+        coEvery { schemeGatewayPort.submit(any()) } throws IllegalStateException("unexpected gateway failure")
+
+        val result = serviceWithFlag.send(command())
+
+        assertThat(result.status).isEqualTo(SwiftStatus.VALIDATED)
+        coVerify(exactly = 0) { settlementPort.settle(any()) }
+        coVerify(exactly = 0) { repo.saveWithOutbox(any(), any()) }
+    }
+
+    @Test
     fun `send with flag on rejects MT103 with mapped reason on scheme reject (RJCT)`(): Unit = runBlocking {
         coEvery { repo.findByIdempotencyKey("idem-1") } returns null
         coEvery { repo.save(match { it.status == SwiftStatus.VALIDATED }) } answers { firstArg() }
