@@ -14,7 +14,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-card-processing-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-card-processing-service openbank-billing-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -96,6 +96,9 @@ jobs:
           # #8349: authorisation lifecycle and hold arithmetic are pure domain policy, with a
           # direct JUnit suite. Local baseline: 29 mutants, 22 killed (76%); 70% task floor.
           - openbank-card-processing-service
+          # #8349: billing's fee assessment and journal selection are application/domain policy.
+          # Local baseline: 16 mutants, 15 killed (94%); 70% task floor.
+          - openbank-billing-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

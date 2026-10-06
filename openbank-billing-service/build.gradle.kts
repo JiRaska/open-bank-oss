@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -66,6 +67,22 @@ dependencies {
     testImplementation(libs.pact.consumer)
     // Admin UI pending-approval contract: generated consumer pact + live HTTP provider replay.
     testImplementation(libs.pact.provider)
+}
+
+// FeeAssessmentService decides charge vs waiver; BillingAssessment selects balanced journal
+// commands. Target both rather than broad event/DTO packages so the weekly score measures those
+// decisions and their returned assessment fields.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf(
+        "com.openbank.billing.application.usecase.FeeAssessmentService",
+        "com.openbank.billing.domain.BillingAssessment",
+    )
+    targetTests = setOf("com.openbank.billing.FeeAssessmentServiceTest")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
 
 // Coverage floor (ADR-0020, ratchet-only — issue #321: billing was the only money-path

@@ -55,6 +55,10 @@ class FeeAssessmentServiceTest {
     fun `multiple fees get distinct idempotency keys — no collapse (ADR-0143)`(): Unit = runBlocking {
         val billing = AccountBilling("prod-1", FeeContext(balance = BigDecimal("100"), currency = "CZK"))
         val a = service(billing, listOf(fee("f1", "5"), fee("f2", "3"))).assess("cyc1", "acc1", "CZK")
+        assertThat(a.cycleId).isEqualTo("cyc1")
+        assertThat(a.accountId).isEqualTo("acc1")
+        assertThat(a.currency).isEqualTo("CZK")
+        assertThat(a.skipped).isFalse()
         val keys = a.journalCommands().map { it.idempotencyKey }
         assertThat(keys).containsExactly("fee-cyc1-acc1-f1-CZK", "fee-cyc1-acc1-f2-CZK")
         assertThat(keys.toSet()).hasSize(2)

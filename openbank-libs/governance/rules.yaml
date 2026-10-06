@@ -1513,17 +1513,17 @@ coverage:
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
-    enforced: advisory                  # fleet default; card-processing enforces its own 70% PIT floor (#8349)
+    enforced: advisory                  # fleet default; card-processing and billing enforce 70% PIT floors (#8349)
     # Moved 2026-09-30 -> 2026-12-31 (#11684): pitest run 36545321433 (2026-09-29) has balance
     # 69.7% and sepa-payment 69.6% below 70, ledger at 70.0; not "sustained".
     target_enforce_date: "2026-12-31"   # ADR-0144
     ci_producer: .github/workflows/pitest.yml
-    # Current #8349 inventory (2026-10-06): 20/26 money-path services run weekly, including
-    # card-processing's hold/clearing policy (local PIT: 22/29 killed, 76%). Billing, clearing,
-    # lending, psd2, settlement and swift remain outside the matrix. The historical file counts
-    # below are not a current exclusion test: lending now has seven domain files and 25 branch
-    # sites, while billing's fee decision lives mainly in its application use case. Each remaining
-    # service needs a measured mutation target and a baseline before admission.
+    # Current #8349 candidate inventory (2026-10-06): 21/26 money-path services run weekly,
+    # including card-processing hold/clearing policy (22/29 killed, 76%) and billing fee
+    # assessment/journal selection (15/16 killed, 94%). Clearing, lending, psd2, settlement and
+    # swift remain outside the matrix. The historical file counts below are not a current
+    # exclusion test: lending now has seven domain files and 25 branch sites. Each remaining
+    # service needs a measured mutation target and baseline before admission.
     # Historical ADR-0063 rollout snapshot (2026-07-11, issue #265 D3):
     # 10/17 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
     # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06) +
