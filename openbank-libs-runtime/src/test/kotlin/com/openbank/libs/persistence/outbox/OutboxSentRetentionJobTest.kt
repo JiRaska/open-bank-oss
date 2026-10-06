@@ -30,6 +30,7 @@ class OutboxSentRetentionJobTest {
         override val retentionLabel: String,
         private val rows: Int,
         private val fail: Boolean = false,
+        override val sentRetentionExempt: Boolean = false,
     ) : SentOutboxRetention {
         var seen: Duration? = null
         private var left = rows
@@ -116,6 +117,30 @@ class OutboxSentRetentionJobTest {
     @Test
     fun `a service with no outbox registers no liveness gauge`() {
         job().registerLiveness(StartupEvent())
+        assertThat(successRecorded()).isNull()
+    }
+
+    @Test
+    fun `a live evidence reader is not purged or reported as a retention target`(): Unit = runBlocking {
+        val evidence = Target("case", rows = 3, sentRetentionExempt = true)
+        val ordinary = Target("sca", rows = 2)
+        val j = job(evidence, ordinary)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(j.purgeAll(now)).containsOnlyKeys("sca").containsEntry("sca", 2L)
+        assertThat(evidence.seen).isNull()
+        assertThat(registry.find("openbank.outbox.purge.cap.reached").tag("service", "case").gauge()).isNull()
+        assertThat(successRecorded()).isEqualTo(1.0)
+    }
+
+    @Test
+    fun `an exempt-only service has no misleading retention heartbeat`(): Unit = runBlocking {
+        val evidence = Target("case", rows = 3, sentRetentionExempt = true)
+        val j = job(evidence)
+        j.registerLiveness(StartupEvent())
+
+        assertThat(j.purgeAll(now)).isEmpty()
+        assertThat(evidence.seen).isNull()
         assertThat(successRecorded()).isNull()
     }
 

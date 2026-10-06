@@ -84,9 +84,13 @@ class OutboxSentRetentionJob(
             return
         }
         require(sentDays > 0) { "openbank.outbox.retention.sent-days must be positive, was $sentDays" }
-        if (targets.stream().findAny().isPresent) {
+        if (targets.stream().anyMatch { !it.sentRetentionExempt }) {
             liveness = metrics.registerWorkflowLiveness(WORKFLOW_NAME, EXPECTED_INTERVAL)
-            targets.forEach { metrics.outboxPurgeCapReached(it.retentionLabel, reached = false) }
+            targets.forEach { target ->
+                if (!target.sentRetentionExempt) {
+                    metrics.outboxPurgeCapReached(target.retentionLabel, reached = false)
+                }
+            }
         }
     }
 
@@ -113,6 +117,7 @@ class OutboxSentRetentionJob(
         val purged = linkedMapOf<String, Long>()
         var allSucceeded = true
         for (target in targets) {
+            if (target.sentRetentionExempt) continue
             val label = target.retentionLabel
             try {
                 val count = OutboxRetention.purgeSentUntilShort(target, retention, batchSize, maxBatches, now)
