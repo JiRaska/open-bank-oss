@@ -48,6 +48,24 @@ afterEach(() => {
 })
 
 describe('onboarding funnel loading (issue #8233)', () => {
+  it('names a KYC case from the verified onboarding record without another lookup', async () => {
+    const caseId = '22222222-2222-4222-8222-222222222222'
+    const current = { ...record('11111111-1111-4111-8111-111111111111', 'Named Customer', 'KYC_OPEN'), kycCaseId: caseId }
+    const fetchMock = routedFetch({
+      funnel: () => Promise.resolve(response(200, FUNNEL)),
+      records: () => Promise.resolve(response(200, { items: [current], total: 1, page: 0, size: 20 })),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    renderPage()
+
+    fireEvent.click(await screen.findByRole('row', { name: 'Select onboarding party Named Customer' }))
+    expect(screen.getByText('Case for Named Customer')).toBeVisible()
+    expect(screen.queryByText(caseId)).not.toBeInTheDocument()
+    expect(screen.getByTitle(caseId)).toHaveTextContent('22222222…')
+    expect(screen.getByRole('button', { name: 'Copy KYC case ID' })).toBeVisible()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
   it('never renders a fabricated 0 for the funnel tiles while the request is in flight', async () => {
     const funnelDeferred = deferred<Response>()
     vi.stubGlobal('fetch', routedFetch({

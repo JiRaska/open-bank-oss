@@ -4,13 +4,13 @@
 
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 import { classifyBffFailure, svcUrl } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { ClipboardList, RefreshCw, ChevronRight, X, TrendingUp } from 'lucide-react'
 import Link from 'next/link'
-import { Drawer, PageHeader } from '@/components/ui'
+import { Drawer, HumanReference, PageHeader } from '@/components/ui'
 import { Can } from '@/components/auth/AuthGuard'
 import {
   ONBOARDING_STAGES as STAGES,
@@ -419,7 +419,15 @@ function RecordDrawer({
           <DrawerRow label={t('E-mail', 'Email')} value={record.email ?? '—'} mono />
           <DrawerRow label={t('Stav party', 'Party status')} value={record.partyStatus} />
           <DrawerRow label={t('Stav KYC', 'KYC status')} value={record.kycStatus?.replace('_', ' ') ?? '—'} />
-          <DrawerRow label={t('KYC případ', 'KYC case ID')} value={record.kycCaseId ? record.kycCaseId.slice(0, 8) + '…' : '—'} mono />
+          <DrawerRow label={t('KYC případ', 'KYC case')} value={record.kycCaseId
+            ? <HumanReference
+                label={record.legalName
+                  ? t(`Případ pro ${record.legalName}`, `Case for ${record.legalName}`)
+                  : t(`Případ ze dne ${new Date(record.createdAt).toLocaleDateString(dateLocale)}`, `Case from ${new Date(record.createdAt).toLocaleDateString(dateLocale)}`)}
+                reference={record.kycCaseId}
+                copyLabel={t('Kopírovat ID případu KYC', 'Copy KYC case ID')}
+              />
+            : '—'} />
           <DrawerRow label={t('SCA zapsáno', 'SCA enrolled')} value={record.scaEnrolled ? `✓ (${record.deviceCount} ${t('zařízení', 'device(s)')})` : '—'} />
           <DrawerRow label={t('Vytvořeno', 'Created')} value={new Date(record.createdAt).toLocaleString(dateLocale)} />
           <DrawerRow label={t('Aktualizováno', 'Updated')} value={new Date(record.updatedAt).toLocaleString(dateLocale)} />
@@ -451,7 +459,7 @@ function RecordDrawer({
   )
 }
 
-function DrawerRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+function DrawerRow({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: '8px', alignItems: 'start' }}>
       <span style={{ fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', paddingTop: '2px' }}>{label}</span>
