@@ -158,6 +158,8 @@ class PublicationTest(unittest.TestCase):
                             f"/{x['providerName']}/" in request.full_url)
             expected = json.loads(base64.b64decode(contract["content"]))
             expected["_links"] = {"self": {"href": "broker-added"}}
+            expected["createdAt"] = "broker-added"
+            expected["interactions"][0]["_id"] = "broker-added"
             return Response(json.dumps(expected).encode())
         opener = MagicMock()
         opener.open.side_effect = open_request
@@ -166,6 +168,21 @@ class PublicationTest(unittest.TestCase):
         self.assertEqual(providers, sorted(x["providerName"] for x in body["contracts"]))
         self.assertEqual([r.method for r in requests], ["POST"] + ["GET"] * 5)
         self.assertTrue(all(f"/version/{self.sha}" in r.full_url for r in requests[1:]))
+
+    def test_readback_strips_only_observed_broker_metadata(self):
+        expected = {"consumer": {"name": "openbank-admin-ui"},
+                    "interactions": [{"description": "bill", "response": {"status": 200}}]}
+        received = copy.deepcopy(expected)
+        received.update({"_links": {"self": {}}, "createdAt": "broker-added"})
+        received["interactions"][0]["_id"] = "broker-added"
+        self.assertEqual(publisher.contract_readback(received), expected)
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["response"]["status"] = 500
+        received["interactions"][0]["_id"] = "broker-added"
+        self.assertNotEqual(publisher.contract_readback(received), expected)
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["unexpected"] = "broker-added"
+        self.assertNotEqual(publisher.contract_readback(received), expected)
 
     def test_mismatched_readback_fails_closed(self):
         opener = MagicMock()
@@ -176,6 +193,30 @@ class PublicationTest(unittest.TestCase):
             publisher.publish(self.body(), self.env)
         self.assertEqual(failure.exception.stage, "readback-mismatch")
         self.assertRegex(failure.exception.provider, publisher.PROVIDER)
+        self.assertEqual(failure.exception.details, "/consumer object/missing; "
+                         "/interactions/0 object/missing; /provider object/missing")
+
+    def test_readback_diagnostic_uses_only_bounded_schema_paths_and_types(self):
+        secret = "do-not-log-token-or-url"
+        expected = {"interactions": [{"request": {"headers": {"Authorization": secret},
+                                                  "body": {"private-id": secret}},
+                                      "response": {"status": 200}}],
+                    "metadata": {secret: {"private-id": secret}}}
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["request"]["headers"]["Authorization"] = "other-secret"
+        received["interactions"][0]["request"]["body"]["private-id"] = "other-secret"
+        received["interactions"][0]["response"]["status"] = 201
+        received["metadata"][secret]["private-id"] = "other-secret"
+        details = publisher.readback_difference_paths(expected, received)
+        self.assertEqual(details, "/interactions/0/request/body object/object; "
+                         "/interactions/0/request/headers object/object; "
+                         "/interactions/0/response/status number/number; "
+                         "/metadata/<field> object/object")
+        self.assertNotIn(secret, details)
+        many = {f"private-{i}": secret for i in range(20)}
+        bounded = publisher.readback_difference_paths(many, {})
+        self.assertLessEqual(len(bounded.split("; ")), 8)
+        self.assertNotIn("private-", bounded)
 
     def test_malformed_broker_body_reports_only_safe_stage_and_provider(self):
         opener = MagicMock()
