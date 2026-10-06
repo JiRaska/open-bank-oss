@@ -74,6 +74,9 @@ class FcmPushSender {
     /** Visible for testing: lets a unit test pin a stub host to loopback. */
     internal var resolver: EgressResolver = EgressResolver.SYSTEM
 
+    /** Test seam for the fixed FCM endpoint; production always uses Google's URL. */
+    internal var testSendUrl: String? = null
+
     private val http: SafeHttpClient by lazy {
         NotificationEgress.client(allowedHosts, resolver, CONNECT_TIMEOUT, REQUEST_TIMEOUT, MAX_RESPONSE_BYTES)
     }
@@ -142,7 +145,7 @@ class FcmPushSender {
                 ),
             ),
         )
-        val url = "https://fcm.googleapis.com/v1/projects/${acct.projectId}/messages:send"
+        val url = testSendUrl ?: "https://fcm.googleapis.com/v1/projects/${acct.projectId}/messages:send"
         val request = EgressRequest(
             method = "POST",
             url = url,

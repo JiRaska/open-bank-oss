@@ -22,11 +22,16 @@ import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
 import java.net.InetAddress
+import java.nio.file.Path
 import java.security.KeyPairGenerator
+import java.security.KeyStore
 import java.time.Instant
 import java.util.Base64
 import java.util.Optional
+import javax.net.ssl.SSLContext
+import javax.net.ssl.TrustManagerFactory
 
 /**
  * ADR-0320 P1: every configurable notification egress URL goes through SafeHttpClient. Each adapter
@@ -160,5 +165,68 @@ class NotificationEgressAllowListTest {
         stub.verify(1, WireMock.postRequestedFor(WireMock.urlPathEqualTo("/token")))
         assertThat(result.success).isFalse()
         assertThat(result.errorMessage).contains("egress denied").contains("fcm.googleapis.com")
+    }
+
+    @Test
+    fun `fcm exchanges a token then posts to the allowed send host`(@TempDir dir: Path) {
+        val keystorePath = dir.resolve("fcm.p12")
+        val keytool = Path.of(System.getProperty("java.home"), "bin", "keytool").toString()
+        val process = ProcessBuilder(
+            keytool, "-genkeypair", "-alias", "fcm", "-keyalg", "EC", "-groupname", "secp256r1",
+            "-dname", "CN=fcm.googleapis.com", "-ext", "san=dns:fcm.googleapis.com", "-validity", "1",
+            "-keystore", keystorePath.toString(), "-storetype", "PKCS12",
+            "-storepass", "changeit", "-keypass", "changeit",
+        ).redirectErrorStream(true).start()
+        check(process.waitFor() == 0) { process.inputStream.readAllBytes().decodeToString() }
+        val keystore = KeyStore.getInstance("PKCS12").apply {
+            keystorePath.toFile().inputStream().use { load(it, "changeit".toCharArray()) }
+        }
+        val anchors = KeyStore.getInstance("PKCS12").apply { load(null, null) }
+        anchors.setCertificateEntry("fcm", keystore.getCertificate("fcm"))
+        val trustManagers = TrustManagerFactory.getInstance("PKIX").apply { init(anchors) }.trustManagers
+        val originalContext = SSLContext.getDefault()
+        SSLContext.setDefault(SSLContext.getInstance("TLS").apply { init(null, trustManagers, null) })
+        val tlsStub = WireMockServer(
+            WireMockConfiguration.options()
+                .dynamicPort()
+                .dynamicHttpsPort()
+                .keystorePath(keystorePath.toString())
+                .keystorePassword("changeit")
+                .keyManagerPassword("changeit")
+                .keystoreType("PKCS12"),
+        )
+        try {
+            tlsStub.start()
+            tlsStub.stubFor(
+                WireMock.post(WireMock.urlPathEqualTo("/token"))
+                    .willReturn(WireMock.okJson("""{"access_token":"t","expires_in":3600}""")),
+            )
+            tlsStub.stubFor(
+                WireMock.post(WireMock.urlPathEqualTo("/v1/projects/p/messages:send"))
+                    .willReturn(WireMock.okJson("""{"name":"projects/p/messages/123"}""")),
+            )
+            val port = tlsStub.httpsPort()
+            val sender = fcm("https://fcm.googleapis.com:$port/token").also {
+                it.allowedHosts = listOf("fcm.googleapis.com:$port;private")
+                it.testSendUrl = "https://fcm.googleapis.com:$port/v1/projects/p/messages:send"
+            }
+
+            val result = sender.send(push()).await().indefinitely()
+
+            assertThat(result.success).isTrue()
+            tlsStub.verify(1, WireMock.postRequestedFor(WireMock.urlPathEqualTo("/token")))
+            tlsStub.verify(
+                1,
+                WireMock.postRequestedFor(WireMock.urlPathEqualTo("/v1/projects/p/messages:send"))
+                    .withHeader("Authorization", WireMock.equalTo("Bearer t"))
+                    .withRequestBody(WireMock.matchingJsonPath("$.message.token", WireMock.equalTo("tok"))),
+            )
+        } finally {
+            try {
+                tlsStub.stop()
+            } finally {
+                SSLContext.setDefault(originalContext)
+            }
+        }
     }
 }
