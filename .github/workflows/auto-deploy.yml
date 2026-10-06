@@ -569,7 +569,7 @@ jobs:
       # dependency, deterministic. configure-aws-credentials exports the creds to the job env.
       - name: Configure AWS credentials (GitHub OIDC)
         uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
-        with:
+        with: &build_aws_oidc
           role-to-assume: arn:aws:iam::265175468565:role/openbank-arc-build-runner
           aws-region: eu-north-1
 
@@ -904,6 +904,15 @@ jobs:
       #
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
+      # The OIDC role session above lasts one hour by default. A full-fleet build, push, sign,
+      # and scan can consume most of that hour before this serial attestation starts (run
+      # 37538928765 reached KMS ExpiredToken while attesting). Re-assume the same role via
+      # GitHub OIDC immediately before this and the following fleet gate; a failed refresh
+      # stops the job before an unattested image can enter GitOps.
+      - name: Refresh AWS credentials before image attestation (GitHub OIDC)
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with: *build_aws_oidc
+
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
         # A full-fleet docs rebuild attests every pushed image in sequence. The
         # previous 15-minute cap stopped after successful image pushes, leaving
