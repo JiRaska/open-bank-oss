@@ -54,7 +54,7 @@ refused command for a transition.
 - **DecisionRequest** — `approve` (bool, required), `reason` (string, nullable). **No `decidedBy`** — the checker is the JWT subject.
 - **CollateralRequest** — `type` (string), `description` (nullable), `marketValue` (Money), `haircut` (number, default 0, validated to `[0,1]`).
 - **WriteOffRequest** — `reason` (string, nullable). The acting principal is the JWT subject.
-- **Money in requests** — `{ amount: number|string, currency: "EUR" }`; the currency is an ISO-4217 code.
+- **Money in requests** — `{ amount: number|string, currency: "EUR" }`; the legacy `{ currency: { code: "EUR" } }` form is also accepted. The currency is an ISO-4217 code.
 - **Money in responses** — the existing wire form is `{ amount: number, currency: { code: "EUR", defaultFractionDigits: 2 }, isNonNegative: boolean, isZero: boolean, isNegative: boolean, isPositive: boolean }`. The OpenAPI `MoneyResponse` schema describes it separately so generated clients do not read the request's string currency shape as a response guarantee.
 
 Validation (application service): requested amount must be positive, term ≥ 1 period, nominal rate ≥ 0, proposer identity non-blank, haircut within `[0,1]`.

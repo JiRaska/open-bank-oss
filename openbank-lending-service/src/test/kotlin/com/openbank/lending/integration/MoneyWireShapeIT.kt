@@ -99,15 +99,18 @@ class MoneyWireShapeIT {
 
     @Test
     @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
-    fun `a request may use the documented shape - a plain currency code, a numeric amount, any scale`() {
-        // Requests keep the string currency code. Responses use the separate MoneyResponse schema.
+    fun `a request accepts both documented currency forms and decimal amount forms`() {
+        // Requests accept the documented string or legacy object currency. Responses use MoneyResponse.
         val request = schemas["Money"] as Map<*, *>
         val requestProperties = request["properties"] as Map<*, *>
-        assertThat((requestProperties["currency"] as Map<*, *>)["type"]).isEqualTo("string")
+        val currencyVariants = (requestProperties["currency"] as Map<*, *>)["oneOf"] as List<*>
+        assertThat((currencyVariants[0] as Map<*, *>)["type"]).isEqualTo("string")
+        assertThat((currencyVariants[1] as Map<*, *>)["type"]).isEqualTo("object")
         listOf(
             """{"amount":"10000.00","currency":"EUR"}""",
             """{"amount":10000,"currency":"EUR"}""",
             """{"amount":"1E+4","currency":"eur"}""",
+            """{"amount":"10000.00","currency":{"code":"EUR"}}""",
         ).forEach { request ->
             assertThat(apply(request)).describedAs(request).contains(legacyTenThousandEur)
         }

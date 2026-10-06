@@ -1635,13 +1635,21 @@ components:
     Money:
       type: object
       required: [amount, currency]
-      description: Request form; the reader accepts a decimal number or string and an ISO-4217 code.
+      description: >-
+        Request form; the reader accepts a decimal number or string and an ISO-4217 code either as
+        a string or in the legacy object form. Responses always use MoneyResponse.
       properties:
         amount:
           oneOf:
             - { type: number }
             - { type: string }
-        currency: { type: string, description: ISO-4217 currency code }
+        currency:
+          oneOf:
+            - { type: string, description: ISO-4217 currency code }
+            - type: object
+              required: [code]
+              properties:
+                code: { type: string, description: ISO-4217 currency code }
     MoneyResponse:
       type: object
       required: [amount, currency, isNonNegative, isZero, isNegative, isPositive]
