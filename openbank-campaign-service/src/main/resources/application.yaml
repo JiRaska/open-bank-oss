@@ -122,6 +122,10 @@ quarkus:
   authz:
     enforce: false
   openbank:
+    authz:
+      # Contract tests have no OPA sidecar; do not spend 500 ms per advisory call.
+      opa-pdp-producer:
+        enabled: false
     campaign:
       # HTTP contract tests exercise a seeded, complete local projection. Production stays
       # fail-closed until a reviewed rollout/catch-up confirmation enables this read model.
@@ -130,6 +134,10 @@ quarkus:
 
 
 openbank:
+  authz:
+    # Consult the deployed OPA sidecar even while the deployment stays advisory.
+    opa-pdp-producer:
+      enabled: true
   temporal:
     enabled: ${OPENBANK_TEMPORAL_ENABLED:false}
     server-url: ${OPENBANK_TEMPORAL_SERVER_URL:localhost:7233}
