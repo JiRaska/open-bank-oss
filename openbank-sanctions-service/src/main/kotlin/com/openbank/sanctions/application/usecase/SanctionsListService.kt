@@ -25,6 +25,8 @@ import java.util.UUID
 private suspend fun SanctionsListRepositoryImpl.requireList(listType: String): SanctionsList =
     findByListType(listType) ?: throw NotFoundException("Sanctions list not found: $listType")
 
+private val INCOMPLETE_IMPORTS = setOf(ListImportOutcome.FAILED_KEPT_EXISTING, ListImportOutcome.EMPTY_FEED)
+
 @ApplicationScoped
 class SanctionsListService(
     private val repo: SanctionsListRepositoryImpl,
@@ -99,13 +101,21 @@ class SanctionsListService(
                 // after ownership passes, so a failed import cannot restore an older count.
                 val currentList = repo.requireList(listType)
                 val result = importer.importList(enumType, currentList.sourceUrl, permit)
+                if (result.outcome in INCOMPLETE_IMPORTS) {
+                    permit.deferUntilNextRefresh()
+                    return@duringRefresh checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
+                        "Failed to defer sanctions list refresh for $listType"
+                    }
+                }
                 publisher.publishFenced(currentList.id, enumType, permit)
                 markCompleted(result, currentList, permit)
             }
         }
         // Unit-test constructor exercises the same orchestration with a mocked publisher.
         val result = importer.importList(enumType, list.sourceUrl)
-        publisher.publishPending(list.id, enumType)
+        if (result.outcome !in INCOMPLETE_IMPORTS) {
+            publisher.publishPending(list.id, enumType)
+        }
         return markCompleted(result, list)
     }
 

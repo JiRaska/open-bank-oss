@@ -17,12 +17,20 @@ class SanctionsPublicationPermit internal constructor(
     @Volatile
     private var active = true
 
+    @Volatile
+    internal var retainPendingJournal = false
+        private set
+
     internal fun checkFor(type: SanctionsListType) {
         check(active && type == listType) { "Sanctions publication fence is not held for $type" }
     }
 
     internal fun invalidate() {
         active = false
+    }
+
+    internal fun deferUntilNextRefresh() {
+        retainPendingJournal = true
     }
 }
 

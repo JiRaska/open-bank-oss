@@ -100,9 +100,10 @@ An active refresh holds a per-list PostgreSQL advisory lock and records an activ
 their own transaction. Other publishers defer without changing the journal while it is active.
 If the owning connection closes, the lock is released but the active marker remains; the next
 refresh takes the lock, advances the generation, and supersedes any stale writer. Until then,
-publication stays deferred. Committed batches from a failed or interrupted import remain in the
-journal; the next publisher evaluates them together against the current list population. A storm
-withholds the change event and retains the journal for investigation.
+publication stays deferred. A failed or empty import keeps its committed batches in the journal
+and requests a retry on the next scheduler tick. Background publication remains deferred until a
+complete refresh evaluates the retained and new batches together. A storm withholds the change
+event and retains the journal for investigation.
 Waiting for the per-list lock or generation row is limited to 30 seconds. A timed-out refresh
 leaves journal evidence intact. The scheduler continues to the other lists and retries pending
 publication on its next tick; the import itself runs at its next due time or on a new request.

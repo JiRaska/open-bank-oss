@@ -33,15 +33,19 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
         entryCount: Int,
         updatedAt: Instant = Instant.now(clock),
         permit: SanctionsPublicationPermit? = null,
+        completed: Boolean = true,
     ): Uni<SanctionsList?> = Panache.withTransaction {
         fun updateRow(): Uni<SanctionsListEntity?> = find("listType", listType).firstResult().invoke { entity ->
             if (entity != null) {
-                entity.lastUpdatedAt = updatedAt
-                entity.lastEntryCount = entryCount
+                if (completed) {
+                    entity.lastUpdatedAt = updatedAt
+                    entity.lastEntryCount = entryCount
+                    entity.refreshRequestedAt = null
+                } else {
+                    // A partial import still owes a complete retry before its journal can publish.
+                    entity.refreshRequestedAt = updatedAt
+                }
                 entity.updatedAt = updatedAt
-                // #9048: the refresh the flag asked for has now run — clear it, or the scheduler
-                // would re-import the list on every tick forever.
-                entity.refreshRequestedAt = null
             }
         }
         if (permit == null) {
@@ -117,4 +121,7 @@ class SanctionsListRepositoryImpl(private val clock: Clock) : PanacheRepository<
         entryCount: Int,
         permit: SanctionsPublicationPermit,
     ): SanctionsList? = markUpdatedUni(listType, entryCount, permit = permit).awaitSuspending()
+
+    suspend fun markRetryPendingFenced(listType: String, permit: SanctionsPublicationPermit): SanctionsList? =
+        markUpdatedUni(listType, 0, permit = permit, completed = false).awaitSuspending()
 }

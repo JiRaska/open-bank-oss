@@ -308,19 +308,30 @@ class SanctionsChangeJournalIT {
     }
 
     @Test
-    fun `failed import releases the fence without losing committed journal evidence`() {
+    fun `failed partial import defers publication until retry evaluates the complete storm`() {
         seedPopulation()
         assertThatThrownBy {
             runBlocking {
                 publicationFence.duringRefresh(SanctionsListType.PEP_GLOBAL) {
-                    changeRange(1, 200, "Committed before failure")
+                    changeRange(1, 400, "Committed before failure")
                     error("feed ended early")
                 }
             }
         }.hasMessageContaining("feed ended early")
-        assertThat(journalCount()).isEqualTo(200)
-        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.PUBLISHED)
-        assertThat(journalCount()).isZero()
+        assertThat(journalCount()).isEqualTo(400)
+        assertThat(publish()).isEqualTo(SanctionsPublicationOutcome.DEFERRED)
+        val listId = onEventLoop { listId(SanctionsListType.PEP_GLOBAL) }
+        val retry = runBlocking {
+            publicationFence.duringRefresh(SanctionsListType.PEP_GLOBAL) { permit ->
+                changeRange(401, 800, "Committed on retry")
+                onEventLoop { publisher.publishFenced(listId, SanctionsListType.PEP_GLOBAL, permit) }
+            }
+        }
+        assertThat(retry).isEqualTo(SanctionsPublicationOutcome.WITHHELD)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
+        assertThat(eventCount("SANCTIONS_LIST_CHANGE_STORM")).isEqualTo(1)
+        assertThat(payloads("SANCTIONS_LIST_CHANGE_STORM").single()["changeCount"].asLong()).isEqualTo(800)
+        assertThat(journalCount()).isEqualTo(800)
     }
 
     @Test

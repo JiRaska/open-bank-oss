@@ -444,7 +444,7 @@ class SanctionsListServiceTest {
     }
 
     @Test
-    fun `a failed import still publishes previously committed changes`(): Unit = runBlocking {
+    fun `a failed import never publishes its partial journal`(): Unit = runBlocking {
         val list = sampleList(lastEntryCount = 10)
         coEvery { repo.findByListType(list.listType) } returns list
         coEvery { importer.importList(any(), any()) } returns ListImportResult.failedKeptExisting("fixture failure")
@@ -452,7 +452,7 @@ class SanctionsListServiceTest {
 
         service.refresh(list.listType)
 
-        coVerify(exactly = 1) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
+        coVerify(exactly = 0) { publisher.publishPending(list.id, SanctionsListType.OFAC_SDN) }
     }
 
     @Test
@@ -497,15 +497,13 @@ class SanctionsListServiceTest {
         }
         coEvery { repo.findByListType(older.listType) } returnsMany listOf(older, current)
         coEvery { importer.importList(any(), any(), any()) } returns ListImportResult.failedKeptExisting("fixture")
-        coEvery { publisher.publishFenced(current.id, SanctionsListType.OFAC_SDN, any()) } returns
-            SanctionsPublicationOutcome.NO_CHANGES
-        coEvery { repo.markUpdatedFenced(older.listType, 42, any()) } returns current
+        coEvery { repo.markRetryPendingFenced(older.listType, any()) } returns current
 
         val result = SanctionsListService(repo, importer, clock, publisher, fence).refresh(older.listType)
 
         assertThat(result.lastEntryCount).isEqualTo(42)
-        coVerify(exactly = 1) { repo.markUpdatedFenced(older.listType, 42, any()) }
-        coVerify(exactly = 0) { repo.markUpdatedFenced(older.listType, 10, any()) }
+        coVerify(exactly = 1) { repo.markRetryPendingFenced(older.listType, any()) }
+        coVerify(exactly = 0) { publisher.publishFenced(current.id, SanctionsListType.OFAC_SDN, any()) }
     }
 
     @Test

@@ -39,6 +39,7 @@ class SanctionsImportPublicationFence private constructor(
         require(lockTimeout.seconds in 1..LOCK_TIMEOUT_SECONDS)
     }
 
+    @Suppress("TooGenericExceptionCaught") // Every failure must keep an incomplete refresh fenced.
     suspend fun <T> duringRefresh(listType: SanctionsListType, refresh: suspend (SanctionsPublicationPermit) -> T): T {
         val (connection, generation) = withContext(NonCancellable + Dispatchers.IO) {
             acquire(listType)
@@ -46,10 +47,13 @@ class SanctionsImportPublicationFence private constructor(
         val permit = SanctionsPublicationPermit(listType, generation)
         try {
             return refresh(permit)
+        } catch (failure: Throwable) {
+            permit.deferUntilNextRefresh()
+            throw failure
         } finally {
             permit.invalidate()
             withContext(NonCancellable + Dispatchers.IO) {
-                release(connection, listType, generation)
+                release(connection, listType, generation, permit.retainPendingJournal)
             }
         }
     }
@@ -91,15 +95,22 @@ class SanctionsImportPublicationFence private constructor(
         }
     }
 
-    private fun release(connection: Connection, listType: SanctionsListType, generation: Long) {
+    private fun release(
+        connection: Connection,
+        listType: SanctionsListType,
+        generation: Long,
+        retainPendingJournal: Boolean,
+    ) {
         try {
-            connection.prepareStatement(
-                "UPDATE sanctions_change_publication SET refresh_active = FALSE " +
-                    "WHERE list_type = ? AND refresh_generation = ?",
-            ).use { statement ->
-                statement.setString(1, listType.name)
-                statement.setLong(2, generation)
-                statement.executeUpdate()
+            if (!retainPendingJournal) {
+                connection.prepareStatement(
+                    "UPDATE sanctions_change_publication SET refresh_active = FALSE " +
+                        "WHERE list_type = ? AND refresh_generation = ?",
+                ).use { statement ->
+                    statement.setString(1, listType.name)
+                    statement.setLong(2, generation)
+                    statement.executeUpdate()
+                }
             }
         } finally {
             try {
