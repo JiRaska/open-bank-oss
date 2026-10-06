@@ -152,6 +152,9 @@ paths:
       responses:
         '201':
           description: Application accepted into the origination graph
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoanApplicationResponse' }
         '400':
           $ref: '#/components/responses/BadRequest'
         '403':

@@ -4,17 +4,20 @@
 
 package com.openbank.lending.integration
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.testing.containers.PostgresRedisTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
 import io.quarkus.test.common.ResourceArg
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.junit.QuarkusTestProfile
+import io.quarkus.test.junit.TestProfile
 import io.quarkus.test.security.TestSecurity
 import io.restassured.module.kotlin.extensions.Extract
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
-import io.restassured.path.json.JsonPath
 import io.smallrye.reactive.messaging.memory.InMemoryConnector
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
@@ -36,6 +39,7 @@ import java.util.UUID
  * The expectations are literals. A value derived from the serialiser would move with it.
  */
 @QuarkusTest
+@TestProfile(MoneyWireShapeIT.IntakeEnabledProfile::class)
 @QuarkusTestResource(MoneyWireShapeIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(
     value = PostgresRedisTestResource::class,
@@ -43,9 +47,16 @@ import java.util.UUID
 )
 class MoneyWireShapeIT {
 
-    private val schemas: Map<*, *> = run {
-        val document = Yaml().load<Map<String, Any>>(javaClass.classLoader.getResourceAsStream("openapi.yaml")!!)
-        (document["components"] as Map<*, *>)["schemas"] as Map<*, *>
+    private val mapper = ObjectMapper()
+    private val api = Yaml().load<Map<String, Any>>(javaClass.classLoader.getResourceAsStream("openapi.yaml")!!)
+    private val schemas = (api["components"] as Map<*, *>)["schemas"] as Map<*, *>
+
+    class IntakeEnabledProfile : QuarkusTestProfile {
+        override fun getConfigOverrides(): Map<String, String> = mapOf(
+            "lending.intake.enabled" to "true",
+            "lending.intake.caller-principal" to "wire-it-edge",
+            "lending.intake.nominal-annual-rate" to "0.05",
+        )
     }
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
@@ -75,26 +86,85 @@ class MoneyWireShapeIT {
         body().asString()
     }
 
-    private val legacyTenThousandEur =
-        """"requestedAmount":{"amount":10000.00,"currency":{"code":"EUR","defaultFractionDigits":2},""" +
-            """"isNonNegative":true,"isZero":false,"isNegative":false,"isPositive":true}"""
+    private fun assertMoneyResponse(value: JsonNode, currency: String = "EUR") {
+        val schema = schemas["MoneyResponse"] as Map<*, *>
+        assertObjectMatchesSchema(value, schema)
+        assertThat(value.path("amount").decimalValue()).isEqualByComparingTo("10000.00")
+        assertThat(value.path("currency").path("code").asText()).isEqualTo(currency)
+        assertThat(value.path("currency").path("defaultFractionDigits").asInt()).isEqualTo(2)
+        assertThat(value.path("isNonNegative").asBoolean()).isTrue()
+        assertThat(value.path("isZero").asBoolean()).isFalse()
+        assertThat(value.path("isNegative").asBoolean()).isFalse()
+        assertThat(value.path("isPositive").asBoolean()).isTrue()
+    }
+
+    private fun assertObjectMatchesSchema(value: JsonNode, schema: Map<*, *>) {
+        assertThat(value.isObject).isTrue()
+        val required = schema["required"] as List<*>
+        required.forEach { name -> assertThat(value.has(name as String)).describedAs("required field $name").isTrue() }
+        val properties = schema["properties"] as Map<*, *>
+        properties.forEach { (name, rawProperty) ->
+            val field = value.path(name as String)
+            if (!field.isMissingNode) {
+                val property = rawProperty as Map<*, *>
+                when (property["type"]) {
+                    "number" -> assertThat(field.isNumber).describedAs(name).isTrue()
+                    "integer" -> assertThat(field.isIntegralNumber).describedAs(name).isTrue()
+                    "string" -> assertThat(field.isTextual).describedAs(name).isTrue()
+                    "boolean" -> assertThat(field.isBoolean).describedAs(name).isTrue()
+                    "object" -> assertObjectMatchesSchema(field, property)
+                    else -> error("unhandled MoneyResponse property type: ${property["type"]}")
+                }
+            }
+        }
+    }
 
     @Test
     @TestSecurity(user = "wire-it-officer", roles = ["ROLE_LENDING_OFFICER"])
-    fun `a response carries Money in the shape this API has always written`() {
+    fun `post get and list return Money matching the complete response schema`() {
         val body = apply("""{"amount":"10000.00","currency":{"code":"EUR"}}""")
-        assertThat(body).contains(legacyTenThousandEur)
-        val amount = JsonPath.from(body).get<Map<String, Any>>("requestedAmount")
-        val response = schemas["MoneyResponse"] as Map<*, *>
-        val properties = response["properties"] as Map<*, *>
-        assertThat(amount["amount"]).isInstanceOf(Number::class.java)
-        assertThat(amount["currency"]).isInstanceOf(Map::class.java)
-        assertThat((properties["amount"] as Map<*, *>)["type"]).isEqualTo("number")
-        assertThat((properties["currency"] as Map<*, *>)["type"]).isEqualTo("object")
+        val created = mapper.readTree(body)
+        assertMoneyResponse(created.path("requestedAmount"))
+        val id = created.path("id").asText()
+        val partyId = created.path("partyId").asText()
+        val fetched = Given { accept("application/json") } When { get("/api/v1/lending/applications/$id") } Then {
+            statusCode(200)
+        } Extract { body().asString() }
+        assertMoneyResponse(mapper.readTree(fetched).path("requestedAmount"))
+        val listed = Given { queryParam("partyId", partyId) } When {
+            get("/api/v1/lending/applications")
+        } Then { statusCode(200) } Extract { body().asString() }
+        assertMoneyResponse(mapper.readTree(listed).first().path("requestedAmount"))
         val application = schemas["LoanApplicationResponse"] as Map<*, *>
         val applicationProperties = application["properties"] as Map<*, *>
         assertThat((applicationProperties["requestedAmount"] as Map<*, *>)["\$ref"])
             .isEqualTo("#/components/schemas/MoneyResponse")
+    }
+
+    @Test
+    @TestSecurity(user = "wire-it-edge", roles = ["ROLE_OPERATOR"])
+    fun `customer intake returns the same documented application Money response`() {
+        val body = Given {
+            contentType("application/json")
+            header("X-Customer-Party-Id", UUID.randomUUID().toString())
+            body("""{"amount":10000.00,"termMonths":12}""")
+        } When {
+            post("/api/v1/lending/intake/applications")
+        } Then {
+            statusCode(201)
+        } Extract {
+            body().asString()
+        }
+        assertMoneyResponse(mapper.readTree(body).path("requestedAmount"), currency = "CZK")
+        val paths = api["paths"] as Map<*, *>
+        val intake = paths["/api/v1/lending/intake/applications"] as Map<*, *>
+        val post = intake["post"] as Map<*, *>
+        val responses = post["responses"] as Map<*, *>
+        val created = responses["201"] as Map<*, *>
+        val content = created["content"] as Map<*, *>
+        val json = content["application/json"] as Map<*, *>
+        assertThat((json["schema"] as Map<*, *>)["\$ref"])
+            .isEqualTo("#/components/schemas/LoanApplicationResponse")
     }
 
     @Test
@@ -112,7 +182,7 @@ class MoneyWireShapeIT {
             """{"amount":"1E+4","currency":"eur"}""",
             """{"amount":"10000.00","currency":{"code":"EUR"}}""",
         ).forEach { request ->
-            assertThat(apply(request)).describedAs(request).contains(legacyTenThousandEur)
+            assertMoneyResponse(mapper.readTree(apply(request)).path("requestedAmount"))
         }
     }
 
