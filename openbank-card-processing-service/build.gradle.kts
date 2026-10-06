@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -52,6 +53,22 @@ dependencies {
     // only the provider replay can — so the committed pact is replayed by card-issuance's
     // @PactFolder class, which runs on every PR (CLAUDE.md, #2327).
     testImplementation(libs.pact.consumer)
+}
+
+// CardAuthorization calculates the held and spent amounts; AuthorizationLifecycle decides
+// whether a hold may clear, reverse, or expire. Other domain types are wire events and data
+// carriers, whose generated accessors drown these decisions in irrelevant mutants (#8349).
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf(
+        "com.openbank.cardprocessing.domain.model.CardAuthorization",
+        "com.openbank.cardprocessing.domain.policy.AuthorizationLifecycle",
+    )
+    targetTests = setOf("com.openbank.cardprocessing.domain.*", "com.openbank.cardprocessing.usecase.*")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
 
 tasks.test {

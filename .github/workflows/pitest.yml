@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 # Mutation testing — pitest on money-path domain layers (ADR-0063, ADR-0030 D3).
 # Run: weekly on Sunday 03:00 UTC (low-traffic window) + manual dispatch.
-# NOT part of the per-PR gate (cost); advisory alert on score < 70%.
+# NOT part of the per-PR gate (cost). Most services report advisory scores; card-processing
+# enforces its measured 70% floor in the Gradle PIT task (#8349).
 
 name: Mutation testing (pitest)
 
@@ -13,7 +14,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-card-processing-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -34,8 +35,8 @@ jobs:
           - openbank-ledger-service
           - openbank-balance-service
           # Fleet rollout (#1266): money-path services with substantive domain math.
-          # Thin-domain services (clearing / swift / lending — 1 domain file each) are
-          # skipped on purpose — mutation testing there is noise, not signal (ADR-0063).
+          # Remaining omitted services need their own measured target, including application
+          # policy when their domain package is thin; see #8349.
           - openbank-account-service
           - openbank-transaction-service
           - openbank-fx-service
@@ -92,6 +93,9 @@ jobs:
           #     NO_COVERAGE, mostly the Nostro* reconciliation classes, which no unit test reaches.
           - openbank-card-issuance-service
           - openbank-treasury-service
+          # #8349: authorisation lifecycle and hold arithmetic are pure domain policy, with a
+          # direct JUnit suite. Local baseline: 29 mutants, 22 killed (76%); 70% task floor.
+          - openbank-card-processing-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
