@@ -83,9 +83,9 @@ THRESHOLD = 3
 # dispatch, in-progress and cancelled runs before applying R1 locally; never paginate.
 PER_PAGE = 50
 MAX_PAGE_AGE = timedelta(hours=6)
-# The three-hour cron has arrived nearly two hours late in recent hosted runs. Five hours
-# allows that delay but rejects an older verdict once the next tick is itself overdue.
-MAX_LANE_AGE = timedelta(hours=5)
+# A verdict older than the three-hour cron interval may omit a newer tick. GitHub can
+# delay the schedule; until that tick arrives the watch errors rather than mutating an issue.
+MAX_LANE_AGE = timedelta(hours=3)
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -307,9 +307,9 @@ def self_test() -> int:
           evaluate(fetched)["close_on"] is not None and not evaluate(fetched)["stuck"]
           and evaluate(stale)["stuck"])
 
-    def rejected(page: list[dict]) -> bool:
+    def rejected(page: list[dict], at: datetime = now) -> bool:
         try:
-            require_current_population(page, now)
+            require_current_population(page, at)
         except RuntimeError:
             return True
         return False
@@ -320,9 +320,9 @@ def self_test() -> int:
     old_lane = [dict(r, created_at="2026-10-05T00:00:00Z")
                 if r["event"] == "schedule" else r for r in current]
     check("freshness: fresh push cannot mask stale scheduled lane", rejected(old_lane))
-    delayed_tick = [dict(r, created_at="2026-10-06T13:15:00Z")
+    delayed_tick = [dict(r, created_at="2026-10-06T15:30:00Z")
                     if r["event"] == "schedule" else r for r in current]
-    check("freshness: a delayed scheduled tick within five hours remains usable",
+    check("freshness: a delayed scheduled tick within three hours remains usable",
           not rejected(delayed_tick))
     missed_one = [dict(r, created_at="2026-10-06T12:44:00Z")
                   if r["event"] == "schedule" else r for r in current]
@@ -332,6 +332,21 @@ def self_test() -> int:
                   if r["event"] == "schedule" else r for r in current]
     check("freshness: two missing three-hour ticks cannot close or reopen",
           rejected(missed_two))
+    at_1650 = datetime(2026, 10, 6, 16, 50, tzinfo=timezone.utc)
+    omitted_green = [_run(8, "push", "success"), _run(7, "schedule", "failure"),
+                     _run(6, "schedule", "failure"), _run(5, "schedule", "failure")]
+    for run, stamp in zip(omitted_green, ["16:40", "12:44", "09:36", "06:50"]):
+        run["created_at"] = f"2026-10-06T{stamp}:00Z"
+    check("Oct 6 16:50: fresh push plus stale red lane cannot reopen #9419",
+          evaluate(omitted_green)["stuck"] and rejected(omitted_green, at_1650))
+    arrived = _run(9, "schedule", "success")
+    arrived["id"] = 37488239667
+    arrived["created_at"] = "2026-10-06T15:31:31Z"
+    complete_page = [arrived, *omitted_green]
+    check("Oct 6 16:50: delayed green tick becomes the current closing verdict",
+          not rejected(complete_page, at_1650)
+          and not evaluate(complete_page)["stuck"]
+          and evaluate(complete_page)["close_on"]["id"] == arrived["id"])
 
     # Declaration lane, held to a known-positive and two sabotages on a synthetic tree.
     import tempfile
