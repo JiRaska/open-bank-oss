@@ -177,10 +177,18 @@ mp:
           serializer: org.apache.kafka.common.serialization.StringSerializer
         key:
           serializer: org.apache.kafka.common.serialization.StringSerializer
+      account-status-events-out:
+        connector: smallrye-kafka
+        client.id: account-status-service-${quarkus.uuid}
+        topic: openbank.accounts.account.status-changed
+        value:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
+        key:
+          serializer: org.apache.kafka.common.serialization.StringSerializer
       account-outbox-out:
         connector: smallrye-kafka
         client.id: account-outbox-service-${quarkus.uuid}
-        topic: openbank.accounts.account.created
+        topic: openbank.accounts.savings-withdrawal.approved
         value.serializer: org.apache.kafka.common.serialization.StringSerializer
         key.serializer: org.apache.kafka.common.serialization.StringSerializer
       # Customer-facing notification requests (ADR-0070) drained by notification-service.

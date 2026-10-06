@@ -3,7 +3,7 @@
 asyncapi: 3.0.0
 info:
   title: OpenBank Async Event API
-  version: 2.3.0
+  version: 2.4.0
   description: |
     Kafka event streams across OpenBank services.
 
@@ -55,10 +55,8 @@ info:
 
     Three channels were removed rather than corrected, because their subject does not exist:
 
-    - `account-status-changed` (`openbank.accounts.account.status-changed`) — no such topic. The
-      sole `AccountEventPublisher` implementation ignores the `topic` argument its caller passes
-      and always emits on `account-events-out`, so `AccountStatusChanged` and `AccountClosed` land
-      on `openbank.accounts.account.created`. Documented there.
+    - `account-status-changed` (`openbank.accounts.account.status-changed`) — absent at the time
+      of revision 2.0.0; restored in 2.4.0 after the consumer-first migration (#9073).
     - `ledger-journal-reversed` (`openbank.ledger.journal.reversed`) — no such topic.
       ledger-service has exactly one outgoing channel; `JournalReversed` is relayed onto
       `openbank.ledger.journal.posted` and discriminated by `ce-type`. Documented there.
@@ -74,8 +72,7 @@ info:
       substituting ingest time and flagging `occurredAtSource=INGEST` when absent — which 7 of
       those topics trigger, so those rows assert a business time nobody measured (#3883).
 
-    Known gaps this document now records rather than hides: `openbank.accounts.account.created`
-    carries four structurally unrelated bodies; sepa-instant emits no `ce-type`, no `ce-id` and no
+    Known gaps this document now records rather than hides: sepa-instant emits no `ce-type`, no `ce-id` and no
     partition key at all (ADR-0003 N2/N3 violation) and drops every subtype-specific field before
     the wire; and the interest payloads carry no event time of any kind.
   license:
@@ -98,26 +95,33 @@ channels:
   account-events-out:
     address: openbank.accounts.account.created
     description: |
-      Account lifecycle. **The address is a misnomer: four structurally unrelated bodies share
-      this one topic**, because account-service's `AccountEventPublisher` has a single
-      implementation that ignores the `topic` argument its callers pass and always emits on the
-      `account-events-out` channel. `AccountStatusChanged` and `AccountClosed` therefore land here,
-      not on the `...account.status-changed` topic their call sites name — that topic does not
-      exist, has no Kafka resource, and nothing consumes it.
-
-      Mixed relay. Three of the four are published by a **direct emitter**
-      (`KafkaAccountEventPublisher`, `writeValueAsString(event)`) which sets no headers at all;
-      `SavingsWithdrawalApproved` is outbox-relayed and so also carries `ce-type`. All four
-      serialise a `DomainEvent` subclass, so all four do carry a **body eventType** — this is one
-      of the few channels where the body-field idiom is genuinely correct. Discriminate on the body
-      field here; `ce-type` is present only on the withdrawal event.
+      Account creation only. KafkaAccountEventPublisher is a direct emitter and serialises
+      AccountCreatedEvent with a body eventType. No Kafka event headers are set. The account id
+      is the record key. Lifecycle status and withdrawal approvals have separate topics.
     messages:
       AccountCreated:
         $ref: '#/components/messages/AccountCreated'
+
+  account-status-events-out:
+    address: openbank.accounts.account.status-changed
+    description: |
+      AccountStatusChanged and AccountClosed from KafkaAccountEventPublisher's direct emitter.
+      Both carry a body eventType and the account id as the record key. No Kafka event headers
+      are set. Consumers were subscribed before this producer routing changed (#9073).
+    messages:
       AccountStatusChanged:
         $ref: '#/components/messages/AccountStatusChanged'
       AccountClosed:
         $ref: '#/components/messages/AccountClosed'
+
+  account-outbox-out:
+    address: openbank.accounts.savings-withdrawal.approved
+    description: |
+      SavingsWithdrawalApproved from the account transactional outbox. The body eventType is
+      present because the serialized value is a DomainEvent subclass; ce-type, ce-id and
+      idempotency-key headers also come from the outbox row. Consumers were subscribed before
+      the fixed outbox destination changed (#9073). This event does not itself execute a payment.
+    messages:
       SavingsWithdrawalApproved:
         $ref: '#/components/messages/SavingsWithdrawalApproved'
 
@@ -484,9 +488,19 @@ operations:
     action: send
     channel:
       $ref: '#/channels/account-events-out'
-    summary: >-
-      account-service publishes AccountCreated, AccountStatusChanged, AccountClosed and
-      SavingsWithdrawalApproved — all onto this one topic
+    summary: account-service publishes AccountCreated on the creation-only topic
+
+  publishAccountStatusEvents:
+    action: send
+    channel:
+      $ref: '#/channels/account-status-events-out'
+    summary: account-service publishes AccountStatusChanged and AccountClosed on the status topic
+
+  publishSavingsWithdrawalApproved:
+    action: send
+    channel:
+      $ref: '#/channels/account-outbox-out'
+    summary: account-service relays SavingsWithdrawalApproved on its own outbox topic
 
   publishLedgerEvents:
     action: send
@@ -617,9 +631,7 @@ components:
     AccountStatusChanged:
       name: AccountStatusChanged
       title: Account Status Changed
-      description: >-
-        Direct emitter. Body `eventType` = `AccountStatusChanged`. Lands on the
-        `...account.created` topic despite its call site naming `...account.status-changed`.
+      description: 'Direct emitter. Body `eventType` = `AccountStatusChanged`.'
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountStatusChangedPayload'
@@ -627,7 +639,7 @@ components:
     AccountClosed:
       name: AccountClosed
       title: Account Closed
-      description: 'Direct emitter. Body `eventType` = `AccountClosed`. Also lands on `...account.created`.'
+      description: 'Direct emitter. Body `eventType` = `AccountClosed`.'
       contentType: application/json
       payload:
         $ref: '#/components/schemas/AccountClosedPayload'
@@ -636,8 +648,8 @@ components:
       name: SavingsWithdrawalApproved
       title: Savings Withdrawal Approved
       description: >-
-        The only OUTBOX-relayed event on this topic, so the only one carrying `ce-type`, `ce-id`
-        and `idempotency-key`. Written by `WithdrawalProposalRepositoryImpl`.
+        Outbox-relayed onto its own topic with `ce-type`, `ce-id` and `idempotency-key`.
+        Written by `WithdrawalProposalRepositoryImpl`.
       contentType: application/json
       payload:
         $ref: '#/components/schemas/SavingsWithdrawalApprovedPayload'
@@ -1096,6 +1108,9 @@ components:
         - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
+            sourceService:
+              type: string
+              enum: [account-service]
             accountNumber:
               type: string
             accountType:
@@ -1113,6 +1128,9 @@ components:
         - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
+            sourceService:
+              type: string
+              enum: [account-service]
             previousStatus:
               type: string
             newStatus:
@@ -1125,6 +1143,9 @@ components:
         - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
+            sourceService:
+              type: string
+              enum: [account-service]
             reason:
               type: string
 
@@ -1133,6 +1154,9 @@ components:
         - $ref: '#/components/schemas/DomainEventEnvelope'
         - type: object
           properties:
+            sourceService:
+              type: string
+              enum: [account-service]
             accountId:
               type: string
               format: uuid

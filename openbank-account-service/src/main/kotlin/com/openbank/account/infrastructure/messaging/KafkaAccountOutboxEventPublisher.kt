@@ -19,6 +19,9 @@ class KafkaAccountOutboxEventPublisher(@Channel("account-outbox-out") private va
     OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
+        require(entry.eventType == APPROVAL_EVENT_TYPE) {
+            "Unsupported account outbox event type: ${entry.eventType}"
+        }
         val kafkaHeaders = RecordHeaders()
         OutboxKafkaHeaders.headersFor(entry).forEach { (k, v) -> kafkaHeaders.add(k, v.toByteArray()) }
         val meta = OutgoingKafkaRecordMetadata.builder<String>()
@@ -26,5 +29,9 @@ class KafkaAccountOutboxEventPublisher(@Channel("account-outbox-out") private va
             .withHeaders(kafkaHeaders)
             .build()
         emitter.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
+    }
+
+    companion object {
+        private const val APPROVAL_EVENT_TYPE = "SavingsWithdrawalApproved"
     }
 }
