@@ -26,6 +26,8 @@ For every `.well-known/security.txt` in the tree:
     treated as untrustworthy by scanners);
   * `Policy:` is present, is NOT the file's own Canonical URL (a policy that is the contact file
     is no policy), and points INTO THIS PUBLIC REPOSITORY at a file that exists in the tree.
+  * all copies publish the same Contact and Policy values; host-specific Canonical and Expires
+    values may differ.
 
 The last rule is deliberately narrower than "some reachable URL". Reachability is a network
 fact this gate cannot establish, and the defect above was a URL that *looked* reachable. A path
@@ -97,8 +99,16 @@ def scan(root: pathlib.Path, now: dt.datetime) -> tuple[int, list[str]]:
     files = sorted(p for p in root.rglob(".well-known/security.txt")
                    if "node_modules" not in p.parts and ".git" not in p.parts)
     found: list[str] = []
+    shared: dict[str, tuple[str, ...]] = {}
     for p in files:
         found.extend(problems(p, root, now))
+        f = fields(p.read_text(encoding="utf-8", errors="replace"))
+        for key in ("contact", "policy"):
+            values = tuple(sorted(set(f.get(key, []))))
+            if key not in shared:
+                shared[key] = values
+            elif values != shared[key]:
+                found.append(f"{p.relative_to(root).as_posix()}: {key.title()} differs from another security.txt copy")
     return len(files), found
 
 
@@ -133,7 +143,35 @@ def self_test() -> int:
             ok = (not want and not got) or (want and len(got) == len(want) and all(w in g for w, g in zip(want, got, strict=True)))
             print(f"  {'ok ' if ok else 'BAD'} {name}: {got}")
             bad += 0 if ok else 1
-    print(f"SUBJECTS={len(cases)}")
+        parity_root = root / "parity"
+        parity_root.mkdir()
+        (parity_root / "SECURITY.md").write_text("policy\n")
+        (parity_root / "ALTERNATE.md").write_text("another policy\n")
+        copies = [parity_root / f"site{i}" / ".well-known" / "security.txt" for i in range(3)]
+        for p in copies:
+            p.parent.mkdir(parents=True)
+
+        parity_cases = {
+            "matching contact and policy": (good, []),
+            "different contact": (
+                good.replace("security@example.org", "other@example.org"),
+                ["Contact differs"]),
+            "different valid policy": (
+                good.replace("SECURITY.md", "ALTERNATE.md"),
+                ["Policy differs"]),
+        }
+        for name, (last_copy, want) in parity_cases.items():
+            for i, p in enumerate(copies):
+                body = good if i < 2 else last_copy
+                body = body.replace("Canonical: https://example.org/", f"Canonical: https://site{i}.example.org/")
+                if i == 1:
+                    body = body.replace("Expires: 2027-06-11", "Expires: 2028-06-11")
+                p.write_text(body)
+            count, got = scan(parity_root, now)
+            ok = count == 3 and len(got) == len(want) and all(w in g for w, g in zip(want, got, strict=True))
+            print(f"  {'ok ' if ok else 'BAD'} {name}: {got}")
+            bad += 0 if ok else 1
+    print(f"SUBJECTS={len(cases) + len(parity_cases)}")
     print("security.txt self-test: " + ("PASS" if not bad else f"FAIL ({bad})"))
     return 1 if bad else 0
 
