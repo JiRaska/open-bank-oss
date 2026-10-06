@@ -140,3 +140,9 @@ Edge vrací malé JSON chybové obálky tvaru `{"error":"…"}`, které sám gen
 - **Zákaznická verze API v URL** (`/customer/v1`). OpenAPI `info.version` (`1.6.0`) je osa API kontraktu (ADR-0048), nezávislá na release verzi `version.txt` (`0.9.0`).
 - Upstream volání míří na vlastní `/api/v1` každé služby.
 - **OpenAPI diff** v CI hlídá breaking změny bez bumpu kontraktu.
+
+## Veřejné texty stavů mobilní aplikace
+
+Anonymní `GET /customer/v1/app-copy` vrací pouze `{version, messages}` ze zveřejněného komunikačního stylu pro klienty. Neobsahuje osobní údaje ani interní instrukce persony. Zveřejněné odpovědi lze ukládat do cache na 60 sekund. Chybějící nebo vyřazená publikace vrací verzi nula a prázdnou mapu, což výslovně ruší klientské přepisy.
+
+Adresa komunikační služby se dodává při běhu přes `COMMUNICATION_SERVICE_URL`. Chybějící konfigurace nebo nedostupná služba vrací 503; neplatný dokument vrací 502. Klient v obou případech zachová ověřené uložené nebo vestavěné texty a tímto volitelným požadavkem neblokuje spuštění. Volání používá identitu služby bez hlavičky klientské party.

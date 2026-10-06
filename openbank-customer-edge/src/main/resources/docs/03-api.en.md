@@ -144,3 +144,9 @@ The edge returns small JSON error envelopes of the shape `{"error":"…"}` it ge
 - **Customer API version in URL** (`/customer/v1`). The OpenAPI `info.version` (`1.6.0`) is the API-contract axis (ADR-0048), independent of the release `version.txt` (`0.9.0`).
 - Upstream calls target each service's own `/api/v1`.
 - **OpenAPI diff** in CI guards against breaking changes without a contract bump.
+
+## Public mobile status copy
+
+`GET /customer/v1/app-copy` is anonymous and returns only `{version, messages}` projected from the published customer communication style. It exposes no customer information or internal persona instructions. Successful published responses are cacheable for 60 seconds. An absent or retired publication returns version zero and an empty map, explicitly clearing client overrides.
+
+The communication upstream is supplied through `COMMUNICATION_SERVICE_URL` at runtime. A missing configuration or unavailable upstream returns 503; an invalid upstream document returns 502. Clients retain validated cached or bundled copy on either error and must not delay startup waiting for this optional request. The upstream read uses the edge service identity without a customer party header.

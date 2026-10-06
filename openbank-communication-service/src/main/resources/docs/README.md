@@ -9,3 +9,9 @@ The committed `src/main/resources/openapi.yaml` defines the API contract. Read `
 ## Build identity
 
 The generated `00-build` page in this same documentation index reports the release version, full source commit, and API contract version packaged in the running image. The index is available at `/q/openbank/docs`.
+
+## Mobile UI messages
+
+The `customer-copilot` style supports `uiMessages`, a map of approved Czech (`cs.`) and English (`en.`) mobile status copy. The editor presents ten supported message keys, with at most 240 plain-text characters each. Other personas, unknown keys, blank values, markup, placeholders and control characters are rejected. Omitted keys leave the mobile app's bundled wording in effect.
+
+Messages share the style version's existing draft, lint, review, publication and retirement lifecycle. They do not change payment outcomes, retry permissions or security decisions. Editors can load the published style to preserve existing vocabulary when preparing the next draft. The additive database migration gives existing versions an empty message map.
