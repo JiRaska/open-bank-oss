@@ -14,6 +14,7 @@
 // DERIVED counts injected so the reality column is real.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
+import { createHash } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { sourceDate } from './lib/source-date.mjs'
@@ -38,6 +39,11 @@ const INPUTS = [
   'openbank-account-service/Dockerfile',
   'openbank-party-service/Dockerfile',
 ]
+
+// GitOps image pins change on ordinary deploys without changing any displayed fact.
+// Bind freshness to the facts used by this dossier, not every input byte.
+const inputFingerprint = (facts) =>
+  `sha256:${createHash('sha256').update(JSON.stringify(facts)).digest('hex')}`
 
 const read = (p) => { try { return readFileSync(p, 'utf8') } catch { return null } }
 
@@ -166,17 +172,16 @@ const counts = {
 }
 const img = imageFacts()
 const pod = podSecurity()
-const npCoverage = `${counts.networkPolicies} / ${ns.length}`
 
 const securityLayers = [
   { id: 'edge', label: 'Edge', icon: 'globe', status: 'partial',
     analogy: 'Ostraha a turniket u vchodu do banky.',
     summary: 'CloudFront + WAF + TLS na hranici, než provoz vůbec dorazí do clusteru.',
     controls: ['CloudFront/WAF', 'TLS (ACM/cert-manager)', 'ingress-nginx'], adr: ['0027'], detailRoute: '/docs/cloud-architecture' },
-  { id: 'network', label: 'Síť (segmentace)', icon: 'network', status: 'planned',
+  { id: 'network', label: 'Síť (segmentace)', icon: 'network', status: counts.networkPolicies > 0 ? 'partial' : 'planned',
     analogy: 'Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.',
-    summary: `Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen ${counts.networkPolicies} NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.`,
-    controls: [`NetworkPolicy (${npCoverage})`, 'per-namespace deny-by-default (cíl)'], adr: ['0081'] },
+    summary: `Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno ${counts.networkPolicies} NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.`,
+    controls: [`NetworkPolicy manifesty (${counts.networkPolicies})`, 'per-namespace deny-by-default (cíl)'], adr: ['0081'] },
   { id: 'identity', label: 'Identita & autorizace', icon: 'lock', status: 'live',
     analogy: 'Občanka a oprávnění — každý ukáže, kdo je a co smí.',
     summary: 'Keycloak OIDC pro lidi i služby; OPA policy gate pro AI agenta a (cíl) REST.',
@@ -221,11 +226,11 @@ const imageAnatomy = {
 
 const planVsReality = [
   { item: 'Namespace segmentace', plan: 'Doménová izolace, 1 ns / doména', reality: `${counts.namespaces} namespaců`, status: 'live' },
-  { item: 'NetworkPolicy (east-west)', plan: 'deny-by-default v každém ns', reality: `${npCoverage} ns má NetworkPolicy → většina provozu otevřená`, status: 'planned' },
+  { item: 'NetworkPolicy (east-west)', plan: 'deny-by-default v každém ns', reality: `${counts.networkPolicies} NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny`, status: counts.networkPolicies > 0 ? 'partial' : 'planned' },
   { item: 'Podpis image', plan: 'Enforce — blokovat nepodepsané', reality: 'Cosign podpis zapojen, kyverno zatím Audit', status: 'partial' },
   { item: 'Tajemství', plan: 'OpenBao + ESO, nic v gitu', reality: `${counts.externalSecrets} ExternalSecret`, status: 'live' },
   { item: 'Pod hardening', plan: 'non-root + seccomp + read-only FS + drop caps', reality: `non-root ${pod.runAsNonRoot ? '✓' : '✗'}, seccomp ${pod.seccomp ? '✓' : '✗'}, read-only/caps jen místy`, status: 'partial' },
-  { item: 'Admission policy', plan: 'sada kyverno policies', reality: `${counts.clusterPolicies} ClusterPolicy (image-verify)`, status: 'partial' },
+  { item: 'Admission policy', plan: 'sada kyverno policies', reality: `${counts.clusterPolicies} ClusterPolicy deklarovaných v GitOpsu; runtime stav neověřen`, status: counts.clusterPolicies > 0 ? 'partial' : 'planned' },
 ]
 
 const out = {
@@ -233,6 +238,7 @@ const out = {
   source: 'derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081',
   // Commit time of the newest input, not the clock — see scripts/lib/source-date.mjs (#2621).
   generatedAt: sourceDate(REPO, INPUTS),
+  inputFingerprint: inputFingerprint({ ns, counts, img, pod }),
   counts,
   groups: GROUPS,
   namespaces: ns,
@@ -241,5 +247,25 @@ const out = {
   planVsReality,
 }
 
-writeFileSync(OUT, JSON.stringify(out, null, 2))
-console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+const rendered = JSON.stringify(out, null, 2)
+if (process.argv.includes('--check')) {
+  const committed = read(OUT)
+  let expected = rendered
+  if (committed && !process.env.SOURCE_DATE_EPOCH) {
+    try {
+      const existing = JSON.parse(committed)
+      if (existing.inputFingerprint === out.inputFingerprint) {
+        expected = JSON.stringify({ ...out, generatedAt: existing.generatedAt }, null, 2)
+      }
+    } catch { /* Malformed JSON fails the exact comparison. */ }
+  }
+  if (committed !== expected) {
+    console.error('[generate-cluster-topology] committed snapshot is missing or stale; regenerate from GitOps and Dockerfile inputs')
+    process.exitCode = 1
+  } else {
+    console.log('[generate-cluster-topology] committed snapshot matches its declared inputs')
+  }
+} else {
+  writeFileSync(OUT, rendered)
+  console.log(`[generate-cluster-topology] ${ns.length} namespaces, ${counts.networkPolicies} NP, ${counts.externalSecrets} ESO, image=${img.ok ? 'parsed' : 'fallback'} → ${OUT}`)
+}

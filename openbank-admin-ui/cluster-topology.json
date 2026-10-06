@@ -1,12 +1,13 @@
 {
   "schema": "openbank.cluster-topology/v1",
   "source": "derived (GitOps apps + manifests + a representative Dockerfile + Deployment securityContext) — ADR-0081",
-  "generatedAt": "2026-08-04T08:06:31.000Z",
+  "generatedAt": "2026-10-05T21:54:29.000Z",
+  "inputFingerprint": "sha256:80b3511da29c6312319f643d5693885efe407f80654281bc15dcec9f81a00c4e",
   "counts": {
-    "namespaces": 68,
-    "networkPolicies": 108,
-    "externalSecrets": 144,
-    "clusterPolicies": 5
+    "namespaces": 81,
+    "networkPolicies": 136,
+    "externalSecrets": 223,
+    "clusterPolicies": 0
   },
   "groups": [
     {
@@ -140,9 +141,21 @@
       "declared": false
     },
     {
+      "name": "communication",
+      "group": "domain",
+      "role": "communication",
+      "declared": true
+    },
+    {
       "name": "consent",
       "group": "domain",
       "role": "Souhlasy (PSD2)",
+      "declared": true
+    },
+    {
+      "name": "context",
+      "group": "domain",
+      "role": "context",
       "declared": true
     },
     {
@@ -191,6 +204,18 @@
       "name": "documents",
       "group": "domain",
       "role": "documents",
+      "declared": true
+    },
+    {
+      "name": "engagement",
+      "group": "domain",
+      "role": "engagement",
+      "declared": true
+    },
+    {
+      "name": "envoy-gateway-system",
+      "group": "domain",
+      "role": "envoy-gateway-system",
       "declared": true
     },
     {
@@ -272,6 +297,12 @@
       "declared": false
     },
     {
+      "name": "incentive",
+      "group": "domain",
+      "role": "incentive",
+      "declared": true
+    },
+    {
       "name": "ingress-nginx",
       "group": "backbone",
       "role": "Vstupní brána (ingress)",
@@ -288,6 +319,12 @@
       "group": "platform",
       "role": "KEDA — autoscaling",
       "declared": false
+    },
+    {
+      "name": "kyb",
+      "group": "domain",
+      "role": "kyb",
+      "declared": true
     },
     {
       "name": "kyc",
@@ -311,6 +348,12 @@
       "name": "lending",
       "group": "domain",
       "role": "lending",
+      "declared": true
+    },
+    {
+      "name": "loyalty",
+      "group": "domain",
+      "role": "loyalty",
       "declared": true
     },
     {
@@ -374,9 +417,21 @@
       "declared": true
     },
     {
+      "name": "pricing",
+      "group": "domain",
+      "role": "pricing",
+      "declared": true
+    },
+    {
       "name": "psd2",
       "group": "domain",
       "role": "psd2",
+      "declared": true
+    },
+    {
+      "name": "referral",
+      "group": "domain",
+      "role": "referral",
       "declared": true
     },
     {
@@ -395,6 +450,12 @@
       "name": "reposilite",
       "group": "domain",
       "role": "reposilite",
+      "declared": true
+    },
+    {
+      "name": "risk",
+      "group": "domain",
+      "role": "risk",
       "declared": true
     },
     {
@@ -440,15 +501,33 @@
       "declared": true
     },
     {
+      "name": "treasury",
+      "group": "domain",
+      "role": "treasury",
+      "declared": true
+    },
+    {
       "name": "vault",
       "group": "identity",
       "role": "OpenBao — trezor tajemství",
       "declared": true
     },
     {
+      "name": "volumeattachment-reaper",
+      "group": "domain",
+      "role": "volumeattachment-reaper",
+      "declared": true
+    },
+    {
       "name": "vpa",
       "group": "domain",
       "role": "vpa",
+      "declared": true
+    },
+    {
+      "name": "wealth",
+      "group": "domain",
+      "role": "wealth",
       "declared": true
     }
   ],
@@ -474,11 +553,11 @@
       "id": "network",
       "label": "Síť (segmentace)",
       "icon": "network",
-      "status": "planned",
+      "status": "partial",
       "analogy": "Zamčené dveře mezi patry — bez propustky se mezi odděleními neprojde.",
-      "summary": "Zero-trust ideál je deny-by-default mezi namespaci. Realita: jen 108 NetworkPolicy deklarované → provoz mezi namespaci je z velké části otevřený.",
+      "summary": "Zero-trust cíl je deny-by-default mezi namespaci. V GitOpsu je deklarováno 136 NetworkPolicy; z tohoto počtu nelze určit pokrytí namespaců ani účinnou izolaci provozu.",
       "controls": [
-        "NetworkPolicy (108 / 68)",
+        "NetworkPolicy manifesty (136)",
         "per-namespace deny-by-default (cíl)"
       ],
       "adr": [
@@ -546,10 +625,10 @@
       "icon": "key",
       "status": "live",
       "analogy": "Trezor s časovým zámkem — hesla nikdy neleží v kódu.",
-      "summary": "OpenBao drží tajemství; 144 ExternalSecret je sype do k8s. Žádný secret v gitu.",
+      "summary": "OpenBao drží tajemství; 223 ExternalSecret je sype do k8s. Žádný secret v gitu.",
       "controls": [
         "OpenBao",
-        "External Secrets (144)",
+        "External Secrets (223)",
         "KMS unseal"
       ],
       "adr": [
@@ -559,23 +638,23 @@
     }
   ],
   "imageAnatomy": {
-    "multiStage": false,
-    "buildBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
-    "runtimeBase": "eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0",
+    "multiStage": true,
+    "buildBase": "above",
+    "runtimeBase": "eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e",
     "steps": [
       {
         "id": "build",
         "label": "Build stage (JDK)",
         "status": "live",
         "adr": [],
-        "detail": "Plný JDK (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
+        "detail": "Plný JDK (above) zkompiluje a sestaví aplikaci. Tento stage se NEDISTRIBUUJE — zůstává v něm jen nářadí."
       },
       {
         "id": "runtime",
         "label": "Runtime stage (JRE-only)",
         "status": "live",
         "adr": [],
-        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre-alpine@sha256:28db6fdf60e38945e43d840c0333aeaec66c15943070104f7586fd3c9d1665b0) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
+        "detail": "Distribuuje se jen štíhlý JRE (eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e) + aplikace. Menší image = menší útočná plocha, žádný kompilátor/shell nářadí navíc."
       },
       {
         "id": "nonroot",
@@ -636,14 +715,14 @@
     {
       "item": "Namespace segmentace",
       "plan": "Doménová izolace, 1 ns / doména",
-      "reality": "68 namespaců",
+      "reality": "81 namespaců",
       "status": "live"
     },
     {
       "item": "NetworkPolicy (east-west)",
       "plan": "deny-by-default v každém ns",
-      "reality": "108 / 68 ns má NetworkPolicy → většina provozu otevřená",
-      "status": "planned"
+      "reality": "136 NetworkPolicy deklarovaných v GitOpsu; pokrytí namespaců a runtime účinnost neověřeny",
+      "status": "partial"
     },
     {
       "item": "Podpis image",
@@ -654,7 +733,7 @@
     {
       "item": "Tajemství",
       "plan": "OpenBao + ESO, nic v gitu",
-      "reality": "144 ExternalSecret",
+      "reality": "223 ExternalSecret",
       "status": "live"
     },
     {
@@ -666,8 +745,8 @@
     {
       "item": "Admission policy",
       "plan": "sada kyverno policies",
-      "reality": "5 ClusterPolicy (image-verify)",
-      "status": "partial"
+      "reality": "0 ClusterPolicy deklarovaných v GitOpsu; runtime stav neověřen",
+      "status": "planned"
     }
   ]
 }
