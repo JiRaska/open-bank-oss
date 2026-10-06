@@ -5,4 +5,7 @@ package com.openbank.sepainstant.application.port.out
 
 import com.openbank.libs.persistence.outbox.OutboxRepository
 
-interface SctInstOutboxRepository : OutboxRepository
+interface SctInstOutboxRepository : OutboxRepository {
+    /** Terminal DEAD rows are excluded from the processable backlog. */
+    suspend fun countDead(): Long
+}

@@ -4,9 +4,15 @@
 package com.openbank.sepainstant.infrastructure.persistence.repository
 
 import com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository
+import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.libs.persistence.outbox.OutboxStatus
 import com.openbank.libs.persistence.outbox.OutboxTableShape
 import com.openbank.sepainstant.application.port.out.SctInstOutboxRepository
 import com.openbank.sepainstant.infrastructure.persistence.entity.SctInstOutboxEntity
+import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
+import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import java.time.Clock
 
@@ -17,4 +23,23 @@ class SctInstOutboxRepositoryImpl(clock: Clock) :
         SctInstOutboxEntity::class.java,
         clock,
     ),
-    SctInstOutboxRepository
+    SctInstOutboxRepository,
+    PanacheRepository<SctInstOutboxEntity> {
+    override suspend fun countDead(): Long = Panache.withSession {
+        count("status = ?1", OutboxStatus.DEAD.name)
+    }.awaitSuspending()
+
+    fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(
+        SctInstOutboxEntity().also {
+            it.eventId = message.eventId
+            it.aggregateId = message.aggregateId
+            it.eventType = message.eventType
+            it.payload = message.payload
+            it.status = OutboxStatus.PENDING.name
+            it.attemptCount = 0
+            it.synthetic = message.synthetic
+            it.createdAt = message.createdAt
+            it.updatedAt = message.createdAt
+        },
+    ).replaceWithVoid()
+}

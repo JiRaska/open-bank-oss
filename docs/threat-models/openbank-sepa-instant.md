@@ -315,13 +315,17 @@ and NetworkPolicy peer remain through Phase 5.
   SETTLED/RECALLED updates now write the established four-field event payload to
   `sct_inst_outbox` in the payment transaction. A failed event insert rolls back the
   state change; the dispatcher uses the shared aggregate-head claim, retry/backoff and
-  terminal `DEAD` state after bounded failures. A successful Kafka acknowledgement can
-  still precede a crash before `markSent`, so consumers must remain idempotent.
+  terminal `DEAD` state after bounded failures. The separate `countDead` gauge and
+  `SepaInstantOutboxDeadLettered` alert make that terminal state visible; reviewed,
+  per-event disposition is in `docs/runbooks/sepa-instant-outbox-recovery.md`.
+  A successful Kafka acknowledgement can still precede a crash before `markSent`.
+  Until stable transport identity is carried and consumed, a retry may append a second
+  audit row; this remains a rollout blocker, not a risk accepted by this source candidate.
   Historical transitions are not backfilled. The scheme-submission GitOps flag is
   explicitly false under its matching application env name until the settlement flow
   and recovery owner approve a rollout. The outbox dispatcher must stay enabled for
   the default PROCESSING flow, and pending/failed/dead counts need operational review.
-  **Rollback:** before dispatch starts, V5 can be reverted by dropping its new table
-  and sequence. After dispatch starts, retain the table on application rollback and
-  drain or explicitly dispose of its rows before any schema removal; never replay
-  historical payment events automatically.
+  **Rollback:** stop writers, retain V5's table while any recoverable outbox rows exist,
+  and run a compatible relay if the old app is restored because it has no dispatcher.
+  Remove the table only after an approved per-row disposition and a verified empty
+  recoverable set; never replay historical payment events automatically.
