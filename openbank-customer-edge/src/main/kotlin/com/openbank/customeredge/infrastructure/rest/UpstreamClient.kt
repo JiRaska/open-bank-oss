@@ -224,11 +224,11 @@ class UpstreamClient {
         return builder.build()
     }
 
-    fun get(url: String, partyId: String): Response = try {
+    fun get(url: String, partyId: String? = null): Response = try {
         val request = upstreamRequest()
             .uri(validatedUri(url))
             .header("Authorization", "Bearer ${serviceToken()}")
-            .header(PARTY_HEADER, partyId)
+            .apply { if (partyId != null) header(PARTY_HEADER, partyId) }
             .header("Accept", "application/json")
             .timeout(Duration.ofMillis(requestTimeoutMs))
             .GET().build()

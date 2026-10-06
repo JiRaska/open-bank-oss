@@ -26,6 +26,7 @@ import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { DataUnavailable } from '@/components/feedback/DataUnavailable'
 import type { UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { classifyBffFailure } from '@/lib/services/bff'
+import { UiMessageEditor } from '@/components/communication/UiMessageEditor'
 import { PageHeader } from '@/components/ui/PageHeader'
 
 interface StyleVersionDraft {
@@ -61,6 +62,39 @@ export default function CommunicationStyleEditorPage() {
   const [formOfAddress, setFormOfAddress] = useState('')
   const [signature, setSignature] = useState('')
   const [maxLength, setMaxLength] = useState('')
+  const [uiMessages, setUiMessages] = useState<Record<string, string>>({})
+  const [preferredTerms, setPreferredTerms] = useState<Record<string, string>>({})
+  const [forbiddenTerms, setForbiddenTerms] = useState<string[]>([])
+  const [loadingPublished, setLoadingPublished] = useState(true)
+  const [publishedLoaded, setPublishedLoaded] = useState(false)
+  const [loadAttempt, setLoadAttempt] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setLoadingPublished(true)
+    setPublishedLoaded(false)
+    setTone(''); setFormality(''); setFormOfAddress(''); setSignature(''); setMaxLength('')
+    setUiMessages({}); setPreferredTerms({}); setForbiddenTerms([])
+    fetch(`${PROXY_BASE}/${encodeURIComponent(personaKey)}/published`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(8_000)]) })
+      .then(async res => {
+        if (res.status === 404) { if (!controller.signal.aborted) setPublishedLoaded(true); return }
+        if (!res.ok) throw new Error('Published style unavailable')
+        const published = await res.json()
+        if (controller.signal.aborted) return
+        setTone(published.tone ?? '')
+        setFormality(published.formality ?? '')
+        setFormOfAddress(published.formOfAddress ?? '')
+        setSignature(published.signature ?? '')
+        setMaxLength(published.maxLength == null ? '' : String(published.maxLength))
+        setUiMessages(published.uiMessages ?? {})
+        setPreferredTerms(published.preferredTerms ?? {})
+        setForbiddenTerms(published.forbiddenTerms ?? [])
+        setPublishedLoaded(true)
+      })
+      .catch(() => { if (!controller.signal.aborted) setUnavailable({ kind: 'unreachable' }) })
+      .finally(() => { if (!controller.signal.aborted) setLoadingPublished(false) })
+    return () => controller.abort()
+  }, [personaKey, loadAttempt])
 
   const [saving, setSaving] = useState(false)
   const [submitting, setSubmitting] = useState(false)
@@ -91,8 +125,9 @@ export default function CommunicationStyleEditorPage() {
           formOfAddress,
           signature: signature || null,
           maxLength: maxLength ? Number(maxLength) : null,
-          preferredTerms: {},
-          forbiddenTerms: [],
+          preferredTerms,
+          forbiddenTerms,
+          uiMessages,
         }),
       })
       if (res.status === 400) {
@@ -115,7 +150,7 @@ export default function CommunicationStyleEditorPage() {
     } catch {
       setUnavailable({ kind: 'unreachable' })
     } finally { setSaving(false) }
-  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, t])
+  }, [personaKey, tone, formality, formOfAddress, signature, maxLength, preferredTerms, forbiddenTerms, uiMessages, t])
 
   const submitForReview = useCallback(async () => {
     if (!draft) return
@@ -240,7 +275,7 @@ export default function CommunicationStyleEditorPage() {
       <div className="page">
         <PageHeader title={t('Editor stylu', 'Style editor')} />
         <DataUnavailable kind={unavailable.kind} service="Communication" feature={t('editor stylu', 'style editor')}>
-          <button type="button" className="btn btn-secondary" onClick={() => setUnavailable(null)}>
+          <button type="button" className="btn btn-secondary" onClick={() => { setUnavailable(null); if (!publishedLoaded) setLoadAttempt(v => v + 1) }}>
             {t('Zkusit znovu', 'Try again')}
           </button>
         </DataUnavailable>
@@ -271,32 +306,36 @@ export default function CommunicationStyleEditorPage() {
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Tón', 'Tone')}
               <input className="input" value={tone} onChange={e => setTone(e.target.value)}
-                placeholder={t('např. vřelý a uklidňující', 'e.g. warm and reassuring')} disabled={!!draft} />
+                placeholder={t('např. vřelý a uklidňující', 'e.g. warm and reassuring')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Formálnost', 'Formality')}
               <input className="input" value={formality} onChange={e => setFormality(e.target.value)}
-                placeholder={t('např. neformální, tykání', 'e.g. informal, first-name basis')} disabled={!!draft} />
+                placeholder={t('např. neformální, tykání', 'e.g. informal, first-name basis')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Oslovení', 'Form of address')}
               <input className="input" value={formOfAddress} onChange={e => setFormOfAddress(e.target.value)}
-                placeholder={t('např. tykání', 'e.g. informal "you"')} disabled={!!draft} />
+                placeholder={t('např. tykání', 'e.g. informal "you"')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Podpis', 'Signature')}
               <input className="input" value={signature} onChange={e => setSignature(e.target.value)}
-                placeholder={t('nepovinné', 'optional')} disabled={!!draft} />
+                placeholder={t('nepovinné', 'optional')} disabled={!!draft || loadingPublished} />
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
               {t('Maximální délka (znaky)', 'Max length (characters)')}
               <input className="input" type="number" min={1} value={maxLength}
-                onChange={e => setMaxLength(e.target.value)} placeholder={t('nepovinné', 'optional')} disabled={!!draft} />
+                onChange={e => setMaxLength(e.target.value)} placeholder={t('nepovinné', 'optional')} disabled={!!draft || loadingPublished} />
             </label>
+
+            {personaKey === 'customer-copilot' && (
+              <UiMessageEditor value={uiMessages} onChange={setUiMessages} disabled={!!draft || loadingPublished} />
+            )}
 
             {lintViolations && lintViolations.length > 0 && (
               <div className="badge badge-danger" style={{ display: 'block', whiteSpace: 'pre-wrap' }}>
@@ -310,7 +349,7 @@ export default function CommunicationStyleEditorPage() {
 
             <div style={{ display: 'flex', gap: '8px' }}>
               {!draft && (
-                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || !tone || !formality || !formOfAddress}>
+                <button type="button" className="btn btn-primary" onClick={saveDraft} disabled={saving || loadingPublished || !tone || !formality || !formOfAddress}>
                   <Save size={14} /> {saving ? t('Ukládám…', 'Saving…') : t('Uložit koncept', 'Save draft')}
                 </button>
               )}

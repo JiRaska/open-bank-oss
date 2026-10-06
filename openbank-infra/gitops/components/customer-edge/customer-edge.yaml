@@ -21,6 +21,8 @@ apiVersion: argoproj.io/v1alpha1
 kind: Rollout
 metadata:
   name: customer-edge
+  annotations:
+    openbank.io/service-dependencies: communication/communication-service
   namespace: customer-edge
   labels:
     app.kubernetes.io/name: customer-edge
@@ -89,6 +91,11 @@ spec:
             - name: management
               containerPort: 8085
           env:
+            - name: COMMUNICATION_SERVICE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: customer-edge-app-copy
+                  key: service-url
             # Traces (ADR-0008/0087). openbank-libs defaults the exporter to
             # localhost:4317, which in the cluster is nothing; without this env every
             # span of this service was exported into a closed port (0 traces in Tempo,
