@@ -209,3 +209,10 @@ silently re-suspend a credential the customer was just given back.
   WARN-logged with a rate limit, and consumer pacts to fraud-service and transaction-service (each
   with a recorded 401) are replayed by both providers on every PR — the CARD-rail ledger posting
   had no contract at all before this.
+- **2026-10-06** — Network dispute deadline drift (STRIDE-I/R, #8869). A status refresh used to
+  ignore the network's `respondByDate`; a moved deadline stayed stale in the case row and was absent
+  from `card.dispute.status_changed.v1`, so a customer-case consumer could miss the real evidence
+  deadline. Refresh now treats a deadline change as a case change, persists the network answer, and
+  carries it as an optional nullable v1 event field. Null clears a previous deadline. Existing v1
+  consumers can ignore the added field, while an old event without it remains valid. Terminal cases
+  remain immutable on refresh and still require investigation when the network disagrees.

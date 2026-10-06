@@ -5,6 +5,7 @@
 package com.openbank.cardprocessing.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationFeature
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import com.openbank.cardprocessing.application.port.`in`.OpenDisputeCommand
@@ -48,6 +49,7 @@ import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import java.time.Clock
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneOffset
 import java.util.UUID
 
@@ -69,6 +71,7 @@ class CardDisputeServiceTest {
     private val authorizations = mockk<CardAuthorizationRepository>()
     private val metrics = mockk<CardLifecycleMetricsPort>(relaxed = true)
     private val mapper = ObjectMapper().registerKotlinModule().registerModule(JavaTimeModule())
+        .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
     private val simulator = SimulatedDisputeAdapter(clock)
 
     private fun service(port: DisputePort = simulator) =
@@ -217,6 +220,51 @@ class CardDisputeServiceTest {
         assertThat(updated.status).isEqualTo(DisputeStatus.WON)
         assertThat(updated.schemeStatus).isEqualTo("RESOLVED_WON")
         assertThat(event.captured.eventType).isEqualTo(CardDisputeStatusChanged.EVENT_TYPE)
+    }
+
+    @Test
+    fun `a network deadline change updates the case and announces the deadline even without a status move`(): Unit =
+        runBlocking {
+            val existing = case(DisputeStatus.OPEN).copy(respondByDate = LocalDate.of(2026, 10, 12))
+            val deadline = LocalDate.of(2026, 10, 18)
+            coEvery { cases.findById(existing.id) } returns existing
+            val saved = slot<CardDisputeCase>()
+            val event = slot<OutboxMessage>()
+            coEvery { cases.save(capture(saved), capture(event), any(), any()) } answers { saved.captured }
+            val port = mockk<DisputePort>()
+            coEvery { port.status(existing.networkCaseId) } returns SchemeResult.Answered(
+                schemeDispute(existing.networkCaseId, "OPEN").copy(respondByDate = deadline),
+                CardScheme.SIMULATOR,
+            )
+
+            val result = service(port).refreshStatus(RefreshDisputeCommand(existing.id, UUID.randomUUID().toString()))
+
+            assertThat((result as DisputeOutcome.Accepted).case.respondByDate).isEqualTo(deadline)
+            assertThat(saved.captured.respondByDate).isEqualTo(deadline)
+            assertThat(event.captured.eventType).isEqualTo(CardDisputeStatusChanged.EVENT_TYPE)
+            val payload = mapper.readTree(event.captured.payload)
+            assertThat(payload["networkCaseId"].asText()).isEqualTo(existing.networkCaseId)
+            assertThat(payload["schemeStatus"].asText()).isEqualTo("OPEN")
+            assertThat(payload["respondByDate"].asText()).isEqualTo("2026-10-18")
+        }
+
+    @Test
+    fun `a network answer without a deadline clears a previous deadline and emits null`(): Unit = runBlocking {
+        val existing = case(DisputeStatus.OPEN).copy(respondByDate = LocalDate.of(2026, 10, 12))
+        coEvery { cases.findById(existing.id) } returns existing
+        val saved = slot<CardDisputeCase>()
+        val event = slot<OutboxMessage>()
+        coEvery { cases.save(capture(saved), capture(event), any(), any()) } answers { saved.captured }
+        val port = mockk<DisputePort>()
+        coEvery { port.status(existing.networkCaseId) } returns SchemeResult.Answered(
+            schemeDispute(existing.networkCaseId, "OPEN"),
+            CardScheme.SIMULATOR,
+        )
+
+        service(port).refreshStatus(RefreshDisputeCommand(existing.id, UUID.randomUUID().toString()))
+
+        assertThat(saved.captured.respondByDate).isNull()
+        assertThat(mapper.readTree(event.captured.payload)["respondByDate"].isNull).isTrue()
     }
 
     @Test

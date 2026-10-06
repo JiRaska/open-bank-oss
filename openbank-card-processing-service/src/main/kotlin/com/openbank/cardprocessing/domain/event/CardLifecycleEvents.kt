@@ -128,11 +128,12 @@ data class CardDisputeEvidenceSubmitted(
 }
 
 /**
- * The bank-side dispute state moved.
+ * The bank-side dispute state or the network's response deadline moved.
  *
  * Both vocabularies are on the wire: [status] is this bank's lifecycle and [schemeStatus] is the
  * network's own string. A consumer that needs the scheme's word for it must not have to guess it
- * back from ours — see [com.openbank.cardprocessing.domain.model.CardDisputeCase].
+ * back from ours. [respondByDate] is optional for old v1 consumers and carries the network's
+ * current deadline when one exists — see [com.openbank.cardprocessing.domain.model.CardDisputeCase].
  */
 data class CardDisputeStatusChanged(
     val disputeId: UUID,
@@ -143,6 +144,7 @@ data class CardDisputeStatusChanged(
     val status: String,
     val schemeStatus: String,
     override val occurredAt: Instant,
+    val respondByDate: LocalDate? = null,
     override val sourceService: String = SOURCE_SERVICE,
 ) : CardLifecycleEvent() {
     companion object {

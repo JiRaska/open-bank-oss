@@ -114,7 +114,7 @@ components:
         $ref: '#/components/schemas/cardDisputeEvidenceSubmitted'
     cardDisputeStatusChanged:
       name: card.dispute.status_changed.v1
-      title: A dispute moved, in both vocabularies
+      title: A dispute status or network response deadline moved
       payload:
         $ref: '#/components/schemas/cardDisputeStatusChanged'
   schemas:
@@ -299,5 +299,10 @@ components:
           description: |
             The network's own status string, verbatim and unmapped. A scheme value this bank does
             not recognise leaves `status` where it was rather than being guessed into it.
+        respondByDate:
+          type: string
+          format: date
+          nullable: true
+          description: Optional v1 addition. The network's current deadline; null means none.
         occurredAt: { type: string, format: date-time }
         sourceService: { type: string, enum: [card-processing-service] }

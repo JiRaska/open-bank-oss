@@ -365,7 +365,8 @@ class CardDisputeService(
         cases.findById(disputeId)?.let { cases.findEvidence(disputeId) }
 
     /**
-     * Re-reads the network's status and records a MOVE, publishing nothing when nothing moved.
+     * Re-reads the network's status and response deadline and records a MOVE, publishing nothing
+     * when neither value moved.
      *
      * Idempotent under the caller's `Idempotency-Key` like [open]: a retried refresh replays the case
      * the first one produced and never asks the network again. Whatever the outcome — a move, no move,
@@ -412,12 +413,21 @@ class CardDisputeService(
         return when (val answer = disputes.status(case.networkCaseId)) {
             is SchemeResult.Answered -> {
                 val bankStatus = bankStatusFor(answer.value, case.status)
-                if (answer.value.status == case.schemeStatus && bankStatus == case.status) {
+                if (
+                    answer.value.status == case.schemeStatus &&
+                    bankStatus == case.status &&
+                    answer.value.respondByDate == case.respondByDate
+                ) {
                     idempotency.complete(claim, case.id)
                     return DisputeOutcome.Accepted(case)
                 }
                 val now = Instant.now(clock)
-                val updated = case.copy(status = bankStatus, schemeStatus = answer.value.status, updatedAt = now)
+                val updated = case.copy(
+                    status = bankStatus,
+                    schemeStatus = answer.value.status,
+                    respondByDate = answer.value.respondByDate,
+                    updatedAt = now,
+                )
                 val event = CardDisputeStatusChanged(
                     disputeId = updated.id,
                     authorizationId = updated.authorizationId,
@@ -427,6 +437,7 @@ class CardDisputeService(
                     status = updated.status.name,
                     schemeStatus = updated.schemeStatus,
                     occurredAt = now,
+                    respondByDate = updated.respondByDate,
                 )
                 DisputeOutcome.Accepted(
                     cases.save(

@@ -72,6 +72,6 @@ Publikované na `openbank.card.processing.events`, popsané v `openbank-contract
 | `card.token.status_changed.v1` | změna stavu tokenu | `previousStatus`, `status`, `scheme` |
 | `card.dispute.opened.v1` | případ otevřen | `disputeId`, `authorizationId`, `networkCaseId`, `reasonCode`, částka, `respondByDate`, `scheme` |
 | `card.dispute.evidence_submitted.v1` | podány důkazy | `disputeId`, `networkCaseId`, `documentReference` |
-| `card.dispute.status_changed.v1` | refresh změnil stav | `previousStatus`, `status`, `schemeStatus` |
+| `card.dispute.status_changed.v1` | refresh změnil stav nebo termín sítě | `previousStatus`, `status`, `schemeStatus`, volitelné nullable `respondByDate` |
 
 Všechny nesou `cardId`, `occurredAt` a `sourceService = card-processing-service`; události autorizací a reklamací nesou i `authorizationId`.

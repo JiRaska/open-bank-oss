@@ -72,6 +72,6 @@ Published on `openbank.card.processing.events`, documented in `openbank-contract
 | `card.token.status_changed.v1` | token status changed | `previousStatus`, `status`, `scheme` |
 | `card.dispute.opened.v1` | case opened | `disputeId`, `authorizationId`, `networkCaseId`, `reasonCode`, amount, `respondByDate`, `scheme` |
 | `card.dispute.evidence_submitted.v1` | evidence filed | `disputeId`, `networkCaseId`, `documentReference` |
-| `card.dispute.status_changed.v1` | refresh moved a status | `previousStatus`, `status`, `schemeStatus` |
+| `card.dispute.status_changed.v1` | refresh changed a status or the network deadline | `previousStatus`, `status`, `schemeStatus`, optional nullable `respondByDate` |
 
 All carry `cardId`, `occurredAt` and `sourceService = card-processing-service`; the authorisation and dispute events also carry `authorizationId`.
