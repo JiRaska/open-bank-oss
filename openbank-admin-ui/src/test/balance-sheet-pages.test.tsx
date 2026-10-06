@@ -721,6 +721,8 @@ describe('ČNB minimum reserve requirement', () => {
     router = () => json(MIN_RESERVES())
     await renderPage(<SnapshotMinReservesPage params={Promise.resolve({ id: 'run-6' })} />)
     await screen.findByTestId('total-holdings')
+    expect(screen.getByText(/As of 2026-09-30|Stav k 2026-09-30/)).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Copy run ID|Kopírovat ID běhu/ }).closest('span')?.textContent).toContain('run-6')
     expect(calls[0].url).toBe('/api/svc/risk-engine/api/v1/risk/snapshots/run-6/min-reserves')
     // every other call is the maintenance-period read, through the same BFF path
     expect(calls.slice(1).every(c => c.url.startsWith('/api/svc/risk-engine/api/v1/risk/min-reserves/periods'))).toBe(true)

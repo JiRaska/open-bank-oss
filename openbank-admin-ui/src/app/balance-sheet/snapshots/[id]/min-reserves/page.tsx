@@ -26,7 +26,7 @@ import Link from 'next/link'
 import { ArrowLeft, Landmark } from 'lucide-react'
 import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
 import {
@@ -76,10 +76,13 @@ function SnapshotMinReserves({ id }: { id: string }) {
     <div>
       <PageHeader
         title={t('Povinné minimální rezervy', 'Minimum reserve requirement')}
-        subtitle={t(`Běh ${id}`, `Run ${id}`)}
+        subtitle={data ? t(`Stav k ${data.asOf}`, `As of ${data.asOf}`) : t('Výpočet pro snímek rozvahy', 'Calculation for a balance-sheet snapshot')}
         icon={<Landmark size={20} aria-hidden="true" />}
         actions={back}
       />
+      <div style={{ marginBottom: 16 }}>
+        <HumanReference label={t('Běh snímku', 'Snapshot run')} reference={id} copyLabel={t('Kopírovat ID běhu', 'Copy run ID')} />
+      </div>
       {kind ? (
         <DataUnavailable kind={kind} service="risk-engine" feature={t('povinné minimální rezervy', 'minimum reserve requirement')} lang={language} />
       ) : data ? (
@@ -97,7 +100,7 @@ function MinReservesBody({ data, locale }: { data: MinReserves; locale: string }
     <>
       <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <ProvenanceBadge provenance={data.provenance} />
-        <StatusBadge status="PARAMS" tone="neutral" label={`${t('Sada parametrů', 'Parameter set')} ${data.parameterSetId} v${data.parameterSetVersion}`} />
+        <StatusBadge status="PARAMS" tone="neutral" label={`${t('Sada parametrů', 'Parameter set')} ${data.parameterSetId} v${data.parameterSetVersion}`} /> {/* raw-id-ok: named parameter set, not a run identifier */}
         <span style={{ fontSize: 12 }}>{t('Sazba', 'Rate')} {(a.rate * 100).toLocaleString(locale)} % · {t('sazba úročení', 'remuneration rate')} {(a.remunerationRate * 100).toLocaleString(locale)} %</span>
       </div>
 

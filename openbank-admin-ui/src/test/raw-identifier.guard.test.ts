@@ -27,7 +27,6 @@ const BASELINE: Record<string, number> = {
   'src/app/approvals/page.tsx': 1,
   'src/app/audit/page.tsx': 2,
   'src/app/balance-sheet/ledger-backfill/page.tsx': 1,
-  'src/app/balance-sheet/snapshots/[id]/min-reserves/page.tsx': 1,
   'src/app/balance-sheet/snapshots/[id]/page.tsx': 1,
   'src/app/communication/[personaId]/page.tsx': 1,
   'src/app/communication/edit/[personaKey]/page.tsx': 1,
