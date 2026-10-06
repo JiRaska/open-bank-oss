@@ -64,7 +64,7 @@ class FakeApi:
         self.jobs = copy.deepcopy(job() if jobs is None else jobs)
         self.prs = copy.deepcopy([pr()] if prs is None else prs)
         self.files = copy.deepcopy(
-            [{"filename": "openbank-admin-ui/package-lock.json"}]
+            [{"filename": "openbank-admin-ui/package-lock.json", "status": "modified"}]
             if files is None
             else files
         )
@@ -117,11 +117,43 @@ class AdmissionTests(unittest.TestCase):
 
     def test_workflow_file_change_rejected(self):
         files = [
-            {"filename": "openbank-admin-ui/package-lock.json"},
-            {"filename": ".github/workflows/dependabot-auto-merge.yml"},
+            {"filename": "openbank-admin-ui/package-lock.json", "status": "modified"},
+            {"filename": ".github/workflows/dependabot-auto-merge.yml", "status": "modified"},
         ]
         with self.assertRaises(verifier.AdmissionError):
             verifier.verify(event(), REPO, FakeApi(files=files))
+
+    def test_dependency_file_set_is_scoped_to_the_classified_ecosystem(self):
+        gradle_event = event()
+        gradle_event["workflow_run"]["head_branch"] = "dependabot/gradle/jvm-patch"
+        gradle_pr = pr()
+        gradle_pr["head"]["ref"] = "dependabot/gradle/jvm-patch"
+        gradle_files = [
+            {"filename": "build-logic/build.gradle.kts", "status": "modified"},
+            {"filename": "gradle/wrapper/gradle-wrapper.jar", "status": "modified"},
+        ]
+        self.assertEqual(
+            verifier.verify(
+                gradle_event, REPO, FakeApi(prs=[gradle_pr], files=gradle_files)
+            ),
+            55,
+        )
+        for files in (
+            [{"filename": "openbank-admin-ui/src/lib/telemetry/glitchtip.ts", "status": "modified"}],
+            [{"filename": "openbank-admin-ui/package-lock.json", "status": "added"}],
+            [{"filename": "build-logic/build.gradle.kts", "status": "modified"}],
+        ):
+            with self.subTest(files=files), self.assertRaises(verifier.AdmissionError):
+                verifier.verify(event(), REPO, FakeApi(files=files))
+        with self.assertRaises(verifier.AdmissionError):
+            verifier.verify(
+                gradle_event,
+                REPO,
+                FakeApi(
+                    prs=[gradle_pr],
+                    files=[{"filename": "openbank-admin-ui/package.json", "status": "modified"}],
+                ),
+            )
 
     def test_incomplete_api_data_rejected(self):
         incomplete_jobs = job()

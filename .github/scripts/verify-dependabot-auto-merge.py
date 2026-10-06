@@ -16,6 +16,30 @@ CLASSIFIER_JOB = "Classify patch Dependabot PR"
 METADATA_STEP = "Fetch Dependabot metadata"
 ELIGIBLE_STEP = "Eligible patch for Gradle or npm"
 Api = Callable[..., Any]
+NPM_BRANCH = "dependabot/npm_and_yarn/openbank-admin-ui/"
+GRADLE_BRANCH = "dependabot/gradle/"
+NPM_FILES = {"openbank-admin-ui/package.json", "openbank-admin-ui/package-lock.json"}
+GRADLE_FILES = {
+    "gradle.properties",
+    "settings.gradle.kts",
+    "gradle/libs.versions.toml",
+    "gradle/verification-metadata.xml",
+    "gradle/wrapper/gradle-wrapper.jar",
+    "gradle/wrapper/gradle-wrapper.properties",
+}
+
+
+def allowed_dependency_file(branch: str, name: str) -> bool:
+    """Unusual Dependabot file sets need human review, even for patch metadata."""
+    if branch.startswith(NPM_BRANCH):
+        return name in NPM_FILES
+    if branch.startswith(GRADLE_BRANCH):
+        return name in GRADLE_FILES or re.fullmatch(
+            r"(?:build-logic/|openbank-[a-z0-9-]+/|"
+            r"openbank-libs/openbank-[a-z0-9-]+/)?build\.gradle\.kts",
+            name,
+        ) is not None
+    return False
 
 
 class AdmissionError(Exception):
@@ -73,9 +97,9 @@ def verify(event: Any, repo: str, api: Api = gh_api) -> int:
     attempt = field(run, "run_attempt")
     require(
         isinstance(branch, str)
-        and branch.startswith("dependabot/")
-        and len(branch) > 11,
-        "source branch is not a Dependabot branch",
+        and branch.startswith((NPM_BRANCH, GRADLE_BRANCH))
+        and len(branch.split("/")) >= 3,
+        "source branch is not a configured Gradle/npm Dependabot branch",
     )
     require(
         isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) is not None,
@@ -161,8 +185,9 @@ def verify(event: Any, repo: str, api: Api = gh_api) -> int:
             name = field(entry, "filename")
             require(isinstance(name, str) and bool(name), "PR file path is missing")
             require(
-                not (name.startswith((".github/workflows/", ".github/scripts/"))),
-                "PR changes trusted workflow or verifier code; human review required",
+                field(entry, "status") == "modified"
+                and allowed_dependency_file(branch, name),
+                f"PR changes a non-dependency or new file ({name}); human review required",
             )
         if len(files) < 100:
             break
