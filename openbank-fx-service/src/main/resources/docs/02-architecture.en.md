@@ -149,3 +149,7 @@ The dispatcher wraps the Kafka publish with MicroProfile Fault Tolerance: `@Bulk
 3. **Best-effort side effects** — AML case opening must not change the verdict.
 4. **No remote calls outside the request** — async propagation via outbox + Kafka.
 5. **Pure domain** — rate maths, fixing parsing, and the screening decision are framework-free and unit-tested.
+
+## ČNB policy rates and minimum-reserve facts
+
+`CnbPolicyRateIngestionScheduler` reads the ČNB history for the 2W repo, discount and lombard rates and the minimum-reserve workbook. Its default daily trigger is 14:45 Europe/Prague; a separate trigger runs after startup and then every 24 hours. Each feed is attempted independently, the full history is upserted idempotently, and workflow success is recorded only when every feed succeeds. Inspect the per-feed fetch outcome and freshness metrics when one feed fails; a successful sibling feed does not hide that failure. Newly inserted or revised facts are published on the compacted `openbank.fx.cnb-policy-rate.published` topic for downstream as-of calculations. This pipeline is separate from the existing daily FX fixing ingestion above.
