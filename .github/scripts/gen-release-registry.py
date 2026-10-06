@@ -24,10 +24,9 @@ WHY THIS EXISTS
     a human deciding what the file should contain.
 
 WHAT IS NOT DERIVED
-    Three packages keep hand-written shapes, declared in OVERRIDES with the reason. Two of them are
-    a defect this script found rather than a design (see the OVERRIDES comment) and are tracked
-    separately — encoding them here keeps the generator honest about the tree it actually has,
-    rather than rewriting two services' release identity as a side effect of an automation change.
+    Three packages keep hand-written shapes, declared in OVERRIDES with the reason. Campaign and
+    tax-reporting retain their original simple release type; #7597 adds component identities and
+    the same test exclusion as the other released services.
 
 Usage:
     gen-release-registry.py            # --check
@@ -48,21 +47,25 @@ CONFIG = REPO / "release-please-config.json"
 # Packages whose config entry is NOT the mechanical shape. Each needs a reason; an entry for a
 # module that no longer exists is a failure, so the map cannot quietly outlive its subject.
 #
-# `openbank-campaign-service` and `openbank-tax-reporting-service` are NOT a considered exception —
-# they are a defect this script surfaced. They carry `{"release-type": "simple"}` with no
-# `component` and no `exclude-paths`, which means (a) their tag has no component prefix, so both
-# share the repo-root `v<version>` namespace with each other, and neither has ever produced a tag
-# despite sitting at 0.39.0 and 0.22.0; and (b) with no `exclude-paths`, a change under their own
-# `src/test` releases them, which is the ADR-0029 rule-2 path axis inverted. Fixing that changes
-# two services' release identity, so it is filed as #9900 rather than done here as a side effect.
+# Campaign and tax-reporting keep `release-type: simple`, their original hand-written type. Their
+# component identities and test exclusions are intentional #7597 changes; #9900 was consolidated
+# into that issue. Historical tags remain untouched.
 OVERRIDES: dict[str, dict] = {
     "openbank-admin-ui": {
         "component": "admin-ui",
         "extra-files": [{"type": "json", "path": "package.json", "jsonpath": "$.version"}],
         "exclude-paths": ["openbank-admin-ui/src/test", "openbank-admin-ui/e2e"],
     },
-    "openbank-campaign-service": {"release-type": "simple"},
-    "openbank-tax-reporting-service": {"release-type": "simple"},
+    "openbank-campaign-service": {
+        "component": "campaign-service",
+        "release-type": "simple",
+        "exclude-paths": ["openbank-campaign-service/src/test"],
+    },
+    "openbank-tax-reporting-service": {
+        "component": "tax-reporting-service",
+        "release-type": "simple",
+        "exclude-paths": ["openbank-tax-reporting-service/src/test"],
+    },
 }
 
 
@@ -193,6 +196,12 @@ def _self_test() -> int:
     for name in OVERRIDES:
         expect(f"{name} keeps its hand-written shape",
                config["packages"].get(name), OVERRIDES[name])
+    for name in ("openbank-campaign-service", "openbank-tax-reporting-service"):
+        paths = config["packages"][name]["exclude-paths"]
+        expect(f"{name} excludes test-only changes from release",
+               any(f"{name}/src/test/example.kt".startswith(f"{excluded}/") for excluded in paths), True)
+        expect(f"{name} still includes production changes in release",
+               any(f"{name}/src/main/example.kt".startswith(f"{excluded}/") for excluded in paths), False)
     expect("every OVERRIDES entry still names a released module",
            sorted(OVERRIDES) == sorted(n for n in OVERRIDES if n in manifest), True)
 
