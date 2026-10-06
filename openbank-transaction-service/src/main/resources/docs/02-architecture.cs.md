@@ -169,7 +169,7 @@ sequenceDiagram
 |---|---|---|
 | `TransactionRepository` | `PanacheTransactionRepository` | atomicky uloží transakci + outbox řádek |
 | `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | zařazení / dispatch outboxu |
-| `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | publikace do Kafky + sestavení payloadu |
+| `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | serializace payloadů událostí pro outbox |
 | `BalanceCoverPort` | `BalanceCoverClient` | vytvoření / uvolnění holdu v balance-service |
 | `FxRatePort` | `FxRateClient` | FX kurz pro zúčtování v jiné měně |
 

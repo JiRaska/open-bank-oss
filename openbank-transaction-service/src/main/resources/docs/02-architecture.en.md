@@ -169,7 +169,7 @@ sequenceDiagram
 |---|---|---|
 | `TransactionRepository` | `PanacheTransactionRepository` | persist transaction + outbox row atomically |
 | `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | outbox enqueue / dispatch |
-| `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | Kafka publish + payload building |
+| `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | serialize lifecycle event payloads for the outbox |
 | `BalanceCoverPort` | `BalanceCoverClient` | place / release cover hold on balance-service |
 | `FxRatePort` | `FxRateClient` | FX rate for cross-currency settlement |
 
