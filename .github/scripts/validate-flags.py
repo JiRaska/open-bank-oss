@@ -4,7 +4,9 @@
 #
 # CI gate for flag-as-code (ADR-0067 / issue #419).
 # Finds every *.flagd.json file under the repo, parses the `openbank` metadata
-# block in each flag, and enforces the same rules as FlagDefinition.validate():
+# block in each flag, and enforces the same rules as FlagDefinition.validate().
+# Also checks flagd-shaped JSON in GitOps ConfigMaps for prohibited keys,
+# including payloads mounted under flags.json through a key alias.
 #
 #   1. key             — kebab-case, non-blank
 #   2. owner           — non-blank (no orphan flags)
@@ -14,7 +16,8 @@
 #                        must never appear (hardened safety controls cannot be disabled
 #                        via a flag — see OPA rest.rego prohibited rule)
 #
-# Exit 0 = all flags valid. Exit 1 = violations found (CI gate fails).
+# Exit 0 = enforced checks passed; deployed ConfigMap metadata is not checked.
+# Exit 1 = violations found (CI gate fails).
 #
 # WARN MODE (--warn-days N, issue #7941). Rule 4 compares against NOW, so the first
 # signal a flag has a retirement date is the day it expires and turns every PR red
@@ -24,11 +27,15 @@
 # ALWAYS exits 0, including for flags already expired: a horizon report, never a
 # second gate. The enforcing path is untouched.
 
+import base64
+import binascii
 import json
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import yaml
 
 # ── Authoritative constants (mirrors openbank-libs/governance/rules.yaml) ────
 PROHIBITED_KEYS = {
@@ -133,6 +140,78 @@ def validate_file(path: Path) -> tuple[int, int, list[str]]:
         all_violations.extend(validate_flag(key, flag_obj, str(path)))
 
     return len(flags), len(all_violations), all_violations
+
+
+def validate_gitops_flags(root: Path) -> tuple[int, int, int, list[str]]:
+    """Check prohibited keys in every GitOps ConfigMap carrying flagd-shaped JSON.
+
+    The per-flag `openbank` metadata gate still applies only to *.flagd.json;
+    this narrow scan closes the high-risk deployed-file blind spot without
+    changing flagd's runtime document or assuming it accepts that extension.
+    """
+    configmaps = flags_checked = 0
+    findings: list[str] = []
+    gitops = root / "openbank-infra" / "gitops"
+    for path in sorted((*gitops.rglob("*.yaml"), *gitops.rglob("*.yml"))):
+        try:
+            text = path.read_text()
+        except UnicodeDecodeError:
+            findings.append(f"  [{path}] GitOps YAML is not valid UTF-8; flag scope cannot be checked")
+            continue
+        try:
+            docs = list(yaml.safe_load_all(text))
+        except yaml.YAMLError as exc:
+            findings.append(f"  [{path}] invalid GitOps YAML; flag scope cannot be checked: {exc}")
+            continue
+        for doc in docs:
+            if not isinstance(doc, dict) or doc.get("kind") != "ConfigMap":
+                continue
+            data = doc.get("data") or {}
+            binary_data = doc.get("binaryData") or {}
+            if not isinstance(data, dict) or not isinstance(binary_data, dict):
+                findings.append(f"  [{path}] ConfigMap data/binaryData is not a mapping")
+                continue
+            if "flags.json" in data and "flags.json" in binary_data:
+                configmaps += 1
+                findings.append(f"  [{path}] ConfigMap flags.json appears in both data and binaryData")
+                continue
+            counted = False
+            for field_name, values in (("data", data), ("binaryData", binary_data)):
+                for source_key, source_value in values.items():
+                    named = source_key == "flags.json"
+                    try:
+                        if field_name == "binaryData":
+                            raw = base64.b64decode(source_value, validate=True)
+                            flag_text = raw.decode("utf-8")
+                        else:
+                            flag_text = source_value
+                        payload = json.loads(flag_text)
+                    except (TypeError, ValueError, binascii.Error, UnicodeDecodeError) as exc:
+                        if named:
+                            findings.append(f"  [{path}] ConfigMap {field_name}.{source_key} "
+                                            f"is invalid base64, UTF-8, or JSON: {exc}")
+                            counted = True
+                        continue
+                    flags = payload.get("flags") if isinstance(payload, dict) else None
+                    if not isinstance(flags, dict):
+                        if named:
+                            findings.append(f"  [{path}] ConfigMap {field_name}.{source_key} "
+                                            "has no flags object")
+                            counted = True
+                        continue
+                    counted = True
+                    flags_checked += len(flags)
+                    for key in flags:
+                        if key not in PROHIBITED_KEYS:
+                            continue
+                        findings.append(
+                            f"  [{path}] ConfigMap {field_name}.{source_key} flag '{key}' "
+                            "is prohibited by ADR-0067/OPA; "
+                            "it may never be defined",
+                        )
+            if counted:
+                configmaps += 1
+    return configmaps, flags_checked, len(findings), findings
 
 
 def _parses(path: Path) -> bool:
@@ -270,6 +349,70 @@ def self_test() -> int:
         if count != 1 or not any("invalid JSON" in m for m in msgs):
             fails.append(f"malformed JSON was not reported as a violation: {msgs}")
 
+    # GitOps embeds the live flagd document as ConfigMap data.flags.json. The
+    # legacy walker sees only *.flagd.json, so a prohibited deployed flag used
+    # to pass even while the example document was clean.
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        config = root / "openbank-infra/gitops/components/party/feature-flags.yaml"
+        config.parent.mkdir(parents=True)
+        def write_gitops(flags):
+            config.write_text(yaml.safe_dump({
+                "kind": "ConfigMap", "data": {"flags.json": _json.dumps({"flags": flags})},
+            }))
+        write_gitops({"party-search": {"state": "ENABLED"}})
+        maps, checked, count, msgs = validate_gitops_flags(root)
+        if (maps, checked, count) != (1, 1, 0):
+            fails.append(f"clean deployed ConfigMap was not counted: {(maps, checked, msgs)}")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "data": {
+            "payload": _json.dumps({"flags": {"party-search": {}}}),
+        }}))
+        if validate_gitops_flags(root)[:3] != (1, 1, 0):
+            fails.append("clean aliased flagd JSON was not counted")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "data": {
+            "payload": _json.dumps({"flags": {"sanctions-screening-disabled": {}}}),
+        }}))
+        if not any("prohibited" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("aliased flagd JSON bypassed the prohibited-key check")
+        # A workload may mount payload as flags.json through either
+        # configMap.items[{key: payload, path: flags.json}] or volumeMount.subPath.
+        # Content-based discovery covers both without guessing at mount layouts.
+        write_gitops({"sanctions-screening-disabled": {"state": "DISABLED"}})
+        maps, checked, count, msgs = validate_gitops_flags(root)
+        if (maps, checked, count) != (1, 1, 1) or not any("prohibited" in msg for msg in msgs):
+            fails.append(f"prohibited deployed flag was not rejected: {(maps, checked, msgs)}")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "data": {"flags.json": "{bad json"}}))
+        if not any("invalid base64, UTF-8, or JSON" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("malformed deployed flagd JSON was not rejected")
+        config.write_text("kind: ConfigMap\ndata:\n  flags.json: [unterminated\n")
+        if not any("invalid GitOps YAML" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("malformed GitOps YAML carrying flags.json was not rejected")
+        config.write_text('kind: ConfigMap\ndata:\n  "flags\\u002ejson": |\n    {"flags":{"aml-screening-disabled":{}}}\n')
+        if not any("prohibited" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("escaped YAML flags.json key bypassed the prohibited-key check")
+        forbidden = _json.dumps({"flags": {"aml-screening-disabled": {}}}).encode()
+        encoded = base64.b64encode(forbidden).decode()
+        allowed = base64.b64encode(_json.dumps({"flags": {"party-search": {}}}).encode()).decode()
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "binaryData": {"flags.json": allowed}}))
+        if validate_gitops_flags(root)[:3] != (1, 1, 0):
+            fails.append("valid binaryData.flags.json was not counted cleanly")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "binaryData": {"flags.json": encoded}}))
+        if not any("prohibited" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("binaryData.flags.json bypassed the prohibited-key check")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "binaryData": {"flags.json": "%%%"}}))
+        if not any("invalid base64" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("invalid binaryData.flags.json was silently omitted")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "binaryData": {"flags.json": "//8="}}))
+        if not any("invalid base64, UTF-8, or JSON" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("non-UTF-8 binaryData.flags.json was silently omitted")
+        config.write_text(yaml.safe_dump({"kind": "ConfigMap", "data": {"flags.json": "{}"},
+                                          "binaryData": {"flags.json": encoded}}))
+        if not any("both data and binaryData" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("dual data/binaryData flags.json was silently accepted")
+        config.write_bytes(b"kind: ConfigMap\ndata:\n  flags.json: \xff\n")
+        if not any("not valid UTF-8" in msg for msg in validate_gitops_flags(root)[3]):
+            fails.append("undecodable GitOps YAML was silently omitted")
+
     # --- warn mode (#7941) -------------------------------------------------------------
     # A warner is worth nothing unless it can be shown to DISCRIMINATE: the same flag must
     # be reported under one window and silent under another. Without that, "0 due" and
@@ -322,7 +465,7 @@ def self_test() -> int:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: feature-flag governance is falsifiable (22 cases)")
+    print("self-test ok: feature-flag governance is falsifiable (35 cases)")
     return 0
 
 
@@ -372,21 +515,28 @@ def main() -> int:
               f"flag(s) expiring within {warn_days} day(s).")
         return 0
 
-    total_flags = 0
+    governance_flags = 0
     total_violations = 0
     all_messages: list[str] = []
 
     for f in sorted(files):
         checked, violations, messages = validate_file(f)
-        total_flags += checked
+        governance_flags += checked
         total_violations += violations
         all_messages.extend(messages)
 
-    if not files:
-        print("validate-flags: no *.flagd.json files found — skipping.")
+    gitops_maps, gitops_flags, gitops_violations, gitops_messages = validate_gitops_flags(repo_root)
+    total_violations += gitops_violations
+    all_messages.extend(gitops_messages)
+
+    if not files and not gitops_maps and not gitops_violations:
+        print("validate-flags: no flagd JSON files or GitOps flag ConfigMaps found — skipping.")
         return 0
 
-    print(f"validate-flags: checked {total_flags} flags in {len(files)} file(s).")
+    print(f"validate-flags: checked governance metadata for {governance_flags} flags "
+          f"in {len(files)} flagd file(s); checked prohibited keys for {gitops_flags} "
+          f"flagd-shaped ConfigMap flags in {gitops_maps} GitOps ConfigMap(s). "
+          "Deployed flag metadata (owner, classification, fourEyes, expiresAt) is UNCHECKED.")
 
     if total_violations:
         print(f"\n❌ {total_violations} violation(s):\n")
@@ -399,7 +549,7 @@ def main() -> int:
         )
         return 1
 
-    print("✅ All flags valid.")
+    print("✅ Enforced checks passed; deployed flag metadata remains unchecked.")
     return 0
 
 
