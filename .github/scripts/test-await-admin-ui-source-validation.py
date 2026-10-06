@@ -68,6 +68,28 @@ class SourceValidationTest(unittest.TestCase):
         self.api.runs["pact-drift-check.yml"] = [run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
         self.verify()
 
+    def test_later_main_pact_publication_substitutes_for_missing_ancestor_run(self):
+        self.api.ui_sha = OTHER_SHA
+        self.verify()
+
+    def test_pending_exact_source_pact_cannot_use_older_ancestor_success(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2),
+            run("pact-drift-check.yml", sha=SHA, run_id=3, status="in_progress", conclusion=None),
+        ]
+        with self.assertRaises(TimeoutError):
+            self.verify()
+
+    def test_failed_exact_source_pact_cannot_use_older_ancestor_success(self):
+        self.api.ui_sha = OTHER_SHA
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2),
+            run("pact-drift-check.yml", sha=SHA, run_id=3, conclusion="failure"),
+        ]
+        with self.assertRaises(RuntimeError):
+            self.verify()
+
     def test_governance_refresh_cannot_bypass_failed_ui_pact(self):
         self.api.ui_sha = OTHER_SHA
         self.api.runs["pact-drift-check.yml"] = [run(
