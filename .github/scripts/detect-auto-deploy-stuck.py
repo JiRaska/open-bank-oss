@@ -83,7 +83,9 @@ THRESHOLD = 3
 # dispatch, in-progress and cancelled runs before applying R1 locally; never paginate.
 PER_PAGE = 50
 MAX_PAGE_AGE = timedelta(hours=6)
-MAX_LANE_AGE = timedelta(hours=9)  # the scheduled lane ticks every three hours
+# The three-hour cron has arrived nearly two hours late in recent hosted runs. Five hours
+# allows that delay but rejects an older verdict once the next tick is itself overdue.
+MAX_LANE_AGE = timedelta(hours=5)
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -318,6 +320,18 @@ def self_test() -> int:
     old_lane = [dict(r, created_at="2026-10-05T00:00:00Z")
                 if r["event"] == "schedule" else r for r in current]
     check("freshness: fresh push cannot mask stale scheduled lane", rejected(old_lane))
+    delayed_tick = [dict(r, created_at="2026-10-06T13:15:00Z")
+                    if r["event"] == "schedule" else r for r in current]
+    check("freshness: a delayed scheduled tick within five hours remains usable",
+          not rejected(delayed_tick))
+    missed_one = [dict(r, created_at="2026-10-06T12:44:00Z")
+                  if r["event"] == "schedule" else r for r in current]
+    check("freshness: one missing three-hour tick cannot close or reopen",
+          rejected(missed_one))
+    missed_two = [dict(r, created_at="2026-10-06T09:36:00Z")
+                  if r["event"] == "schedule" else r for r in current]
+    check("freshness: two missing three-hour ticks cannot close or reopen",
+          rejected(missed_two))
 
     # Declaration lane, held to a known-positive and two sabotages on a synthetic tree.
     import tempfile
