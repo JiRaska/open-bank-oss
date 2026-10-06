@@ -46,11 +46,19 @@ class PgRiskOutbox(private val pool: Pool, private val mapper: ObjectMapper) :
 
     override val retentionLabel: String = "risk"
 
-    /** SENT-row retention (ADR-0329): the dedup claim survives in `risk_limit_event_dedup`. */
-    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int = pool.preparedQuery(PURGE_SENT)
-        .execute(Tuple.of(now.minus(olderThan).atOffset(ZoneOffset.UTC), batch.coerceAtLeast(1)))
-        .awaitSuspending()
-        .rowCount()
+    /**
+     * Catch up rows written by an old pod after V10's one-time backfill before deleting them.
+     * The claim and delete share a transaction; the delete also requires a durable claim so an
+     * old pod inserting between the two statements cannot lose its replay guard.
+     */
+    override suspend fun purgeSent(olderThan: Duration, batch: Int, now: Instant): Int {
+        val args = Tuple.of(now.minus(olderThan).atOffset(ZoneOffset.UTC), batch.coerceAtLeast(1))
+        return pool.withTransaction { conn ->
+            conn.preparedQuery(CATCH_UP_DEDUP).execute(args)
+                .flatMap { conn.preparedQuery(PURGE_SENT).execute(args) }
+                .map { it.rowCount() }
+        }.awaitSuspending()
+    }
 
     override suspend fun recordNonOk(analysis: LimitAnalysis, occurredAt: Instant): Int {
         val run = analysis.run
@@ -139,9 +147,16 @@ class PgRiskOutbox(private val pool: Pool, private val mapper: ObjectMapper) :
                 "INSERT INTO risk_outbox (event_id, aggregate_id, event_type, payload, dedup_key, created_at, " +
                 "updated_at, synthetic) SELECT $1, $2, $3, $4, $5, $6, $6, $7 FROM claimed " +
                 "ON CONFLICT (dedup_key) DO NOTHING"
+        const val CATCH_UP_DEDUP =
+            "INSERT INTO risk_limit_event_dedup (dedup_key, event_id, created_at) " +
+                "SELECT dedup_key, event_id, created_at FROM risk_outbox " +
+                "WHERE status = 'SENT' AND sent_at < $1 ORDER BY sent_at, event_id LIMIT $2 " +
+                "ON CONFLICT (dedup_key) DO NOTHING"
         const val PURGE_SENT =
             "DELETE FROM risk_outbox WHERE event_id IN (SELECT event_id FROM risk_outbox " +
-                "WHERE status = 'SENT' AND sent_at < $1 LIMIT $2)"
+                "WHERE status = 'SENT' AND sent_at < $1 " +
+                "AND EXISTS (SELECT 1 FROM risk_limit_event_dedup d WHERE d.dedup_key = risk_outbox.dedup_key) " +
+                "ORDER BY sent_at, event_id LIMIT $2)"
         const val SELECT_PROCESSABLE =
             "SELECT $COLUMNS FROM risk_outbox WHERE status IN ('PENDING', 'FAILED') ORDER BY created_at LIMIT $1"
         const val COUNT_PROCESSABLE = "SELECT count(*) FROM risk_outbox WHERE status IN ('PENDING', 'FAILED')"
