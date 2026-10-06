@@ -53,6 +53,14 @@ if [ "${1:-}" = "--self-test" ]; then
   reset; put "$K/application/Svc.kt" 'class Svc { fun at() = LocalDate.now() }\n'
   expect "LocalDate.now() in application is FLAGGED" 1 "VIOLATION"
 
+  # Multiplication is executable Kotlin, not a KDoc comment. The old unanchored
+  # `grep -v '[[:space:]]\*'` discarded this entire line and reported clean.
+  reset; put "$K/domain/Money.kt" 'class Money { fun at() = System.currentTimeMillis() * 2 }\n'
+  expect "a wall-clock call followed by multiplication is FLAGGED" 1 "VIOLATION"
+
+  reset; put "$K/domain/Money.kt" 'class Money { fun at() = "https://example.invalid" to System.currentTimeMillis() }\n'
+  expect "a wall-clock call after a URL literal is FLAGGED" 1 "VIOLATION"
+
   # The documented fix must be clean, or the gate blocks the shape ADR-0100 requires.
   reset; put "$K/domain/Money.kt" 'class Money(private val clock: Clock) { fun at() = Instant.now(clock) }\n'
   expect "Instant.now(clock) is clean" 0 "OK: no direct wall-clock"
@@ -73,6 +81,9 @@ if [ "${1:-}" = "--self-test" ]; then
   reset; put "$K/domain/Money.kt" 'class Money {\n  // never call Instant.now() here — inject a Clock (ADR-0100)\n  fun at() = Instant.now(clock)\n}\n'
   expect "the call named in a comment is not a hit" 0 "OK: no direct wall-clock"
 
+  reset; put "$K/domain/Money.kt" 'class Money {\n  /* never call Instant.now() here */\n  fun at() = Instant.now(clock)\n}\n'
+  expect "the call named in a block-comment opener is not a hit" 0 "OK: no direct wall-clock"
+
   # DERIVATION: an empty money_path_services must fail, not silently scan nothing. This is the
   # defect the derivation replaced — a short list read as a clean fleet.
   printf 'money_path_services: []\n' > "$td/openbank-libs/governance/rules.yaml"
@@ -83,7 +94,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'money_path_services:\n  - openbank-fixture-service\n' > "$td/openbank-libs/governance/rules.yaml"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: clock-injection gate is falsifiable (7 cases, scope derived from rules.yaml)"
+  echo "self-test ok: clock-injection gate is falsifiable (10 cases, scope derived from rules.yaml)"
   exit 0
 fi
 
@@ -141,7 +152,9 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
         continue
       fi
 
-      matches=$(grep -n "$PATTERN" "$file" | grep -v '[[:space:]]*//' | grep -v '[[:space:]]\*' || true)
+      # Discard comment LINES only. Unanchored `*` and `//` filters discard valid
+      # arithmetic or a URL literal beside `System.currentTimeMillis()` (#6253).
+      matches=$(grep -n "$PATTERN" "$file" | grep -vE '^[0-9]+:[[:space:]]*(//|/\*|\*)' || true)
       SCANNED=$((SCANNED + 1))
       if [ -n "$matches" ]; then
         echo "VIOLATION [$svc/$layer] $file"
