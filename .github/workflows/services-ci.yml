@@ -85,7 +85,9 @@ jobs:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          # Admission policy and pinned requirements must come from the current
+          # trusted base branch; base.sha is frozen for older pull requests.
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
       - id: admit
         env:
@@ -125,6 +127,7 @@ jobs:
           # shellcheck source=.github/scripts/service-ci-pact-modules.sh
           source .github/scripts/service-ci-pact-modules.sh
           pact_build_modules_self_test
+          python3 .github/scripts/coverage-floor-only-diff.py --self-test
 
           if [ "${{ github.event_name }}" = "schedule" ] \
              || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
@@ -134,7 +137,8 @@ jobs:
             # Scope service and Pact changes; inert release/docs/infra changes build nothing.
             # Unknown build inputs fall back to the full fleet below. Full history makes
             # HEAD~1 available on main (squash-merged pushes are single commits).
-            FILES=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || true)
+            DIFF_BASE=HEAD~1
+            FILES=$(git diff --name-only "$DIFF_BASE" HEAD 2>/dev/null || true)
             if admin_ui_pact_changed "$FILES"; then
               echo "admin-ui-pact-changed=true" >> "$GITHUB_OUTPUT"
             fi
@@ -169,7 +173,13 @@ jobs:
               #   - the CI recipe itself -> canary below.
               #   - anything else -> unattributable -> full-fleet (safety).
               FILES_CODE=$(grep -vE '^openbank-libs/governance/' <<< "$RELEVANT" || true)
-              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+              FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+              # An exact raised-floor-only diff stays local to libs-domain.
+              if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+                echo "Decision: shared domain build script changes only its raised coverage floor."
+                FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+              fi
+              if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
                 echo "Decision: code-global change -> full-fleet."
                 CHANGED="$ALL"
               else
@@ -196,7 +206,7 @@ jobs:
                   CHANGED="$ALL"
                 else
                   # Include direct and transitive consumers of the small shared libraries.
-                  CHANGED="$CHANGED $(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE" | python3 .github/scripts/service-ci-library-dependents.py "$ALL")"
+                  CHANGED="$CHANGED $(python3 .github/scripts/service-ci-library-dependents.py "$ALL" <<< "$FILES_GLOBAL")"
                   # (No dedup here: the matrix JSON below is built with `sort -u`, so a service
                   # named by both its src and a pact edge collapses to one job downstream.)
                   # DST-harness edge (ADR-0115/#267) — same as the PR path.
@@ -232,11 +242,12 @@ jobs:
             # would break merge-base once main advances past this PR's base.
             git fetch --no-tags --force origin \
               "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" \
-              >/dev/null 2>&1 || true
+              >/dev/null 2>&1 || { echo "::error::Cannot refresh ${BASE}; build scope is unknown."; exit 1; }
             # Compute the merge-base explicitly rather than leaning on the
             # three-dot shorthand's ref resolution, then diff from it. Equivalent
             # to BASE...HEAD but observable and robust to odd ref state.
-            MB=$(git merge-base "$BASE" HEAD 2>/dev/null || echo "$BASE")
+            MB=$(git merge-base "$BASE" HEAD 2>/dev/null) || { echo "::error::Cannot find merge-base with ${BASE}; build scope is unknown."; exit 1; }
+            DIFF_BASE="$MB"
             FILES=$(git diff --name-only "$MB" HEAD)
             echo "Detect: base=$BASE merge-base=$MB changed-files=$(echo "$FILES" | grep -c . || true)"
             echo "Changed files:"; echo "$FILES" | sed 's/^/  /'
@@ -282,7 +293,13 @@ jobs:
             # quarkus.application.version invariant and check-admin-ui-version-sync.sh the
             # package.json one, both unconditionally in the gate job.
             FILES_CODE=$(grep -vE '^openbank-libs/governance/|(/version\.txt$)|(/CHANGELOG\.md$)|(^\.release-please-manifest\.json$)|(^release-please-config\.json$)' <<< "$FILES" || true)
-            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")"; then
+            FILES_GLOBAL=$(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE")
+            # Match the push selector: an exact raised-floor-only diff stays local.
+            if grep -Fxq 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" && python3 .github/scripts/coverage-floor-only-diff.py --base "$DIFF_BASE"; then
+              echo "Decision: shared domain build script changes only its raised coverage floor."
+              FILES_GLOBAL=$(grep -vFx 'openbank-libs-domain/build.gradle.kts' <<< "$FILES_GLOBAL" || true)
+            fi
+            if grep -qE '^(openbank-libs/|openbank-libs-domain/|openbank-libs-runtime/|openbank-libs-testing/|gradle/|settings\.gradle\.kts|build\.gradle\.kts|gradle\.properties|build-logic/)' <<< "$FILES_GLOBAL"; then
               echo "Decision: code-global change -> build all modules."
               CHANGED="$ALL"
             else
@@ -293,7 +310,7 @@ jobs:
                   CHANGED="$CHANGED $m"
                 fi
               done
-              CHANGED="$CHANGED $(python3 .github/scripts/filter-lib-test-only-paths.py <<< "$FILES_CODE" | python3 .github/scripts/service-ci-library-dependents.py "$ALL")"
+              CHANGED="$CHANGED $(python3 .github/scripts/service-ci-library-dependents.py "$ALL" <<< "$FILES_GLOBAL")"
               # A changed pact builds BOTH sides, exactly as the main-push path above already
               # does. Without this the PR path attributes files ONLY by `^<module>/`, so a
               # pact-only PR matched no module, built nothing, and merged green — then broke the
@@ -385,6 +402,9 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Admission rejection leaves the trusted base in a depth-1 checkout. The
+      # all-green job fails closed on admission=false; do not run a PR diff here
+      # until the full PR checkout above has actually happened.
       - name: Require service documentation with production changes
         if: github.event_name == 'pull_request' && steps.admit.outputs.proceed == 'true'
         env:
@@ -444,14 +464,16 @@ jobs:
       # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
       # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
       # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
-      # once. Eight stays below both the 20-job hosted cap (leaving 12 slots for other CI)
-      # and the 12-runner ARC pool (leaving four slots for targeted verification/deploy work).
+      # once. Eight stays below the 12-runner ARC pool, leaving four slots for targeted
+      # verification/deploy work when contract jobs can run.
+      # On PRs the contract job is skipped, so twelve matrix lanes use hosted runners only
+      # and leave eight of the account's twenty hosted slots for other workflows. On main,
+      # schedules and manual runs, retain eight lanes to preserve ARC capacity.
       #
-      # Measured on successful full-fleet run 34476896912 after the hosted-build split:
-      # 50 build jobs, median 7.8 min, P90 10.4 min, 381 runner-minutes. Four lanes impose
-      # a ~95 min work floor before queueing; eight cut that floor to ~48 min without
-      # saturating either pool. Re-measure before raising it again.
-      max-parallel: 8
+      # Full-fleet PR run 37403901088: 79 hosted builds used 603 runner-minutes; eight
+      # lanes stayed occupied for almost all of the 79-minute build span. Twelve lanes
+      # lower the work floor from ~75 to ~50 minutes; hosted timing still needs measurement.
+      max-parallel: ${{ github.event_name == 'pull_request' && 12 || 8 }}
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
@@ -535,6 +557,8 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
+    permissions:
+      actions: read
     steps:
       - name: Verify no service failed
         run: |
@@ -556,6 +580,44 @@ jobs:
             echo "verification-metadata has no successful verdict for changed build files (#3218)."; exit 1
           fi
           echo "All changed services built green (or nothing to build)."
+      # `needs.build.result` can report success when a reusable matrix child was cancelled
+      # before receiving a runner (run 37347641780: Treasury cancelled, all-green passed).
+      # Audit every selected build in this exact attempt instead of trusting that summary.
+      - name: Require every selected service build to pass
+        if: needs.changes.outputs.any == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SERVICES_JSON: ${{ needs.changes.outputs.services }}
+          JOB_FILE: ${{ runner.temp }}/service-ci-jobs.ndjson
+        run: |
+          set -euo pipefail
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/attempts/${GITHUB_RUN_ATTEMPT}/jobs?per_page=100" \
+            --jq '.jobs[] | {name,conclusion}' > "$JOB_FILE"
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          services = json.loads(os.environ["SERVICES_JSON"])
+          if not isinstance(services, list) or not services or len(services) != len(set(services)):
+              raise SystemExit("Invalid selected-service matrix")
+          expected = {f"build ({service}) / {service} (build)" for service in services}
+          observed = {}
+          for line in Path(os.environ["JOB_FILE"]).read_text().splitlines():
+              job = json.loads(line)
+              name = job["name"]
+              if name.startswith("build (") and name.endswith(" (build)"):
+                  observed.setdefault(name, []).append(job["conclusion"])
+          if set(observed) != expected:
+              missing = sorted(expected - set(observed))
+              extra = sorted(set(observed) - expected)
+              raise SystemExit(f"Service build roster mismatch: missing={missing}, extra={extra}")
+          bad = {name: verdicts for name, verdicts in observed.items() if verdicts != ["success"]}
+          if bad:
+              raise SystemExit(f"Service builds without one successful verdict: {bad}")
+          print(f"Verified {len(expected)} selected service builds in this workflow attempt")
+          PY
 
   # Nightly-only: turn a failed full-fleet build into an actionable, deduplicated issue.
   # Runs solely for the scheduled run so PR/push failures (already visible as red checks)

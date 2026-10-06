@@ -174,51 +174,6 @@ jobs:
           cache-read-only: true
           gradle-home-cache-strict-match: false
 
-      # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
-      #
-      # setup-gradle refuses to touch a Gradle User Home that already exists ("Gradle User
-      # Home already exists: will not restore from cache" / "Caching was skipped"). This step
-      # invokes ./gradlew, which CREATES that home -- so while it ran first it silently
-      # disabled the very restore the default-home choice above exists to enable, and then
-      # did the same work by hand, slower. Measured 2026-08-22 on 3 of 3 sampled PR builds:
-      # the warm step took 120s and setup-gradle took 2s doing nothing, against 9s for the
-      # identical restore in fleet-lint on the same runner class (nine entries, including an
-      # 832 MB gradle-dependencies-v2 written from main). Build-cache hit rate in those
-      # builds was ~2%: "52 actionable tasks: 45 executed, 1 from cache, 6 up-to-date".
-      #
-      # Nothing about the heal contract changes by moving it. The corrupted entry it guards
-      # against can arrive in the RESTORED cache just as easily as in a persistent home, and
-      # healing it here still keeps the retry out of "Build + test" -- which must run exactly
-      # once, because it re-runs `test` differently depending on PUBLISH_RESULTS (the #1009
-      # Pact-publish hazard). It is now healing a warm cache instead of populating a cold one.
-      - name: Warm Gradle dependency cache (self-heal corrupted entries)
-        continue-on-error: true
-        run: |
-          set +e
-          # This advisory command is allowed to time out.  It must not leave a Gradle
-          # daemon writing test/Kover files while the mandatory build begins (#6614).
-          # `quarkusDependenciesBuild` writes dependent projects' build/libs JARs. A timeout
-          # can leave one truncated, which Gradle then treats as up-to-date in the mandatory
-          # build. `dependencies` resolves the same cache without producing project outputs.
-          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
-          warmup_status=$?
-          if [ $warmup_status -eq 124 ]; then
-            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
-            cat /tmp/gradle-warmup.log
-          elif [ $warmup_status -ne 0 ]; then
-            cat /tmp/gradle-warmup.log
-            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
-              echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain
-              retry_status=$?
-              if [ $retry_status -eq 124 ]; then
-                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
-              fi
-            else
-              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
-            fi
-          fi
-
       # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
       # never has a broker URL to forward, so the @PactBroker-gated provider-verification
       # test stays skipped and there is no #1009-style cache-key hazard to guard against —
@@ -257,7 +212,11 @@ jobs:
             wait "${docker_events_pid}" 2>/dev/null || true
           }
           trap cleanup_test_evidence EXIT
-          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+          # Cache healing replays this command only if verification fails before
+          # the first Gradle task; tests and build outputs are never replayed.
+          bash .github/scripts/retry-testcontainers-ebusy.sh -- \
+            bash .github/scripts/retry-gradle-verification-cache.sh -- \
+            ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
@@ -716,7 +675,9 @@ jobs:
           # `quarkusDependenciesBuild` writes dependent projects' build/libs JARs. A timeout
           # can leave one truncated, which Gradle then treats as up-to-date in the mandatory
           # build. `dependencies` resolves the same cache without producing project outputs.
-          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
+          # Keep the contract warm-up scoped to this module as in the build job.
+          # The mandatory Gradle task below still uses full configuration.
+          timeout --kill-after=10s 120s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
           if [ $warmup_status -eq 124 ]; then
             echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
@@ -725,7 +686,7 @@ jobs:
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain
+              timeout --kill-after=10s 120s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:dependencies --console=plain
               retry_status=$?
               if [ $retry_status -eq 124 ]; then
                 echo "::warning::dependency warm-up retry timed out after 120s; continuing"
@@ -875,17 +836,15 @@ jobs:
           echo "Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid HAL/JSON — proceeding to provider verification."
 
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
-      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
-      # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
-      # to the Pact Broker) that Gradle's up-to-date/build-cache machinery cannot observe, so a
-      # cached providerPactTest would silently skip the publish (#1964's original reason,
-      # narrowed here to a task this job ALONE runs — no PR-lane cache to protect).
+      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. The task
+      # itself is never up-to-date or cacheable: publishing a verification result is a network
+      # side effect that Gradle cannot observe. Its compile/model prerequisites remain cacheable.
       - name: Provider verification (:${{ inputs.service }}:providerPactTest)
         if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          ./gradlew :${{ inputs.service }}:providerPactTest --rerun-tasks --build-cache \
+          ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \

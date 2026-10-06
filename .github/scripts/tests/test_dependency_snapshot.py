@@ -53,6 +53,15 @@ class MergeTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.merge({'one': snapshot(), 'two': part})
 
+    def test_unexpected_detector_is_rejected(self):
+        for detector in ({'name': 'other', 'version': '1.5.0', 'url': IDENTITY['detector']['url']},
+                         {'name': IDENTITY['detector']['name'], 'version': 'latest', 'url': IDENTITY['detector']['url']},
+                         {'name': IDENTITY['detector']['name'], 'version': '1.5.0', 'url': 'https://example.invalid'}):
+            part = snapshot()
+            part['detector'] = detector
+            with self.subTest(detector=detector), self.assertRaisesRegex(ValueError, 'detector'):
+                self.merge({'one': part, 'two': snapshot()})
+
     def test_conflicting_package_or_manifest(self):
         part = snapshot()
         part['manifests']['example']['resolved']['a']['package_url'] = 'pkg:maven/different/a@1'
@@ -138,6 +147,8 @@ class RunnerTests(unittest.TestCase):
                     (coverage / f'{index}.json').write_text(json.dumps(receipt))
                 reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
                 part = snapshot()
+                if case == 'mixed-detector' and len(calls) == 2:
+                    part['detector']['version'] = '1.5.1'
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
                 if case == 'wrong-detector':
@@ -193,7 +204,7 @@ class RunnerTests(unittest.TestCase):
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
                      'wrong-receipt', 'wrong-snapshot', 'wrong-detector',
-                     'duplicate-snapshot', 'merge-ref'):
+                     'duplicate-snapshot', 'merge-ref', 'mixed-detector'):
             with self.subTest(case=case):
                 self.run_case(case)
 
