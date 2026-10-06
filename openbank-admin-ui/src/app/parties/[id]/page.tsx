@@ -15,7 +15,7 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { EntityChip } from '@/components/entities/EntityChip'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
-import { PageHeader, StatusBadge } from '@/components/ui'
+import { HumanReference, PageHeader, StatusBadge } from '@/components/ui'
 import { opsMessageApi, OPERATOR_MESSAGE_TEMPLATE_VARS, type OperatorMessageTemplate, type ComposeMessageRequest } from '@/lib/api'
 import { parseKycCaseEvidence, type KycCaseEvidence } from '@/lib/parties/kycEvidenceContract'
 import { parsePartyEvidence, type PartyEvidence } from '@/lib/parties/partyEvidenceContract'
@@ -214,8 +214,12 @@ function PartyDetailPage() {
             </div>
             {kyc ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                  {t('ID případu:', 'Case ID:')} <span style={{ fontFamily: 'var(--font-mono)' }}>{kyc.id}</span>
+                <div style={{ marginBottom: '8px' }}>
+                  <HumanReference
+                    label={t(`Případ KYC pro ${party.legalName}`, `KYC case for ${party.legalName}`)}
+                    reference={kyc.id}
+                    copyLabel={t('Kopírovat ID případu KYC', 'Copy KYC case ID')}
+                  />
                 </div>
                 {kyc.checks.map(check => (
                   <div key={check.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--surface-2)', borderRadius: '6px' }}>
