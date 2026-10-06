@@ -11,6 +11,7 @@ graph LR
 
   bal[(balance-service)]
   led[(ledger-service)]
+  temporal[(Temporal frontend)]
   audit[audit-service]
   notif[notification-service]
 
@@ -22,8 +23,9 @@ graph LR
   agent -. "GET search/list (MCP)" .-> tx
   admin -- "GET search/list" --> tx
   tx -- "GET kurz" --> fx
-  tx -- "hold / debet / kredit" --> bal
-  tx -- "post / reverze journalu" --> led
+  tx -- "spuštění / čekání na workflow" --> temporal
+  tx -- "aktivita workflow: hold / uvolnění" --> bal
+  tx -- "aktivita workflow: zaúčtování / reverze" --> led
 
   tx --> db
   tx -- "outbox → publish" --> kafka
@@ -40,24 +42,32 @@ graph TB
   subgraph "openbank-transaction-service (Quarkus 3.x, reaktivní)"
     direction TB
     rest[REST<br/>TransactionResource<br/>ExceptionMappers]
-    uc[Application<br/>TransactionService<br/>PaymentSagaOrchestrator<br/>PaymentJournalFactory]
-    dom[Domain<br/>Transaction / PaymentSaga<br/>SettlementDateResolver<br/>+ doménové události]
-    persist[Persistence<br/>PanacheTransactionRepository<br/>PanachePaymentSagaRepository<br/>Reactive Panache]
+    uc[Application<br/>TransactionService<br/>PaymentJournalFactory]
+    workflow[Temporal workflow + aktivity<br/>PaymentWorkflowImpl<br/>PaymentActivitiesImpl]
+    worker[Temporal worker<br/>PaymentWorkerRegistrar]
+    dom[Domain<br/>Transaction / SagaState<br/>SettlementDateResolver<br/>+ doménové události]
+    persist[Persistence<br/>PanacheTransactionRepository<br/>Reactive Panache]
     outbox["Outbox<br/>TransactionOutboxDispatcher<br/>@Scheduled každých 5s"]
     clients[REST klienti<br/>LedgerCallGuard / LedgerRestClient<br/>BalanceCoverClient / FxRateClient]
   end
 
   rest --> uc
+  uc --> workflow
+  worker --> workflow
   uc --> dom
   uc --> persist
   uc --> outbox
   uc --> clients
+  workflow --> persist
+  workflow --> clients
 
   persist -.-> db[(PostgreSQL)]
   outbox -.-> kafka[(Kafka)]
   clients -.-> led[(ledger-service)]
   clients -.-> bal[(balance-service)]
   clients -.-> fx[(fx-service)]
+  uc -.-> temporal[(Temporal frontend)]
+  worker -.-> temporal
 ```
 
 ## Hexagonální vrstvy
@@ -68,16 +78,18 @@ Struktura balíčků odráží **ports-and-adapters** (ADR-0002):
 com.openbank.transaction/
 ├── domain/                    ◄── jádro — žádné závislosti na frameworku
 │   ├── model/                 Transaction, TransactionType, TransactionStatus
-│   ├── saga/                  PaymentSaga, SagaState (používá libs SagaStateMachine, ADR-0045)
+│   ├── saga/                  SagaState (výsledek workflow)
 │   ├── settlement/            SettlementDateResolver (pravidla datumu valuty/zaúčtování)
 │   └── event/                 TransactionInitiated / Completed / Failed
 │
 ├── application/               ◄── orchestrace use-case
 │   ├── port/in/               TransactionUseCase, příkazy a dotazy
-│   ├── port/out/              TransactionRepository, PaymentSagaRepository,
-│   │                          TransactionOutboxPort, TransactionEventPublisher,
+│   ├── port/out/              TransactionRepository,
+│   │                          TransactionOutboxRepository, TransactionEventPublisher,
 │   │                          BalanceCoverPort, FxRatePort
-│   └── usecase/               TransactionService, PaymentSagaOrchestrator, PaymentJournalFactory
+│   ├── usecase/               TransactionService, PaymentJournalFactory
+│   └── workflow/              PaymentWorkflowImpl, PaymentActivitiesImpl,
+│                              PaymentWorkerRegistrar
 │
 └── infrastructure/            ◄── adaptéry
     ├── rest/                  TransactionResource, ExceptionMappers (mapování DTO)
@@ -89,41 +101,43 @@ com.openbank.transaction/
 
 **Pravidlo závislostí:** `domain` ← `application` ← `infrastructure`. Doménový kód nikdy nevidí Panache, Kafku ani REST DTO.
 
-## Platební sága
+## Platební workflow
 
-Orchestrátor (`PaymentSagaOrchestrator`) spouští pohyb peněz **synchronně** v rámci iniciačního požadavku a prochází řádek `PaymentSaga` stavovým automatem validovaným sdíleným primitivem `SagaStateMachine` (ADR-0045).
+`TransactionService` uloží čekající transakci a iniciační outbox zprávu společně, potom spustí Temporal `PaymentWorkflow` s ID `payment-{transactionId}`. HTTP požadavek čeká na `execute()` na IO dispatcheru a znovu načte finální řádek transakce. Pohyb peněz provádějí aktivity Temporal workeru; `PaymentSagaOrchestrator` ani řádek `PaymentSaga` už neexistují.
 
 ```mermaid
 sequenceDiagram
   participant TS as TransactionService
-  participant Saga as PaymentSagaOrchestrator
+  participant Temporal as Temporal PaymentWorkflowImpl
+  participant Act as PaymentActivitiesImpl
   participant Bal as balance-service
   participant Led as ledger-service
 
-  TS->>Saga: startSaga(transaction)
-  Saga->>Saga: STARTED → PAYMENT_INITIATED
+  TS->>Temporal: execute(transactionId), čekání na výsledek
   opt zdrojový účet přítomen
-    Saga->>Saga: → FUNDS_RESERVED
-    Saga->>Bal: placeHold(zdroj, baseAmount, TTL 300s)
+    Temporal->>Act: placeHold(transactionId)
+    Act->>Bal: placeHold(zdroj, baseAmount, TTL 300s)
   end
-  Saga->>Saga: → LEDGER_POSTING
-  Saga->>Led: postJournal(idempotencyKey=saga-{id}-ledger)
-  opt zdrojový účet přítomen
-    Saga->>Saga: → FUNDS_CAPTURED
-    Saga->>Bal: debit(zdroj) + releaseHold
+  Temporal->>Act: postJournal(transactionId)
+  Act->>Led: postJournal(idempotencyKey=workflow-{id}-ledger)
+  Note over Bal,Led: Ledger projekce balance-service mění zaúčtované zůstatky<br/>a uvolňuje hold; workflow přímo neprovádí debet ani kredit.
+  alt aktivity dokončeny
+    Temporal->>Act: markCompleted(transactionId)
+  else selhání aktivity po omezených pokusech
+    Temporal->>Act: reverseJournal, pokud zaúčtován; releaseHold, pokud vytvořen
+    Temporal->>Act: markFailed(transactionId)
   end
-  opt cílový účet přítomen
-    Saga->>Bal: credit(cíl, amount)
-  end
-  Saga->>Saga: → COMPLETED
-  Note over Saga,Led: Při jakékoli výjimce → COMPENSATING:<br/>reverze journalu, vrácení zachyceného debetu,<br/>uvolnění holdu → COMPENSATED
+  Act->>Act: atomický update transakce + finální outbox
+  Temporal-->>TS: COMPLETED nebo COMPENSATED
+  TS->>TS: nové načtení finální transakce
 ```
 
 Klíčové invarianty:
-- **Idempotentní vstup** — `startSaga` vrátí existující ságu pro známý `idempotencyKey`; zaúčtování v ledgeru má klíč `saga-{id}-ledger`.
+- **Idempotentní vstup** — známý `idempotencyKey` vrátí existující transakci; ID Temporal workflow je `payment-{transactionId}` a klíč zaúčtování `workflow-{transactionId}-ledger`.
 - **TTL holdu jako pojistka** — hold nese TTL 300 s, takže balance-service jej expiruje i když `releaseHold` selže.
-- **Kompenzace vrací na kapsu** — samotná reverze journalu by peníze na zaúčtovaný zůstatek nevrátila, proto se zachycený debet explicitně připíše zpět (idempotency tag `compensation-{txId}`).
-- **Příchozí kredit bez zdrojového účtu** přeskočí etapy rezervace prostředků a zaúčtuje rovnou do ledgeru.
+- **Kompenzace** — při selhání aktivity workflow reverzuje zaúčtovaný journal a uvolní vytvořený hold. Obě operace jsou best effort; hold má navíc TTL. Zaúčtované zůstatky mění ledger projekce v balance-service.
+- **Trvalý finální stav** — `markCompleted` nebo `markFailed` aktualizuje transakci a finální outbox zprávu uvnitř workflow před návratem z `execute()`. Selhání finalizace ukončí workflow chybou místo reverze již zaúčtovaného journalu.
+- **Příchozí kredit bez zdrojového účtu** přeskočí hold a zaúčtuje journal v ledgeru.
 
 ## Outbox tok
 
@@ -138,7 +152,7 @@ sequenceDiagram
   TS->>DB: INSERT INTO transactions
   TS->>DB: INSERT INTO transaction_outbox (TransactionInitiated, PENDING)
   TS->>DB: COMMIT
-  Note over TS: sága běží → COMPLETED/FAILED →<br/>druhý outbox řádek (Completed/Failed)
+  Note over TS: Temporal workflow ve finální aktivitě uloží stav COMPLETED/FAILED<br/>spolu s finálním outbox řádkem
 
   loop @Scheduled každých 5s (SKIP pokud běží)
     D->>DB: listProcessable(dávka 25)
@@ -154,10 +168,9 @@ sequenceDiagram
 | Port (application/port/out) | Adaptér | Účel |
 |---|---|---|
 | `TransactionRepository` | `PanacheTransactionRepository` | atomicky uloží transakci + outbox řádek |
-| `PaymentSagaRepository` | `PanachePaymentSagaRepository` | persistence stavu ságy |
-| `TransactionOutboxPort` / `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | zařazení / dispatch outboxu |
+| `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | zařazení / dispatch outboxu |
 | `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | publikace do Kafky + sestavení payloadu |
-| `BalanceCoverPort` | `BalanceCoverClient` | hold / debet / kredit / uvolnění na balance-service |
+| `BalanceCoverPort` | `BalanceCoverClient` | vytvoření / uvolnění holdu v balance-service |
 | `FxRatePort` | `FxRateClient` | FX kurz pro zúčtování v jiné měně |
 
 ## Komponenty z `openbank-libs`
@@ -165,7 +178,6 @@ sequenceDiagram
 | Modul | Použití zde |
 |---|---|
 | `libs.domain.money.Money` + `CurrencyCode` | částky, převod zúčtování, validace měny |
-| `libs.domain.saga.SagaStateMachine` + `SagaTransitionPolicy` | hlídání přechodů platební ságy (ADR-0045) |
 | `libs.api.pagination.CursorPage` / `CursorEncoder` / `PageInfo` | cursor stránkování `listTransactions` |
 | `libs.persistence.outbox` | primitiva entity / repozitáře outboxu |
 | `libs.security.Roles` | konstanty rolí pro `@RolesAllowed` |
@@ -175,8 +187,8 @@ sequenceDiagram
 
 ## Principy
 
-1. **Hranice agregátu = Transaction** — jedna transakce, jedna sága, jedno referenční číslo.
-2. **Synchronní sága, asynchronní události** — pohyb peněz je v rámci požadavku a konzistentní; události životního cyklu se šíří přes outbox + Kafku.
+1. **Hranice agregátu = Transaction** — jedna transakce, jedno ID Temporal platebního workflow, jedno referenční číslo.
+2. **Temporal workflow, asynchronní události** — požadavek čeká na trvalý výsledek workflow; události životního cyklu se šíří přes outbox + Kafku.
 3. **Žádné podvojné účetnictví zde** — GL žije v ledger-service; tato služba zaúčtovává a reverzuje journaly přes fault-tolerant klienta.
-4. **Idempotence end-to-end** — `idempotencyKey` volajícího, unique DB constraint, klíč zaúčtování v ledgeru, tag kompenzačního vrácení.
-5. **Čistota domény** — přechody ságy a pravidla datumu zúčtování jsou čistá doménová logika bez frameworku.
+4. **Idempotence end-to-end** — `idempotencyKey` volajícího, unikátní DB omezení, stabilní ID workflow a klíč zaúčtování, finální aktivita bezpečná při opakování.
+5. **Čistota domény** — pravidla data zúčtování a stav transakce jsou doménová logika; Temporal orchestrace je v aplikační vrstvě.

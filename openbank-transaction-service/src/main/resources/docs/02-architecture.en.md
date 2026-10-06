@@ -11,6 +11,7 @@ graph LR
 
   bal[(balance-service)]
   led[(ledger-service)]
+  temporal[(Temporal frontend)]
   audit[audit-service]
   notif[notification-service]
 
@@ -22,8 +23,9 @@ graph LR
   agent -. "GET search/list (MCP)" .-> tx
   admin -- "GET search/list" --> tx
   tx -- "GET rate" --> fx
-  tx -- "hold / debit / credit" --> bal
-  tx -- "post / reverse journal" --> led
+  tx -- "start / await payment workflow" --> temporal
+  tx -- "workflow activity: cover hold / release" --> bal
+  tx -- "workflow activity: post / reverse journal" --> led
 
   tx --> db
   tx -- "outbox → publish" --> kafka
@@ -40,24 +42,32 @@ graph TB
   subgraph "openbank-transaction-service (Quarkus 3.x, reactive)"
     direction TB
     rest[REST<br/>TransactionResource<br/>ExceptionMappers]
-    uc[Application<br/>TransactionService<br/>PaymentSagaOrchestrator<br/>PaymentJournalFactory]
-    dom[Domain<br/>Transaction / PaymentSaga<br/>SettlementDateResolver<br/>+ domain events]
-    persist[Persistence<br/>PanacheTransactionRepository<br/>PanachePaymentSagaRepository<br/>Reactive Panache]
+    uc[Application<br/>TransactionService<br/>PaymentJournalFactory]
+    workflow[Temporal workflow + activities<br/>PaymentWorkflowImpl<br/>PaymentActivitiesImpl]
+    worker[Temporal worker<br/>PaymentWorkerRegistrar]
+    dom[Domain<br/>Transaction / SagaState<br/>SettlementDateResolver<br/>+ domain events]
+    persist[Persistence<br/>PanacheTransactionRepository<br/>Reactive Panache]
     outbox["Outbox<br/>TransactionOutboxDispatcher<br/>@Scheduled every 5s"]
     clients[REST clients<br/>LedgerCallGuard / LedgerRestClient<br/>BalanceCoverClient / FxRateClient]
   end
 
   rest --> uc
+  uc --> workflow
+  worker --> workflow
   uc --> dom
   uc --> persist
   uc --> outbox
   uc --> clients
+  workflow --> persist
+  workflow --> clients
 
   persist -.-> db[(PostgreSQL)]
   outbox -.-> kafka[(Kafka)]
   clients -.-> led[(ledger-service)]
   clients -.-> bal[(balance-service)]
   clients -.-> fx[(fx-service)]
+  uc -.-> temporal[(Temporal frontend)]
+  worker -.-> temporal
 ```
 
 ## Hexagonal layers
@@ -68,16 +78,18 @@ The package structure reflects **ports-and-adapters** (ADR-0002):
 com.openbank.transaction/
 ├── domain/                    ◄── core — no framework dependencies
 │   ├── model/                 Transaction, TransactionType, TransactionStatus
-│   ├── saga/                  PaymentSaga, SagaState (uses libs SagaStateMachine, ADR-0045)
+│   ├── saga/                  SagaState (workflow result)
 │   ├── settlement/            SettlementDateResolver (value/booking date rules)
 │   └── event/                 TransactionInitiated / Completed / Failed
 │
 ├── application/               ◄── use-case orchestration
 │   ├── port/in/               TransactionUseCase, commands & queries
-│   ├── port/out/              TransactionRepository, PaymentSagaRepository,
-│   │                          TransactionOutboxPort, TransactionEventPublisher,
+│   ├── port/out/              TransactionRepository,
+│   │                          TransactionOutboxRepository, TransactionEventPublisher,
 │   │                          BalanceCoverPort, FxRatePort
-│   └── usecase/               TransactionService, PaymentSagaOrchestrator, PaymentJournalFactory
+│   ├── usecase/               TransactionService, PaymentJournalFactory
+│   └── workflow/              PaymentWorkflowImpl, PaymentActivitiesImpl,
+│                              PaymentWorkerRegistrar
 │
 └── infrastructure/            ◄── adapters
     ├── rest/                  TransactionResource, ExceptionMappers (DTO mapping)
@@ -89,41 +101,43 @@ com.openbank.transaction/
 
 **Dependency rule:** `domain` ← `application` ← `infrastructure`. Domain code never sees Panache, Kafka, or REST DTOs.
 
-## Payment saga
+## Payment workflow
 
-The orchestrator (`PaymentSagaOrchestrator`) runs the money movement **synchronously** within the initiate request, transitioning a `PaymentSaga` row through a state machine validated by the shared `SagaStateMachine` primitive (ADR-0045).
+`TransactionService` saves the pending transaction and initiated outbox message together, then starts a Temporal `PaymentWorkflow` with workflow ID `payment-{transactionId}`. The HTTP initiation waits for `execute()` on an IO dispatcher and reloads the terminal transaction row. Temporal runs the money movement in worker activities; no `PaymentSagaOrchestrator` or `PaymentSaga` row remains.
 
 ```mermaid
 sequenceDiagram
   participant TS as TransactionService
-  participant Saga as PaymentSagaOrchestrator
+  participant Temporal as Temporal PaymentWorkflowImpl
+  participant Act as PaymentActivitiesImpl
   participant Bal as balance-service
   participant Led as ledger-service
 
-  TS->>Saga: startSaga(transaction)
-  Saga->>Saga: STARTED → PAYMENT_INITIATED
+  TS->>Temporal: execute(transactionId), wait for result
   opt source account present
-    Saga->>Saga: → FUNDS_RESERVED
-    Saga->>Bal: placeHold(source, baseAmount, TTL 300s)
+    Temporal->>Act: placeHold(transactionId)
+    Act->>Bal: placeHold(source, baseAmount, TTL 300s)
   end
-  Saga->>Saga: → LEDGER_POSTING
-  Saga->>Led: postJournal(idempotencyKey=saga-{id}-ledger)
-  opt source account present
-    Saga->>Saga: → FUNDS_CAPTURED
-    Saga->>Bal: debit(source) + releaseHold
+  Temporal->>Act: postJournal(transactionId)
+  Act->>Led: postJournal(idempotencyKey=workflow-{id}-ledger)
+  Note over Bal,Led: Balance-service ledger projection moves booked balances<br/>and releases the cover hold; this workflow does not debit or credit directly.
+  alt activities complete
+    Temporal->>Act: markCompleted(transactionId)
+  else activity failure after bounded retries
+    Temporal->>Act: reverseJournal if posted; releaseHold if placed
+    Temporal->>Act: markFailed(transactionId)
   end
-  opt target account present
-    Saga->>Bal: credit(target, amount)
-  end
-  Saga->>Saga: → COMPLETED
-  Note over Saga,Led: On any exception → COMPENSATING:<br/>reverse journal, refund captured debit,<br/>release hold → COMPENSATED
+  Act->>Act: update transaction + terminal outbox atomically
+  Temporal-->>TS: COMPLETED or COMPENSATED
+  TS->>TS: reload terminal transaction
 ```
 
 Key invariants:
-- **Idempotent entry** — `startSaga` returns the existing saga for a known `idempotencyKey`; the ledger post is keyed `saga-{id}-ledger`.
+- **Idempotent entry** — a known `idempotencyKey` returns the existing transaction; the Temporal workflow ID is `payment-{transactionId}` and the ledger post key is `workflow-{transactionId}-ledger`.
 - **Hold TTL safety net** — a hold carries a 300 s TTL so balance-service expires it even if `releaseHold` fails.
-- **Compensation refunds the pocket** — a journal reversal alone would not return money to the booked balance, so a captured debit is explicitly credited back (idempotency-tagged `compensation-{txId}`).
-- An **incoming credit with no source account** skips the fund-reservation legs and posts straight to the ledger.
+- **Compensation** — after an activity failure, the workflow reverses a posted journal and releases a placed hold. Both operations are best effort; the hold also expires by TTL. Balance-service projects ledger entries to booked balances.
+- **Durable terminal state** — `markCompleted` or `markFailed` updates the transaction and terminal outbox message inside the workflow before `execute()` returns. A finalisation failure fails the workflow instead of reversing an already settled journal.
+- An **incoming credit with no source account** skips the cover hold and posts the ledger journal.
 
 ## Outbox flow
 
@@ -138,7 +152,7 @@ sequenceDiagram
   TS->>DB: INSERT INTO transactions
   TS->>DB: INSERT INTO transaction_outbox (TransactionInitiated, PENDING)
   TS->>DB: COMMIT
-  Note over TS: saga runs → COMPLETED/FAILED →<br/>second outbox row (Completed/Failed)
+  Note over TS: Temporal workflow commits COMPLETED/FAILED status<br/>with a terminal outbox row in its final activity
 
   loop @Scheduled every 5s (SKIP if running)
     D->>DB: listProcessable(batch 25)
@@ -154,10 +168,9 @@ sequenceDiagram
 | Port (application/port/out) | Adapter | Purpose |
 |---|---|---|
 | `TransactionRepository` | `PanacheTransactionRepository` | persist transaction + outbox row atomically |
-| `PaymentSagaRepository` | `PanachePaymentSagaRepository` | saga state persistence |
-| `TransactionOutboxPort` / `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | outbox enqueue / dispatch |
+| `TransactionOutboxRepository` | `TransactionOutboxRepositoryImpl` | outbox enqueue / dispatch |
 | `TransactionEventPublisher` | `LoggingTransactionEventPublisher` | Kafka publish + payload building |
-| `BalanceCoverPort` | `BalanceCoverClient` | hold / debit / credit / release on balance-service |
+| `BalanceCoverPort` | `BalanceCoverClient` | place / release cover hold on balance-service |
 | `FxRatePort` | `FxRateClient` | FX rate for cross-currency settlement |
 
 ## Components from `openbank-libs`
@@ -165,7 +178,6 @@ sequenceDiagram
 | Module | Use here |
 |---|---|
 | `libs.domain.money.Money` + `CurrencyCode` | amounts, settlement conversion, currency validation |
-| `libs.domain.saga.SagaStateMachine` + `SagaTransitionPolicy` | payment saga transition guard (ADR-0045) |
 | `libs.api.pagination.CursorPage` / `CursorEncoder` / `PageInfo` | cursor-paginated `listTransactions` |
 | `libs.persistence.outbox` | outbox entity / repository primitives |
 | `libs.security.Roles` | role constants for `@RolesAllowed` |
@@ -175,8 +187,8 @@ sequenceDiagram
 
 ## Principles
 
-1. **Aggregate boundary = Transaction** — one transaction, one saga, one reference number.
-2. **Synchronous saga, async events** — money movement is request-scoped and consistent; lifecycle events propagate via outbox + Kafka.
+1. **Aggregate boundary = Transaction** — one transaction, one Temporal payment workflow ID, one reference number.
+2. **Temporal workflow, async events** — the request waits for a durable workflow result; lifecycle events propagate via outbox + Kafka.
 3. **No double-entry here** — the GL lives in ledger-service; this service posts and reverses journals through a fault-tolerant client.
-4. **Idempotence end-to-end** — caller `idempotencyKey`, unique DB constraint, ledger-post key, compensation refund tag.
-5. **Domain purity** — saga transitions and settlement-date rules are pure domain logic, framework-free.
+4. **Idempotence end-to-end** — caller `idempotencyKey`, unique DB constraint, stable workflow ID and ledger-post key, and replay-safe terminal activity.
+5. **Domain purity** — settlement-date rules and transaction state are domain logic; Temporal orchestration lives in the application layer.
