@@ -61,6 +61,12 @@ describe('Customer graph live overlay route', () => {
     expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
       `http://card-issuance-service.payments.svc:8118/api/v1/cards/party/${PARTY}?limit=51`,
     )
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://lending-service.lending.svc:8126/api/v1/lending/applications?partyId=${PARTY}&limit=31`,
+    )
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toContain(
+      `http://notification-service.notifications.svc:8112/api/v1/devices?partyId=${PARTY}&limit=21`,
+    )
     expect(body.unavailable).toEqual([])
     expect(body.truncated).toEqual([])
     expect(body.accounts).toHaveLength(1)
@@ -87,6 +93,28 @@ describe('Customer graph live overlay route', () => {
     const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
     expect(await result.json()).toMatchObject({ cards: [], unavailable: ['cards'] })
   })
+
+  it('returns only the visible slice and marks larger card and lending histories', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) return response(Array.from({ length: 51 }, (_, index) => ({
+        id: `card-${index}`, accountId: 'account-1', status: 'ACTIVE',
+      })))
+      if (url.includes(':8126/')) return response(Array.from({ length: 31 }, (_, index) => ({
+        id: `application-${index}`, status: 'APPROVED',
+      })))
+      if (url.includes(':8100/')) return response({ data: [] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await result.json()
+    expect(body.cards).toHaveLength(50)
+    expect(body.lendingApplications).toHaveLength(30)
+    expect(body.truncated).toEqual(['cards', 'lending'])
+  })
+
 
   it('does not mistake a changed source envelope for an empty customer history', async () => {
     vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -156,6 +184,35 @@ describe('Customer graph live overlay route', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('distinguishes a source refusal from an outage and never returns rows for that source', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) return response({ error: 'forbidden' }, 403)
+      if (url.includes(':8100/')) return response({ data: [{ id: 'account-1', status: 'ACTIVE' }] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    const body = await result.json()
+    expect(result.status).toBe(200)
+    expect(body).toMatchObject({ cards: [], restricted: ['cards'], unavailable: [], accounts: [{ id: 'account-1' }] })
+  })
+
+  it('returns no graph facts when a source rejects the bearer', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.includes(':8118/')) return response({ error: 'unauthorized' }, 401)
+      if (url.includes(':8100/')) return response({ data: [{ id: 'account-1' }] })
+      if (url.includes('/notifications') || url.includes('/devices')) return response({ items: [] })
+      return response([])
+    }))
+    const { GET } = await import('@/app/api/customer-360/[partyId]/graph/route')
+    const result = await GET(new Request('http://localhost'), { params: Promise.resolve({ partyId: PARTY }) })
+    expect(result.status).toBe(401)
+    expect(await result.json()).toEqual({ error: 'unauthorized' })
+  })
+
   it('deduplicates simultaneous graph reads from sibling panels', async () => {
     let resolveResponse!: (response: Response) => void
     const fetchMock = vi.fn(() => new Promise<Response>(resolve => { resolveResponse = resolve }))
@@ -179,6 +236,20 @@ describe('Customer graph live overlay route', () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     clearSelectedCustomerGraphFacts(selectedParty)
+  })
+
+  it('rechecks graph access and evidence when selecting the same customer again', async () => {
+    const selectedParty = '66666666-6666-4666-8666-666666666666'
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response({ accounts: [{ id: 'previous-account' }], unavailable: [] }))
+      .mockResolvedValueOnce(new Response(null, { status: 403 }))
+    vi.stubGlobal('fetch', fetchMock)
+    const { selectCustomerGraphFacts } = await import('@/lib/context/customerGraphClient')
+
+    const previous = await selectCustomerGraphFacts(selectedParty)
+    expect(previous.accounts.map(account => account.id)).toEqual(['previous-account'])
+    await expect(selectCustomerGraphFacts(selectedParty)).rejects.toThrow('Graph access denied')
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('does not reuse an in-flight snapshot after leaving a customer selection', async () => {

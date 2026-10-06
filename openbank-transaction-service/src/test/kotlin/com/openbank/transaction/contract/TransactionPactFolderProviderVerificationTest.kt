@@ -24,6 +24,8 @@ import com.openbank.transaction.domain.model.TransactionType
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
+import io.quarkus.test.security.oidc.Claim
+import io.quarkus.test.security.oidc.OidcSecurity
 import io.restassured.module.kotlin.extensions.Given
 import io.restassured.module.kotlin.extensions.Then
 import io.restassured.module.kotlin.extensions.When
@@ -80,13 +82,16 @@ import java.util.UUID
  * changed status code. Do not "fix" it by relaxing the pact: regenerate from the consumer test and
  * read what changed.
  */
+// Test OIDC metadata supplies the domestic source owner for its upgraded request pact.
+// Authorization failures are exercised separately by TransactionSourceOwnershipIT.
 @QuarkusTest
 @QuarkusTestResource(com.openbank.transaction.it.PostgresRedpandaTestResource::class)
-@TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
+@TestSecurity(user = "service-account-openbank-domestic-payment", roles = ["ROLE_API", "ROLE_OPERATOR"])
+@OidcSecurity(claims = [Claim(key = "azp", value = "openbank-domestic-payment")])
 @Provider("openbank-transaction-service")
 @PactFolder("../pacts")
 // Everything EXCEPT the unauthenticated interactions, which class-level @TestSecurity above makes
-// unservable here — they expect 401 and every request this class makes carries an operator
+// unservable here — they expect 401 and every request this class makes carries an authenticated
 // identity. TransactionNegativeAuthPactVerificationTest serves them without @TestSecurity; the two
 // filters are complements built from one literal, so no interaction lands in both or in neither.
 // pact-jvm 4.7.3 matches a filter value against the state name with String.matches (a full-match

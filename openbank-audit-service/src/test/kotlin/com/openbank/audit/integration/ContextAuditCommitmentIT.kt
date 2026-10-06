@@ -47,7 +47,10 @@ class ContextAuditCommitmentIT {
         assertThat(verification.checked).isGreaterThanOrEqualTo(1)
         assertThatThrownBy {
             onEventLoop { consumer.persist(commitment(id, "b".repeat(64))) }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("conflicting audit replay")
+        assertThat(onEventLoop { repository.findByAggregateId(id.toString()) }.map { it.id })
+            .containsExactly(id)
     }
 
     @Test
@@ -67,7 +70,10 @@ class ContextAuditCommitmentIT {
             onEventLoop {
                 consumer.persist(commitment(id, "d".repeat(64), "CONTEXT_DISCLOSURE_COMMITTED", "CONTEXT_DISCLOSURE"))
             }
-        }.isInstanceOf(IllegalArgumentException::class.java)
+        }.isInstanceOf(IllegalStateException::class.java)
+            .hasMessageContaining("conflicting audit replay")
+        assertThat(onEventLoop { repository.findByAggregateId(id.toString()) }.map { it.id })
+            .containsExactly(id)
     }
 
     private fun commitment(

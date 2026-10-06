@@ -5,6 +5,7 @@ import { auth } from '@/auth'
 import { hasPermission } from '@/lib/auth/roles'
 import { contextServiceUrl } from '@/lib/context/server'
 import { parseIncidentImpact } from '@/lib/context/incidentImpact'
+import { readBoundedContextJson } from '@/lib/context/boundedJson'
 
 export const dynamic = 'force-dynamic'
 const SAFE_VALUE = /^[A-Za-z0-9._:-]{1,200}$/
@@ -32,7 +33,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ reference: 
       signal: AbortSignal.timeout(5_000),
     })
     if (!upstream.ok) return NextResponse.json({ error: 'context_unavailable' }, { status: upstream.status < 504 ? upstream.status : 502 })
-    const body = await upstream.json() as unknown
+    const body = await readBoundedContextJson(upstream, 256 * 1024)
     let impact
     try { impact = parseIncidentImpact(body) }
     catch { return NextResponse.json({ error: 'invalid_response' }, { status: 502 }) }

@@ -32,7 +32,7 @@ class DeviceTokenRepository : PanacheRepository<DeviceTokenEntity> {
     fun findActiveByParty(partyId: UUID): Uni<List<DeviceTokenEntity>> =
         find("partyId = ?1 and status = ?2", partyId, "ACTIVE").list()
 
-    /** The optional bounded REST view is ordered so the newest devices remain visible. */
+    /** Complete subject-access list, or a database-bounded newest slice for Customer 360. */
     suspend fun listByParty(partyId: UUID, limit: Int? = null): List<DeviceTokenEntity> = Panache.withSession {
         val query = if (limit == null) {
             find("partyId", partyId)

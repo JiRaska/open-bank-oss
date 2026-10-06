@@ -47,6 +47,9 @@ spec:
               kubernetes.io/metadata.name: campaign
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: context
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: customer-edge
         - namespaceSelector:
             matchLabels:

@@ -1,0 +1,3 @@
+# Zdrojové propojení tuzemské platby
+
+Požadavek na zaúčtování smí nést `originatingPaymentId` jen od autentizovaného servisního účtu domestic-payment se správným klientským claimem, rolí API, tuzemskou platební cestou, debetním typem a zdrojovým účtem. Ostatní volající dostanou 403. ID se uloží k transakci při prvním zápisu. Idempotentní opakování, včetně zotavení po souběžném konfliktu unikátního klíče, odmítne jiné nenulové ID původní platby; starému řádku bez tohoto ID se zdroj zpětně nepřisuzuje. Tím se chrání vazby pro šetření, aniž by neověřená reference účtu znamenala důkaz vlastnictví.

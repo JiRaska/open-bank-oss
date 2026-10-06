@@ -34,6 +34,8 @@ rules_mock := {
 
 operator := {"type": "HUMAN", "id": "u-op", "roles": ["ROLE_OPERATOR"]}
 
+admin := {"type": "HUMAN", "id": "u-admin", "roles": ["ROLE_ADMIN"]}
+
 edge := {"type": "HUMAN", "id": "service-account-openbank-edge", "roles": ["ROLE_OPERATOR"]}
 
 services_m2m := {"type": "HUMAN", "id": "service-account-openbank-services", "roles": ["ROLE_OPERATOR"]}
@@ -84,4 +86,23 @@ test_operator_may_score if {
 test_extension_is_loaded if {
 	"operator-fraud-write" in rest.allowed_reasons with input as {"principal": operator, "action": "fraud.score"}
 		with data.rules as rules_mock
+}
+
+test_human_admin_may_open_read_and_close_case if {
+	every action in {"fraud.case.open", "fraud.case.read", "fraud.case.close"} {
+		decision := rest.allow with input as {"principal": admin, "action": action}
+			with data.rules as rules_mock
+		decision.allow == true
+		"admin-fraud-case" in rest.allowed_reasons with input as {"principal": admin, "action": action}
+			with data.rules as rules_mock
+	}
+}
+
+test_operator_and_m2m_cannot_open_read_or_close_case if {
+	every principal in [operator, edge, services_m2m] {
+		every action in {"fraud.case.open", "fraud.case.read", "fraud.case.close"} {
+			rest.allow == false with input as {"principal": principal, "action": action}
+				with data.rules as rules_mock
+		}
+	}
 }

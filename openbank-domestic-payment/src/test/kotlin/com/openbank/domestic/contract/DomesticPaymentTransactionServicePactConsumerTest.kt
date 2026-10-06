@@ -41,7 +41,9 @@ class DomesticPaymentTransactionServicePactConsumerTest {
           "currencyCode": "CZK",
           "description": "pact contract domestic payment",
           "valueDate": "2026-01-20",
-          "rail": "DOMESTIC"
+          "rail": "DOMESTIC",
+          "instructionType": "ONE_OFF",
+          "originatingPaymentId": "dddddddd-dddd-dddd-dddd-dddddddddddd"
         }
     """.trimIndent()
 
@@ -69,6 +71,34 @@ class DomesticPaymentTransactionServicePactConsumerTest {
             }.build(),
         )
         .toPact()
+
+    /**
+     * The same booking request without a service identity must be rejected before money moves.
+     * This shared provider state routes the interaction to the unauthenticated Pact verifier.
+     */
+    @Pact(consumer = "openbank-domestic-payment", provider = "openbank-transaction-service")
+    fun initiateDomesticTransactionUnauthenticatedPact(builder: PactDslWithProvider): RequestResponsePact = builder
+        .given("no valid M2M identity is presented")
+        .uponReceiving("POST initiate domestic transaction with no credentials")
+        .path("/api/v1/transactions")
+        .method("POST")
+        .headers(mapOf("Content-Type" to "application/json"))
+        .body(requestBody)
+        .willRespondWith()
+        .status(401)
+        .toPact()
+
+    @Test
+    @PactTestFor(pactMethod = "initiateDomesticTransactionUnauthenticatedPact")
+    fun `initiateTransaction without credentials is refused with 401`(mockServer: MockServer) {
+        given()
+            .baseUri(mockServer.getUrl())
+            .contentType("application/json")
+            .body(requestBody)
+            .post("/api/v1/transactions")
+            .then()
+            .statusCode(401)
+    }
 
     @Test
     @PactTestFor(pactMethod = "initiateDomesticTransactionPact")

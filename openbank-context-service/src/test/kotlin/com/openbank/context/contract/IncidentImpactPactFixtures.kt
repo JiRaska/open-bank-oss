@@ -8,7 +8,10 @@ import java.sql.Statement
 import java.util.UUID
 
 class IncidentImpactPactProfile : QuarkusTestProfile {
-    override fun getConfigOverrides() = mapOf("openbank.context.max-edges" to "2")
+    override fun getConfigOverrides() = mapOf(
+        "openbank.context.max-edges" to "2",
+        "openbank.context.lending-source-read-enabled" to "true",
+    )
 }
 
 /** The third edge exceeds the real query limit; no response or repository is mocked. */

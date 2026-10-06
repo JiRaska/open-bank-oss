@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Card Issuance Service API
-  version: 1.10.0
+  version: 1.10.1
   description: Debit/credit card lifecycle — issue, activate, block, suspend, resume, cancel;
     synthetic PAN vault, product-catalog entitlements, and additional-cardholder cards issued
     under a delegation grant (ADR-0249 D1/D2).
@@ -150,7 +150,7 @@ paths:
         - name: limit
           in: query
           required: false
-          description: Return at most this many newest cards; omit for the legacy full list.
+          description: Return at most this many newest cards; omit for the full subject-access list.
           schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':

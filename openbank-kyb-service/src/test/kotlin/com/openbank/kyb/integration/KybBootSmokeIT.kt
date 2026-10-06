@@ -24,6 +24,7 @@ class KybBootSmokeIT {
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
             InMemoryConnector.switchOutgoingChannelsToInMemory("kyb-events-out") +
+                InMemoryConnector.switchOutgoingChannelsToInMemory("kyb-ubo-observation-references-out") +
                 InMemoryConnector.switchIncomingChannelsToInMemory("party-events-in")
 
         override fun stop() = InMemoryConnector.clear()

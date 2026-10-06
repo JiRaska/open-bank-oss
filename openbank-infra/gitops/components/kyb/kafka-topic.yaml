@@ -31,3 +31,21 @@ spec:
   config:
     retention.ms: 1209600000
     cleanup.policy: delete
+---
+# Reference-only KYB ownership observations. No names, birth dates, addresses or free text;
+# KYB retains the durable mapped finding and Context resolves it under case-scoped authorization.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.kyb.ubo-observation-references
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+spec:
+  partitions: 3
+  replicas: 1
+  config:
+    retention.ms: 604800000
+    cleanup.policy: delete

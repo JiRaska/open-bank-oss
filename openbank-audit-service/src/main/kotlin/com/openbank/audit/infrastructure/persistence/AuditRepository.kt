@@ -172,11 +172,14 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 find("entryId", entry.id).firstResult()
             }.flatMap { existing ->
                 if (existing != null) {
-                    if (entry.eventType in CONTEXT_COMMITMENT_EVENT_TYPES) {
-                        require(existing.eventType == entry.eventType && existing.payload == entry.payload) {
-                            "Context audit commitment event ID reused with different evidence"
-                        }
-                    }
+                    check(
+                        existing.payload == entry.payload &&
+                            existing.eventType == entry.eventType &&
+                            existing.aggregateType == entry.aggregateType &&
+                            existing.aggregateId == entry.aggregateId &&
+                            existing.actorId == entry.actorId &&
+                            existing.sourceService == entry.sourceService,
+                    ) { "conflicting audit replay for event ${entry.id}" }
                     Uni.createFrom().voidItem()
                 } else {
                     find("ORDER BY id DESC").page(0, 1).firstResult().flatMap { head ->
@@ -499,12 +502,7 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     )
 
     companion object {
-        private val CONTEXT_COMMITMENT_EVENT_TYPES = setOf(
-            "CONTEXT_READ_AUDIT_COMMITTED",
-            "CONTEXT_DISCLOSURE_COMMITTED",
-        )
         private const val CHAIN_APPEND_LOCK = 913_004_212L
-
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
         private const val CHAIN_PAGE_SIZE = 500
 

@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: Apache-2.0
+# The generated ingress policy has namespace-level edges and includes the legacy
+# plaintext port. This evidence read admits only context-service on mTLS/8443.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: lending-context-graph-https-ingress
+  namespace: lending
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: lending-service
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: context
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: context-service
+      ports:
+        - { protocol: TCP, port: 8443 }

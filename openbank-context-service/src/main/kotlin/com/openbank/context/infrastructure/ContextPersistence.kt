@@ -14,15 +14,17 @@ import com.openbank.context.domain.ContextNode
 import com.openbank.context.domain.DataClassification
 import com.openbank.libs.domain.identifiers.Ids
 import io.quarkus.hibernate.reactive.panache.PanacheEntityBase
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
 import jakarta.persistence.Id
+import jakarta.persistence.IdClass
 import jakarta.persistence.Table
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.hibernate.reactive.mutiny.Mutiny
-import java.time.Duration
+import java.io.Serializable
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
@@ -74,16 +76,29 @@ class ContextNodeEntity : PanacheEntityBase() {
     var sourceVersion: Long = 0
 }
 
+data class ContextEdgeIdentity(
+    var id: UUID? = null,
+    var bankScope: String? = null,
+    var projectionGeneration: Long = 1,
+) : Serializable {
+    private companion object {
+        const val serialVersionUID: Long = 1L
+    }
+}
+
 @Entity
+@IdClass(ContextEdgeIdentity::class)
 @Table(name = "context_edges")
 class ContextEdgeEntity : PanacheEntityBase() {
     @Id
     @Column(name = "edge_id")
     lateinit var id: UUID
 
+    @Id
     @Column(name = "bank_scope")
     lateinit var bankScope: String
 
+    @Id
     @Column(name = "projection_generation")
     var projectionGeneration: Long = 1
 
@@ -248,6 +263,9 @@ class ContextDisclosureCommitmentOutboxEntity : PanacheEntityBase() {
     @Column(name = "attempt_count")
     var attemptCount: Int = 0
 
+    @Column(name = "claim_token")
+    var claimToken: UUID? = null
+
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null
 
@@ -280,6 +298,9 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     @Column(name = "attempt_count")
     var attemptCount: Int = 0
 
+    @Column(name = "claim_token")
+    var claimToken: UUID? = null
+
     @Column(name = "claimed_at")
     var claimedAt: Instant? = null
 
@@ -290,14 +311,24 @@ class ContextAuditCommitmentOutboxEntity : PanacheEntityBase() {
     lateinit var updatedAt: Instant
 }
 
+/** Each operation owns its session; overlapping work must not borrow a context-cached session. */
+internal fun <T> Mutiny.SessionFactory.boundedContextTransaction(
+    timeoutMs: Int,
+    block: (Mutiny.Session) -> Uni<T>,
+): Uni<T> = ContextSqlOperation.execute(this, timeoutMs) { operation -> operation.sql(block) }
+
+/** PostgreSQL bounds each statement; server timeout reaches cleanup without cancelling SQL observation. */
+internal fun <T> Mutiny.SessionFactory.boundedGraphRead(timeoutMs: Int, block: (Mutiny.Session) -> Uni<T>): Uni<T> =
+    boundedContextTransaction(timeoutMs, block)
+
 @ApplicationScoped
 class ContextGraphRepository(
     private val sessions: Mutiny.SessionFactory,
+    private val objectMapper: ObjectMapper,
     @ConfigProperty(name = "openbank.context.bank-scope") private val bankScope: String,
     @ConfigProperty(name = "openbank.context.projection-generation") private val projectionGeneration: Long,
     @ConfigProperty(name = "openbank.context.query-timeout-ms") private val queryTimeoutMs: Int,
 ) : ContextGraphPort {
-    @Suppress("LongMethod") // Every evidence hop has its own remaining-edge bound.
     override suspend fun neighborhood(
         namespace: ContextNamespace,
         root: String,
@@ -305,71 +336,103 @@ class ContextGraphRepository(
         maxNodes: Int,
         maxEdges: Int,
     ): ContextNeighborhood? {
-        val rootNode = findRoot(namespace, root, asOf) ?: return null
-        val firstHop = findRootEdges(namespace, root, asOf, maxEdges + 1)
-        val paymentEvidence = if (namespace == ContextNamespace.COMPLAINT && firstHop.size <= maxEdges) {
-            val transactionKeys = firstHop.filter {
-                it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
-            }.map(ContextEdgeEntity::toKey)
-            findComplaintPaymentEvidenceEdges(transactionKeys, asOf, maxEdges - firstHop.size + 1)
-        } else {
-            emptyList()
+        require(maxNodes in 1..MAX_GRAPH_NODES && maxEdges in 1..MAX_GRAPH_EDGES) {
+            "Graph read limits exceed the approved bounded-query policy"
         }
-        val bookingTransactionKeys = paymentEvidence.filter {
-            it.relationType == BOOKING_REQUESTED
-        }.map(ContextEdgeEntity::toKey)
-        val reversalEvidence = if (firstHop.size + paymentEvidence.size <= maxEdges) {
-            findComplaintBookingEvidenceEdges(
-                bookingTransactionKeys,
-                TRANSACTION_SOURCE,
-                BOOKING_TRANSACTION_PREFIX,
-                REVERSED_BY,
-                asOf,
-                maxEdges - firstHop.size - paymentEvidence.size + 1,
-            )
+        val graphRoot = resolveGraphRoot(namespace, root, asOf, maxEdges + 1) ?: return null
+        val edges = if (namespace == ContextNamespace.COMPLAINT) {
+            findComplaintEvidenceEdges(root, graphRoot.edges, asOf, maxEdges)
         } else {
-            emptyList()
+            graphRoot.edges
         }
-        val ledgerEvidence = if (firstHop.size + paymentEvidence.size + reversalEvidence.size <= maxEdges) {
+        val boundedEdges = edges.take(maxEdges)
+        val keys = graphRoot.boundedKeys(boundedEdges, maxNodes)
+        val nodes = graphRoot.mergeNodes(keys, findNodes(namespace, keys, asOf))
+        val visibleKeys = nodes.map { it.key }.toSet()
+        return ContextNeighborhood(
+            root,
+            nodes.map { it.domain() },
+            boundedEdges.filter { it.fromKey in visibleKeys && it.toKey in visibleKeys }.map { it.domain() },
+            edges.size > maxEdges || nodes.size >= maxNodes || visibleKeys.size < keys.size,
+        )
+    }
+
+    private suspend fun findComplaintEvidenceEdges(
+        root: String,
+        firstHop: List<ContextEdgeEntity>,
+        asOf: Instant,
+        maxEdges: Int,
+    ): List<ContextEdgeEntity> {
+        if (firstHop.size > maxEdges) return firstHop
+        val bookingKeys = firstHop.filter {
+            it.fromKey == root && it.relationType == CONCERNS_TRANSACTION
+        }.map(ContextEdgeEntity::toKey).distinct()
+        val associations = GraphEdgeHistoryReader(
+            sessions,
+            objectMapper,
+            bankScope,
+            projectionGeneration,
+            queryTimeoutMs,
+        ).find(
+            bookingKeys,
+            listOf(GraphEdgeRule(TRANSACTION_SOURCE, "transaction:%", setOf(BOOKING_REQUESTED))),
+            asOf,
+            maxEdges - firstHop.size + 1,
+            incoming = true,
+        )
+        val edges = (firstHop + associations).toMutableList()
+        // History reads with a nonpositive remaining bound return without issuing SQL.
+        val paymentEvidence = findComplaintPaymentEvidenceEdges(
+            associations.map(ContextEdgeEntity::fromKey).distinct(),
+            asOf,
+            maxEdges - edges.size + 1,
+        )
+        edges.addAll(paymentEvidence)
+        val reversalEvidence = findComplaintBookingEvidenceEdges(
+            bookingKeys,
+            TRANSACTION_SOURCE,
+            BOOKING_TRANSACTION_PREFIX,
+            REVERSED_BY,
+            asOf,
+            maxEdges - edges.size + 1,
+        )
+        edges.addAll(reversalEvidence)
+        edges.addAll(
             findComplaintBookingEvidenceEdges(
-                bookingTransactionKeys + reversalEvidence.map(ContextEdgeEntity::toKey),
+                bookingKeys + reversalEvidence.map(ContextEdgeEntity::toKey),
                 LEDGER_SOURCE,
                 LEDGER_BOOKING_PREFIX,
                 BOOKED_AS,
                 asOf,
-                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size + 1,
-            )
-        } else {
-            emptyList()
-        }
-        val clearingEvidence = if (
-            firstHop.size + paymentEvidence.size + reversalEvidence.size + ledgerEvidence.size <= maxEdges
-        ) {
-            val clearingItemKeys = paymentEvidence.filter {
-                it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
-            }.map(ContextEdgeEntity::toKey)
-            findComplaintClearingEvidenceEdges(
-                clearingItemKeys,
-                asOf,
-                maxEdges - firstHop.size - paymentEvidence.size - reversalEvidence.size - ledgerEvidence.size + 1,
-            )
-        } else {
-            emptyList()
-        }
-        val edges = firstHop + paymentEvidence + reversalEvidence + ledgerEvidence + clearingEvidence
-        val boundedEdges = edges.take(maxEdges)
-        val keys = (boundedEdges.flatMap { listOf(it.fromKey, it.toKey) } + rootNode.key).distinct().take(maxNodes)
-        val nodes = findNodes(namespace, keys, asOf)
-        return ContextNeighborhood(
-            root,
-            nodes.map { it.domain() },
-            boundedEdges.filter { it.fromKey in keys && it.toKey in keys }.map { it.domain() },
-            edges.size > maxEdges || nodes.size >= maxNodes,
+                maxEdges - edges.size + 1,
+            ),
         )
+        val clearingKeys = paymentEvidence.filter {
+            it.relationType == SUBMITTED_TO && it.sourceSystem == CLEARING_SOURCE
+        }.map(ContextEdgeEntity::toKey)
+        val reader = GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs)
+        val clearingRules = listOf(GraphEdgeRule(CLEARING_SOURCE, CLEARING_EVIDENCE_PREFIX, setOf(SETTLED)))
+        edges.addAll(reader.find(clearingKeys, clearingRules, asOf, maxEdges - edges.size + 1))
+        return edges
+    }
+
+    private suspend fun resolveGraphRoot(
+        namespace: ContextNamespace,
+        root: String,
+        asOf: Instant,
+        edgeLimit: Int,
+    ): GraphNeighborhoodRoot? {
+        if (namespace == ContextNamespace.COMPLAINT) {
+            val snapshot = ComplaintSnapshotReader(sessions, bankScope, projectionGeneration, queryTimeoutMs)
+                .find(root, asOf) ?: return null
+            return GraphNeighborhoodRoot(snapshot.root.key, snapshot.edges, snapshot)
+        }
+        val rootNode = findRoot(namespace, root, asOf) ?: return null
+        return GraphNeighborhoodRoot(rootNode.key, findRootEdges(namespace, root, asOf, edgeLimit))
     }
 
     private suspend fun findRoot(namespace: ContextNamespace, root: String, asOf: Instant): ContextNodeEntity? =
-        sessions.withSession { session ->
+        sessions.boundedGraphRead(queryTimeoutMs) { session ->
             session.createQuery(
                 "from ContextNodeEntity where key = :root and bankScope = :bankScope and " +
                     "projectionGeneration = :generation and namespace = :namespace and validFrom <= :asOf and " +
@@ -378,65 +441,38 @@ class ContextGraphRepository(
             ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
                 .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
                 .setParameter("root", root).singleResultOrNull
-        }.bounded().awaitSuspending()
+        }.awaitSuspending()
 
     private suspend fun findRootEdges(
         namespace: ContextNamespace,
         root: String,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> = sessions.withSession { session ->
-        session.createQuery(
-            "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                "namespace = :namespace and (fromKey = :root or toKey = :root) and validFrom <= :asOf and " +
-                "(validTo is null or validTo > :asOf) order by recordedAt desc",
+    ): List<ContextEdgeEntity> = sessions.boundedGraphRead(queryTimeoutMs) { session ->
+        session.createNativeQuery(
+            ROOT_EDGES_SQL,
             ContextEdgeEntity::class.java,
         ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
             .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
-            .setParameter("root", root).setMaxResults(limit).resultList
-    }.bounded().awaitSuspending()
+            .setParameter("root", root).setParameter("limit", limit).resultList
+    }.awaitSuspending()
 
     private suspend fun findComplaintPaymentEvidenceEdges(
         transactionKeys: List<String>,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (transactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and fromKey in (:keys) and " +
-                    "((sourceSystem = :domesticSource and toKey like :stagePrefix and " +
-                    "relationType in (:lifecycleRelations)) or " +
-                    "(sourceSystem = :transactionSource and toKey like :transactionPrefix and " +
-                    "relationType = :bookingRequested) or " +
-                    "(sourceSystem = :clearingSource and toKey like :clearingItemPrefix and " +
-                    "relationType = :submittedTo) or " +
-                    "(sourceSystem = :sepaSource and toKey like :returnPrefix and " +
-                    "relationType = :returnedBy) or " +
-                    "(sourceSystem = :sepaSource and toKey like :reversalPrefix and " +
-                    "relationType = :reversedBy)) and " +
-                    "validFrom <= :asOf and (validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("domesticSource", DOMESTIC_PAYMENT_SOURCE)
-                .setParameter("transactionSource", TRANSACTION_SOURCE)
-                .setParameter("clearingSource", CLEARING_SOURCE)
-                .setParameter("sepaSource", SEPA_SOURCE)
-                .setParameter("stagePrefix", PAYMENT_STAGE_PREFIX)
-                .setParameter("transactionPrefix", BOOKING_TRANSACTION_PREFIX)
-                .setParameter("bookingRequested", BOOKING_REQUESTED)
-                .setParameter("clearingItemPrefix", CLEARING_ITEM_PREFIX)
-                .setParameter("submittedTo", SUBMITTED_TO)
-                .setParameter("returnPrefix", RETURN_EVIDENCE_PREFIX)
-                .setParameter("returnedBy", RETURNED_BY)
-                .setParameter("reversalPrefix", REVERSAL_TRANSACTION_PREFIX)
-                .setParameter("reversedBy", REVERSED_BY)
-                .setParameter("keys", transactionKeys)
-                .setParameter("lifecycleRelations", COMPLAINT_LIFECYCLE_RELATIONS)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
-    }
+    ): List<ContextEdgeEntity> =
+        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
+            transactionKeys,
+            listOf(
+                GraphEdgeRule(DOMESTIC_PAYMENT_SOURCE, PAYMENT_STAGE_PREFIX, COMPLAINT_LIFECYCLE_RELATIONS.toSet()),
+                GraphEdgeRule(CLEARING_SOURCE, CLEARING_ITEM_PREFIX, setOf(SUBMITTED_TO)),
+                GraphEdgeRule(SEPA_SOURCE, RETURN_EVIDENCE_PREFIX, setOf(RETURNED_BY)),
+                GraphEdgeRule(SEPA_SOURCE, REVERSAL_TRANSACTION_PREFIX, setOf(REVERSED_BY)),
+            ),
+            asOf,
+            limit,
+        )
 
     private suspend fun findComplaintBookingEvidenceEdges(
         bookingTransactionKeys: List<String>,
@@ -445,61 +481,58 @@ class ContextGraphRepository(
         relation: String,
         asOf: Instant,
         limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (bookingTransactionKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
-                    "toKey like :bookingPrefix and relationType = :relation and validFrom <= :asOf and " +
-                    "(validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", source).setParameter("keys", bookingTransactionKeys)
-                .setParameter("bookingPrefix", toPrefix).setParameter("relation", relation)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
-    }
-
-    private suspend fun findComplaintClearingEvidenceEdges(
-        clearingItemKeys: List<String>,
-        asOf: Instant,
-        limit: Int,
-    ): List<ContextEdgeEntity> {
-        if (clearingItemKeys.isEmpty() || limit <= 0) return emptyList()
-        return sessions.withSession { session ->
-            session.createQuery(
-                "from ContextEdgeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                    "namespace = 'COMPLAINT' and sourceSystem = :source and fromKey in (:keys) and " +
-                    "toKey like :evidencePrefix and relationType = :relation and validFrom <= :asOf and " +
-                    "(validTo is null or validTo > :asOf) order by validFrom asc",
-                ContextEdgeEntity::class.java,
-            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-                .setParameter("source", CLEARING_SOURCE).setParameter("keys", clearingItemKeys)
-                .setParameter("evidencePrefix", CLEARING_EVIDENCE_PREFIX).setParameter("relation", SETTLED)
-                .setParameter("asOf", asOf).setMaxResults(limit).resultList
-        }.bounded().awaitSuspending()
-    }
+    ): List<ContextEdgeEntity> =
+        GraphEdgeHistoryReader(sessions, objectMapper, bankScope, projectionGeneration, queryTimeoutMs).find(
+            bookingTransactionKeys,
+            listOf(GraphEdgeRule(source, toPrefix, setOf(relation))),
+            asOf,
+            limit,
+        )
 
     private suspend fun findNodes(
         namespace: ContextNamespace,
         keys: List<String>,
         asOf: Instant,
-    ): List<ContextNodeEntity> = sessions.withSession { session ->
-        session.createQuery(
-            "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
-                "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
-                "(validTo is null or validTo > :asOf)",
-            ContextNodeEntity::class.java,
-        ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
-            .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
-            .setParameter("keys", keys).resultList
-    }.bounded().awaitSuspending()
-
-    private fun <T> io.smallrye.mutiny.Uni<T>.bounded(): io.smallrye.mutiny.Uni<T> =
-        ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail()
+    ): List<ContextNodeEntity> {
+        if (namespace == ContextNamespace.COMPLAINT) {
+            return GraphNodeHistoryReader(sessions, bankScope, projectionGeneration, queryTimeoutMs, objectMapper)
+                .find(keys, asOf)
+        }
+        return sessions.boundedGraphRead(queryTimeoutMs) { session ->
+            session.createQuery(
+                "from ContextNodeEntity where bankScope = :bankScope and projectionGeneration = :generation and " +
+                    "namespace = :namespace and key in (:keys) and validFrom <= :asOf and " +
+                    "(validTo is null or validTo > :asOf)",
+                ContextNodeEntity::class.java,
+            ).setParameter("bankScope", bankScope).setParameter("generation", projectionGeneration)
+                .setParameter("namespace", namespace.name).setParameter("asOf", asOf)
+                .setParameter("keys", keys).resultList
+        }.awaitSuspending()
+    }
 
     private companion object {
+        // Keep each direction index-ordered and bounded before merging. The previous OR predicate
+        // scanned and sorted every edge of a high-degree root before applying the result limit.
+        const val ROOT_EDGE_COLUMNS = "e.edge_id, e.bank_scope, e.projection_generation, e.namespace, " +
+            "e.from_key, e.to_key, e.relation_type, e.source_system, e.evidence_ref, e.valid_from, " +
+            "e.valid_to, e.recorded_at, e.source_version"
+        val ROOT_EDGES_SQL = """
+            SELECT * FROM (
+                (SELECT $ROOT_EDGE_COLUMNS FROM context_edges e
+                 WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
+                   AND e.namespace = :namespace AND e.from_key = :root
+                   AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
+                 ORDER BY e.recorded_at DESC, e.edge_id LIMIT :limit)
+                UNION ALL
+                (SELECT $ROOT_EDGE_COLUMNS FROM context_edges e
+                 WHERE e.bank_scope = :bankScope AND e.projection_generation = :generation
+                   AND e.namespace = :namespace AND e.to_key = :root AND e.from_key <> :root
+                   AND e.valid_from <= :asOf AND (e.valid_to IS NULL OR e.valid_to > :asOf)
+                 ORDER BY e.recorded_at DESC, e.edge_id LIMIT :limit)
+            ) candidates ORDER BY recorded_at DESC, edge_id LIMIT :limit
+        """.trimIndent()
+        const val MAX_GRAPH_NODES = 100
+        const val MAX_GRAPH_EDGES = 200
         const val CONCERNS_TRANSACTION = "CONCERNS_TRANSACTION"
         const val DOMESTIC_PAYMENT_SOURCE = "domestic-payment"
         const val TRANSACTION_SOURCE = "transaction-service"
@@ -564,7 +597,7 @@ class CaseAssignmentRepository(
         purpose: String,
         root: String,
         at: Instant,
-    ): Boolean = sessions.withSession { session ->
+    ): Boolean = sessions.boundedContextTransaction(queryTimeoutMs) { session ->
         session.createQuery(
             "select count(a) from CaseAssignmentEntity a where bankScope = :bankScope and principalId = :principal " +
                 "and caseId = :caseId and purpose = :purpose and rootRef = :root and validFrom <= :at and validTo > :at",
@@ -572,7 +605,7 @@ class CaseAssignmentRepository(
         ).setParameter("bankScope", bankScope).setParameter("principal", principalId)
             .setParameter("caseId", caseId).setParameter("purpose", purpose).setParameter("root", root)
             .setParameter("at", at).singleResult
-    }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending() > 0
+    }.awaitSuspending() > 0
 }
 
 @ApplicationScoped
@@ -608,13 +641,14 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.withTransaction { session, _ ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult
-                .flatMap { session.persist(entity) }
-                .flatMap { session.persist(commitment) }
-        }
-            .ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+        ContextSqlOperation.execute(sessions, queryTimeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { operation.sql { session -> session.persist(entity) } }
+                .flatMap { operation.sql { session -> session.persist(commitment) } }
+                .flatMap { operation.sql { session -> session.flush() } }
+        }.awaitSuspending()
     }
 
     override suspend fun recordDisclosure(entry: ContextDisclosureAudit) {
@@ -637,11 +671,13 @@ class ContextReadAuditRepository(
             status = "PENDING"
             updatedAt = entity.occurredAt
         }
-        sessions.withTransaction { session, _ ->
-            session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
-                .setParameter("bank", bankScope).singleResult
-                .flatMap { session.persist(entity) }
-                .flatMap { session.persist(commitment) }
-        }.ifNoItem().after(Duration.ofMillis(queryTimeoutMs.toLong())).fail().awaitSuspending()
+        ContextSqlOperation.execute(sessions, queryTimeoutMs) { operation ->
+            operation.sql { session ->
+                session.createNativeQuery("select set_config('openbank.bank_scope', :bank, true)", String::class.java)
+                    .setParameter("bank", bankScope).singleResult
+            }.flatMap { operation.sql { session -> session.persist(entity) } }
+                .flatMap { operation.sql { session -> session.persist(commitment) } }
+                .flatMap { operation.sql { session -> session.flush() } }
+        }.awaitSuspending()
     }
 }

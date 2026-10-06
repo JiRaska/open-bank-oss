@@ -1,0 +1,3 @@
+# Domestic payment source correlation
+
+An initiation request may carry `originatingPaymentId` only from the authenticated domestic-payment service account, with the expected client claim, API role, domestic rail, debit type and source account. Other callers receive 403. The ID is stored with the transaction at initial booking. Idempotent replay, including recovery from a concurrent uniqueness conflict, rejects a different non-null originating payment ID; a legacy row without that ID is not retroactively attributed to a source. This protects investigation links without turning an unverified account reference into ownership evidence.

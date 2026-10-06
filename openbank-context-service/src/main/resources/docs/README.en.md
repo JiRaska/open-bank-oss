@@ -1,0 +1,13 @@
+# Context: KYB ownership references
+
+Context consumes the dedicated `openbank.kyb.ubo-observation-references` topic and stores a bounded, bank-scoped index of KYB observation references. The payload is deliberately small: case and observation IDs, revision, event identity, source digest and time. Names and beneficial-owner details stay in KYB. The consumer checks topic, Kafka key, identity headers and payload shape before acknowledging; malformed messages are nacked to the channel's dedicated DLQ.
+
+`GET /api/v1/context/kyb-cases/{id}/access` gives KYB a data-free authorization answer. `GET /api/v1/context/kyb-cases/{id}/ownership-observations` returns only references. Both require a KYC/admin role, a case ID matching the path, purpose `KYB_OWNERSHIP_REVIEW`, current case authorization and read/disclosure audit. Denial returns 403 and unavailable authorization 503. A historical `knownAt` must be RFC 3339 and no later than now; it does not bypass the current authorization check. Responses carry `Cache-Control: no-store`.
+
+A KYB restriction event records an append-only tombstone in `context_kyb_observation_restrictions` (Flyway V13). History excludes restricted references regardless of arrival order. Retain tombstones while their original references exist: deleting a tombstone would expose evidence that KYB restricted. Context never authorizes source-owner detail by itself; the exact KYB detail endpoint performs its own current assignment, purpose, policy and read-audit checks. See [`openapi.yaml`](../openapi.yaml) for the API contract.
+
+## Other investigation lenses
+
+The Fraud lens asks the Fraud source for matches only among bounded, currently assigned candidate cases. Every case disclosed to an investigator passes a fresh role, purpose, exact-root assignment and policy check with read/disclosure audit. Shared account or counterparty references are leads, not ownership claims. Customer 360 reads bounded recent cards, devices and lending applications from their owning services; a source outage does not turn unattributed projection data into verified live facts.
+
+Complaint history retains immutable source graph-input revisions so an event-time `asOf` read can reconstruct a bounded payment/rail/booking path after a correction. It still requires current authorization, and missing pre-migration history is reported as missing rather than invented. The Lending guarantee lens is default-off (`openbank.context.lending-source-read-enabled=false`); enable it only after its source dependency, mTLS path and access/performance evidence are deployed and verified. Neither lens grants a general right to enumerate source cases.

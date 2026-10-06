@@ -38,7 +38,9 @@ export function DevicesPanel({ partyId }: { partyId: string }) {
     ;(async () => {
       try {
         const facts = await loadCustomerGraphFacts(partyId)
-        if (live) setState(facts.unavailable.includes('devices')
+        if (live) setState(facts.restricted?.includes('devices')
+          ? { kind: 'unknown', why: 'unauthorized' }
+          : facts.unavailable.includes('devices')
           ? { kind: 'unknown', why: 'unreachable' }
           : { kind: 'ok', devices: facts.devices })
       } catch {

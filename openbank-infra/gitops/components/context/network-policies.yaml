@@ -47,6 +47,12 @@ spec:
               kubernetes.io/metadata.name: lending
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: fraud
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kyb
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP

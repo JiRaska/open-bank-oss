@@ -1,0 +1,26 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+# See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+#
+# Materialises the openbank-ca chain in the KYB namespace. The pod mounts only ca.crt;
+# the generated key is never exposed to the workload. This trusts Context's DNS-bound TLS cert.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: kyb-context-trust
+  namespace: kyb
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  secretName: kyb-context-trust
+  duration: 2160h
+  renewBefore: 360h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  dnsNames:
+    - kyb-service.kyb.svc
+  issuerRef:
+    name: openbank-ca
+    kind: ClusterIssuer
+    group: cert-manager.io

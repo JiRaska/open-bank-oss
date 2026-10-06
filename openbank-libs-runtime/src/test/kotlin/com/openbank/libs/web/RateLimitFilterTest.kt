@@ -16,9 +16,16 @@ import org.junit.jupiter.api.Test
 
 class RateLimitFilterTest {
 
-    private fun requestFor(path: String): ContainerRequestContext {
-        val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns path }
-        return mockk(relaxed = true) { every { this@mockk.uriInfo } returns uriInfo }
+    private fun requestFor(requestedPath: String): ContainerRequestContext {
+        val uriInfo = mockk<UriInfo> { every { this@mockk.path } returns requestedPath }
+        val requestProperties = mutableMapOf<String, Any>()
+        return mockk(relaxed = true) {
+            every { this@mockk.uriInfo } returns uriInfo
+            every { this@mockk.setProperty(any(), any()) } answers {
+                requestProperties[firstArg<String>()] = secondArg()
+            }
+            every { this@mockk.getProperty(any()) } answers { requestProperties[firstArg<String>()] }
+        }
     }
 
     @Test
@@ -53,7 +60,7 @@ class RateLimitFilterTest {
         filter.filter(req)
 
         verify(exactly = 0) { req.abortWith(any()) }
-        verify { req.setProperty("rate-limit-acquired", true) }
+        verify { req.setProperty("rate-limit-acquired", any()) }
     }
 
     @Test
@@ -80,10 +87,10 @@ class RateLimitFilterTest {
         val filter = RateLimitFilter(maxConcurrent = 3, enabled = true)
         val req = requestFor("/api/v1/accounts")
         filter.filter(req)
-        every { req.getProperty("rate-limit-acquired") } returns true
 
         val headers = MultivaluedHashMap<String, Any>()
         val resp = mockk<ContainerResponseContext> { every { this@mockk.headers } returns headers }
+        filter.filter(req, resp)
         filter.filter(req, resp)
 
         assertThat(headers.getFirst("X-RateLimit-Limit")).isEqualTo(3)

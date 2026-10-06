@@ -6,6 +6,7 @@ package com.openbank.kyb.domain.model
 
 import java.time.Instant
 import java.time.LocalDate
+import java.util.UUID
 
 /**
  * Where a beneficial-owner statement came from. This is NOT a quality score — it is the question an
@@ -101,3 +102,33 @@ data class UboFinding(
     /** Owners at or above the jurisdiction threshold. An unquantified control counts — it is not evidence of a small stake. */
     val reportableOwners: List<BeneficialOwner> get() = owners.filter { it.band != OwnershipBand.BELOW_THRESHOLD }
 }
+
+/** A mapped source answer recorded for one onboarding case; revisions are local to that case. */
+data class UboObservation(
+    val id: UUID,
+    val caseId: UUID,
+    val revision: Long,
+    val finding: UboFinding,
+    /** SHA-256 of KYB's serialized mapped finding, not of the upstream register response. */
+    val sourceSha256: String,
+    val recordedAt: Instant,
+    /** Set only for a reviewed correction, never inferred from a later register observation. */
+    val supersedesObservationId: UUID? = null,
+)
+
+/** An explicit proposal to correct the mapped finding of one case observation. */
+enum class UboCorrectionStatus { PENDING, APPROVED, REJECTED }
+
+data class UboCorrection(
+    val id: UUID,
+    val caseId: UUID,
+    val priorObservationId: UUID,
+    val candidate: UboFinding,
+    val candidateSha256: String,
+    val reasonCode: String,
+    val proposedBy: String,
+    val proposedAt: Instant,
+    val status: UboCorrectionStatus,
+    val decidedBy: String?,
+    val decidedAt: Instant?,
+)

@@ -21,10 +21,7 @@ package openbank.rest
 
 import rego.v1
 
-# Operators and admins may perform ANY fraud operation — the ops console path
-# (manual re-score of a payment intent while investigating an alert; future
-# rule-management endpoints inherit the same gate before getting their own
-# narrower reasons).
+# Operators and admins may score a payment intent while investigating an alert.
 #
 # The `service-account-` exclusion IS the load-bearing part of this rule (#3734):
 # the realm grants ROLE_OPERATOR to BOTH M2M clients — `openbank-services` (shared
@@ -42,7 +39,28 @@ allowed_reasons contains "operator-fraud-write" if {
 	some role in {"ROLE_OPERATOR", "ROLE_ADMIN"}
 	role in input.principal.roles
 	not startswith(input.principal.id, "service-account-")
-	startswith(input.action, "fraud.")
+    input.action == "fraud.score"
+}
+
+case_actions := {"fraud.case.open", "fraud.case.read", "fraud.case.close"}
+
+human_case_admin if {
+    input.principal.type == "HUMAN"
+    "ROLE_ADMIN" in input.principal.roles
+    not startswith(input.principal.id, "service-account-")
+}
+
+allowed_reasons contains "admin-fraud-case" if {
+    input.action in case_actions
+    human_case_admin
+}
+
+# Base read/matrix rules can grant these actions independently of this extension.
+# Veto all three unless the caller is a human admin, including shared M2M identities
+# that Keycloak classifies as HUMAN and grants ROLE_OPERATOR.
+prohibited if {
+    input.action in case_actions
+    not human_case_admin
 }
 
 # M2M payment surfaces calling the real-time scoring gate: fx-service invokes

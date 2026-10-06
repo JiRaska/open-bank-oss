@@ -4,7 +4,6 @@ package com.openbank.context.integration
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.context.application.ContextReadAudit
 import com.openbank.context.application.ContextReadAuditPort
-import com.openbank.context.infrastructure.ContextAuditCommitmentRelay
 import com.openbank.libs.testing.containers.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.ResourceArg
@@ -37,8 +36,6 @@ import java.util.UUID
 class ContextAuditCommitmentRelayIT {
     @Inject lateinit var audit: ContextReadAuditPort
 
-    @Inject lateinit var relay: ContextAuditCommitmentRelay
-
     @Inject lateinit var mapper: ObjectMapper
 
     @Inject
@@ -46,7 +43,7 @@ class ContextAuditCommitmentRelayIT {
     lateinit var connector: InMemoryConnector
 
     @Test
-    fun `committed read audit relays only a digest and marks the row sent`() {
+    fun `real scheduler relays committed read audit only as a digest and marks the row sent`() {
         val caseId = "case-${UUID.randomUUID()}"
         val root = "complaint:${UUID.randomUUID()}"
         onEventLoop {
@@ -63,9 +60,9 @@ class ContextAuditCommitmentRelayIT {
                     occurredAt = Instant.parse("2026-09-18T12:00:00.123456789Z"),
                 ),
             )
-            relay.dispatch()
         }
 
+        awaitScheduledPublication()
         val messages = connector.sink<String>("context-audit-commitments-out").received()
         assertThat(messages).hasSize(1)
         val message = messages.single() as Message<String>
@@ -85,6 +82,10 @@ class ContextAuditCommitmentRelayIT {
         val id = UUID.fromString(node.path("eventId").asText())
         assertThat(message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow().key)
             .isEqualTo(id.toString())
+        assertEventuallySent(id)
+    }
+
+    private fun assertEventuallySent(id: UUID) {
         DriverManager.getConnection(
             ConfigProvider.getConfig().getValue("quarkus.datasource.jdbc.url", String::class.java),
             ConfigProvider.getConfig().getValue("quarkus.datasource.username", String::class.java),
@@ -94,12 +95,31 @@ class ContextAuditCommitmentRelayIT {
                 "SELECT status, attempt_count FROM context_audit_commitment_outbox WHERE audit_id = ?",
             ).use { statement ->
                 statement.setObject(1, id)
+                awaitSentStatus(statement)
                 statement.executeQuery().use { rows ->
                     assertThat(rows.next()).isTrue()
                     assertThat(rows.getString("status")).isEqualTo("SENT")
                     assertThat(rows.getInt("attempt_count")).isEqualTo(1)
                 }
             }
+        }
+    }
+
+    private fun awaitSentStatus(statement: java.sql.PreparedStatement) {
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10)
+        var sent = false
+        while (!sent && System.nanoTime() < deadline) {
+            sent = statement.executeQuery().use { rows -> rows.next() && rows.getString("status") == "SENT" }
+            if (!sent) Thread.sleep(50)
+        }
+    }
+
+    private fun awaitScheduledPublication() {
+        val deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20)
+        while (connector.sink<String>("context-audit-commitments-out").received().isEmpty() &&
+            System.nanoTime() < deadline
+        ) {
+            Thread.sleep(100)
         }
     }
 
@@ -110,6 +130,6 @@ class ContextAuditCommitmentRelayIT {
 class ContextAuditExportProfile : QuarkusTestProfile {
     override fun getConfigOverrides(): Map<String, String> = mapOf(
         "openbank.context.audit-export.enabled" to "true",
-        "quarkus.scheduler.enabled" to "false",
+        "quarkus.scheduler.enabled" to "true",
     )
 }

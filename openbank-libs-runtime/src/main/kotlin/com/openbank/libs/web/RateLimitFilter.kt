@@ -11,7 +11,9 @@ import jakarta.ws.rs.container.ContainerResponseFilter
 import jakarta.ws.rs.core.Response
 import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.config.inject.ConfigProperty
+import org.jboss.resteasy.reactive.server.spi.ResteasyReactiveContainerRequestContext
 import java.util.concurrent.Semaphore
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 @Provider
@@ -48,16 +50,33 @@ class RateLimitFilter(
             return
         }
         activeRequests.incrementAndGet()
-        ctx.setProperty("rate-limit-acquired", true)
+        val lease = PermitLease()
+        ctx.setProperty("rate-limit-acquired", lease)
+        if (ctx is ResteasyReactiveContainerRequestContext) {
+            val server = ctx.serverRequestContext
+            server.registerCompletionCallback { lease.release() }
+            server.serverResponse().addCloseHandler { lease.release() }
+        }
     }
 
     override fun filter(req: ContainerRequestContext, resp: ContainerResponseContext) {
-        if (req.getProperty("rate-limit-acquired") == true) {
-            semaphore.release()
+        val lease = req.getProperty("rate-limit-acquired") as? PermitLease
+        if (lease != null) {
+            lease.release()
             val remaining = semaphore.availablePermits()
-            activeRequests.decrementAndGet()
             resp.headers.putSingle("X-RateLimit-Limit", maxConcurrent)
             resp.headers.putSingle("X-RateLimit-Remaining", remaining)
+        }
+    }
+
+    private inner class PermitLease {
+        private val released = AtomicBoolean(false)
+
+        fun release() {
+            if (released.compareAndSet(false, true)) {
+                semaphore.release()
+                activeRequests.decrementAndGet()
+            }
         }
     }
 }
