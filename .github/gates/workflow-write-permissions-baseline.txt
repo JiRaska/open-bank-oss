@@ -4,9 +4,9 @@ admin-ui-deploy.yml|job:build-push|contents
 admin-ui-deploy.yml|job:build-push|id-token
 admin-ui-deploy.yml|job:build-push|pull-requests
 agent-review.yml|job:review|pull-requests
-alert-rca-weekly.yml|job:review|contents
-alert-rca-weekly.yml|job:review|issues
-alert-rca-weekly.yml|job:review|pull-requests
+alert-rca-weekly.yml|job:publish|contents
+alert-rca-weekly.yml|job:publish|issues
+alert-rca-weekly.yml|job:publish|pull-requests
 api-contract-post-merge.yml|job:raise-issue|issues
 auto-deploy-red-watch.yml|job:watch|issues
 auto-deploy.yml|job:build-push|contents
