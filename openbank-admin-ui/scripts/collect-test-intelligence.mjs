@@ -678,7 +678,11 @@ function mutationComponents() {
   const fixedComponents = [...workflow.matchAll(
     /--mutation-report\s+["']?(openbank-[a-z0-9-]+)\/build\/reports\/pitest\/mutations\.xml["']?/g,
   )].map(match => match[1])
-  return new Set([...matrixComponents, ...fixedComponents])
+  // A fixed lane can report on a narrower target than its Gradle module. In
+  // particular, authz and advisory libs-runtime PIT publish separate verdicts.
+  const fixedLaneComponents = [...workflow.matchAll(/--service\s+["'](openbank-[a-z0-9-]+)["']/g)]
+    .map(match => match[1])
+  return new Set([...matrixComponents, ...fixedComponents, ...fixedLaneComponents])
 }
 
 function platformCapabilities() {
