@@ -473,9 +473,9 @@ gates:
       a deploy PR's auto-merge is armed and carries pending pins into the newest PR. The failure
       it must never introduce is a built image that nothing pins, or a pin that rewinds a
       service; the self-test proves both (two pushes in one window -> one PR pins both, a moved
-      service is not rewound, workflow_dispatch is never delayed, nothing pending -> no PR). The
-      script only runs inside the deploy workflows against live PRs, so this is where it can go
-      red before it acts.
+      service is not rewound, a matching manual deploy bypasses the time window without arming a
+      second PR, nothing pending -> no PR). The script runs in the deploy workflows and flusher
+      against live PRs, so this is where it can go red before it acts.
     review_after: "2027-03-30"
     budget_seconds: 15
     run: |

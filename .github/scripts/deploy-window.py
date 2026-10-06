@@ -16,6 +16,7 @@ moment a deploy PR's auto-merge is ARMED does:
                 deploy workflow completes and on a short recovery cron. Picks the OLDEST deferred
                 deploy PR once the window has elapsed and nothing is armed. The caller re-runs
                 supersede-deploy-prs.sh (ancestry + coverage) on it before arming.
+                A successful manual producer run expedites only its matching PR.
   * `carry`   — called by auto-deploy.yml's rewrite step. Re-applies the image pins of every
                 open, UNARMED older gitops deploy PR onto the new PR, so the newest PR covers
                 every pending service and supersede-deploy-prs.sh closes the older ones. That
@@ -50,10 +51,10 @@ PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<ta
 
 
 def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, window: int) -> tuple[str, str]:
-    if event == "workflow_dispatch":
-        return "ARM", "manual workflow_dispatch deploys immediately"
     if armed_open:
         return "DEFER", "a deploy PR is already armed; this one waits for the next window"
+    if event == "workflow_dispatch":
+        return "ARM", "manual workflow_dispatch deploys immediately"
     if last_deploy is None:
         return "ARM", "no recent deploy commit on main"
     age = now - last_deploy
@@ -62,7 +63,30 @@ def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, wind
     return "DEFER", f"last deploy commit is {age}s old, window {window}s — flush arms it at {last_deploy + window}"
 
 
-def flush(prs: list[dict], now: int, last_deploy: int | None, window: int) -> dict | None:
+def manual_deploy_head(event: dict) -> str | None:
+    """Identify only a successful manual producer run from GitHub's workflow_run event."""
+    run = event.get("workflow_run") or {}
+    producers = {
+        "Auto deploy": (".github/workflows/auto-deploy.yml", DEPLOY_PREFIXES[0]),
+        "Admin-UI deploy": (".github/workflows/admin-ui-deploy.yml", DEPLOY_PREFIXES[1]),
+    }
+    producer = producers.get(run.get("name"))
+    # Match the exact canonical file path; a different workflow can reuse the display name.
+    # Auto deploy also supports workflow_dispatch from a recovery ref.
+    path = run.get("path")
+    sha = run.get("head_sha") or ""
+    repository = (event.get("repository") or {}).get("full_name")
+    if (event.get("action") != "completed" or run.get("event") != "workflow_dispatch"
+            or run.get("conclusion") != "success" or not producer or path != producer[0]
+            or not repository
+            or not re.fullmatch(r"[0-9a-f]{40}", sha)
+            or (run.get("head_repository") or {}).get("full_name") != repository):
+        return None
+    return producer[1] + sha
+
+
+def flush(prs: list[dict], now: int, last_deploy: int | None, window: int,
+          manual_head: str | None = None) -> dict | None:
     """Return the deferred PR to arm now, or None. prs: [{number, head, created_at, armed}]."""
     deploy = [p for p in prs if p["head"].startswith(DEPLOY_PREFIXES)]
     if any(p.get("armed") for p in deploy):
@@ -70,6 +94,15 @@ def flush(prs: list[dict], now: int, last_deploy: int | None, window: int) -> di
     pending = sorted((p for p in deploy if not p.get("armed")), key=lambda p: (p["created_at"], p["number"]))
     if not pending:
         return None
+    if manual_head:
+        manual = next((p for p in pending if p["head"] == manual_head), None)
+        if manual:
+            # A newer PR of the same kind may already supersede this run. Never expedite a
+            # stale pin merely because its source workflow was manually dispatched.
+            kind = next(x for x in DEPLOY_PREFIXES if manual_head.startswith(x))
+            newest = [p for p in pending if p["head"].startswith(kind)][-1]
+            if newest is manual:
+                return manual
     verdict, _ = decide("flush", now, last_deploy, False, window)
     if verdict != "ARM":
         return None
@@ -187,8 +220,9 @@ def self_test() -> int:
     # 2. second push inside the window: deferred, then flushed at the window
     check("push inside the window -> DEFER", decide("push", T, T - 60, False, W)[0] == "DEFER")
     check("push while another deploy PR is armed -> DEFER", decide("push", T, T - 9000, True, W)[0] == "DEFER")
-    # 3. manual dispatch is never delayed
-    check("workflow_dispatch -> ARM even inside the window", decide("workflow_dispatch", T, T - 1, True, W)[0] == "ARM")
+    # 3. manual dispatch bypasses the time window, but never the single armed-PR guard
+    check("workflow_dispatch -> ARM inside the window", decide("workflow_dispatch", T, T - 1, False, W)[0] == "ARM")
+    check("workflow_dispatch waits behind an armed PR", decide("workflow_dispatch", T, T - 1, True, W)[0] == "DEFER")
     # 4. nothing pending -> no commit
     check("flush with nothing pending -> no PR", flush([], T, T - 9000, W) is None)
     check("flush ignores non-deploy PRs",
@@ -205,6 +239,61 @@ def self_test() -> int:
     check("flush arms the NEWEST PR of that kind (it supersedes the older)", pick is not None and pick["number"] == 14)
     check("flush never arms a second PR while one is armed",
           flush(prs + [{"number": 13, "head": "chore/admin-ui-deploy-c", "created_at": "z", "armed": True}], T, None, W) is None)
+    # Exercise the same CLI and event file that the serialized workflow uses. An unrelated
+    # older PR must not steal a manual run's exemption, and routine events keep the window.
+    with tempfile.TemporaryDirectory() as d:
+        sha = "a" * 40
+        manual_pr = {"number": 21, "head": DEPLOY_PREFIXES[0] + sha,
+                     "created_at": "2026-09-30T10:10:00Z", "armed": False}
+        event = {"action": "completed", "repository": {"full_name": "example/open-bank"},
+                 "workflow_run": {"name": "Auto deploy", "event": "workflow_dispatch",
+                                  "conclusion": "success", "head_sha": sha,
+                                  "path": ".github/workflows/auto-deploy.yml", "head_branch": "main",
+                                  "head_repository": {"full_name": "example/open-bank"}}}
+        paths = {name: os.path.join(d, name + ".json") for name in ("prs", "commits", "event")}
+        def run_fixture(prs_fixture, event_fixture):
+            for name, value in (("prs", prs_fixture), ("commits", [{"message": DEPLOY_SUBJECTS[0] + "old", "epoch": T - 60}]),
+                                ("event", event_fixture)):
+                with open(paths[name], "w", encoding="utf-8") as out:
+                    json.dump(value, out)
+            result = subprocess.run([sys.executable, __file__, "flush", "--prs-json", paths["prs"],
+                                     "--commits-json", paths["commits"], "--event-json", paths["event"],
+                                     "--now", str(T), "--window", str(W)], capture_output=True, text=True)
+            return result.returncode, result.stdout
+        check("manual producer completion expedites only its matching PR inside the window",
+              run_fixture(prs + [manual_pr], event) == (0, "arm=21\narm_head=" + manual_pr["head"] + "\n"))
+        check("manual producer completion cannot expedite an unrelated PR",
+              run_fixture(prs, event) == (0, "arm=\narm_head=\n"))
+        check("scheduled producer completion remains inside the window",
+              run_fixture([manual_pr], {**event, "workflow_run": {**event["workflow_run"], "event": "schedule"}})[1]
+              == "arm=\narm_head=\n")
+        check("failed manual producer completion remains inside the window",
+              run_fixture([manual_pr], {**event, "workflow_run": {**event["workflow_run"], "conclusion": "failure"}})[1]
+              == "arm=\narm_head=\n")
+        check("another repository's manual completion remains inside the window",
+              run_fixture([manual_pr], {**event, "workflow_run": {**event["workflow_run"],
+                                                               "head_repository": {"full_name": "other/open-bank"}}})[1]
+              == "arm=\narm_head=\n")
+        check("same-name manual completion from another workflow remains inside the window",
+              run_fixture([manual_pr], {**event, "workflow_run": {**event["workflow_run"],
+                                                               "path": ".github/workflows/other.yml"}})[1]
+              == "arm=\narm_head=\n")
+        check("manual recovery-ref completion expedites its matching PR",
+              run_fixture([manual_pr], {**event, "workflow_run": {**event["workflow_run"],
+                                                               "head_branch": "recovery"}})[1]
+              == "arm=21\narm_head=" + manual_pr["head"] + "\n")
+        admin_pr = {**manual_pr, "head": DEPLOY_PREFIXES[1] + sha}
+        check("manual Admin-UI completion expedites its own PR",
+              run_fixture([admin_pr], {**event, "workflow_run": {**event["workflow_run"],
+                                                       "name": "Admin-UI deploy",
+                                                       "path": ".github/workflows/admin-ui-deploy.yml"}})[1]
+              == "arm=21\narm_head=" + admin_pr["head"] + "\n")
+        check("manual completion never arms beside an already armed deploy PR",
+              run_fixture([manual_pr, {**prs[0], "armed": True}], event)[1] == "arm=\narm_head=\n")
+        check("older manual PR cannot overtake a newer PR of the same kind",
+              run_fixture([manual_pr, {**manual_pr, "number": 22, "head": DEPLOY_PREFIXES[0] + "b" * 40,
+                                       "created_at": "2026-09-30T10:11:00Z"}], event)[1]
+              == "arm=\narm_head=\n")
     check("last deploy read from main's subjects",
           last_deploy_from_commits([{"message": "feat(x): y", "epoch": 9},
                                     {"message": "chore(admin-ui): deploy sandbox-1-run2", "epoch": 7}]) == 7)
@@ -263,6 +352,7 @@ def main() -> int:
     f = sub.add_parser("flush")
     f.add_argument("--prs-json", required=True, help="file: [{number, head, created_at, armed}]")
     f.add_argument("--commits-json", required=True)
+    f.add_argument("--event-json", help="GitHub's workflow_run event payload for manual deploy intent")
     c = sub.add_parser("carry")
     c.add_argument("--root", default=".")
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
@@ -282,7 +372,8 @@ def main() -> int:
         return 0
     if a.cmd == "flush":
         last = last_deploy_from_commits(json.load(open(a.commits_json)))
-        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window)
+        manual_head = manual_deploy_head(json.load(open(a.event_json))) if a.event_json else None
+        pick = flush(json.load(open(a.prs_json)), a.now, last, a.window, manual_head)
         print(f"arm={pick['number'] if pick else ''}")
         print(f"arm_head={pick['head'] if pick else ''}")
         return 0
