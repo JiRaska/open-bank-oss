@@ -16,6 +16,8 @@ import xml.etree.ElementTree as ET
 import tempfile
 from urllib.parse import urlparse
 
+from test_impact_bytecode import direct_bytecode_mapping
+
 
 SUITE_KINDS = {"unit", "integration", "contract", "e2e", "simulation"}
 SUITE_STATES = {"passed", "failed", "skipped", "not-run"}
@@ -95,7 +97,7 @@ def valid_build_attestation(value) -> bool:
             and value["matched"] == matching_build_shas(value["requestedSha"], value["observedSha"]))
 
 
-def validate_envelope(envelope: dict) -> None:
+def validate_envelope(envelope: dict, service: Path | None = None) -> None:
     """Fail closed before CI publishes an envelope that violates the v1 contract."""
     required = {"schemaVersion", "run", "component", "suites", "coverage", "testInfrastructure"}
     if set(envelope) - (required | {"specializedEvidence", "testCases", "diagnostics", "testImpact"}) or not required.issubset(envelope):
@@ -207,13 +209,14 @@ def validate_envelope(envelope: dict) -> None:
         )):
             raise ValueError("test case definition path is invalid")
     impact = envelope.get("testImpact")
-    if impact is not None and impact != {
-        "schemaVersion": 1,
-        "mode": "shadow",
-        "mappingState": "unknown",
-        "selectionState": "unavailable",
-    }:
-        raise ValueError("test impact evidence must remain the explicit v1 unknown/shadow state")
+    unknown_impact = {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown",
+                      "selectionState": "unavailable"}
+    if impact is not None and impact != unknown_impact:
+        # A v2 claim is accepted only when the checked-out bytecode and source tree
+        # reproduce it exactly. Missing/ambiguous edges remain unknown; neither state
+        # supports a selection verdict or a skipped test.
+        if service is None or impact != direct_bytecode_mapping(service, envelope.get("testCases", [])):
+            raise ValueError("test impact mapping lacks verified source/bytecode evidence")
     for item in envelope.get("diagnostics", []):
         if set(item) != {"kind", "suiteKind", "name", "url", "retentionDays", "access", "mayContainSensitiveData"}:
             raise ValueError("diagnostic artifact fields are invalid")
@@ -1438,6 +1441,7 @@ def main() -> None:
         args.synthetic_variant,
     )
     specialized.extend(trace_contract_evidence(service))
+    case_evidence = test_cases(component, service)
     envelope = {
         "schemaVersion": 1,
         "run": {
@@ -1448,16 +1452,13 @@ def main() -> None:
             "url": run_url,
             "observedAt": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         },
-        "component": component, "suites": suite_evidence, "testCases": test_cases(component, service), "coverage": coverage(service),
-        # v1 intentionally records absence rather than guessing a test-to-production mapping.
-        # A future producer may only advance this after emitting versioned, verified coverage or
-        # dependency edges and measuring recommendations against the preserved full suite (#7207).
-        "testImpact": {"schemaVersion": 1, "mode": "shadow", "mappingState": "unknown", "selectionState": "unavailable"},
+        "component": component, "suites": suite_evidence, "testCases": case_evidence, "coverage": coverage(service),
+        "testImpact": direct_bytecode_mapping(service, case_evidence),
         "testInfrastructure": {"declared": declared_infrastructure(service), "observed": observations(service)},
         "specializedEvidence": specialized,
         "diagnostics": browser_diagnostics(args.browser_report_dir, run_id, run_attempt, run_url),
     }
-    validate_envelope(envelope)
+    validate_envelope(envelope, service)
     output = Path(args.out)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(envelope, indent=2) + "\n")

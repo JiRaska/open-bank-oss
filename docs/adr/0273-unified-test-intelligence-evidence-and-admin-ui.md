@@ -316,6 +316,15 @@ set: it is a guardrail propagated through the collector, operator UI and browser
 requires versioned, verified test-to-production coverage or dependency edges, plus a measured
 comparison of shadow recommendations against the preserved full suite (#7207).
 
+The v2 advisory observation may retain **partial** direct JVM bytecode-to-production-source edges
+for test identities observed in that run. It records source and class-file SHA-256 digests and
+rejects paths outside the checked-out service tree. A missing, ambiguous or older class file is
+`unknown`. A direct bytecode reference does not prove test coverage or enumerate CDI, reflection,
+configuration and indirect dependencies; absence of an edge never means unaffected. `selectionState`
+remains `unavailable`, and the full suite remains mandatory. Shadow recommendations require an
+explicit complete full-suite oracle, escaped-failure recall controls and falsification fixtures
+before they can appear as a candidate selection observation.
+
 Test-to-trace correlation uses the existing privacy-preserving `TraceContract`. A successful test
 emits a bounded marker only after at least one trace assertion has passed; the run collector turns
 that JUnit marker into `trace` evidence with the same commit and workflow provenance. Trace ids,

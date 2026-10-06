@@ -20,6 +20,47 @@ const write = (root: string, relative: string, body: string) => {
 afterEach(() => dirs.splice(0).forEach(dir => rmSync(dir, { recursive: true, force: true })))
 
 describe('test-intelligence collector', () => {
+  it('shows partial bytecode edges as advisory and rejects a forged out-of-tree path', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-impact-partial-'))
+    dirs.push(repo)
+    write(repo, 'openbank-alpha-service/version.txt', '1.0.0\n')
+    write(repo, 'openbank-libs/governance/rules.yaml', 'money_path_services: []\n')
+    write(repo, 'openbank-libs/governance/journeys.yaml', 'version: 1\njourneys: []\n')
+    const edge = {
+      sourcePath: 'src/main/kotlin/example/Foo.kt', sourceSha256: 'a'.repeat(64),
+      productionClass: 'example/Foo', productionClassSha256: 'b'.repeat(64), testClassSha256: 'c'.repeat(64),
+    }
+    const impact = {
+      schemaVersion: 2, mode: 'shadow', mappingState: 'partial', selectionState: 'unavailable',
+      method: 'jvm-bytecode-direct-class-reference',
+      mappings: [{ fingerprint: '0'.repeat(24), state: 'partial', edges: [edge] }],
+      coverage: { observedTests: 1, testsWithDirectEdges: 1, unknownTests: 0 },
+    }
+    const envelope = {
+      schemaVersion: 1,
+      run: { id: 'impact-42', attempt: 1, commit: 'abcdef012345', branch: 'main', workflow: 'CI', url: 'https://github.com/JiRaska/open-bank-oss/actions/runs/impact-42', observedAt: '2026-08-22T10:00:00Z' },
+      component: 'openbank-alpha-service', suites: [], coverage: null,
+      testInfrastructure: { declared: [], observed: [] }, testImpact: impact,
+    }
+    const runPath = 'openbank-alpha-service/build/test-intelligence/run.json'
+    const out = path.join(repo, 'report.json')
+    write(repo, runPath, JSON.stringify(envelope))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const report = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(report.testImpact).toMatchObject({
+      schemaVersion: 2, mappingState: 'partial', selectionState: 'unavailable',
+      observedTests: 1, testsWithDirectEdges: 1, unknownTests: 0,
+      detail: expect.stringContaining('shadow recommendations and escaped-failure recall are not collected yet'),
+    })
+
+    write(repo, runPath, JSON.stringify({ ...envelope, testImpact: {
+      ...impact, mappings: [{ ...impact.mappings[0], edges: [{ ...edge, sourcePath: 'src/main/kotlin/../../outside.kt' }] }],
+    } }))
+    execFileSync('node', [SCRIPT, '--repo', repo, '--out', out, '--stale-after-days', '99999'])
+    const rejected = JSON.parse(readFileSync(out, 'utf8')) as TestIntelligenceReport
+    expect(rejected.testImpact).toMatchObject({ mappingState: 'unknown', selectionState: 'unavailable' })
+  })
+
   it('retains both Security Excellence browser variants as a distinct governed journey', () => {
     const repo = mkdtempSync(path.join(tmpdir(), 'test-intelligence-security-browser-'))
     dirs.push(repo)

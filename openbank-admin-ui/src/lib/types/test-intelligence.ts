@@ -387,12 +387,16 @@ export interface AiEvalAssurance {
  * verified test-to-production map was collected; it never means a test is unaffected.
  */
 export interface TestImpactEvidence {
-  schemaVersion: 1
+  schemaVersion: 1 | 2
   mode: 'shadow'
-  mappingState: 'unknown'
+  mappingState: 'unknown' | 'partial'
   selectionState: 'unavailable'
   declaredByAllRetainedRuns: boolean
   detail: string
+  /** Direct JVM bytecode edges among observed test identities; incomplete by design. */
+  observedTests?: number
+  testsWithDirectEdges?: number
+  unknownTests?: number
 }
 
 export interface TestCaseHistory {

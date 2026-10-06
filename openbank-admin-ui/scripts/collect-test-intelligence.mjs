@@ -519,20 +519,56 @@ function testCaseHistory(currentEnvelopes) {
   }).slice(0, 2000)
 }
 
+function validPartialImpact(item) {
+  if (item?.schemaVersion !== 2 || item.mode !== 'shadow' || item.selectionState !== 'unavailable'
+      || !['partial', 'unknown'].includes(item.mappingState)
+      || item.method !== 'jvm-bytecode-direct-class-reference'
+      || !Array.isArray(item.mappings) || !item.coverage) return false
+  const counts = item.coverage
+  if (![counts.observedTests, counts.testsWithDirectEdges, counts.unknownTests]
+      .every(value => Number.isSafeInteger(value) && value >= 0)
+      || counts.observedTests !== item.mappings.length
+      || counts.testsWithDirectEdges + counts.unknownTests !== counts.observedTests
+      || item.mappingState !== (counts.testsWithDirectEdges ? 'partial' : 'unknown')) return false
+  const fingerprints = new Set()
+  let partialCount = 0
+  for (const mapping of item.mappings) {
+    if (!/^[0-9a-f]{24}$/.test(mapping?.fingerprint) || fingerprints.has(mapping.fingerprint)
+        || !Array.isArray(mapping.edges) || !['partial', 'unknown'].includes(mapping.state)
+        || mapping.state !== (mapping.edges.length ? 'partial' : 'unknown')) return false
+    fingerprints.add(mapping.fingerprint)
+    if (mapping.state === 'partial') partialCount++
+    for (const edge of mapping.edges) {
+      if (!/^src\/main\/(?:kotlin|java)\/[A-Za-z0-9_./-]+\.(?:kt|java)$/.test(edge?.sourcePath)
+          || edge.sourcePath.split('/').some(part => part === '.' || part === '..')
+          || !/^[A-Za-z0-9_/$-]+$/.test(edge.productionClass)
+          || ![edge.sourceSha256, edge.productionClassSha256, edge.testClassSha256]
+            .every(value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value))) return false
+    }
+  }
+  return partialCount === counts.testsWithDirectEdges
+}
+
 function testImpact(currentEnvelopes) {
-  // Do not infer "unaffected" from a definition path or a passing suite. The current contract
-  // intentionally exposes exactly what is known: source provenance exists for some JVM tests,
-  // while a verified test-to-production mapping has not been collected yet (#7207).
+  // A direct bytecode reference is a partial dependency edge, not executable coverage.
+  // Reflection, CDI and indirect calls remain unknown; no recommendation/selection is made.
   const retained = currentEnvelopes.map(item => item?.testImpact)
-    .filter(item => item?.schemaVersion === 1)
+    .filter(item => item?.schemaVersion === 1 || item?.schemaVersion === 2)
   const fullyDeclared = currentEnvelopes.length > 0 && retained.length === currentEnvelopes.length
+  const partial = retained.filter(validPartialImpact)
+  const observedTests = partial.reduce((sum, item) => sum + item.coverage.observedTests, 0)
+  const testsWithDirectEdges = partial.reduce((sum, item) => sum + item.coverage.testsWithDirectEdges, 0)
+  const unknownTests = partial.reduce((sum, item) => sum + item.coverage.unknownTests, 0)
   return {
-    schemaVersion: 1,
+    schemaVersion: partial.length ? 2 : 1,
     mode: 'shadow',
-    mappingState: 'unknown',
+    mappingState: testsWithDirectEdges ? 'partial' : 'unknown',
     selectionState: 'unavailable',
     declaredByAllRetainedRuns: fullyDeclared,
-    detail: fullyDeclared
+    ...(partial.length ? { observedTests, testsWithDirectEdges, unknownTests } : {}),
+    detail: partial.length
+      ? `Retained runs report direct JVM bytecode-to-source edges for ${testsWithDirectEdges}/${observedTests} observed test fingerprints across ${partial.length} component run(s); ${unknownTests} have no direct edge. The mapping is partial; shadow recommendations and escaped-failure recall are not collected yet. Full suites remain authoritative.`
+      : fullyDeclared
       ? 'Every retained run explicitly reports that no verified test-to-production mapping was collected. Full suites remain authoritative.'
       : 'One or more retained runs predate the impact contract. No test-to-production mapping is assumed; full suites remain authoritative.',
   }

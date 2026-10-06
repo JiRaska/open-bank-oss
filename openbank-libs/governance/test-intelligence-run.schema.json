@@ -107,15 +107,62 @@
       "additionalProperties": false
     },
     "testImpact": {
-      "type": "object",
-      "required": ["schemaVersion", "mode", "mappingState", "selectionState"],
-      "properties": {
-        "schemaVersion": { "const": 1 },
-        "mode": { "const": "shadow" },
-        "mappingState": { "const": "unknown" },
-        "selectionState": { "const": "unavailable" }
-      },
-      "additionalProperties": false
+      "oneOf": [{
+        "type": "object",
+        "required": ["schemaVersion", "mode", "mappingState", "selectionState"],
+        "properties": {
+          "schemaVersion": { "const": 1 },
+          "mode": { "const": "shadow" },
+          "mappingState": { "const": "unknown" },
+          "selectionState": { "const": "unavailable" }
+        },
+        "additionalProperties": false
+      }, {
+        "type": "object",
+        "required": ["schemaVersion", "mode", "mappingState", "selectionState", "method", "mappings", "coverage"],
+        "properties": {
+          "schemaVersion": { "const": 2 },
+          "mode": { "const": "shadow" },
+          "mappingState": { "enum": ["partial", "unknown"] },
+          "selectionState": { "const": "unavailable" },
+          "method": { "const": "jvm-bytecode-direct-class-reference" },
+          "mappings": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["fingerprint", "state", "edges"],
+              "properties": {
+                "fingerprint": { "type": "string", "pattern": "^[0-9a-f]{24}$" },
+                "state": { "enum": ["partial", "unknown"] },
+                "edges": { "type": "array", "uniqueItems": true, "items": {
+                  "type": "object",
+                  "required": ["sourcePath", "sourceSha256", "productionClass", "productionClassSha256", "testClassSha256"],
+                  "properties": {
+                    "sourcePath": { "type": "string", "pattern": "^src/main/(?:kotlin|java)/[A-Za-z0-9_./-]+\\.(?:kt|java)$" },
+                    "sourceSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "productionClass": { "type": "string", "pattern": "^[A-Za-z0-9_/$-]+$" },
+                    "productionClassSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+                    "testClassSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+                  },
+                  "additionalProperties": false
+                } }
+              },
+              "additionalProperties": false
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "required": ["observedTests", "testsWithDirectEdges", "unknownTests"],
+            "properties": {
+              "observedTests": { "type": "integer", "minimum": 0 },
+              "testsWithDirectEdges": { "type": "integer", "minimum": 0 },
+              "unknownTests": { "type": "integer", "minimum": 0 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }]
     },
     "infrastructureObservation": {
       "type": "object",
