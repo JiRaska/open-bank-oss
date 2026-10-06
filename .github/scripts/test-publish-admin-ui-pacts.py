@@ -118,8 +118,9 @@ class PublicationTest(unittest.TestCase):
         for event, ref in [("pull_request", "refs/heads/main"), ("push", "refs/heads/topic"),
                            ("workflow_run", "refs/heads/main")]:
             with self.subTest(event=event), patch.object(publisher.urllib.request, "build_opener") as op:
-                with self.assertRaises(ValueError):
+                with self.assertRaises(publisher.PublicationFailure) as failure:
                     publisher.publish(self.body(), dict(self.env, GITHUB_EVENT_NAME=event, GITHUB_REF=ref))
+                self.assertEqual(failure.exception.stage, "trusted-main")
                 op.assert_not_called()
 
     def test_missing_config_never_contacts_broker(self):
@@ -170,8 +171,22 @@ class PublicationTest(unittest.TestCase):
         opener = MagicMock()
         opener.open.return_value.__enter__.return_value.status = 201
         opener.open.return_value.__enter__.return_value.read.return_value = b'{"interactions":[]}'
-        with patch.object(publisher.urllib.request, "build_opener", return_value=opener):
-            with self.assertRaises(ValueError): publisher.publish(self.body(), self.env)
+        with (patch.object(publisher.urllib.request, "build_opener", return_value=opener),
+              self.assertRaises(publisher.PublicationFailure) as failure):
+            publisher.publish(self.body(), self.env)
+        self.assertEqual(failure.exception.stage, "readback-mismatch")
+        self.assertRegex(failure.exception.provider, publisher.PROVIDER)
+
+    def test_malformed_broker_body_reports_only_safe_stage_and_provider(self):
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value.status = 201
+        opener.open.return_value.__enter__.return_value.read.return_value = b'not-json secret-token'
+        with (patch.object(publisher.urllib.request, "build_opener", return_value=opener),
+              self.assertRaises(publisher.PublicationFailure) as failure):
+            publisher.publish(self.body(), self.env)
+        self.assertEqual(failure.exception.stage, "readback-json")
+        self.assertRegex(failure.exception.provider, publisher.PROVIDER)
+        self.assertNotIn("secret-token", str(failure.exception))
 
     def test_provider_name_must_be_a_service_not_a_matrix_expression(self):
         path = self.root / next(iter(self.bundle["files"]))
@@ -182,9 +197,32 @@ class PublicationTest(unittest.TestCase):
 
     def test_network_failure_and_redirect_not_success(self):
         with patch.object(publisher.urllib.request, "build_opener") as op:
-            op.return_value.open.side_effect = urllib.error.URLError("offline")
-            with self.assertRaises(urllib.error.URLError): publisher.publish(self.body(), self.env)
+            op.return_value.open.side_effect = urllib.error.URLError("secret broker URL")
+            with self.assertRaises(publisher.PublicationFailure) as failure:
+                publisher.publish(self.body(), self.env)
+        self.assertEqual(failure.exception.stage, "broker-write-network")
+        self.assertNotIn("secret broker URL", str(failure.exception))
         self.assertIsNone(publisher.NoRedirect().redirect_request(None, None, 302, "redirect", {}, "https://other.example"))
+
+    def test_http_failure_identifies_write_or_provider_readback(self):
+        body = self.body()
+        first_provider = body["contracts"][0]["providerName"]
+        for fail_on_readback in (False, True):
+            opener = MagicMock()
+            response = MagicMock()
+            response.__enter__.return_value.status = 200
+            http_error = urllib.error.HTTPError("https://secret.example/path", 503,
+                                               "private response", {}, None)
+            opener.open.side_effect = [response, http_error] if fail_on_readback else http_error
+            with (patch.object(publisher.urllib.request, "build_opener", return_value=opener),
+                  self.assertRaises(publisher.PublicationFailure) as failure):
+                publisher.publish(body, self.env)
+            self.assertEqual(failure.exception.stage,
+                             "broker-readback" if fail_on_readback else "broker-write")
+            self.assertEqual(failure.exception.provider, first_provider if fail_on_readback else None)
+            self.assertEqual(failure.exception.status, 503)
+            self.assertNotIn("secret.example", str(failure.exception))
+            http_error.close()
 
 
 if __name__ == "__main__":

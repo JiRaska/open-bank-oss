@@ -16,13 +16,15 @@ import org.eclipse.microprofile.reactive.messaging.Message
 
 /**
  * Routes each outbox row to its topic by event type: fixings to `fx-fixing-out`
- * (`openbank.fx.fixing.published`), everything else to `fx-events-out`
+ * (`openbank.fx.fixing.published`), ČNB policy-rate facts to `fx-policy-rate-out`
+ * (`openbank.fx.cnb-policy-rate.published`, compacted), everything else to `fx-events-out`
  * (`openbank.fx.conversion.completed`). The outbox is shared; the topics are not.
  */
 @ApplicationScoped
 class KafkaFxOutboxEventPublisher(
     @Channel("fx-events-out") private val emitter: MutinyEmitter<String>,
     @Channel("fx-fixing-out") private val fixingEmitter: MutinyEmitter<String>,
+    @Channel("fx-policy-rate-out") private val policyRateEmitter: MutinyEmitter<String>,
 ) : OutboxEventPublisher {
 
     override suspend fun publish(entry: OutboxEntry) {
@@ -32,11 +34,16 @@ class KafkaFxOutboxEventPublisher(
             .withKey(OutboxKafkaHeaders.partitionKey(entry))
             .withHeaders(kafkaHeaders)
             .build()
-        val target = if (entry.eventType.startsWith(FIXING_EVENT_PREFIX)) fixingEmitter else emitter
+        val target = when {
+            entry.eventType.startsWith(FIXING_EVENT_PREFIX) -> fixingEmitter
+            entry.eventType.startsWith(POLICY_RATE_EVENT_PREFIX) -> policyRateEmitter
+            else -> emitter
+        }
         target.sendMessage(Message.of(entry.payload).addMetadata(meta)).awaitSuspending()
     }
 
     private companion object {
         const val FIXING_EVENT_PREFIX = "fx.fixing."
+        const val POLICY_RATE_EVENT_PREFIX = "fx.cnb-policy-rate."
     }
 }
