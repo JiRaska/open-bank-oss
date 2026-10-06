@@ -2,6 +2,8 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 package com.openbank.referral.integration
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.referral.application.ReferralService
 import com.openbank.referral.it.ReferralPostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.common.QuarkusTestResourceLifecycleManager
@@ -52,7 +54,10 @@ class ReferralOutboxWriteIT {
     @Inject
     lateinit var dataSource: DataSource
 
-    private fun seedDraft(id: UUID) {
+    @Inject
+    lateinit var objectMapper: ObjectMapper
+
+    private fun seedDraft(id: UUID, version: Int = 1) {
         dataSource.connection.use { connection ->
             connection.prepareStatement(
                 """insert into referral_program
@@ -63,7 +68,7 @@ class ReferralOutboxWriteIT {
             ).use { statement ->
                 statement.setObject(1, id)
                 statement.setString(2, "outbox-it-${UUID.randomUUID()}")
-                statement.setInt(3, 1)
+                statement.setInt(3, version)
                 statement.setBigDecimal(4, BigDecimal.TEN)
                 statement.setString(5, "EUR")
                 statement.setString(6, "account.opened")
@@ -77,14 +82,20 @@ class ReferralOutboxWriteIT {
         }
     }
 
-    private fun outboxRows(rewardId: UUID): List<Pair<String, String>> = dataSource.connection.use { conn ->
+    private fun outboxRows(rewardId: UUID): List<Triple<String, String, String>> = dataSource.connection.use { conn ->
         conn.prepareStatement(
-            "SELECT event_type, status FROM referral_outbox WHERE aggregate_id = ? ORDER BY created_at",
+            "SELECT event_type, status, payload FROM referral_outbox WHERE aggregate_id = ? ORDER BY created_at",
         ).use { ps ->
             ps.setObject(1, rewardId)
             val rs = ps.executeQuery()
-            val rows = mutableListOf<Pair<String, String>>()
-            while (rs.next()) rows += rs.getString("event_type") to rs.getString("status")
+            val rows = mutableListOf<Triple<String, String, String>>()
+            while (rs.next()) {
+                rows += Triple(
+                    rs.getString("event_type"),
+                    rs.getString("status"),
+                    rs.getString("payload"),
+                )
+            }
             rows
         }
     }
@@ -94,7 +105,7 @@ class ReferralOutboxWriteIT {
         val programId = UUID.randomUUID()
         val referrer = UUID.randomUUID()
         val referee = UUID.randomUUID()
-        seedDraft(programId)
+        seedDraft(programId, version = 7)
 
         Given { contentType("application/json") }
             .When { post("/api/v1/referrals/programs/$programId/publish") }
@@ -126,7 +137,10 @@ class ReferralOutboxWriteIT {
         val rows = outboxRows(UUID.fromString(rewardId))
         assertThat(rows).describedAs("referral_outbox rows for reward %s", rewardId).hasSize(2)
         assertThat(rows.map { it.first }).containsExactlyInAnyOrder("Qualified", "RewardRequested")
-        assertThat(rows).allSatisfy { (_, status) -> assertThat(status).isEqualTo("PENDING") }
+        assertThat(rows).allSatisfy { (_, status, payload) ->
+            assertThat(status).isEqualTo("PENDING")
+            assertThat(objectMapper.readTree(payload).path("programVersion").asInt()).isEqualTo(7)
+        }
 
         // Idempotent replay must not write a second pair of events for the same qualification.
         Given { contentType("application/json") }
@@ -136,5 +150,49 @@ class ReferralOutboxWriteIT {
             .Then { statusCode(202) }
 
         assertThat(outboxRows(UUID.fromString(rewardId))).hasSize(2)
+    }
+
+    @Test
+    fun `legacy invite keeps unknown version even when its programme has a current version`() {
+        val programId = UUID.randomUUID()
+        val inviteId = UUID.randomUUID()
+        val token = UUID.randomUUID().toString()
+        seedDraft(programId, version = 9)
+        Given { contentType("application/json") }
+            .When { post("/api/v1/referrals/programs/$programId/publish") }
+            .Then { statusCode(200) }
+        dataSource.connection.use { conn ->
+            conn.prepareStatement(
+                """INSERT INTO referral_invite
+                    (id, program_id, token_hash, referrer_party_id, referee_party_id, status,
+                     expires_at, idempotency_key, attributed_at)
+                    VALUES (?, ?, ?, ?, ?, 'ATTRIBUTED', ?, ?, ?)
+                """.trimIndent(),
+            ).use { ps ->
+                ps.setObject(1, inviteId)
+                ps.setObject(2, programId)
+                ps.setString(3, ReferralService.hash(token))
+                ps.setObject(4, UUID.randomUUID())
+                ps.setObject(5, UUID.randomUUID())
+                ps.setTimestamp(6, Timestamp.from(Instant.now().plusSeconds(86_400)))
+                ps.setString(7, "legacy-$inviteId")
+                ps.setTimestamp(8, Timestamp.from(Instant.now()))
+                ps.executeUpdate()
+            }
+            if (!conn.autoCommit) conn.commit()
+        }
+        val rewardId = Given {
+            contentType("application/json")
+            header("Idempotency-Key", "qualify-$inviteId")
+            body("""{"eventName":"account.opened","eventId":"event-$inviteId"}""")
+        } When { post("/api/v1/referrals/invites/$token/qualify") } Then {
+            statusCode(202)
+        } Extract { path<String>("id") }
+        val rows = outboxRows(UUID.fromString(rewardId))
+        assertThat(rows).hasSize(2)
+        assertThat(rows).allSatisfy { (_, _, payload) ->
+            val version = objectMapper.readTree(payload).path("programVersion")
+            assertThat(version.isNull || version.isMissingNode).isTrue()
+        }
     }
 }

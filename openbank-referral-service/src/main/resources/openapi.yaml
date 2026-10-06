@@ -4,7 +4,8 @@ info:
   # 1.1.0 -> 1.3.0: additive — GET /api/v1/referrals/parties/{partyId}/invites (the referrer's
   # own invites) and a machine-readable `reason` on attribution conflicts. NOT 1.2.0: open PR
   # #7192 claims it against this file; a skipped number is harmless, a collided one is not.
-  version: 1.3.0
+  # 1.4.0 adds nullable programVersion to invite/reward responses. A null is historical unknown.
+  version: 1.4.0
 paths:
   /api/v1/referrals/parties/{partyId}/invites:
     get:
@@ -58,7 +59,11 @@ paths:
       summary: Issue an opaque invite token
       parameters: [{name: id, in: path, required: true, schema: {type: string, format: uuid}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
       responses:
-        "201": {description: Issued}
+        "201":
+          description: Issued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralInvite'}
         "404": {description: Unknown program}
         "409":
           description: Program not open (PROGRAM_UNAVAILABLE) or key already used (IDEMPOTENCY_KEY_REUSED)
@@ -81,9 +86,47 @@ paths:
     post:
       summary: Qualify one event and request a fixed reward
       parameters: [{name: token, in: path, required: true, schema: {type: string}}, {name: Idempotency-Key, in: header, required: true, schema: {type: string}}]
-      responses: {"202": {description: Reward requested}}
+      responses:
+        "202":
+          description: Reward requested
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ReferralReward'}
 components:
   schemas:
+    ReferralInvite:
+      type: object
+      required: [id, programId, token, referrerPartyId, status, expiresAt, idempotencyKey]
+      properties:
+        id: {type: string, format: uuid}
+        programId: {type: string, format: uuid}
+        programVersion: {type: integer, minimum: 1, nullable: true}
+        token: {type: string}
+        referrerPartyId: {type: string, format: uuid}
+        refereePartyId: {type: string, format: uuid, nullable: true}
+        status: {type: string, enum: [ISSUED, ATTRIBUTED, EXPIRED, REJECTED]}
+        expiresAt: {type: string, format: date-time}
+        idempotencyKey: {type: string}
+        attributedAt: {type: string, format: date-time, nullable: true}
+    ReferralReward:
+      type: object
+      required: [id, inviteId, programId, referrerPartyId, refereePartyId, qualificationEventId,
+                 rewardReference, amount, currency, status, createdAt]
+      properties:
+        id: {type: string, format: uuid}
+        inviteId: {type: string, format: uuid}
+        programId: {type: string, format: uuid}
+        programVersion: {type: integer, minimum: 1, nullable: true}
+        referrerPartyId: {type: string, format: uuid}
+        refereePartyId: {type: string, format: uuid}
+        qualificationEventId: {type: string}
+        rewardReference: {type: string}
+        amount: {type: number}
+        currency: {type: string}
+        status: {type: string, enum: [QUALIFIED, REWARD_REQUESTED, REWARDED, RETRYABLE, REVERSED]}
+        createdAt: {type: string, format: date-time}
+        requestedAt: {type: string, format: date-time, nullable: true}
+        rewardedAt: {type: string, format: date-time, nullable: true}
     ReferralConflict:
       type: object
       required: [error]

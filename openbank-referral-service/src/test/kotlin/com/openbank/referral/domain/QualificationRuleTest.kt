@@ -35,6 +35,7 @@ class QualificationRuleTest {
     private val invite = ReferralInvite(
         id = UUID.randomUUID(),
         programId = program.id,
+        programVersion = program.version,
         token = "hash",
         referrerPartyId = UUID.randomUUID(),
         refereePartyId = referee,

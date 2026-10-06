@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# Live-delivery copy of analytics-sink's V18__referral_lifecycle_funnel.sql. The init ConfigMap
+# only runs on an empty ClickHouse data directory; ci-gate-runs-schema-apply reapplies this
+# idempotent view on an existing cluster. Keep this definition aligned with V18 and clickhouse-init.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: referral-lifecycle-schema
+  namespace: analytics
+  labels:
+    app.kubernetes.io/part-of: analytics
+    app.kubernetes.io/component: campaign-observability
+data:
+  referral-funnel.sql: |
+    CREATE OR REPLACE VIEW openbank_analytics.gold_referral_lifecycle_funnel AS
+    SELECT
+        JSONExtractString(payload, 'programId') AS program_id,
+        nullIf(JSONExtractInt(payload, 'programVersion'), 0) AS program_version,
+        uniqExactIf(event_id, event_type = 'Qualified') AS qualified_events,
+        uniqExactIf(event_id, event_type = 'RewardRequested') AS reward_requested_events,
+        uniqExactIf(event_id, event_type = 'RewardOutcome' AND JSONExtractString(payload, 'outcome') = 'ACCEPTED') AS accepted_outcomes,
+        uniqExactIf(event_id, event_type = 'RewardOutcome' AND JSONExtractString(payload, 'outcome') = 'REJECTED') AS rejected_outcomes,
+        uniqExactIf(event_id, event_type = 'RewardOutcome' AND JSONExtractString(payload, 'outcome') = 'REVERSED') AS reversed_outcomes,
+        max(occurred_at) AS last_observed_at
+    FROM openbank_analytics.bronze_events
+    WHERE aggregate_type = 'REFERRAL'
+      AND source_service = 'referral-service'
+      AND event_type IN ('Qualified', 'RewardRequested', 'RewardOutcome')
+      AND JSONExtractString(payload, 'programId') != ''
+    GROUP BY program_id, program_version;

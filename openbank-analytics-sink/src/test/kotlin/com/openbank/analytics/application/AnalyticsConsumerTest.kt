@@ -5,8 +5,10 @@
 package com.openbank.analytics.application
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.analytics.infrastructure.sink.ClickHouseAnalyticsSink
 import com.openbank.libs.security.PiiMask
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.time.Clock
 import java.util.UUID
@@ -22,6 +24,82 @@ class AnalyticsConsumerTest {
     private val consumer = AnalyticsConsumer().apply {
         objectMapper = mapper
         clock = Clock.systemUTC()
+    }
+
+    @Test
+    fun `referral bronze row contains only funnel fields and preserves unknown legacy version`() {
+        val referrer = UUID.randomUUID()
+        val referee = UUID.randomUUID()
+        val programId = UUID.randomUUID()
+        val eventId = UUID.randomUUID()
+        val body = """{
+            "eventId":"$eventId", "eventType":"Qualified", "programId":"$programId",
+            "inviteId":"${UUID.randomUUID()}", "referrerPartyId":"$referrer",
+            "refereePartyId":"$referee", "aggregateId":"$referrer", "actorId":"$referee",
+            "qualificationEventId":"private-fact",
+            "occurredAt":"2026-09-01T00:00:00Z"
+        }"""
+        val address = EventAddress(
+            topic = "openbank.referral.qualified.v1",
+            key = UUID.randomUUID().toString(),
+            ceType = "Qualified",
+        )
+        val envelope = consumer.toEnvelope(mapper.readTree(body), address)
+        val row = ClickHouseAnalyticsSink().apply { this.mapper = this@AnalyticsConsumerTest.mapper }
+            .bronzeRowJson(envelope)
+
+        assertThat(envelope.eventId).isEqualTo(eventId)
+        assertThat(envelope.aggregateId).isEqualTo(programId.toString())
+        assertThat(envelope.actorId).isNull()
+        assertThat(envelope.payload["programId"]).isEqualTo(programId.toString())
+        assertThat(envelope.payload["programVersion"]).isNull()
+        assertThat(row).doesNotContain(
+            referrer.toString(),
+            referee.toString(),
+            "private-fact",
+            "referrerPartyId",
+        )
+        val backfillRow = ClickHouseAnalyticsSink().apply { this.mapper = this@AnalyticsConsumerTest.mapper }
+            .bronzeRowJson(consumer.toEnvelope(mapper.readTree(body)))
+        assertThat(backfillRow).doesNotContain(referrer.toString(), referee.toString(), "referrerPartyId")
+
+        val versionedBody = body.replace(
+            "\"eventType\":\"Qualified\"",
+            "\"eventType\":\"Qualified\", \"programVersion\":7",
+        )
+        val versioned = consumer.toEnvelope(mapper.readTree(versionedBody), address)
+        assertThat(versioned.payload["programVersion"]).isEqualTo(7)
+    }
+
+    @Test
+    fun `an invitation or click cannot be projected as a reward lifecycle event`() {
+        val node = mapper.readTree(
+            """{"eventId":"${UUID.randomUUID()}","programId":"${UUID.randomUUID()}","eventType":"InviteIssued"}""",
+        )
+        assertThatThrownBy {
+            consumer.toEnvelope(node, EventAddress(topic = "openbank.referral.qualified.v1"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `topicless unknown referral body fails closed before bronze`() {
+        val node = mapper.readTree(
+            """{"sourceService":"referral-service","eventType":"InviteIssued",
+                "referrerPartyId":"private-person","programId":"${UUID.randomUUID()}"}""",
+        )
+        assertThatThrownBy { consumer.toEnvelope(node) }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun `oversized programme version is rejected rather than wrapped into another cohort`() {
+        val node = mapper.readTree(
+            """{"eventId":"${UUID.randomUUID()}","programId":"${UUID.randomUUID()}","eventType":"Qualified",
+                "programVersion":4294967297}""",
+        )
+        assertThatThrownBy {
+            consumer.toEnvelope(node, EventAddress(topic = "openbank.referral.qualified.v1"))
+        }.isInstanceOf(IllegalArgumentException::class.java)
     }
 
     @Test

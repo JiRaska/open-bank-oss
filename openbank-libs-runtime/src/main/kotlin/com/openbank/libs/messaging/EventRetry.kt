@@ -78,6 +78,8 @@ object EventRetry {
      *   way on every delivery, so retrying it burns attempts and delays the ack for nothing.
      *   A non-retryable failure is rethrown immediately and unchanged: this helper never decides to
      *   swallow, it only decides whether to try again.
+     * @param redactErrors omit exception messages and stack traces from this helper's retry logs
+     *   when the failure may embed sensitive event payloads; the exception is still rethrown.
      */
     // TooGenericExceptionCaught: type-agnostic ON PURPOSE. What makes a failure retryable here is
     // whether the dependency might recover, not which class it is — and the caller says so through
@@ -90,6 +92,7 @@ object EventRetry {
         maxAttempts: Int = DEFAULT_MAX_ATTEMPTS,
         backoffMs: Long = DEFAULT_BACKOFF_MS,
         isRetryable: (Exception) -> Boolean = { true },
+        redactErrors: Boolean = false,
         block: suspend () -> T,
     ): T {
         require(maxAttempts >= 1) { "maxAttempts must be >= 1, was $maxAttempts" }
@@ -108,6 +111,16 @@ object EventRetry {
                     throw e
                 }
                 if (attempt >= maxAttempts) {
+                    if (redactErrors) {
+                        log.errorf(
+                            "%s for %s failed after %d attempt(s) (%s)",
+                            what,
+                            key,
+                            attempt,
+                            e.javaClass.simpleName,
+                        )
+                        throw e
+                    }
                     log.errorf(
                         e,
                         "%s for %s failed after %d attempt(s) (%s: %s) — rethrowing so the connector dead-letters",
@@ -118,6 +131,19 @@ object EventRetry {
                         e.message,
                     )
                     throw e
+                }
+                if (redactErrors) {
+                    log.warnf(
+                        "%s for %s failed (attempt %d/%d, %s) — retrying",
+                        what,
+                        key,
+                        attempt,
+                        maxAttempts,
+                        e.javaClass.simpleName,
+                    )
+                    delay(backoffMs * attempt)
+                    attempt++
+                    continue
                 }
                 log.warnf(
                     "%s for %s failed (attempt %d/%d, %s: %s) — retrying",

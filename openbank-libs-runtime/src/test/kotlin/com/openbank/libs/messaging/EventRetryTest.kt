@@ -9,6 +9,10 @@ import org.assertj.core.api.Assertions.assertThat
 import org.jboss.logging.Logger
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.util.logging.Handler
+import java.util.logging.Level
+import java.util.logging.LogRecord
+import java.util.logging.Logger as JulLogger
 
 private class TransientFailure : RuntimeException("connection refused")
 
@@ -76,6 +80,43 @@ class EventRetryTest {
         }
 
         assertThat(calls).isEqualTo(1)
+    }
+
+    @Test
+    fun `redacted retry logs omit exception message while preserving retries and rethrow`(): Unit = runBlocking {
+        val category = JulLogger.getLogger(EventRetryTest::class.java.name)
+        val records = mutableListOf<LogRecord>()
+        val handler = object : Handler() {
+            override fun publish(record: LogRecord) {
+                records += record
+            }
+            override fun flush() = Unit
+            override fun close() = Unit
+        }
+        val previousLevel = category.level
+        val previousParentHandlers = category.useParentHandlers
+        category.level = Level.ALL
+        category.useParentHandlers = false
+        category.addHandler(handler)
+        try {
+            var calls = 0
+            assertThrows<IllegalStateException> {
+                runBlocking {
+                    EventRetry.withRetry(log, "TEST_EVENT", "key-1", backoffMs = 1, redactErrors = true) {
+                        calls++
+                        throw IllegalStateException("secret-party-identifier")
+                    }
+                }
+            }
+            assertThat(calls).isEqualTo(EventRetry.DEFAULT_MAX_ATTEMPTS)
+            assertThat(records).isNotEmpty()
+            assertThat(records.map { it.message }).doesNotContain("secret-party-identifier")
+            assertThat(records.map { it.thrown }).containsOnlyNulls()
+        } finally {
+            category.removeHandler(handler)
+            category.level = previousLevel
+            category.useParentHandlers = previousParentHandlers
+        }
     }
 
     @Test

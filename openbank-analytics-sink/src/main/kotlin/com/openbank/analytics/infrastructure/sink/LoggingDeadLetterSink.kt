@@ -11,12 +11,11 @@ import jakarta.enterprise.inject.Default
 import org.jboss.logging.Logger
 
 /**
- * Default [DeadLetterSink] that emits the quarantined message at WARN with its content hash.
+ * Default [DeadLetterSink] that emits a content hash and error class at WARN.
  *
  * WARN (not INFO) so it trips alerting — a non-zero DLQ rate means a producer is emitting malformed
- * events and bronze is losing rows. The payload is logged truncated, so a message quarantined through
- * this binding is recoverable only from the log pipeline, only for as long as log retention holds, and
- * only up to 500 characters — it is NOT the durable, replayable `dead_letter_events` row that
+ * events and bronze is losing rows. The raw payload is never logged; this fallback is not replayable.
+ * It is NOT the durable, replayable `dead_letter_events` row that
  * ADR-0022, the diagrams, the overview docs and the `dead_lettered` Grafana panel describe. That row
  * is written by [ClickHouseDeadLetterSink], which this fallback yields to when
  * `openbank.analytics.sink.type=clickhouse`. Any deployment relying on the documented "replay
@@ -30,10 +29,9 @@ class LoggingDeadLetterSink : DeadLetterSink {
 
     override suspend fun quarantine(record: DeadLetterRecord) {
         log.warnf(
-            "analytics dead-letter hash=%s error=%s payload=%s",
+            "analytics dead-letter hash=%s error=%s",
             record.contentHash,
             record.error,
-            record.rawPayload.take(500),
         )
     }
 }

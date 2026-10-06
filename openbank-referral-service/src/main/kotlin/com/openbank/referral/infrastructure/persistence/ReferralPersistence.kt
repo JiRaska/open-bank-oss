@@ -51,6 +51,7 @@ class ReferralProgramEntity : PanacheEntityBase() {
 class ReferralInviteEntity : PanacheEntityBase() {
     @Id lateinit var id: UUID
     lateinit var programId: UUID
+    var programVersion: Int? = null
     lateinit var tokenHash: String
     lateinit var referrerPartyId: UUID
     var refereePartyId: UUID? = null
@@ -66,6 +67,7 @@ class ReferralRewardEntity : PanacheEntityBase() {
     @Id lateinit var id: UUID
     lateinit var inviteId: UUID
     lateinit var programId: UUID
+    var programVersion: Int? = null
     lateinit var referrerPartyId: UUID
     lateinit var refereePartyId: UUID
     lateinit var qualificationEventId: String
@@ -97,14 +99,15 @@ private fun ReferralProgramEntity.toDomain() = ReferralProgram(
     maker, checker, createdAt, publishedAt,
 )
 private fun ReferralInviteEntity.toDomain(token: String) = ReferralInvite(
-    id, programId, token, referrerPartyId, refereePartyId,
+    id, programId, programVersion, token, referrerPartyId, refereePartyId,
     InviteStatus.valueOf(
         status,
     ),
     expiresAt, idempotencyKey, attributedAt,
 )
 private fun ReferralRewardEntity.toDomain() = ReferralReward(
-    id, inviteId, programId, referrerPartyId, refereePartyId, qualificationEventId, rewardReference, amount, currency,
+    id, inviteId, programId, programVersion, referrerPartyId, refereePartyId, qualificationEventId,
+    rewardReference, amount, currency,
     RewardStatus.valueOf(
         status,
     ),
@@ -166,6 +169,7 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                 id =
                     i.id
                 programId = i.programId
+                programVersion = i.programVersion
                 tokenHash = ReferralService.hash(i.token)
                 referrerPartyId = i.referrerPartyId
                 status =
@@ -224,6 +228,7 @@ private fun ReferralRewardEntity.toDomain() = ReferralReward(
                 id = r.id
                 inviteId = r.inviteId
                 programId = r.programId
+                programVersion = r.programVersion
                 referrerPartyId = r.referrerPartyId
                 refereePartyId = r.refereePartyId
                 qualificationEventId = r.qualificationEventId

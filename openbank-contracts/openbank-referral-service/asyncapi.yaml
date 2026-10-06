@@ -1,13 +1,20 @@
 asyncapi: 2.6.0
 info:
   title: Referral lifecycle events
-  version: 1.0.0
+  version: 1.1.0
   description: |
     Producer wired since #7190: qualification writes both Qualified and RewardRequested to
     `referral_outbox` in the same transaction as the reward row, and ReferralOutboxDispatcher
     relays them at-least-once to the topics below (each channel is its own Kafka topic —
     openbank.referral.qualified.v1, openbank.referral.reward-requested.v1,
     openbank.referral.reward-outcome.v1). A consumer can now build against these channels.
+    Since 1.1.0, newly issued invites pin programVersion and all three event types carry
+    that version. The field remains optional on the v1 channels: retained events and
+    rewards from invites issued before this change have no proven version. Consumers
+    must retain an unknown version rather than join to the current programme catalogue.
+    Campaign Studio observes RewardRequested and RewardOutcome for reporting only. This
+    subscription does not post a reward; ADR-0310 D2 still requires a separate approved
+    money-path consumer and expense-account decision.
 channels:
   referral.qualified.v1:
     address: openbank.referral.qualified.v1
@@ -20,6 +27,27 @@ channels:
     publish: {operationId: referralRewardOutcome, message: {$ref: '#/components/messages/RewardOutcome'}}
 components:
   messages:
-    Qualified: {payload: {type: object, required: [eventId, inviteId, qualificationEventId]}}
-    RewardRequested: {payload: {type: object, required: [eventId, inviteId, rewardReference, amount, currency]}}
-    RewardOutcome: {payload: {type: object, required: [eventId, inviteId, rewardReference, outcome]}}
+    Qualified:
+      payload:
+        type: object
+        required: [eventId, inviteId, qualificationEventId]
+        properties:
+          programVersion: {$ref: '#/components/schemas/ProgramVersion'}
+    RewardRequested:
+      payload:
+        type: object
+        required: [eventId, inviteId, rewardReference, amount, currency]
+        properties:
+          programVersion: {$ref: '#/components/schemas/ProgramVersion'}
+    RewardOutcome:
+      payload:
+        type: object
+        required: [eventId, inviteId, rewardReference, outcome]
+        properties:
+          programVersion: {$ref: '#/components/schemas/ProgramVersion'}
+  schemas:
+    ProgramVersion:
+      type: integer
+      minimum: 1
+      nullable: true
+      description: Null or absent means historical programme version is unknown.

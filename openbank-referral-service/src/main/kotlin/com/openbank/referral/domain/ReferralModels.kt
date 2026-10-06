@@ -33,6 +33,8 @@ data class ReferralProgram(
 data class ReferralInvite(
     val id: UUID,
     val programId: UUID,
+    /** Pinned when issued. Null for invites created before version pinning. */
+    val programVersion: Int?,
     val token: String,
     val referrerPartyId: UUID,
     val refereePartyId: UUID?,
@@ -46,6 +48,8 @@ data class ReferralReward(
     val id: UUID,
     val inviteId: UUID,
     val programId: UUID,
+    /** Copied from the invite, never resolved from the current programme catalogue. */
+    val programVersion: Int?,
     val referrerPartyId: UUID,
     val refereePartyId: UUID,
     val qualificationEventId: String,
@@ -63,6 +67,7 @@ sealed class ReferralEvent {
     abstract val eventId: UUID
     abstract val occurredAt: Instant
     abstract val programId: UUID
+    abstract val programVersion: Int?
     abstract val inviteId: UUID
 
     /**
@@ -81,6 +86,7 @@ sealed class ReferralEvent {
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int?,
         override val inviteId: UUID,
         val referrerPartyId: UUID,
         val refereePartyId: UUID,
@@ -93,6 +99,7 @@ sealed class ReferralEvent {
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int?,
         override val inviteId: UUID,
         val rewardReference: String,
         val amount: BigDecimal,
@@ -105,6 +112,7 @@ sealed class ReferralEvent {
         override val eventId: UUID,
         override val occurredAt: Instant,
         override val programId: UUID,
+        override val programVersion: Int?,
         override val inviteId: UUID,
         val rewardReference: String,
         val outcome: LedgerOutcome,

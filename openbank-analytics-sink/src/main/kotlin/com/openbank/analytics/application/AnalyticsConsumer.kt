@@ -33,8 +33,8 @@ import java.util.UUID
  *
  * This is the *only* extraction path into analytics: there is no Debezium/WAL CDC reading the
  * operational databases, so reporting adds zero load on the OLTP side. PII is masked at this
- * boundary via [PayloadMasker] before anything is handed to the [AnalyticsSink], because the
- * bronze layer is retained ≥10 years and must never hold raw identifiers.
+ * boundary via [PayloadMasker] or a strict referral allowlist before anything is handed to the
+ * [AnalyticsSink], because the bronze layer is retained ≥10 years and must never hold raw identifiers.
  *
  * Delivery is at-least-once; the envelope's [AnalyticsEnvelope.eventId] is the dedupe key and the
  * sink (and ClickHouse `ReplacingMergeTree`) collapse duplicates.
@@ -43,10 +43,10 @@ import java.util.UUID
  *
  * A **malformed or un-projectable event** cannot be fixed by replaying it, so it is handed to the
  * [DeadLetterSink] and ACKED. Read [DeadLetterSink] for what that actually buys today: the only
- * binding is `LoggingDeadLetterSink`, a WARN line. The message is recoverable from the log pipeline
- * for as long as logs are retained (Loki, 1 week here) — that is a far weaker guarantee than the
- * "visible, counted and replayable" this KDoc used to claim. The ClickHouse `dead_letter_events`
- * table exists but nothing writes to it — see [DeadLetterSink].
+ * binding is `LoggingDeadLetterSink`, which logs only the hash and error. This fallback is not
+ * replayable; the ClickHouse binding stores raw messages in an operational dead-letter table.
+ * Connector NACK/DLQ may also retain the original Kafka record for replay. Neither raw store is a
+ * privacy-reduced analytics view; referral party IDs are excluded specifically from bronze/gold.
  *
  * A **failed sink write** is the opposite: the event is fine, ClickHouse is not. This used to take
  * the same branch — the bronze row was dropped, a WARN was logged, and the message was acked. Bronze
@@ -96,17 +96,26 @@ class AnalyticsConsumer {
     suspend fun consume(message: Message<String>) {
         val payload = message.payload
         val address = addressOf(message)
+        val referral = address.topic in ReferralFunnelPayload.topics
 
         // ---- Un-projectable payload: the poison pill. Quarantine and ACK; a replay fails the same.
         val envelope = try {
             toEnvelope(objectMapper.readTree(payload), address)
         } catch (e: Exception) {
-            log.errorf(e, "Quarantining un-projectable analytics message: %s", payload.take(200))
+            if (referral) {
+                log.errorf(
+                    "Quarantining un-projectable referral message: hash=%s error=%s",
+                    sha256(payload),
+                    e.javaClass.simpleName,
+                )
+            } else {
+                log.errorf(e, "Quarantining un-projectable analytics message: hash=%s", sha256(payload))
+            }
             deadLetters.quarantine(
                 DeadLetterRecord(
                     contentHash = sha256(payload),
                     rawPayload = payload,
-                    error = "${e.javaClass.simpleName}: ${e.message}",
+                    error = if (referral) e.javaClass.simpleName else "${e.javaClass.simpleName}: ${e.message}",
                     failedAt = Instant.now(clock),
                 ),
             )
@@ -146,7 +155,7 @@ class AnalyticsConsumer {
 
         // ---- Sink write: a dependency failure, NOT a bad event. Retry, then nack.
         try {
-            EventRetry.withRetry(log, "analytics bronze write", envelope.eventId) {
+            EventRetry.withRetry(log, "analytics bronze write", envelope.eventId, redactErrors = referral) {
                 sink.write(envelope)
             }
         } catch (e: Exception) {
@@ -163,8 +172,23 @@ class AnalyticsConsumer {
             // and #5751 is wiring this one to `openbank.dlq.analytics-sink.analytics-events-in`.
             // Either outcome beats the old behaviour, which was to ack: a halted channel or a parked
             // record is recoverable, a silent hole in a ≥10-year log of record is not.
-            log.errorf(e, "Bronze write failed after retries, nacking: %s", payload.take(200))
-            settle(message, e)
+            if (referral) {
+                log.errorf(
+                    "Referral bronze write failed after retries, nacking: hash=%s error=%s",
+                    sha256(payload),
+                    e.javaClass.simpleName,
+                )
+            } else {
+                log.errorf(e, "Bronze write failed after retries, nacking: hash=%s", sha256(payload))
+            }
+            val nackCause = if (referral) {
+                IllegalStateException(
+                    "referral bronze write failed: hash=${sha256(payload)} type=${e.javaClass.simpleName}",
+                )
+            } else {
+                e
+            }
+            settle(message, nackCause)
             return
         }
 
@@ -238,27 +262,55 @@ class AnalyticsConsumer {
      * UNKNOWN into a value.
      */
     fun toEnvelope(node: JsonNode, address: EventAddress): AnalyticsEnvelope {
-        val aggregateType = resolveAggregateType(node, address)
+        // Validate and strip direct party identifiers before any bronze write. Referral is a
+        // lifecycle COUNT, not a party-level analytics stream.
+        val referralTopic = if (address.topic in ReferralFunnelPayload.topics) {
+            address.topic
+        } else {
+            ReferralFunnelPayload.topicForBody(node).also {
+                require(it == null || address.topic == null) {
+                    "referral body on unexpected topic"
+                }
+            }
+        }
+        val referralPayload = if (referralTopic != null) {
+            ReferralFunnelPayload.project(node, referralTopic)
+        } else {
+            null
+        }
+        val aggregateType = if (referralPayload != null) "REFERRAL" else resolveAggregateType(node, address)
         return AnalyticsEnvelope(
             eventId = node["eventId"]?.asText()?.let { runCatching { UUID.fromString(it) }.getOrNull() }
                 // ADR-0106: a synthesised dedupe key is a durable, indexed identifier -> UUIDv7.
                 ?: Ids.newId(),
             aggregateType = aggregateType,
-            aggregateId = resolveAggregateId(node, aggregateType, address),
-            aggregateVersion = resolveAggregateVersion(node),
+            aggregateId = referralPayload?.get("programId")?.toString()
+                ?: resolveAggregateId(node, aggregateType, address),
+            aggregateVersion = if (referralPayload != null) 0L else resolveAggregateVersion(node),
             // `ce-type` is the outbox event type; a bare payload has no eventType field at all.
-            eventType = node["eventType"]?.asText() ?: address.ceType ?: UNKNOWN,
+            eventType = referralPayload?.get("state")?.toString()
+                ?: node["eventType"]?.asText() ?: address.ceType ?: UNKNOWN,
             occurredAt = node["occurredAt"]?.asText()?.let { runCatching { Instant.parse(it) }.getOrNull() }
                 ?: Instant.now(clock),
-            sourceService = node["sourceService"]?.asText()
-                ?: TopicAttribution.sourceService(address.topic)
-                ?: UNKNOWN_SERVICE,
+            sourceService = if (referralPayload != null) {
+                "referral-service"
+            } else {
+                node["sourceService"]?.asText() ?: TopicAttribution.sourceService(address.topic) ?: UNKNOWN_SERVICE
+            },
             schemaVersion = node["schemaVersion"]?.asInt() ?: 1,
-            actorId = node["requestedBy"]?.asText() ?: node["actorId"]?.asText(),
-            actorType = node["actorType"]?.asText(),
-            traceId = node["traceId"]?.asText() ?: node["correlationId"]?.asText(),
+            actorId = if (referralPayload != null) {
+                null
+            } else {
+                node["requestedBy"]?.asText() ?: node["actorId"]?.asText()
+            },
+            actorType = if (referralPayload != null) null else node["actorType"]?.asText(),
+            traceId = if (referralPayload != null) {
+                null
+            } else {
+                node["traceId"]?.asText() ?: node["correlationId"]?.asText()
+            },
             ingestedAt = Instant.now(clock),
-            payload = PayloadMasker.maskToMap(node["payload"] ?: node),
+            payload = referralPayload ?: PayloadMasker.maskToMap(node["payload"] ?: node),
             synthetic = address.synthetic,
         )
     }

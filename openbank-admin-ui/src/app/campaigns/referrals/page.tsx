@@ -22,6 +22,51 @@ interface ReferralProgram {
   checker: string
 }
 
+interface FunnelRow {
+  program_version: number | null
+  qualified_events: number
+  reward_requested_events: number
+  accepted_outcomes: number
+  rejected_outcomes: number
+  reversed_outcomes: number
+  last_observed_at: string | null
+}
+
+function ReferralProgramFunnel({ programId }: { programId: string }) {
+  const { t } = useLanguage()
+  const [rows, setRows] = useState<FunnelRow[]>([])
+  const [state, setState] = useState<'loading' | 'ok' | 'unavailable'>('loading')
+
+  useEffect(() => {
+    fetch(`/api/referral-programs/${programId}/funnel`)
+      .then(response => response.json())
+      .then((body: { items?: FunnelRow[]; state?: string }) => {
+        if (body.state !== 'ok') { setState('unavailable'); return }
+        setRows(body.items ?? [])
+        setState('ok')
+      })
+      .catch(() => setState('unavailable'))
+  }, [programId])
+
+  if (state === 'loading') return <p className="mt-4 text-sm text-slate-500">{t('Načítám životní cyklus…', 'Loading lifecycle…')}</p>
+  if (state === 'unavailable') return <p className="mt-4 text-sm text-amber-700">{t('Projekce doporučení není dostupná.', 'Referral projection is unavailable.')}</p>
+  if (rows.length === 0) return <p className="mt-4 text-sm text-amber-700">{t('Nejsou dostupné řádky životního cyklu. Aktuálnost ingestu zde nelze ověřit.', 'No lifecycle rows are available. Ingestion freshness cannot be verified here.')}</p>
+
+  return <div className="mt-4 space-y-3" data-testid={`referral-funnel-${programId}`}>
+    {rows.map((row, index) => <div key={`${row.program_version ?? 'unknown'}-${index}`} className="rounded-xl border border-slate-200 p-3 text-sm dark:border-slate-700">
+      <p className="font-semibold">{row.program_version == null ? t('Verze neznámá', 'Unknown version') : `v${row.program_version}`}</p>
+      <p className="text-xs text-slate-500">{t('Poslední událost:', 'Last event:')} {row.last_observed_at ?? t('neznámá', 'unknown')}. {t('Aktuálnost ingestu nelze ověřit.', 'Ingestion freshness is unverified.')}</p>
+      <dl className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
+        <div><dt className="text-slate-500">{t('Kvalifikováno', 'Qualified')}</dt><dd className="font-semibold">{row.qualified_events}</dd></div>
+        <div><dt className="text-slate-500">{t('Odměna požádána', 'Reward requested')}</dt><dd className="font-semibold">{row.reward_requested_events}</dd></div>
+        <div><dt className="text-slate-500">{t('Přijato účetní knihou', 'Ledger accepted')}</dt><dd className="font-semibold">{row.accepted_outcomes}</dd></div>
+        <div><dt className="text-slate-500">{t('Odmítnuto', 'Rejected')}</dt><dd className="font-semibold">{row.rejected_outcomes}</dd></div>
+        <div><dt className="text-slate-500">{t('Stornováno', 'Reversed')}</dt><dd className="font-semibold">{row.reversed_outcomes}</dd></div>
+      </dl>
+    </div>)}
+  </div>
+}
+
 export default function ReferralProgramsPage() {
   const { t, language } = useLanguage()
   const [items, setItems] = useState<ReferralProgram[]>([])
@@ -68,6 +113,7 @@ export default function ReferralProgramsPage() {
         {items.map(program => <article key={program.id} className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-700 dark:bg-slate-900" data-referral-program={`${program.name}@${program.version}`}>
           <div className="flex items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[.12em] text-emerald-700 dark:text-emerald-300">{t('Publikováno', 'Published')} · v{program.version}</p><h2 className="mt-1 text-lg font-semibold">{program.name}</h2></div><span className="rounded-xl bg-amber-50 px-3 py-2 text-lg font-bold text-amber-800">{money(program)}</span></div>
           <dl className="mt-5 grid gap-3 rounded-xl bg-slate-50 p-4 text-sm sm:grid-cols-2"><div><dt className="text-xs text-slate-500">{t('Kvalifikace', 'Qualification')}</dt><dd className="mt-1 font-medium">{program.qualifyingEvent}</dd></div><div><dt className="text-xs text-slate-500">{t('Platí do', 'Window ends')}</dt><dd className="mt-1 font-medium">{new Intl.DateTimeFormat(language === 'cs' ? 'cs-CZ' : 'en-GB', { dateStyle: 'medium' }).format(new Date(program.attributionWindowEndsAt))}</dd></div></dl>
+          <ReferralProgramFunnel programId={program.id} />
           <p className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-violet-700 dark:text-violet-300">{t('Další krok: připnout tuto verzi ke kampani', 'Next: pin this version to a campaign')} <ArrowRight className="h-4 w-4" /></p>
         </article>)}
       </section>}

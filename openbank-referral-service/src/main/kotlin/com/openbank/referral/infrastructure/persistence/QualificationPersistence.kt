@@ -108,6 +108,7 @@ class PanacheReferralRefereeLookup : ReferralRefereeLookup {
         ReferralInvite(
             id = e.id,
             programId = e.programId,
+            programVersion = e.programVersion,
             token = e.tokenHash,
             referrerPartyId = e.referrerPartyId,
             refereePartyId = e.refereePartyId,
@@ -131,6 +132,7 @@ class PanacheReferralRefereeLookup : ReferralRefereeLookup {
                 id = e.id,
                 inviteId = e.inviteId,
                 programId = e.programId,
+                programVersion = e.programVersion,
                 referrerPartyId = e.referrerPartyId,
                 refereePartyId = e.refereePartyId,
                 qualificationEventId = e.qualificationEventId,
