@@ -12,7 +12,6 @@ import com.openbank.notification.infrastructure.persistence.repository.Notificat
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.Mail
 import io.quarkus.mailer.reactive.ReactiveMailer
-import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
@@ -23,6 +22,10 @@ import java.util.UUID
 
 /** Thrown for a request `opsmessage.compose` cannot fulfil; the resource maps this to 400. */
 class OperatorMessageRejected(message: String) : RuntimeException(message)
+
+enum class OperatorDispatchStatus { SENT, IN_DOUBT }
+
+data class OperatorMessageResult(val id: UUID, val dispatchStatus: OperatorDispatchStatus)
 
 /**
  * The `opsmessage.compose` write path (ADR-0176 D2/D5) — separate from [NotificationConsumer],
@@ -66,7 +69,7 @@ class OperatorMessageService {
     @Inject
     lateinit var clock: Clock
 
-    suspend fun compose(request: OperatorMessageRequest): UUID {
+    suspend fun compose(request: OperatorMessageRequest): OperatorMessageResult {
         validateRequest(request)
 
         val (subject, body) = render(request.template, request.variables)
@@ -87,41 +90,35 @@ class OperatorMessageService {
         }
         Panache.withTransaction { notificationRepo.persist(entity) }.awaitSuspending()
 
-        // Two `.onFailure()` handlers, deliberately at two different points in the chain — not
-        // one after both stages (code-review finding, PR #1368). A single trailing handler
-        // cannot tell "the mail never went out" from "the mail went out, but recording SENT
-        // failed" — Mutiny's Uni#chain composes onto ONE failure channel, so it would catch
-        // both, and the original code did: a transient Postgres error AFTER a successful send
-        // silently overwrote the row with status=FAILED, while the customer had actually
-        // received the message. That is a worse outcome than leaving the row PENDING.
-        mailer.send(Mail.withHtml(request.recipient, subject, body))
+        // An SMTP exception may occur after provider acceptance. Keep the durable row PENDING
+        // and surface IN_DOUBT. The old recovery chain wrote FAILED and then unconditionally
+        // wrote SENT, claiming success even when the mailer rejected the handoff.
+        val handedOff = mailer.send(Mail.withHtml(request.recipient, subject, body))
+            .replaceWith(true)
             .onFailure().invoke { e ->
-                log.warnf(e, "opsmessage.compose: mail send failed notificationId=%s", notificationId)
+                log.warnf(e, "opsmessage.compose: handoff unresolved notificationId=%s", notificationId)
             }
-            .onFailure().recoverWithUni { _ -> notificationRepo.markTerminalStatus(notificationId, "FAILED") }
-            // Scoped bulk UPDATE, not find-then-map-then-persist (issue #1393): the prior code
-            // SELECTed the full row (pulling subject/body HTML back out) before UPDATEing it —
-            // an extra DB round-trip this repository's own markRead/markAllRead idiom already
-            // avoided elsewhere in this file.
-            .chain { _ -> notificationRepo.markTerminalStatus(notificationId, "SENT", Instant.now(clock)) }
-            // Only reachable if the mail genuinely went out (the FAILED path above already
-            // recovered any send failure into a completed Uni). Never marks the row FAILED —
-            // that would be a lie about a message that was actually delivered — logs loudly
-            // instead, and swallows so the endpoint still returns 201: the customer already has
-            // the message, this is a bookkeeping problem for an operator to notice via the log,
-            // not a reason to fail the request.
+            .onFailure().recoverWithItem(false)
+            .awaitSuspending()
+        if (!handedOff) return OperatorMessageResult(notificationId, OperatorDispatchStatus.IN_DOUBT)
+
+        // A successful handoff followed by a failed status write is also unresolved in the DB.
+        // Never retry mail automatically merely because this bookkeeping step failed.
+        val recorded = notificationRepo.markTerminalStatus(notificationId, "SENT", Instant.now(clock))
+            .replaceWith(true)
             .onFailure().invoke { e ->
                 log.warnf(
                     e,
-                    "opsmessage.compose: mail sent but recording SENT status failed notificationId=%s " +
-                        "— row left as-is, NOT marked FAILED (the email was actually delivered)",
+                    "opsmessage.compose: handoff accepted but status write failed notificationId=%s",
                     notificationId,
                 )
             }
-            .onFailure().recoverWithUni { _ -> Uni.createFrom().voidItem() }
+            .onFailure().recoverWithItem(false)
             .awaitSuspending()
-
-        return notificationId
+        return OperatorMessageResult(
+            notificationId,
+            if (recorded) OperatorDispatchStatus.SENT else OperatorDispatchStatus.IN_DOUBT,
+        )
     }
 
     // Format-validate before anything is persisted or sent (issue #1384): an empty string,

@@ -268,6 +268,13 @@ duplicate contact. A definitive HTTP rejection can still be FAILED; the exceptio
 IN_DOUBT. SMTP, APNs and FCM do not provide a universal queryable exactly-once receipt, so
 automated redelivery of an ambiguous handoff is prohibited. Reconciliation must use any
 provider-specific evidence available and otherwise record an explicit unresolved decision.
+The synchronous operator-email path now follows the same ambiguity rule. A mailer exception
+or a failed terminal status write leaves its row PENDING and returns HTTP 202 with its id and
+`dispatchStatus=IN_DOUBT`; a successful SMTP handoff and committed status returns 201. The
+previous recovery chain wrote FAILED after a mailer exception and then unconditionally wrote
+SENT. A real PostgreSQL plus refused-SMTP test guards that false success. Operators must
+reconcile an IN_DOUBT id rather than resubmit the request: this path still has no stable
+idempotency key or durable dispatch queue.
 A push fan-out can mix accepted and in-doubt device sends; the current aggregate row cannot
 reconstruct each device's result. A durable per-device attempt ledger and provider-specific
 receipts are still required before claiming automatic reconciliation for that case.

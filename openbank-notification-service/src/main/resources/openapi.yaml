@@ -3,7 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
-  version: 1.11.0
+  version: 1.12.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
     name: Apache-2.0
@@ -331,6 +331,8 @@ paths:
         paused with `202` and a pending-approval id; the maker retries with `X-Approval-Id` once a
         different operator decides it via `PATCH /api/v1/notifications/approvals/{id}`.
         `AUTHZ_FOUR_EYES_ENFORCE` defaults `false`, so a `201` is the common response today.
+        An SMTP or status-write ambiguity returns `202` with the notification id and
+        `dispatchStatus=IN_DOUBT`; operators must reconcile that id before any new send.
       operationId: composeOperatorMessage
       requestBody:
         required: true
@@ -340,13 +342,23 @@ paths:
               $ref: '#/components/schemas/ComposeMessageRequest'
       responses:
         '201':
-          description: Message persisted and sent (or, once four-eyes enforcement is on, approved and sent)
+          description: Message persisted and SMTP handoff accepted
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ComposeMessageResponse'
         '202':
-          description: Four-eyes enforcement is on — paused pending a different operator's approval
+          description: Either paused for four-eyes approval or persisted with unresolved transport outcome
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ComposeMessageResponse'
+                  - type: object
+                    required: [status, approvalId]
+                    properties:
+                      status: { type: string, const: PENDING_APPROVAL }
+                      approvalId: { type: string }
         '400':
           description: Unknown/missing template variables, or a malformed recipient
           content:
@@ -861,11 +873,16 @@ components:
 
     ComposeMessageResponse:
       type: object
+      required: [id, dispatchStatus]
       properties:
         id:
           type: string
           format: uuid
           description: The new notification's id.
+        dispatchStatus:
+          type: string
+          enum: [SENT, IN_DOUBT]
+          description: SENT means SMTP handoff and terminal write succeeded; IN_DOUBT requires reconciliation.
 
     DecideApprovalRequest:
       type: object
