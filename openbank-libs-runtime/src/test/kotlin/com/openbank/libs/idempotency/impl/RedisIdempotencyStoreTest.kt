@@ -8,6 +8,7 @@ import com.openbank.libs.api.error.ApiError
 import com.openbank.libs.api.error.IdempotencyKeyReusedExceptionMapper
 import com.openbank.libs.api.error.IdempotencyRequestInProgressExceptionMapper
 import com.openbank.libs.idempotency.IdempotencyKeyReusedException
+import com.openbank.libs.idempotency.IdempotencyRecordCorruptException
 import com.openbank.libs.idempotency.IdempotencyRequestInProgressException
 import com.openbank.libs.idempotency.RequestFingerprint
 import com.openbank.libs.idempotency.ReserveResult
@@ -93,6 +94,29 @@ class RedisIdempotencyStoreTest {
         assertThat(store.get("broken")).isNull()
         assertThat(store.reserve("broken", first)).isEqualTo(ReserveResult.Mismatch)
         assertThat(backing["idempotency:broken"]).isEqualTo("v2|hash-only")
+    }
+
+    @Test
+    fun `stored HTTP status range accepts endpoints and refuses adjacent values`(): Unit = runBlocking {
+        for (status in listOf(100, 599)) {
+            val key = "valid-$status"
+            backing["idempotency:$key"] = "v2|$first|$status|2026-09-26T10:00Z|{}"
+
+            assertThat(store.get(key)!!.statusCode).isEqualTo(status)
+            assertThat(store.reserve(key, first)).isInstanceOf(ReserveResult.Replay::class.java)
+        }
+
+        for (status in listOf(99, 600)) {
+            val key = "invalid-$status"
+            val raw = "v2|$first|$status|2026-09-26T10:00Z|{}"
+            backing["idempotency:$key"] = raw
+
+            assertThatThrownBy { runBlocking { store.get(key) } }
+                .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+            assertThatThrownBy { runBlocking { store.reserve(key, first) } }
+                .isInstanceOf(IdempotencyRecordCorruptException::class.java)
+            assertThat(backing["idempotency:$key"]).isEqualTo(raw)
+        }
     }
 
     @Test
