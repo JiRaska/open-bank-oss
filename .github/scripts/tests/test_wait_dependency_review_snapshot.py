@@ -23,6 +23,12 @@ def response(base=None, head=None):
     return f"HTTP/2.0 200 OK\n{warning}\n[]"
 
 
+def single_missing_response(side):
+    message = f"No snapshots were found for the {side} SHA {'a' * 40}."
+    warning = base64.b64encode(message.encode()).decode()
+    return f"HTTP/2.0 200 OK\nX-GitHub-Dependency-Graph-Snapshot-Warnings: {warning}\n\n[]"
+
+
 class SnapshotWaitTests(unittest.TestCase):
     def test_missing_head_waits_then_accepts_indexed_graph(self):
         replies = iter([response(1, 0), response(1, 0), response()])
@@ -42,6 +48,10 @@ class SnapshotWaitTests(unittest.TestCase):
         self.assertFalse(MODULE.wait_for_snapshot(query, lambda _: None))
         self.assertEqual(len(calls), 7)
         self.assertEqual(sum(MODULE.DELAYS), 1800)
+
+    def test_single_missing_snapshot_warning_is_classified(self):
+        self.assertEqual(MODULE._snapshot_state(single_missing_response("base")), "missing_base")
+        self.assertEqual(MODULE._snapshot_state(single_missing_response("head")), "missing_head")
 
     def test_unknown_or_malformed_response_is_not_success(self):
         for reply in [

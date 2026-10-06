@@ -57,9 +57,14 @@ def _snapshot_state(response: str) -> str:
             counts = re.search(
                 r"base SHA \((\d+)\) and the head SHA \((\d+)\)", message
             )
-            if not counts:
+            if counts:
+                base_count, head_count = map(int, counts.groups())
+            elif re.fullmatch(r"No snapshots were found for the base SHA [0-9a-f]{40}\.", message):
+                return "missing_base"
+            elif re.fullmatch(r"No snapshots were found for the head SHA [0-9a-f]{40}\.", message):
+                return "missing_head"
+            else:
                 raise ValueError("unknown dependency snapshot warning")
-            base_count, head_count = map(int, counts.groups())
             if not base_count:
                 return "missing_base"
             if not head_count:
