@@ -5068,16 +5068,21 @@ gates:
   #
   # ENFORCED (was advisory, #2392). It had 10 violations at introduction and the last two —
   # finrep-service and onboarding-service — were cleared in #2403, so `--enforce` exits 0 on a
-  # clean tree today. The advisory period had no deadline attached because the gate had no
+  # clean tree today. Also check the converse from #9105: an OPA sidecar with no enabled CDI
+  # PolicyDecisionPoint never receives a decision request (and enforcing endpoints fail closed).
+  # The advisory period had no deadline attached because the gate had no
   # rules.yaml rule at all, and its docstring cited an `authz_pdp_parity.target_enforce_date`
   # key that never existed (#2393): it read as governed while nothing watched it.
   - id: authz-enforce-pdp-sidecar-parity
     name: "authz-enforce ⇒ PDP sidecar parity (enforced, #1797)"
     group: security
     mode: enforced
-    selftest: python3 .github/scripts/check-authz-pdp-parity.py --self-test
+    selftest: |
+      set -e
+      python3 .github/scripts/check-authz-pdp-parity.py --self-test
+      python3 .github/scripts/check_authz_pdp_parity_test.py
     selftest_expect: pass
-    selftest_inputs: [".github/scripts/check-authz-pdp-parity.py"]
+    selftest_inputs: [".github/scripts/check-authz-pdp-parity.py", ".github/scripts/check_authz_pdp_parity_test.py"]
     run: |
       python3 .github/scripts/check-authz-pdp-parity.py . --enforce
 

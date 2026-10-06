@@ -8,7 +8,8 @@ unfalsified — its failure path is code nobody has run. So every test here buil
 and asserts what the guard PRINTS, not merely its exit code, in both directions:
 
   must_flag     — @Authorize present, enforce true, no `opa` sidecar  -> 1 violation
-  must_not_flag — @Authorize present, enforce true, sidecar declared  -> 0 violations
+  must_not_flag — @Authorize present, sidecar + CDI PDP wired         -> 0 violations
+  must_flag     — @Authorize present, sidecar but no CDI PDP          -> 1 violation
   must_not_flag — NO @Authorize, enforce true, no sidecar             -> 0 violations, skipped
   must_flag     — @Authorize only in a NESTED KDoc                    -> not an annotation
 
@@ -58,7 +59,8 @@ def workload_yaml(service: str, *, sidecar: bool, enforce: str | None) -> str:
 class Fixture:
     """A minimal repo: one gitops workload plus one service module."""
 
-    def __init__(self, service: str, *, sidecar: bool, enforce: str | None, kotlin: str | None):
+    def __init__(self, service: str, *, sidecar: bool, enforce: str | None, kotlin: str | None,
+                 pdp_enabled: bool = False):
         self.tmp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.tmp.name)
         comp = self.root / "openbank-infra" / "gitops" / "components" / service
@@ -70,13 +72,17 @@ class Fixture:
             (src / "Resource.kt").write_text(kotlin)
         res = self.root / f"openbank-{service}" / "src" / "main" / "resources"
         res.mkdir(parents=True)
-        res.joinpath("application.yaml").write_text("authz:\n  enforce: \"${AUTHZ_ENFORCE:true}\"\n")
+        res.joinpath("application.yaml").write_text(
+            "authz:\n  enforce: \"${AUTHZ_ENFORCE:true}\"\n"
+            f"openbank:\n  authz:\n    opa-pdp-producer:\n      enabled: {str(pdp_enabled).lower()}\n"
+        )
 
     def run(self, *extra: str) -> tuple[int, str]:
         proc = subprocess.run(
             [sys.executable, str(SCRIPT), str(self.root), *extra],
             capture_output=True,
             text=True,
+            check=False,
         )
         return proc.returncode, proc.stdout + proc.stderr
 
@@ -123,7 +129,7 @@ class TestParity(unittest.TestCase):
     def test_flags_annotated_service_with_no_sidecar(self):
         with Fixture("must-flag-service", sidecar=False, enforce="true", kotlin=ANNOTATED) as f:
             code, out = f.run("--enforce")
-            self.assertIn("1 enforce-without-PDP violation", out, out)
+            self.assertIn("1 enforce-without-sidecar violation", out, out)
             self.assertIn("must-flag-service enforces authz", out, out)
             self.assertIn("::error", out, out)
             self.assertEqual(1, code, out)
@@ -131,23 +137,61 @@ class TestParity(unittest.TestCase):
     def test_flags_when_enforce_comes_from_the_application_yaml_default(self):
         with Fixture("must-flag-service", sidecar=False, enforce=None, kotlin=ANNOTATED) as f:
             code, out = f.run("--enforce")
-            self.assertIn("1 enforce-without-PDP violation", out, out)
+            self.assertIn("1 enforce-without-sidecar violation", out, out)
             self.assertIn("(app-default)", out, out)
             self.assertEqual(1, code, out)
 
     # ---- direction 2: it MUST NOT flag --------------------------------------------
     def test_does_not_flag_annotated_service_that_has_a_sidecar(self):
-        with Fixture("good-service", sidecar=True, enforce="true", kotlin=ANNOTATED) as f:
+        with Fixture("good-service", sidecar=True, enforce="true", kotlin=ANNOTATED,
+                     pdp_enabled=True) as f:
             code, out = f.run("--enforce")
-            self.assertIn("0 enforce-without-PDP violation", out, out)
+            self.assertIn("0 enforce-without-sidecar violation", out, out)
+            self.assertIn("0 sidecar-without-bean violation", out, out)
             self.assertNotIn("0 skipped", out.replace("0 skipped (no @Authorize in src/main: none)", ""), out)
+            self.assertEqual(0, code, out)
+
+    def test_flags_sidecar_without_application_pdp(self):
+        with Fixture("unwired-service", sidecar=True, enforce="false", kotlin=ANNOTATED) as f:
+            code, out = f.run("--enforce")
+            self.assertIn("unwired-service declares an `opa` sidecar but no PolicyDecisionPoint bean", out)
+            self.assertIn("1 sidecar-without-bean violation", out)
+            self.assertEqual(1, code, out)
+
+    def test_accepts_an_explicit_cdi_producer(self):
+        with Fixture("local-service", sidecar=True, enforce="true", kotlin=ANNOTATED) as f:
+            source = f.root / "openbank-local-service/src/main/kotlin/AuthzProducer.kt"
+            source.write_text("@Produces\n@ApplicationScoped\n"
+                              "fun policyDecisionPoint(): PolicyDecisionPoint = createPdp()\n")
+            code, out = f.run("--enforce")
+            self.assertIn("0 sidecar-without-bean violation", out)
+            self.assertEqual(0, code, out)
+
+    def test_comment_only_producer_does_not_wire_a_sidecar(self):
+        with Fixture("unwired-service", sidecar=True, enforce="true", kotlin=ANNOTATED) as f:
+            source = f.root / "openbank-unwired-service/src/main/kotlin/AuthzProducer.kt"
+            source.write_text("// @Produces fun policyDecisionPoint(): PolicyDecisionPoint = fake()\n")
+            code, out = f.run("--enforce")
+            self.assertIn("1 sidecar-without-bean violation", out)
+            self.assertEqual(1, code, out)
+
+    def test_runtime_override_cannot_disable_the_build_time_producer(self):
+        with Fixture("disabled-service", sidecar=True, enforce="true", kotlin=ANNOTATED,
+                     pdp_enabled=True) as f:
+            manifest = f.root / "openbank-infra/gitops/components/disabled-service/disabled-service.yaml"
+            document = yaml.safe_load(manifest.read_text())
+            document["spec"]["template"]["spec"]["containers"][0]["env"].append(
+                {"name": "OPENBANK_AUTHZ_OPA_PDP_PRODUCER_ENABLED", "value": "false"})
+            manifest.write_text(yaml.safe_dump(document))
+            code, out = f.run("--enforce")
+            self.assertIn("0 sidecar-without-bean violation", out)
             self.assertEqual(0, code, out)
 
     def test_does_not_flag_a_service_with_no_authorize_at_all(self):
         """finrep/onboarding: nothing to fail closed, so a missing PDP is not a defect."""
         with Fixture("bare-service", sidecar=False, enforce="true", kotlin=None) as f:
             code, out = f.run("--enforce")
-            self.assertIn("0 enforce-without-PDP violation", out, out)
+            self.assertIn("0 enforce-without-sidecar violation", out, out)
             self.assertIn("skipped (no @Authorize in src/main: bare-service)", out, out)
             self.assertEqual(0, code, out)
 
@@ -155,7 +199,7 @@ class TestParity(unittest.TestCase):
         """A KDoc naming @Authorize — including one with a NESTED block comment — must not count."""
         with Fixture("prose-service", sidecar=False, enforce="true", kotlin=PROSE_ONLY) as f:
             code, out = f.run("--enforce")
-            self.assertIn("0 enforce-without-PDP violation", out, out)
+            self.assertIn("0 enforce-without-sidecar violation", out, out)
             self.assertIn("skipped (no @Authorize in src/main: prose-service)", out, out)
             self.assertEqual(0, code, out)
 
