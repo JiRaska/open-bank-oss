@@ -82,6 +82,51 @@ if [ "${1:-}" = "--self-test" ]; then
   put "$K/domain/Money.kt" 'class Money { val time = """${Instant.now()}""" }\n'
   expect "a clock call inside raw string interpolation is FLAGGED" 1 "VIOLATION"
 
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val quote = '"'; fun at() = Instant.now() }
+KOTLIN
+  expect "a double quote in a char literal does not hide executable code" 1 "VIOLATION"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val quote = '\"'; val slash = '\\'; fun at() = Instant.now() }
+KOTLIN
+  expect "escaped quote and backslash chars do not hide executable code" 1 "VIOLATION"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val quote = '\''; fun at() = Instant.now() }
+KOTLIN
+  expect "an escaped single quote char does not hide executable code" 1 "VIOLATION"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val quote = '"'; val docs = "Instant.now()" }
+KOTLIN
+  expect "a char quote does not expose clock-call text in a later string" 0 "OK: no direct wall-clock"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val time = "${if (true) '}' else Instant.now()}" }
+KOTLIN
+  expect "a char brace inside interpolation does not hide a clock call" 1 "VIOLATION"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val `path//segment` = 1; fun at() = Instant.now() }
+KOTLIN
+  expect "a slash pair in a backtick identifier does not hide code" 1 "VIOLATION"
+
+  reset; mkdir -p "$(dirname "$K/domain/Money.kt")"
+  cat > "$K/domain/Money.kt" <<'KOTLIN'
+class Money { val `Instant.now()` = 1 }
+KOTLIN
+  expect "clock-call text inside a backtick identifier is clean" 0 "OK: no direct wall-clock"
+
+  reset; put "$K/domain/Money.kt" 'class Money { fun at() = Instant . now() }\n'
+  expect "spaces around the member-access dot still FLAG a clock call" 1 "VIOLATION"
+
   reset; put "$K/domain/Money.kt" '/* comment */ fun at() = System.currentTimeMillis()\n'
   expect "code after a same-line block comment is FLAGGED" 1 "VIOLATION"
 
@@ -136,7 +181,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'money_path_services:\n  - openbank-fixture-service\n' > "$td/openbank-libs/governance/rules.yaml"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: clock-injection gate is falsifiable (22 cases, scope derived from rules.yaml)"
+  echo "self-test ok: clock-injection gate is falsifiable (30 cases, scope derived from rules.yaml)"
   exit 0
 fi
 
@@ -207,11 +252,11 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
               continue
             }
             if (string_mode != "") {
-              if (string_mode == "normal") {
+              if (string_mode == "normal" || string_mode == "char") {
                 if (escaped) { escaped = 0; continue }
                 if (c == "\\") { escaped = 1; continue }
               }
-              if (c == "$" && next_c == "{") {
+              if ((string_mode == "normal" || string_mode == "raw") && c == "$" && next_c == "{") {
                 template_level++
                 template_depth[template_level] = 1
                 template_return[template_level] = string_mode
@@ -227,11 +272,19 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
               } else if (string_mode == "normal" && c == "\"") {
                 string_mode = ""
                 out = out " "
+              } else if (string_mode == "char" && c == "\047") {
+                string_mode = ""
+                out = out " "
+              } else if (string_mode == "backtick" && c == "`") {
+                string_mode = ""
+                out = out " "
               }
               continue
             }
             if (three == "\"\"\"") { string_mode = "raw"; out = out " "; i += 2; continue }
             if (c == "\"") { string_mode = "normal"; out = out " "; continue }
+            if (c == "\047") { string_mode = "char"; out = out " "; continue }
+            if (c == "`") { string_mode = "backtick"; out = out " "; continue }
             if (c == "/" && next_c == "*") { block_comment = 1; i++; continue }
             if (c == "/" && next_c == "/") break
             if (template_level > 0) {
@@ -254,7 +307,7 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
         }
         {
           code = executable_code($0)
-          if (code ~ /(Instant|LocalDateTime|LocalDate)[.]now[(][)]|System[.]currentTimeMillis[(][)]/)
+          if (code ~ /(Instant|LocalDateTime|LocalDate)[[:space:]]*[.][[:space:]]*now[[:space:]]*[(][[:space:]]*[)]|System[[:space:]]*[.][[:space:]]*currentTimeMillis[[:space:]]*[(][[:space:]]*[)]/)
             print FNR ":" $0
         }
       ' "$file")
