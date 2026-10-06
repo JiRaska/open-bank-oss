@@ -54,6 +54,20 @@ spec:
             registry: public.ecr.aws/d7v4f3x6
             repository: falcoctl
             tag: "0.14.2"
+          # Falco 0.45.0 ships stable rules 5.2.0. The chart default `:5` and
+          # weekly follow timer let long-lived pods load different rulesets.
+          # Update this ref together with Falco, then roll the DaemonSet.
+          artifact:
+            follow:
+              enabled: false
+          config:
+            artifact:
+              install:
+                refs:
+                  - falco-rules:5.2.0
+              follow:
+                refs:
+                  - falco-rules:5.2.0
 
         driver:
           kind: modern_ebpf
