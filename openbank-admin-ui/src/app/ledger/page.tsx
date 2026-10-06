@@ -11,7 +11,7 @@ import { svcUrl, classifyBffFailure } from '@/lib/services/bff'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { AuthGuard, Can } from '@/components/auth/AuthGuard'
 import { PageHeader } from '@/components/ui/PageHeader'
-import { StatusBadge } from '@/components/ui'
+import { HumanReference, StatusBadge } from '@/components/ui'
 import { parseLedgerJournalPage, type LedgerJournalPage } from '@/lib/ledger/ledgerJournalContract'
 import { ContextualInsights } from '@/components/insights/ContextualInsights'
 import { LEDGER_INSIGHTS } from '@/components/insights/catalog'
@@ -244,7 +244,13 @@ export default function LedgerPage() {
                         </button>
                       </td>
                       <td><span className="mono" style={{ fontSize: '12px', fontWeight: 500 }}>{entry.entryNumber ?? '—'}</span></td>
-                      <td><span className="mono" style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>{entry.transactionId.slice(0, 8)}…</span></td>
+                      <td><HumanReference
+                        label={entry.entryNumber !== null
+                          ? t(`Zápis č. ${entry.entryNumber}`, `Entry no. ${entry.entryNumber}`)
+                          : t(`Zápis z ${entry.entryDate}`, `Entry on ${entry.entryDate}`)}
+                        reference={entry.transactionId}
+                        copyLabel={t('Kopírovat ID transakce', 'Copy transaction ID')}
+                      /></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.entryDate}</span></td>
                       <td><span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>{entry.valueDate}</span></td>
                       <td><StatusBadge status={entry.status} /></td>

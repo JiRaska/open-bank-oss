@@ -40,7 +40,7 @@ const BASELINE: Record<string, number> = {
   'src/app/iaops/page.tsx': 2,
   'src/app/interest/page.tsx': 1,
   'src/app/kyc/page.tsx': 2,
-  'src/app/ledger/page.tsx': 3,
+  'src/app/ledger/page.tsx': 2,
   'src/app/loyalty/page.tsx': 2,
   'src/app/observability/traces/page.tsx': 2,
   'src/app/onboarding/page.tsx': 1,

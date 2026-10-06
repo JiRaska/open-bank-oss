@@ -48,6 +48,17 @@ describe('General Ledger pagination', () => {
     expect(disclosure).toHaveAttribute('aria-controls', 'ledger-entry-entry-1')
   })
 
+  it('names the transaction by its journal entry and keeps the full ID copyable as a secondary reference', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response(firstPage)))
+    renderPage()
+    fireEvent.click(screen.getByRole('button', { name: 'Load Entries' }))
+
+    await screen.findByText('Entry no. 1')
+    expect(screen.queryByText('transaction-1')).not.toBeInTheDocument()
+    expect(screen.getByTitle('transaction-1')).toHaveTextContent('transact…')
+    expect(screen.getByRole('button', { name: 'Copy transaction ID' })).toBeVisible()
+  })
+
   it('forwards the server cursor and appends the next journal page', async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(firstPage))
