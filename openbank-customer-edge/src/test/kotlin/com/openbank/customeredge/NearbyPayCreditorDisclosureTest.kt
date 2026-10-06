@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.customeredge.infrastructure.rest.CustomerEdgeResource
 import com.openbank.customeredge.infrastructure.rest.PaymentSessionStore
 import com.openbank.customeredge.infrastructure.rest.UpstreamClient
+import com.openbank.customeredge.infrastructure.rest.inMemoryPaymentSessionStore
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
@@ -45,7 +46,7 @@ class NearbyPayCreditorDisclosureTest {
     private val payerAccount: UUID = UUID.randomUUID()
     private val payeeAccount: UUID = UUID.randomUUID()
 
-    private val sessions = PaymentSessionStore()
+    private val sessions = inMemoryPaymentSessionStore()
 
     private fun resource(upstream: UpstreamClient): CustomerEdgeResource = CustomerEdgeResource(
         upstream,

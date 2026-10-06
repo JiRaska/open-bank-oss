@@ -932,3 +932,32 @@ decision use first; the additive projection table may remain until its consumer 
   (reference, amount, currency) must match exactly and is restated on consume
   (`DecisionScaBindingTest`).
   Rollback: disable the delegation flag first; V31/V32 are additive.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("account-service", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:account-service:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+`/api/v1/accounts` remains served through `accounts-api` on ingress-nginx while the new
+HTTPRoute is staged. The generated `account-service-ingress-allow-list` additionally admits
+`envoy-gateway-system` on TCP 8100; the nginx peer stays in place. This adds an internal
+network ingress peer now, and a public proxy path only after the shared Gateway listener,
+its connection policy and the DNS cutover are verified. Account-service still performs its
+own OIDC and OPA checks; neither the caller principal nor an account mutation grant changes.
+
+**D1 residual risk at cutover:** nginx's `limit-connections: 10` capped concurrent
+connections per client IP. Envoy Gateway has no equivalent. The staged route retains a
+per-client request rate of 20/s and adds a per-backend circuit breaker; the listener-wide
+connection limit belongs to the separate listener change. One slow client can consume more
+than ten connections and compete with other account clients for that shared limit. Keep DNS
+on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
+address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
+allowance remain until Phase 5.

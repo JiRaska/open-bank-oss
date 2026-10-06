@@ -1,5 +1,7 @@
 # 03 — API & contracts
 
+Shared domain APIs live in `openbank-libs-domain`; Quarkus adapters and HTTP resources live in `openbank-libs-runtime`. The root `openbank-libs` module re-exports them for compatibility. For a deployed service, read its own `/q/openbank/docs` and `/q/openapi` for the exact version in use.
+
 How services consume each libs package. Examples are abbreviated but runnable.
 
 ## domain/money — Money + CurrencyCode
@@ -16,6 +18,28 @@ require(total.currency == price.currency)  // type-safe; cross-currency add thro
 ```
 
 **When to use:** anywhere code operates on a monetary amount. Never use `BigDecimal amount + String currencyCode` pairs — `Money` prevents you from adding 100 EUR + 100 CZK.
+
+### Inbound boundary — `Money.parseInbound`
+
+Build `Money` from a request at the API edge, **before** the idempotency key is reserved or anything is written:
+
+```kotlin
+val amount = Money.parseInbound(req.amount, req.currency, requirePositive = true)
+```
+
+It trims and upper-cases the currency and throws `InvalidMoneyException` (still an `IllegalArgumentException`),
+which libs-runtime's `InvalidMoneyExceptionMapper` renders as a 400 RFC 9457 `ProblemDetail` whose `violations[]`
+names the field and never echoes the value:
+
+| Reason | Code |
+|---|---|
+| more decimals than the currency allows (`1.005 EUR`) | `AMOUNT_SCALE_EXCEEDED` |
+| not an ISO 4217 code with a minor unit (`XYZ`, `XAU`, blank) | `CURRENCY_UNSUPPORTED` |
+| more than 19 integer digits / scale above 18 | `VALIDATION_ERROR` |
+| zero or negative, when `requirePositive = true` | `AMOUNT_NOT_POSITIVE` |
+
+`requirePositive` defaults to `false`, so existing callers behave exactly as before; payment, credit, debit and
+hold amounts should pass `true`.
 
 ## domain/account — Iban
 

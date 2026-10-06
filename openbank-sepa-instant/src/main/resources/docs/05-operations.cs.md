@@ -78,3 +78,7 @@ Způsobeno přepsanou aplikovanou migrací. Dočasná oprava: nastav `QUARKUS_FL
 
 ### Timeout provedení
 Platby v `PROCESSING` po `execution_timeout_at` jsou vyzvednuty `findTimedOut` (parciální index) a přepnuty na `TIMEOUT` s událostí `SctInstPaymentTimeout`.
+
+## Produkční mTLS volání AML služby
+
+Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.

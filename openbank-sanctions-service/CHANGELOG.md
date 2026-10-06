@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.1...sanctions-service-v0.15.2) (2026-10-04)
+
+
+### Security
+
+* **libs,infra:** harden XML/TLS and patch LiteLLM PyJWT ([#12036](https://github.com/JiRaska/open-bank-oss/issues/12036)) ([66a1099](https://github.com/JiRaska/open-bank-oss/commit/66a109909a55ada01edea51509d33c9190ec666f))
+
+## [0.15.1](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.0...sanctions-service-v0.15.1) (2026-10-03)
+
+
+### Performance
+
+* **libs:** warm the JVM before reporting ready ([#11894](https://github.com/JiRaska/open-bank-oss/issues/11894)) ([49bf354](https://github.com/JiRaska/open-bank-oss/commit/49bf3545d95e01b14d0ffe1ede3dc827b1106667))
+
 ## [0.15.0](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.14.1...sanctions-service-v0.15.0) (2026-09-29)
 
 

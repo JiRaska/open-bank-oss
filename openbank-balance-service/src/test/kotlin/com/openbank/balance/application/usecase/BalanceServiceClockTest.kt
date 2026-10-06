@@ -7,6 +7,7 @@ import com.openbank.balance.application.port.out.BalanceMovementPort
 import com.openbank.balance.application.port.out.BalanceRepository
 import com.openbank.balance.application.port.out.HoldRepository
 import com.openbank.balance.domain.model.Balance
+import com.openbank.libs.domain.money.Money
 import io.mockk.coEvery
 import io.mockk.mockk
 import kotlinx.coroutines.runBlocking
@@ -42,7 +43,7 @@ class BalanceServiceClockTest {
         coEvery { balanceRepo.save(any()) } returns saved
 
         val result = service.initializeBalance(
-            InitializeBalanceCommand(accountId, "CZK", BigDecimal.ZERO, BigDecimal.ZERO),
+            InitializeBalanceCommand(accountId, Money.of(BigDecimal.ZERO, "CZK"), Money.of(BigDecimal.ZERO, "CZK")),
         )
 
         assertThat(result.updatedAt).isEqualTo(OffsetDateTime.ofInstant(fixedInstant, ZoneOffset.UTC))
@@ -73,7 +74,7 @@ class BalanceServiceClockTest {
         coEvery { holdRepo.saveWithEvent(any(), any(), any()) } answers { firstArg() }
 
         val result = service.placeHold(
-            PlaceHoldCommand(accountId, BigDecimal("100"), "CZK", "test", "ref1", null),
+            PlaceHoldCommand(accountId, Money.of(BigDecimal("100"), "CZK"), "test", "ref1", null),
         )
 
         assertThat(result.createdAt).isEqualTo(OffsetDateTime.ofInstant(fixedInstant, ZoneOffset.UTC))

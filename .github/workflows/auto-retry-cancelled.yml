@@ -228,7 +228,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write
+      actions: write  # `gh run rerun` is the whole job; nothing else here writes
     # A rate-limit wait is now "until the limit resets" (capped at GH_RETRY_MAX_WAIT_SECONDS,
     # 600s here) rather than a flat 15s, because a 45-second budget cannot outlast an
     # installation limit whose window is minutes — that is #6853/#7976 and it reproduced on run

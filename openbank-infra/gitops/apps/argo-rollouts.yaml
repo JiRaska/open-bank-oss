@@ -24,10 +24,10 @@ spec:
     repoURL: https://argoproj.github.io/argo-helm
     chart: argo-rollouts
     # Pin to a specific chart version — update to latest stable before each upgrade.
-    # Chart 2.43.2 ships Argo Rollouts controller v1.10.0 (v1.9 -> v1.10: CRD
+    # Chart 2.43.5 ships Argo Rollouts controller v1.10.0 (v1.9 -> v1.10: CRD
     # versions unchanged, schema additions only; no breaking changes for our
     # dual-Service canary setup).
-    targetRevision: 2.43.2
+    targetRevision: 2.43.5
     helm:
       releaseName: argo-rollouts
       valuesObject:

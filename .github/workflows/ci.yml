@@ -4,9 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  pull_request_review:
+    types: [submitted, dismissed, edited]
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   # On a push to main, github.ref is always refs/heads/main regardless of commit, so a
@@ -15,12 +18,40 @@ concurrency:
   # survived to completion — 9 of 11 CI runs and 9 of 11 Security runs were cancelled on
   # 2026-08-02 (issue #3390). Give each main commit its own lane and never cancel it;
   # PR pushes keep the superseding behaviour, which is what that setting is for.
-  # The key stays O(1) — a sha, never a list: interpolating a fleet-sized value here
-  # stops the job being created at all (#3082).
-  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || 'ci' }}
+  # Review events have their own lane: a review must not cancel the PR push run that
+  # provides required checks (including service builds from a separate workflow).
+  # The key stays O(1) — a sha or event name, never a list (#3082).
+  group: ci-${{ github.ref }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.sha || github.event_name }}
   cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
 jobs:
+  agent-admission:
+    name: Agent PR admission
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.admit.outputs.proceed }}
+    steps:
+      - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - id: admit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = 'push' ]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/agent-admission-venv"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" -m pip install --quiet --require-hashes -r .github/workflows/requirements/public-readiness.txt
+          gh api --paginate --slurp "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" > "$RUNNER_TEMP/agent-prs.json"
+          "$RUNNER_TEMP/agent-admission-venv/bin/python" .github/scripts/agent-admission.py "$RUNNER_TEMP/agent-prs.json" --current-pr "$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
   # ---------------------------------------------------------------------------
   # JVM / Kotlin / Gradle builds moved to services-ci.yml, which builds every
   # Gradle module as its own path-scoped matrix job (per-service status checks +
@@ -41,6 +72,8 @@ jobs:
   # ---------------------------------------------------------------------------
   changes-ui:
     name: Detect UI or governance changes
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -52,6 +85,8 @@ jobs:
         with:
           fetch-depth: 0
       - id: check
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
         run: |
           set -euo pipefail
           python3 .github/scripts/tests/test_select_admin_ui_rbac_tests.py
@@ -59,10 +94,11 @@ jobs:
             # Post-merge main build always includes admin-ui.
             echo "changed=true" >> "$GITHUB_OUTPUT"
           else
-            BASE="origin/${{ github.base_ref }}"
+            : "${BASE_REF:?pull request base ref missing}"
+            BASE="origin/${BASE_REF}"
             # Force the remote-tracking ref to the true tip (persistent self-hosted
             # runners reuse the workdir, so the cached ref can be stale).
-            git fetch origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --no-tags
+            git fetch origin "${BASE_REF}:refs/remotes/origin/${BASE_REF}" --no-tags
             # The extra pathspecs are the governance gate's INPUTS, not UI code:
             # every per-service governance.yaml, plus the schema it validates them
             # against. The generator itself lives under openbank-admin-ui/.
@@ -349,6 +385,8 @@ jobs:
   # ---------------------------------------------------------------------------
   gates:
     name: gates (${{ matrix.slug }})
+    needs: agent-admission
+    if: needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -388,7 +426,7 @@ jobs:
       PR_TITLE: ${{ github.event.pull_request.title }}
       PR_BODY: ${{ github.event.pull_request.body }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
-      BASE_REF: ${{ github.base_ref || github.ref_name }}
+      BASE_REF: ${{ github.event.pull_request.base.ref || github.ref_name }}
       # `gh` needs GH_TOKEN; the job-level `permissions: contents: read` above is what
       # scopes it. check-msg-channel-image-parity.py reads a file at an arbitrary historical
       # commit (the sha an image tag names) through the contents API, because CI checks out
@@ -535,7 +573,7 @@ jobs:
       # falls back to EVENT_BASE_SHA if HEAD^1 somehow fails to resolve, so an unexpected event
       # shape degrades to the old (stale but safe) behaviour rather than failing the job.
       - name: resolve PR diff base (current merge-base, not creation-time base.sha)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         env:
           EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
@@ -620,11 +658,20 @@ jobs:
   # in-repo fix the ruleset can't ship itself.
   validate:
     name: Validate manifests
-    needs: [gates, ui]
+    needs: [agent-admission, gates, ui]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
+      - name: Verify agent PR admission
+        env:
+          RESULT: ${{ needs.agent-admission.result }}
+          PROCEED: ${{ needs.agent-admission.outputs.proceed }}
+        run: |
+          if [ "$RESULT" != 'success' ] || [ "$PROCEED" != 'true' ]; then
+            echo "::error::Agent PR admission refused or failed ($RESULT, proceed=$PROCEED)."
+            exit 1
+          fi
       - name: Verify no gate shard failed
         env:
           RESULT: ${{ needs.gates.result }}
@@ -669,7 +716,8 @@ jobs:
 
   app-status:
     name: Customer-app dossier
-    if: github.event_name == 'pull_request'
+    needs: agent-admission
+    if: github.event_name == 'pull_request' && needs.agent-admission.outputs.proceed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

@@ -22,7 +22,7 @@ spec:
       annotations:
         # Rolls the pods when the OPA bundle changes — subPath mounts do NOT hot-reload.
         # Kept in sync by gen-fx-opa-bundle.sh (do not hand-edit).
-        openbank.tech/policy-checksum: "46c83a0431f3dafa"
+        openbank.tech/policy-checksum: "fe62db9b7328017c"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -32,7 +32,7 @@ spec:
         seccompProfile: {type: RuntimeDefault}
       containers:
         - name: fx-service
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-25bde9f5
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-fx-service:sandbox-bf801f7b
           imagePullPolicy: IfNotPresent
           ports:
             - {name: http, containerPort: 8119}
@@ -95,8 +95,10 @@ spec:
               value: http://keycloak.iam.svc:8080/realms/openbank
             - name: SANCTIONS_SERVICE_URL
               value: http://sanctions-service.sanctions.svc:8123
+            # aml-service's private-CA mTLS listener (8443, client auth REQUIRED, %prod bucket
+            # aml-authority, client certificate fx-internal-tls mounted at /mnt/aml-tls).
             - name: AML_SERVICE_URL
-              value: http://aml-service.aml.svc:8117
+              value: https://aml-service.aml.svc:8443
             # Fraud scoring in SHADOW mode (ADR-0084 §4.1, issue #4221). fx-service scores from
             # two call sites (FxActivitiesImpl and FxService, rail FX) and had no FRAUD_SERVICE_URL,
             # so both resolved application.yaml's `http://localhost:8133` and the fail-open adapter
@@ -151,6 +153,7 @@ spec:
             capabilities: {drop: [ALL]}
           volumeMounts:
             - {name: internal-tls, mountPath: /mnt/internal-tls, readOnly: true}
+            - {name: aml-tls, mountPath: /mnt/aml-tls, readOnly: true}
             - {name: tmp, mountPath: /tmp}
             - {name: kafka-keystore, mountPath: /mnt/kafka-keystore, readOnly: true}
             - {name: kafka-truststore, mountPath: /mnt/kafka-truststore, readOnly: true}
@@ -161,7 +164,7 @@ spec:
         # all @Authorize-annotated endpoints in fx-service (fx.*). Bundle mounted from
         # fx-opa-bundle ConfigMap (gen-fx-opa-bundle.sh).
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run
@@ -235,6 +238,10 @@ spec:
         - name: internal-tls
           secret:
             secretName: fx-service-internal-tls
+            optional: false
+        - name: aml-tls
+          secret:
+            secretName: fx-internal-tls
             optional: false
         - {name: tmp, emptyDir: {}}
         - name: opa-tmp

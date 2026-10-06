@@ -30,10 +30,12 @@ on:
 
 permissions:
   contents: read
-  id-token: write   # OIDC → assume the build-runner role to read the KMS public key
 
 jobs:
   verify:
+    permissions:
+      contents: read
+      id-token: write  # OIDC -> build-runner role to read the KMS public key
     # Not `Verify ${{ inputs.tag }}` any more: on a schedule there is no input and the job
     # rendered as a bare "Verify ".
     name: Verify release evidence bundle

@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.86.0...customer-edge-v0.87.0) (2026-10-04)
+
+
+### Features
+
+* **customer-edge:** carry the synthetic taint to every upstream ([#12050](https://github.com/JiRaska/open-bank-oss/issues/12050)) ([8bb3106](https://github.com/JiRaska/open-bank-oss/commit/8bb31061b6589daf405f80d1270844ef5b5faa5f)), closes [#4348](https://github.com/JiRaska/open-bank-oss/issues/4348)
+* **customer-edge:** share nearby-pay sessions across replicas via Redis ([#12090](https://github.com/JiRaska/open-bank-oss/issues/12090)) ([65250e7](https://github.com/JiRaska/open-bank-oss/commit/65250e7842938536bc34d3443439a169543f7425)), closes [#4728](https://github.com/JiRaska/open-bank-oss/issues/4728)
+
+## [0.86.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.85.0...customer-edge-v0.86.0) (2026-10-03)
+
+
+### Features
+
+* **customer-edge:** let a customer declare and manage off-platform holdings ([#11991](https://github.com/JiRaska/open-bank-oss/issues/11991)) ([bf0e812](https://github.com/JiRaska/open-bank-oss/commit/bf0e812518dc21db65b8c38eb246aeab235d47c9))
+
+## [0.85.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.84.0...customer-edge-v0.85.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+* **customer-edge:** publish per-capability availability for the app ([#10016](https://github.com/JiRaska/open-bank-oss/issues/10016)) ([c14cb9b](https://github.com/JiRaska/open-bank-oss/commit/c14cb9ba36a482ac8938b5883620ea30a4e993fb))
+
 ## [0.84.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.83.0...customer-edge-v0.84.0) (2026-09-29)
 
 

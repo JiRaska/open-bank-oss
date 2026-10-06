@@ -4,8 +4,10 @@
 
 package com.openbank.sepa.infrastructure.rest.dto
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.sepa.application.port.`in`.CreateSepaPaymentCommand
 import com.openbank.sepa.application.port.`in`.TransitionSepaPaymentStatusCommand
+import com.openbank.sepa.domain.error.SctSchemeRules
 import com.openbank.sepa.domain.model.SepaPayment
 import com.openbank.sepa.domain.model.SepaPaymentStatus
 import com.openbank.sepa.domain.model.SepaPaymentType
@@ -37,7 +39,9 @@ data class CreateSepaPaymentRequest(
         creditorIban = creditorIban,
         creditorName = creditorName,
         creditorBic = creditorBic,
-        amount = inboundMoney(amount, currency),
+        // #11931: SCT is a euro-only scheme. A currency Money can hold but SCT does not carry is a
+        // 400 CURRENCY_NOT_ALLOWED, raised here — before the resource reserves the Idempotency-Key.
+        amount = SctSchemeRules.requireSchemeCurrency(Money.parseInbound(amount, currency)),
         remittanceInfo = remittanceInfo,
         endToEndId = endToEndId,
     )

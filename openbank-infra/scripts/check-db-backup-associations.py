@@ -105,29 +105,100 @@ def backing_up_clusters(gitops_dir: pathlib.Path) -> list[tuple[str, str, str, s
             text = path.read_text()
         except OSError:
             continue
-        if "kind: Cluster" not in text:
-            continue
-        try:
-            docs = list(yaml.safe_load_all(text))
-        except yaml.YAMLError:
-            # A manifest this script cannot parse must not silently drop out of the check.
-            print(f"::warning::could not parse {_rel(path)} — skipped", file=sys.stderr)
-            continue
-        for doc in docs:
-            if not isinstance(doc, dict):
-                continue
-            if doc.get("kind") != "Cluster":
-                continue
-            if not str(doc.get("apiVersion", "")).startswith(CNPG_API_PREFIX):
-                continue
-            dest = (
-                (doc.get("spec") or {}).get("backup", {}).get("barmanObjectStore", {}).get("destinationPath", "")
-            )
-            if not dest:
-                continue
-            meta = doc.get("metadata") or {}
-            found.append((meta.get("name", "?"), meta.get("namespace", "?"), _rel(path), str(dest)))
+        found.extend(clusters_in_text(text, _rel(path)))
     return found
+
+
+def clusters_in_text(text: str, src: str) -> list[tuple[str, str, str, str]]:
+    """The CNPG Clusters declaring a barmanObjectStore in ONE manifest's text.
+
+    Split out of backing_up_clusters so the same-diff check can parse a file's BASE revision
+    (from `git show`) with exactly the reader the tree-wide check uses — two readers of one
+    shape drift apart, and then the two checks disagree about what a backed-up cluster is.
+    """
+    if "kind: Cluster" not in text:
+        return []
+    try:
+        docs = list(yaml.safe_load_all(text))
+    except yaml.YAMLError:
+        # A manifest this script cannot parse must not silently drop out of the check.
+        print(f"::warning::could not parse {src} — skipped", file=sys.stderr)
+        return []
+    found: list[tuple[str, str, str, str]] = []
+    for doc in docs:
+        if not isinstance(doc, dict):
+            continue
+        if doc.get("kind") != "Cluster":
+            continue
+        if not str(doc.get("apiVersion", "")).startswith(CNPG_API_PREFIX):
+            continue
+        dest = (
+            (doc.get("spec") or {}).get("backup", {}).get("barmanObjectStore", {}).get("destinationPath", "")
+        )
+        if not dest:
+            continue
+        meta = doc.get("metadata") or {}
+        found.append((meta.get("name", "?"), meta.get("namespace", "?"), src, str(dest)))
+    return found
+
+
+TF_REL = "openbank-infra/aws/envs/sandbox-platform/db-backups.tf"
+GITOPS_REL = "openbank-infra/gitops/"
+
+
+def _git(root: pathlib.Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(root), *args], capture_output=True, text=True, check=True
+    ).stdout
+
+
+def _git_show_or_empty(root: pathlib.Path, base: str, rel: str) -> str:
+    """A file's content at `base`, or "" when it did not exist there (a NEW manifest)."""
+    proc = subprocess.run(
+        ["git", "-C", str(root), "show", f"{base}:{rel}"], capture_output=True, text=True, check=False
+    )
+    return proc.stdout if proc.returncode == 0 else ""
+
+
+def same_diff_violations(root: pathlib.Path, base: str) -> list[tuple[str, str, str]]:
+    """Clusters whose backup config AND pod-identity association both arrive in this diff.
+
+    EKS Pod Identity injects credentials at pod ADMISSION. GitOps deploys a merged Cluster
+    within minutes, while the association exists only once someone runs `tofu apply` on
+    db-backups.tf. So when one PR carries both, the pod is admitted with no credentials, and it
+    stays that way until it is recreated: every WAL archive fails "Unable to locate
+    credentials". pricing-db (2026-09-28) and card-processing-db (#8837: cluster created
+    10-01 20:04:55Z, ~4 min after merge; ~8.7 h without a single archived WAL) both shipped
+    that shape. card-processing's tf entry even carried a comment asserting that adding the
+    two together was the SAFE order.
+
+    A "new" backup is a (name, namespace) that declares a barmanObjectStore at HEAD and did
+    not at `base`, so both a brand-new Cluster and backup added to an existing one count. It
+    is a violation only when that cluster's ServiceAccount is declared at HEAD but NOT at
+    `base` — an association already on main is assumed applied (the scheduled
+    --check-applied run is what verifies that).
+    """
+    # An unresolvable base must be a loud failure: read as "no file at base", it would make every
+    # association look new — or, with a typo'd tf path, none — and the verdict meaningless.
+    _git(root, "rev-parse", "--verify", "--quiet", f"{base}^{{commit}}")
+    changed = [
+        f for f in _git(root, "diff", "--name-only", base).splitlines()
+        if f.startswith(GITOPS_REL) and f.endswith((".yaml", ".yml"))
+    ]
+    base_backed: set[tuple[str, str]] = set()
+    head: list[tuple[str, str, str, str]] = []
+    for rel in changed:
+        base_backed |= {(n, ns) for n, ns, _s, _d in clusters_in_text(_git_show_or_empty(root, base, rel), rel)}
+        path = root / rel
+        if path.exists():
+            head.extend(clusters_in_text(path.read_text(), rel))
+    new = [(n, ns, src) for n, ns, src, _d in head if (n, ns) not in base_backed]
+    if not new:
+        return []
+    tf_head = (root / TF_REL).read_text() if (root / TF_REL).exists() else ""
+    sa_base = declared_associations(_git_show_or_empty(root, base, TF_REL))
+    sa_head = declared_associations(tf_head)
+    return [(n, ns, src) for n, ns, src in new if n in sa_head and n not in sa_base]
 
 
 def parse_applied_associations(aws_json: str) -> set[str]:
@@ -243,12 +314,67 @@ def self_test() -> int:
         case("only CNPG clusters WITH a barmanObjectStore are found", found, ["ledger-db"])
         case("an empty gitops dir finds no clusters", backing_up_clusters(d / "nope"), [])
 
+    # --- same-diff rule: backup config + association must NOT land together -----------------
+    # Real git repos, because the subject is a DIFF: the reader of the base revision is the
+    # part most likely to come back empty and make every cluster look "new" or none.
+    import os as _os
+
+    def _repo(td: pathlib.Path) -> pathlib.Path:
+        env = {**_os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+               "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
+        subprocess.run(["git", "init", "-q", str(td)], check=True, env=env)
+        _repo.env = env  # type: ignore[attr-defined]
+        return td
+
+    def _commit(td: pathlib.Path, files: dict[str, str]) -> str:
+        for rel, body in files.items():
+            (td / rel).parent.mkdir(parents=True, exist_ok=True)
+            (td / rel).write_text(body)
+        subprocess.run(["git", "-C", str(td), "add", "-A"], check=True)
+        subprocess.run(["git", "-C", str(td), "-c", "commit.gpgsign=false", "commit", "-qm", "x"],
+                       check=True, env=_repo.env)  # type: ignore[attr-defined]
+        return _git(td, "rev-parse", "HEAD").strip()
+
+    tf0 = 'locals {\n  db_backup_clusters = {\n    party = { namespace = "party", sa = "party-db" }\n  }\n}\n'
+    tf1 = tf0.replace('  }\n}', '    card-processing = { namespace = "payments", sa = "card-processing-db" }\n  }\n}')
+    cl_nobackup = ("apiVersion: postgresql.cnpg.io/v1\nkind: Cluster\n"
+                   "metadata:\n  name: card-processing-db\n  namespace: payments\nspec:\n  instances: 2\n")
+    cl_backup = cl_nobackup + ("  backup:\n    barmanObjectStore:\n"
+                               "      destinationPath: s3://openbank-sandbox-db-backups/card-processing-db\n")
+    pg = GITOPS_REL + "components/payments/postgres.yaml"
+    with tempfile.TemporaryDirectory() as td:
+        # #8837's exact shape: new cluster with backup + its association, one diff -> RED.
+        r = _repo(pathlib.Path(td))
+        base = _commit(r, {TF_REL: tf0, GITOPS_REL + "components/x.yaml": "a: 1\n"})
+        _commit(r, {TF_REL: tf1, pg: cl_backup})
+        case("#8837 shape (new cluster + association in one diff) is flagged",
+             [v[0] for v in same_diff_violations(r, base)], ["card-processing-db"])
+    with tempfile.TemporaryDirectory() as td:
+        # Backup ADDED to an existing cluster, association in the same diff -> RED too.
+        r = _repo(pathlib.Path(td))
+        base = _commit(r, {TF_REL: tf0, pg: cl_nobackup})
+        _commit(r, {TF_REL: tf1, pg: cl_backup})
+        case("backup added to an existing cluster + association in one diff is flagged",
+             [v[0] for v in same_diff_violations(r, base)], ["card-processing-db"])
+    with tempfile.TemporaryDirectory() as td:
+        # The sanctioned order: association already on base, backup config lands now -> GREEN.
+        r = _repo(pathlib.Path(td))
+        base = _commit(r, {TF_REL: tf1, GITOPS_REL + "components/x.yaml": "a: 1\n"})
+        _commit(r, {pg: cl_backup})
+        case("association already on base passes", same_diff_violations(r, base), [])
+    with tempfile.TemporaryDirectory() as td:
+        # An unrelated edit to an already-backed-up cluster plus a tf change -> GREEN.
+        r = _repo(pathlib.Path(td))
+        base = _commit(r, {TF_REL: tf1, pg: cl_backup})
+        _commit(r, {TF_REL: tf1 + "# c\n", pg: cl_backup.replace("instances: 2", "instances: 3")})
+        case("editing an already-backed-up cluster passes", same_diff_violations(r, base), [])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: db-backup associations are falsifiable (9 cases)")
+    print("self-test ok: db-backup associations are falsifiable (13 cases)")
     return 0
 
 
@@ -260,6 +386,11 @@ def main() -> int:
         "--check-applied",
         action="store_true",
         help="also assert each declared association is LIVE in AWS (needs aws creds + CLI >= 2.15)",
+    )
+    parser.add_argument(
+        "--base",
+        help="also enforce the same-diff rule against this ref (PR_DIFF_BASE): a PR must not add a "
+        "cluster's backup config AND its pod-identity association together",
     )
     parser.add_argument("--cluster-name", default=DEFAULT_EKS_CLUSTER, help="EKS cluster name")
     parser.add_argument("--region", default=DEFAULT_AWS_REGION, help="AWS region")
@@ -343,7 +474,21 @@ def main() -> int:
                 f"openbank-infra/aws/envs/sandbox-platform (expect adds only, 0 destroy)."
             )
 
-    if not missing and not drift:
+    split: list[tuple[str, str, str]] = []
+    if args.base:
+        split = same_diff_violations(REPO_ROOT, args.base)
+        for name, namespace, src in split:
+            print(
+                f"::{level} file={src}::{name} (namespace {namespace}) gains a barmanObjectStore in "
+                f"the SAME diff that adds its pod-identity association to {_rel(TF_FILE)}. GitOps "
+                f"deploys the Cluster minutes after merge; the association exists only after "
+                f"`tofu apply`, and EKS Pod Identity injects credentials at pod ADMISSION — so the "
+                f'pod archives nothing ("Unable to locate credentials") until it is recreated. '
+                f"Split it: (1) a PR adding only the db-backups.tf entry, merged AND applied; "
+                f"(2) then the gitops PR adding the backup config."
+            )
+
+    if not missing and not drift and not split:
         if args.check_applied:
             print("✓ every managed cluster has an association declared AND live in AWS")
         else:
@@ -355,6 +500,8 @@ def main() -> int:
         problems.append(f"{len(missing)} cluster(s) would silently never back up")
     if drift:
         problems.append(f"{len(drift)} declared association(s) not applied in AWS")
+    if split:
+        problems.append(f"{len(split)} cluster(s) add backup config and association in one diff")
     print("\n" + "; ".join(problems) + ".", file=sys.stderr)
     # Advisory unless --enforce, mirroring the static gate: a PR that merely REVEALS preexisting
     # drift (e.g. this check's own introducing PR) must not be blocked by it. The scheduled run

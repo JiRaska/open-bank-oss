@@ -1,0 +1,162 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# kc.open-bank.tech on the shared Gateway (ADR-0324 Phase 3), the Gateway API translation of
+# BOTH nginx Ingresses in keycloak.yaml: `keycloak` (the browser leg) and
+# `keycloak-admin-block` (the operator-only surfaces, 403 at the edge).
+#
+# IN DNS since the cutover: external-dns publishes kc.open-bank.tech from this route, pointing
+# at the Gateway's NLB. Both nginx Ingresses in keycloak.yaml now carry
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending` and keep serving on
+# ingress-nginx as the rollback (swap the annotation back). The three steps were:
+#   1. this file — the ReferenceGrant, the route and its policies (no listener names them yet);
+#   2. the Gateway's https-keycloak listener (envoy-gateway/gateway.yaml), once the grant is
+#      live — switching the listener in the same sync as the grant left langfuse's listener
+#      RefNotPermitted (2026-10-03), because the Gateway and this namespace are different Argo
+#      apps with no ordering between them;
+#   3. the DNS cutover: the annotation moves from this route to the `keycloak` Ingress.
+#
+# TLS PINNING (ADR-0066 S3): the mobile app pins this host's SPKI, so the Gateway serves the
+# SAME Secret, `keycloak-tls` (private-key-rotation-policy: Never), through the grant below —
+# exactly as rum.open-bank.tech does. Never point the listener at a newly issued certificate.
+# CAVEAT for the Ingress deletion later: cert-manager runs with
+# --enable-certificate-owner-ref, and the `keycloak-tls` Certificate is owned by the `keycloak`
+# Ingress, so deleting that Ingress would garbage-collect the pinned key. Before deleting it,
+# the Certificate has to be declared here (same name, rotationPolicy: Never) and the Ingress's
+# cert-manager annotation dropped, so the key survives the handover.
+#
+# Annotation mapping from keycloak.yaml:
+#   ssl-redirect                 -> the Gateway's http listener redirects every host (301)
+#   custom-headers keycloak-edge-headers-v1 (Permissions-Policy, X-Robots-Tag)
+#   + the controller's HSTS (2y, preload), nosniff and hide-headers X-Powered-By
+#                                -> ResponseHeaderModifier on every rule, same values
+#   denylist-source-range 0.0.0.0/0,::/0 on /admin, /auth/admin, /realms/master
+#                                -> a rule matching the same three PathPrefixes whose only
+#                                   filter is a direct 403 (HTTPRouteFilter below); it has
+#                                   no backendRefs, so Keycloak is never reached. PathPrefix
+#                                   matches whole segments, exactly as the Ingress `Prefix`
+#                                   pathType did (`/admin`, `/admin/...`, not `/administrator`),
+#                                   and Gateway API picks the LONGEST matching prefix across
+#                                   rules, so these beat `/`. Envoy Gateway normalises the path
+#                                   before matching (RFC 3986 dot segments, merged slashes,
+#                                   escaped slashes unescaped and redirected), as nginx did.
+#   cert-manager.io/cluster-issuer, private-key-rotation-policy: Never
+#                                -> unchanged: the listener reuses `keycloak-tls` (above)
+#   controller proxy-buffer-size 32k (large OIDC Set-Cookie)
+#                                -> nothing to carry: Envoy buffers upstream response headers
+#                                   up to its 60 KiB header limit, not a 4k/8k proxy buffer
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                                -> BackendTrafficPolicy below; Envoy otherwise has no body
+#                                   cap and a 15s route timeout
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: edge-gateway-tls
+  namespace: iam
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      namespace: envoy-gateway-system
+  to:
+    - group: ""
+      kind: Secret
+      name: keycloak-tls
+---
+# The 403 the `keycloak-admin-block` Ingress answered. JSON body, the shape Keycloak's own
+# errors use (the nginx page it replaces was HTML; the snippet before that was this JSON).
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: keycloak-admin-block
+  namespace: iam
+spec:
+  directResponse:
+    statusCode: 403
+    contentType: application/json
+    body:
+      type: Inline
+      inline: '{"error":"Forbidden"}'
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: keycloak
+  namespace: iam
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-keycloak
+  hostnames:
+    - kc.open-bank.tech
+  rules:
+    # Operator-only surfaces: 403 for everyone at the edge, the operator included. Use
+    #   kubectl -n iam port-forward svc/keycloak 8080:8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /admin
+        - path:
+            type: PathPrefix
+            value: /auth/admin
+        - path:
+            type: PathPrefix
+            value: /realms/master
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: keycloak-admin-block
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: Permissions-Policy
+                value: "camera=(), microphone=(), geolocation=(), payment=()"
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+            remove:
+              - X-Powered-By
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+              - name: Permissions-Policy
+                value: "camera=(), microphone=(), geolocation=(), payment=()"
+              - name: X-Robots-Tag
+                value: "noindex, nofollow"
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: keycloak
+          port: 8080
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: keycloak
+  namespace: iam
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: keycloak
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s

@@ -175,7 +175,7 @@ tests:
     # Must-FIRE: sanctions-db-1 as measured 2026-09-30 (334Mi working set, 256Mi request).
     name: "a postgres pod above its memory request for >30m fires CnpgWorkingSetAboveRequest"
     input_series:
-      - series: 'container_memory_working_set_bytes{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
         values: "350224384+0x60"
       - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-1",container="postgres",resource="memory"}'
         values: "268435456+0x60"
@@ -188,14 +188,14 @@ tests:
               namespace: sanctions
               pod: sanctions-db-1
             exp_annotations:
-              summary: "Postgres working set above memory request on sanctions/sanctions-db-1"
-              description: "The postgres container's working set has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max working set x 1.3), 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
+              summary: "Postgres resident memory above memory request on sanctions/sanctions-db-1"
+              description: "The postgres container's RSS (non-reclaimable memory, page cache excluded) has exceeded its memory request for >30m. The node is over-committed by this pod and it is an eviction candidate under memory pressure. Raise spec.resources.requests.memory in the CNPG Cluster (ceil(max RSS x 1.3) plus shared_buffers, 64Mi step, limit >= 2x request) — note the change rolls the cluster (replica, then switchover)."
 
   - interval: 1m
     # Must-NOT-fire: the same pod after its request was raised to 448Mi.
     name: "a postgres pod under its memory request does NOT fire CnpgWorkingSetAboveRequest"
     input_series:
-      - series: 'container_memory_working_set_bytes{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-1",container="postgres"}'
         values: "350224384+0x60"
       - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-1",container="postgres",resource="memory"}'
         values: "469762048+0x60"
@@ -205,10 +205,26 @@ tests:
         exp_alerts: []
 
   - interval: 1m
+    # Must-NOT-fire: sanctions-db-2 as measured 2026-10-03 — page cache drove the working set to
+    # 907Mi over a 640Mi request while RSS was 47Mi. A full cache is not a request problem.
+    name: "page cache above the request with low RSS does NOT fire CnpgWorkingSetAboveRequest"
+    input_series:
+      - series: 'container_memory_working_set_bytes{namespace="sanctions",pod="sanctions-db-2",container="postgres"}'
+        values: "951058432+0x60"
+      - series: 'container_memory_rss{namespace="sanctions",pod="sanctions-db-2",container="postgres"}'
+        values: "49283072+0x60"
+      - series: 'kube_pod_container_resource_requests{namespace="sanctions",pod="sanctions-db-2",container="postgres",resource="memory"}'
+        values: "671088640+0x60"
+    alert_rule_test:
+      - eval_time: 45m
+        alertname: CnpgWorkingSetAboveRequest
+        exp_alerts: []
+
+  - interval: 1m
     # Must-NOT-fire: a 20-minute startup/WAL-replay spike above the request, then back under.
     name: "a short spike above the memory request does NOT fire CnpgWorkingSetAboveRequest"
     input_series:
-      - series: 'container_memory_working_set_bytes{namespace="accounts",pod="accounts-db-1",container="postgres"}'
+      - series: 'container_memory_rss{namespace="accounts",pod="accounts-db-1",container="postgres"}'
         values: "350224384+0x20 150000000+0x40"
       - series: 'kube_pod_container_resource_requests{namespace="accounts",pod="accounts-db-1",container="postgres",resource="memory"}'
         values: "268435456+0x60"

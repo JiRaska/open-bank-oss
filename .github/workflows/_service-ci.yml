@@ -161,9 +161,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # This job is always GitHub-hosted now — the Actions cache is network-internal
           # and free there, and there is no in-cluster remote build cache to fall back on
@@ -269,8 +269,8 @@ jobs:
           python3 .github/scripts/check-testcontainers-registry-failure.py \
             --service "${{ inputs.service }}"
 
-      # rules.yaml: openapi_request_schema_conformance (advisory).
-      - name: "openapi request-schema conformance (advisory)"
+      # rules.yaml: openapi_request_schema_conformance (enforced).
+      - name: "openapi request-schema conformance"
         run: |
           SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
           if [ ! -f "$SPEC" ]; then
@@ -279,7 +279,8 @@ jobs:
           fi
           python3 .github/scripts/check-openapi-request-schema-conformance.py \
             --service "${{ inputs.service }}" \
-            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml" \
+            --enforce
 
       # Coverage upload is tokenless for this public repository. It is advisory only —
       # never gates the build — and deliberately must not regain an OIDC token in this
@@ -392,8 +393,30 @@ jobs:
 
       # Compatibility projection for the image build: the latest envelope remains
       # separate from immutable attempts above, so a re-run cannot erase history.
-      - name: Upload Test Intelligence evidence
+      # A failed advisory collector may still leave JUnit/Kover files. Uploading those
+      # under the compatibility name makes the deploy select an incomplete newest
+      # artifact and fail even when an older complete main artifact exists (#11850).
+      - name: Check Test Intelligence compatibility evidence
+        id: test-intelligence-compatibility
         if: always()
+        env:
+          SERVICE: ${{ inputs.service }}
+          EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if python3 .github/scripts/check-test-intelligence-compatibility.py \
+            "${SERVICE}/build/test-intelligence/run.json" \
+            --component "${SERVICE}" \
+            --commit "${GITHUB_SHA}" \
+            --branch "${EXPECTED_BRANCH}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::Skipping incomplete Test Intelligence compatibility artifact"
+          fi
+
+      - name: Upload Test Intelligence evidence
+        if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -453,7 +476,11 @@ jobs:
           set -euo pipefail
           cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh \
             "$RUNNER_TEMP/prove-pact-provider-version.sh"
-          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh"
+          # The equivalence proof the runner calls must be the trusted one too: P's own copy may
+          # predate --own-test-overlay, and P must never get to judge its own equivalence.
+          cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
+            "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -492,7 +519,7 @@ jobs:
           git checkout --detach --quiet "$RESOLVED_REF"
           echo "$RESOLVED_REF is on main — publishing the verification against it."
 
-      - name: Check out P and overlay the one approved Ledger provider fixture from F
+      - name: Check out P and overlay the provider test tree from F (equivalence-proven)
         env:
           SERVICE: ${{ inputs.service }}
           REQUESTED_FIXTURE_REF: ${{ inputs.ref }}
@@ -507,8 +534,10 @@ jobs:
             FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
             git fetch --quiet origin main "$FIXTURE_REF"
             FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
-            # The script proves P/F/main ancestry, requires this checkout to be P, and writes
-            # exactly LedgerPactBrokerProviderVerificationTest.kt from F into the P worktree.
+            # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
+            # are byte-identical in every production build input of SERVICE, it replaces
+            # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger and Balance,
+            # whose single approved provider fixture from F is kept as the fallback (#11597).
             bash "$PROOF_RUNNER" --prepare-overlay \
               "$SERVICE" "$PROVIDER_VERSION" "$FIXTURE_VERSION" origin/main
           else
@@ -651,9 +680,9 @@ jobs:
           AWS_DEFAULT_REGION: eu-north-1
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # Self-hosted: disable the GitHub Actions cache for Gradle home (FinOps — see the
           # original single-job file's history for the NAT-cost analysis) and rely on the

@@ -15,8 +15,10 @@ import com.openbank.clearing.domain.model.ClearingItem
 import com.openbank.clearing.domain.model.ClearingStatus
 import com.openbank.clearing.domain.model.PaymentRail
 import com.openbank.clearing.domain.model.SettlementPosition
-import com.openbank.clearing.domain.model.SubmitPaymentRequest
+import com.openbank.clearing.domain.model.SubmitPaymentCommand
+import com.openbank.clearing.infrastructure.rest.dto.SubmitPaymentRequest
 import com.openbank.libs.authz.Authorize
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.security.Roles
 import io.smallrye.mutiny.Uni
 import jakarta.annotation.security.RolesAllowed
@@ -75,8 +77,30 @@ class ClearingResource(
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.submit")
     @Operation(summary = "Submit payment for clearing")
-    fun submit(request: SubmitPaymentRequest): Uni<Response> = submitUseCase.submit(request)
-        .map { Response.status(Response.Status.CREATED).entity(it).build() }
+    fun submit(request: SubmitPaymentRequest?): Uni<Response> {
+        requireNotNull(request) { "request body is required" }
+        val rail = requireNotNull(request.rail) { "field 'rail' is required" }
+        // #11604: Money is built HERE, before the use case looks the paymentId (the idempotency
+        // key, ADR-0298) up — an amount or currency it cannot hold is a 400 problem (kernel
+        // InvalidMoneyException: AMOUNT_SCALE_EXCEEDED / CURRENCY_UNSUPPORTED / VALIDATION_ERROR,
+        // rendered by libs-runtime) that leaves no clearing item behind, so the paymentId stays
+        // free for a corrected retry.
+        val command = SubmitPaymentCommand(
+            paymentId = request.paymentId,
+            paymentReference = request.paymentReference,
+            debtorIban = request.debtorIban,
+            creditorIban = request.creditorIban,
+            debtorBic = request.debtorBic,
+            creditorBic = request.creditorBic,
+            amount = Money.parseInbound(request.amount, request.currency),
+            rail = rail,
+            valueDate = request.valueDate,
+            endToEndId = request.endToEndId,
+            remittanceInfo = request.remittanceInfo,
+        )
+        return submitUseCase.submit(command)
+            .map { Response.status(Response.Status.CREATED).entity(it).build() }
+    }
 
     @GET
     @Path("/batches")
@@ -116,7 +140,7 @@ class ClearingResource(
     @Path("/cycle/trigger")
     @RolesAllowed(Roles.PAYMENTS, Roles.ADMIN)
     @Authorize(action = "clearingBatch.triggerCycle")
-    @Operation(summary = "Trigger a clearing cycle for a payment rail")
+    @Operation(summary = "Trigger a clearing cycle for a payment rail; one batch per currency")
     fun triggerCycle(@QueryParam("rail") @DefaultValue("SEPA_SCT") rail: String): Uni<Response> =
         triggerUseCase.triggerClearingCycle(PaymentRail.valueOf(rail))
             .map { Response.ok(it).build() }

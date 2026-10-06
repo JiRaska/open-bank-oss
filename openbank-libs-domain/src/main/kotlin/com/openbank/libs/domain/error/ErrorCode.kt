@@ -111,6 +111,15 @@ enum class PlatformErrorCode(
     POLICY_DECISION_POINT_UNAVAILABLE(ErrorCategory.UNAVAILABLE, "Authorization is temporarily unavailable"),
     SERVICE_UNAVAILABLE(ErrorCategory.UNAVAILABLE, "The service is temporarily unavailable"),
     INTERNAL_ERROR(ErrorCategory.INTERNAL, "An unexpected error occurred"),
+
+    /** A monetary amount needs rounding to fit its currency's minor unit (`InvalidMoneyException`). */
+    AMOUNT_SCALE_EXCEEDED(ErrorCategory.VALIDATION, "The amount has more decimal places than its currency allows"),
+
+    /** Not an ISO 4217 currency with a minor unit, so it cannot denominate a monetary amount. */
+    CURRENCY_UNSUPPORTED(ErrorCategory.VALIDATION, "The currency is not supported"),
+
+    /** A monetary amount is zero or negative where a strictly positive one is required. */
+    AMOUNT_NOT_POSITIVE(ErrorCategory.VALIDATION, "The amount must be greater than zero"),
     ;
 
     override val code: String get() = name

@@ -128,6 +128,8 @@ metadata:
     openbank.io/plane: platform
     openbank.io/adr: "0162"
   annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '30 2 * * 0' plus slack.
+    openbank.tech/max-success-age-seconds: "1296000"
     openbank.tech/description: "ADR-0162 D4 continued: re-asserts the OpenBao document-signing PKI config weekly"
     openbank.tech/runbook: "docs/runbooks/0008-openbao-document-signing-pki.md"
 spec:
@@ -160,9 +162,9 @@ spec:
               type: RuntimeDefault
           containers:
             - name: configure
-              # Pin the same image tag as the openbao server (apps/openbao.yaml → openbao 2.5.5).
+              # Pin the same image tag as the openbao server (apps/openbao.yaml → openbao 2.7.1).
               # Update together when the server image is bumped.
-              image: quay.io/openbao/openbao:2.5.5
+              image: quay.io/openbao/openbao:2.7.1
               command: ["/bin/sh", "/config/configure.sh"]
               securityContext:
                 allowPrivilegeEscalation: false

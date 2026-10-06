@@ -27,20 +27,38 @@ import java.util.UUID
 class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
 
     override suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>) {
+        write(set, quotes, INSERT_SET)
+    }
+
+    override suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean =
+        write(set, quotes, INSERT_SET_IF_ABSENT)
+
+    /** True when [insertSet] stored the set row; quotes and pillars are written only then. */
+    private suspend fun write(
+        set: CurveSet,
+        quotes: Map<CurveIndex, List<MoneyMarketQuote>>,
+        insertSet: String,
+    ): Boolean {
         val quoteRows = quotes.flatMap { (index, qs) ->
             qs.map { Tuple.tuple(listOf(set.id, index.name, it.tenor.code, it.simpleRate)) }
         }
         val pillarRows = set.curves.flatMap { (index, curve) ->
             curve.pillars.map { Tuple.tuple(listOf(set.id, index.name, it.date, it.zeroRate)) }
         }
-        pool.withTransaction { conn ->
-            conn.preparedQuery(INSERT_SET).execute(
+        return pool.withTransaction { conn ->
+            conn.preparedQuery(insertSet).execute(
                 Tuple.tuple(
                     listOf(set.id, set.asOf, set.provenance.wire, set.source, set.recordedAt.atOffset(ZoneOffset.UTC)),
                 ),
-            )
-                .flatMap { batch(conn, INSERT_QUOTE, quoteRows) }
-                .flatMap { batch(conn, INSERT_PILLAR, pillarRows) }
+            ).flatMap { inserted ->
+                if (inserted.rowCount() == 0) {
+                    Uni.createFrom().item(false)
+                } else {
+                    batch(conn, INSERT_QUOTE, quoteRows)
+                        .flatMap { batch(conn, INSERT_PILLAR, pillarRows) }
+                        .replaceWith(true)
+                }
+            }
         }.awaitSuspending()
     }
 
@@ -52,8 +70,8 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
         ).executeBatch(rows).replaceWithVoid()
     }
 
-    override suspend fun listRecent(limit: Int): List<CurveSetSummary> =
-        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit)).awaitSuspending().map { row ->
+    override suspend fun listRecent(limit: Int, asOf: LocalDate?): List<CurveSetSummary> =
+        pool.preparedQuery(SELECT_RECENT).execute(Tuple.of(limit, asOf)).awaitSuspending().map { row ->
             CurveSetSummary(
                 id = row.getUUID("id"),
                 asOf = row.getLocalDate("as_of"),
@@ -89,6 +107,7 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
     private companion object {
         const val INSERT_SET =
             "INSERT INTO curve_set (id, as_of, provenance, source, recorded_at) VALUES ($1, $2, $3, $4, $5)"
+        const val INSERT_SET_IF_ABSENT = "$INSERT_SET ON CONFLICT (id) DO NOTHING"
         const val INSERT_QUOTE =
             "INSERT INTO curve_set_quote (curve_set_id, curve_index, tenor, simple_rate) VALUES ($1, $2, $3, $4)"
         const val INSERT_PILLAR =
@@ -96,7 +115,8 @@ class PgCurveSetRepository(private val pool: Pool) : CurveSetRepository {
         const val SELECT_RECENT =
             "SELECT s.id, s.as_of, s.provenance, s.source, s.recorded_at, " +
                 "(SELECT string_agg(DISTINCT p.curve_index, ',' ORDER BY p.curve_index) FROM curve_set_pillar p " +
-                "WHERE p.curve_set_id = s.id) AS indices FROM curve_set s ORDER BY s.recorded_at DESC, s.id LIMIT $1"
+                "WHERE p.curve_set_id = s.id) AS indices FROM curve_set s " +
+                "WHERE ($2::date IS NULL OR s.as_of = $2::date) ORDER BY s.recorded_at DESC, s.id LIMIT $1"
         const val SELECT_LATEST_FOR =
             "SELECT id FROM curve_set WHERE as_of = $1 ORDER BY recorded_at DESC, id LIMIT 1"
         const val SELECT_SET = "SELECT id, as_of, provenance, source, recorded_at FROM curve_set WHERE id = $1"

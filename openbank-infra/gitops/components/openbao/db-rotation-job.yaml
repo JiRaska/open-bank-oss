@@ -34,6 +34,8 @@ metadata:
     openbank.io/plane: platform
     openbank.io/adr: "0099"
   annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 2 * * 0' plus slack.
+    openbank.tech/max-success-age-seconds: "1296000"
     # Describe what this Job does for the audit trail and runbook readers.
     openbank.io/description: "ADR-0099 Tier 1: re-asserts OpenBao database engine config weekly"
     openbank.io/runbook: "docs/runbooks/0006-openbao-dynamic-db.md"
@@ -72,9 +74,9 @@ spec:
               type: RuntimeDefault
           containers:
             - name: configure
-              # Pin the same image tag as the server (openbao.yaml targetRevision 0.28.3
-              # deploys openbao 2.5.5). Update together when the server image is bumped.
-              image: quay.io/openbao/openbao:2.5.5
+              # Pin the same image tag as the server (openbao.yaml targetRevision 0.30.2
+              # deploys openbao 2.7.1). Update together when the server image is bumped.
+              image: quay.io/openbao/openbao:2.7.1
               command: ["/bin/sh", "/config/configure.sh"]
               securityContext:
                 allowPrivilegeEscalation: false

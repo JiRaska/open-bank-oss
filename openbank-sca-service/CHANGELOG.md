@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.20.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.19.1...sca-service-v0.20.0) (2026-10-04)
+
+
+### Features
+
+* **sca:** show reviewers what an operator approval binds (device and payment summary) ([#11965](https://github.com/JiRaska/open-bank-oss/issues/11965)) ([a93caba](https://github.com/JiRaska/open-bank-oss/commit/a93caba29a636bd286301d6118d07dd863e1da49))
+
+## [0.19.1](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.19.0...sca-service-v0.19.1) (2026-10-03)
+
+
+### Security
+
+* **sca:** durable operator approvals ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 9b) ([#11903](https://github.com/JiRaska/open-bank-oss/issues/11903)) ([a147957](https://github.com/JiRaska/open-bank-oss/commit/a147957aaed53896087f810f4c81c7d80ebc66fa))
+
+## [0.19.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.18.0...sca-service-v0.19.0) (2026-10-03)
+
+
+### Features
+
+* **sca:** durable challenge and device lifecycle ([#10041](https://github.com/JiRaska/open-bank-oss/issues/10041) slice 9a) ([#11889](https://github.com/JiRaska/open-bank-oss/issues/11889)) ([76bde3c](https://github.com/JiRaska/open-bank-oss/commit/76bde3c2d99dcf16c6ec2c617e2ebcef0ffe0a19))
+
+## [0.18.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.17.0...sca-service-v0.18.0) (2026-10-02)
+
+
+### Features
+
+* **account:** project immutable approval group revisions ([#9430](https://github.com/JiRaska/open-bank-oss/issues/9430)) ([e3ce14c](https://github.com/JiRaska/open-bank-oss/commit/e3ce14c1ac20913dffc98494f1921dc07d3ad0e1))
+
 ## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/sca-service-v0.16.3...sca-service-v0.17.0) (2026-09-28)
 
 

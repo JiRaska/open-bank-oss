@@ -75,7 +75,15 @@ kustomize edit set image openbank-account-service=ghcr.io/acme/openbank-account-
    - CloudNativePG operator
    - Metrics Server
    - Ingress controller
-2. Review and replace placeholder secrets in `base/shared.yaml`.
+2. Provision secrets in the target namespace through your secret manager before applying
+   workloads. The base deliberately contains no placeholder credentials:
+   - `openbank-shared-secrets`: `QUARKUS_DATASOURCE_USERNAME`,
+     `QUARKUS_DATASOURCE_PASSWORD`, `QUARKUS_OIDC_CREDENTIALS_SECRET`,
+     `QUARKUS_REDIS_PASSWORD`.
+   - `openbank-cnpg-bootstrap`: `username` and `password`, matching the database
+     identity above.
+   Keep actual values outside the repository. Missing secrets prevent workload startup;
+   applying the base no longer creates or overwrites credentials.
 3. Render and review the local overlay:
 
 ```bash

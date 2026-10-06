@@ -487,7 +487,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
       # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
@@ -538,9 +538,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: false   # deploy jobs update the cache too
 
@@ -888,7 +888,10 @@ jobs:
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
-        timeout-minutes: 15
+        # A full-fleet docs rebuild attests every pushed image in sequence. The
+        # previous 15-minute cap stopped after successful image pushes, leaving
+        # the remaining images unattested and preventing the GitOps rollout.
+        timeout-minutes: 30
         run: |
           set -uo pipefail
           SERVICES='${{ steps.scan.outputs.deployable }}'
@@ -1186,10 +1189,11 @@ jobs:
           #
           # Safe because the rewrite is deterministic — pin each image: to the tag just built —
           # so recomputing against a newer main is always correct.
-          git fetch origin main
+          git fetch --depth=100 origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
           UPDATED=()
+          CARRIED_PRS=()
 
           # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
           # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
@@ -1253,9 +1257,16 @@ jobs:
                 | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
                 || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
               [ -z "$carried" ] && continue
+              CARRIED_PRS+=("#${n}")
               echo "  carried from deferred PR #${n}:"; echo "$carried"
               while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
             done
+          fi
+
+          if [ "${#CARRIED_PRS[@]}" -gt 0 ]; then
+            (IFS=,; echo "carried_prs=${CARRIED_PRS[*]}") >> "$GITHUB_OUTPUT"
+          else
+            echo "carried_prs=none" >> "$GITHUB_OUTPUT"
           fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
@@ -1344,10 +1355,15 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
+            **Built and scanned in this run:** ${{ needs.build-push.outputs.deployable_services }}
 
-            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
-            triggering commit). ArgoCD syncs automatically after merge.
+            **Contract-approved in this run:** ${{ needs.can-i-deploy.outputs.deployable || 'not evaluated' }}
+
+            **Pending image pins carried from earlier PRs:** ${{ steps.rewrite.outputs.carried_prs }}
+
+            Images built in this run use the short SHA of the triggering commit. Carried pins
+            retain their own build tags. The Files changed tab is the proposed deployment set;
+            ArgoCD syncs after merge.
 
             ## Linked issues
 
@@ -1355,6 +1371,20 @@ jobs:
           labels: |
             chore
             gitops
+
+      # A deferred PR may carry images from an older source commit. Check every proposed pin
+      # against the current main build inputs before the PR can close older proposals or arm
+      # auto-merge. This also catches a source commit that aged while the image was building.
+      - name: Verify GitOps image source freshness
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            | python3 .github/scripts/deploy-window.py verify --root .
 
       # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
       # to the newest build, so two are never additive and both edit the same manifest line — left

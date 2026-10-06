@@ -6,24 +6,32 @@ package com.openbank.audit.infrastructure.persistence
 
 import com.openbank.audit.domain.model.AttributionSource
 import com.openbank.audit.domain.model.AuditEntry
+import com.openbank.audit.domain.model.EntryHashStatus
+import com.openbank.audit.domain.model.EvidenceBundle
+import com.openbank.audit.domain.model.EvidenceEntry
 import com.openbank.audit.domain.model.OccurredAtSource
 import io.quarkus.hibernate.reactive.panache.Panache
-import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntity
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheEntityBase
 import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.Uni
 import io.smallrye.mutiny.coroutines.awaitSuspending
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.inject.Inject
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.Id
 import jakarta.persistence.Table
-import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 
 @Entity
 @Table(name = "audit_entries")
-class AuditEntryEntity : PanacheEntity() {
+class AuditEntryEntity : PanacheEntityBase {
+    @Id
+    @Column(name = "id")
+    var id: Long? = null
+
     @Column(name = "entry_id", nullable = false, unique = true)
     lateinit var entryId: UUID
 
@@ -142,6 +150,7 @@ class AuditEntryEntity : PanacheEntity() {
 }
 
 @ApplicationScoped
+@Suppress("TooManyFunctions") // Keep append transaction helpers and existing read/test seams together.
 class AuditRepository : PanacheRepository<AuditEntryEntity> {
 
     // ADR-0179 / issue #1984: follows `merged_into` at read time so a party-history query does
@@ -151,64 +160,75 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
     // not a crash.
     @Inject lateinit var mergeIndex: PartyMergeIndexRepository
 
-    // Chain writes are serialised in-process: the consumer group has a single member
-    // (group.id=audit-service, 1 replica), so a mutex is sufficient — and much simpler than
-    // row-locking through the reactive session. If the service ever scales horizontally the
-    // chain MUST move to a DB-level advisory lock first.
-    private val chainMutex = kotlinx.coroutines.sync.Mutex()
-
+    // Serialize across replicas, not merely coroutines in one process. The transaction-scoped
+    // lock covers deduplication, reading the head, and committing the new link together.
     suspend fun save(entry: AuditEntry) {
-        chainMutex.withLock {
-            // Kafka delivery is at least once.  The producer's immutable event id is copied to
-            // entry_id, so a retry must be a no-op before it can advance the append-only chain.
-            val alreadyRecorded = Panache.withSession {
+        Panache.withTransaction {
+            Panache.getSession().flatMap { session ->
+                session.createNativeQuery("SELECT 1 FROM pg_advisory_xact_lock(:key)", Int::class.javaObjectType)
+                    .setParameter("key", CHAIN_APPEND_LOCK)
+                    .singleResult
+            }.flatMap {
                 find("entryId", entry.id).firstResult()
-            }.awaitSuspending()
-            if (alreadyRecorded != null) {
-                if (entry.eventType in CONTEXT_COMMITMENT_EVENT_TYPES) {
-                    require(alreadyRecorded.eventType == entry.eventType && alreadyRecorded.payload == entry.payload) {
-                        "Context audit commitment event ID reused with different evidence"
+            }.flatMap { existing ->
+                if (existing != null) {
+                    if (entry.eventType in CONTEXT_COMMITMENT_EVENT_TYPES) {
+                        require(existing.eventType == entry.eventType && existing.payload == entry.payload) {
+                            "Context audit commitment event ID reused with different evidence"
+                        }
+                    }
+                    Uni.createFrom().voidItem()
+                } else {
+                    find("ORDER BY id DESC").page(0, 1).firstResult().flatMap { head ->
+                        persistNext(entry, head?.recordHash ?: GENESIS_HASH)
                     }
                 }
-                return
             }
-            val prev = Panache.withSession {
-                find("ORDER BY id DESC").page(0, 1).firstResult()
-            }.awaitSuspending()
-            val prevHash = prev?.recordHash ?: GENESIS_HASH
-            // Persist exactly the value that gets hashed (#3505). `occurred_at`/`recorded_at` are
-            // TIMESTAMPTZ, which keeps MICROseconds, while a java.time.Instant carries nanoseconds
-            // — on Linux, where the pods run, Instant.now() really does produce them. Hashing the
-            // unrounded value and storing the rounded one makes every link permanently
-            // unverifiable: verifyChain rebuilds the entry from the row, so the lost digits can
-            // never come back. Normalising here (and again inside chainHash) makes the two sides
-            // agree by construction rather than by luck of the platform clock.
-            val stored = entry.normalisedForStorage()
-            val e = AuditEntryEntity().also {
-                it.entryId = entry.id
-                it.eventType = entry.eventType
-                it.aggregateType = entry.aggregateType
-                it.aggregateId = entry.aggregateId
-                it.actorId = entry.actorId
-                it.actorType = entry.actorType
-                it.payload = entry.payload
-                it.sourceService = entry.sourceService
-                it.correlationId = entry.correlationId
-                it.occurredAt = stored.occurredAt
-                it.recordedAt = stored.recordedAt
-                it.occurredAtSource = entry.occurredAtSource.name
-                it.sourceServiceSource = entry.sourceServiceSource.name
-                it.channel = entry.channel
-                it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
-                    ?.let { chain -> actChainJson.writeValueAsString(chain) }
-                it.sessionId = entry.sessionId
-                it.onBehalfOf = entry.onBehalfOf
-                it.delegationId = entry.delegationId
-                it.prevHash = prevHash
-                it.recordHash = chainHash(prevHash, stored)
-                it.hashVersion = HASH_VERSION_MICROS
-            }
-            Panache.withTransaction { persist(e) }.awaitSuspending()
+        }.awaitSuspending()
+    }
+
+    private fun persistNext(entry: AuditEntry, previousHash: String): Uni<Void> =
+        // Allocate under the append lock, without per-JVM ID pools. A cached lower ID from
+        // another replica would otherwise sort behind an already committed head.
+        Panache.getSession().flatMap { session ->
+            session.createNativeQuery("SELECT nextval('audit_entries_seq')", Long::class.javaObjectType)
+                .singleResult
+        }.flatMap { id ->
+            persist(chainEntity(entry, previousHash).also { it.id = id }).replaceWithVoid()
+        }
+
+    private fun chainEntity(entry: AuditEntry, prevHash: String): AuditEntryEntity {
+        // Persist exactly the value that gets hashed (#3505). `occurred_at`/`recorded_at` are
+        // TIMESTAMPTZ, which keeps MICROseconds, while a java.time.Instant carries nanoseconds
+        // — on Linux, where the pods run, Instant.now() really does produce them. Hashing the
+        // unrounded value and storing the rounded one makes every link permanently
+        // unverifiable: verifyChain rebuilds the entry from the row, so the lost digits can
+        // never come back. Normalising here (and again inside chainHash) makes the two sides
+        // agree by construction rather than by luck of the platform clock.
+        val stored = entry.normalisedForStorage()
+        return AuditEntryEntity().also {
+            it.entryId = entry.id
+            it.eventType = entry.eventType
+            it.aggregateType = entry.aggregateType
+            it.aggregateId = entry.aggregateId
+            it.actorId = entry.actorId
+            it.actorType = entry.actorType
+            it.payload = entry.payload
+            it.sourceService = entry.sourceService
+            it.correlationId = entry.correlationId
+            it.occurredAt = stored.occurredAt
+            it.recordedAt = stored.recordedAt
+            it.occurredAtSource = entry.occurredAtSource.name
+            it.sourceServiceSource = entry.sourceServiceSource.name
+            it.channel = entry.channel
+            it.actChain = entry.actChain.takeIf { chain -> chain.isNotEmpty() }
+                ?.let { chain -> actChainJson.writeValueAsString(chain) }
+            it.sessionId = entry.sessionId
+            it.onBehalfOf = entry.onBehalfOf
+            it.delegationId = entry.delegationId
+            it.prevHash = prevHash
+            it.recordHash = chainHash(prevHash, stored)
+            it.hashVersion = HASH_VERSION_MICROS
         }
     }
 
@@ -302,12 +322,9 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
      *    UPDATE rather than refusing it. A legacy row can therefore only be appended, never
      *    demoted. (That same rule is why the legacy hashes could not have been backfilled even if
      *    rewriting tamper-evidence had been acceptable.)
-     * 2. The id comes from `nextval('audit_entries_seq')` — the SAME allocator Hibernate uses — so
-     *    ids stay monotonic. Mixing allocators broke two earlier attempts: `MAX(id)+1` collides
-     *    with an id Hibernate has already reserved from its cached block (`V4` gives the sequence
-     *    `INCREMENT BY 50`), and letting Hibernate write a neighbouring row lands it at a LOWER id
-     *    than a raw `nextval`, scrambling chain order. A test needing consecutive rows must write
-     *    BOTH of them through this seam.
+     * 2. The id comes from `nextval('audit_entries_seq')`, the same per-append allocator as
+     *    [save]. No process reserves a block for subsequent writes. Sequence gaps are harmless;
+     *    reusing a cached lower ID after another writer commits would scramble chain order.
      *
      * Returns rows inserted so the caller can assert the seam did something — a seam that no-ops
      * makes the test it supports pass for the wrong reason, which is how the first version of this
@@ -369,6 +386,35 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
                 find("aggregateId in ?1 ORDER BY occurredAt DESC", ids).page(0, limit).list()
             }
         }.awaitSuspending().map { it.toDomain() }
+    }
+
+    /**
+     * ADR-0214 D3 reconstruction query: every entry about [aggregateId], OLDEST first (the order a
+     * supervisor reads a loan's life in), each with its own `record_hash` recomputed. Fetches one
+     * row beyond [EvidenceBundle.MAX_ENTRIES] so a longer history reports `truncated` instead of
+     * reading as complete. Exactly [aggregateId] — no merge-index widening, which exists for party
+     * merges and would mix another subject's history into a loan's evidence.
+     */
+    suspend fun evidenceFor(aggregateId: String): EvidenceBundle {
+        val rows = Panache.withSession {
+            find("aggregateId = ?1 ORDER BY occurredAt ASC, id ASC", aggregateId)
+                .page(0, EvidenceBundle.MAX_ENTRIES + 1).list()
+        }.awaitSuspending()
+        val kept = rows.take(EvidenceBundle.MAX_ENTRIES)
+        return EvidenceBundle(
+            aggregateId = aggregateId,
+            entries = kept.map { e ->
+                val domain = e.toDomain()
+                val status = when {
+                    e.recordHash == null -> EntryHashStatus.UNCHAINED
+                    isLegacyHashVersion(e) -> EntryHashStatus.LEGACY_UNVERIFIABLE
+                    chainHash(e.prevHash ?: GENESIS_HASH, domain) == e.recordHash -> EntryHashStatus.VERIFIED
+                    else -> EntryHashStatus.MISMATCH
+                }
+                EvidenceEntry(domain, e.recordHash, e.prevHash, status)
+            },
+            truncated = rows.size > EvidenceBundle.MAX_ENTRIES,
+        )
     }
 
     /**
@@ -457,6 +503,8 @@ class AuditRepository : PanacheRepository<AuditEntryEntity> {
             "CONTEXT_READ_AUDIT_COMMITTED",
             "CONTEXT_DISCLOSURE_COMMITTED",
         )
+        private const val CHAIN_APPEND_LOCK = 913_004_212L
+
         private const val GENESIS_HASH = "0000000000000000000000000000000000000000000000000000000000000000"
         private const val CHAIN_PAGE_SIZE = 500
 

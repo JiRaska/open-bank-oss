@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.1...dispute-service-v0.11.2) (2026-10-03)
+
+
+### Performance
+
+* **party,dispute,document,kyc,pid,tpp-registry:** kernel outbox v2 repository (ADR-0327 phase 2) ([#11753](https://github.com/JiRaska/open-bank-oss/issues/11753)) ([51294c7](https://github.com/JiRaska/open-bank-oss/commit/51294c727517168bd6d78a0462c05e887fc0236e))
+
 ## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/dispute-service-v0.11.0...dispute-service-v0.11.1) (2026-09-29)
 
 

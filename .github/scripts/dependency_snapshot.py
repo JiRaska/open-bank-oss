@@ -168,6 +168,12 @@ def generate(repo, output, env, extra_arguments=()):
         raise ValueError('missing dependency graph identity from setup-gradle')
     if sha != env['GITHUB_DEPENDENCY_GRAPH_SHA']:
         raise ValueError('checkout and dependency graph SHA differ')
+    source_ref = ('refs/heads/' + env['GITHUB_HEAD_REF']
+                  if env.get('GITHUB_HEAD_REF') else env.get('GITHUB_REF'))
+    if not source_ref or not source_ref.startswith('refs/heads/'):
+        raise ValueError('dependency graph source is not a branch')
+    if env['GITHUB_DEPENDENCY_GRAPH_REF'] != source_ref:
+        raise ValueError('dependency graph ref does not match checked-out source branch')
     if env.get('GITHUB_DEPENDENCY_GRAPH_WORKSPACE') != str(repo):
         raise ValueError('checkout and dependency graph workspace differ')
     correlator = env['GITHUB_DEPENDENCY_GRAPH_JOB_CORRELATOR']
@@ -189,7 +195,7 @@ def generate(repo, output, env, extra_arguments=()):
     expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
                     'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
-                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
+                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                                   'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
     for i in range(0, len(modules), 4):
@@ -220,7 +226,11 @@ def generate(repo, output, env, extra_arguments=()):
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:
             raise ValueError('expected one fresh snapshot per shard')
-        parts[shard.name] = load_snapshot(snapshots[0])
+        part = load_snapshot(snapshots[0])
+        validate_snapshot(part)
+        if any(part.get(key) != identity.get(key) for key in IDENTITY):
+            raise ValueError('snapshot identity mismatch: ' + shard.name)
+        parts[shard.name] = part
         receipts.append({'shard': shard.name, 'projects': projects,
                              'seconds': round(time.monotonic() - started, 2)})
         (output / 'results.json').write_text(json.dumps(receipts, indent=2))

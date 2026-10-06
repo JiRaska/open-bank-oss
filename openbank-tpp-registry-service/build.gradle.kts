@@ -80,3 +80,8 @@ kover {
 // build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts's `tasks.withType<Test>().configureEach { }`
 // (ADR-0250 Phase 2, issue #4414) — this module's copy was byte-identical in substance to the
 // fleet-standard block, so nothing service-specific remains here.
+
+// The hosted CI default 512 MiB heap OOMed during the Quarkus integration suite.
+tasks.test {
+    maxHeapSize = "2g"
+}

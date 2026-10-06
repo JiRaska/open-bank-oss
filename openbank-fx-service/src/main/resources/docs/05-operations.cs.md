@@ -97,3 +97,7 @@ PENDING znamená, že screening řekl REVIEW nebo byla sanctions-service nedostu
 - Per-service CI buildí jen na změněných cestách; `version.txt` vlastní **release-please** (neměň ručně ve feature/fix PR).
 - `openapi.yaml:info.version` je samostatná osa (ADR-0048) klasifikovaná z OpenAPI diffu.
 - GitOps: ArgoCD přebírá nový image tag; u konfliktů image tagu ber `--ours` (čerstvě sestavený), nikdy slepě `--theirs`.
+
+## Produkční mTLS volání AML služby
+
+Produkční REST klient AML používá pojmenovanou konfiguraci TLS `aml-authority` a listener AML služby na portu 8443, který vyžaduje klientský certifikát. Nasazení dodává klientský certifikát a svazek důvěryhodné privátní CA; vyžaduje se TLS 1.3. Pokud volání AML po nasazení selhává, zkontrolujte společně klientský certifikát a CA, produkční URL REST klienta a síťovou politiku k listeneru. Lokální vývoj a testy nadále používají HTTP fixture; úspěšný lokální HTTP test sám neprokazuje navázání TLS v nasazení.

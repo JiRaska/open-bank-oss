@@ -1,6 +1,6 @@
 # API
 
-REST kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version 0.1.0`). Swagger UI je dostupné na `/api/docs`. Všechny cesty jsou verzované pod `/api/v1` (ADR-0048: OpenAPI `major` == `openbank.api.version` == URL `/api/v{N}`).
+REST kontrakt je formalizován v [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0, `info.version 1.35.0`). Swagger UI je dostupné na `/api/docs`. Všechny cesty jsou verzované pod `/api/v1` (ADR-0048: OpenAPI `major` == `openbank.api.version` == URL `/api/v{N}`).
 
 Základní cesta: `/api/v1/lending`. Všechny endpointy vyžadují Keycloak bearer JWT (`bearerAuth`).
 
@@ -13,8 +13,9 @@ Třída resource je role-gated; **jednající principal je vždy ověřený JWT 
 | `/applications` | `POST` | (role třídy) | Podání žádosti (maker). 201 / 400 |
 | `/applications` | `GET` | (role třídy) | Seznam žádostí dle `partyId` (povinný query) |
 | `/applications/{id}` | `GET` | (role třídy) | 200 / 404 |
-| `/applications/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` | Schválit/zamítnout (checker). Checker se musí lišit od makera. 200 / 409 |
-| `/applications/{id}/disburse` | `POST` | `ROLE_LENDING_OFFICER`, `ROLE_ADMIN` | Čerpání schváleného úvěru. Disburser se musí lišit od checkera. 201 / 409 |
+| `/applications/{id}/advance` | `POST` | (role třídy) | Posun o jeden krok; nelze opustit `FOUR_EYES` ani pokračovat po rozhodnutí bez zaznamenaného schvalovatele. 200 / 409 / 422 |
+| `/applications/{id}/decision` | `POST` | `ROLE_CREDIT_RISK`, `ROLE_ADMIN` | Rozhodnutí ve `FOUR_EYES` (checker). Musí se lišit od navrhovatele. 200 / 409 |
+| `/applications/{id}/disburse` | `POST` | `ROLE_LENDING_OFFICER`, `ROLE_ADMIN` | Čerpání ve `READY_TO_DISBURSE` se zaznamenaným rozhodnutím. Čerpající se musí lišit od navrhovatele i schvalovatele. 201 / 409 |
 | `/loans` | `GET` | (role třídy) | Seznam úvěrů dle `partyId` (povinný query) |
 | `/loans/{id}` | `GET` | (role třídy) | 200 / 404 |
 | `/loans/{id}/schedule` | `GET` | (role třídy) | Splátkový kalendář |
@@ -31,14 +32,21 @@ Naplánovaný měsíční cyklus IFRS 9 provisioningu (ADR-0028 Fáze 3, `Provis
 Vznik úvěru je řetězec maker-checker-disburser vynucený na serveru (ADR-0028 D5, EBA/GL/2020/06):
 
 ```
-maker (POST /applications)           → žádost PROPOSED, proposed_by = JWT subjekt
-checker (POST .../decision)          → APPROVED/REJECTED, decided_by = JWT subjekt
-                                        409 pokud decided_by == proposed_by  (porušení čtyřoč)
+maker (POST /applications)           → žádost SUBMITTED, proposed_by = JWT subjekt
+advance                              → FOUR_EYES, potom čeká na výslovné rozhodnutí
+checker (POST .../decision)          → OFFERED nebo DECLINED, decided_by = JWT subjekt
+                                        409 pokud decided_by == proposed_by
+advance po rozhodnutí                → READY_TO_DISBURSE jen se zaznamenaným schvalovatelem
 disburser (POST .../disburse)        → DISBURSED + úvěr zaúčtován
-                                        409 pokud disburser == decided_by    (segregace odpovědností)
+                                        409 pokud disburser == proposed_by nebo decided_by
 ```
 
-Rozhodnutí je přijato pouze nad žádostí ve stavu `PROPOSED`; čerpání pouze nad `APPROVED`; jinak `409`.
+Rozhodnutí lze přijmout pouze ve stavu `FOUR_EYES`; čerpání pouze ve stavu
+`READY_TO_DISBURSE`. Obecný `advance` ve `FOUR_EYES` vrací
+`409 FOUR_EYES_DECISION_REQUIRED`. Žádost za tímto bodem bez zaznamenaného schvalovatele
+vrací při posunu nebo čerpání `409 FOUR_EYES_DECISION_MISSING`. Zamítnutý příkaz nemění stav a
+zapisuje samostatnou outbox událost `credit.application.transition.refused`, aby jej čtenář
+historie nepovažoval za provedený přechod.
 
 ## Request schémata (vybrané)
 
@@ -56,11 +64,15 @@ CORS povoluje hlavičku `Idempotency-Key` a služba má nakonfigurovaný Redis k
 
 ## Chybový model
 
-Chyby vrací `application/json` ve tvaru `{ "error": "<zpráva>" }` (`ApiError`). Mapování stavů dle `LendingResource`:
+Starší chyby vrací `application/json` ve tvaru `{ "error": "<zpráva>" }`.
+Kódovaná zamítnutí čtyřoč vrací `{ "error": "<kód>", "message": "<popis>" }`;
+tělo neobsahuje identitu navrhovatele, schvalovatele ani čerpajícího. Mapování stavů v `LendingResource`:
 
 - `400 Bad Request` — selhání validace při vytvoření (`applyForLoan`, `registerCollateral`).
 - `404 Not Found` — neznámá žádost / úvěr (a při selhání lookup v `provisioning`).
-- `409 Conflict` — nelegální přechod stavu nebo porušení čtyřoč / segregace odpovědností (decision, disburse, repay, writeoff).
+- `409 Conflict` — nelegální přechod stavu nebo porušení čtyřoč / segregace odpovědností.
+  Kódovaná zamítnutí používají `FOUR_EYES_DECISION_REQUIRED`, `FOUR_EYES_DECISION_MISSING`
+  nebo `SEGREGATION_OF_DUTIES` (advance, decision, disburse).
 - `201 Created` — žádost přijata, úvěr načerpán, zajištění evidováno.
 - `200 OK` — čtení, rozhodnutí aplikováno, splátka zaznamenána, odpis, snímek opravných položek.
 

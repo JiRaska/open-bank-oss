@@ -7,9 +7,9 @@
 - ❌ žádnou PostgreSQL databázi — žádnou nevlastní, takže `governance.yaml` neuvádí `databaseName` (`primaryDatastore: Redis`, `ownsNoDatabase: true`, ADR-0071)
 - ❌ žádné Flyway migrace
 - ❌ žádnou outbox tabulku
-- ✅ **Redis** úložiště — jediné, které používá: rozpracované onboardingy pozastavené na four-eyes ověření identity, klíčované `caseId` s TTL (`PendingOnboardingStore`, ADR-0072), a WebAuthn credentials klíčované id credentialu (`WebAuthnStore`, ADR-0066 F2)
+- ✅ **Redis** úložiště — jediné, které používá: rozpracované onboardingy pozastavené na four-eyes ověření identity, klíčované `caseId` s TTL (`PendingOnboardingStore`, ADR-0072), WebAuthn credentials klíčované id credentialu (`WebAuthnStore`, ADR-0066 F2) a nearby-pay platební relace klíčované neprůhledným tokenem s TTL 5 minut (`PaymentSessionStore`, ADR-0095)
 
-Jediný stav v paměti je cachovaný M2M servisní token v `UpstreamClient` (řetězec JWT + jeho expirace, obnovovaný přes `client_credentials` do 60 s před expirací). Neobsahuje žádná zákaznická data a po restartu se sestaví znovu.
+Vše, co může potřebovat další požadavek, je v Redisu, takže kterákoli replika obslouží kterýkoli požadavek. V paměti zůstávají jen cache, které si každý pod sestaví sám: M2M servisní tokeny (`UpstreamClient`, `WebAuthnKeycloakClient`), krátkodobé lookupy party-merge a acting-for (`PartyMergeResolver`, `ActingForResolver`) a cache dokumentů podmínek v `OnboardingResource`. Nic z toho se mezi replikami nemusí shodovat déle než po dobu svého TTL.
 
 ```mermaid
 graph LR
