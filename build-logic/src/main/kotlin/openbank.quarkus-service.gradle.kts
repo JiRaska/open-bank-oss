@@ -367,6 +367,11 @@ kover {
     currentProject {
         instrumentation {
             excludedClasses.add("org.testcontainers.*")
+            // Kover otherwise wires every Test task into koverVerify. The ordinary `test`
+            // task already executes these provider classes, so letting coverage pull in
+            // providerPactTest repeats verification and can publish to the broker during
+            // every build. Keep that task explicit for the contract lane only.
+            disabledForTestTasks.add("providerPactTest")
         }
     }
 }
