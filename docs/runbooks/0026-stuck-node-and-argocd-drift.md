@@ -4,6 +4,9 @@
 (`prometheus-rules-node-pod-startup.yaml`), `ArgoCDAppOutOfSyncNotHealing`
 (`prometheus-rules-argocd.yaml`). The trace-pipeline alerts in
 `prometheus-rules-trace-ingestion.yaml` were born in the same incident and are covered in §3.
+The EBS attachment alerts in `prometheus-rules-finops.yaml` also link here
+for the node and volume diagnosis in §1; the alert alone does not prove
+which device or workload caused the condition.
 
 **Why these exist.** Three faults on 2026-09-29/30 each ran 20-120 minutes before anyone
 noticed, and every dashboard was green throughout:

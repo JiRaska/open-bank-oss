@@ -55,7 +55,7 @@ spec:
           annotations:
             summary: "NAT egress spike — {{ $labels.namespace }} > 50 GB/day"
             description: "Namespace {{ $labels.namespace }} transmitted {{ $value | humanize1024 }}B in the last 24 h. Threshold: 50 GB. Possible cross-AZ routing or data exfiltration."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/nat-egress-triage.md"
 
         # D1b: Relative threshold — 200 % of the 7-day rolling average.
         # Catches fast-rising namespaces even below the absolute threshold.
@@ -100,7 +100,7 @@ spec:
           annotations:
             summary: "NAT egress 2× rolling avg — {{ $labels.namespace }}"
             description: "{{ $labels.namespace }} current egress rate is {{ $value | humanizePercentage }} of its 7-day average. Possible overnight batch runaway. Note: subquery requires 7d of retention — alert may be absent on fresh clusters."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/nat-egress-triage.md"
 
     - name: openbank.finops.fleet-egress
       interval: 5m
@@ -168,7 +168,7 @@ spec:
           annotations:
             summary: "Fleet node egress {{ $value | printf \"%.0f\" }} GB/day — >2x normal"
             description: "Summed node egress has held above 800 GB/day for an hour (healthy fleet is ~330, busiest observed CI day ~385). Roughly half of this cluster's egress crosses an AZ boundary and is billed in both directions, so a sustained step here lands on EUN1-DataTransfer-Regional-Bytes at ~$0.01/GB. Look for a retry storm before a workload: a rejected sink (Loki full, Kafka unavailable, a 5xx endpoint) makes every client resend, which is fleet-wide and uniform, whereas a real workload change is concentrated. Check per node with topk(10, sum by (instance) (rate(node_network_transmit_bytes_total{device=~\"ens[0-9]+\"}[30m]))) — uniform across nodes means an agent, one node means that node."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0006-nat-egress-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/nat-egress-triage.md"
 
     - name: openbank.finops.karpenter-churn
       interval: 5m
@@ -200,7 +200,7 @@ spec:
           annotations:
             summary: "Karpenter node churn high — {{ $value }} terminations/h"
             description: "{{ $value }} nodes terminated in the last hour. If outside 20:00–07:00 UTC maintenance window, check disruption budget and consolidation policy."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/karpenter-capacity-triage.md"
 
         # D3b: Node churn specifically OUTSIDE the maintenance window.
         - alert: FinOpsKarpenterChurnOutsideMaintenance
@@ -221,7 +221,7 @@ spec:
           annotations:
             summary: "Node churn during business hours"
             description: "Karpenter terminated {{ $value }} nodes during business hours (07:00–20:00 UTC). This causes unnecessary EBS detach races and cross-AZ traffic spikes. Prometheus server UTC assumed."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/karpenter-capacity-triage.md"
 
         # A NodePool at its `limits` cap is invisible until it bites: Karpenter simply
         # refuses to provision ("all available instance types exceed limits for nodepool"),
@@ -245,7 +245,7 @@ spec:
           annotations:
             summary: "NodePool {{ $labels.nodepool }} at {{ $value | printf \"%.0f\" }}% of its CPU cap"
             description: "Karpenter cannot add nodes to {{ $labels.nodepool }} once usage reaches the cap: pods stay Pending and Rollouts abort on progressDeadlineSeconds (#1272, #809). Decide whether declared requests grew honestly (raise the cap) or overstate demand (right-size them) — do not reflex-raise; the cap is the runaway-cost guardrail."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0002-karpenter-node-drain.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/karpenter-capacity-triage.md"
 
     - name: openbank.finops.ebs-health
       interval: 2m
@@ -266,8 +266,8 @@ spec:
             route: finops-agent
           annotations:
             summary: "EBS attachment failure — {{ $labels.namespace }}/{{ $labels.name }}"
-            description: "PVC attachment failure detected. Node drain race or stuck finalizer. Check: kubectl describe pvc -n {{ $labels.namespace }} and force-detach runbook."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0004-ebs-stuck-finalizer.md"
+            description: "PVC attachment failure detected. Node drain race or stalled volume attachment. Check the affected PVC and node events; see the linked diagnosis."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
 
         # D4b: PVC stuck in Pending/Lost phase for >5 minutes.
         - alert: FinOpsPvcStuck
@@ -281,8 +281,8 @@ spec:
             route: finops-agent
           annotations:
             summary: "PVC stuck in {{ $labels.phase }} — {{ $labels.namespace }}/{{ $labels.persistentvolumeclaim }}"
-            description: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} has been {{ $labels.phase }} for >5 minutes. Likely requires force-detach or node drain."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0004-ebs-stuck-finalizer.md"
+            description: "PVC {{ $labels.persistentvolumeclaim }} in {{ $labels.namespace }} has been {{ $labels.phase }} for >5 minutes. Inspect volume attachment, node, and scheduling events before remediation."
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0026-stuck-node-and-argocd-drift.md"
 
     - name: openbank.finops.ci-runner-pressure
       interval: 1m
@@ -304,4 +304,4 @@ spec:
           annotations:
             summary: "CI runner pool > 80% utilisation"
             description: "ARC runner pool is at {{ $value | humanizePercentage }} capacity. Scale-up recommended to prevent aio-max-nr exhaustion and job queuing."
-            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/0007-arc-runner-scale.md"
+            runbook: "https://github.com/JiRaska/open-bank-oss/blob/main/docs/runbooks/arc-runner-pressure.md"
