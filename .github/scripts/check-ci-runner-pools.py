@@ -5,23 +5,21 @@
 # CI runner pool governance (ADR-0053; rules.yaml: ci_runners; issue #6458).
 #
 # WHY THIS EXISTS
-#   `rules.yaml: ci_runners` declares three ARC scale sets — build, batch, deploy —
+#   `rules.yaml: ci_runners` declares four ARC scale sets — build, batch, DR,
+#   deploy —
 #   with a trust split (build/batch carry no cloud credentials; deploy pushes to ECR
 #   and syncs ArgoCD) and a capacity split. Until this gate, NOTHING compared that
-#   declaration to anything:
+#   declaration to the OpenTofu resources and workflow labels:
 #
-#     * `openbank-batch` is declared, with an `isolation_rationale` explaining the
-#       capacity split it provides, and it is provisioned NOWHERE. The OpenTofu
-#       creates exactly two scale sets. A job routed to it would sit `queued`
-#       forever — the failure mode with no error message, because "no runner has
-#       picked this up yet" and "no runner will ever exist" are the same state to
-#       every observer. `rules.yaml: infra_apply.runner_routing` still routes the
-#       tofu PLAN lane there on paper.
+#     * A declared pool without an OpenTofu scale set can leave a routed job
+#       queued indefinitely. Build, batch, DR, and deploy now each have a
+#       matching resource. The batch and DR scale sets and their listeners were
+#       observed Ready in a read-only cluster check for #6458; this source gate
+#       cannot prove job pickup, DR execution, or restore success.
 #
 #     * `pr_jobs_allowed_pools: [build, batch]` says a pull_request job must never
 #       target the credential-carrying deploy pool. That was the literal content of
-#       `ci_runners.blocked_on` ("a CI lint enforcing pr_jobs_allowed_pools ... has
-#       not landed"), with `target_enforce_date: 2026-08-31`. This is that lint.
+#       `ci_runners.blocked_on` before this lint landed. This is that lint.
 #
 #   The declaration reads as governance either way: an unprovisioned pool and a
 #   provisioned one are the same three lines of YAML.
@@ -44,12 +42,11 @@
 #      not two, and #8388 is why this class exists. "Declared in rules.yaml", "written in
 #      OpenTofu" and "running in the cluster" are different facts, and `load_provisioned`
 #      can only ever read the middle one — CI has no cluster credentials. So when #8388
-#      added helm_release.arc_batch/arc_dr, this gate immediately reported both pools as
-#      provisioned, while the merge commit's Platform OpenTofu run did a PLAN only
-#      (`tofu apply (manual dispatch)` skipped) and no apply has run since 2026-08-31.
-#      The capacity does not exist; the gate built to see that gap could no longer see it.
-#      A scale set in KNOWN_UNAPPLIED is therefore subtracted from `provisioned`, so the
-#      other four classes reason about capacity that actually exists.
+#      added helm_release.arc_batch/arc_dr, this gate saw resources in source
+#      control before live readiness was established. A scale set in KNOWN_UNAPPLIED
+#      is therefore subtracted from `provisioned` until a read-only check confirms
+#      its scale set and listener are Ready. An empty baseline records the completed
+#      check; it does not turn this source gate into a live capacity monitor.
 #
 # EXIT CODES
 #   0 — clean

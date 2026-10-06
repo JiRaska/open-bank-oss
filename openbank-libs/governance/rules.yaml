@@ -2472,7 +2472,7 @@ ci_runners:
   spot:
     provider: karpenter                 # diversified Graviton spot, price-capacity-optimized
     interruption: karpenter-managed     # no persistent spot request; node replaced on reclaim
-  pools:                                # three ARC scale sets: build/deploy TRUST split + build/batch CAPACITY split
+  pools:                                # four ARC scale sets: build/deploy trust, build/batch capacity, isolated DR
     build:                              # executes PR code, merge-required (compile, unit/IT tests, admin-ui, manifests)
       scale_set: openbank-build
       cloud_write_credentials: false    # no ECR push, no ArgoCD, no prod secrets
@@ -2530,14 +2530,12 @@ ci_runners:
     sign_images: cosign
     deploy_only_signed_digests: true
   gate: ci-runner-governance
-  enforced: planned                     # ADR-0053 Accepted; lint + tofu enable land on rollout
+  enforced: planned                     # ADR-0053 Accepted; the full runtime/trust control remains pending
   target_enforce_date: "2026-11-30"   # ADR-0144. Moved from 2026-08-31, which passed with the
                                       # blocker unresolved and turned an enforced gate red on every
-                                      # PR regardless of its diff. Extending the horizon is the
-                                      # sanctioned move here; the alternative -- flipping `enforced`
-                                      # to satisfy the date -- would claim a control this repo does
-                                      # not have.
-  blocked_on: "the CI lint enforcing pr_jobs_allowed_pools (build/batch only, never deploy) does not exist: no file under .github/scripts or .github/gates references that key (control: money_path_services is referenced by two, so the probe sees rule keys). The OpenTofu half is less clear than this line used to claim -- arc-runners.tf and arc-runner-reaper.tf are in the tree, but a committed .tf is not an applied one, and that is not checkable from this repository. Corroborating evidence that the pools are not fully provisioned: #6458 records openbank-batch as a declared pool with no capacity and no consumer."
+                                      # PR regardless of its diff. The remaining runtime/trust
+                                      # assertions need proof before this umbrella rule can enforce.
+  blocked_on: "The enforced ci-runner-pool-capacity gate checks source declarations, OpenTofu resources, workflow labels, and pr_jobs_allowed_pools. Batch and DR scale sets and listeners were observed Ready in a read-only check for #6458, but neither that observation nor the source gate proves job pickup, ephemeral-per-job behavior, or credential isolation. The full ci-runner-governance rule remains planned until those runtime and trust claims have enforceable evidence."
 
 # ---------------------------------------------------------------------------------------
 # Infra apply (ADR-0060). Closes the "as-code without applied" gap: CI applies the
