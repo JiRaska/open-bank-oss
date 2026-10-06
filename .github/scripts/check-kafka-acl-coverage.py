@@ -188,14 +188,16 @@ def mounted_volume(path: str, container: dict, pod: dict) -> tuple[dict, str] | 
     volume = volumes[0]
     source = volume.get("secret") or volume.get("configMap") or {}
     key = pathlib.PurePosixPath(path).name
+    relative = path.removeprefix(mount["mountPath"].rstrip("/")).lstrip("/")
     if "items" in source:
-        relative = path.removeprefix(mount["mountPath"].rstrip("/")).lstrip("/")
         matches = [item for item in source["items"] or []
                    if isinstance(item, dict) and item.get("path") == relative
                    and isinstance(item.get("key"), str)]
         if len(matches) != 1:
             return None
         key = matches[0]["key"]
+    elif relative != key:
+        return None  # without items, Kubernetes projects each key at the volume root
     return volume, key
 
 
@@ -451,6 +453,12 @@ def selftest() -> int:
     wrong_items["spec"]["template"]["spec"]["volumes"][0]["secret"]["items"] = [
         {"key": "some-other-key", "path": "user.p12"},
     ]
+    nested_path = copy.deepcopy(deployment)
+    nested_path["spec"]["template"]["spec"]["containers"][0]["env"][1]["value"] = (
+        "/mnt/kafka/nested/user.p12"
+    )
+    directory_path = copy.deepcopy(deployment)
+    directory_path["spec"]["template"]["spec"]["containers"][0]["env"][1]["value"] = "/mnt/kafka"
     wrong_store = copy.deepcopy(cert)
     wrong_store["spec"]["secretStoreRef"]["name"] = "untrusted-store"
     wrong_template = copy.deepcopy(cert)
@@ -458,6 +466,7 @@ def selftest() -> int:
     wrong_data = copy.deepcopy(cert)
     wrong_data["spec"]["data"] = [{"secretKey": "user.p12", "remoteRef": {"key": "other"}}]
     for broken_deployment, broken_cert in ((wrong_mount, cert), (wrong_items, cert),
+                                            (nested_path, cert), (directory_path, cert),
                                             (deployment, wrong_store),
                                             (deployment, wrong_template), (deployment, wrong_data)):
         identity, error = deployed_user("case-coordinator-agent", [broken_deployment, broken_cert, principal])
