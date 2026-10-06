@@ -81,9 +81,11 @@ spec:
               # match zero series — the exact "wrong label, empty result" class of bug this
               # repo has been burned by before (see podmonitor-openbank-services.yaml).
               # These boundaries give every money-path SLO's 1s p99 threshold (rules.yaml:
-              # slo.latency_threshold_seconds) a real bucket to read.
+              # slo.latency_threshold_seconds) a real bucket to read. The 5s top
+              # bucket hid the slow admin health fan-out in +Inf (#9728); 10s and
+              # 30s distinguish its timeout-sized tail from more severe latency.
               span_metrics:
-                histogram_buckets: [0.1, 0.25, 0.5, 1, 2, 5]
+                histogram_buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10, 30]
           # Enable the processors for ALL tenants (span-metrics = RED,
           # service-graphs = dependency edges). The chart templates the main
           # config's `overrides:` block from `.Values.tempo.overrides`
