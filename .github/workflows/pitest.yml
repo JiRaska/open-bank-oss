@@ -14,7 +14,7 @@ on:
       services:
         description: "Space-separated list of service modules to run pitest on (the matrix below is the source of truth)"
         required: false
-        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-card-processing-service openbank-billing-service openbank-lending-service openbank-clearing-service"
+        default: "openbank-ledger-service openbank-balance-service openbank-account-service openbank-transaction-service openbank-fx-service openbank-sepa-payment openbank-sepa-instant openbank-domestic-payment openbank-fraud-service openbank-sanctions-service openbank-sdd-service openbank-interest-service openbank-delegation-service openbank-vop-service openbank-standing-order-service openbank-sca-service openbank-consent-service openbank-card-issuance-service openbank-treasury-service openbank-card-processing-service openbank-billing-service openbank-lending-service openbank-clearing-service openbank-psd2-service openbank-swift-service"
 
 # Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
 # block); the pitest job below already declares contents: read too, belt-and-suspenders.
@@ -105,6 +105,12 @@ jobs:
           # #8349: idempotent submit, per-currency batches and reconciliation. Local baseline:
           # 52 mutants, 42 killed (81%) after excluding Kotlin-generated null-check calls.
           - openbank-clearing-service
+          # #8349: consent/payment policy. Local baseline: 36 mutants, 34 killed (94%);
+          # 70% task floor.
+          - openbank-psd2-service
+          # #8349: validation and payment state decisions. Local baseline: 47 mutants,
+          # 30 detected (64%, five timeouts); advisory until weekly-run score is stable.
+          - openbank-swift-service
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1513,17 +1513,18 @@ coverage:
     money_path_target: 70               # aspirational target; raise floor PRs as tests land
   money_path_depth:
     tool: pitest                        # mutation testing on money-path domain math (ADR-0030 D3)
-    enforced: advisory                  # fleet default; card-processing, billing, lending, clearing enforce 70% PIT floors (#8349)
+    enforced: advisory                  # fleet default; card-processing, billing, lending, clearing, psd2 enforce 70% PIT floors (#8349)
     # Moved 2026-09-30 -> 2026-12-31 (#11684): pitest run 36545321433 (2026-09-29) has balance
     # 69.7% and sepa-payment 69.6% below 70, ledger at 70.0; not "sustained".
     target_enforce_date: "2026-12-31"   # ADR-0144
     ci_producer: .github/workflows/pitest.yml
-    # Current #8349 candidate inventory (2026-10-06): 23/26 money-path services run weekly,
+    # Current #8349 candidate inventory (2026-10-06): 25/26 money-path services run weekly,
     # including card-processing hold/clearing policy (22/29 killed, 76%), billing fee
     # assessment/journal selection (15/16 killed, 94%), and lending credit-offer eligibility
     # (30/31 killed, 97%), and clearing reconciliation/admission (42/52 killed, 81%).
-    # Psd2, settlement and swift remain outside the matrix;
-    # each needs a measured mutation target and baseline before admission.
+    # Psd2 consent/payment policy (34/36 killed, 94%) has a 70% floor. Swift message/payment
+    # policy is advisory at 30/47 detected (64%, five timeouts) pending hosted baseline.
+    # Settlement remains outside the matrix and needs a measured target before admission.
     # Historical ADR-0063 rollout snapshot (2026-07-11, issue #265 D3):
     # 10/17 money-path services wired (pitest.yml weekly) — ledger, balance, account, transaction,
     # fx + sepa-payment, sepa-instant, domestic-payment, fraud (SSDLC-audit rollout 2026-07-06) +
