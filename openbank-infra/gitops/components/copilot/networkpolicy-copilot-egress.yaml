@@ -101,6 +101,14 @@ spec:
       ports:
         - protocol: TCP
           port: 8443
+    # Credit-profile read uses analytics-sink's internal mTLS listener.
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: analytics
+      ports:
+        - protocol: TCP
+          port: 8443
     # OTLP traces to Tempo.
     - to:
         - namespaceSelector:

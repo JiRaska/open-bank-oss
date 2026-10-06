@@ -172,6 +172,8 @@ spec:
             # by consent_rest_ext.rego's service-consent-m2m rule.
             - name: CONSENT_SERVICE_URL
               value: https://consent-service.consent.svc:8443
+            - name: ANALYTICS_SINK_URL
+              value: https://analytics-sink.analytics.svc:8443
             - name: TRANSACTION_SERVICE_URL
               value: http://transaction-service.payments.svc:8102
             # Redis backing the four-eyes ApprovalStore (ADR-0155). The CDI bean

@@ -185,6 +185,15 @@ mp:
         # fraud-service, PR #685 -> #698). Do not re-add them as dotted YAML keys either —
         # that reintroduces this exact bug.
 
+"%prod":
+  quarkus:
+    http:
+      ssl:
+        # Build-time setting: require a verified caller certificate on the internal TLS listener.
+        client-auth: required
+      # Retain the existing HTTP listener for probes and callers during migration.
+      insecure-requests: enabled
+
 "%dev":
   quarkus:
     log:

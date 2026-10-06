@@ -95,7 +95,7 @@ quarkus:
     # same reasoning — an unreadable profile makes the gate refuse, never approve, so a slow
     # analytics-sink costs a suppressed offer.
     analytics-sink:
-      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      url: ${ANALYTICS_SINK_URL:http://localhost:8134}
       connect-timeout: 2000
       read-timeout: 3000
   redis:
@@ -334,11 +334,23 @@ lending:
           pem:
             certs: /mnt/consent-tls/ca.crt
         protocols: TLSv1.3
+      analytics-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       product-catalog:
         tls-configuration-name: catalog-authority
       consent-service:
         tls-configuration-name: consent-authority
+      analytics-sink:
+        tls-configuration-name: analytics-authority
   lending:
     ledger:
       backend: ${LENDING_LEDGER_BACKEND:rest}

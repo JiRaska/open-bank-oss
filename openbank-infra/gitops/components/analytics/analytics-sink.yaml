@@ -36,6 +36,8 @@ kind: Deployment
 metadata:
   name: analytics-sink
   namespace: analytics
+  annotations:
+    openbank.io/port-scoped-ingress: "true"
   labels:
     app.kubernetes.io/name: analytics-sink
     app.kubernetes.io/part-of: openbank
@@ -74,6 +76,8 @@ spec:
           ports:
             - name: http
               containerPort: 8134
+            - name: https
+              containerPort: 8443
             - name: management
               containerPort: 8086
           env:
@@ -87,6 +91,16 @@ spec:
               value: "0.1"
             - name: QUARKUS_HTTP_PORT
               value: "8134"
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_FILES
+              value: /mnt/internal-tls/tls.crt
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_KEY_FILES
+              value: /mnt/internal-tls/tls.key
+            - name: QUARKUS_HTTP_SSL_CERTIFICATE_TRUST_STORE_FILES
+              value: /mnt/internal-tls/ca.crt
+            - name: QUARKUS_HTTP_SSL_PORT
+              value: "8443"
+            - name: QUARKUS_HTTP_SSL_PROTOCOLS
+              value: TLSv1.3
             # Same defect as security-scanner (#3433). `QUARKUS_OIDC_ENABLED=false` is inert —
             # quarkus.oidc.enabled is a BUILD-TIME property — so OIDC ran here regardless, against
             # the application.yaml default `http://localhost:8080/realms/openbank` inside this
@@ -202,6 +216,9 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: internal-tls
+              mountPath: /mnt/internal-tls
+              readOnly: true
             - name: kafka-keystore
               mountPath: /mnt/kafka/keystore
               readOnly: true
@@ -221,6 +238,10 @@ spec:
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: internal-tls
+          secret:
+            secretName: analytics-sink-internal-tls
+            optional: false
         - name: kafka-keystore
           secret:
             secretName: analytics-sink-kafka-keystore
@@ -246,6 +267,9 @@ spec:
     - name: http
       port: 8134
       targetPort: http
+    - name: https
+      port: 8443
+      targetPort: https
     - name: management
       port: 8086
       targetPort: management

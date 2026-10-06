@@ -110,7 +110,7 @@ quarkus:
       connect-timeout: 2000
       read-timeout: 3000
     analytics-sink:
-      url: ${ANALYTICS_SINK_URL:http://localhost:8110}
+      url: ${ANALYTICS_SINK_URL:http://localhost:8134}
       connect-timeout: 2000
       read-timeout: 3000
 
@@ -287,9 +287,21 @@ authz:
           pem:
             certs: /mnt/consent-tls/ca.crt
         protocols: TLSv1.3
+      analytics-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/consent-tls/tls.crt
+              key: /mnt/consent-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/consent-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       consent-service:
         tls-configuration-name: consent-authority
+      analytics-sink:
+        tls-configuration-name: analytics-authority
 
 "%dev":
   quarkus:
