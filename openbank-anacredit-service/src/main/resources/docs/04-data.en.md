@@ -55,11 +55,19 @@ erDiagram
 
 `CreditRecord` and `ExclusionNote` are **not stored** — they are computed on demand by `AnaCreditReturnBuilder` when a return is rendered.
 
+`credit_exposure_observation` retains each committed insert, update and delete of the current
+projection, plus one migration-time baseline for rows that already existed. Its `captured_at` is
+the database observation time, **not** the source business date. The existing return still reads
+`credit_exposures` and must not be treated as historically correct for an earlier reference date;
+source-effective dates and same-date coverage are required before observation history can support
+regulatory as-of reporting (issue #9890).
+
 ## Migrations
 
 | Script | Status |
 |---|---|
 | `V2__create_credit_exposures.sql` | Applied — creates `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
+| `V3__observe_credit_exposure_changes.sql` | Adds transactional observation history and a migration-time baseline. Rollback: export the history, then drop trigger, function and table; the current exposure table stays. |
 
 ## Eligibility rules (the derivation that produces the data)
 
@@ -77,6 +85,7 @@ The €25 000 threshold (`AnaCreditEligibilityPolicy.REPORTING_THRESHOLD_EUR`) i
 | Data | Storage |
 |---|---|
 | credit exposures | durable — `credit_exposures` table, 10 years (`governance.yaml: retentionPolicy`), AML / regulatory record |
+| exposure observations | durable — `credit_exposure_observation`, same restricted classification and declared 10-year policy; includes old values and deletion tombstones |
 | rendered returns | not persisted (recomputed on each request, derived) |
 
 ## PII / data classification

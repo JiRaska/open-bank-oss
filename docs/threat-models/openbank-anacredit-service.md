@@ -61,6 +61,12 @@ service — read-only access to internal data, write-only to the regulator's end
 
 ## 6. Change log
 
+- **2026-10-06** — Exposure observation history (#9890) records committed changes, including
+  pre-delete values, in the reporting database. It inherits restricted classification and the
+  declared ten-year retention policy. The trigger runs in the source transaction, so a rolled-back
+  upsert leaves no history. Observation time is not a source-effective business date; neither the
+  existing return nor this history alone proves a historical monthly position. Old-value retention
+  and authorized purge/erasure need the same governance as the exposure store.
 - **2026-08-09** — `anacredit.create` narrowed to humans only (GHSA-58jq-9hq3-66jr, issue #4228);
   the extension also moved out of the generator heredoc into `anacredit_rest_ext.rego` so
   `opa-policy.yml`'s file-pair discovery can cover it — until then it had no test at all.

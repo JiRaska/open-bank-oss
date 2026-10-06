@@ -55,11 +55,18 @@ erDiagram
 
 `CreditRecord` a `ExclusionNote` se **neukládají** — počítá je na vyžádání `AnaCreditReturnBuilder` při vykreslení výkazu.
 
+`credit_exposure_observation` uchovává každý potvrzený INSERT, UPDATE a DELETE aktuální expozice
+a při migraci jeden výchozí záznam pro již existující řádky. `captured_at` je čas pozorování
+v databázi, **nikoli** obchodní datum zdroje. Současný výkaz stále čte `credit_exposures` a pro
+starší referenční datum jej nelze považovat za historicky správný; před regulatorním použitím
+historie jsou nutná obchodní data zdroje a kontrola úplnosti ke stejnému datu (issue #9890).
+
 ## Migrace
 
 | Skript | Stav |
 |---|---|
 | `V2__create_credit_exposures.sql` | Aplikováno — vytváří `credit_exposures` + `idx_credit_exposures_debtor_id`. Rollback: `DROP TABLE credit_exposures;` |
+| `V3__observe_credit_exposure_changes.sql` | Přidává transakční historii změn a výchozí záznam při migraci. Rollback: exportovat historii, pak odstranit trigger, funkci a tabulku; aktuální expozice zůstávají. |
 
 ## Pravidla způsobilosti (odvození, které produkuje data)
 
@@ -77,6 +84,7 @@ Práh €25 000 (`AnaCreditEligibilityPolicy.REPORTING_THRESHOLD_EUR`) se vyhodn
 | Data | Úložiště |
 |---|---|
 | úvěrové expozice | trvanlivé — tabulka `credit_exposures`, 10 let (`governance.yaml: retentionPolicy`), AML / regulatorní záznam |
+| pozorování expozic | trvanlivé — `credit_exposure_observation`, stejná klasifikace restricted a deklarovaná desetiletá retence; obsahuje starší hodnoty i záznamy o smazání |
 | vykreslené výkazy | neukládají se (přepočítány při každém požadavku, odvozené) |
 
 ## PII / klasifikace dat
