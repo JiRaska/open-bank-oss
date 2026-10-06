@@ -6,7 +6,4 @@
 # list can only shrink. Regenerate a candidate list with `--print-baseline`; keep the reasons.
 #
 # format: <consumer> -> <provider>  # <reason>
-openbank-domestic-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
 openbank-lending-service -> openbank-analytics-sink  # credit-profile read for offers; no provider replay exists yet — #8345
-openbank-sepa-instant -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
-openbank-sepa-payment -> openbank-clearing-simulator  # sandbox scheme simulator, not a real counterparty — #8345 says this needs a decision, not a reflex pact
