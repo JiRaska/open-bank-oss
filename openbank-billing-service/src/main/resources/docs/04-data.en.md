@@ -8,6 +8,8 @@ This page currently documents only the outbox lifecycle; the rest of the data mo
 
 Annual fee-summary issuance remains idempotent after this purge: V8 backfills a separate `billing_annual_fee_summary_issuance` key for every existing summary outbox intent. The unique deterministic account/year key and the new outbox event are committed in one transaction. This table stores only the key and recording time, not the summary payload; retain it for as long as past-year reruns are allowed (#12187).
 
+For application rollback after the first purge, disable `openbank.billing.annual-fee-summary.scheduler.enabled` before starting the older binary and keep the issuance table. That binary cannot read the key, so past-year reruns must wait until a V8-aware version is restored.
+
 - Runs nightly (`openbank.outbox.retention.cron`, default `0 17 3 * * ?`) on every replica; each delete is bounded (`batch-size` 5 000, at most `max-batches` 200 per run), so a long-unpurged table drains over several nights.
 - PENDING, FAILED, DISPATCHING and DEAD rows are never touched — DEAD rows are the producer-side DLQ.
 - Replaying an event older than the window comes from the Kafka topic or audit-service, not from this table.

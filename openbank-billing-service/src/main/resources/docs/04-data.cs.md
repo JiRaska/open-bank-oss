@@ -8,6 +8,8 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 
 Vydání ročního souhrnu zůstává idempotentní i po tomto smazání: migrace V8 zpětně zapíše samostatný klíč `billing_annual_fee_summary_issuance` pro každý existující záměr v outboxu. Unikátní deterministický klíč účtu a roku se ukládá ve stejné transakci jako nová událost. Tabulka obsahuje pouze klíč a čas zápisu, nikoli souhrnný payload; uchovávejte ji po celou dobu, kdy je dovoleno znovu spustit minulé roky (#12187).
 
+Při návratu na starší verzi aplikace po prvním smazání vypněte před jejím spuštěním `openbank.billing.annual-fee-summary.scheduler.enabled` a tabulku s klíči ponechte. Starší verze klíč nečte; opakování minulých roků musí počkat na opětovné nasazení verze podporující V8.
+
 - Běží každou noc (`openbank.outbox.retention.cron`, výchozí `0 17 3 * * ?`) na každé replice; každé mazání je omezené (`batch-size` 5 000, nejvýš `max-batches` 200 za běh), takže dlouho nečištěná tabulka se vyprázdní během několika nocí.
 - Řádků PENDING, FAILED, DISPATCHING a DEAD se nikdy nedotkne — DEAD řádky jsou DLQ na straně producenta.
 - Replay události starší než okno jde z Kafka topicu nebo z audit-service, ne z této tabulky.
