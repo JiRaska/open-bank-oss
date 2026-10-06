@@ -17,10 +17,10 @@
 # defense against a poisoned upstream release riding an auto-merge — human review
 # of minors is.
 #
-# Dependabot PR runs cannot read Actions secrets. This workflow classifies the
-# patch and passes only its identity to a separate workflow_run job, which mints
-# an App token to arm native auto-merge after validating the PR again. A merge
-# armed with GITHUB_TOKEN suppresses main push workflows and strands Pact proof.
+# This unprivileged PR workflow only classifies the update. The default-branch
+# workflow_run listener in dependabot-auto-merge-arm.yml uses a GitHub App token
+# to enable native auto-merge after rechecking the PR and this run. A merge armed
+# with GITHUB_TOKEN suppresses the resulting main push workflows (#12161).
 #
 # Ref: https://docs.github.com/en/code-security/dependabot/working-with-dependabot/automating-dependabot-with-github-actions#enabling-auto-merge-on-a-pull-request
 
@@ -28,16 +28,49 @@ name: Dependabot auto-merge
 
 on:
   pull_request:
-    # The privileged follow-up validates the exact classified head SHA. A Dependabot
-    # rebase between opened and that follow-up must be reclassified or auto-merge
-    # remains unarmed. Synchronize adds skipped runs for non-Dependabot PRs, but the
-    # job-level actor check prevents API calls and runner allocation for them.
-    # Labeled remains excluded: labels are applied repeatedly by GitOps bots and
-    # do not change dependency metadata.
+    # Reclassify after a Dependabot rebase: the privileged follow-up checks the exact
+    # head SHA and refuses the old run once the branch moves. Only a new successful
+    # classification can arm auto-merge for the new head (#12161).
+    # This restores some skipped non-Dependabot runs; the job-level actor guard
+    # prevents them from allocating a runner or making metadata API calls.
+    #
+    # Measured 2026-09-12 over a 0.32 h window of 300 workflow runs: this workflow ran 18 times
+    # and SKIPPED 18 of 18, every one of them triggered by a push to one of five non-Dependabot
+    # feature branches. A skipped job still costs a queued Actions run and its API calls, and the
+    # installation quota was exhausted that same morning — hard-failing `dependency-review` and
+    # the `CodeQL` SARIF upload across the open PRs with
+    # `API rate limit exceeded for installation`.
+    #
+    # NOT `labeled` either, and the reason it was kept did not survive measurement. The comment
+    # here used to read "a label is how a human re-opens the question for a PR this job already
+    # declined, and it fires rarely enough not to be part of the cost." Both halves were wrong.
+    #
+    # Measured 2026-09-12 over 600 completed `pull_request` runs (07:25:42Z..10:10:22Z, 2.74 h):
+    # this workflow ran 38 times on 20 branches, 34 skipped and the other 4 cancelled — zero
+    # useful executions, and not one of those branches was a Dependabot branch. Eight branches
+    # fired it more than once; the worst fired FIVE times.
+    #
+    # Those repeats are not rare human labelling. `openbank-gitops-bot` applies the PR's labels
+    # when it opens a deploy PR, and applies each one twice:
+    #
+    #     08:15:10  labeled  chore   by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  gitops  by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  chore   by openbank-gitops-bot[bot]
+    #     08:15:11  labeled  gitops  by openbank-gitops-bot[bot]
+    #
+    # One `opened` plus four `labeled` is exactly the five runs measured — so `labeled` costs four
+    # queued runs per bot deploy PR and buys nothing. Dependabot's own labels (`dependencies`,
+    # plus the ecosystem) are applied at creation too, so `labeled` there is redundant with
+    # `opened` rather than additional to it.
+    #
+    # What the removal costs: re-labelling a PR this job declined no longer re-asks it. `reopened`
+    # still does, and a maintainer can re-run the workflow. That is a smaller affordance than four
+    # wasted runs per deploy PR, and unlike the claim it replaces it is not asserted — nothing in
+    # the window shows `labeled` ever doing work.
     types: [opened, reopened, synchronize]
 
-# Restrictive token permissions in the PR phase; the separate workflow_run phase
-# mints an App token only after validating the Dependabot PR identity.
+# Restrictive top-level default (Scorecard Token-Permissions wants an explicit top-level
+# block); the auto-merge job below declares its own override for the write access it needs.
 permissions:
   contents: read
 
@@ -46,11 +79,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  auto-merge:
-    name: Classify patch Dependabot PRs
+  classify:
+    name: Classify patch Dependabot PR
     runs-on: ubuntu-latest
     timeout-minutes: 10  # API calls only
-    if: github.actor == 'dependabot[bot]'
+    if: |
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main'
     permissions:
       contents: read
       pull-requests: read
@@ -62,36 +99,16 @@ jobs:
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
-      # A trusted follow-up arms auto-merge with a GitHub App token. Keep this
-      # Dependabot-triggered run read-only and pass only the exact PR identity.
-      - name: Record patch eligibility
+      # The successful conclusion of this step is the eligibility marker read by
+      # the privileged workflow_run listener. Do not merge or mint a write token
+      # in this job. Only these two ecosystems are in the policy; the previous
+      # negative checks also admitted Terraform patch updates by mistake.
+      - name: Eligible patch for Gradle or npm
         if: |
           steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
           (steps.metadata.outputs.package-ecosystem == 'gradle' ||
            steps.metadata.outputs.package-ecosystem == 'npm_and_yarn')
-        env:
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
-          ECOSYSTEM: ${{ steps.metadata.outputs.package-ecosystem }}
-        run: |
-          jq -n --argjson number "$PR_NUMBER" --arg sha "$HEAD_SHA" \
-            --arg ref "$HEAD_REF" --arg update_type "$UPDATE_TYPE" \
-            --arg ecosystem "$ECOSYSTEM" \
-            '{number: $number, sha: $sha, ref: $ref, update_type: $update_type, ecosystem: $ecosystem}' \
-            > "$RUNNER_TEMP/dependabot-eligibility.json"
-
-      - name: Pass patch eligibility to privileged follow-up
-        if: |
-          steps.metadata.outputs.update-type == 'version-update:semver-patch' &&
-          (steps.metadata.outputs.package-ecosystem == 'gradle' ||
-           steps.metadata.outputs.package-ecosystem == 'npm_and_yarn')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: dependabot-auto-merge-eligibility
-          path: ${{ runner.temp }}/dependabot-eligibility.json
-          retention-days: 1
+        run: echo "Dependabot patch is eligible for trusted auto-merge arming."
 
       - name: Skip — requires human review
         if: |
