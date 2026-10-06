@@ -67,13 +67,21 @@ describe('GET /api/services/[name]/docs', () => {
     expect(body.availableLanguages).toContain('cs')
   })
 
-  it('returns 404 with stable JSON body when service has no docs', async () => {
+  it('returns 404 with stable JSON body when the docs endpoint is unavailable', async () => {
     vi.mocked(loadDocsIndex).mockResolvedValue(null)
     const { GET } = await import('@/app/api/services/[name]/docs/route')
     const res = await GET(new Request('http://localhost/api/services/unknown-svc/docs'), ctx('unknown-svc'))
     expect(res.status).toBe(404)
     const body = await res.json()
     expect(body).toMatchObject({ error: expect.any(String), service: 'unknown-svc' })
+  })
+
+  it('returns an empty index for a reachable service without published documents', async () => {
+    vi.mocked(loadDocsIndex).mockResolvedValue({ ...DOCS_INDEX, items: [] })
+    const { GET } = await import('@/app/api/services/[name]/docs/route')
+    const res = await GET(new Request('http://localhost/api/services/account/docs'), ctx('account'))
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ service: 'account-service', items: [] })
   })
 
   it('passes ?lang query param to loadDocsIndex', async () => {

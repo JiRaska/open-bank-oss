@@ -235,7 +235,9 @@ async function indexFromLive(id: string, requestedLang: string): Promise<DocsInd
       links?: Record<string, string>
       items?: DocsIndexItem[]
     }
-    if (!body.available || !body.items || body.items.length === 0) return null
+    // A responding service with no source documents is different from an
+    // unreachable docs endpoint. Keep its empty index for the UI to explain.
+    if (!Array.isArray(body.items)) return null
     return {
       service: body.service,
       version: body.version,

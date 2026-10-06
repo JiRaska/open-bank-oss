@@ -41,4 +41,14 @@ describe('newly discovered service documentation', () => {
     expect(await loadDocsIndex('unregistered-service')).toBeNull()
     expect(fetch).not.toHaveBeenCalled()
   })
+
+  it('preserves an empty response from a reachable service', async () => {
+    vi.mocked(inCluster).mockReturnValue(true)
+    vi.mocked(resolveInClusterBaseUrl).mockResolvedValue('http://context-service.context.svc:8150')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      service: 'openbank-context-service', version: '0.3.0', available: false, items: [],
+    }), { status: 200 })))
+
+    expect(await loadDocsIndex('context')).toMatchObject({ source: 'live', items: [] })
+  })
 })
