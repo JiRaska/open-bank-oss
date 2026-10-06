@@ -179,6 +179,16 @@ jobs:
           cache: "npm"
           cache-dependency-path: openbank-admin-ui/package-lock.json
 
+      # setup-node caches npm downloads, not Next's compiler cache. A hosted
+      # runner starts each build with an empty .next/cache otherwise.
+      - name: Cache Next build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: openbank-admin-ui/.next/cache
+          key: next-build-${{ runner.os }}-${{ hashFiles('openbank-admin-ui/package-lock.json', 'openbank-admin-ui/next.config.mjs') }}-${{ github.sha }}
+          restore-keys: |
+            next-build-${{ runner.os }}-${{ hashFiles('openbank-admin-ui/package-lock.json', 'openbank-admin-ui/next.config.mjs') }}-
+
       - name: Install
         run: npm ci --no-audit --no-fund
 
