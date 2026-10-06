@@ -41,6 +41,10 @@ class BillingOutboxRepositoryImpl(private val assessments: BillingAssessmentRepo
     SentOutboxRetention by PanacheOutboxRetention(OutboxTableShape("billing_outbox")),
     PanacheRepository<BillingOutboxEntity> {
 
+    // Annual fee-summary idempotency currently depends on SENT rows remaining queryable.
+    // Enable retention only after issuance has an independent durable uniqueness record (#12187).
+    override val sentRetentionExempt: Boolean = true
+
     private val mapper = jacksonObjectMapper().findAndRegisterModules()
 
     override suspend fun listProcessable(limit: Int): List<OutboxEntry> = Panache.withSession {
