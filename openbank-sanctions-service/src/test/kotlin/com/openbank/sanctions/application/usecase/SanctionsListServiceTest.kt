@@ -507,6 +507,31 @@ class SanctionsListServiceTest {
     }
 
     @Test
+    fun `non importing outcomes cannot complete an inherited partial refresh`(): Unit = runBlocking {
+        for ((type, outcome) in listOf(
+            SanctionsListType.EU_CONSOLIDATED to ListImportResult.seedFallback("sample entries"),
+            SanctionsListType.FATF_HIGH_RISK to ListImportResult.skippedNotEntityBased("country risk"),
+        )) {
+            val list = sampleList(listType = type.name, lastEntryCount = 12)
+            val fence = mockk<SanctionsImportPublicationFence>()
+            coEvery { fence.duringRefresh<SanctionsList>(type, any()) } coAnswers {
+                secondArg<suspend (SanctionsPublicationPermit) -> SanctionsList>()(
+                    SanctionsPublicationPermit(type, inheritedIncomplete = true),
+                )
+            }
+            coEvery { repo.findByListType(list.listType) } returns list
+            coEvery { importer.importList(type, list.sourceUrl, any()) } returns outcome
+            coEvery { repo.markRetryPendingFenced(list.listType, any()) } returns list
+
+            SanctionsListService(repo, importer, clock, publisher, fence).refresh(list.listType)
+
+            coVerify(exactly = 1) { repo.markRetryPendingFenced(list.listType, any()) }
+            coVerify(exactly = 0) { publisher.publishFenced(list.id, type, any()) }
+            coVerify(exactly = 0) { repo.markUpdatedFenced(list.listType, any(), any()) }
+        }
+    }
+
+    @Test
     fun `publication failure does not mark refresh completed`() {
         val list = sampleList()
         coEvery { repo.findByListType(list.listType) } returns list

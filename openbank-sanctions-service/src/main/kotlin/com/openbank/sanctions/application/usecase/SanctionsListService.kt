@@ -101,7 +101,11 @@ class SanctionsListService(
                 // after ownership passes, so a failed import cannot restore an older count.
                 val currentList = repo.requireList(listType)
                 val result = importer.importList(enumType, currentList.sourceUrl, permit)
-                if (result.outcome in INCOMPLETE_IMPORTS) {
+                // A no-feed outcome may finish an ordinary seed/FATF refresh, but it cannot
+                // certify a previous partial import whose committed journal is still fenced.
+                if (result.outcome in INCOMPLETE_IMPORTS ||
+                    (permit.inheritedIncomplete && result.outcome != ListImportOutcome.IMPORTED)
+                ) {
                     permit.deferUntilNextRefresh()
                     return@duringRefresh checkNotNull(repo.markRetryPendingFenced(listType, permit)) {
                         "Failed to defer sanctions list refresh for $listType"

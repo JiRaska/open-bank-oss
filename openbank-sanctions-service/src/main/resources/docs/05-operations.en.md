@@ -104,6 +104,9 @@ publication stays deferred. A failed or empty import keeps its committed batches
 and requests a retry on the next scheduler tick. Background publication remains deferred until a
 complete refresh evaluates the retained and new batches together. A storm withholds the change
 event and retains the journal for investigation.
+If a previous import was incomplete, a later seed fallback or non-entity skip does not count as
+that complete refresh: it keeps the journal fenced and requests another retry. A normal seed or
+non-entity refresh with no inherited partial import still completes as before.
 Waiting for the per-list lock or generation row is limited to 30 seconds. A timed-out refresh
 leaves journal evidence intact. The scheduler continues to the other lists and retries pending
 publication on its next tick; the import itself runs at its next due time or on a new request.

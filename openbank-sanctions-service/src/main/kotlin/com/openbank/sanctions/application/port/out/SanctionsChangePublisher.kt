@@ -13,6 +13,7 @@ enum class SanctionsPublicationOutcome { NO_CHANGES, PUBLISHED, WITHHELD, DEFERR
 class SanctionsPublicationPermit internal constructor(
     private val listType: SanctionsListType,
     val generation: Long = 0,
+    val inheritedIncomplete: Boolean = false,
 ) {
     @Volatile
     private var active = true

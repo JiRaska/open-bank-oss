@@ -41,10 +41,10 @@ class SanctionsImportPublicationFence private constructor(
 
     @Suppress("TooGenericExceptionCaught") // Every failure must keep an incomplete refresh fenced.
     suspend fun <T> duringRefresh(listType: SanctionsListType, refresh: suspend (SanctionsPublicationPermit) -> T): T {
-        val (connection, generation) = withContext(NonCancellable + Dispatchers.IO) {
+        val (connection, generation, inheritedIncomplete) = withContext(NonCancellable + Dispatchers.IO) {
             acquire(listType)
         }
-        val permit = SanctionsPublicationPermit(listType, generation)
+        val permit = SanctionsPublicationPermit(listType, generation, inheritedIncomplete)
         try {
             return refresh(permit)
         } catch (failure: Throwable) {
@@ -59,7 +59,7 @@ class SanctionsImportPublicationFence private constructor(
     }
 
     @Suppress("TooGenericExceptionCaught") // JDBC cleanup must also run after an Error.
-    private fun acquire(listType: SanctionsListType): Pair<Connection, Long> {
+    private fun acquire(listType: SanctionsListType): Triple<Connection, Long, Boolean> {
         val connection = dataSource.connection
         var locked = false
         try {
@@ -74,6 +74,17 @@ class SanctionsImportPublicationFence private constructor(
                 statement.execute()
             }
             locked = true
+            // Read the prior durable state under the same row lock used to advance the
+            // generation. A fallback/no-feed attempt cannot clear an earlier failed import.
+            val inheritedIncomplete = connection.prepareStatement(
+                "SELECT refresh_active FROM sanctions_change_publication WHERE list_type = ? FOR UPDATE",
+            ).use { statement ->
+                statement.setString(1, listType.name)
+                statement.executeQuery().use { rows ->
+                    check(rows.next()) { "No sanctions publication row for $listType" }
+                    rows.getBoolean(1)
+                }
+            }
             val generation = connection.prepareStatement(
                 "UPDATE sanctions_change_publication SET refresh_generation = refresh_generation + 1, " +
                     "refresh_active = TRUE WHERE list_type = ? RETURNING refresh_generation",
@@ -86,7 +97,7 @@ class SanctionsImportPublicationFence private constructor(
             }
             connection.commit()
             connection.autoCommit = true
-            return connection to generation
+            return Triple(connection, generation, inheritedIncomplete)
         } catch (failure: Throwable) {
             runCatching { connection.rollback() }
             if (locked) runCatching { unlock(connection, listType) }

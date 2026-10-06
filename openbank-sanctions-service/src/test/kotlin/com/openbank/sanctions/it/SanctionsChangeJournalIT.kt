@@ -7,16 +7,21 @@ package com.openbank.sanctions.it
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.openbank.libs.persistence.outbox.OutboxMessage
+import com.openbank.sanctions.application.port.out.ListImportResult
 import com.openbank.sanctions.application.port.out.SanctionsChangePublisher
 import com.openbank.sanctions.application.port.out.SanctionsOutboxRepository
 import com.openbank.sanctions.application.port.out.SanctionsPublicationOutcome
+import com.openbank.sanctions.application.usecase.SanctionsImportService
 import com.openbank.sanctions.domain.model.EntityType
 import com.openbank.sanctions.domain.model.SanctionsEntry
 import com.openbank.sanctions.domain.model.SanctionsListType
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsEntryRepositoryImpl
 import com.openbank.sanctions.infrastructure.persistence.repository.SanctionsImportPublicationFence
+import io.mockk.coEvery
+import io.mockk.mockk
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.test.common.QuarkusTestResource
+import io.quarkus.test.junit.QuarkusMock
 import io.quarkus.test.junit.QuarkusTest
 import io.quarkus.test.security.TestSecurity
 import io.quarkus.vertx.VertxContextSupport
@@ -125,6 +130,61 @@ class SanctionsChangeJournalIT {
         val response = given().contentType("application/json").post("/api/v1/sanctions/lists/FATF_HIGH_RISK/refresh")
         assertThat(response.statusCode).isEqualTo(200)
         assertThat(response.jsonPath().getString("listType")).isEqualTo(SanctionsListType.FATF_HIGH_RISK.name)
+        assertThat(refreshActive(SanctionsListType.FATF_HIGH_RISK)).isFalse()
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `seed fallback cannot publish journal retained from a failed EU refresh`() {
+        val type = SanctionsListType.EU_CONSOLIDATED
+        assertThatThrownBy {
+            runBlocking {
+                publicationFence.duringRefresh(type) { permit ->
+                    onEventLoop {
+                        entryRepository.upsertAllFenced(
+                            listOf(entry("partial-eu").copy(listType = type)),
+                            permit,
+                        )
+                    }
+                    error("feed failed after a committed batch")
+                }
+            }
+        }.hasMessageContaining("feed failed")
+        assertThat(journalCount()).isEqualTo(1)
+        assertThat(refreshActive(type)).isTrue()
+
+        // Exercise real HTTP, service, fence and PostgreSQL with a deterministic no-feed
+        // import result; %test otherwise fetches the live EU feed.
+        installSeedFallbackImporter()
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/EU_CONSOLIDATED/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(journalCount()).isEqualTo(1)
+        assertThat(eventCount("SANCTIONS_LIST_CHANGED")).isZero()
+        assertThat(refreshActive(type)).isTrue()
+    }
+
+    @Test
+    @TestSecurity(user = "operator", roles = ["ROLE_OPERATOR"])
+    fun `ordinary seed fallback completes when no earlier refresh is incomplete`() {
+        val type = SanctionsListType.EU_CONSOLIDATED
+        installSeedFallbackImporter()
+        val response = given().contentType("application/json").post("/api/v1/sanctions/lists/EU_CONSOLIDATED/refresh")
+        assertThat(response.statusCode).isEqualTo(200)
+        assertThat(refreshActive(type)).isFalse()
+        assertThat(journalCount()).isZero()
+    }
+
+    private fun installSeedFallbackImporter() {
+        val importer = mockk<SanctionsImportService>()
+        coEvery { importer.importList(SanctionsListType.EU_CONSOLIDATED, any(), any()) } returns
+            ListImportResult.seedFallback("sample entries")
+        QuarkusMock.installMockForType(importer, SanctionsImportService::class.java)
+    }
+
+    private fun refreshActive(type: SanctionsListType): Boolean = onEventLoop {
+        pool.preparedQuery("SELECT refresh_active FROM sanctions_change_publication WHERE list_type = $1")
+            .execute(io.vertx.mutiny.sqlclient.Tuple.of(type.name))
+            .awaitSuspending().iterator().next().getBoolean("refresh_active")
     }
 
     @Test
