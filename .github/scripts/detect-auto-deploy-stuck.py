@@ -37,8 +37,8 @@ the fleet, so:
   R2  stuck := the THRESHOLD newest scheduled verdicts are all `failure`;
   R3  the issue is closed only by a green SCHEDULED run newer than the streak — never by a
       green push, which is a fact about other services;
-  R4  the query is bounded (one page, `per_page` a little above the threshold) — a watch that
-      reads the whole history to look at three runs is the rate-limit outage it reports on.
+  R4  the query is bounded (one unfiltered page), then R1 is applied locally. The filtered
+      GitHub index can be stale (#12189); missing or old lane verdicts fail this watch closed.
 
 Three lanes
 -----------
@@ -71,15 +71,19 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 WORKFLOW = ".github/workflows/auto-deploy-red-watch.yml"
 WORKFLOW_ID = "auto-deploy.yml"
 LANE = "schedule"
 THRESHOLD = 3
-# R4: one page, a little above the threshold so a couple of cancelled runs still leave enough
-# verdicts. NOT a paginate; NOT the history.
-PER_PAGE = 8
+# R4: one unfiltered page. GitHub's filtered workflow-runs index has returned Sept/Oct 2
+# results while the unfiltered page contained current runs (#9419). Leave room for push,
+# dispatch, in-progress and cancelled runs before applying R1 locally; never paginate.
+PER_PAGE = 50
+MAX_PAGE_AGE = timedelta(hours=6)
+MAX_LANE_AGE = timedelta(hours=9)  # the scheduled lane ticks every three hours
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -131,15 +135,35 @@ def _slim(r: dict) -> dict:
     }
 
 
+def require_current_population(runs: list[dict], now: datetime) -> None:
+    """Do not turn a stale/truncated API page into a false red or false green verdict."""
+    if not runs:
+        raise RuntimeError("workflow-runs page is empty")
+
+    def age(run: dict) -> timedelta:
+        stamp = run.get("created_at")
+        if not isinstance(stamp, str):
+            raise TypeError("workflow run has no created_at timestamp")
+        when = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+        if when.tzinfo is None:
+            raise RuntimeError("workflow run has no timezone in created_at")
+        return now - when
+
+    if min(age(r) for r in runs) > MAX_PAGE_AGE:
+        raise RuntimeError("unfiltered workflow-runs page is stale")
+    verdicts = lane_verdicts(runs)
+    if len(verdicts) < THRESHOLD:
+        raise RuntimeError(f"unfiltered page has only {len(verdicts)} scheduled verdicts; need {THRESHOLD}")
+    if age(verdicts[0]) > MAX_LANE_AGE:
+        raise RuntimeError("newest completed scheduled verdict is stale")
+
+
 # --------------------------------------------------------------------------- online lane
 
 
 def fetch_runs(repo: str, per_page: int = PER_PAGE) -> list[dict]:
-    """One bounded call (R4). `event=` is a server-side filter, so the page IS the lane."""
-    path = (
-        f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs"
-        f"?event={LANE}&status=completed&per_page={per_page}"
-    )
+    """One bounded unfiltered call (R4); select the scheduled lane locally."""
+    path = f"repos/{repo}/actions/workflows/{WORKFLOW_ID}/runs?per_page={per_page}"
     out = subprocess.run(
         ["gh", "api", path, "--jq", ".workflow_runs"],
         check=True, capture_output=True, text=True,
@@ -252,6 +276,49 @@ def self_test() -> int:
     check("three red PUSH runs are not a scheduled-lane verdict", not v["stuck"]
           and v["population"] == 0)
 
+    # #12189: GitHub's event/status-filtered index returned old runs while the unfiltered
+    # workflow page held current scheduled successes. Mock the HTTP boundary, not just R1.
+    from unittest.mock import patch
+
+    now = datetime(2026, 10, 6, 18, tzinfo=timezone.utc)
+    current = [_run(8, "schedule", "success"), _run(7, "push", "success"),
+               _run(6, "schedule", "success"), _run(5, "schedule", "success")]
+    for i, run in enumerate(current):
+        run["created_at"] = f"2026-10-06T{17-i:02d}:00:00Z"
+    stale = [_run(3, "schedule", "failure"), _run(2, "schedule", "failure"),
+             _run(1, "schedule", "failure")]
+    for run in stale:
+        run["created_at"] = "2026-09-21T18:00:00Z"
+
+    def fake_gh(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        page = stale if "event=" in argv[2] or "status=" in argv[2] else current
+        return subprocess.CompletedProcess(argv, 0, json.dumps(page), "")
+
+    with patch.object(subprocess, "run", side_effect=fake_gh) as gh:
+        fetched = fetch_runs("example/repo")
+    check("API regression: one bounded unfiltered request, no stale event/status index",
+          gh.call_count == 1 and "?per_page=50" in gh.call_args.args[0][2]
+          and "event=" not in gh.call_args.args[0][2]
+          and "status=" not in gh.call_args.args[0][2])
+    require_current_population(fetched, now)
+    check("API regression: current scheduled success closes, stale filtered red does not reopen",
+          evaluate(fetched)["close_on"] is not None and not evaluate(fetched)["stuck"]
+          and evaluate(stale)["stuck"])
+
+    def rejected(page: list[dict]) -> bool:
+        try:
+            require_current_population(page, now)
+        except RuntimeError:
+            return True
+        return False
+
+    check("freshness: stale filtered page cannot escalate or close", rejected(stale))
+    check("coverage: fewer than three scheduled verdicts cannot return not-stuck",
+          rejected(current[:2]))
+    old_lane = [dict(r, created_at="2026-10-05T00:00:00Z")
+                if r["event"] == "schedule" else r for r in current]
+    check("freshness: fresh push cannot mask stale scheduled lane", rejected(old_lane))
+
     # Declaration lane, held to a known-positive and two sabotages on a synthetic tree.
     import tempfile
     with tempfile.TemporaryDirectory() as td:
@@ -315,7 +382,8 @@ def main() -> int:
             return 1
         try:
             runs = fetch_runs(a.repo)
-        except (subprocess.CalledProcessError, ValueError, RuntimeError) as e:
+            require_current_population(runs, datetime.now(timezone.utc))
+        except (subprocess.CalledProcessError, TypeError, ValueError, RuntimeError) as e:
             err = getattr(e, "stderr", "") or str(e)
             print(f"::error::the watch could not read the {LANE} lane of {WORKFLOW_ID}: "
                   f"{err.strip()[:400]}", file=sys.stderr)
