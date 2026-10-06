@@ -175,7 +175,17 @@ class PublicationTest(unittest.TestCase):
               self.assertRaises(publisher.PublicationFailure) as failure):
             publisher.publish(self.body(), self.env)
         self.assertEqual(failure.exception.stage, "readback-mismatch")
+        self.assertEqual(failure.exception.category, "consumer,provider,interactions")
         self.assertRegex(failure.exception.provider, publisher.PROVIDER)
+
+    def test_readback_mismatch_category_never_contains_broker_keys_or_values(self):
+        expected = {"consumer": {"name": "openbank-admin-ui"}, "interactions": [1]}
+        received = {"consumer": {"name": "openbank-admin-ui"}, "interactions": [2],
+                    "secret-token": "private-value"}
+        self.assertEqual(publisher.mismatch_category(expected, received), "interactions")
+        self.assertEqual(publisher.mismatch_category(expected, {"secret-token": "private-value"}),
+                         "consumer,interactions")
+        self.assertEqual(publisher.mismatch_category({}, {"secret-token": "private-value"}), "other")
 
     def test_malformed_broker_body_reports_only_safe_stage_and_provider(self):
         opener = MagicMock()

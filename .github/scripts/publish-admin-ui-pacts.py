@@ -20,11 +20,19 @@ PROVIDER = re.compile(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 class PublicationFailure(ValueError):
     """A fixed, non-sensitive stage label for a failed publication invariant."""
 
-    def __init__(self, stage, provider=None, status=None):
+    def __init__(self, stage, provider=None, status=None, category=None):
         self.stage = stage
         self.provider = provider
         self.status = status if isinstance(status, int) and 100 <= status <= 599 else None
+        self.category = category
         super().__init__(stage)
+
+
+def mismatch_category(expected, received):
+    """Describe a mismatch using only fixed Pact field names, never broker values or keys."""
+    fields = ("consumer", "provider", "interactions", "metadata", "plugins", "verificationProperties")
+    changed = [field for field in fields if expected.get(field) != received.get(field)]
+    return ",".join(changed) if changed else "other"
 
 
 def source(root, sha):
@@ -140,7 +148,8 @@ def publish(body, env):
             raise PublicationFailure("readback-shape", provider)
         received.pop("_links", None)
         if received != expected:
-            raise PublicationFailure("readback-mismatch", provider)
+            raise PublicationFailure("readback-mismatch", provider,
+                                     category=mismatch_category(expected, received))
     return sorted(contract["providerName"] for contract in body["contracts"])
 
 
@@ -171,7 +180,8 @@ def main():
         stage = error.stage if isinstance(error, PublicationFailure) else "artifact-validation"
         provider = f" provider={error.provider}" if isinstance(error, PublicationFailure) and error.provider else ""
         status = f" HTTP {error.status}" if isinstance(error, PublicationFailure) and error.status else ""
-        parser.exit(1, f"Pact publication failed at {stage}{provider}{status}; no success recorded\n")
+        category = f" category={error.category}" if isinstance(error, PublicationFailure) and error.category else ""
+        parser.exit(1, f"Pact publication failed at {stage}{provider}{status}{category}; no success recorded\n")
 
 
 if __name__ == "__main__":
