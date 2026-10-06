@@ -462,6 +462,23 @@ class DealTest {
         }
 
         @Test
+        fun `ACT-360 counts leap day and keeps treasury half-up amount rounding`() {
+            val principal = BigDecimal("1000000.00")
+            val rate = BigDecimal("3.60")
+            // [Feb 28, Mar 1) includes Feb 29 in 2024, but only one day in 2023.
+            assertThat(
+                DayCount.act360Interest(principal, rate, LocalDate.parse("2024-02-28"), LocalDate.parse("2024-03-01")),
+            ).isEqualByComparingTo("200.00")
+            assertThat(
+                DayCount.act360Interest(principal, rate, LocalDate.parse("2023-02-28"), LocalDate.parse("2023-03-01")),
+            ).isEqualByComparingTo("100.00")
+            // 1 000 × 0.18 % / 360 = 0.005, which treasury rounds HALF_UP to 0.01.
+            assertThat(
+                DayCount.act360Interest(BigDecimal("1000"), BigDecimal("0.18"), MONDAY, MONDAY.plusDays(1)),
+            ).isEqualByComparingTo("0.01")
+        }
+
+        @Test
         fun `overnight from a Friday matures on Monday - no holiday calendar`() {
             assertThat(DayCount.nextBusinessDay(FRIDAY)).isEqualTo(LocalDate.parse("2026-09-28"))
             assertThat(DayCount.nextBusinessDay(MONDAY)).isEqualTo(LocalDate.parse("2026-09-22"))

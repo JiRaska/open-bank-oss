@@ -11,6 +11,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.temporal.ChronoUnit
 import java.util.UUID
+import com.openbank.libs.domain.calendar.DayCount as KernelDayCount
 
 /**
  * Products (ADR-0315 D2). The three money-market products are the MVP core; [FX_SPOT] is the
@@ -592,9 +593,6 @@ data class Deal(
  * not modelled, so an "overnight" deal struck the day before a holiday matures on the holiday.
  */
 object DayCount {
-    private const val DAYS_IN_YEAR_ACT360 = 360
-    private const val PERCENT = 100
-
     private const val SPOT_LAG_BUSINESS_DAYS = 2
 
     fun isWeekend(date: LocalDate): Boolean = date.dayOfWeek == DayOfWeek.SATURDAY || date.dayOfWeek == DayOfWeek.SUNDAY
@@ -611,10 +609,13 @@ object DayCount {
 
     /** principal × rate/100 × days/360, half-up to 2 dp. */
     fun act360Interest(principal: BigDecimal, ratePercent: BigDecimal, from: LocalDate, to: LocalDate): BigDecimal {
-        val days = BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to))
-        val quotient = RoundingPolicy.TREASURY_INTEREST_WORK.divide(
-            principal.multiply(ratePercent).multiply(days),
-            BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()),
+        val work = RoundingPolicy.TREASURY_INTEREST_WORK
+        // Keep treasury's existing 12-decimal intermediate and 2-decimal final rounding. Only
+        // the year-fraction source moves to the exact shared ACT/360 kernel (#11670).
+        val quotient = KernelDayCount.ACT_360.yearFraction(from, to).applyTo(
+            principal.multiply(ratePercent.movePointLeft(2)),
+            requireNotNull(work.fixedScale),
+            work.mode,
         )
         return RoundingPolicy.TREASURY_AMOUNT.round(quotient)
     }
