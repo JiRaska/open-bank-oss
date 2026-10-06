@@ -56,8 +56,10 @@ erDiagram
 `CreditRecord` a `ExclusionNote` se **neukládají** — počítá je na vyžádání `AnaCreditReturnBuilder` při vykreslení výkazu.
 
 `credit_exposure_observation` uchovává každý potvrzený INSERT, UPDATE a DELETE aktuální expozice
-a při migraci jeden výchozí záznam pro již existující řádky. `captured_at` je čas pozorování
-v databázi, **nikoli** obchodní datum zdroje. Současný výkaz stále čte `credit_exposures` a pro
+a při migraci jeden výchozí záznam pro již existující řádky. Migrace po dobu kopírování výchozího
+stavu a instalace triggeru blokuje zápisy. `captured_at` a `version_id` vznikají při běhu triggeru,
+**nikoli** při commitu; neprokazují pořadí commitů mezi transakcemi ani obchodní datum zdroje.
+Časový průřez těchto záznamů proto není potvrzeným historickým stavem. Současný výkaz stále čte `credit_exposures` a pro
 starší referenční datum jej nelze považovat za historicky správný; před regulatorním použitím
 historie jsou nutná obchodní data zdroje a kontrola úplnosti ke stejnému datu (issue #9890).
 

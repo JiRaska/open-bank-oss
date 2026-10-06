@@ -56,8 +56,11 @@ erDiagram
 `CreditRecord` and `ExclusionNote` are **not stored** — they are computed on demand by `AnaCreditReturnBuilder` when a return is rendered.
 
 `credit_exposure_observation` retains each committed insert, update and delete of the current
-projection, plus one migration-time baseline for rows that already existed. Its `captured_at` is
-the database observation time, **not** the source business date. The existing return still reads
+projection, plus one migration-time baseline for rows that already existed. The migration blocks
+writes while it copies that baseline and installs the trigger. Its `captured_at` and `version_id`
+are assigned when the trigger runs, **not** at commit, and do not establish commit order across
+transactions or the source business date. A time cutoff over these rows is therefore not a
+committed as-of snapshot. The existing return still reads
 `credit_exposures` and must not be treated as historically correct for an earlier reference date;
 source-effective dates and same-date coverage are required before observation history can support
 regulatory as-of reporting (issue #9890).

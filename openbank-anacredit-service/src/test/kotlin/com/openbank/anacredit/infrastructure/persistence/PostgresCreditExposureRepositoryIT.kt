@@ -17,12 +17,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import org.assertj.core.api.Assertions.assertThat
+import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
 import java.time.OffsetDateTime
 import java.util.Comparator
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
 import javax.sql.DataSource
 
 /**
@@ -78,26 +83,13 @@ class PostgresCreditExposureRepositoryIT {
     }
 
     @Suppress("NestedBlockDepth") // JDBC connection, statement and result must all close in the test
-    private fun observedAt(instrumentId: String, checkpoint: Long): BigDecimal? {
+    private fun valueAtRecordedVersion(instrumentId: String, checkpoint: Long): BigDecimal? {
         val query = "SELECT drawn_amount FROM credit_exposure_observation " +
             "WHERE instrument_id = ? AND version_id <= ? ORDER BY version_id DESC LIMIT 1"
         return dataSource.connection.use { connection ->
             connection.prepareStatement(query).use { statement ->
                 statement.setString(1, instrumentId)
                 statement.setLong(2, checkpoint)
-                statement.executeQuery().use { rows -> if (rows.next()) rows.getBigDecimal(1) else null }
-            }
-        }
-    }
-
-    @Suppress("NestedBlockDepth") // JDBC connection, statement and result must all close in the test
-    private fun observedAt(instrumentId: String, cutoff: OffsetDateTime): BigDecimal? {
-        val query = "SELECT drawn_amount FROM credit_exposure_observation " +
-            "WHERE instrument_id = ? AND captured_at <= ? ORDER BY captured_at DESC, version_id DESC LIMIT 1"
-        return dataSource.connection.use { connection ->
-            connection.prepareStatement(query).use { statement ->
-                statement.setString(1, instrumentId)
-                statement.setObject(2, cutoff)
                 statement.executeQuery().use { rows -> if (rows.next()) rows.getBigDecimal(1) else null }
             }
         }
@@ -120,6 +112,86 @@ class PostgresCreditExposureRepositoryIT {
         defaulted = false,
         originationDate = LocalDate.parse("2025-06-01"),
     )
+
+    @Suppress("LongMethod", "CyclomaticComplexMethod", "NestedBlockDepth")
+    // The migration, blocked writer and final observation must share this one transactional test.
+    @Test
+    fun `migration baseline and trigger cannot lose a concurrent update`() {
+        val schema = "observation_${UUID.randomUUID().toString().replace("-", "")}"
+        val v2 = requireNotNull(
+            javaClass.classLoader.getResourceAsStream("db/migration/V2__create_credit_exposures.sql"),
+        )
+            .bufferedReader().use { it.readText() }
+        val v3 = requireNotNull(
+            javaClass.classLoader.getResourceAsStream("db/migration/V3__observe_credit_exposure_changes.sql"),
+        )
+            .bufferedReader().use { it.readText() }
+        val baselineStart = v3.indexOf("INSERT INTO credit_exposure_observation (")
+        assertThat(baselineStart).isPositive()
+        dataSource.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.execute("CREATE SCHEMA $schema")
+                statement.execute("SET search_path TO $schema")
+                statement.execute(v2)
+                statement.execute(
+                    """INSERT INTO credit_exposures (
+                        instrument_id, debtor_id, debtor_type, instrument_type, currency,
+                        committed_amount, drawn_amount, committed_amount_eur, arrears_amount,
+                        defaulted, origination_date
+                    ) VALUES ('MIGRATION-IT', 'LE-IT-ACME', 'LEGAL_ENTITY', 'OVERDRAFT', 'EUR',
+                              40000, 12000, 40000, 0, false, DATE '2025-06-01')""",
+                )
+            }
+        }
+        val executor = Executors.newSingleThreadExecutor()
+        try {
+            dataSource.connection.use { migration ->
+                migration.autoCommit = false
+                migration.createStatement().use { statement ->
+                    statement.execute("SET search_path TO $schema")
+                    statement.execute(v3.substring(0, baselineStart))
+                }
+                val started = CountDownLatch(1)
+                val writer = executor.submit<Int> {
+                    dataSource.connection.use { connection ->
+                        connection.createStatement().use { statement ->
+                            statement.execute("SET search_path TO $schema")
+                            started.countDown()
+                            statement.executeUpdate(
+                                "UPDATE credit_exposures SET drawn_amount = 18500 WHERE instrument_id = 'MIGRATION-IT'",
+                            )
+                        }
+                    }
+                }
+                assertThat(started.await(5, TimeUnit.SECONDS)).isTrue()
+                assertThatThrownBy { writer.get(250, TimeUnit.MILLISECONDS) }
+                    .isInstanceOf(TimeoutException::class.java)
+                migration.createStatement().use { it.execute(v3.substring(baselineStart)) }
+                migration.commit()
+                assertThat(writer.get(5, TimeUnit.SECONDS)).isEqualTo(1)
+            }
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { statement ->
+                    statement.executeQuery(
+                        "SELECT event_kind, drawn_amount FROM $schema.credit_exposure_observation ORDER BY version_id",
+                    ).use { rows ->
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getString(1)).isEqualTo("BASELINE")
+                        assertThat(rows.getBigDecimal(2)).isEqualByComparingTo(BigDecimal("12000.00"))
+                        assertThat(rows.next()).isTrue()
+                        assertThat(rows.getString(1)).isEqualTo("UPDATE")
+                        assertThat(rows.getBigDecimal(2)).isEqualByComparingTo(BigDecimal("18500.00"))
+                        assertThat(rows.next()).isFalse()
+                    }
+                }
+            }
+        } finally {
+            executor.shutdownNow()
+            dataSource.connection.use { connection ->
+                connection.createStatement().use { it.execute("DROP SCHEMA $schema CASCADE") }
+            }
+        }
+    }
 
     @Test
     fun `save then find round-trips every field through Postgres`(): Unit = onVertxContext {
@@ -173,9 +245,8 @@ class PostgresCreditExposureRepositoryIT {
         val history = observations(id)
 
         assertThat(history.map { it.kind }).containsExactly("INSERT", "UPDATE")
-        assertThat(observedAt(id, first.version)).isEqualByComparingTo(BigDecimal("12000.00"))
+        assertThat(valueAtRecordedVersion(id, first.version)).isEqualByComparingTo(BigDecimal("12000.00"))
         assertThat(history.last().capturedAt).isAfter(first.capturedAt)
-        assertThat(observedAt(id, first.capturedAt)).isEqualByComparingTo(BigDecimal("12000.00"))
         assertThat(history.last().drawn).isEqualByComparingTo(BigDecimal("18500.00"))
         assertThat(onVertxContext { repository.findById(id) }!!.drawnAmount)
             .isEqualByComparingTo(BigDecimal("18500.00"))

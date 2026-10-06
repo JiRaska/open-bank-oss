@@ -30,6 +30,11 @@ CREATE TABLE credit_exposure_observation (
 CREATE INDEX idx_credit_exposure_observation_instrument
     ON credit_exposure_observation (instrument_id, version_id DESC);
 
+-- Flyway runs this PostgreSQL migration in one transaction. Block concurrent INSERT/UPDATE/DELETE
+-- until the baseline and trigger both commit; otherwise a writer between the SELECT and trigger
+-- creation could disappear from observation history. Reads remain available during the copy.
+LOCK TABLE credit_exposures IN SHARE ROW EXCLUSIVE MODE;
+
 -- The only fact available for pre-migration rows is their value at migration time. Do not
 -- invent a historical source date from origination_date or updated_at.
 INSERT INTO credit_exposure_observation (
