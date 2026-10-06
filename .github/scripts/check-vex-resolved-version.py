@@ -21,16 +21,18 @@ WHAT THIS CHECKS
 ----------------
 For every statement in `openbank-libs/governance/vex/*.openvex.json`, find citations of the
 shape `Resolved <group>:<artifact> is <version>` (markdown backticks/bold tolerated) and compare
-`<version>` against the component version pinned in `gradle/verification-metadata.xml` — the
-file Gradle itself verifies the build against, so it is the fleet's source of truth for "what
-we resolve". A mismatch means the statement's premise no longer holds and a human must re-triage
+`<version>` against that overlay's module `runtimeClasspath` resolution. Verification metadata
+is not enough: it retains multiple versions of the same component across configurations and
+modules (including three versions of opentelemetry-api), and choosing the last XML entry made
+the old check accidentally report one version as the fleet's resolved version. A mismatch means
+the statement's premise no longer holds and a human must re-triage
 the verdict. This gate deliberately does NOT flip verdicts: `fixed` vs `not_affected` and
 whether to keep compensating-control history are security judgements (#7987 says so
 explicitly). It only makes the staleness LOUD.
 
-An artifact not present in verification-metadata is counted as UNVERIFIABLE, not failed: the
-claim may cite evidence about a jar this repo does not resolve, and a gate cannot fail on what
-it cannot check.
+An artifact absent from a module's runtimeClasspath is counted as UNVERIFIABLE, not failed:
+the claim may cite a non-runtime artifact. A failed Gradle resolution is a gate failure, never
+an unverifiable claim.
 
 The 49 known-stale citations are BASELINED below with their issue, ratchet-only: a NEW mismatch
 fails, a baseline entry that stops occurring fails too (so the baseline cannot rot), and the
@@ -46,8 +48,10 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
-import xml.etree.ElementTree as ET
+from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
 
 # key: <overlay file>|<group>:<artifact>|<cited version>. Every entry needs a reason + issue.
@@ -116,35 +120,74 @@ CITATION = re.compile(
 )
 
 
-def pinned_versions(metadata: Path) -> dict[tuple[str, str], str]:
-    root = ET.parse(metadata).getroot()
-    m = re.match(r"\{.*\}", root.tag)
-    ns = m.group(0) if m else ""
-    return {
-        (c.get("group"), c.get("name")): c.get("version")
-        for c in root.iter(ns + "component")
-    }
+def parse_insight(output: str, coordinate: str, modules: list[str]) -> dict[str, str | None]:
+    """Read only the selected top-level artifact line in each module's report."""
+    selected: dict[str, set[str]] = {module: set() for module in modules}
+    seen: set[str] = set()
+    current = None
+    version_line = re.compile(rf"^{re.escape(coordinate)}:([^\s]+)$")
+    for line in output.splitlines():
+        if line.startswith("> Task :"):
+            task = re.match(r"> Task :([^:]+):dependencyInsight(?:\s|$)", line)
+            current = task.group(1) if task and task.group(1) in selected else None
+            if current:
+                seen.add(current)
+            continue
+        if current:
+            version = version_line.match(line)
+            if version:
+                selected[current].add(version.group(1))
+    missing = set(modules) - seen
+    ambiguous = {module: versions for module, versions in selected.items() if len(versions) > 1}
+    if missing or ambiguous:
+        raise RuntimeError(f"incomplete dependencyInsight: missing tasks={sorted(missing)}, "
+                           f"ambiguous versions={ambiguous}")
+    return {module: next(iter(versions)) if versions else None
+            for module, versions in selected.items()}
+
+
+def resolve_runtime(root: Path, coordinate: str, modules: list[str]) -> dict[str, str | None]:
+    command = [str((root / "gradlew").resolve())]
+    for module in modules:
+        command.extend([f":{module}:dependencyInsight", "--dependency", coordinate,
+                        "--configuration", "runtimeClasspath"])
+    command.append("--console=plain")
+    run = subprocess.run(command, cwd=root, text=True, stdout=subprocess.PIPE,
+                         stderr=subprocess.STDOUT, check=False)
+    if run.returncode:
+        raise RuntimeError(f"Gradle runtime resolution failed for {coordinate} "
+                           f"(exit {run.returncode}); rerun dependencyInsight for "
+                           f"{modules[0]} to inspect the failure")
+    return parse_insight(run.stdout, coordinate, modules)
 
 
 def find_mismatches(
     root: Path,
+    resolver: Callable[[Path, str, list[str]], dict[str, str | None]] = resolve_runtime,
 ) -> tuple[set[str], int, int]:
     """Return (mismatch keys, citation count, unverifiable count)."""
-    versions = pinned_versions(root / "gradle/verification-metadata.xml")
     mismatches: set[str] = set()
     citations = 0
     unverifiable = 0
+    claims: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
     for overlay in sorted((root / "openbank-libs/governance/vex").glob("*.openvex.json")):
         doc = json.loads(overlay.read_text())
         for statement in doc.get("statements", []):
             text = " ".join(v for v in statement.values() if isinstance(v, str))
             for group, artifact, cited in CITATION.findall(text):
                 citations += 1
-                actual = versions.get((group, artifact))
-                if actual is None:
-                    unverifiable += 1
-                elif actual != cited:
-                    mismatches.add(f"{overlay.name}|{group}:{artifact}|{cited}")
+                module = f"openbank-{overlay.name.removesuffix('.openvex.json')}"
+                claims[f"{group}:{artifact}"].append((overlay.name, module, cited))
+    for coordinate, entries in claims.items():
+        modules = sorted({module for _, module, _ in entries})
+        present = [module for module in modules if (root / module / "build.gradle.kts").exists()]
+        versions = resolver(root, coordinate, present) if present else {}
+        for overlay, module, cited in entries:
+            actual = versions.get(module)
+            if actual is None:
+                unverifiable += 1
+            elif actual != cited:
+                mismatches.add(f"{overlay}|{coordinate}|{cited}")
     return mismatches, citations, unverifiable
 
 
@@ -153,13 +196,14 @@ def self_test() -> int:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmpdir = Path(tmp)
-        (tmpdir / "gradle").mkdir()
         (tmpdir / "openbank-libs/governance/vex").mkdir(parents=True)
-        (tmpdir / "gradle/verification-metadata.xml").write_text(
-            '<verification-metadata><components>'
-            '<component group="com.example" name="widget" version="2.0.0"/>'
-            "</components></verification-metadata>"
-        )
+        (tmpdir / "openbank-svc").mkdir()
+        (tmpdir / "openbank-svc/build.gradle.kts").touch()
+
+        def fake_resolver(root: Path, coordinate: str,
+                          modules: list[str]) -> dict[str, str | None]:
+            assert root == tmpdir and modules == ["openbank-svc"]
+            return {"openbank-svc": None if coordinate.endswith(":phantom") else "2.0.0"}
 
         def write(text: str) -> None:
             doc = {"statements": [{"action_statement": text}]}
@@ -168,19 +212,34 @@ def self_test() -> int:
             )
 
         write("Resolved com.example:widget is 1.0.0 — blocked until the bump lands.")
-        mism, cit, _ = find_mismatches(tmpdir)
+        mism, cit, _ = find_mismatches(tmpdir, fake_resolver)
         assert cit == 1 and mism == {"svc.openvex.json|com.example:widget|1.0.0"}, (
             f"known-positive not caught: {mism}"
         )
         write("Resolved `com.example:widget` is **2.0.0**, which carries the fix.")
-        mism, cit, _ = find_mismatches(tmpdir)
+        mism, cit, _ = find_mismatches(tmpdir, fake_resolver)
         assert cit == 1 and not mism, f"clean claim flagged: {mism}"
         write("Resolved com.example:phantom is 9.9.9 — no such artifact here.")
-        mism, cit, unv = find_mismatches(tmpdir)
+        mism, cit, unv = find_mismatches(tmpdir, fake_resolver)
         assert cit == 1 and unv == 1 and not mism, f"unverifiable claim failed: {mism}"
         write("The resolved artifact is pinned as described above.")
-        mism, cit, _ = find_mismatches(tmpdir)
+        mism, cit, _ = find_mismatches(tmpdir, fake_resolver)
         assert cit == 0, f"non-version phrasing matched: {cit}"
+        report = ("> Task :openbank-svc:dependencyInsight\n"
+                  "com.example:widget:2.0.0\n"
+                  "  com.example:widget:1.0.0 -> 2.0.0\n")
+        assert parse_insight(report, "com.example:widget", ["openbank-svc"]) == {
+            "openbank-svc": "2.0.0"}
+        two_modules = report + ("> Task :openbank-other:dependencyInsight\n"
+                                "com.example:widget:1.0.0\n")
+        assert parse_insight(two_modules, "com.example:widget",
+                             ["openbank-svc", "openbank-other"]) == {
+            "openbank-svc": "2.0.0", "openbank-other": "1.0.0"}
+        try:
+            parse_insight(report, "com.example:widget", ["openbank-svc", "openbank-other"])
+            assert False, "missing task was accepted"
+        except RuntimeError:
+            pass
     print("self-test OK")
     return 0
 
@@ -191,13 +250,17 @@ def main(argv: list[str]) -> int:
     root = Path(".")
     if "--root" in argv:
         root = Path(argv[argv.index("--root") + 1])
-    mismatches, citations, unverifiable = find_mismatches(root)
+    try:
+        mismatches, citations, unverifiable = find_mismatches(root)
+    except (OSError, RuntimeError) as exc:
+        print(f"::error::VEX runtime resolution unavailable: {exc}")
+        return 1
     new = mismatches - BASELINE
     stale = BASELINE - mismatches
     print(
         f"vex resolved-version audit: {citations} citations, "
         f"{len(mismatches)} stale ({len(BASELINE)} baselined against #7987), "
-        f"{unverifiable} unverifiable (artifact not in verification-metadata)"
+            f"{unverifiable} unverifiable (artifact absent from module runtimeClasspath)"
     )
     print(f"SUBJECTS={citations}")
     for key in sorted(new):

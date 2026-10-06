@@ -5962,13 +5962,14 @@ gates:
       months after the platform bump landed and 1.62.0 was resolved — a public,
       machine-readable "we are exposed" statement that the dependency graph no longer
       supported, reported by nothing. check-vex-range-reasoning verifies a claim is ANCHORED;
-      this verifies it is still TRUE against gradle/verification-metadata.xml.
+      this verifies it against each overlay's module runtimeClasspath, since verification
+      metadata retains several versions of an artifact and cannot identify a module's selection.
     review_after: "2027-03-03"
     selftest: python3 .github/scripts/check-vex-resolved-version.py --self-test
     selftest_expect: pass
     selftest_inputs: [".github/scripts/check-vex-resolved-version.py"]
     min_subjects: 40   # 49 citations today (2026-09-03), all 49 baselined against #7987
-    budget_seconds: 20  # ~0.2s locally over the 56 overlays
+    budget_seconds: 120  # one batched Gradle resolution over the cited modules
     run: |
       python3 .github/scripts/check-vex-resolved-version.py
 
