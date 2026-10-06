@@ -1189,7 +1189,7 @@ main {
   border-radius: var(--r-xl);
   background:
     radial-gradient(circle at 96% 0%, rgba(129, 140, 248, .16), transparent 15rem),
-    linear-gradient(125deg, #ffffff 0%, #f8faff 100%);
+    linear-gradient(125deg, var(--surface) 0%, var(--surface-2) 100%);
   box-shadow: 0 12px 28px rgba(30, 41, 59, .055);
 }
 .page-title { font-size: clamp(24px, 2.4vw, 31px); line-height: 1.15; letter-spacing: -.045em; }

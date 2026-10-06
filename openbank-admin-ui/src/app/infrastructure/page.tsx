@@ -180,17 +180,17 @@ export default function InfrastructurePage() {
             </span>
           )}
           {!loading && !unavailable && (
-            <span style={{ fontSize: '11px', color: upCount === totalCount ? 'var(--success)' : 'var(--danger)', fontWeight: 600 }}>
+            <span style={{ fontSize: '11px', color: upCount === totalCount ? 'var(--success-text)' : 'var(--danger-text)', fontWeight: 600 }}>
               {upCount}/{totalCount} UP
             </span>
           )}
           {attention > 0 && (
-            <span style={{ fontSize: '11px', color: '#dc2626', fontWeight: 700 }} title={t('Po/blízko EoL nebo se zranitelnostmi', 'Past/near EoL or vulnerable')}>
+            <span style={{ fontSize: '11px', color: 'var(--danger-text)', fontWeight: 700 }} title={t('Po/blízko EoL nebo se zranitelnostmi', 'Past/near EoL or vulnerable')}>
               {attention} {t('vyžaduje pozornost', 'need attention')}
             </span>
           )}
           {upgradable > 0 && (
-            <span style={{ fontSize: '11px', color: '#d97706', fontWeight: 600 }}>
+            <span style={{ fontSize: '11px', color: 'var(--warning-text)', fontWeight: 600 }}>
               {upgradable} {t('k aktualizaci', 'upgradable')}
             </span>
           )}
