@@ -15,14 +15,15 @@
 -- forever makes the exactly-once guarantee unconditional rather than "within the replay window".
 -- risk_outbox keeps its own dedup_key UNIQUE as a second line; it becomes purgeable once delivered.
 --
--- Backfill: every existing outbox row's key, so nothing already emitted can be emitted again.
+-- Backfill: every existing outbox row's key. PgRiskOutbox.purgeSent also catches up rows written
+-- by a legacy pod after this one-time migration before it deletes any eligible SENT row.
 --
 -- Rollback note: additive. A binary from before this migration ignores the table and keeps
 -- deduplicating on risk_outbox.dedup_key alone, which is correct for every row SENT-retention has
 -- not yet purged. Rows purged after this migration took effect are no longer guarded on such a
--- binary, so before rolling back set openbank.outbox.retention.enabled=false for this service and
--- accept that runs older than the retention window could re-emit. Never drop this table while a
--- binary that reads it is running.
+-- binary. Disable openbank.outbox.retention.enabled before rollback; that prevents further purges
+-- but cannot restore rows already purged. Do not replay those runs on an older binary, or they
+-- could re-emit. Never drop this table while a binary that reads it is running.
 
 CREATE TABLE risk_limit_event_dedup (
     dedup_key   VARCHAR(512) PRIMARY KEY,

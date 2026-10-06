@@ -186,6 +186,30 @@ class RiskLimitOutboxIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `a legacy pod writing after the backfill cannot lose its replay guard during retention`() {
+        val analysis = onEventLoop { limits.evaluate(breachingRun("2024-04-07")) }
+        val runId = analysis.run.id
+        val key = "$runId:lcr-min:openbank-risk-appetite:1"
+        // Simulate an old pod still running after V10 Flyway completed. Its INSERT knows only
+        // risk_outbox, so a one-time migration backfill cannot see this row.
+        TestDb.execute(
+            "INSERT INTO risk_outbox (event_id, aggregate_id, event_type, payload, dedup_key, " +
+                "status, sent_at, created_at, updated_at) VALUES " +
+                "('${UUID.randomUUID()}', '$runId', 'risk.limit.breach.v1', '{}', '$key', " +
+                "'SENT', TIMESTAMPTZ '2024-04-07T20:31:00Z', " +
+                "TIMESTAMPTZ '2024-04-07T20:30:00Z', TIMESTAMPTZ '2024-04-07T20:31:00Z')",
+        )
+
+        assertThat(onEventLoop { retention.purgeSent(Duration.ofDays(7), 100, Instant.parse("2024-05-01T00:00:00Z")) })
+            .isEqualTo(1)
+        assertThat(rows(runId)).isEqualTo(0)
+        assertThat(onEventLoop { outbox.recordNonOk(analysis, Instant.parse("2024-05-01T20:30:00Z")) })
+            .describedAs("mixed-version row must remain deduplicated after its SENT outbox row is purged")
+            .isEqualTo(0)
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `SENT retention deletes only delivered rows older than the window`() {
         val old = onEventLoop { limits.evaluate(breachingRun("2024-04-06")) }
         val fresh = old.copy(run = old.run.copy(id = UUID.randomUUID()))
