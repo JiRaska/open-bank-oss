@@ -1,6 +1,6 @@
 # NOT a build recipe. The deploy pipeline supplies the prepared quarkus-app/ context.
 # Keep this runtime recipe aligned with .github/workflows/Dockerfile.deploy (#3016).
-FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e
+FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
 WORKDIR /app
 RUN groupadd --system --gid 101 openbank \
  && useradd --system --uid 100 --gid 101 --no-create-home --shell /usr/sbin/nologin openbank
