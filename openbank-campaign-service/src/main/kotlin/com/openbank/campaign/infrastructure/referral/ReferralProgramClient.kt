@@ -48,6 +48,9 @@ class LiveReferralProgramCatalogAdapter(@RestClient private val client: Referral
     ReferralProgramCatalogPort {
     override suspend fun resolvePublished(id: UUID): ReferralProgramRef? = try {
         client.published(id).awaitSuspending().let { response ->
+            check(response.id == id && response.name.isNotBlank() && response.version >= 1) {
+                "referral-service returned an invalid published programme reference"
+            }
             ReferralProgramRef(response.id, response.name, response.version)
         }
     } catch (failure: WebApplicationException) {

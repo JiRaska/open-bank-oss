@@ -125,6 +125,39 @@ class CampaignRestContractIT {
             }
     }
 
+    @Test
+    fun `duplicate rejects a changed referral reference instead of silently repinning`() {
+        val publishedId = UUID.randomUUID()
+        val sourceId = Given {
+            contentType("application/json")
+            body(draftBody("mgm-source-${UUID.randomUUID()}").dropLast(1) + ",\"referralProgramId\":\"$publishedId\"}")
+        } When {
+            post("/api/v1/campaigns")
+        } Then {
+            statusCode(201)
+        } Extract { path<String>("id") }
+
+        coEvery { referralPrograms.resolvePublished(publishedId) } returns
+            ReferralProgramRef(publishedId, "later-name", 4)
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(409)
+            body("error", equalTo("source referral programme $publishedId no longer matches its published version"))
+        }
+
+        coEvery { referralPrograms.resolvePublished(publishedId) } returns
+            ReferralProgramRef(publishedId, "friends-get-friends", 3)
+        When {
+            post("/api/v1/campaigns/$sourceId/duplicate")
+        } Then {
+            statusCode(201)
+            body("referralProgramRef.id", equalTo(publishedId.toString()))
+            body("referralProgramRef.name", equalTo("friends-get-friends"))
+            body("referralProgramRef.version", equalTo(3))
+        }
+    }
+
     /**
      * No Kafka and no Temporal worker. Neither is on the path of these endpoints, and starting them
      * would let this test go red for reasons that say nothing about the HTTP contract.

@@ -117,6 +117,7 @@ class CampaignService @Inject constructor(
         decisions: List<CampaignDecision> = emptyList(),
         incentiveOfferRef: IncentiveOfferRef? = null,
         referralProgramId: UUID? = null,
+        expectedReferralProgramRef: ReferralProgramRef? = null,
     ): Campaign {
         val (resolvedSegment, resolvedReferralProgram) = validateDraftReferences(
             segmentRef,
@@ -125,6 +126,11 @@ class CampaignService @Inject constructor(
             trigger,
         )
         val resolvedIncentive = validateIncentiveOffer(incentiveOfferRef)
+        if (expectedReferralProgramRef != null && resolvedReferralProgram != expectedReferralProgramRef) {
+            throw CampaignReferenceNotFoundException(
+                "source referral programme ${expectedReferralProgramRef.id} no longer matches its published version",
+            )
+        }
         val campaign = Campaign(
             id = Ids.newId(),
             name = name,
@@ -185,7 +191,9 @@ class CampaignService @Inject constructor(
      * segment, conversion-rule and trigger catalogues again, and may never inherit an approval, lifecycle
      * state, enrolment, delivery record or active Temporal schedule.  A recurring schedule remains a
      * visible DRAFT setting only; it still cannot exist in Temporal until the new draft passes
-     * its own four-eyes activation.
+     * its own four-eyes activation. The referral programme is also re-resolved by its immutable id;
+     * a missing or changed id/name/version rejects the copy before persistence rather than silently
+     * upgrading the source's pinned reference.
      */
     suspend fun duplicateAsDraft(id: UUID, createdBy: String): Campaign {
         val source = campaigns.findById(id) ?: throw CampaignNotFoundException(id)
@@ -199,6 +207,7 @@ class CampaignService @Inject constructor(
             // would be a credit journey the step gate no longer recognises as one.
             productKind = source.productKind,
             referralProgramId = source.referralProgramRef?.id,
+            expectedReferralProgramRef = source.referralProgramRef,
             stopCondition = source.stopCondition,
             conversionRule = source.conversionRule,
             holdoutPercent = source.holdoutPercent,

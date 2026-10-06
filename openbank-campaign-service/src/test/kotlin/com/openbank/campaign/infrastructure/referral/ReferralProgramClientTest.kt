@@ -40,6 +40,20 @@ class ReferralProgramClientTest {
     }
 
     @Test
+    fun `mismatched or malformed published reference fails closed`(): Unit = runBlocking {
+        val invalid = listOf(
+            ReferralProgramResponse(UUID.randomUUID(), "friends", 3),
+            ReferralProgramResponse(id, " ", 3),
+            ReferralProgramResponse(id, "friends", 0),
+        )
+        invalid.forEach { response ->
+            every { client.published(id) } returns Uni.createFrom().item(response)
+            assertThat(runCatching { adapter.resolvePublished(id) }.exceptionOrNull())
+                .isInstanceOf(IllegalStateException::class.java)
+        }
+    }
+
+    @Test
     fun `other referral failures remain visible`(): Unit = runBlocking {
         every { client.published(id) } returns Uni.createFrom().failure(
             WebApplicationException(Response.status(Response.Status.SERVICE_UNAVAILABLE).build()),
