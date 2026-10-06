@@ -27,6 +27,10 @@ internal class RecordingLedger : LedgerPostingPort {
     val entryDates = mutableMapOf<String, LocalDate>()
     var failFor: UUID? = null
     var afterPost: (() -> Unit)? = null
+    override suspend fun findPostedJournal(spec: JournalSpec, entryDate: LocalDate, description: String): UUID? =
+        posted.firstOrNull { it.idempotencyKey == spec.idempotencyKey && it == spec }
+            ?.let { UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray()) }
+
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
         if (spec.dealId == failFor) error("ledger unavailable")
         posted += spec

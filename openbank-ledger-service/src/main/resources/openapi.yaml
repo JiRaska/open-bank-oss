@@ -6,7 +6,7 @@ info:
   # major == openbank.api.version == URL /api/v1 (ADR-0048). Minor bump (1.15 -> 1.16): additive
   # only — GET /journals/approvals (the checker's queue, issue #5679) plus two additive fields on
   # ApprovalResponse (makerId, createdAt). No breaking change.
-  version: 1.21.1
+  version: 1.22.0
   description: Double-entry journal ledger — query journal entries and transaction postings.
   license:
     name: Apache-2.0
@@ -122,6 +122,36 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+
+  /api/v1/journals/by-idempotency-key:
+    get:
+      tags: [Ledger]
+      summary: Find a posted journal by idempotency key
+      description: >
+        Read-only probe for a caller recovering after a journal POST may have succeeded but its
+        response or the caller's own commit failed. A missing key answers 200 with found=false;
+        route or dependency failures must never look like a key miss.
+      operationId: findJournalByIdempotencyKey
+      parameters:
+        - name: key
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        '200':
+          description: Explicit found/missing verdict and the complete journal when found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JournalIdempotencyLookupResponse'
+        '400':
+          description: Missing or blank key.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/journals/{journalId}:
     get:
@@ -1298,6 +1328,17 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/SubLedgerBalanceResponse'
+
+    JournalIdempotencyLookupResponse:
+      type: object
+      required: [found]
+      properties:
+        found:
+          type: boolean
+        journal:
+          oneOf:
+            - $ref: '#/components/schemas/JournalEntryResponse'
+            - type: 'null'
 
     JournalEntryResponse:
       type: object

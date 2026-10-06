@@ -110,3 +110,8 @@ interface LedgerUseCase {
     suspend fun getAccountCurrencyBalance(query: GetAccountCurrencyBalanceQuery): AccountCurrencyBalance
     suspend fun getControlAccountTieOut(query: GetControlAccountTieOutQuery): List<ControlAccountTieOut>
 }
+
+/** Read-only lookup for a caller recovering a committed journal after losing its POST response. */
+interface JournalIdempotencyLookupUseCase {
+    suspend fun findJournalByIdempotencyKey(key: String): JournalEntry?
+}

@@ -601,3 +601,18 @@ set) apply equally to the new `ledger.approval.decide` action.
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+
+- **2026-10-06 — Read-only journal lookup for treasury settlement recovery (#12115).**
+  `GET /api/v1/journals/by-idempotency-key?key=` returns a 200 with `found=false` only when
+  the key is absent; a found key returns the existing journal response. This adds no posting or
+  reversal capability. The route uses the same read roles and `ledger.read` OPA action as the
+  existing journal GET. Treasury's identity already holds `ledger.read` for nostro reconciliation;
+  no new grant or role is added. **STRIDE-I:** the endpoint allows an authorized ledger reader to
+  locate a journal by its key rather than its id or transaction id, so a reader who knows a key can
+  retrieve the full existing journal. The existing ledger-read authorization remains the boundary.
+  **STRIDE-T:** treasury verifies the returned transaction, dates, status, description and every
+  posting line before relying on it to skip a second funding check. A missing route, malformed
+  response or mismatch fails closed. The provider HTTP test checks a posted journal and an absent
+  key. Residual: no deployed two-service replay test yet; the local regression models a committed
+  ledger post followed by a failed treasury state save. Rollback: remove the read route and stop
+  treasury from using it before removing the provider.

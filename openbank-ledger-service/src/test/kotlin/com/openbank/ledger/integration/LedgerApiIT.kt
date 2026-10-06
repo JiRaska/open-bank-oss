@@ -27,6 +27,7 @@ class LedgerApiIT {
 
     companion object {
         private var createdJournalId: String? = null
+        private var createdKey: String? = null
         private val transactionId = UUID.randomUUID()
         private val operatorId = UUID.randomUUID()
     }
@@ -68,6 +69,7 @@ class LedgerApiIT {
         val glLiabilityId = "a0000000-0000-0000-0000-000000000002"
         val today = LocalDate.now().toString()
         val idempotencyKey = UUID.randomUUID()
+        createdKey = idempotencyKey.toString()
 
         val payload = """
             {
@@ -141,6 +143,33 @@ class LedgerApiIT {
             body("status", equalTo("POSTED"))
             body("lines.size()", equalTo(2))
         }
+    }
+
+    @Test
+    @Order(5)
+    @TestSecurity(user = "00000000-0000-0000-0000-000000000099", roles = ["ROLE_VIEWER"])
+    fun `GET idempotency lookup distinguishes posted and absent keys`() {
+        val key = createdKey ?: error("posting setup did not run")
+        val id = createdJournalId ?: error("posting setup did not run")
+        Given { queryParam("key", key) } When {
+            get("/api/v1/journals/by-idempotency-key")
+        } Then {
+            statusCode(200)
+            body("found", equalTo(true))
+            body("journal.id", equalTo(id))
+            body("journal.transactionId", equalTo(transactionId.toString()))
+            body("journal.status", equalTo("POSTED"))
+            body("journal.lines.size()", equalTo(2))
+        }
+        Given { queryParam("key", UUID.randomUUID().toString()) } When {
+            get("/api/v1/journals/by-idempotency-key")
+        } Then {
+            statusCode(200)
+            body("found", equalTo(false))
+        }
+        Given { this } When {
+            get("/api/v1/journals/by-idempotency-key")
+        } Then { statusCode(400) }
     }
 
     @Test

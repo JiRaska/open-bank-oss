@@ -115,6 +115,9 @@ interface CounterpartyRepository {
 interface LedgerPostingPort {
     /** Returns the ledger's journal id — the original one on an idempotent replay. */
     suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID
+
+    /** Verified prior posting, or null only when the ledger explicitly says this key is absent. */
+    suspend fun findPostedJournal(spec: JournalSpec, entryDate: LocalDate, description: String): UUID?
 }
 
 /**

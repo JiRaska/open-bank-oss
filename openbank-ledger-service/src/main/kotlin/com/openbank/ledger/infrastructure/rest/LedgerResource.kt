@@ -9,6 +9,7 @@ import com.openbank.ledger.application.port.`in`.GetJournalQuery
 import com.openbank.ledger.application.port.`in`.GetJournalsByTransactionQuery
 import com.openbank.ledger.application.port.`in`.GetSubLedgerBalancesQuery
 import com.openbank.ledger.application.port.`in`.GetTrialBalanceQuery
+import com.openbank.ledger.application.port.`in`.JournalIdempotencyLookupUseCase
 import com.openbank.ledger.application.port.`in`.JournalLineRequest
 import com.openbank.ledger.application.port.`in`.LedgerUseCase
 import com.openbank.ledger.application.port.`in`.ListJournalsQuery
@@ -64,6 +65,7 @@ import java.util.UUID
 class LedgerResource(
     private val clock: Clock,
     private val ledgerUseCase: LedgerUseCase,
+    private val journalIdempotencyLookup: JournalIdempotencyLookupUseCase,
     private val replayUseCase: ReplayBookedChangesUseCase,
 ) {
 
@@ -150,6 +152,18 @@ class LedgerResource(
             balances = balances.map { it.toResponse() },
         )
         return Response.ok(result).build()
+    }
+
+    /** A 200 with found=false distinguishes an absent key from a missing route or failed probe. */
+    @GET
+    @Path("/by-idempotency-key")
+    @RolesAllowed(Roles.API, Roles.AUDITOR, Roles.VIEWER, Roles.OPERATOR, Roles.ADMIN)
+    @Authorize(action = "ledger.read", resource = "")
+    @Operation(summary = "Find an already posted journal by idempotency key")
+    suspend fun findJournalByIdempotencyKey(@QueryParam("key") key: String?): Response {
+        require(!key.isNullOrBlank()) { "query parameter 'key' is required" }
+        val journal = journalIdempotencyLookup.findJournalByIdempotencyKey(key)
+        return Response.ok(JournalIdempotencyLookupResponse(journal != null, journal?.toResponse())).build()
     }
 
     @GET
@@ -312,6 +326,8 @@ data class JournalLineResponse(
     val sequence: Int,
     val subAccountId: UUID? = null,
 )
+
+data class JournalIdempotencyLookupResponse(val found: Boolean, val journal: JournalEntryResponse?)
 
 data class JournalEntryResponse(
     val id: UUID,

@@ -231,8 +231,24 @@ class TreasuryDealService(
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
         val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
-        if (fundingAccount(settled) != null) requireFunding(settled, pendingAlreadyIncludesDeal = true)
-        val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
+        val spec = PostingRules.settlement(settled)
+        val description = "treasury ${settled.product} settlement"
+        // A prior ledger POST may have committed even when saving our SETTLED state failed. On
+        // retry, the ledger balance already includes that debit while this deal remains pending.
+        // Only a verified POSTED journal with this exact key and financial shape may skip the
+        // funding check; an absent key still takes the normal check before any new POST.
+        val existing = if (fundingAccount(settled) != null) {
+            ledger.findPostedJournal(spec, settled.valueDate, description)
+        } else {
+            null
+        }
+        if (fundingAccount(settled) != null && existing == null) {
+            requireFunding(settled, pendingAlreadyIncludesDeal = true)
+        }
+        val ref = post(spec, settled.valueDate, description)
+        if (existing != null && ref.journalId != existing) {
+            throw LedgerUnavailableException("ledger replay returned a different journal for settlement")
+        }
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
             objectMapper.writeValueAsString(

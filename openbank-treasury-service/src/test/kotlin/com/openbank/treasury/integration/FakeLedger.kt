@@ -32,6 +32,12 @@ class FakeLedger : LedgerPostingPort {
     @Volatile
     var loseNextResponse = false
 
+    override suspend fun findPostedJournal(spec: JournalSpec, entryDate: LocalDate, description: String): UUID? =
+        journals[spec.idempotencyKey]?.let { (id, original) ->
+            if (original != spec) error("ledger key belongs to a different posting")
+            id
+        }
+
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
         calls += spec.idempotencyKey
         val (id, _) = journals.computeIfAbsent(spec.idempotencyKey) { UUID.randomUUID() to spec }
