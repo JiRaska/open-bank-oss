@@ -39,11 +39,6 @@ RETENTION_EXEMPT_OVERRIDE = re.compile(
 
 # Each entry: why that outbox's SENT rows must not be purged yet. Measured 2026-10-03 (#11896).
 EXEMPT: dict[str, str] = {
-    "openbank-billing-service": (
-        "billing_outbox is the only idempotency record for annual fee summaries keyed by account and year; "
-        "purging SENT rows permits duplicate annual-summary events on a rerun. Retain until a durable "
-        "independent issuance key is deployed (#12187)"
-    ),
     "openbank-lending-service": (
         "SENT rows ARE the ADR-0214 evidence bundle (LendingResource GET /applications/{id}/evidence "
         "reads them via findByAggregateId); purge only after that evidence moves to a durable store (#11900)"

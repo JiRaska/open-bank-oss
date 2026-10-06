@@ -52,7 +52,10 @@ money (debits the customer, credits fee income), so it is a money-path service.
    `RestAccountContextPort` already calls for `productId`) and reads `assessed_fee` rows
    (`postedFeesForAccount`, POSTED-only, in-year) to build an `AnnualFeeSummary`. Appends a
    `billing_outbox` row (`billing.annual-fee-summary.ready`) idempotent per `(accountId, year)`
-   (`appendAnnualFeeSummaryEvent`), dispatched by the SAME `BillingOutboxDispatcher` →
+   (`appendAnnualFeeSummaryEvent`): V8 backfills a separate unique issuance key from existing
+   outbox intents, and each new key commits atomically with its event. The key survives the
+   seven-day SENT payload purge, so a delayed or concurrent rerun cannot reissue the summary.
+   The event is dispatched by the SAME `BillingOutboxDispatcher` →
    `LedgerOutboxEventPublisher`, which routes this `eventType` to a **new Kafka producer**
    (`billing-events-out` → topic `openbank.billing.fee.event`) instead of the ledger REST call —
    billing-service's first Kafka publisher; document-service consumes it to render the PAD Art. 5
