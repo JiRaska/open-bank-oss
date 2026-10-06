@@ -4,6 +4,7 @@
 package com.openbank.document.infrastructure.persistence.repository
 
 import com.openbank.document.application.port.out.DocumentOutboxRepository
+import com.openbank.document.infrastructure.outbox.DocumentEventSchemaValidator
 import com.openbank.document.infrastructure.persistence.entity.DocumentOutboxEntity
 import com.openbank.libs.persistence.outbox.AbstractPanacheOutboxRepository
 import com.openbank.libs.persistence.outbox.OutboxMessage
@@ -21,7 +22,7 @@ import java.time.Clock
  * transaction (#4007) stays here.
  */
 @ApplicationScoped
-class DocumentOutboxRepositoryImpl(clock: Clock) :
+class DocumentOutboxRepositoryImpl(clock: Clock, private val eventSchema: DocumentEventSchemaValidator) :
     AbstractPanacheOutboxRepository<DocumentOutboxEntity>(
         OutboxTableShape("document_outbox"),
         DocumentOutboxEntity::class.java,
@@ -30,7 +31,10 @@ class DocumentOutboxRepositoryImpl(clock: Clock) :
     DocumentOutboxRepository,
     PanacheRepository<DocumentOutboxEntity> {
 
-    override fun persistInTransaction(message: OutboxMessage): Uni<Void> = persist(message.toEntity()).replaceWithVoid()
+    override fun persistInTransaction(message: OutboxMessage): Uni<Void> {
+        eventSchema.check(message.eventType, message.payload)
+        return persist(message.toEntity()).replaceWithVoid()
+    }
 
     private fun OutboxMessage.toEntity() = DocumentOutboxEntity().also {
         it.eventId = eventId

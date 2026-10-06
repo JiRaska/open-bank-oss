@@ -154,6 +154,10 @@ openbank:
     dispatch-enabled: true
     poll-interval: 5s
     initial-delay: 5s
+  # ADR-0260 / #1916: observe validates producer outbox writes and records drift without
+  # rejecting them. Switch to enforce only after the registry pilot and consumers are verified.
+  event-schema:
+    document-validation-mode: ${DOCUMENT_EVENT_SCHEMA_VALIDATION_MODE:observe}
   # ADR-0161: shared ObjectStorePort backend selection. postgres is the default/dev/test adapter
   # (BYTEA table, see V4__add_object_store_blobs.sql); s3 is the production adapter.
   objectstore:

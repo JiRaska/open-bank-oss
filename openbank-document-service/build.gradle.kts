@@ -37,6 +37,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.reactive)
     implementation(libs.jackson.module.kotlin)
     implementation(libs.jackson.datatype.jsr310)
+    // #1916: validate the exact JSON Schema committed under openbank-contracts before outbox write.
+    implementation("com.networknt:json-schema-validator:1.5.9")
     implementation(project(":openbank-libs-domain"))
     implementation(project(":openbank-libs-runtime"))
     // ADR-0161: openbank-libs-runtime only compiles S3ObjectStore against the AWS SDK as
@@ -70,6 +72,13 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+}
+
+// ADR-0260 D2: package the reviewed contract verbatim; never maintain a service-local copy.
+tasks.named<Copy>("processResources") {
+    from(rootProject.file("openbank-contracts/openbank-document-service/schema/document-event.schema.json")) {
+        into("event-schemas")
+    }
 }
 
 // Pact: resolve the git-pact folder and forward broker config for provider verification
