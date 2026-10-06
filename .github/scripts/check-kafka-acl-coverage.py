@@ -171,8 +171,8 @@ def gitops_documents() -> list[dict]:
     return docs
 
 
-def mounted_volume(path: str, container: dict, pod: dict) -> dict | None:
-    """Return the one pod volume supplying a container path; ambiguity is unsafe."""
+def mounted_volume(path: str, container: dict, pod: dict) -> tuple[dict, str] | None:
+    """Return the volume and source key supplying a path; ambiguity is unsafe."""
     mounts = [mount for mount in container.get("volumeMounts") or []
               if isinstance(mount, dict) and isinstance(mount.get("mountPath"), str)
               and (path == mount["mountPath"] or path.startswith(mount["mountPath"].rstrip("/") + "/"))]
@@ -187,13 +187,16 @@ def mounted_volume(path: str, container: dict, pod: dict) -> dict | None:
         return None
     volume = volumes[0]
     source = volume.get("secret") or volume.get("configMap") or {}
+    key = pathlib.PurePosixPath(path).name
     if "items" in source:
         relative = path.removeprefix(mount["mountPath"].rstrip("/")).lstrip("/")
-        expected_key = pathlib.PurePosixPath(path).name
-        if not any(isinstance(item, dict) and item.get("key") == expected_key
-                   and item.get("path") == relative for item in source["items"] or []):
+        matches = [item for item in source["items"] or []
+                   if isinstance(item, dict) and item.get("path") == relative
+                   and isinstance(item.get("key"), str)]
+        if len(matches) != 1:
             return None
-    return volume
+        key = matches[0]["key"]
+    return volume, key
 
 
 def kafka_override(container: dict, pod: dict, namespace: str, docs: list[dict]) -> dict[str, str] | None:
@@ -202,8 +205,9 @@ def kafka_override(container: dict, pod: dict, namespace: str, docs: list[dict])
     location = (env.get("QUARKUS_CONFIG_LOCATIONS") or {}).get("value")
     if not isinstance(location, str):
         return None
-    volume = mounted_volume(location, container, pod)
-    config_name = (volume.get("configMap") or {}).get("name") if volume else None
+    mounted = mounted_volume(location, container, pod)
+    volume, source_key = mounted if mounted else ({}, "")
+    config_name = (volume.get("configMap") or {}).get("name")
     if not config_name:
         return None
     configs = [doc for doc in docs if doc.get("kind") == "ConfigMap"
@@ -211,7 +215,7 @@ def kafka_override(container: dict, pod: dict, namespace: str, docs: list[dict])
                and (doc.get("metadata") or {}).get("name") == config_name]
     if len(configs) != 1:
         return None
-    source = ((configs[0].get("data") or {}).get(pathlib.PurePosixPath(location).name))
+    source = ((configs[0].get("data") or {}).get(source_key))
     if not isinstance(source, str):
         return None
     properties: dict[str, str] = {}
@@ -260,8 +264,9 @@ def deployed_user(short: str, docs: list[dict]) -> tuple[str | None, str | None]
                        .get("secretKeyRef") or {}).get("name")
         if not cert_secret:
             return None, "deployed mTLS container has no keystore Secret reference"
-        volume = mounted_volume(location, container, pod)
-        if not volume or (volume.get("secret") or {}).get("secretName") != cert_secret:
+        mounted = mounted_volume(location, container, pod)
+        volume, source_key = mounted if mounted else ({}, "")
+        if source_key != "user.p12" or (volume.get("secret") or {}).get("secretName") != cert_secret:
             return None, "deployed keystore path is not mounted from the password Secret"
         extracts: set[str] = set()
         matching_secrets = 0
@@ -483,6 +488,25 @@ def selftest() -> int:
     ):
         print("selftest FAIL: mounted Kafka properties did not resolve the cert identity")
         return 1
+    alias_deployment = copy.deepcopy(override_deployment)
+    alias_volume = alias_deployment["spec"]["template"]["spec"]["volumes"][1]["configMap"]
+    alias_volume["items"] = [{"key": "properties-source", "path": "override.properties"}]
+    alias_config = copy.deepcopy(override)
+    alias_config["data"] = {"properties-source": override["data"]["override.properties"]}
+    if deployed_user("case-coordinator-agent", [alias_deployment, alias_config, cert, principal]) != (
+        "case-coordinator", None
+    ):
+        print("selftest FAIL: aliased ConfigMap key did not resolve the mounted properties")
+        return 1
+    for items in ([{"key": "properties-source", "path": "other.properties"}], [
+        {"key": "properties-source", "path": "override.properties"},
+        {"key": "second-source", "path": "override.properties"},
+    ]):
+        broken_alias = copy.deepcopy(alias_deployment)
+        broken_alias["spec"]["template"]["spec"]["volumes"][1]["configMap"]["items"] = items
+        if deployed_user("case-coordinator-agent", [broken_alias, alias_config, cert, principal])[1] is None:
+            print("selftest FAIL: missing/ambiguous projected ConfigMap path did not fail closed")
+            return 1
 
     # ACLs from a same-named KafkaUser in another namespace do not belong to
     # this broker. The inventory must use only messaging/KafkaUser grants.
