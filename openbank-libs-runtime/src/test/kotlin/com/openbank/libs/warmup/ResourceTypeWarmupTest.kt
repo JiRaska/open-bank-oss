@@ -4,7 +4,12 @@
 
 package com.openbank.libs.warmup
 
+import com.fasterxml.jackson.databind.BeanDescription
+import com.fasterxml.jackson.databind.JsonSerializer
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.SerializationConfig
+import com.fasterxml.jackson.databind.module.SimpleModule
+import com.fasterxml.jackson.databind.ser.BeanSerializerModifier
 import io.smallrye.mutiny.Uni
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.POST
@@ -37,6 +42,13 @@ class ResourceTypeWarmupTest {
 
     class NotAResource
 
+    data class Book(val entries: List<Dto>)
+
+    @Path("/book")
+    class BookResource {
+        @GET fun book(): Book = Book(emptyList())
+    }
+
     private fun Type.render(): String = when (this) {
         is Class<*> -> simpleName
         is ParameterizedType -> (rawType as Class<*>).simpleName +
@@ -60,6 +72,27 @@ class ResourceTypeWarmupTest {
     @Test
     fun `builds the serializers without an instance`() {
         val detail = ResourceTypeWarmup.warm(ObjectMapper(), listOf(Resource::class.java))
-        assertThat(detail).isEqualTo("1 resources, 3 (de)serializers built, 0 unbuildable")
+        assertThat(detail).isEqualTo("1 resources, 3 root (de)serializers built, 0 unbuildable")
+    }
+
+    @Test
+    fun `warms serializers of nested collection entries before the first response`() {
+        val built = mutableSetOf<Class<*>>()
+        val mapper = ObjectMapper().registerModule(
+            SimpleModule().setSerializerModifier(object : BeanSerializerModifier() {
+                override fun modifySerializer(
+                    config: SerializationConfig,
+                    beanDesc: BeanDescription,
+                    serializer: JsonSerializer<*>,
+                ): JsonSerializer<*> {
+                    built += beanDesc.beanClass
+                    return serializer
+                }
+            }),
+        )
+
+        ResourceTypeWarmup.warm(mapper, listOf(BookResource::class.java))
+
+        assertThat(built).contains(Book::class.java, Dto::class.java, Nested::class.java)
     }
 }

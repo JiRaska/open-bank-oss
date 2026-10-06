@@ -22,9 +22,9 @@ import java.lang.reflect.WildcardType
  * took 1.8 s, ~0.9 s of it AFTER the last SQL statement returned — first-use construction of the
  * response DTO's serializer graph (Kotlin-module introspection of every nested data class). A
  * generic payload round-trip warms Jackson itself, not the per-type serializer cache, which is
- * keyed by type. `ObjectMapper.writerFor`/`readerFor` prefetch the root (de)serializer, and bean
- * (de)serializers resolve their property graph on construction, so one call per type is enough.
- * No instance is needed, which is what makes this generic.
+ * keyed by type. `ObjectMapper.writerFor`/`readerFor` prefetch only the root: collection entries
+ * and nested bean properties can remain cold until a real response contains one. Traverse those
+ * declared types explicitly, without constructing a DTO or making a request.
  */
 internal object ResourceTypeWarmup {
     private val WRAPPERS = setOf(
@@ -79,9 +79,25 @@ internal object ResourceTypeWarmup {
         }
         var built = 0
         var failed = 0
-        out.forEach { t -> if (attempt { mapper.writerFor(javaType(mapper, t)) }) built++ else failed++ }
-        inp.forEach { t -> if (attempt { mapper.readerFor(javaType(mapper, t)) }) built++ else failed++ }
-        return "${resources.size} resources, $built (de)serializers built, $failed unbuildable"
+        var truncated = false
+        val seenWriters = mutableSetOf<JavaType>()
+        val seenReaders = mutableSetOf<JavaType>()
+        out.forEach { t ->
+            val root = javaType(mapper, t)
+            if (attempt { mapper.writerFor(root) }) built++ else failed++
+            val nested = NestedSerializerPrefetch.warm(mapper, root, seenWriters, writer = true)
+            failed += nested.failed
+            truncated = truncated || nested.truncated
+        }
+        inp.forEach { t ->
+            val root = javaType(mapper, t)
+            if (attempt { mapper.readerFor(root) }) built++ else failed++
+            val nested = NestedSerializerPrefetch.warm(mapper, root, seenReaders, writer = false)
+            failed += nested.failed
+            truncated = truncated || nested.truncated
+        }
+        val limit = if (truncated) ", nested traversal capped at ${NestedSerializerPrefetch.MAX_TYPES} types" else ""
+        return "${resources.size} resources, $built root (de)serializers built, $failed unbuildable$limit"
     }
 
     private fun attempt(block: () -> Unit): Boolean = try {
@@ -126,4 +142,55 @@ internal object ResourceTypeWarmup {
         is ParameterizedType -> (t.rawType as Class<*>).name
         else -> t.typeName
     }
+}
+
+/** Jackson leaves collection entries and nested bean serializers cold until a value is present. */
+private object NestedSerializerPrefetch {
+    const val MAX_TYPES = 512
+
+    data class Result(val failed: Int, val truncated: Boolean)
+
+    fun warm(mapper: ObjectMapper, root: JavaType, seen: MutableSet<JavaType>, writer: Boolean): Result {
+        val pending = ArrayDeque<JavaType>()
+        pending.add(root)
+        var failed = 0
+        while (pending.isNotEmpty() && seen.size < MAX_TYPES) {
+            val type = pending.removeFirst()
+            if (!seen.add(type)) continue
+            repeat(type.containedTypeCount()) { i -> type.containedType(i)?.let(pending::add) }
+            if (isApplicationBean(type)) failed += prefetch(mapper, type, root, writer, pending)
+        }
+        return Result(failed, pending.isNotEmpty())
+    }
+
+    private fun prefetch(
+        mapper: ObjectMapper,
+        type: JavaType,
+        root: JavaType,
+        writer: Boolean,
+        pending: ArrayDeque<JavaType>,
+    ): Int {
+        val properties = try {
+            if (writer) {
+                mapper.serializationConfig.introspect(type).findProperties()
+            } else {
+                mapper.deserializationConfig.introspect(type).findProperties()
+            }
+        } catch (@Suppress("TooGenericExceptionCaught", "SwallowedException") e: Exception) {
+            return 1
+        }
+        properties.forEach { property -> property.primaryType?.let(pending::add) }
+        if (type == root) return 0
+        return try {
+            if (writer) mapper.writerFor(type) else mapper.readerFor(type)
+            0
+        } catch (@Suppress("TooGenericExceptionCaught", "SwallowedException") e: Exception) {
+            1
+        }
+    }
+
+    private fun isApplicationBean(type: JavaType): Boolean = !type.isContainerType &&
+        !type.isEnumType &&
+        !type.isPrimitive &&
+        type.rawClass.name.startsWith("com.openbank.")
 }
