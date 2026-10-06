@@ -27,9 +27,8 @@ def is_ui_test(path: str) -> bool:
         return False
     relative = path.removeprefix("openbank-admin-ui/")
     return (
-        relative.startswith(("src/test/", "e2e/"))
-        or "/__tests__/" in relative
-        or any(relative.endswith(suffix) for suffix in (
+        relative.startswith(("src/", "e2e/"))
+        and any(relative.endswith(suffix) for suffix in (
             ".test.ts", ".test.tsx", ".test.js", ".test.jsx",
             ".spec.ts", ".spec.tsx", ".spec.js", ".spec.jsx",
         ))
@@ -55,7 +54,10 @@ def is_test(path: str, package: str) -> bool:
         return is_ui_test(path)
     return (
         path.startswith(f"{package}/src/test/")
-        and Path(path).suffix in {".kt", ".java"}
+        and Path(path).name.endswith((
+            "Test.kt", "Tests.kt", "IT.kt", "Spec.kt", "E2E.kt",
+            "Test.java", "Tests.java", "IT.java", "Spec.java", "E2E.java",
+        ))
     )
 
 
@@ -108,6 +110,12 @@ def self_test() -> int:
         ("UI src test clears", {ui_code, ui_test}, {ui_code, ui_test}, set()),
         ("UI e2e test clears", {ui_code, "openbank-admin-ui/e2e/page.spec.ts"},
          {ui_code, "openbank-admin-ui/e2e/page.spec.ts"}, set()),
+        ("UI JSON fixture does not clear", {ui_code, "openbank-admin-ui/src/test/fixtures/dora.sample.json"},
+         {ui_code, "openbank-admin-ui/src/test/fixtures/dora.sample.json"}, {"openbank-admin-ui"}),
+        ("UI test helper does not clear", {ui_code, "openbank-admin-ui/e2e/helpers/auth.ts"},
+         {ui_code, "openbank-admin-ui/e2e/helpers/auth.ts"}, {"openbank-admin-ui"}),
+        ("service test fixture does not clear", {ledger_code, "openbank-ledger-service/src/test/kotlin/Fixtures.kt"},
+         {ledger_code, "openbank-ledger-service/src/test/kotlin/Fixtures.kt"}, {"openbank-ledger-service"}),
         ("UI test file is not code", {ui_test}, {ui_test}, set()),
         ("UI type declaration is not code", {"openbank-admin-ui/src/types.d.ts"},
          {"openbank-admin-ui/src/types.d.ts"}, set()),
