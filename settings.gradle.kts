@@ -31,8 +31,7 @@ rootProject.name = "openbank"
 
 plugins {
     // Auto-downloads a matching JDK when none of the locally installed ones satisfies
-    // `kotlin { jvmToolchain(N) }`. Required because Kotlin 2.0.21 does not support
-    // Java 24+ and many dev workstations now default to JDK 24/25/26.
+    // `kotlin { jvmToolchain(N) }`, independently of the developer's Gradle JDK.
     id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
