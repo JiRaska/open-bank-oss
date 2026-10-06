@@ -32,3 +32,7 @@ Kořenový build používá Gradle subprojekty. Služby zpravidla deklarují `im
 - **Selhání:** výjimka z rendereru volání odmítne (503, `PolicyDecisionException`) — schválení se nevydá s chybějícím shrnutím ani s obecným výpisem argumentů, který renderer nahrazuje.
 - **Shrnutí je informativní:** o shodě opakovaného požadavku rozhoduje pouze otisk, nikdy text shrnutí.
 - **Osobní údaje:** shrnutí vidí operátoři, takže v něm smí být jen to, co schvalovatel potřebuje k rozpoznání cíle. Účty a IBAN maskujte (např. poslední 4 znaky), klíče nikdy nevypisujte (stačí krátký otisk SHA-256), žádná tajemství, hodnoty od volajícího ověřte podle očekávaného tvaru, jinak je nevypisujte. Příklad: `ScaApprovalSummaryRenderer` v sca-service.
+
+## Vlastnictví topicu sazeb ČNB
+
+`openbank-libs-domain` mapuje `openbank.fx.cnb-policy-rate.published` na `fx-service` v `TopicProducers`. Tím zaznamenává producenta pro sdílenou analytiku a kontroly správy; knihovna událost sama nepublikuje ani neodebírá. Producentem je cesta příjmu sazeb ve FX, zatímco risk engine a audit-service odebírají fakta a auditní stopu. Při přejmenování topicu nebo změně vlastníka aktualizujte i mapování.
