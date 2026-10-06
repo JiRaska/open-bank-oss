@@ -62,10 +62,11 @@ dependencies {
     testImplementation(libs.assertj)
     testImplementation(libs.mockk)
     testImplementation(libs.rest.assured.kotlin)
+    testImplementation(libs.pact.provider)
     // Integration tests for the real external adapters (ClickHouse / Vault / Apicurio) drive the
     // adapters' actual HTTP path against throwaway Docker containers — see *IT.kt. They self-skip when
     // Docker is absent (@Testcontainers(disabledWithoutDocker = true)), so the default offline build is
-    // unaffected; run them explicitly with `-PwithDocker` (see tasks.test below).
+    // unaffected for existing integration-tagged tests; run those with `-PwithDocker`.
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     // Boot IT proving the Kafka consumer joins the intended group.id (issue #686) — see
@@ -84,11 +85,37 @@ allOpen {
     annotation("jakarta.enterprise.context.RequestScoped")
     annotation("io.quarkus.test.junit.QuarkusTest")
 }
-// The default `test` run stays unit-only and infra-free (preserves the offline-buildable promise):
-// the Docker-backed `@Tag("integration")` adapter ITs are excluded unless `-PwithDocker` is passed.
+// Existing Docker-backed `@Tag("integration")` adapter ITs are excluded unless `-PwithDocker` is
+// passed. The untagged provider Pact replay below runs in the default test lane against ClickHouse.
 tasks.test {
     useJUnitPlatform { if (!project.hasProperty("withDocker")) excludeTags("integration") }
     systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+}
+
+// Analytics-sink does not apply openbank.quarkus-service (it has no OLTP database), so register
+// the same isolated broker-verification lane explicitly. The always-running @PactFolder replay
+// stays in `test`; this task runs only the broker twin and publishes its result on main-push.
+val providerPactTestSourceSet = sourceSets.create("providerPactTest") {
+    kotlin.srcDir("src/test/kotlin")
+    kotlin.include("**/*BrokerProviderVerificationTest.kt")
+    resources.srcDir("src/test/resources")
+    compileClasspath += sourceSets.main.get().output +
+        sourceSets.test.get().output + configurations.testCompileClasspath.get()
+    runtimeClasspath += output + compileClasspath + sourceSets.test.get().runtimeClasspath
+}
+tasks.register<Test>("providerPactTest") {
+    group = org.gradle.language.base.plugins.LifecycleBasePlugin.VERIFICATION_GROUP
+    description = "Verify analytics-sink provider pacts against the broker on main-push."
+    testClassesDirs = providerPactTestSourceSet.output.classesDirs
+    classpath = providerPactTestSourceSet.runtimeClasspath
+    useJUnitPlatform()
+    systemProperty("java.util.logging.manager", "org.jboss.logmanager.LogManager")
+    listOf(
+        "pactbroker.url", "pactbroker.auth.username", "pactbroker.auth.password",
+        "pactbroker.enablePending", "pactbroker.providerBranch", "pact.verifier.publishResults",
+        "pact.provider.version", "pact.provider.branch", "pact.provider.tag",
+    ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
+    shouldRunAfter(tasks.named("test"))
 }
 
 tasks.named<org.cyclonedx.gradle.CycloneDxTask>("cyclonedxBom") {

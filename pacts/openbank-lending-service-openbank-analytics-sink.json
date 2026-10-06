@@ -1,0 +1,96 @@
+{
+  "consumer": {
+    "name": "openbank-lending-service"
+  },
+  "interactions": [
+    {
+      "description": "GET an observed party credit profile for the lending offer gate",
+      "providerStates": [
+        {
+          "name": "an observed credit profile exists for the pact lending party"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/analytics/credit-profile/8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a"
+      },
+      "response": {
+        "body": {
+          "income_monthly": "1000.00",
+          "months_observed": 1,
+          "net_monthly": "600.00",
+          "outflow_monthly": "400.00"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "matchingRules": {
+          "body": {
+            "$.income_monthly": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9]+(\\.[0-9]+)?$"
+                }
+              ]
+            },
+            "$.months_observed": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "integer"
+                }
+              ]
+            },
+            "$.net_monthly": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9]+(\\.[0-9]+)?$"
+                }
+              ]
+            },
+            "$.outflow_monthly": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "regex",
+                  "regex": "^[0-9]+(\\.[0-9]+)?$"
+                }
+              ]
+            }
+          }
+        },
+        "status": 200
+      }
+    },
+    {
+      "description": "GET a credit profile without M2M identity is refused",
+      "providerStates": [
+        {
+          "name": "no valid M2M identity is presented"
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "path": "/api/v1/analytics/credit-profile/8a8a8a8a-8a8a-4a8a-8a8a-8a8a8a8a8a8a"
+      },
+      "response": {
+        "status": 401
+      }
+    }
+  ],
+  "metadata": {
+    "pact-jvm": {
+      "version": "4.7.3"
+    },
+    "pactSpecification": {
+      "version": "3.0.0"
+    }
+  },
+  "provider": {
+    "name": "openbank-analytics-sink"
+  }
+}
