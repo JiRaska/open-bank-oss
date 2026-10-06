@@ -7,6 +7,8 @@ package com.openbank.swift.domain.model
 import com.openbank.swift.domain.model.SwiftMessage
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
 import java.time.Instant
 import java.util.UUID
 
@@ -17,6 +19,29 @@ class SwiftMessageTest {
         val message = message(senderBic = "ABC123")
 
         assertThat(message.validate()).contains("Invalid sender BIC: ABC123")
+    }
+
+    @ParameterizedTest
+    @CsvSource("ABCDEFG,Invalid sender BIC: ABCDEFG", "ABCDEFGHIJKL,Invalid sender BIC: ABCDEFGHIJKL")
+    fun `sender BIC outside the inclusive 8 to 11 character range is rejected`(bic: String, error: String) {
+        assertThat(message(senderBic = bic).validate()).contains(error)
+    }
+
+    @ParameterizedTest
+    @CsvSource("ABCDEFG,Invalid receiver BIC: ABCDEFG", "ABCDEFGHIJKL,Invalid receiver BIC: ABCDEFGHIJKL")
+    fun `receiver BIC outside the inclusive 8 to 11 character range is rejected`(bic: String, error: String) {
+        assertThat(message(receiverBic = bic).validate()).contains(error)
+    }
+
+    @Test
+    fun `blank transaction reference is rejected`() {
+        assertThat(message(transactionReference = "  ").validate()).contains("Transaction reference required")
+    }
+
+    @ParameterizedTest
+    @CsvSource("ABCDEFGH,IJKLMNOP", "ABCDEFGHIJK,IJKLMNOPQRS")
+    fun `both BIC length boundaries are accepted`(sender: String, receiver: String) {
+        assertThat(message(senderBic = sender, receiverBic = receiver).validate()).isEmpty()
     }
 
     @Test
@@ -53,13 +78,14 @@ class SwiftMessageTest {
         amountMinorUnits: Long = 1000,
         chargeCode: String = "SHA",
         valueDate: String = "20260527",
+        transactionReference: String = "TRX-001",
     ) = SwiftMessage(
         id = UUID.fromString("00000000-0000-0000-0000-000000000001"),
         idempotencyKey = "idem-1",
         messageType = SwiftMessageType.MT103,
         senderBic = senderBic,
         receiverBic = receiverBic,
-        transactionReference = "TRX-001",
+        transactionReference = transactionReference,
         relatedReference = null,
         valueDate = valueDate,
         amount = SwiftMessage.moneyOfMinorUnits(amountMinorUnits, "EUR"),

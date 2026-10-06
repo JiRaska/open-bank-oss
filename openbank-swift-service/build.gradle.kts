@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -179,4 +180,27 @@ kover {
             }
         }
     }
+}
+
+// Mutate the validation and payment-state decisions, not generated data-class accessors.
+// The target tests run without a Quarkus boot or external services (#8349).
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf(
+        "com.openbank.swift.domain.model.SwiftMessage",
+        "com.openbank.swift.application.usecase.SwiftService",
+    )
+    targetTests = setOf(
+        "com.openbank.swift.domain.model.SwiftMessageTest",
+        "com.openbank.swift.application.usecase.SwiftServiceTest",
+    )
+    // Kotlin data-class getters are storage accessors; mutate validate() and the use-case
+    // decisions instead. The computed currency/minor-unit getters have separate unit tests.
+    excludedMethods = setOf("get*")
+    // Advisory like the existing weekly fleet lanes. The 2026-10-06 baseline is 30/47
+    // detected (64%, including 5 timeouts); enforce a floor after the weekly runner confirms it.
+    mutationThreshold = 0
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
