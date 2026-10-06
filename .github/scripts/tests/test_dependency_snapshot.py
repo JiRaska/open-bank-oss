@@ -140,6 +140,8 @@ class RunnerTests(unittest.TestCase):
                 part = snapshot()
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
+                if case == 'wrong-detector':
+                    part['detector']['version'] = 'unexpected'
                 (reports / 'snapshot.json').write_text(json.dumps(part))
                 if case == 'duplicate-snapshot':
                     (reports / 'other.json').write_text(json.dumps(part))
@@ -161,6 +163,8 @@ class RunnerTests(unittest.TestCase):
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case in ('wrong-snapshot', 'wrong-detector'):
+                        self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(timeouts, [240])
@@ -188,7 +192,8 @@ class RunnerTests(unittest.TestCase):
 
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
-                     'wrong-receipt', 'wrong-snapshot', 'duplicate-snapshot', 'merge-ref'):
+                     'wrong-receipt', 'wrong-snapshot', 'wrong-detector',
+                     'duplicate-snapshot', 'merge-ref'):
             with self.subTest(case=case):
                 self.run_case(case)
 

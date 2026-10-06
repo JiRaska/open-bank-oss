@@ -226,7 +226,11 @@ def generate(repo, output, env, extra_arguments=()):
         snapshots = list(reports.glob('*.json'))
         if len(snapshots) != 1:
             raise ValueError('expected one fresh snapshot per shard')
-        parts[shard.name] = load_snapshot(snapshots[0])
+        part = load_snapshot(snapshots[0])
+        validate_snapshot(part)
+        if any(part.get(key) != identity.get(key) for key in IDENTITY):
+            raise ValueError('snapshot identity mismatch: ' + shard.name)
+        parts[shard.name] = part
         receipts.append({'shard': shard.name, 'projects': projects,
                              'seconds': round(time.monotonic() - started, 2)})
         (output / 'results.json').write_text(json.dumps(receipts, indent=2))
