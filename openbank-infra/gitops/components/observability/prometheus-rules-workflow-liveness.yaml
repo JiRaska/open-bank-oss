@@ -115,13 +115,13 @@ spec:
         # gauge stays green while the job walks toward overrunning its own slot — at which point
         # `ConcurrentExecution.SKIP` starts dropping runs with nothing logged.
         #
-        # WHY NOT THE SPAN HISTOGRAM. `traces_spanmetrics_latency_bucket` is the obvious source and
-        # is unusable here: its `le` set is 0.1/0.25/0.5/1/2/5/+Inf and every agent-oversight sweep
-        # lands in (5s, +Inf], so histogram_quantile returns exactly 5.00 on every run — the metric
-        # is SATURATED and no threshold above 5s is expressible from it at all (measured live in
-        # #6168). Widening the window converts a never-firing rule into a never-clearing one; the
-        # signal needed a different instrument, not a retuned rule, so the job now records its own
-        # timer (DomainMetrics.registerWorkflowRun).
+        # WHY NOT THE SPAN HISTOGRAM. At the time of #6168, Tempo's highest finite bucket was 5s;
+        # every agent-oversight sweep landed above it, so histogram_quantile returned 5.00 on
+        # every run. Tempo now declares 10s and 30s buckets (#9728), which removes that particular
+        # 5s ceiling after deployment. It does not make a p99 over roughly four runs per 2h a
+        # useful duration signal: widening the window for a 30m cron trades a never-firing rule
+        # for a stale, maximum-like estimate. The job records its own timer instead
+        # (DomainMetrics.registerWorkflowRun).
         #
         # WHAT THE NUMBER IS. Mean wall-clock per run over 2h, measured IN THE JOB'S PROCESS —
         # `_sum / _count`, not a percentile. A quantile is not available at this sample size and
