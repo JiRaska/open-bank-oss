@@ -61,7 +61,7 @@ import java.util.UUID
  */
 // detekt's FunctionNaming excludes **/test/** by default, but these @Test methods must live in
 // src/main so testImplementation(project(":openbank-libs-testing")) can pull and inherit them.
-@Suppress("FunctionNaming")
+@Suppress("FunctionNaming", "TooManyFunctions") // one @Test per conformance case
 abstract class OutboxDispatchConformanceIT {
 
     /** The channel this service's dispatcher publishes to (e.g. `"ledger-events-out"`). */
@@ -78,6 +78,14 @@ abstract class OutboxDispatchConformanceIT {
 
     /** Look up the row's current state (status/sentAt/attemptCount) by event id. */
     protected abstract suspend fun findEntry(eventId: UUID): OutboxEntry?
+
+    /**
+     * The event type a seeded row carries. Defaults to the suite's own synthetic names; a service
+     * whose publisher ROUTES by event type (one emitter per type, an unknown type is an error —
+     * referral is the first) returns a type it actually wires, so the suite exercises the real
+     * routing instead of failing on a type no producer ever writes.
+     */
+    protected open fun eventType(suggested: String): String = suggested
 
     /**
      * Reactive Panache needs a Vert.x duplicated context; the JUnit thread is not one. Every
@@ -103,7 +111,7 @@ abstract class OutboxDispatchConformanceIT {
         val aggregateId = Ids.newId()
         val first = OutboxMessage(
             aggregateId = aggregateId,
-            eventType = "test.event.posted",
+            eventType = eventType("test.event.posted"),
             payload = """{"seq":1}""",
             // createdAt DELIBERATELY omitted: the default is what ~48 fleet call sites use, and
             // passing it here is what made this suite blind to the epoch default (#3272).
@@ -177,7 +185,7 @@ abstract class OutboxDispatchConformanceIT {
     fun `replaying dispatch after a row is SENT does not re-publish it`() {
         val message = OutboxMessage(
             aggregateId = Ids.newId(),
-            eventType = "test.event.replay",
+            eventType = eventType("test.event.replay"),
             payload = """{"once":true}""",
             createdAt = Instant.now(),
         )
@@ -197,7 +205,40 @@ abstract class OutboxDispatchConformanceIT {
         }
         assertThat(secondPassCount).describedAs("SENT row must not be re-published on replay").isEqualTo(1)
     }
+
+    @Test
+    fun `one dispatch relays a batch of distinct aggregates - the publish path admits concurrent sends`() {
+        // ADR-0327 D6: on a v2 repository the loop publishes one batch's rows (one per aggregate)
+        // concurrently, up to OutboxDispatch.SEND_CONCURRENCY. A dispatcher whose
+        // publishWithResilience still carries @Bulkhead(1) rejects the overflow with a
+        // BulkheadException, which the loop treats as transport-unavailable: the batch is
+        // abandoned and those rows sit DISPATCHING until the stale reclaim. A v1 (sequential)
+        // repository passes this trivially, which is correct — it never sends concurrently.
+        val batch = (1..CONCURRENT_BATCH).map { i ->
+            OutboxMessage(
+                aggregateId = Ids.newId(),
+                eventType = eventType("test.event.batch"),
+                payload = """{"seq":$i}""",
+            )
+        }
+        batch.forEach { onEventLoop { seed(it) } }
+
+        onEventLoop { triggerDispatch() }
+
+        val ids = batch.map { it.eventId.toString() }.toSet()
+        val relayed = received().map {
+            headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID)
+        }.filter { it in ids }.toSet()
+        assertThat(relayed).describedAs("every row of one batch relayed in one dispatch").isEqualTo(ids)
+        batch.forEach { msg ->
+            assertThat(onEventLoop { findEntry(msg.eventId) }!!.status).isEqualTo(OutboxStatus.SENT)
+        }
+    }
+
     private companion object {
+        /** Above the default async bulkhead (1 running + 10 queued), at or below the batch size. */
+        const val CONCURRENT_BATCH = 20
+
         /**
          * Payload comparison in this suite is STRUCTURAL, not textual — see the relay assertions.
          * A byte-equality assertion conflated two different guarantees ("no field was lost or

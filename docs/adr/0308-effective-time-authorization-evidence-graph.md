@@ -2,7 +2,7 @@
 date: 2026-09-13
 decision-status: accepted
 delivery-status: partial
-followup: "#9945 — ingest historical authorization evidence and add governed evidentiary export"
+followup: "#9945 — connect immutable business-action decisions with policy versions and add governed evidentiary export"
 authors: [Jiri Raska]
 supersedes: []
 superseded-by: []
@@ -87,8 +87,95 @@ independent checker approval and immediate revocation; append-only assignment-ch
 assignment verification; mandatory OPA; and durable allow/deny/unavailable read audit before graph
 disclosure. The admin UI exposes the controlled lifecycle and hides it from non-admin users. OPA
 denies service accounts from assignment administration even if a broad operational role is present.
-Export to the fleet tamper-evident audit store and historical authorization evidence ingestion remain,
-so this ADR stays `partial`.
+Every graph read now requires an exact approved root, including complaint and incident
+aggregate reads. New proposals name `complaint:reference` or `incident:UUID`; old
+purpose-only assignments remain recorded but cannot authorize a read. Operators must
+issue new maker/checker approved root grants before those views are used. Context and
+OPA both reject an unscoped grant, including for an admin; a case ID by itself is
+never proof of permission for every root sharing its purpose.
+The read-audit table now forces bank-scope row-level security, including for its table owner, and
+the audit writer sets that scope transaction-locally before persisting a decision. A missing or
+different scope cannot read the row. Context also writes a schema-versioned SHA-256 commitment
+into a bank-scoped outbox in the same transaction. A bounded relay publishes only the commitment
+and random audit ID, and a dedicated strict Audit consumer validates the exact payload and
+persists it idempotently into the fleet hash chain. Both channels are disabled by default until
+the images, topic ACLs and operational checks are in place; code and local integration tests do
+not prove sandbox delivery or fleet anchoring. Live disclosure-outcome export, reconciliation and
+historical business-action decision ingestion also remain, so this ADR stays `partial`.
+
+### Remaining P0 audit-delivery contract
+
+The current `ALLOWED` row records a successful *access decision before the read*. It does not
+establish that any evidence was returned. Context now appends a separate, bank-scoped disclosure
+outcome after materializing a bounded successful response and before returning it from the query
+service. The outcome links to the allowed decision and records the projection generation where
+applicable, normalized query hash,
+returned evidence references/count and whether the response was truncated. Failed queries and
+candidate checks omitted from the final response do not produce disclosure outcomes. Failure to
+persist the outcome suppresses the response. Context now commits a versioned SHA-256 disclosure
+commitment in the same transaction and has a separate relay, disabled by default until compatible
+Audit images are deployed. The strict Audit consumer validates both commitment types and rejects
+conflicting redelivery before ACK. Live export and reconciliation of disclosure outcomes remain
+release gates; local and in-memory tests are not fleet anchoring. Historical decision
+evidence from the source enforcement point remains a distinct record, not an inference from either
+read-audit row.
+
+A [read-only reconciliation utility](../../openbank-infra/scripts/reconcile-context-audit-commitments.py)
+compares mature, bank-scoped local read and disclosure
+commitments with the central Audit rows by random event ID and digest, using indexed exact-ID
+lookups. It caps each hourly sample at 10,000 commitments, reports counts rather than customer
+or case details, and fails on missing or differing commitments; an empty or oversized sample is
+inconclusive. This is an operator check, not a deployed
+periodic control or proof that the central chain was anchored. The central chain/anchor
+verification and a measured sandbox run remain separate release gates.
+
+Context will write each read-audit row and its export outbox entry in one database transaction.
+The outbox carries only a schema version, random audit event ID, occurrence time and SHA-256
+commitment over a canonical, length-delimited representation of the complete local row, including
+the random ID. It carries no investigator, customer, case, root or evidence reference in clear
+text. Re-delivery keeps the same event ID and commitment. A dedicated Kafka topic allows Context
+to write and Audit to read; neither the legacy best-effort `AuditConsumer` nor its shared topic
+qualifies because they acknowledge persistence failures. A dedicated Audit consumer must validate
+the version and digest format, persist idempotently into the hash-chained, anchored audit store,
+and acknowledge only after commit. Its own DLQ, retention, Kafka ACLs and lag/backlog alerts are
+part of the delivery, including an alarm on any DLQ record. A poisoned commitment is quarantined
+for investigation, never silently treated as exported.
+
+The local row remains the only place holding the restricted detail. An authorized, purpose-bound
+verification operation can recompute its commitment by audit event ID and compare it with the
+anchored fleet record; a mismatch or a local row without a fleet record is a finding. Periodic
+reconciliation compares committed local IDs with centrally stored IDs, so a lost or stalled relay
+cannot appear healthy merely because requests still return. Context read latency depends on the
+local atomic insert, not Kafka or Audit availability, while bounded outbox age and central
+verification are release gates. Measure that insert at populated 1× and 10× load together with
+payment-path p95 before enabling a real-data lens. Rollback disables new sensitive reads and the
+relay while retaining both append-only stores and pending outbox rows; it does not delete an
+audit trail or treat an unexported commitment as exported.
+
+### Source delegation history and root-scoped review
+
+The authority-history lens consumes the existing versioned delegation lifecycle stream and
+stores immutable, deduplicated source observations. It retains event time and database record
+time independently, supports `effectiveAt` and `knownAt`, and rejects conflicting content for
+an already recorded source revision. An omitted `knownAt` uses PostgreSQL time as the cutoff
+for the current snapshot, since comparing a database-recorded timestamp with an application
+clock can hide a committed observation during clock skew. An explicit historical `knownAt`
+remains an exact caller-supplied cutoff. The audit view exposes grantor, grantee, resource,
+capabilities and lifecycle evidence with provenance, bounded to 100 observations.
+
+`AUTHORIZATION_REVIEW` requires a maker/checker-approved assignment to the exact delegation
+root. A broad case assignment, another delegation root, or a historical grant cannot satisfy
+this check. OPA restricts the purpose and human compliance/admin role, while database row-level
+security applies a transaction-local bank scope. Both requested timestamps enter the read audit.
+
+These are source delegation assertions. The response explicitly reports business-action
+`actionAuthorization: UNKNOWN`: without an immutable decision from the actual enforcement
+point, this view does not establish that a specific payment or approval was authorized.
+Generic success audit events are not substituted for that missing decision evidence.
+
+Rollback stops the history consumer and endpoint while retaining append-only observations.
+The nullable assignment/audit columns preserve the earlier P1 access contract. New delegation
+topic replay is isolated from source services and uses a dedicated dead-letter topic.
 
 ## Alternatives considered
 

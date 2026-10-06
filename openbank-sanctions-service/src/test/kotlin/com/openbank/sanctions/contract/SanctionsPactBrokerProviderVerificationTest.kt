@@ -14,7 +14,9 @@ import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import com.openbank.sanctions.it.PostgresTestResource
 import io.quarkus.test.common.QuarkusTestResource
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -70,6 +72,9 @@ class SanctionsPactBrokerProviderVerificationTest {
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
 
+    @Inject
+    lateinit var testIdentityAssociation: TestIdentityAssociation
+
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
         context?.target = HttpTestTarget("localhost", testPort.toInt())
@@ -79,7 +84,17 @@ class SanctionsPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        // The missing-identity interactions expect 401. Class-level @TestSecurity otherwise
+        // authenticates every broker replay, including those, and would produce a 201.
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // verifyPacts clears the authenticated test identity for this interaction.
     }
 
     /** Mirrors [SanctionsPactProviderVerificationTest] — no-op by design, see that class's KDoc. */

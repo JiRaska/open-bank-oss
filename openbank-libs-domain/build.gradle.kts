@@ -45,7 +45,8 @@ dependencies {
     // here, which is the direction the hexagon wants. CompliancePackParser was SPLIT instead of
     // moved: its decoder already took an already-parsed Map, so only the JSON front-end left, as
     // `CompliancePackJson` (now in lending-service; the parser itself in libs-lending, ADR-0317). Jackson survives below ONLY as the annotation-level
-    // dependency of EntityId/LendingIds/Money, which are still baselined and still owed a fix.
+    // dependency of EntityId/LendingIds, which are still baselined and still owed a fix. Money's
+    // binding was paid off the same way: it is `MoneyJacksonModule` in openbank-libs-runtime.
 
     testImplementation(platform(libs.junit.bom))
     testImplementation(libs.junit.jupiter)
@@ -68,13 +69,14 @@ tasks.test {
 
 kover {
     reports {
-        // Measured 2026-09-26 over two independent koverXmlReport runs (both 87.46% LINE, no
-        // variance observed): floor = floor(min(run1, run2)) - 2, per the fleet's
-        // flaky-koverVerify ratchet convention. Ratchet-only: never lower this.
+        // Re-measured 2026-09-29 on main merged with feat/spend-category-vocabulary's split of
+        // libs-domain into libs-lending/libs-iso20022 (over two independent koverXmlReport runs,
+        // both 89.4759% LINE, no variance observed): floor = floor(min(run1, run2)) - 2, per the
+        // fleet's flaky-koverVerify ratchet convention. Ratchet-only: never lower this.
         verify {
             rule {
                 bound {
-                    minValue = 85
+                    minValue = 87
                     coverageUnits = kotlinx.kover.gradle.plugin.dsl.CoverageUnit.LINE
                 }
             }

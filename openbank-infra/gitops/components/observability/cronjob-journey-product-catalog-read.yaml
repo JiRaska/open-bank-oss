@@ -115,6 +115,9 @@ metadata:
     app.kubernetes.io/part-of: observability
     app.kubernetes.io/component: journey
     openbank.tech/journey: product-catalog-read
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '*/10 * * * *' plus slack.
+    openbank.tech/max-success-age-seconds: "3600"
 spec:
   schedule: "*/10 * * * *"
   concurrencyPolicy: Forbid
@@ -141,7 +144,7 @@ spec:
               type: RuntimeDefault
           containers:
             - name: k6
-              image: docker.io/grafana/k6:1.2.0@sha256:5301215b669b3758b1b3b1f43a25a91378c2bbb8cbb6b29d5b4a44be8064dedc
+              image: docker.io/grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true

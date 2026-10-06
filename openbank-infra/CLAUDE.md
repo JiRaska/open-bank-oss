@@ -118,6 +118,11 @@ out of it (they are path-scoped, not less important — several are live-inciden
   singletons (a container OOM-kill self-heals; a dead node doesn't), and Karpenter `NodeRepair`
   as the backstop (EKS node auto repair covers only managed node groups, and consolidation cannot
   touch a node holding a `do-not-disrupt` pod).
+- **`karpenter.sh/do-not-disrupt` pins a node for its whole life, drift included.** It blocks
+  every voluntary disruption, so the node is never consolidated AND never replaced on AMI drift
+  (`DisruptionBlocked`, `Drifted=True AMIDrift` indefinitely), and anything else that lands on it
+  stays too. Protect a singleton by placing it on a pool whose disruption policy cannot hurt it
+  (e.g. `stateful`: WhenEmpty, on-demand, budgeted drift) rather than by freezing a node.
 - **Right-sizing requests can pin a NodePool at its `limits` cap.** The cap was calibrated to the
   old, understated requests; after raising them Karpenter may refuse to provision
   ("all available instance types exceed limits for nodepool"), leaving pods Pending and stalling
@@ -173,6 +178,16 @@ out of it (they are path-scoped, not less important — several are live-inciden
   via `fleet-attestation.yml`) — it checks every image *declared* in gitops, incl. initContainers
   and sidecars, so a gap is caught while still latent. Green gate before any Enforce graduation
   (`rules.yaml: provenance.fleet_attestation_gate`).
+- **A CNPG backup and its Pod Identity association must NOT land in one PR — the association is
+  admission-time too, and GitOps beats `tofu apply`.** Argo creates the Cluster minutes after
+  merge; the `db-backups.tf` association exists only once someone applies it; the pod admitted in
+  between has no credentials and archives nothing (`Unable to locate credentials`) until it is
+  recreated. pricing-db (2026-09-28) and card-processing-db (#8837, ~8.7 h with zero WAL archived
+  — its tf comment even called the combined PR the safe order) both shipped that shape. Split it:
+  tofu PR merged AND applied, then the gitops PR adding `barmanObjectStore`. Enforced by
+  `db-backup-association-gate` (`check-db-backup-associations.py --base`). If it already
+  happened: switch over / delete the replica so a freshly admitted pod archives, then force the
+  first base backup and assert `firstRecoverabilityPoint`.
 - **`gen-network-policies.py` emits INGRESS only, so a new in-cluster edge also needs the CALLER's
   hand-written EGRESS rule — and the omission is silent in both directions.** Measured 2026-08-20:
   LiteLLM's Langfuse trace callback died on `ConnectTimeout` to `langfuse.ai-platform.svc:3000`

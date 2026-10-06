@@ -19,16 +19,36 @@ info:
   #         built from, required with `rationale` when an agent drafts (ADR-0315 D10).
   # 1.11.0: additive — native-currency nostro balance reconciliation; unknown GL remains explicitly
   #         unstated, and an unavailable ledger balance is a 502.
-  version: 1.11.0
+  # 1.12.0: additive — POST /deals/{id}/confirm and DealState CONFIRMED (ADR-0315 D2): the
+  #        counterparty's confirmation of a BOOKED deal; settlement requires it unless
+  #        openbank.treasury.confirmation.required is false.
+  # 1.13.0: additive — GET /quotes (ADR-0315 D9): SYNTHETIC bid/ask of the simulated
+  #        counterparties off the risk engine's latest curve set plus a configured spread.
+  # 1.14.0: additive — nostro reconciliation breaks and MT940 (ADR-0315 D7): GET
+  #         /nostro/{account}/breaks (age in business days, alert threshold) and POST
+  #         /nostro/statements/mt940 (SWIFT MT940 mapped onto the camt.053 statement model).
+  # 1.15.0: skipped — it was reserved for the daily-position change below, which landed after 1.16.0.
+  # 1.16.0: additive — DealEvent.limitSnapshot carries the limit-check figures of a limit note,
+  #         so clients render them instead of parsing `note`.
+  # 1.17.0: additive — GET /positions answers basis ACTUAL | PROJECTED, the accounting day `today`
+  #         (Europe/Prague) it was judged against, the counted deal states, and a per-currency
+  #         dealCount. A date after today is a projection of concluded deals, no longer all zeros.
+  # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
+  #         principal and maximum tenor, declared in configuration. Enforced at submit and
+  #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
+  version: 1.18.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
-    `DRAFT → PENDING_APPROVAL → BOOKED → SETTLED → MATURED`, or to `CANCELLED` (before booking) or
-    `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason on its
-    timeline.
+    `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
+    booking) or `REVERSED` (after). A rejection returns a pending deal to `DRAFT` with the reason
+    on its timeline. `CONFIRMED` records that the counterparty confirmed the booked terms (a
+    back-office person, never the deal's creator or submitter; in the sandbox the simulated
+    counterparty set). Settlement requires `CONFIRMED`; a deployment with
+    `openbank.treasury.confirmation.required=false` may also settle straight from `BOOKED`.
 
     **Four-eyes is enforced in the domain**: the approver must be neither the deal's creator nor
     its submitter (422 `FOUR_EYES_VIOLATION`), and only a human may submit, approve, reject,
-    cancel, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
+    cancel, confirm, settle or reverse — an AI agent (`sub` prefixed `agent:`) or a service account is
     refused with 403 `ACTOR_NOT_PERMITTED`. An AI agent may draft, and must then supply a
     `rationale` and the `inputs` it used (ADR-0315 D10); its draft consumes no limit, and only a
     human dealer can submit it.
@@ -37,6 +57,13 @@ info:
     (placements and the ČNB facility; a borrowing consumes no limit). Checked at submission and
     again at approval; a breach blocks booking (422 `LIMIT_BREACHED`). A senior approver may record
     a bounded override with a reason; four-eyes separation still applies at booking.
+
+    **Product limits** (ADR-0315 D4) are the bank's mandate per product, declared in configuration:
+    the currencies a product may be dealt in, the largest principal per deal in each, and the
+    longest tenor. A product with no declared limit is not permitted. Enforced at submission and
+    re-checked at approval (the mandate may have been tightened in between); a breach is 422
+    `PRODUCT_LIMIT_BREACHED` with `breaches`. It is not overridable — the senior override covers
+    the counterparty limit only.
 
     **Interest** is ACT/360 simple interest at maturity (the CZK and EUR money-market
     convention); `rate` is an annual percentage. **Overnight** means the next business day,
@@ -150,6 +177,12 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: PRODUCT_LIMIT_BREACHED — the deal is outside its product limit (ADR-0315 D4)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/deals/{id}/approve:
     post:
@@ -165,7 +198,10 @@ paths:
         '404': { description: No such deal }
         '409': { $ref: '#/components/responses/InvalidState' }
         '422':
-          description: FOUR_EYES_VIOLATION (approver created or submitted the deal) or LIMIT_BREACHED
+          description: >-
+            FOUR_EYES_VIOLATION (approver created or submitted the deal), LIMIT_BREACHED (counterparty
+            limit, not covered by a senior override) or PRODUCT_LIMIT_BREACHED (the deal is outside its
+            product limit as declared NOW — re-checked at approval; not overridable)
           content:
             application/json:
               schema:
@@ -229,11 +265,43 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
 
+  /api/v1/treasury/deals/{id}/confirm:
+    post:
+      tags: [Treasury]
+      operationId: confirmDeal
+      summary: Record the counterparty's confirmation of a BOOKED deal (CONFIRMED); posts nothing
+      description: |
+        ADR-0315 D2. ROLE_TREASURY_APPROVER (the back office). The confirmer must be neither the
+        deal's creator nor its submitter (422 `FOUR_EYES_VIOLATION`); an AI agent or a service
+        account is refused (403). Emits `treasury.deal.confirmed.v1`.
+      parameters:
+        - $ref: '#/components/parameters/DealId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmRequest'
+      responses:
+        '200': { $ref: '#/components/responses/DealOk' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '422':
+          description: FOUR_EYES_VIOLATION (the creator or submitter may not confirm the deal)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
   /api/v1/treasury/deals/{id}/settle:
     post:
       tags: [Treasury]
       operationId: settleDeal
-      summary: Settle a BOOKED deal on or after its value date; posts the settlement journal
+      summary: Settle a CONFIRMED deal on or after its value date; posts the settlement journal
+      description: |
+        A BOOKED deal answers 409 until confirmed, unless the deployment sets
+        `openbank.treasury.confirmation.required=false`.
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -259,7 +327,7 @@ paths:
     post:
       tags: [Treasury]
       operationId: reverseDeal
-      summary: Reverse a BOOKED or SETTLED deal; a settled one gets an offsetting journal
+      summary: Reverse a BOOKED, CONFIRMED or SETTLED deal; a settled one gets an offsetting journal
       parameters:
         - $ref: '#/components/parameters/DealId'
         - $ref: '#/components/parameters/IdempotencyKey'
@@ -319,7 +387,11 @@ paths:
         - name: asOf
           in: query
           required: false
-          description: Defaults to today. A deal counts when it has settled and valueDate <= asOf < maturityDate.
+          description: |
+            Defaults to the bank's accounting day today (Europe/Prague). A counted deal is in the
+            position when valueDate <= asOf < maturityDate. Up to and including today the basis is
+            ACTUAL and only SETTLED or MATURED deals count; after today it is PROJECTED and BOOKED
+            and CONFIRMED deals count too, on their contracted dates — no new deals are assumed.
           schema:
             type: string
             format: date
@@ -330,6 +402,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Positions'
+
+  /api/v1/treasury/quotes:
+    get:
+      tags: [Treasury]
+      operationId: getSimulatedQuotes
+      summary: SYNTHETIC bid/ask of the simulated counterparties for a product, currency and tenor
+      description: |
+        ADR-0315 D9, sandbox only. Each SYNTHETIC bank counterparty with a configured half-spread
+        quotes the risk engine's latest curve set (CZK → CZEONIA, EUR → ESTR; linear on zero rates,
+        flat outside the pillars) converted to ACT/360 simple percent, ± its spread. `bid` is what
+        the counterparty pays for a deposit (a placement is struck at the bid), `ask` what it charges
+        to lend (a borrowing is struck at the ask). `synthetic` is always true. With the simulated
+        market or its quotes switched off the endpoint answers 409; when no quote can be priced (no
+        curve set or curve, risk engine unreachable or refusing) 503 `QUOTE_UNAVAILABLE`.
+      parameters:
+        - name: product
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [MM_PLACEMENT, MM_BORROWING]
+        - name: currency
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [CZK, EUR]
+        - name: tenorDays
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 365
+      responses:
+        '200':
+          description: The quote board
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QuoteBoard'
+        '400':
+          description: Missing or invalid product, currency or tenorDays
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/InvalidState' }
+        '503':
+          description: QUOTE_UNAVAILABLE — no curve set or curve, or the risk engine unreachable or refusing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/nostro/statements:
     post:
@@ -371,6 +498,88 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '409':
           $ref: '#/components/responses/InvalidState'
+
+  /api/v1/treasury/nostro/statements/mt940:
+    post:
+      tags: [Nostro reconciliation]
+      operationId: uploadNostroStatementMt940
+      summary: Upload a correspondent's SWIFT MT940 statement for a configured nostro account
+      description: |
+        ADR-0315 D7: MT940 mapped onto the same statement model as camt.053, then stored and
+        reconciled identically. Reads `:20:` `:25:` `:28C:` `:60F:` `:61:` `:86:` `:62F:`; the SWIFT
+        envelope may be present. `statementId` is `:20:` + "/" + `:28C:`. A multi-page statement
+        (`:60M:`/`:62M:`), an unsupported field, a control character, invalid UTF-8 or a body over
+        1 MiB is refused. Same Idempotency-Key contract as the camt.053 upload; nothing is posted.
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+          application/x-swift-mt940:
+            schema:
+              type: string
+      responses:
+        '201':
+          description: The stored statement (or the original one on an idempotent replay)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroStatement'
+        '400':
+          description: Missing Idempotency-Key, malformed MT940, a statement that does not foot, an entry outside its period, or an unconfigured account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/InvalidState'
+
+  /api/v1/treasury/nostro/{account}/breaks:
+    get:
+      tags: [Nostro reconciliation]
+      operationId: listNostroBreaks
+      summary: Reconciliation breaks of a configured nostro account, with age in business days
+      description: |
+        ADR-0315 D7. Every item a reconciliation left unmatched — a statement line (`STATEMENT`) or
+        a ledger line on the nostro GL (`LEDGER`) — with the day it was first seen and its age in
+        business days (Monday–Friday, no holiday calendar). A break resolves the day a later
+        reconciliation matches it; recent statements are re-reconciled by an hourly sweep. `aged`
+        is true for an open break at least `alertAgeDays` old with an amount of at least
+        `alertMinAmount` in its own currency; such a break is announced once as
+        `treasury.nostro.break-aged.v1`. Oldest first. Nothing is ever posted.
+      parameters:
+        - name: account
+          in: path
+          required: true
+          description: The nostro IBAN (spaces ignored)
+          schema:
+            type: string
+        - name: includeResolved
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: The account's breaks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NostroBreakList'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Not a configured nostro account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /api/v1/treasury/nostro/statements/{id}/reconciliation:
     get:
@@ -477,16 +686,30 @@ components:
       enum: [MM_PLACEMENT, MM_BORROWING, CNB_DEPOSIT_FACILITY, CNB_LOMBARD, FX_SPOT]
     DealState:
       type: string
-      enum: [DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED]
+      enum: [DRAFT, PENDING_APPROVAL, BOOKED, CONFIRMED, SETTLED, MATURED, CANCELLED, REVERSED]
     Error:
       type: object
       required: [error]
       properties:
         error:
           type: string
-          description: FOUR_EYES_VIOLATION, LIMIT_BREACHED, ACTOR_NOT_PERMITTED, INVALID_STATE, NOT_FOUND
+          description: >-
+            FOUR_EYES_VIOLATION, LIMIT_BREACHED, PRODUCT_LIMIT_BREACHED, ACTOR_NOT_PERMITTED,
+            INVALID_STATE, NOT_FOUND
         message:
           type: [string, 'null']
+        breaches:
+          type: array
+          description: PRODUCT_LIMIT_BREACHED only — each product-limit rule the deal breaks.
+          items:
+            type: object
+            required: [rule, limit, actual]
+            properties:
+              rule:
+                type: string
+                enum: [PRODUCT_NOT_PERMITTED, CURRENCY_NOT_PERMITTED, MAX_PRINCIPAL, MAX_TENOR]
+              limit: { type: string, description: 'The declared limit, e.g. "2000000000.00 CZK" or "366"' }
+              actual: { type: string, description: "The deal's figure in the same unit" }
     DraftDealRequest:
       type: object
       required: [product, counterpartyId, principal, rate]
@@ -529,6 +752,40 @@ components:
             The data an AI agent built the draft from (quote, curve point, headroom, position), as a
             JSON object. Required with `rationale` when an AI agent drafts (ADR-0315 D10); optional
             for a human dealer. Stored and returned verbatim.
+    QuoteBoard:
+      type: object
+      required: [product, currency, tenorDays, synthetic, quotes]
+      properties:
+        product: { type: string, enum: [MM_PLACEMENT, MM_BORROWING] }
+        currency: { type: string }
+        tenorDays: { type: integer }
+        synthetic: { type: boolean, const: true, description: Always true — invented counterparties, never a dealable market price. }
+        quotes:
+          type: array
+          items:
+            $ref: '#/components/schemas/SimulatedQuote'
+    SimulatedQuote:
+      type: object
+      required: [counterpartyId, synthetic, bid, ask, dealRate, mid, spreadBp, curveSetId, curveAsOf, curveIndex, curveProvenance]
+      properties:
+        counterpartyId: { type: string }
+        synthetic: { type: boolean, const: true }
+        bid: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty pays for a deposit (floored at 0).' }
+        ask: { type: number, description: 'Annual %, ACT/360 simple; what the counterparty charges to lend.' }
+        dealRate: { type: number, description: 'The side a deal of the requested product is struck at: bid for MM_PLACEMENT, ask for MM_BORROWING.' }
+        mid: { type: number, description: The curve mid for the tenor. }
+        spreadBp: { type: integer, description: The counterparty's configured half-spread in basis points. }
+        curveSetId: { type: string, format: uuid }
+        curveAsOf: { type: string, format: date }
+        curveIndex: { type: string }
+        curveProvenance: { type: string, description: "The risk engine's label for the curve's market data (synthetic / production)." }
+    ConfirmRequest:
+      type: object
+      properties:
+        reference:
+          type: [string, 'null']
+          maxLength: 200
+          description: The counterparty's confirmation reference, recorded on the deal's timeline.
     ReasonRequest:
       type: object
       required: [reason]
@@ -552,6 +809,18 @@ components:
         actorType: { type: string, enum: [HUMAN, AI_AGENT, SERVICE, SYSTEM] }
         at: { type: string, format: date-time }
         note: { type: [string, 'null'] }
+        limitSnapshot:
+          description: >
+            The limit-check figures when `note` is a limit note (submit/approve), else null. Added
+            in 1.16.0 so clients render the figures instead of parsing `note`, which stays as is.
+          oneOf:
+            - type: 'null'
+            - type: object
+              properties:
+                limit: { type: number }
+                currency: { type: string }
+                exposureAfter: { type: number }
+                headroomAfter: { type: number }
     JournalRef:
       type: object
       properties:
@@ -657,12 +926,22 @@ components:
       type: object
       properties:
         asOf: { type: string, format: date }
+        today: { type: string, format: date, description: The accounting day (Europe/Prague) asOf was judged against }
+        basis:
+          type: string
+          enum: [ACTUAL, PROJECTED]
+          description: ACTUAL when asOf <= today (settled deals only), PROJECTED when asOf is after today
+        countedStates:
+          type: array
+          description: The deal states this answer counted
+          items: { $ref: '#/components/schemas/DealState' }
         positions:
           type: array
           items:
             type: object
             properties:
               currency: { type: string }
+              dealCount: { type: integer, description: Deals outstanding in this currency on asOf }
               placed: { type: number }
               borrowed: { type: number }
               atCnb: { type: number }
@@ -682,6 +961,35 @@ components:
         sha256: {type: string, description: SHA-256 of the uploaded bytes}
         uploadedBy: {type: string}
         uploadedAt: {type: string, format: date-time}
+    NostroBreak:
+      type: object
+      required: [breakId, side, ourSide, amount, currency, bookingDate, statementUuid, firstSeenOn, ageBusinessDays, aged]
+      properties:
+        breakId: {type: string, format: uuid}
+        side: {type: string, enum: [STATEMENT, LEDGER], description: Which side the unmatched item is on}
+        ourSide: {type: string, enum: [DEBIT, CREDIT], description: From the bank's side; a statement CRDT is a DEBIT}
+        amount: {type: number}
+        currency: {type: string}
+        bookingDate: {type: string, format: date}
+        reference: {type: [string, 'null']}
+        statementUuid: {type: string, format: uuid, description: The statement whose reconciliation first saw it}
+        statementSequence: {type: [integer, 'null']}
+        ledgerLineId: {type: [string, 'null'], format: uuid}
+        firstSeenOn: {type: string, format: date}
+        resolvedOn: {type: [string, 'null'], format: date}
+        ageBusinessDays: {type: integer, description: Business days from firstSeenOn to today (or to resolvedOn)}
+        aged: {type: boolean, description: Open and over both alert thresholds}
+        alertedAt: {type: [string, 'null'], format: date-time}
+    NostroBreakList:
+      type: object
+      required: [iban, alertAgeDays, alertMinAmount, breaks]
+      properties:
+        iban: {type: string}
+        alertAgeDays: {type: integer}
+        alertMinAmount: {type: number}
+        breaks:
+          type: array
+          items: {$ref: '#/components/schemas/NostroBreak'}
     NostroStatementEntry:
       type: object
       properties:

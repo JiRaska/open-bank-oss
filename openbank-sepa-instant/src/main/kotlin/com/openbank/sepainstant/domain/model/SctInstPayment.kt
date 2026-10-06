@@ -4,12 +4,17 @@
 
 package com.openbank.sepainstant.domain.model
 
-import java.math.BigDecimal
+import com.openbank.libs.domain.money.Money
 import java.time.OffsetDateTime
 import java.util.UUID
 
 enum class SctInstStatus {
-    PENDING, PROCESSING, SETTLED, REJECTED, TIMEOUT, RECALLED
+    PENDING,
+    PROCESSING,
+    SETTLED,
+    REJECTED,
+    TIMEOUT,
+    RECALLED,
 }
 
 data class SctInstPayment(
@@ -23,8 +28,8 @@ data class SctInstPayment(
     val creditorIban: String,
     val creditorName: String,
     val creditorBic: String?,
-    val amount: BigDecimal,
-    val currency: String = "EUR",
+    /** Always a valid kernel [Money]: built at the inbound boundary, never rounded (#11604). */
+    val amount: Money,
     val remittanceInfo: String?,
     val endToEndId: String,
     val executionTimeoutAt: OffsetDateTime?,
@@ -36,4 +41,7 @@ data class SctInstPayment(
     val submittedAt: OffsetDateTime?,
     val createdAt: OffsetDateTime,
     val updatedAt: OffsetDateTime,
-)
+) {
+    /** ISO 4217 code of [amount], the spelling every outbound contract carries. */
+    val currency: String get() = amount.currency.code
+}

@@ -13,7 +13,23 @@ info:
   # 1.55.0 -> 1.56.0: preview and offer document exposure are explicitly refused, not misrepresented.
   # 1.56.0 -> 1.57.0 (#9707): additive — GET /business/search.
   #
-  # Additive recertification review and evidence routes.
+  # 1.57.0 -> 1.58.0 (#9280, this branch): additive — customer-managed delegated account portfolios.
+  # Fourth PR in a row to take a number on this one file (#9044 1.54.0, #9119 1.55.0, #9707 1.57.0).
+  # This branch held 1.56.0, which main passed twice while it sat open. Read off live origin/main
+  # (1.57.0) in the same turn as this edit and confirmed free with
+  # `git log -S 'version: 1.58.0' -- <this file>` (no hits) — a taken version is textually identical
+  # to a free one, which is why the git merge reconciled two claims to 1.55.0 as ordinary text.
+  # 1.58.0 -> 1.62.0 (#9772): additive — GET /net-worth, the ADR-0301 D2 composition.
+  # NOT 1.59.0: that and 1.60.0/1.61.0 are claimed by open PRs #9215/#9237/#9417 against this
+  # same file. A skipped number is harmless; a collided one is not, and whoever lands second
+  # takes the next free version (ADR-0048).
+  # 1.62.0 -> 1.65.0: additive — Lístky (/loyalty, /loyalty/benefits, /loyalty/earn-sources,
+  # /loyalty/redemptions, /loyalty/grants) and member-get-member (/referrals/program,
+  # /referrals/invites GET+POST, /referrals/attributions). NOT 1.63.0/1.64.0: claimed by open PRs
+  # #9417/#9237 against this file (and 1.59.0 by #9215). The 503 LOYALTY_UNAVAILABLE on the
+  # /loyalty routes is part of the same unreleased additive bump (main is still 1.62.0).
+  # 1.65.0 -> 1.66.0 (#9215): additive — recertification review and evidence routes.
+  # 1.66.0 -> 1.67.0 (#10059): additive — 422 INITIATOR_IDENTITY_MISMATCH on the KYB initiator route.
   # 1.67.0 -> 1.68.0: additive — business onboarding questionnaire (+ prefill), declarations, case documents, agreement and
   # disclosure acceptance; /documents and /documents/{id}/content honour X-Acting-For; ceremony
   # decisions are always the human signer's.
@@ -23,7 +39,12 @@ info:
   # representatives, signing rule and accounts). SCA routes documented as the HUMAN's under
   # X-Acting-For (no shape change).
   # 1.72.0 -> 1.73.0: anonymous OTP-gated sealed disclosure download.
-  version: 1.73.0
+  # 1.73.0 -> 1.74.0 (#9430): additive — approval-group management routes and the N-of-M grant
+  # preview binding (scaReference, approval-group snapshot).
+  # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
+  # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
+  # holdings that GET /net-worth reads (ADR-0301 D1).
+  version: 1.76.1
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -58,6 +79,7 @@ tags:
   - name: Feedback
   - name: Cards
   - name: Lending
+  - name: Wealth
   - name: Delegation
   - name: External disclosures
   - name: Pockets
@@ -150,6 +172,145 @@ paths:
           description: The net-worth tree, possibly partial
         '401':
           description: Missing or invalid bearer token
+  /holdings:
+    get:
+      tags: [Wealth]
+      operationId: listDeclaredHoldings
+      summary: The caller's declared off-platform holdings
+      description: >-
+        Active and pledged holdings the caller declared (ADR-0301 D1). The owner is the token's
+        party, or the verified X-Acting-For entity. Withdrawn holdings are not listed.
+      security:
+        - customerOidc: [wealth:read]
+      responses:
+        '200':
+          description: Holdings
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '502': {description: Wealth service unavailable}
+    post:
+      tags: [Wealth]
+      operationId: declareHolding
+      summary: Declare a holding the bank does not hold
+      description: >-
+        The valuation is always recorded as CUSTOMER_DECLARED. Any source, appraiser reference or
+        owner in the body is ignored, so a customer cannot label their own figure as an appraisal.
+      security:
+        - customerOidc: [wealth:write]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/DeclareHoldingRequest'}
+      responses:
+        '201':
+          description: Declared
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '400': {description: Invalid input; the message names the first invalid field}
+        '401': {description: Missing or invalid bearer token}
+        '409': {description: 'DUPLICATE_HOLDING: same holdingType and externalReference already declared'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}:
+    parameters:
+      - name: holdingId
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Wealth]
+      operationId: getDeclaredHolding
+      summary: One of the caller's holdings
+      security:
+        - customerOidc: [wealth:read]
+      responses:
+        '200':
+          description: The holding
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller, including one owned by another party}
+        '502': {description: Wealth service unavailable}
+    delete:
+      tags: [Wealth]
+      operationId: withdrawDeclaredHolding
+      summary: Withdraw a holding from the caller's picture
+      security:
+        - customerOidc: [wealth:write]
+      responses:
+        '200':
+          description: Withdrawn
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '409': {description: 'HOLDING_LOCKED: pledged as lending collateral, or already withdrawn'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}/valuation:
+    put:
+      tags: [Wealth]
+      operationId: revalueDeclaredHolding
+      summary: Restate a holding's value
+      description: >-
+        Appends to the valuation history; the previous value is kept. The new value is recorded as
+        CUSTOMER_DECLARED even when the holding was appraised before.
+      security:
+        - customerOidc: [wealth:write]
+      parameters:
+        - name: holdingId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [valuation]
+              properties:
+                valuation: {$ref: '#/components/schemas/HoldingValuationInput'}
+      responses:
+        '200':
+          description: Revalued
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeclaredHolding'}
+        '400': {description: Invalid valuation}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '409': {description: 'HOLDING_LOCKED: the holding is withdrawn'}
+        '502': {description: Wealth service unavailable}
+  /holdings/{holdingId}/valuations:
+    get:
+      tags: [Wealth]
+      operationId: listHoldingValuations
+      summary: Every value ever asserted for the holding, newest first
+      security:
+        - customerOidc: [wealth:read]
+      parameters:
+        - name: holdingId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Valuation history
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/HoldingValuationEntry'}
+        '401': {description: Missing or invalid bearer token}
+        '404': {description: No such holding for this caller}
+        '502': {description: Wealth service unavailable}
   /products:
     get:
       tags: [Products]
@@ -2203,8 +2364,8 @@ paths:
       tags: [Payment Sessions]
       summary: Create a "nearby pay" (BLE proximity) session on the caller's own account (ADR-0095)
       description: >-
-        Entirely in-memory at the edge — no dedicated backend service. Sessions expire after
-        5 minutes and do not survive an edge restart (single-replica-only by design).
+        Held by the edge itself in its Redis — no dedicated backend service. Sessions expire
+        after 5 minutes and are shared by every edge replica.
       operationId: createPaymentSession
       security:
         - customerOidc: [payments:initiate]
@@ -3782,7 +3943,8 @@ paths:
                 resourceId: {type: string, format: uuid}
                 capabilities: {type: array, minItems: 1, uniqueItems: true, items: {type: string}}
                 approvalPolicy: {type: string, default: SOLO}
-                requiredApprovals: {type: integer}
+                requiredApprovals: {type: integer, deprecated: true, description: Server-derived for N_OF_M}
+                approvalGroupId: {type: string, format: uuid, description: Required for N_OF_M}
                 perTransactionLimit: {type: object}
                 dailyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
                 monthlyLimit: {type: object, description: 'Cumulative ceiling, counted by delegation-service (ADR-0249 D3); required with ACCOUNT_INITIATE_PAYMENT'}
@@ -3796,8 +3958,20 @@ paths:
                   description: Review-only cadence; it never changes access rights.
                 validTo: {type: string, format: date-time}
       responses:
-        '200': {description: Draft is currently eligible to proceed to SCA}
-        '400': {description: Invalid draft, including non-null exposure (EXPOSURE_UNSUPPORTED)}
+        '200':
+          description: Draft is currently eligible to proceed to SCA
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [valid, scaReference]
+                properties:
+                  valid: {type: boolean, const: true}
+                  scaReference: {type: string, description: Pass as dynamicLinkingData.reference for DELEGATION_GRANT SCA}
+                  approvalGroupId: {type: string, format: uuid, nullable: true}
+                  approvalGroupRevision: {type: integer, format: int64, nullable: true}
+                  requiredApprovals: {type: integer, minimum: 2, nullable: true}
+        '400': {description: Invalid draft, a constraint the customer channel cannot enforce, or non-null exposure (EXPOSURE_UNSUPPORTED)}
         '403': {description: grantorPartyId does not match the authenticated customer}
         '422': {description: Party eligibility or resource ownership could not be established}
   /delegations/recertifications:
@@ -3843,6 +4017,78 @@ paths:
               schema: {$ref: '#/components/schemas/DelegationRecertification'}
         '404': {description: Task not found}
         '409': {description: Task already confirmed or the delegation lifecycle changed}
+
+  /delegations/approval-groups/sca-reference:
+    post:
+      tags: [Delegation]
+      summary: Calculate the canonical reference that a management SCA must sign
+      operationId: calculateApprovalGroupScaReference
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupScaReferenceRequest' }
+      responses:
+        '200': {description: Pass reference as dynamicLinkingData.reference when initiating SCA}
+        '400': {description: Invalid create/revise shape}
+
+  /delegations/approval-groups:
+    get:
+      tags: [Delegation]
+      summary: List approval groups for the currently selected profile
+      operationId: listApprovalGroups
+      security: [{ customerOidc: [delegations:read] }]
+      responses:
+        '200': {description: Versioned groups, including inactive history}
+    post:
+      tags: [Delegation]
+      summary: Create an SCA-bound approval group
+      operationId: createApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '201': {description: Approval group created}
+        '400': {description: Invalid roster or SCA}
+
+  /delegations/approval-groups/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: {type: string, format: uuid}
+    get:
+      tags: [Delegation]
+      summary: Get an approval group owned by the selected profile
+      operationId: getApprovalGroup
+      security: [{ customerOidc: [delegations:read] }]
+      responses:
+        '200': {description: Approval group}
+        '404': {description: Missing or belongs to another profile}
+    put:
+      tags: [Delegation]
+      summary: Replace the roster under optimistic revision and fresh SCA
+      operationId: reviseApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApprovalGroupWriteRequest' }
+      responses:
+        '200': {description: Approval group revised}
+        '409': {description: expectedRevision is stale}
+    delete:
+      tags: [Delegation]
+      summary: Deactivate the group for future operation snapshots
+      operationId: deactivateApprovalGroup
+      security: [{ customerOidc: [delegations:write] }]
+      responses:
+        '200': {description: Approval group deactivated}
 
   /profiles:
     get:
@@ -4789,6 +5035,31 @@ paths:
         '200': {description: Grant renounced}
         '403': {description: Caller is not the grantee}
 
+  /capabilities:
+    get:
+      tags: [Capabilities]
+      summary: Which app capabilities this environment offers
+      description: >-
+        ADR-0310 D5. Not marketing and not party-specific: identical for every authenticated caller
+        and computed from edge configuration only, never from a live health probe, so the app moves a
+        feature from demo to live without a release. A capability is live only when its backend is
+        wired AND an operator switched it on. Clients MUST ignore capability ids they do not know and
+        treat any state other than `live` as unavailable. Cacheable (Cache-Control: private,
+        max-age=300).
+      operationId: getCapabilities
+      security:
+        - customerOidc: []
+      responses:
+        '200':
+          description: Every capability this edge knows, with its state
+          headers:
+            Cache-Control:
+              schema: {type: string, example: 'private, max-age=300'}
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CapabilitiesResponse'}
+        '401': {description: Unauthenticated}
+
   /loyalty:
     get:
       tags: [Loyalty]
@@ -5063,6 +5334,36 @@ components:
       openIdConnectUrl: https://kc.open-bank.tech/realms/openbank-customers/.well-known/openid-configuration
 
   schemas:
+    CapabilityId:
+      type: string
+      description: >-
+        Closed set of capability ids (ADR-0310 D5). Adding an id is a MINOR change; a client ignores
+        an id it does not know.
+      enum: [loyalty, referrals, offers, accept.settlement, allmoney.linked, business.tax, approvals.multisig, rewards.points]
+    Capability:
+      type: object
+      required: [id, state]
+      properties:
+        id: {$ref: '#/components/schemas/CapabilityId'}
+        state:
+          type: string
+          enum: [live, unavailable]
+        reason:
+          type: string
+          description: >-
+            Present only when state is unavailable. NOT_BUILT — no backend exists; NOT_DEPLOYED — the
+            backend is not wired to this edge in this environment; DISABLED — an operator switched it off.
+          enum: [NOT_BUILT, NOT_DEPLOYED, DISABLED]
+    CapabilitiesResponse:
+      type: object
+      required: [schemaVersion, capabilities]
+      properties:
+        schemaVersion:
+          type: integer
+          enum: [1]
+        capabilities:
+          type: array
+          items: {$ref: '#/components/schemas/Capability'}
     ExternalDisclosureOtpRequest:
       type: object
       additionalProperties: false
@@ -5558,6 +5859,38 @@ components:
         createdAt: {type: string, format: date-time}
         updatedAt: {type: string, format: date-time}
 
+    ApprovalGroupScaReferenceRequest:
+      type: object
+      required: [name, members, threshold]
+      properties:
+        groupId: {type: string, format: uuid, description: Present only for revision}
+        expectedRevision: {type: integer, format: int64, minimum: 1, description: Required with groupId}
+        name: {type: string, minLength: 1, maxLength: 120}
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        threshold: {type: integer, minimum: 1}
+    ApprovalGroupWriteRequest:
+      type: object
+      required: [name, members, threshold, scaSessionId]
+      properties:
+        name: {type: string, minLength: 1, maxLength: 120}
+        members:
+          type: array
+          minItems: 1
+          maxItems: 50
+          uniqueItems: true
+          items: {type: string, format: uuid}
+        threshold: {type: integer, minimum: 1}
+        scaSessionId: {type: string, format: uuid}
+        expectedRevision:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Required on PUT to prevent overwriting a newer roster.
     # --- Read-endpoint response schemas (issue #1773) ---
     # customer-edge is a raw BFF proxy: each read endpoint returns the upstream service's
     # response body verbatim, so these schemas mirror the upstream DTOs inline (no cross-file
@@ -7049,3 +7382,52 @@ components:
             - CARD_NETWORK_NOT_ALLOWED
             - SCA_REQUIRED
             - SCA_REJECTED
+    HoldingType:
+      type: string
+      enum: [REAL_ESTATE, COLLECTIBLE, EXTERNAL_SECURITIES, EXTERNAL_COMPANY_STAKE, VEHICLE, EXTERNAL_DEPOSIT, PRIVATE_CLAIM, MORTGAGE, CONSUMER_CREDIT, PRIVATE_DEBT, OTHER_LIABILITY]
+    HoldingValuationInput:
+      type: object
+      required: [amount, currency, valuedAt]
+      properties:
+        amount: {type: string, description: Non-negative decimal, example: '6500000'}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        valuedAt: {type: string, format: date, description: When the value was established; not in the future}
+    DeclareHoldingRequest:
+      type: object
+      required: [holdingType, label, valuation]
+      properties:
+        holdingType: {$ref: '#/components/schemas/HoldingType'}
+        label: {type: string, minLength: 1, maxLength: 200}
+        valuation: {$ref: '#/components/schemas/HoldingValuationInput'}
+        ownershipShare: {type: string, description: 'Greater than 0 and at most 1; default 1', example: '0.5'}
+        externalReference: {type: string, maxLength: 128}
+    DeclaredHolding:
+      type: object
+      properties:
+        holdingId: {type: string, format: uuid}
+        holdingType: {$ref: '#/components/schemas/HoldingType'}
+        isLiability: {type: boolean}
+        label: {type: string}
+        amount: {type: string}
+        currency: {type: string}
+        valuedAt: {type: string, format: date}
+        valuationSource:
+          type: string
+          enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]
+          description: CUSTOMER_DECLARED means the customer typed the number and nobody checked it
+        valuationAgeDays: {type: integer, format: int64}
+        ownershipShare: {type: string}
+        attributableAmount: {type: string}
+        externalReference: {type: string, nullable: true}
+        status: {type: string, enum: [ACTIVE, PLEDGED, WITHDRAWN]}
+        pledged: {type: boolean}
+        createdAt: {type: string, format: date-time}
+        updatedAt: {type: string, format: date-time}
+    HoldingValuationEntry:
+      type: object
+      properties:
+        amount: {type: string}
+        currency: {type: string}
+        valuedAt: {type: string, format: date}
+        valuationSource: {type: string, enum: [CUSTOMER_DECLARED, EXPERT_APPRAISAL, MARKET_REFERENCE]}
+        recordedAt: {type: string, format: date-time, description: When the bank learned the value}

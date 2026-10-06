@@ -99,6 +99,17 @@ not change any existing request's outcome until explicitly flipped.
 
 ## 6. Change log
 
+- **2026-09-30** — Screening gate turned into an ALLOW-list (#8345 follow-up). The gate blocked
+  only `HIT` and `REVIEW`; sanctions-service has never returned `REVIEW` (its vocabulary is
+  `CLEAR | HIT | POTENTIAL_HIT | WHITELISTED | ESCALATED`), so a `POTENTIAL_HIT` (a 0.65+ fuzzy
+  match), an `ESCALATED` case and a response with no `status` all opened the account, and the
+  adapter mapped a missing status to `CLEAR`. **Risk class = integrity of the ADR-0032 §C gate**:
+  a deny-list against a vocabulary the other side owns fails open on every value it does not
+  name. Now `SanctionsScreenResult.permitsOpening` permits only `CLEAR` and `WHITELISTED`; a
+  missing status is `UNKNOWN` and blocks. Mitigated by `AccountServiceTest` (parameterised over
+  the blocked statuses, red against the old gate), `SanctionsScreeningAdapterTest` and the new
+  consumer pact `AccountSanctionsScreenPactConsumerTest`, which pins `CLEAR` and `HIT` as exact
+  values and is replayed by sanctions-service. No endpoint, edge or privilege changed.
 - **2026-09-28** — **pricing namespace admitted to product-catalog `:8104` (JiRaska/openbank-pricing#1).** The
   `pricing` namespace was adopted under GitOps and its NetworkPolicies are now generated from declared edges,
   which adds `pricing` to the product-catalog ingress allow-list in `accounts`. **Not a new flow:**
@@ -668,6 +679,19 @@ fail-closed rejection of non-SOLO grants. Risk class: authorization integrity. R
 consumer-first (account-service migration and consumer before delegation-service producer);
 rollback removes the producer fields first and may retain the additive projection columns.
 
+## Immutable approval-group revisions
+
+The delegation event consumer stores each complete approval-group roster under `(groupId, revision)`;
+an identical replay is a no-op and different content for the same identity fails to the configured
+DLQ. Operations will reference one revision and copy its eligible actors into their own immutable
+snapshot, so later membership changes cannot rewrite an in-flight decision. This consumer does not
+activate N-of-M by itself. Revisions arrive on a dedicated compacted, unbounded-retention topic
+keyed by `groupId:revision`; its separate consumer group prevents a large bootstrap from delaying
+authority-removing grant lifecycle events. Delegation-service's append-only database history remains
+the reconciliation source if Kafka state is lost. Missing history fails closed. Rollout is the
+producer topic and history first, then this projection, then operation enforcement;
+rollback disables enforcement first and leaves both additive history tables intact for evidence.
+
 ## SCA-derived representative identity
 
 An entity-owned savings proposal is still addressed under the entity subject, but the human
@@ -678,6 +702,37 @@ exact, active `SOLE` mandate with `requiredSignatures=1`. `JOINT`, unknown, inac
 incomplete facts fail closed before the one-shot challenge is consumed. This preserves the human
 evidence in `WithdrawalProposal.decidedBy` and `ApprovalStore` without falsely claiming that one
 signature satisfies a statutory quorum.
+
+## Immutable withdrawal-approval snapshots
+
+Each delegated withdrawal proposal copies the grant id, exact approval-group revision, threshold,
+and eligible party ids into account-service storage. Later group edits therefore cannot widen an
+already-open operation, and a changed or inactive group forces grant re-issuance before a new
+operation is admitted. The proposing delegate is removed from the snapshot; admission fails closed
+when the remaining roster cannot meet the threshold.
+
+Quorum truth is the PostgreSQL decision ledger, not the Redis inbox and not a caller-supplied count.
+The repository locks the proposal row, admits only a party in the immutable roster, and relies on
+unique `(proposal_id, party_id)` and globally unique `sca_session_id` constraints. A rejection is
+terminal; approvals keep the proposal PENDING until the configured number of distinct actors is
+present. The final state transition and `SavingsWithdrawalApproved` outbox insert share the same
+database transaction, preventing two concurrent final approvers from emitting twice.
+
+SCA consumption is a separate service transaction, so every proposal response publishes distinct
+approve/reject references. The device signs the chosen reference together with the proposal amount
+and currency; account-service restates and compares all three at consume time. If consume committed
+but the account transaction was unavailable, a retry may recover an already-consumed challenge only
+after that exact signed tuple, actor, purpose and immutable proposal match. The database decision
+ledger then makes recovery idempotent and prevents a duplicate vote or executable event.
+
+The operation-inbox read model exposes aggregate progress, never the immutable roster itself. An
+account owner may see all proposals on the account, a maker only proposals they created, and an
+approval-group member only proposals whose captured roster includes them. Unrelated callers receive
+an empty set rather than an existence oracle. One batch decision query supplies
+`approvalsReceived`, `myDecision` and `canDecide`, avoiding per-row calls as corporate inboxes grow.
+Migration V32 backfills the account owner into every pre-existing PENDING proposal's roster; without
+that expand step, deploying the new ledger would strand legitimate SOLO proposals created by the
+old writer.
 
 Risk class: elevation of privilege and non-repudiation. Mandate events share the existing
 `party-events-in` consumer so Kafka cannot load-balance lifecycle and mandate records between two
@@ -860,3 +915,49 @@ decision use first; the additive projection table may remain until its consumer 
   would leak that distinction onto the wire. **Risk class:** none — response-plumbing
   de-duplication only; no endpoint, authorization or booking logic changes. Rollback: restore the
   deleted mapper classes and revert the exception base classes.
+
+- **2026-09-29** — **N-of-M withdrawal approvals and group-change refusal (#9430).** Account-service
+  projects immutable approval-group revisions (V31) and snapshots the grant's pinned revision,
+  threshold and eligible approvers onto each withdrawal proposal (V32). N-of-M grants only exist when
+  delegation-service's `openbank.delegation.n-of-m-enabled` flag is on (default false); with it off no
+  N_OF_M grant reaches this projection and every proposal keeps the single-owner SOLO path, whose
+  exact SOLE-mandate check for business owners is unchanged. When a grant's group has since been
+  deactivated or revised (revision or threshold differs from the grant's pin), a new proposal is
+  refused with "approval group changed; the grant must be reissued" — a group edit never silently
+  re-scopes an issued grant or an open proposal. Risk class: elevation of privilege / tampering.
+  Decision SCA linking is split by policy. An N_OF_M proposal is STRICT: the decision challenge
+  must carry `SavingsWithdrawalScaReference.of(proposalId, approve)` plus the amount and currency,
+  or an approve could be counted from a challenge the device signed as a reject. A SOLO proposal
+  keeps main's behaviour: a challenge carrying no linking is accepted, and any field it does carry
+  (reference, amount, currency) must match exactly and is restated on consume
+  (`DecisionScaBindingTest`).
+  Rollback: disable the delegation flag first; V31/V32 are additive.
+- **2026-10-01** — **Idempotency keys scoped per service and caller.** The create endpoint now
+  claims its `Idempotency-Key` through `IdempotencyScope("account-service", <authenticated principal>)`, so
+  the Redis record lives under `idempotency:v2:account-service:<sha256(principal)>:<key>`: the same key sent
+  by another principal, or reaching another service on a shared Redis, is a different key and never
+  replays this caller's stored response. The key is validated (1-128 chars of `[A-Za-z0-9._:-]`,
+  otherwise 400); a record without a fingerprint or with an undecodable status is never replayed;
+  a response above `openbank.idempotency.max-response-bytes` is not stored and a retry answers 409.
+  During the deploy window a same-fingerprint request still in flight under the previous unscoped
+  key answers 409 IN_PROGRESS, and a completed one answers 409 rather than replaying it. No new
+  endpoint, caller, privilege or event. Rollback: revert (records under the scoped keys expire
+  within the 24 h record TTL).
+
+## 2026-10-04 — Staged Envoy Gateway public edge (ADR-0324 Phase 4)
+
+`/api/v1/accounts` remains served through `accounts-api` on ingress-nginx while the new
+HTTPRoute is staged. The generated `account-service-ingress-allow-list` additionally admits
+`envoy-gateway-system` on TCP 8100; the nginx peer stays in place. This adds an internal
+network ingress peer now, and a public proxy path only after the shared Gateway listener,
+its connection policy and the DNS cutover are verified. Account-service still performs its
+own OIDC and OPA checks; neither the caller principal nor an account mutation grant changes.
+
+**D1 residual risk at cutover:** nginx's `limit-connections: 10` capped concurrent
+connections per client IP. Envoy Gateway has no equivalent. The staged route retains a
+per-client request rate of 20/s and adds a per-backend circuit breaker; the listener-wide
+connection limit belongs to the separate listener change. One slow client can consume more
+than ten connections and compete with other account clients for that shared limit. Keep DNS
+on nginx until the listener policy and 401/429 behavior have been checked on the Gateway
+address. Rollback is the coordinated DNS switch back to nginx; its Ingress and network
+allowance remain until Phase 5.

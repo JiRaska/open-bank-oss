@@ -214,19 +214,27 @@ class MergeSweepApprovalBindingIT {
             .isNotEqualTo(PENDING_APPROVAL)
     }
 
+    /**
+     * One sweep is one fixed payload. The approval binds to the whole request (accounts, parties,
+     * amount, date), not only to its idempotency key, so step 4 must repeat step 1's body exactly;
+     * fresh random ids per call would describe a different sweep, which is correctly re-paused.
+     */
     private fun sweepPayload(idempotencyKey: String, mergeReference: String) = """
         {
           "idempotencyKey": "$idempotencyKey",
-          "sourceAccountId": "${UUID.randomUUID()}",
-          "targetAccountId": "${UUID.randomUUID()}",
-          "sourcePartyId": "${UUID.randomUUID()}",
-          "survivingPartyId": "${UUID.randomUUID()}",
+          "sourceAccountId": "${idFor(idempotencyKey, "source-account")}",
+          "targetAccountId": "${idFor(idempotencyKey, "target-account")}",
+          "sourcePartyId": "${idFor(idempotencyKey, "source-party")}",
+          "survivingPartyId": "${idFor(idempotencyKey, "surviving-party")}",
           "amount": "1000.00",
           "currencyCode": "CZK",
-          "valueDate": "${LocalDate.now()}",
+          "valueDate": "$VALUE_DATE",
           "mergeReference": "$mergeReference"
         }
     """.trimIndent()
+
+    private fun idFor(sweep: String, role: String): UUID =
+        UUID.nameUUIDFromBytes("$sweep/$role".toByteArray(Charsets.UTF_8))
 
     /** Posts a sweep, optionally replaying an approval id. The status IS the observation. */
     private fun postSweep(payload: String, approvalId: String? = null) = RestAssured.given()
@@ -243,6 +251,9 @@ class MergeSweepApprovalBindingIT {
         private const val KEY_A = "sweep-a-11111111-1111-1111-1111-111111111111"
         private const val KEY_B = "sweep-b-22222222-2222-2222-2222-222222222222"
         private const val PENDING_APPROVAL = 202
+
+        /** Fixed once per run, so a replay of the same sweep sends the same value date. */
+        private val VALUE_DATE: LocalDate = LocalDate.now()
 
         /** The only action this stub PDP gates — mirrors `rules.yaml four_eyes.verbs: sweep`. */
         private const val FOUR_EYES_ACTION = "transaction.sweep"

@@ -73,6 +73,11 @@ quarkus:
       # Local default only. The in-cluster URL (ledger's mTLS listener, 8443) is declared in the
       # gitops Deployment env where gen-network-policies.py can see the edge.
       url: ${LEDGER_SERVICE_URL:http://localhost:8101}
+    # ADR-0315 D9: the risk engine's curve sets for the simulated quotes (read-only, m2m identity).
+    # Local default only; the in-cluster URL (the engine's mTLS listener, 8443) is declared in the
+    # gitops Deployment env where gen-network-policies.py can see the edge.
+    risk-engine:
+      url: ${RISK_ENGINE_URL:http://localhost:8159}
 
   smallrye-reactive-messaging:
     kafka:
@@ -132,16 +137,77 @@ openbank:
     # treasury_outbox: no error, attempt_count stays 0, the audit trail stays empty.
     dispatch-enabled: true
   treasury:
+    confirmation:
+      # ADR-0315 D2: a deal settles only once CONFIRMED (counterparty confirmation received). The
+      # simulated market confirms every BOOKED deal first, so the sandbox lifecycle is unchanged.
+      # false = settle straight from BOOKED, the pre-CONFIRMED behaviour, for a deployment with no
+      # confirmation step. Deals already BOOKED are NOT migrated: with true they wait for a confirm.
+      required: ${OPENBANK_TREASURY_CONFIRMATION_REQUIRED:true}
     simulated-market:
       # ADR-0315 D9: SYNTHETIC counterparties that settle and mature booked deals in the sandbox.
       # On by default because the sandbox is the only environment; an environment with real
       # market connectivity sets OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED=false.
       enabled: ${OPENBANK_TREASURY_SIMULATED_MARKET_ENABLED:true}
       interval: 60s
+      quotes:
+        # ADR-0315 D9: the simulated counterparties quote the risk engine's latest curve set (CZK
+        # CZEONIA, EUR ESTR) ± a half-spread, read as treasury's own identity (risk_rest_ext.rego
+        # grants risk.curve-set.read to service-account-openbank-treasury only). On, a simulated
+        # counterparty confirms a quoted MM deal only when it was struck at its quote or better;
+        # off, it confirms every BOOKED deal (the pre-quote behaviour) and GET /quotes is 409.
+        # Off by default until the grant, the network edge and the TLS bucket are verified live.
+        enabled: ${OPENBANK_TREASURY_SIMULATED_QUOTES_ENABLED:false}
+        # Half-spread in basis points around the curve mid, per SYNTHETIC counterparty. A
+        # counterparty missing here does not quote; a non-synthetic one never does.
+        spread-bp:
+          SIMBK-A: 5
+          SIMBK-B: 10
+          SIMBK-C: 20
+    product-limits:
+      # ADR-0315 D4 product limits, declared as code: per product, the largest principal per deal by
+      # currency (a currency not listed may not be dealt in that product) and the longest tenor in
+      # days. Enforced at submit AND re-checked at approval; a breach is 422 PRODUCT_LIMIT_BREACHED
+      # and is NOT overridable — dealing outside a mandate means changing it here, under review.
+      # A product missing from this map is not permitted at all (fail-closed). Sandbox-sized: each
+      # cap sits at or above the largest synthetic counterparty line, so the counterparty limit
+      # stays the binding constraint in the sandbox.
+      MM_PLACEMENT:
+        max-principal:
+          CZK: 2000000000.00
+          EUR: 50000000.00
+        max-tenor-days: 366
+      MM_BORROWING:
+        max-principal:
+          CZK: 2000000000.00
+          EUR: 50000000.00
+        max-tenor-days: 366
+      CNB_DEPOSIT_FACILITY:
+        max-principal:
+          CZK: 100000000000.00
+        # Overnight to the next business day: 7 covers the longest Czech holiday bridge.
+        max-tenor-days: 7
+      CNB_LOMBARD:
+        max-principal:
+          CZK: 10000000000.00
+        max-tenor-days: 7
+      FX_SPOT:
+        # The foreign leg; the CZK equivalent is bounded by the counterparty's CZK limit.
+        max-principal:
+          EUR: 50000000.00
     nostro:
       # Configure correspondent IBAN -> treasury GL code in deployment-specific configuration.
       # An unconfigured account is refused; no sample account is active in production.
       accounts: {}
+      # ADR-0315 D7: an OPEN reconciliation break alerts (outbox treasury.nostro.break-aged.v1, the
+      # openbank_treasury_nostro_breaks_aged gauge) once it is this many BUSINESS days old AND at
+      # least this amount in its own currency (0 = any amount).
+      break-alert-age-days: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_AGE_DAYS:3}
+      break-alert-min-amount: ${OPENBANK_TREASURY_NOSTRO_BREAK_ALERT_MIN_AMOUNT:0}
+    nostro-breaks:
+      # Hourly sweep: re-reconcile statements of the last 31 days (a late ledger booking resolves
+      # its break), then age every open break and alert once on those over the threshold.
+      enabled: ${OPENBANK_TREASURY_NOSTRO_BREAKS_ENABLED:true}
+      interval: 1h
     accrual:
       # ADR-0315 D5: daily accrual of interest on SETTLED deals into the accrued-interest accounts.
       # Hourly and idempotent per day, so a missed pass is caught up by the next one.
@@ -189,9 +255,24 @@ authz:
           pem:
             certs: /mnt/ledger-tls/ca.crt
         protocols: TLSv1.3
+      # The risk engine's 8443 listener is private-CA mTLS with client auth REQUIRED too. Same
+      # treasury-internal-tls client certificate and the same openbank-ca trust, its own bucket so
+      # each edge names what it trusts.
+      risk-authority:
+        key-store:
+          pem:
+            client:
+              cert: /mnt/ledger-tls/tls.crt
+              key: /mnt/ledger-tls/tls.key
+        trust-store:
+          pem:
+            certs: /mnt/ledger-tls/ca.crt
+        protocols: TLSv1.3
     rest-client:
       ledger-service:
         tls-configuration-name: ledger-authority
+      risk-engine:
+        tls-configuration-name: risk-authority
 
 "%dev":
   quarkus:

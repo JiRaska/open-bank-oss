@@ -84,8 +84,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — bounded context, not yet modelled",
     "openbank-ap2-service":
         "#9167 — bounded context, not yet modelled",
-    "openbank-audit-service":
-        "#9167 — bounded context, not yet modelled",
     "openbank-authz-policy-auditor":
         "#9167 — agent, not yet modelled",
     "openbank-campaign-service":
@@ -94,8 +92,6 @@ DEPLOYED_BASELINE: dict[str, str] = {
         "#9167 — agent, not yet modelled",
     "openbank-clearing-simulator":
         "#9167 — bounded context, not yet modelled",
-    "openbank-communication-service":
-        "#9167 — a model exists but carries no STRIDE framing — prose that satisfies the claims gate and not this one",
     "openbank-control-liveness-sentinel":
         "#9167 — agent, not yet modelled",
     "openbank-developer-portal":

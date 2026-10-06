@@ -194,6 +194,9 @@ spec:
               kubernetes.io/metadata.name: treasury
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: vault
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: wealth
         - namespaceSelector:
             matchLabels:
@@ -219,6 +222,13 @@ spec:
         - namespaceSelector:
             matchLabels:
               kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8080
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: envoy-gateway-system
       ports:
         - protocol: TCP
           port: 8080

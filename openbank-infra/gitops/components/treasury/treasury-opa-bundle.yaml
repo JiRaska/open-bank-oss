@@ -9,7 +9,7 @@ metadata:
     app.kubernetes.io/name: treasury-service
     app.kubernetes.io/part-of: treasury
   annotations:
-    openbank.tech/policy-checksum: "11b1a39ad9b93acb"
+    openbank.tech/policy-checksum: "097e088575e52715"
 data:
   rest.rego: |
     # SPDX-License-Identifier: Apache-2.0
@@ -384,7 +384,7 @@ data:
     # caller's authoritative partyId from the JWT, so a client-supplied id never reaches
     # audit-service.
     #
-    # Deliberately a DISTINCT action from `audit.read`, not the `audit.` family: `audit.read` is the
+    # Deliberately a DISTINCT action from `audit.trail.inspect`, not the `audit.` family: that is the
     # auditor/compliance surface over the whole trail (GET /entries/{aggregateId},
     # /entries/by-actor/{actorId}) and granting it to the edge principal would put regulated evidence
     # behind a service account. `audit.customerRead` reaches only the metadata projection.
@@ -595,12 +595,14 @@ data:
     # Mounted alongside rest.rego in the same OPA bundle — OPA merges same-package rules.
     #
     # Actions gated (TreasuryResource):
-    #   treasury.deal.read, treasury.counterparty.read, treasury.position.read
+    #   treasury.deal.read, treasury.counterparty.read, treasury.position.read, treasury.quote.read
     #       — treasury dealers, approvers and admins (operators/admins also reach every *.read through
     #         the base rest.rego `operator-read-any` rule; this file cannot veto that)
     #   treasury.deal.draft, treasury.deal.submit — ROLE_TREASURY_DEALER
     #   treasury.deal.cancel                      — ROLE_TREASURY_DEALER or ROLE_TREASURY_APPROVER
-    #   treasury.deal.approve, .reject, .settle, .mature, .reverse — ROLE_TREASURY_APPROVER
+    #   treasury.deal.approve, .reject, .confirm, .settle, .mature, .reverse — ROLE_TREASURY_APPROVER
+    #       (.confirm = counterparty confirmation received, ADR-0315 D2: a back-office step, so the
+    #       approver role, never the dealer; the domain also refuses the deal's creator and submitter)
     #   treasury.deal.override-limit              — ROLE_TREASURY_SENIOR_APPROVER only (ADR-0315 D4)
     #   treasury.nostro.read                      — treasury dealers, approvers and admins (#10896)
     #   treasury.nostro.upload                    — ROLE_TREASURY_APPROVER (a statement upload changes no
@@ -616,8 +618,9 @@ data:
     # to a machine by mistake would open booking to it.
     #
     # AI_AGENT principals get NOTHING from this file, deliberately. ADR-0315 D10's agent grant lives in
-    # ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the three reads
-    # + treasury.deal.draft; tools.deny: every other treasury.deal.* action and treasury.nostro.*) —
+    # ONE place — the `treasury-dealing-assistant` charter in agents.yaml (tools.allow: the four reads
+    # + treasury.deal.draft; tools.deny: every other treasury.deal.* action — confirm included — and
+    # treasury.nostro.*) —
     # and reaches this bundle through base rest.rego's `agent-charter-allows`, which hands the REST
     # action to agents.allow (charter allow AND not charter deny AND not hard-denied). A second grant
     # here would be a copy that drifts. treasury_rest_ext_test.rego holds this file to granting an agent
@@ -644,7 +647,14 @@ data:
     	treasury_staff
     	some role in {"ROLE_TREASURY_DEALER", "ROLE_TREASURY_APPROVER", "ROLE_TREASURY_SENIOR_APPROVER", "ROLE_ADMIN"}
     	role in input.principal.roles
-    	input.action in {"treasury.deal.read", "treasury.counterparty.read", "treasury.position.read", "treasury.nostro.read"}
+    	input.action in {
+    		"treasury.deal.read",
+    		"treasury.counterparty.read",
+    		"treasury.position.read",
+    		"treasury.nostro.read",
+    		# ADR-0315 D9: the simulated counterparties' SYNTHETIC quotes (GET /quotes).
+    		"treasury.quote.read",
+    	}
     }
 
     allowed_reasons contains "treasury-dealer-write" if {
@@ -665,6 +675,7 @@ data:
     	input.action in {
     		"treasury.deal.approve",
     		"treasury.deal.reject",
+    		"treasury.deal.confirm",
     		"treasury.deal.settle",
     		"treasury.deal.mature",
     		"treasury.deal.reverse",
@@ -1029,12 +1040,14 @@ data:
         - treasury.deal.read
         - treasury.counterparty.read
         - treasury.position.read
+        - treasury.quote.read
         - treasury.deal.draft
         deny:
         - treasury.deal.submit
         - treasury.deal.approve
         - treasury.deal.reject
         - treasury.deal.cancel
+        - treasury.deal.confirm
         - treasury.deal.settle
         - treasury.deal.mature
         - treasury.deal.reverse
@@ -1405,6 +1418,17 @@ data:
                                                 # without the cardholder's SCA today — add a verb here when one ships.
                                                 # Runs AUTHZ_ENFORCE=false (advisory) — joins the #3679 cohort.
       - openbank-treasury-service              # ADR-0315 (#10618): the bank's own money-market deals (MM placement /
+                                                # borrowing, ČNB deposit facility). Every settle/mature/reverse posts
+                                                # a journal through ledger's POST /api/v1/journals. Threat model:
+                                                # docs/threat-models/openbank-treasury-service.md.
+                                                # four-eyes assessed: treasury.deal.approve (booking) is four-eyes
+                                                # IN THE DOMAIN (approver != creator/submitter -> 422, DB CHECK
+                                                # deals_four_eyes) and human-only (AI_AGENT / service-account ->
+                                                # 403), so it is NOT wired via four_eyes.actions: that mechanism
+                                                # needs an X-Approval-Id round-trip the deal's own
+                                                # PENDING_APPROVAL state already is. Writes are human-only in
+                                                # treasury_rest_ext.rego.
+      - openbank-card-processing-service       # ADR-0283 phase 1 (#8809): the card money path — holds approved spend,
 
     money_path_action_prefixes:
       sepa-payment: [sepaPayment]
@@ -1482,6 +1506,7 @@ data:
       # M2M identity via a prefix match, and opsmessage.* was kept out of that family for exactly this
       # reason (ADR-0176 D4).
       actions:
+        - settlement.create                # Human operator origination; no verified M2M caller (#10041).
         - catalog.publish                  # ADR-0257: human checker publishes immutable commercial terms;
                                              # core also enforces maker != checker for standalone installs.
         - commstyle.publish                 # ADR-0285 D3: publishing a Communication Studio style or
@@ -1611,7 +1636,6 @@ data:
             - account.read
             - anacredit.list
             - anacredit.read
-            - audit.read
             - card.list
             - card.read
             - device.list
@@ -1744,7 +1768,7 @@ data:
           grant:
             - account.read
             - anacredit.read
-            - audit.read
+            - audit.trail.inspect
             - card.read
             - dispatch.read
             - fx.read
@@ -1788,7 +1812,7 @@ data:
             - kyb.ubo.read                     # ADR-0284 D5: beneficial owners for the review queue
         ROLE_AUDITOR:
           grant:
-            - audit.read
+            - audit.trail.inspect
             - audit.verify
         ROLE_SUPERVISOR:
           grant:
@@ -1898,7 +1922,7 @@ data:
       # adding it here before that is a money-path outage, not a test failure.
       deferred:
         operator-transaction-write: "6 verified callers of transaction.create via the shared client; no identity-scoped rule exists"
-        operator-settlement-write: "settlement.create is resourceless with no alternative rule"
+        operator-settlement-write: "human-only, request-bound four-eyes origination; no verified M2M caller or identity-scoped M2M rule"
         operator-swift-write: "no identity-scoped rule; callers unverified"
         operator-sepa-instant-write: "no identity-scoped rule; callers unverified"
         operator-billing-write: "no identity-scoped rule; callers unverified"

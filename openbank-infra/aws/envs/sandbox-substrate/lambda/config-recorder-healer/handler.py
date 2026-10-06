@@ -1,17 +1,7 @@
-"""Self-heal the AWS Config recorder if it is ever left in a stopped state.
+"""Restore the AWS Config recorder when recording is enabled and it is stopped.
 
-Triggered by an EventBridge rule matching the CloudTrail `StopConfigurationRecorder`
-API call. A `tofu apply` that recreates `aws_config_configuration_recorder.audit`
-(e.g. a provider bump, or an apply interrupted mid-recreate) stops the old recorder
-as part of the destroy step; if the apply is cancelled or fails before the new
-recorder's start step runs, the recorder is left off with zero audit coverage
-until someone notices (a 15-hour gap on 2026-07-07, repeated 2026-07-08 during
-active CI iteration on the substrate apply pipeline — each recurrence also cost
-$60-80/day once restarted mid-CONTINUOUS-window before the DAILY mode re-applied).
-
-This does not replace fixing the underlying apply reliability — it is a backstop
-so a stopped recorder is a same-minute self-correction, not a multi-hour human-
-detected compliance and cost gap.
+Triggered by EventBridge for recorder stop events and periodically as a backstop.
+Recording can be disabled explicitly for environments whose desired state requires it.
 """
 
 import os
@@ -20,9 +10,17 @@ import boto3
 
 RECORDER_NAME = os.environ["RECORDER_NAME"]
 RECORDING_FREQUENCY = os.environ.get("RECORDING_FREQUENCY", "DAILY")
+_RECORDING_ENABLED_VALUE = os.environ.get("RECORDING_ENABLED", "true")
+if _RECORDING_ENABLED_VALUE not in {"true", "false"}:
+    raise ValueError("RECORDING_ENABLED must be exactly 'true' or 'false'")
+RECORDING_ENABLED = _RECORDING_ENABLED_VALUE == "true"
 
 
 def handler(event, context):
+    if not RECORDING_ENABLED:
+        print("AWS Config recording is disabled — skipping recorder healing.")
+        return {"healed": False, "reason": "recording_disabled"}
+
     client = boto3.client("config")
 
     status = client.describe_configuration_recorder_status(

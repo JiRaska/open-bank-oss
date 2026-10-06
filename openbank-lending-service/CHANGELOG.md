@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.40.1](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.40.0...lending-service-v0.40.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **lending:** require a decision to leave the four-eyes state ([#12081](https://github.com/JiRaska/open-bank-oss/issues/12081)) ([9ea7d14](https://github.com/JiRaska/open-bank-oss/commit/9ea7d1494450d9a1522bfbce9c6da65dc0e35c8f))
+
+## [0.40.0](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.3...lending-service-v0.40.0) (2026-10-02)
+
+
+### Features
+
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+* **lending,risk-engine,admin-ui:** immutable human loan contract number ([#11722](https://github.com/JiRaska/open-bank-oss/issues/11722)) ([f19ab46](https://github.com/JiRaska/open-bank-oss/commit/f19ab4629b01673c29c8d4c1f1f8b01a6db89915))
+
+
+### Bug Fixes
+
+* **lending:** book a disbursement's local writes in one transaction ([#11631](https://github.com/JiRaska/open-bank-oss/issues/11631)) ([c45be81](https://github.com/JiRaska/open-bank-oss/commit/c45be811eaadd328ec1389af4c5c54d2c6445649)), closes [#11626](https://github.com/JiRaska/open-bank-oss/issues/11626)
+* **lending:** verify provisioning coverage without truncating the cycle ([#9903](https://github.com/JiRaska/open-bank-oss/issues/9903)) ([8bdfc4f](https://github.com/JiRaska/open-bank-oss/commit/8bdfc4fe690543498d88ea7c7a6b68d9fa2e38f1))
+* **libs:** bound amount magnitude and canonicalise Money scale and JSON form ([#11642](https://github.com/JiRaska/open-bank-oss/issues/11642)) ([66ba1af](https://github.com/JiRaska/open-bank-oss/commit/66ba1af4b1176f5bfc2675d0bddd509fb16a9f63))
+
+## [0.39.3](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.2...lending-service-v0.39.3) (2026-09-30)
+
+
+### Bug Fixes
+
+* **lending:** book the backfill void's mirrors as reversals the ledger accepts ([#11582](https://github.com/JiRaska/open-bank-oss/issues/11582)) ([b4787fd](https://github.com/JiRaska/open-bank-oss/commit/b4787fdfc71de5ea596854253456e9f3005f772e)), closes [#11487](https://github.com/JiRaska/open-bank-oss/issues/11487)
+
 ## [0.39.2](https://github.com/JiRaska/open-bank-oss/compare/lending-service-v0.39.1...lending-service-v0.39.2) (2026-09-29)
 
 

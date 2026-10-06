@@ -138,6 +138,9 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.balance.ledger-events-in
+          # Preserve the original String payload for replay, without JSON-string wrapping.
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.ledger.journal.posted
         group.id: openbank-balance-service
@@ -161,6 +164,10 @@ mp:
         failure-strategy: dead-letter-queue
         dead-letter-queue:
           topic: openbank.dlq.balance.balance-init-in
+          # Preserve the original String payload for replay, without JSON-string wrapping (#11604:
+          # without this a parked AccountCreated was re-encoded as a quoted JSON string).
+          value:
+            serializer: org.apache.kafka.common.serialization.StringSerializer
         connector: smallrye-kafka
         topic: openbank.accounts.account.created
         group.id: openbank-balance-service

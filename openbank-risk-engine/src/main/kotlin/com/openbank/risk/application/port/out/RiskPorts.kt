@@ -4,6 +4,7 @@
 
 package com.openbank.risk.application.port.out
 
+import com.openbank.risk.application.port.`in`.LimitAnalysis
 import com.openbank.risk.domain.curve.CurveIndex
 import com.openbank.risk.domain.curve.CurveSet
 import com.openbank.risk.domain.curve.MoneyMarketQuote
@@ -57,6 +58,12 @@ data class CurveSetSummary(
 interface SnapshotRepository {
     /** The [limit] most recently recorded runs, newest first. */
     suspend fun listRecent(limit: Int): List<SnapshotRunSummary>
+
+    /**
+     * The latest-recorded TIED_OUT run of each as-of date in [from]..[to] (inclusive), oldest date
+     * first: one run per day, so a re-run of a day supersedes the earlier one.
+     */
+    suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate): List<SnapshotRunSummary>
 
     suspend fun findByNaturalKey(asOf: LocalDate, inputHash: String): SnapshotRun?
 
@@ -116,6 +123,35 @@ data class TreasuryDealEvent(
     val maturityDate: LocalDate?,
 )
 
+/**
+ * One ČNB policy-rate / minimum-reserve fact as received from fx-service
+ * (`fx.cnb-policy-rate.published.v1`). [rate] is a fraction.
+ */
+data class CnbPolicyRateFactRow(
+    val instrument: String,
+    val effectiveFrom: LocalDate,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val fetchedAt: Instant,
+    val contentSha256: String,
+    val note: String?,
+    val revised: Boolean,
+    val receivedAt: Instant,
+)
+
+enum class FactUpsert { INSERTED, REVISED, DUPLICATE }
+
+interface CnbPolicyRateFactRepository {
+    /**
+     * Idempotent on (instrument, effectiveFrom): the same rate again is [FactUpsert.DUPLICATE]; a
+     * different rate for a stored key is fx-service's revision and is applied ([FactUpsert.REVISED]).
+     */
+    suspend fun upsert(fact: CnbPolicyRateFactRow): FactUpsert
+
+    /** The fact of [instrument] with the latest effectiveFrom <= [asOf], or null — never a default. */
+    suspend fun effectiveAt(instrument: String, asOf: LocalDate): CnbPolicyRateFactRow?
+}
+
 interface FxFixingRepository {
     /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
     suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int
@@ -135,13 +171,34 @@ class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismat
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
 
 interface CurveSetRepository {
-    /** The [limit] most recently recorded curve sets, newest first. */
-    suspend fun listRecent(limit: Int): List<CurveSetSummary>
+    /** The [limit] most recently recorded curve sets, newest first; only those as of [asOf] when given. */
+    suspend fun listRecent(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
 
+    /**
+     * Like [save], but a set whose id is already stored is left untouched and `false` is returned —
+     * the idempotent write for sets with a deterministic id (the sandbox reference set).
+     */
+    suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean
+
     suspend fun findById(id: UUID): CurveSet?
+
+    /**
+     * The id of the most recently recorded curve set AS OF exactly [asOf], or null. The limit
+     * evaluation prices a run only on a curve set of its own date — never on a neighbouring day's.
+     */
+    suspend fun latestIdFor(asOf: LocalDate): UUID?
+}
+
+/**
+ * The transactional outbox for limit events (ADR-0313 D9). Writes one row per EARLY_WARNING or
+ * BREACH evaluation of [analysis], all in ONE transaction, idempotent on (run, limit id, limit-set
+ * version): re-evaluating the same run writes nothing new. Returns the number of rows written.
+ */
+interface LimitEventOutbox {
+    suspend fun recordNonOk(analysis: LimitAnalysis, occurredAt: Instant): Int
 }
 
 class CurveSetNotFoundException(id: UUID) : RuntimeException("curve set $id not found")

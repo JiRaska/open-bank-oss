@@ -43,6 +43,10 @@ USER root
 # 30+ services that all run in plain JVM mode, where this never applies, so nothing
 # about their behaviour changes. Verified by re-running this build: without the flag,
 # fails at the native-image link stage with the error above; with it, that stage passes.
+# The build context has no .git (.dockerignore), so the commit recorded in the service's
+# build facts must arrive as an explicit input: --build-arg SOURCE_COMMIT=<40-hex sha>.
+ARG SOURCE_COMMIT
+ENV SOURCE_COMMIT=${SOURCE_COMMIT}
 RUN chmod +x gradlew && \
     ./gradlew :openbank-product-catalog:quarkusBuild \
       -Dquarkus.package.type=native \

@@ -5,12 +5,15 @@
 package com.openbank.treasury.application.usecase
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.domain.calendar.AccountingClock
 import com.openbank.libs.domain.identifiers.Ids
 import com.openbank.treasury.application.port.`in`.AccrualRun
 import com.openbank.treasury.application.port.`in`.CounterpartyExposure
 import com.openbank.treasury.application.port.`in`.CurrencyPosition
 import com.openbank.treasury.application.port.`in`.DealView
 import com.openbank.treasury.application.port.`in`.DraftDealCommand
+import com.openbank.treasury.application.port.`in`.PositionBasis
+import com.openbank.treasury.application.port.`in`.PositionReport
 import com.openbank.treasury.application.port.`in`.SimulatedMarketRun
 import com.openbank.treasury.application.port.`in`.TreasuryDealUseCase
 import com.openbank.treasury.application.port.out.CommandKey
@@ -28,6 +31,7 @@ import com.openbank.treasury.domain.model.Counterparty
 import com.openbank.treasury.domain.model.DayCount
 import com.openbank.treasury.domain.model.Deal
 import com.openbank.treasury.domain.model.DealBooked
+import com.openbank.treasury.domain.model.DealConfirmed
 import com.openbank.treasury.domain.model.DealMatured
 import com.openbank.treasury.domain.model.DealReversed
 import com.openbank.treasury.domain.model.DealSettled
@@ -36,6 +40,8 @@ import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
+import com.openbank.treasury.domain.model.ProductLimitApplied
+import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.Clock
@@ -49,8 +55,14 @@ import java.util.UUID
  * its old state with the journal already in the ledger; the retry re-posts under the same key,
  * the ledger returns the ORIGINAL entry, and the state change commits — never a double posting.
  * Nothing posts before BOOKED: only settle / mature / reverse-from-SETTLED call the ledger.
+ *
+ * [confirmationRequired] (`openbank.treasury.confirmation.required`, default true, ADR-0315 D2):
+ * settlement needs a CONFIRMED deal. False keeps the pre-CONFIRMED behaviour (settle straight from
+ * BOOKED) for a deployment that has no confirmation step yet; there is no data migration either way.
  */
-@Suppress("TooManyFunctions")
+// LongParameterList: a plain application class wired by one CDI producer; every parameter is a
+// collaborator or a deployment decision, and bundling them would only hide which is which.
+@Suppress("TooManyFunctions", "LongParameterList")
 class TreasuryDealService(
     private val deals: DealRepository,
     private val counterparties: CounterpartyRepository,
@@ -59,13 +71,21 @@ class TreasuryDealService(
     private val clock: Clock,
     private val fxMid: FxMidRatePort = FxMidRatePort.NONE,
     private val fxTolerance: FxRateTolerance = FxRateTolerance.DISABLED,
+    private val confirmationRequired: Boolean = true,
+    /** ADR-0315 D9: when set and enabled, a simulated counterparty confirms only deals struck at its quote. */
+    private val simulatedQuotes: SimulatedQuoteService? = null,
+    /**
+     * ADR-0315 D4 product limits (`openbank.treasury.product-limits`). Required, no default: a
+     * service constructed without a mandate must not book as though every product were permitted.
+     */
+    private val productLimits: ProductLimitPolicy,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, DRAFT, null)?.let { return it } }
         counterparties.findById(command.counterpartyId) ?: throw UnknownCounterpartyException(command.counterpartyId)
         val now = clock.instant()
-        val today = LocalDate.now(clock)
+        val today = bankToday()
         val tradeDate = command.tradeDate ?: today
         val valueDate = command.valueDate
             ?: if (command.product == ProductType.FX_SPOT) DayCount.spotDate(tradeDate) else null
@@ -97,14 +117,19 @@ class TreasuryDealService(
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = load(dealId)
-        return deals.save(deal.submit(actor, limitCheck(deal), clock.instant()), command = cmd(key, SUBMIT, dealId))
+        return deals.save(
+            deal.submit(actor, limitCheck(deal), clock.instant(), productLimits.evaluate(deal)),
+            command = cmd(key, SUBMIT, dealId),
+        )
     }
 
     override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
         val deal = load(dealId)
-        // Re-checked at approval: exposure may have moved since submission.
-        val booked = deal.approve(actor, limitCheck(deal), clock.instant())
+        // Re-checked at approval: exposure may have moved, and the product mandate may have been
+        // tightened, since submission (ADR-0315 D4).
+        val productCheck = productLimits.evaluate(deal)
+        val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -122,6 +147,7 @@ class TreasuryDealService(
                     occurredAt = booked.updatedAt,
                     fxSide = booked.fx?.side,
                     counterAmount = booked.fx?.counterAmount,
+                    productLimit = productCheck.limit?.let { ProductLimitApplied.of(it, booked.currency) },
                 ),
             ),
         )
@@ -146,10 +172,32 @@ class TreasuryDealService(
         return deals.save(load(dealId).cancel(actor, clock.instant()), command = cmd(key, CANCEL, dealId))
     }
 
+    override suspend fun confirm(dealId: UUID, reference: String?, actor: Actor, key: String?): Deal {
+        key?.let { k -> replay(k, CONFIRM, dealId)?.let { return it } }
+        val confirmed = load(dealId).confirm(actor, clock.instant(), reference)
+        val event = DealEvent(
+            DealConfirmed.EVENT_TYPE,
+            objectMapper.writeValueAsString(
+                DealConfirmed(
+                    dealId = confirmed.id,
+                    product = confirmed.product,
+                    counterpartyId = confirmed.counterpartyId,
+                    currency = confirmed.currency,
+                    principal = confirmed.principal,
+                    valueDate = confirmed.valueDate,
+                    confirmedBy = actor.id,
+                    simulated = actor == Actor.SIMULATED_MARKET,
+                    occurredAt = confirmed.updatedAt,
+                ),
+            ),
+        )
+        return deals.save(confirmed, event = event, command = cmd(key, CONFIRM, dealId))
+    }
+
     override suspend fun settle(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SETTLE, dealId)?.let { return it } }
         val deal = load(dealId)
-        val settled = deal.settle(actor, LocalDate.now(clock), clock.instant())
+        val settled = deal.settle(actor, bankToday(), clock.instant(), confirmationRequired)
         val ref = post(PostingRules.settlement(settled), settled.valueDate, "treasury ${settled.product} settlement")
         val event = DealEvent(
             DealSettled.EVENT_TYPE,
@@ -175,7 +223,7 @@ class TreasuryDealService(
     override suspend fun mature(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, MATURE, dealId)?.let { return it } }
         val deal = load(dealId)
-        val matured = deal.mature(actor, LocalDate.now(clock), clock.instant())
+        val matured = deal.mature(actor, bankToday(), clock.instant())
         // ADR-0315 D5: catch the accrual up to maturity first, so the maturity journal clears the
         // accrued account instead of booking the whole interest to income in one amount.
         accrueThrough(deal, deal.maturityDate)
@@ -209,7 +257,7 @@ class TreasuryDealService(
         val reversed = deal.reverse(actor, reason, clock.instant())
         val accrued = if (deal.state == DealState.SETTLED) accruedSoFar(deal) else BigDecimal.ZERO
         val ref = PostingRules.reversal(reversed, deal.state, accrued)
-            ?.let { post(it, LocalDate.now(clock), "treasury ${deal.product} reversal") }
+            ?.let { post(it, bankToday(), "treasury ${deal.product} reversal") }
         val event = DealEvent(
             DealReversed.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -253,14 +301,23 @@ class TreasuryDealService(
         }
 
     /**
-     * Outstanding principal on [asOf]: a deal that has SETTLED (or since MATURED) and whose
-     * value date <= asOf < maturity date. Reversed and never-settled deals hold no position.
+     * Outstanding principal on [asOf]: a counted deal whose value date <= asOf < maturity date, so
+     * a deal is in the position from its value date and out of it on its maturity date.
+     *
+     * The basis follows the bank's accounting day (Europe/Prague, never the JVM zone): up to and
+     * including today the position is ACTUAL — only SETTLED or MATURED deals, whose cash moved;
+     * after today it is PROJECTED — BOOKED and CONFIRMED deals are added on their contracted dates.
+     * DRAFT and PENDING_APPROVAL are not concluded, CANCELLED and REVERSED hold nothing.
      */
-    override suspend fun positions(asOf: LocalDate): List<CurrencyPosition> {
-        val live = (deals.list(DealState.SETTLED) + deals.list(DealState.MATURED)).filter {
-            !it.valueDate.isAfter(asOf) && it.maturityDate.isAfter(asOf)
+    override suspend fun positions(asOf: LocalDate?): PositionReport {
+        val today = AccountingClock.bank(clock).today()
+        val date = asOf ?: today
+        val basis = if (date.isAfter(today)) PositionBasis.PROJECTED else PositionBasis.ACTUAL
+        val states = if (basis == PositionBasis.ACTUAL) ACTUAL_STATES else ACTUAL_STATES + CONTRACTED_STATES
+        val live = states.flatMap { deals.list(it) }.filter {
+            !it.valueDate.isAfter(date) && it.maturityDate.isAfter(date)
         }
-        return Deal.SUPPORTED_CURRENCIES.sorted().map { ccy ->
+        val positions = Deal.SUPPORTED_CURRENCIES.sorted().map { ccy ->
             val inCcy = live.filter { it.currency == ccy }
             fun sum(p: ProductType) = inCcy.filter { it.product == p }.sumOf { it.principal }
             CurrencyPosition(
@@ -269,8 +326,10 @@ class TreasuryDealService(
                 // Lombard borrowing from ČNB is a borrowing: it reduces the net like an interbank one.
                 borrowed = sum(ProductType.MM_BORROWING) + sum(ProductType.CNB_LOMBARD),
                 atCnb = sum(ProductType.CNB_DEPOSIT_FACILITY),
+                dealCount = inCcy.count { it.product in POSITION_PRODUCTS },
             )
         }
+        return PositionReport(date, today, basis, states, positions)
     }
 
     /**
@@ -278,13 +337,32 @@ class TreasuryDealService(
      * swallowed either: it is counted and its cause returned for the scheduler to log.
      */
     override suspend fun runSimulatedMarket(): SimulatedMarketRun {
-        val today = LocalDate.now(clock)
-        val outcomes = deals.dueForSettlement(today).map { d -> runCatching { settle(d.id, Actor.SIMULATED_MARKET) } } +
-            deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, Actor.SIMULATED_MARKET) } }
+        val today = bankToday()
+        val market = Actor.SIMULATED_MARKET
+        // ADR-0315 D9: the simulated counterparty confirms BOOKED deals first (a SYNTHETIC
+        // confirmation, `simulated = true` on the event and SIMULATED_MARKET on the timeline), so
+        // the settlement pass below finds them CONFIRMED whatever `confirmationRequired` says. A
+        // quoted deal struck off the counterparty's quote is DECLINED: it stays BOOKED for a person.
+        val confirmations = deals.list(DealState.BOOKED).map { d -> runCatching { simulatedConfirm(d, market) } }
+        val settleable = Deal.settleableStates(confirmationRequired)
+        val moves = deals.dueForSettlement(today, settleable).map { d -> runCatching { settle(d.id, market) } } +
+            deals.dueForMaturity(today).map { d -> runCatching { mature(d.id, market) } }
         return SimulatedMarketRun(
-            moved = outcomes.count { it.isSuccess },
-            failures = outcomes.mapNotNull { it.exceptionOrNull() },
+            moved = confirmations.count { it.getOrNull() == true } + moves.count { it.isSuccess },
+            failures = confirmations.mapNotNull { it.exceptionOrNull() } + moves.mapNotNull { it.exceptionOrNull() },
+            declined = confirmations.count { it.getOrNull() == false },
         )
+    }
+
+    /** True = confirmed; false = the simulated counterparty declined (struck off its quote). */
+    private suspend fun simulatedConfirm(deal: Deal, market: Actor): Boolean {
+        val quote = simulatedQuotes?.quoteFor(deal)
+        if (quote != null && !quote.accepts(deal)) return false
+        val reference = quote?.let {
+            "synthetic quote bid ${it.bid} / ask ${it.ask} % (${it.curveIndex}, curve set ${it.curveSetId})"
+        }
+        confirm(deal.id, reference, market)
+        return true
     }
 
     /**
@@ -354,16 +432,36 @@ class TreasuryDealService(
         return load(prior.dealId)
     }
 
+    /**
+     * The business day in the bank zone (Europe/Prague), never the JVM default: the pod runs UTC,
+     * so `LocalDate.now(clock)` gave yesterday for a deal struck in Prague after 22:00 UTC (summer).
+     */
+    private fun bankToday(): LocalDate = AccountingClock.bank(clock).today()
+
     private fun cmd(key: String?, action: String, dealId: UUID) = key?.let { CommandKey(it, action, dealId) }
 
     private companion object {
         const val MAX_KEY_LENGTH = 128
+
+        /** Cash has moved: what an ACTUAL position counts. */
+        val ACTUAL_STATES = setOf(DealState.SETTLED, DealState.MATURED)
+
+        /** Concluded with the counterparty, cash not yet moved: added by a PROJECTED position. */
+        val CONTRACTED_STATES = setOf(DealState.BOOKED, DealState.CONFIRMED)
+
+        val POSITION_PRODUCTS = setOf(
+            ProductType.MM_PLACEMENT,
+            ProductType.MM_BORROWING,
+            ProductType.CNB_LOMBARD,
+            ProductType.CNB_DEPOSIT_FACILITY,
+        )
         const val DRAFT = "DRAFT"
         const val SUBMIT = "SUBMIT"
         const val APPROVE = "APPROVE"
         const val OVERRIDE = "OVERRIDE_LIMIT"
         const val REJECT = "REJECT"
         const val CANCEL = "CANCEL"
+        const val CONFIRM = "CONFIRM"
         const val SETTLE = "SETTLE"
         const val MATURE = "MATURE"
         const val REVERSE = "REVERSE"

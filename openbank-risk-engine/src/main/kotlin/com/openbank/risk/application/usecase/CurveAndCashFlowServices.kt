@@ -18,6 +18,7 @@ import com.openbank.risk.domain.cashflow.SnapshotCashFlowProjection
 import com.openbank.risk.domain.curve.CurveBootstrap
 import com.openbank.risk.domain.curve.CurveSet
 import java.time.Clock
+import java.time.LocalDate
 import java.util.UUID
 
 /**
@@ -46,9 +47,11 @@ class CurveSetService(private val repository: CurveSetRepository, private val cl
         return set
     }
 
-    override suspend fun list(limit: Int): List<CurveSetSummary> = repository.listRecent(limit)
+    override suspend fun list(limit: Int, asOf: LocalDate?): List<CurveSetSummary> = repository.listRecent(limit, asOf)
 
     override suspend fun get(id: UUID): CurveSet = repository.findById(id) ?: throw CurveSetNotFoundException(id)
+
+    override suspend fun latestIdFor(asOf: LocalDate): UUID? = repository.latestIdFor(asOf)
 }
 
 /**

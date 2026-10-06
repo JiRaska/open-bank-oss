@@ -38,7 +38,7 @@ spec:
       annotations:
         # Roll the pod when the OPA policy bundle changes (subPath mounts don't hot-reload).
         # Must match case-coordinator-opa-bundle's openbank.tech/policy-checksum (CI verifies).
-        openbank.tech/policy-checksum: "f3d6b591c034c4bb"
+        openbank.tech/policy-checksum: "63d5776454f98f0a"
     spec:
       securityContext:
         runAsNonRoot: true
@@ -49,7 +49,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: case-coordinator-agent
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-951dcbab
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-case-coordinator-agent:sandbox-0657ccc0
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
@@ -209,7 +209,7 @@ spec:
         # it yet — the capability-gate adapter is the tracked follow-up — but the sidecar and
         # the bundle ship WITH the deployment so the follow-up is a service-code-only change.
         - name: opa
-          image: docker.io/openpolicyagent/opa:1.17.0
+          image: docker.io/openpolicyagent/opa:1.21.1
           imagePullPolicy: IfNotPresent
           args:
             - run

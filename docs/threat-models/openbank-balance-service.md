@@ -253,6 +253,19 @@ also be deleted (nothing else in balance-service depends on it).
   standalone `balance_rest_ext.rego` so `opa test` can load it (interest/delegation pattern).
   Rollback: revert the ext to the pre-#3734 shape — no live caller is lost, as no edge write
   path exists.
+- **2026-10-04** — **The Envoy Gateway path for `/api/v1/balances` is staged alongside
+  ingress-nginx (ADR-0324 Phase 4).** `components/balances/httproute.yaml` and the
+  `balances-api` Ingress coexist; DNS still points to nginx. The eventual cutover retains
+  the path and the service's OIDC/OPA checks. D1 changes when DNS moves:
+  `limit-connections: 10` (concurrent connections per client IP) has no Envoy Gateway
+  equivalent. It is replaced by the same per-client request rate (20/s), a listener-wide
+  connection limit on `https-api`, and a per-backend circuit breaker. **Residual-risk delta:**
+  one client can hold more than 10 concurrent connections, bounded by the listener total
+  and the per-backend circuit breaker.
+  This was accepted because the archived controller is the larger risk (ADR-0324 Phase 4
+  amendment). `balance-service-ingress-allow-list` gains `TCP:8103 FROM envoy-gateway-system`
+  (generated). The ingress-nginx rule stays until Phase 5; the Gateway listener and its
+  connection policy must be verified before the DNS switch.
 - **2026-08-02** — **balance-service is now genuinely reachable from the public edge**, and the
   honest framing is that the *intent* did not change while the *reality* did. `accounts/accounts-api`
   had declared `api.open-bank.tech/api/v1/balances` since the Ingress was written, so the exposure was
@@ -360,3 +373,89 @@ also be deleted (nothing else in balance-service depends on it).
   cannot approve their own request) is preserved verbatim in the shared implementation, and a
   maker-cannot-approve-own test exists for this service. Rollback: revert to the inline
   implementation this PR replaces.
+
+## Atomic ledger projection and reservation consumption
+
+**Threat:** a payee event could release the payer's hold before the payer debit was projected,
+or a committed projection could lose its subsequent hold release. Either breaks the spendable
+balance invariant. A hold or overdraft update prepared from an older balance could also overwrite
+a concurrent ledger movement despite Hibernate versioning, because the repository loaded a newer
+entity and copied old amounts onto it.
+
+**Controls:** lock the account/currency pocket, then commit the booked delta, projection marker,
+matching account/currency/transaction cover release and outbox records in one transaction. A
+redelivery skips the booked delta and can finish an older partial cover release. Snapshot-based
+hold and overdraft writes compare the expected domain version before copying amounts; Hibernate
+optimistic locking protects changes after that comparison. A conflict rolls the transaction back.
+Explicit hold release rechecks the active hold while holding the same pocket lock, and replays an
+already released hold without changing another reservation or emitting another release event.
+
+**Evidence:** `ProjectionCoverAtomicityIT` exercises payee-first delivery, failed release-outbox
+persistence and old partial-write redelivery against PostgreSQL. `HoldSnapshotConcurrencyIT`
+interleaves a ledger credit between a snapshot read and a hold/overdraft write.
+
+**Residual risk:** these controls do not reconcile historic balance drift or prove that every
+producer uses the ledger as its sole booked-money writer. Reservation consumption assumes the
+journal transaction reference identifies the covered movement. Authorization, DLQ replay and
+ledger reconciliation remain required operational controls.
+
+
+## Ledger-projection reservation identity
+
+The settlement named M2M client now additionally receives `balance.hold` through
+`service-settlement-balance-cover`. The grant requires the exact settlement service principal
+and the validated user/service-account principal type. This is necessary for payer-cover
+reservation before journal posting; the former debit/credit-only grant rejected that first step.
+Legacy debit/credit grants remain for existing workflow histories. No `balance.holdRelease`,
+initialization, overdraft, reconciliation or approval-decision permission is added. A compromised
+settlement credential can reserve funds as well as perform its existing legacy movements; it
+cannot directly release cover when a journal outcome is uncertain. Ledger projection remains
+the owner of reservation consumption.
+
+Policy tests assert reservation admission, deny other balance actions and unrelated principals,
+and reject the wrong principal type. They do not prove token issuance or the full distributed
+workflow. Roll back this grant only after disabling new ledger-projection originations and
+draining their workflows; otherwise the cover step will be denied again.
+
+## Failed projection records
+
+With projection enabled, malformed JSON and malformed booked-change events fail processing
+and are parked by the configured Kafka dead-letter handler instead of being acknowledged as
+successful. The DLQ explicitly serializes String values without JSON-string wrapping so the
+original payload remains available for diagnosis and controlled replay. Existing topic and
+write ACL declarations are retained. Operators must correct the cause before replay and retain
+the original journal/account/currency identity used for deduplication.
+
+`LedgerProjectionDlqIT` verifies two poison records reach the real broker's DLQ unchanged,
+then a valid event and its acknowledged redelivery apply one booked movement and consume
+matching cover. This does not prove upstream ledger delivery, OIDC enforcement or a full
+settlement workflow.
+
+### 2026-10-04 — Inbound amount and currency validated as kernel `Money` (#11604)
+
+**Tampering / input validation.** Every balance write now builds a kernel `Money` with
+`Money.parseInbound` in `BalanceResource` before the hold's `(accountId, currency, referenceId)`
+replay lookup (ADR-0287), the credit/debit `referenceId` movement marker (V8), any write and any
+outbox event; the use-case commands carry `Money`. Before, an amount the currency cannot hold
+(`10.005 EUR`, `1000.5 JPY`) was reserved or booked as a sub-minor-unit figure, any string became
+a currency pocket (`/initialize` with `XYZ` answered 201), an amount beyond `NUMERIC(19,4)` failed
+only at the database (500), and — the sharpest case — a **negative or zero credit/debit answered
+200**: a negative credit lowered the booked balance with no overdraft guard and a negative debit
+raised it. Each now answers **400 `AMOUNT_SCALE_EXCEEDED` / `CURRENCY_UNSUPPORTED` /
+`VALIDATION_ERROR`** (libs-runtime `InvalidMoneyExceptionMapper`, or `ValidationFailure` for the
+sign rule), naming the field and never echoing the value, with nothing reserved, booked, marked
+or announced; the `referenceId` stays free. A negative overdraft limit is refused the same way.
+
+**Kafka.** `ledger-events-in` builds the `AccountBookedChanged` delta as `Money`, and
+`balance-init-in` the `AccountCreated` currency as `CurrencyCode`; a refusal is rethrown and
+parked by the configured dead-letter strategy, so a malformed upstream event cannot book a
+sub-minor-unit delta, create a phantom pocket or initialise a balance in an unsupported currency,
+and cannot wedge the channel. `balance-init-in`'s DLQ now also serialises String values without
+JSON-string wrapping, matching `ledger-events-in`. Proven against a real broker by
+`BalanceConsumerMoneyDlqIT`; REST by `BalanceMoneyBoundaryIT`.
+
+**Residual.** Read paths do not build `Money` (balances are served from the `NUMERIC(19,4)`
+columns), so a stored row cannot fail to load; a sandbox read-only check on 2026-10-04 found no
+off-scale amount or non-ISO currency in `balances`, `balance_holds`, `balance_movement` or
+`ledger_projection_event`. The `Balance` aggregate itself still holds `BigDecimal` fields.
+No new endpoint, caller, privilege or event. Rollback: revert the commit.

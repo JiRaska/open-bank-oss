@@ -341,6 +341,17 @@ channels:
       FxFixingPublished:
         $ref: '#/components/messages/FxFixingPublished'
 
+  fx-cnb-policy-rates:
+    address: openbank.fx.cnb-policy-rate.published
+    description: |
+      ČNB policy rates and minimum-reserve facts, one event per new or revised
+      (instrument, effectiveFrom) row, compacted on that key. `ce-type` =
+      `fx.cnb-policy-rate.published.v1`. The authoritative contract is
+      `openbank-contracts/openbank-fx-service/asyncapi.yaml`.
+    messages:
+      CnbPolicyRatePublished:
+        $ref: '#/components/messages/CnbPolicyRatePublished'
+
   clearing-events:
     address: openbank.clearing.batch.event
     description: |
@@ -830,6 +841,14 @@ components:
       payload:
         type: object
         required: [source, fixingDate, quoteCurrency, validFrom, validTo, rates, occurredAt]
+
+    CnbPolicyRatePublished:
+      name: CnbPolicyRatePublished
+      description: '`ce-type` = `fx.cnb-policy-rate.published.v1`. Full schema in the fx-service contract.'
+      contentType: application/json
+      payload:
+        type: object
+        required: [instrument, effectiveFrom, rate, sourceUrl, fetchedAt, contentSha256, revised, occurredAt]
 
     ClearingBatchSettled:
       name: ClearingBatchSettled
@@ -1393,6 +1412,10 @@ components:
               type: [string, 'null']
               format: uuid
               description: Rail payment that caused this booking; absent for non-rail postings.
+            reversalOf:
+              type: [string, 'null']
+              format: uuid
+              description: Original transaction ID when this initiation is a reversal; absent on older events.
 
     BalanceEventPayload:
       # A plain data class, not a DomainEvent — `eventType` is declared by the class itself, which

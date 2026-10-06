@@ -26,7 +26,7 @@ spec:
         app.kubernetes.io/name: pricing-service
         app.kubernetes.io/part-of: pricing
       annotations:
-        openbank.tech/policy-checksum: "c36888d97560f63d"
+        openbank.tech/policy-checksum: "240082e86e21ee31"
     spec:
       containers:
       - env:
@@ -136,7 +136,7 @@ spec:
         - --log-level=info
         - --bundle
         - /bundle
-        image: docker.io/openpolicyagent/opa:1.17.0@sha256:3c6e9e4d433b6e94df424c3385134312a95042aa991cdfc8e01944115675fb9d
+        image: docker.io/openpolicyagent/opa:1.21.1@sha256:d3a9a6bd4fbcb0f4403294b0d0b239b07be163ac118a46df7d50045b52e52053
         imagePullPolicy: IfNotPresent
         name: opa
         ports:

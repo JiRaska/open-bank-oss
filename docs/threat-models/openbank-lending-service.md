@@ -102,7 +102,14 @@
     signs explicitly (increase: DEBIT expense / CREDIT allowance; decrease: reversed) and asserts the
     loan principal GL (Loans Receivable) is never touched by a provisioning entry.
   - **Batch completeness:** `findUnprovisioned` drains successive batches of every nonterminal exposure,
-    including defaulted loans. Daily immutable keys support current-date completeness checks.
+    including defaulted loans. Daily immutable keys support current-date completeness checks; the
+    scheduler records workflow success only after the missing-eligible count is zero.
+  - **Residual date-rollover recovery risk:** a process failure can interrupt a date before all
+    eligible loans receive rows. The next daily tick uses a new date; `snapshotFor` reads mutable
+    current loan, installment, collateral and risk state, so calling it with yesterday's `asOf`
+    cannot reconstruct yesterday's ECL. Do not backdate those current inputs or treat today's
+    successful pass as proof that the prior date was complete. Historical-input-backed recovery
+    or a controlled accounting reconciliation remains necessary.
   - **Crash and concurrency integrity:** provisioning and terminal transitions lock and refresh the loan.
     Snapshot/state changes and frozen allowance commands commit in one database transaction. The
     outbox retries the same amount, accounting date and ledger idempotency reference; provisioning
@@ -119,9 +126,18 @@
   - **Silently succeeding without paying.** Either the lookup returning no account, or the credit
     call itself failing, surfaces as a **failed disbursement** — the `loan.disbursed` outbox event
     (and everything downstream: statements, notifications) does not fire. The loan's origination
-    state was already claimed `DISBURSED` by the point this crossing runs (a pre-existing atomicity
-    gap #3850 already tracks, not new here); a failure past that point needs the same operator
-    attention #3850 does.
+    state was already claimed `DISBURSED` by the point this crossing runs; a failure past that
+    point still needs operator attention, because the remote calls sit outside the booking
+    transaction by design (a database transaction must not wait on another service).
+  - **A half-booked loan (#11626, fixed 2026-09-30).** Before the fix the local half of a booking
+    was three transactions — the `loan` row and its schedule, then the `DISBURSED` claim on the
+    application, then the transition evidence — measured as three distinct `xmin` values for one
+    request. A crash between them left a loan with a schedule that no claim and no event
+    referenced, and two concurrent disbursements could both book a loan before one lost the claim.
+    `LoanApplicationRepository.withLocked` now locks the application row and every local write
+    joins that one transaction, so the loser of a race rolls its loan back instead of orphaning
+    it. `LendingOutboxWriteIT` asserts the four rows share one `xmin` and is red against the old
+    code (`expected "813" but was "815"`).
   - **Paying twice on retry.** `idempotencyKey = "loan:<id>:disbursement-credit"` is deterministic
     per loan — a retried disbursement call replays the same credit rather than paying again, the
     same shape the ledger crossing (item 2) already uses.
@@ -208,7 +224,7 @@
 | **Repudiation** | Mitigated | Maker/checker identities and sensitive reads audit-logged; write-off attribution now server-derived. |
 | **Information disclosure** | Mitigated | Role-gated GDPR-class reads; analytics only via the outbox stream. |
 | **Denial of service** | Partially mitigated | `LedgerCallGuard` (`@Retry`/`@Timeout`/`@CircuitBreaker`) bounds ledger calls; per-tenant rate limiting is a gateway-layer roadmap item. |
-| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination, disbursement, and (issue #621) collateral registration from reducing reported ECL. |
+| **Elevation of privilege** | Mitigated | No `@PermitAll`; least-privilege roles per endpoint; four-eyes prevents single-actor origination, disbursement, and (issue #621) collateral registration from reducing reported ECL. Origination decision states are left only through a decision: the generic `advance` does not apply to `FOUR_EYES` (409 `FOUR_EYES_DECISION_REQUIRED`), and the state machine's standard policy itself requires a four-eyes decision by a principal other than the proposer on `FOUR_EYES -> OFFERED/DECLINED`. Every post-decision state fails closed without a recorded decider (409 `FOUR_EYES_DECISION_MISSING` on advance and disburse), the disburser must differ from both proposer and approver, and refused commands are recorded as `credit.application.transition.refused` outbox evidence. |
 
 ## 5. Maturity / roadmap (tracked, not yet built)
 
@@ -821,6 +837,18 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
 - **2026-09-21** — **Borrower account lookup moves to the service's own machine identity (#10486 batch 5).** `AccountServiceRestClient` (`GET /api/v1/accounts`, `account.list`) now mints its bearer from the NAMED oidc-client `m2m` the service already has for its ledger and transaction legs, Keycloak client `openbank-lending` (`ROLE_API` only), instead of the shared `openbank-services` client. account-service grants it exactly `account.list` (`service-lending-account-read`). **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches `account.list`. **Repudiation improves:** the read names this service. Rollback: revert the commit (the client returns to the shared token).
 - **2026-09-21** — **Credit-profile read moves to the service's own machine identity (#10486 batch 6).** `CreditProfileClient` (`GET /api/v1/analytics/credit-profile/{partyId}`) now mints its bearer from the NAMED oidc-client `m2m` the service already has, Keycloak client `openbank-lending` (`ROLE_API` only), instead of the shared `openbank-services` client. analytics-sink admits `ROLE_API` on that endpoint and narrows it with a Kotlin named-caller check (`requireNamedCreditProfileCaller`: copilot and lending only), because analytics-sink runs no OPA sidecar. **STRIDE-S/E:** no new credential; the existing `m2m` secret now also reaches the credit profile. **Repudiation improves:** the read names this service. Rollback: revert the commit (the client returns to the shared token).
 - **2026-09-24** — **One-off four-eyes ledger backfill (#10746, root cause #6057).** New endpoints under `/api/v1/lending/ledger-backfill` re-post the GL history of loans whose journals never reached the ledger (disbursement, interest accrual, principal repayment, interest settlement/recognition, provisioning deltas). **Threats and controls:** (1) *Double posting* — every journal reuses the exact live idempotency reference (`loan:<id>:disbursement`, `loan:<id>:inst:<n>:accrual|principal|interest`, `loan:<id>:provisioning:<period>`), so a re-run or a later live posting of the same event replays to the one journal in ledger; proven by `LedgerBackfillIT` with a sabotage (a non-deterministic reference produced 19 journals for 13 legs). (2) *Moving customer money* — the backfill depends only on `LedgerPostingPort`; the borrower-credit port is never injected or called (asserted in the IT). The disbursement's cash leg stays on Customer Cash Clearing, exactly as the live posting books it, and no deposit-control or customer balance is created. (3) *Single-actor execution* — propose/decide/execute with `Proposal.approve` refusing checker == maker (`MakerCheckerViolation`, 422); the approval binds a SHA-256 plan hash, and execution refuses if the book moved since. (4) *Rewriting closed history* — journals are booked on a cut-over date that must be today or later (the open accounting day) and carry the original business date as `valueDate`; nothing is back-dated into TIED_OUT days or a drafted period. (5) *Privilege* — `@RolesAllowed("ROLE_ADMIN")`; `lending_rest_ext.rego` vetoes every `lending.ledgerBackfill.*` for any `service-account-*` and for any principal without ROLE_ADMIN (rego tests). (6) *Concurrent execution* — a conditional DB lease (`claimExecution`) admits one run at a time. Audit: `lending.ledger_backfill.transition` outbox events (proposed/decided/started/executed/partial) and the `ledger_backfill_request` row. Unsupported loan shapes (non-ACTIVE, rescheduled, restructured) refuse the whole plan rather than approximate it. Rollback: stop using the endpoints; per-journal reversal via ledger `reverseJournal`.
+
+- **2026-09-25 — Bounded party-application read for Customer 360.** The existing
+  `GET /api/v1/lending/applications` accepts an optional `limit` of 1–200 and
+  returns the newest `(createdAt, id)` rows from a database-limited query. The
+  required `partyId`, class role check and `lending.list` authorization remain in
+  force; the response DTO is unchanged. A limit does not grant portfolio or
+  cross-borrower access. Omitting it preserves the existing complete list, so
+  an authorized caller can still request a large history; caller rate limits and
+  the Customer 360 BFF's compliance permission and response-size cap remain
+  necessary. This read supplies application context only: it does not establish
+  guarantor, shared collateral or exposure facts for ADR-0307. Rollback omits the
+  parameter and disables the graph feed if the complete response is too large.
 - **2026-09-26** — **Ledger backfill reports idempotent replays instead of counting them as posted (#10904).** A second request for an already-executed plan replayed all 352 legs on the sandbox, booked nothing, and still reported `loansPosted: 44`. The ledger client edge gains `postJournalWithHeaders` (same `POST /api/v1/journals`, same m2m OIDC filter, same retry/timeout/circuit-breaker guard) to read ledger-service's `Idempotent-Replayed` header (#10906). Each loan is POSTED, ALREADY_POSTED, UNCONFIRMED (no header, e.g. an older ledger) or FAILED, and an implementation that cannot tell answers UNCONFIRMED, never POSTED. `propose` also refuses (409) a plan another request already APPROVED or EXECUTED. **STRIDE-R:** the audit record can now tell a posting from a no-op. **STRIDE-T:** no journal content, key or amount changes, and the request body is the one `post` sends. A retry after a lost response reads as ALREADY_POSTED for a journal the first attempt booked; that is "the ledger held it when asked", which is what the operator needs. Rollback: revert; the ledger header is additive and harmless unread.
 - **2026-09-26** — **Four-eyes void of the synthetic back-posted loans (#10969).** The 44 loans the ledger backfill posted were never paid out, so they are cancelled rather than disbursed. `.../ledger-backfill/voids` (plan, propose, decide, execute, history) mirrors the backfill's controls exactly. It uses the same four `lending.ledgerBackfill.*` OPA actions, so the rego prefix rules apply unchanged: humans only, ROLE_FINANCE or ROLE_ADMIN, every service account vetoed. Maker != checker is enforced by `Proposal`. The plan hash binds the approval, and a DB lease admits one run at a time (V20 `ledger_backfill_void_request`). A void must name an EXECUTED backfill request and re-plans that request's own scope, restricted to loans still ACTIVE, so it can reach no other loan. Each leg is re-sent under its live reference (normally a replay) and then offset by a mirror `void:<reference>` with the amount negated, so every loan nets to zero in the GL whatever the ledger held. Only a fully offset loan moves to UNWOUND, with the standard `credit.loan.transition` evidence event. **STRIDE-T/E:** no new write path. It posts only through `LedgerPostingPort`, has no dependency on the borrower-credit port and cannot move customer money. **STRIDE-R:** a `lending.ledger_backfill_void.transition` audit event covers every four-eyes step, and `last_result` reports `originalsBookedNow` (expected 0), so a leg the ledger never had is visible rather than silently booked and offset. The status is set directly, not through the termination flow, because UNWOUND there also releases the allowance and would book a provision release on top of the mirrored provisioning legs. Rollback: stop using the endpoints. The mirrors are ordinary journals and can be offset in turn.
 - **2026-09-30** — **The void's mirror journals actually post (#11487).** The void built each mirror as the original posting with the amount negated, and `LendingJournalFactory` passed the negative value straight into the journal lines. ledger-service stores lines under `CHECK (amount > 0)` and refused every one: on the sandbox the first real execution reported 44/44 loans FAILED (72 constraint violations), so nothing was posted and no loan moved. A negative amount now means the reversal of that posting kind: the two sides swap and the absolute value is booked, the convention provisioning deltas already used. Live flows only ever post positive amounts, so their journals are unchanged. **Why tests missed it:** `LedgerBackfillIT`'s stub ledger stored domain postings and never built lines; it now builds them with the real factory and refuses a non-positive line as the ledger does (without the fix, 2 of its 14 tests fail). **STRIDE-T:** no new write path, no new caller; a mirror remains an ordinary journal offset by its own reference.
@@ -852,3 +880,54 @@ not validate the remaining loss model. See [rollout prerequisites](../credit-ris
   (uninitialized-property crash) on a malformed request back to the intended 400; no endpoint,
   authorization, self-approval or wire-shape change. Rollback: revert to the eager
   `SecurityIdentity` parameter.
+
+- **2026-10-01** — **Human loan contract number (#11107).** Every loan now carries an immutable
+  `contract_number` of the form `UV-<origination year (UTC)>-<per-year sequence, zero-padded to at
+  least six digits>` (e.g. `UV-2026-000123`), so risk officers and the console stop reading UUID
+  prefixes. V24 adds the column, backfills existing loans deterministically (per UTC year of
+  `created_at`, ordered by `created_at, id`), then sets NOT NULL, UNIQUE and a format CHECK. It is
+  generated by the database: `next_loan_contract_number(year)` upserts one counter row per year,
+  and that row lock serialises concurrent creators; the repository draws the number in the same
+  transaction as the INSERT, and a BEFORE INSERT trigger is the backstop for raw inserts. A BEFORE
+  UPDATE trigger rejects any change. The number is exposed on the loan reads, on `LoanBookEntry`
+  (the risk engine's loan-book pull, which now carries it into `Instrument.contractNumber`), and as
+  an optional `contractNumber` field on `loan.disbursed`. **STRIDE-T:** the number is assigned by
+  the database, never taken from a request, and cannot be rewritten even by a direct UPDATE. Money
+  is unaffected: it is not a ledger reference, not an idempotency key and not in the risk engine's
+  input hash. **STRIDE-I:** it encodes only the origination year and a per-year count, so it shows
+  roughly how many loans the bank books a year to anyone who sees one. That is acceptable for a
+  contract reference printed on customer documents, and it carries no party data. **STRIDE-D:** the
+  per-year counter row serialises loan creation for the length of the creating transaction. That
+  transaction is the short `save` in `LoanRepositoryImpl`, not the disbursement saga. **Residual:**
+  the sequence is gap-tolerant, not gap-free: nothing may infer a missing loan from a missing
+  number. Rollback: see V24's `-- Rollback:` note. Numbers already shown to customers cannot be
+  recalled.
+
+## 11. Provisioning date rollover evidence (issue #10275)
+
+**Threat:** A process stops after a subset of loan allowances commits. On the next day the scheduler
+uses a new reporting key and can mark that newer day healthy while yesterday has no complete book.
+Replaying the older key from current installments, collateral, loan status and risk parameters would
+misstate historical facts and could post a false delta to the ledger.
+
+**Control:** `provisioning_cycle_run` is committed before any loan-level posting. A crash retains
+`RUNNING`; a failed or unreadable coverage check retains `INCOMPLETE`. Days with no scheduler run
+since the last recorded date become `MISSED` on the next start. Only a zero-missing check may
+write `COMPLETE`. The scheduler queries all earlier non-complete dates before recording workflow
+success, exposes their count as a gauge, and the lending alert pages when it is nonzero. The row
+contains a date and counts, not borrower identifiers. An old gap is retained for independently
+reviewed reconciliation on the actual correction date; the scheduler never backdates current facts.
+
+**Residual risk:** This change detects and preserves a prior-date gap but does not reconstruct the
+historical eligible population or implement a reviewed closure operation. Direct mutation of the
+run row would defeat the control; operational access to the database remains privileged and the
+reconciliation case must retain the approval and adjustment references. The existing `(loan_id,
+period)` uniqueness, per-loan lock and allowance outbox references are not weakened.
+
+**Accepted residual risk (owner decision, 2026-10-01):** this slice is accepted as DETECTOR-ONLY.
+It records `RUNNING`/`INCOMPLETE`/`MISSED` evidence, verifies current-date coverage and withholds
+workflow success until zero eligible exposures are missing; it posts no journal for any date other
+than the current reporting date and never replays a past date from current inputs. Until #10275
+delivers historical-input-backed recovery or a reviewed reconciliation operation, a detected
+prior-date gap stays open and is closed only by a controlled manual correction. The
+historical-replay / reconciliation policy is tracked in #10275.

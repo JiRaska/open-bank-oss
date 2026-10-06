@@ -27,6 +27,10 @@ data class LiquidityLine(
     val factor: BigDecimal?,
     val factorKey: String?,
     val citation: String,
+    /** The loan contract this line is about; null for an account- or aggregate-level line. */
+    val instrumentId: String? = null,
+    /** How many customer accounts or contracts the line aggregates; null for a single GL account. */
+    val itemCount: Int? = null,
 ) {
     val weighted: BigDecimal get() = factor?.let { amount.multiply(it, BigMath.MC) } ?: BigDecimal.ZERO
 }
@@ -129,6 +133,12 @@ data class LiquidityResult(
 private const val RATIO_SCALE = 6
 private const val LCR_HORIZON_DAYS = 30L
 private const val NSFR_HORIZON_YEARS = 1L
+private val RETAIL_STABLE =
+    LiquidityFactor.LCR_RETAIL_STABLE_RUNOFF to LiquidityFactor.NSFR_ASF_RETAIL_STABLE
+private val RETAIL_LESS_STABLE =
+    LiquidityFactor.LCR_RETAIL_LESS_STABLE_RUNOFF to LiquidityFactor.NSFR_ASF_RETAIL_LESS_STABLE
+private val OPERATIONAL =
+    LiquidityFactor.LCR_OPERATIONAL_DEPOSIT_RUNOFF to LiquidityFactor.NSFR_ASF_OPERATIONAL_DEPOSIT
 private const val STAGE_3 = "STAGE_3"
 
 /**
@@ -267,8 +277,14 @@ object Liquidity {
         private var overdraftAccounts = 0
         private val cls get() = params.classification
 
-        private fun line(label: String, code: String?, amount: BigDecimal, f: LiquidityFactor) =
-            LiquidityLine(label, code, amount, params[f], f.key, params.citation(f))
+        private fun line(
+            label: String,
+            code: String?,
+            amount: BigDecimal,
+            f: LiquidityFactor,
+            instrumentId: String? = null,
+            itemCount: Int? = null,
+        ) = LiquidityLine(label, code, amount, params[f], f.key, params.citation(f), instrumentId, itemCount)
 
         /** A customer balance in the trial-balance convention: credit (negative) is a deposit, debit an overdraft. */
         fun customerAccount(p: Position) {
@@ -288,48 +304,28 @@ object Liquidity {
                 val stable = retail.multiply(cls.retailStableShare, BigMath.MC)
                 val lessStable = retail.subtract(stable)
                 val n = "$depositAccounts customer accounts"
-                if (stable.signum() > 0) {
-                    outflows +=
-                        line("Retail deposits, stable ($n)", null, stable, LiquidityFactor.LCR_RETAIL_STABLE_RUNOFF)
-                    asf += line("Retail deposits, stable ($n)", null, stable, LiquidityFactor.NSFR_ASF_RETAIL_STABLE)
-                }
-                if (lessStable.signum() > 0) {
-                    outflows +=
-                        line(
-                            "Retail deposits, less stable ($n)",
-                            null,
-                            lessStable,
-                            LiquidityFactor.LCR_RETAIL_LESS_STABLE_RUNOFF,
-                        )
-                    asf +=
-                        line(
-                            "Retail deposits, less stable ($n)",
-                            null,
-                            lessStable,
-                            LiquidityFactor.NSFR_ASF_RETAIL_LESS_STABLE,
-                        )
-                }
-                if (operational.signum() > 0) {
-                    outflows +=
-                        line(
-                            "Operational deposits ($n)",
-                            null,
-                            operational,
-                            LiquidityFactor.LCR_OPERATIONAL_DEPOSIT_RUNOFF,
-                        )
-                    asf +=
-                        line(
-                            "Operational deposits ($n)",
-                            null,
-                            operational,
-                            LiquidityFactor.NSFR_ASF_OPERATIONAL_DEPOSIT,
-                        )
-                }
+                depositLines("Retail deposits, stable ($n)", stable, RETAIL_STABLE)
+                depositLines("Retail deposits, less stable ($n)", lessStable, RETAIL_LESS_STABLE)
+                depositLines("Operational deposits ($n)", operational, OPERATIONAL)
             }
             if (overdraftAccounts > 0) {
                 // Open-maturity lending: no LCR inflow (d238 ¶152); maturity undefined, so the ≥ 1 year RSF.
-                rsf += line("Overdrawn customer accounts ($overdraftAccounts)", null, overdrafts, loanOverOneYear())
+                rsf +=
+                    line(
+                        "Overdrawn customer accounts ($overdraftAccounts)",
+                        null,
+                        overdrafts,
+                        loanOverOneYear(),
+                        itemCount = overdraftAccounts,
+                    )
             }
+        }
+
+        /** One deposit category: its LCR run-off line and its NSFR ASF line, over all customer accounts. */
+        private fun depositLines(label: String, amount: BigDecimal, factors: Pair<LiquidityFactor, LiquidityFactor>) {
+            if (amount.signum() <= 0) return
+            outflows += line(label, null, amount, factors.first, itemCount = depositAccounts)
+            asf += line(label, null, amount, factors.second, itemCount = depositAccounts)
         }
 
         private fun loanOverOneYear() = if (cls.loansQualifyForLowRiskWeight) {
@@ -341,15 +337,13 @@ object Liquidity {
         fun loan(p: Position, instrument: Instrument?, asOf: LocalDate) {
             val label = "Loan ${p.instrumentId ?: "?"}"
             val outstanding = p.amount
+
+            fun loanLine(p: Position, text: String, amount: BigDecimal, f: LiquidityFactor) =
+                line(text, p.glAccountCode, amount, f, instrumentId = p.instrumentId, itemCount = 1)
             if (instrument?.ifrs9Stage == STAGE_3) {
                 // Not fully performing: no inflow (d238 ¶142, ¶151), non-performing RSF (d295 ¶43(c)).
                 rsf +=
-                    line(
-                        "$label (non-performing, $STAGE_3)",
-                        p.glAccountCode,
-                        outstanding,
-                        LiquidityFactor.NSFR_RSF_OTHER_ASSET,
-                    )
+                    loanLine(p, "$label (non-performing, $STAGE_3)", outstanding, LiquidityFactor.NSFR_RSF_OTHER_ASSET)
                 return
             }
             val installments = (instrument?.extension as? LoanExtension)?.remainingInstallments.orEmpty()
@@ -361,9 +355,9 @@ object Liquidity {
             val inflow = if (bulletIn30) outstanding else due30
             if (inflow.signum() > 0) {
                 inflows +=
-                    line(
+                    loanLine(
+                        p,
                         "$label: contractual payments due ≤ 30 days",
-                        p.glAccountCode,
                         inflow,
                         LiquidityFactor.LCR_RETAIL_LOAN_INFLOW,
                     )
@@ -377,16 +371,10 @@ object Liquidity {
             }
             val over1y = outstanding.subtract(under1y)
             if (under1y.signum() > 0) {
-                rsf +=
-                    line(
-                        "$label: principal due < 1 year",
-                        p.glAccountCode,
-                        under1y,
-                        LiquidityFactor.NSFR_RSF_LOAN_UNDER_1Y,
-                    )
+                rsf += loanLine(p, "$label: principal due < 1 year", under1y, LiquidityFactor.NSFR_RSF_LOAN_UNDER_1Y)
             }
             if (over1y.signum() > 0) {
-                rsf += line("$label: principal due ≥ 1 year", p.glAccountCode, over1y, loanOverOneYear())
+                rsf += loanLine(p, "$label: principal due ≥ 1 year", over1y, loanOverOneYear())
             }
         }
 
@@ -443,6 +431,9 @@ object Liquidity {
                     asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_CENTRAL_BANK_UNDER_6M)
                 }
                 GlClass.CURRENT_YEAR_RESULT -> asf += line(label, code, liability, LiquidityFactor.NSFR_ASF_OTHER)
+                // POLICY CHOICE (#11107): by sign, the most conservative class for that side (see the class KDoc).
+                GlClass.TECHNICAL_OR_CLEARING ->
+                    glAccount(p, if (asset.signum() >= 0) GlClass.OTHER_ASSET else GlClass.OTHER_LIABILITY)
             }
         }
 

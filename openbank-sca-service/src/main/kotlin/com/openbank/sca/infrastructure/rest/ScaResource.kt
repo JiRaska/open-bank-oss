@@ -25,11 +25,14 @@ import com.openbank.sca.application.port.`in`.ListDevicesQuery
 import com.openbank.sca.application.port.`in`.ListDevicesUseCase
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionCommand
 import com.openbank.sca.application.port.`in`.RecordDeviceDecisionUseCase
+import com.openbank.sca.application.port.`in`.RevokeDeviceCommand
+import com.openbank.sca.application.port.`in`.RevokeDeviceUseCase
 import com.openbank.sca.application.port.`in`.VerifyScaCommand
 import com.openbank.sca.application.port.`in`.VerifyScaUseCase
 import com.openbank.sca.application.usecase.CredentialAlreadyEnrolledException
 import com.openbank.sca.application.usecase.DeviceNotEnrolledException
 import com.openbank.sca.application.usecase.DeviceOwnershipMismatchException
+import com.openbank.sca.application.usecase.DeviceRevokedException
 import com.openbank.sca.application.usecase.InvalidDeviceAssertionException
 import com.openbank.sca.application.usecase.NonNaturalPersonEnrolmentException
 import com.openbank.sca.application.usecase.PartyRegisterUnavailableException
@@ -55,6 +58,7 @@ import io.quarkus.security.identity.SecurityIdentity
 import jakarta.annotation.security.RolesAllowed
 import jakarta.inject.Inject
 import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.DELETE
 import jakarta.ws.rs.ForbiddenException
 import jakarta.ws.rs.GET
 import jakarta.ws.rs.HeaderParam
@@ -96,10 +100,17 @@ data class EnrolledDeviceResponse(
     val credentialId: String,
     val algorithm: SignatureAlgorithm,
     val enrolledAt: String,
+    val revokedAt: String? = null,
 ) {
     companion object {
-        fun from(d: EnrolledDevice) =
-            EnrolledDeviceResponse(d.id, d.partyId, d.credentialId, d.algorithm, d.createdAt.toString())
+        fun from(d: EnrolledDevice) = EnrolledDeviceResponse(
+            d.id,
+            d.partyId,
+            d.credentialId,
+            d.algorithm,
+            d.createdAt.toString(),
+            d.revokedAt?.toString(),
+        )
     }
 }
 
@@ -195,6 +206,8 @@ data class ConsumeScaRequest(
     val amount: String? = null,
     val currency: String? = null,
     val creditor: String? = null,
+    /** Opaque operation fingerprint displayed and signed by the approving device. */
+    val reference: String? = null,
     /** Document content address (SHA-256), for a DOCUMENT_SIGNING challenge (ADR-0169 D2). */
     val documentSha256: String? = null,
     /** The signature ceremony this consume is scoped to, for a DOCUMENT_SIGNING challenge. */
@@ -219,6 +232,7 @@ class ScaResource(
     private val getSca: GetScaUseCase,
     private val enrollDevice: EnrollDeviceUseCase,
     private val listDevices: ListDevicesUseCase,
+    private val revokeDevice: RevokeDeviceUseCase,
     private val recordDecision: RecordDeviceDecisionUseCase,
     private val consumeSca: ConsumeScaUseCase,
     private val idempotencyStore: IdempotencyStore,
@@ -309,8 +323,10 @@ class ScaResource(
     @Path("/parties/{partyId}/challenges/pending")
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "scaChallenge.read", resource = "#partyId")
-    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> =
-        getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    suspend fun listPending(@PathParam("partyId") partyId: UUID): List<PendingScaResponse> {
+        identity.requirePartyOwnership(partyId)
+        return getSca.listPendingByParty(partyId).map { PendingScaResponse.from(it) }
+    }
 
     /**
      * List device credentials enrolled to a party (ADR-0021, ADR-0068 onboarding cockpit).
@@ -322,12 +338,7 @@ class ScaResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.list", resource = "#partyId")
     suspend fun listDevices(@PathParam("partyId") partyId: UUID): List<EnrolledDeviceResponse> {
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot list devices for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         return listDevices.listDevices(ListDevicesQuery(partyId)).map { EnrolledDeviceResponse.from(it) }
     }
 
@@ -341,18 +352,7 @@ class ScaResource(
     @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
     @Authorize(action = "device.enroll", resource = "#partyId")
     suspend fun enroll(@PathParam("partyId") partyId: UUID, request: EnrollDeviceRequest): Response {
-        // P1 ownership enforcement (defense-in-depth over OPA advisory mode, ADR-0021 security review):
-        // the authenticated principal may only enroll devices for their OWN partyId.
-        // When the customer realm (ADR-0065) issues JWTs, the 'sub' claim carries the partyId;
-        // in the operator realm 'sub' is the operator user id — operators with ROLE_OPERATOR
-        // may enroll on behalf of a party (service-desk credential reset path, future scope).
-        // For now: reject if sub == UUID && sub != partyId (i.e. the caller is a party, not an operator).
-        val principalName = identity.principal?.name
-        if (principalName != null && !identity.hasRole("ROLE_OPERATOR") && !identity.hasRole("ROLE_ADMIN")) {
-            runCatching { UUID.fromString(principalName) }.getOrNull()?.let { principalPartyId ->
-                if (principalPartyId != partyId) throw ForbiddenException("Cannot enroll device for another party")
-            }
-        }
+        identity.requirePartyOwnership(partyId)
         val device = enrollDevice.enroll(
             EnrollDeviceCommand(
                 partyId = partyId,
@@ -362,6 +362,16 @@ class ScaResource(
             ),
         )
         return Response.status(201).entity(EnrolledDeviceResponse.from(device)).build()
+    }
+
+    @DELETE
+    @Path("/parties/{partyId}/devices/{deviceId}")
+    @RolesAllowed("ROLE_API", "ROLE_OPERATOR", "ROLE_ADMIN", "ROLE_CUSTOMER")
+    @Authorize(action = "device.revoke", resource = "#partyId")
+    suspend fun revoke(@PathParam("partyId") partyId: UUID, @PathParam("deviceId") deviceId: UUID): Response {
+        identity.requirePartyOwnership(partyId)
+        revokeDevice.revoke(RevokeDeviceCommand(partyId, deviceId, identity.principal.name))
+        return Response.noContent().build()
     }
 
     /**
@@ -412,6 +422,7 @@ class ScaResource(
                 amount = request.amount,
                 currency = request.currency,
                 creditor = request.creditor,
+                reference = request.reference,
                 documentSha256 = request.documentSha256,
                 ceremonyId = request.ceremonyId,
                 cardId = request.cardId,
@@ -496,6 +507,12 @@ class DeviceCredentialConflictMapper : ExceptionMapper<CredentialAlreadyEnrolled
 }
 
 @Provider
+class DeviceRevokedMapper : ExceptionMapper<DeviceRevokedException> {
+    override fun toResponse(e: DeviceRevokedException): Response =
+        Response.status(Response.Status.FORBIDDEN).entity(err(ErrorCode.FORBIDDEN, e.message!!)).build()
+}
+
+@Provider
 class DeviceOwnershipMismatchMapper : ExceptionMapper<DeviceOwnershipMismatchException> {
     override fun toResponse(e: DeviceOwnershipMismatchException): Response =
         Response.status(403).entity(err(ErrorCode.FORBIDDEN, e.message ?: "Device ownership mismatch")).build()
@@ -547,4 +564,16 @@ class PartyRegisterUnavailableMapper : ExceptionMapper<PartyRegisterUnavailableE
     override fun toResponse(e: PartyRegisterUnavailableException): Response =
         Response.status(Response.Status.SERVICE_UNAVAILABLE)
             .entity(err(ErrorCode.INTERNAL_ERROR, e.message ?: "Party register unavailable").copy(status = 503)).build()
+}
+
+/** Customer self-service requires a resolved party; service identities remain subject to OPA. */
+private fun SecurityIdentity.requirePartyOwnership(partyId: UUID) {
+    if (hasRole("ROLE_OPERATOR") || hasRole("ROLE_ADMIN")) return
+    val principalPartyId = principal?.name?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    if (hasRole("ROLE_CUSTOMER") && principalPartyId == null) {
+        throw ForbiddenException("Customer party identity is required")
+    }
+    if (principalPartyId != null && principalPartyId != partyId) {
+        throw ForbiddenException("Cannot access another party's SCA data")
+    }
 }

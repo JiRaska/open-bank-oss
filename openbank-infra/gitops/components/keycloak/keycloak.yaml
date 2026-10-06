@@ -61,7 +61,7 @@ spec:
           # live in the Dockerfile now and MUST NOT be re-set as env below, or
           # `--optimized` aborts on a build-option mismatch. Bump = rebuild via
           # openbank-infra/scripts/build-push-keycloak.sh, then bump this tag.
-          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.7.3-optimized@sha256:ef7e6ff36c8790a2789da7e0f78679225b8463430ecd442a64a8bec5ed9ddbd1
+          image: 265175468565.dkr.ecr.eu-north-1.amazonaws.com/openbank-keycloak:26.8.0-optimized@sha256:9466211c6beed3a11cd60bfdb45dda2b887f9d1fa7e34356c0403bac471b4df5
           args: ["start", "--optimized", "--import-realm"]
           env:
             # --- front/back-channel hostname split ---
@@ -213,6 +213,9 @@ metadata:
   name: keycloak
   namespace: iam
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     cert-manager.io/cluster-issuer: letsencrypt-prod
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     # Security headers: HSTS with preload (2-year max-age per preload list requirement)
@@ -265,6 +268,9 @@ metadata:
   name: keycloak-admin-block
   namespace: iam
   annotations:
+    # DNS moved to the Envoy Gateway route (httproute.yaml). This makes external-dns ignore
+    # this Ingress; it stays as the rollback until a later change deletes it.
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/denylist-source-range: "0.0.0.0/0,::/0"
 spec:

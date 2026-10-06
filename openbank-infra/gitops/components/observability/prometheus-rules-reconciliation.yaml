@@ -43,3 +43,26 @@ spec:
               clearing) — this is sustained drift, not a transient backfill-in-progress snapshot
               (issue #860). Investigate the control-account ⇄ sub-ledger tie-out; do not dismiss
               as a snapshot artifact.
+
+    # ADR-0315 D7: a nostro reconciliation break (an unmatched correspondent statement line or
+    # ledger line on the nostro GL) older than openbank.treasury.nostro.break-alert-age-days
+    # business days and over break-alert-min-amount. The gauge is published by treasury-service's
+    # hourly NostroBreakScheduler and reads NaN on a cold pod until its first sweep, so a restart
+    # can neither fire nor clear this alert on a value nobody measured. `max` because an Argo canary
+    # runs two pods that both sweep the same table. `for: 2h` spans two sweeps. Each break is also
+    # announced once on the outbox as treasury.nostro.break-aged.v1 (GET
+    # /api/v1/treasury/nostro/{iban}/breaks lists them with their age).
+    - name: openbank.treasury.nostro
+      rules:
+        - alert: TreasuryNostroBreaksAged
+          expr: max(openbank_treasury_nostro_breaks_aged) > 0
+          for: 2h
+          labels:
+            severity: warning
+          annotations:
+            summary: "Nostro reconciliation break(s) past the age threshold"
+            description: >-
+              treasury-service reports open nostro breaks older than the configured business-day
+              threshold. A break is never auto-posted: investigate each one on the admin-ui nostro
+              page (or GET /api/v1/treasury/nostro/{iban}/breaks) and resolve it with the
+              correspondent or by a ledger booking through the normal deal lifecycle.

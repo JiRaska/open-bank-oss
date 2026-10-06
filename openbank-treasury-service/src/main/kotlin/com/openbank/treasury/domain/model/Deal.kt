@@ -4,8 +4,8 @@
 
 package com.openbank.treasury.domain.model
 
+import com.openbank.libs.domain.money.RoundingPolicy
 import java.math.BigDecimal
-import java.math.RoundingMode
 import java.time.DayOfWeek
 import java.time.Instant
 import java.time.LocalDate
@@ -24,7 +24,7 @@ import java.util.UUID
  * - [FX_SPOT]: the bank buys or sells a foreign currency against CZK with a counterparty (see
  *   [FxTerms]). No interest, no maturity: it is final once SETTLED. It carries settlement risk
  *   until then, so it consumes the counterparty's CZK limit by its CZK equivalent while
- *   PENDING_APPROVAL or BOOKED. `isAsset = false`: it opens no placement-like claim.
+ *   PENDING_APPROVAL, BOOKED or CONFIRMED. `isAsset = false`: it opens no placement-like claim.
  */
 enum class ProductType(val isAsset: Boolean, val isCnbFacility: Boolean = false) {
     MM_PLACEMENT(isAsset = true),
@@ -67,11 +67,18 @@ data class FxTerms(
 }
 
 /**
- * ADR-0315 D2 lifecycle, MVP subset: `CONFIRMED` is folded into `SETTLED` because the simulated
- * counterparty confirms and settles in one step (ADR-0315 D9). `REJECTED` is not a state: a
- * rejection sends the deal back to `DRAFT` with the reason recorded on its timeline.
+ * ADR-0315 D2 lifecycle: `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, plus
+ * `CANCELLED` (before booking) and `REVERSED` (after). `CONFIRMED` = the counterparty's
+ * confirmation of the booked terms has been received — by a back-office person, or, in the
+ * sandbox, by the simulated counterparty set (ADR-0315 D9). Nothing posts on confirmation.
+ * `REJECTED` is not a state: a rejection sends the deal back to `DRAFT` with the reason recorded
+ * on its timeline.
+ *
+ * Backward compatibility (no data migration): deals BOOKED before `CONFIRMED` existed stay BOOKED.
+ * Whether one may settle straight from BOOKED is a deployment decision,
+ * `openbank.treasury.confirmation.required` (default true) — see [Deal.settle].
  */
-enum class DealState { DRAFT, PENDING_APPROVAL, BOOKED, SETTLED, MATURED, CANCELLED, REVERSED }
+enum class DealState { DRAFT, PENDING_APPROVAL, BOOKED, CONFIRMED, SETTLED, MATURED, CANCELLED, REVERSED }
 
 /** Who acts. Derived from the authenticated principal, never from a request body. */
 enum class ActorType { HUMAN, AI_AGENT, SERVICE, SYSTEM }
@@ -235,7 +242,7 @@ data class Deal(
         val flag = when {
             mid == null || mid.signum() <= 0 -> "fx-service mid unavailable; deal rate $rate is unvalidated"
             else -> {
-                val deviation = (rate - mid).abs().multiply(HUNDRED).divide(mid, DEVIATION_SCALE, RoundingMode.HALF_UP)
+                val deviation = RoundingPolicy.RATE_PERCENT.divide((rate - mid).abs().multiply(HUNDRED), mid)
                 if (deviation > tolerancePercent) {
                     "deal rate $rate deviates $deviation % from fx-service mid $mid (tolerance $tolerancePercent %)"
                 } else {
@@ -270,9 +277,16 @@ data class Deal(
     /** Interest at maturity, ACT/360, rounded half-up to the currency's 2 minor units. */
     val interest: BigDecimal get() = DayCount.act360Interest(principal, rate, valueDate, maturityDate)
 
-    fun submit(actor: Actor, check: LimitCheck, at: Instant): Deal {
+    /**
+     * ADR-0315 D4: the counterparty check is RECORDED here (a breach may still book under a senior
+     * override); the product limit is ENFORCED — a deal outside its product mandate never reaches
+     * an approver's queue. [productCheck] is required, never defaulted: a missing check must not
+     * read as a passed one.
+     */
+    fun submit(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "submit")
         requireState(DealState.DRAFT, "submit")
+        if (productCheck.breached) throw ProductLimitBreachedException(productCheck)
         return transition(DealState.PENDING_APPROVAL, actor, at, limitNote(check))
             .copy(submittedBy = actor, limitCheck = check)
     }
@@ -282,10 +296,14 @@ data class Deal(
      * enforcing would otherwise silently allow self-approval. Order matters — the agent check
      * runs first, so an agent is refused as an agent even when it is also the creator.
      */
-    fun approve(actor: Actor, check: LimitCheck, at: Instant): Deal {
+    fun approve(actor: Actor, check: LimitCheck, at: Instant, productCheck: ProductLimitCheck): Deal {
         requireHuman(actor, "approve")
         requireState(DealState.PENDING_APPROVAL, "approve")
         requireSecondPerson(actor)
+        // ADR-0315 D4: the product limit is re-evaluated at approval — the declared mandate may have
+        // been tightened since submission. Not overridable (see ProductLimit); the senior override
+        // below covers the counterparty limit only.
+        if (productCheck.breached) throw ProductLimitBreachedException(productCheck)
         // ADR-0315 D4: a breach blocks booking unless a second, senior approver recorded an override
         // with a reason that still covers it. The booking approver is yet another person.
         if (check.breached) requireOverrideCovers(actor, check)
@@ -344,9 +362,47 @@ data class Deal(
         return transition(DealState.CANCELLED, actor, at, null)
     }
 
-    fun settle(actor: Actor, today: LocalDate, at: Instant): Deal {
+    /**
+     * ADR-0315 D2: the counterparty's confirmation of the booked terms was received. A back-office
+     * person (never the deal's creator or submitter: the dealer who struck a trade does not also
+     * attest that the other side agreed to it) or the in-process simulated counterparty
+     * ([Actor.SIMULATED_MARKET], sandbox only). An AI agent or a service account never confirms,
+     * whatever roles it carries. Posts nothing.
+     */
+    fun confirm(actor: Actor, at: Instant, reference: String? = null): Deal {
+        requireHumanOrSystem(actor, "confirm")
+        requireState(DealState.BOOKED, "confirm")
+        if (actor.type == ActorType.HUMAN) {
+            val role = when (actor.id) {
+                createdBy.id -> "creator"
+                submittedBy?.id -> "submitter"
+                else -> null
+            }
+            role?.let { throw FourEyesViolationException("four-eyes: the deal's $it must not confirm it") }
+        }
+        require(reference == null || reference.length <= MAX_REFERENCE_LENGTH) {
+            "a confirmation reference has at most $MAX_REFERENCE_LENGTH characters"
+        }
+        val note = "counterparty confirmation received" + (reference?.takeIf { it.isNotBlank() }?.let { ": $it" } ?: "")
+        return transition(DealState.CONFIRMED, actor, at, note)
+    }
+
+    /**
+     * Settlement on or after the value date. From CONFIRMED always; from BOOKED only when the
+     * deployment does not require counterparty confirmation ([confirmationRequired] false) — the
+     * compatibility path for deals booked before `CONFIRMED` existed, chosen by configuration
+     * instead of a data migration that would claim confirmations nobody received.
+     */
+    fun settle(actor: Actor, today: LocalDate, at: Instant, confirmationRequired: Boolean = true): Deal {
         requireHumanOrSystem(actor, "settle")
-        requireState(DealState.BOOKED, "settle")
+        check(state in settleableStates(confirmationRequired)) {
+            if (state == DealState.BOOKED) {
+                "cannot settle a deal in state BOOKED: counterparty confirmation is required (confirm it first)"
+            } else {
+                val expected = settleableStates(confirmationRequired).joinToString("/")
+                "cannot settle a deal in state $state (expected $expected)"
+            }
+        }
         check(!valueDate.isAfter(today)) { "deal cannot settle before its value date $valueDate" }
         return transition(DealState.SETTLED, actor, at, null)
     }
@@ -360,14 +416,15 @@ data class Deal(
     }
 
     /**
-     * A booked or settled deal is undone by reversal. From SETTLED the settlement journal is
-     * offset in the ledger; from BOOKED nothing had posted. A matured deal is final in the MVP.
+     * A booked, confirmed or settled deal is undone by reversal. From SETTLED the settlement journal
+     * is offset in the ledger; from BOOKED or CONFIRMED nothing had posted. A matured deal is final
+     * in the MVP.
      * Four-eyes applies: the creator cannot reverse their own deal.
      */
     fun reverse(actor: Actor, reason: String, at: Instant): Deal {
         requireHuman(actor, "reverse")
-        check(state == DealState.BOOKED || state == DealState.SETTLED) {
-            "only a BOOKED or SETTLED deal can be reversed (deal is $state)"
+        check(state == DealState.BOOKED || state == DealState.CONFIRMED || state == DealState.SETTLED) {
+            "only a BOOKED, CONFIRMED or SETTLED deal can be reversed (deal is $state)"
         }
         require(reason.isNotBlank()) { "a reversal needs a reason" }
         if (actor.id == createdBy.id) {
@@ -380,7 +437,7 @@ data class Deal(
     val consumesLimit: Boolean
         get() = when (product) {
             ProductType.FX_SPOT -> state in FX_LIMIT_CONSUMING_STATES
-            else -> product.isAsset && state in setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+            else -> product.isAsset && state in LIMIT_CONSUMING_STATES
         }
 
     private fun transition(to: DealState, actor: Actor, at: Instant, note: String?) = copy(
@@ -423,8 +480,7 @@ data class Deal(
         }
     }
 
-    private fun limitNote(check: LimitCheck) =
-        "limit ${check.limit} ${check.currency}, exposure after ${check.exposureAfter}, headroom ${check.headroomAfter}"
+    private fun limitNote(check: LimitCheck) = LimitNote.format(check)
 
     companion object {
         const val CZK = "CZK"
@@ -435,19 +491,24 @@ data class Deal(
         private val HUNDRED = BigDecimal("100")
         private const val FX_RATE_SCALE = 6
         private val FX_RATE_LIMIT = BigDecimal("1000")
-        private const val DEVIATION_SCALE = 4
-        private const val MONEY_SCALE = 2
+        private const val MAX_REFERENCE_LENGTH = 200
+
+        /** The states [settle] accepts: CONFIRMED, plus BOOKED only when confirmation is not required. */
+        fun settleableStates(confirmationRequired: Boolean): Set<DealState> =
+            if (confirmationRequired) setOf(DealState.CONFIRMED) else setOf(DealState.BOOKED, DealState.CONFIRMED)
 
         /**
          * An FX spot consumes its counterparty's CZK limit (settlement risk on its CZK leg) only
-         * while PENDING_APPROVAL or BOOKED: once both legs are exchanged nothing is left at risk.
+         * while PENDING_APPROVAL, BOOKED or CONFIRMED: once both legs are exchanged nothing is left
+         * at risk.
          * The repository's `exposure` query reads the same set, never a second literal list.
          */
-        val FX_LIMIT_CONSUMING_STATES: Set<DealState> = setOf(DealState.PENDING_APPROVAL, DealState.BOOKED)
+        val FX_LIMIT_CONSUMING_STATES: Set<DealState> =
+            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.CONFIRMED)
 
         /** The CZK leg of an FX spot: foreign amount x deal rate, half-up to 2 dp. */
         fun counterAmountOf(principal: BigDecimal, rate: BigDecimal): BigDecimal =
-            principal.multiply(rate).setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+            RoundingPolicy.TREASURY_AMOUNT.round(principal.multiply(rate))
 
         /**
          * The single source of truth for "on book" (ADR-0315, treasury limit utilisation, #10896):
@@ -459,7 +520,7 @@ data class Deal(
          * booking is worth nothing if it silently reads a different rule).
          */
         val LIMIT_CONSUMING_STATES: Set<DealState> =
-            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.SETTLED)
+            setOf(DealState.PENDING_APPROVAL, DealState.BOOKED, DealState.CONFIRMED, DealState.SETTLED)
 
         /**
          * A new draft. A human dealer or an AI agent may draft (ADR-0315 D3); a service account or
@@ -533,8 +594,6 @@ data class Deal(
 object DayCount {
     private const val DAYS_IN_YEAR_ACT360 = 360
     private const val PERCENT = 100
-    private const val MONEY_SCALE = 2
-    private const val WORK_SCALE = 12
 
     private const val SPOT_LAG_BUSINESS_DAYS = 2
 
@@ -553,9 +612,11 @@ object DayCount {
     /** principal × rate/100 × days/360, half-up to 2 dp. */
     fun act360Interest(principal: BigDecimal, ratePercent: BigDecimal, from: LocalDate, to: LocalDate): BigDecimal {
         val days = BigDecimal.valueOf(ChronoUnit.DAYS.between(from, to))
-        return principal.multiply(ratePercent).multiply(days)
-            .divide(BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()), WORK_SCALE, RoundingMode.HALF_UP)
-            .setScale(MONEY_SCALE, RoundingMode.HALF_UP)
+        val quotient = RoundingPolicy.TREASURY_INTEREST_WORK.divide(
+            principal.multiply(ratePercent).multiply(days),
+            BigDecimal.valueOf((PERCENT * DAYS_IN_YEAR_ACT360).toLong()),
+        )
+        return RoundingPolicy.TREASURY_AMOUNT.round(quotient)
     }
 }
 

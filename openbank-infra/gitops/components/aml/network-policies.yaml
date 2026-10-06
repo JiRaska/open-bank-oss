@@ -44,6 +44,19 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
+              kubernetes.io/metadata.name: security-scanner
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: admin-ui
+      ports:
+        - protocol: TCP
+          port: 8117
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: context
+        - namespaceSelector:
+            matchLabels:
               kubernetes.io/metadata.name: fx
         - namespaceSelector:
             matchLabels:
@@ -53,13 +66,10 @@ spec:
               kubernetes.io/metadata.name: platform
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: security-scanner
-        - namespaceSelector:
-            matchLabels:
               kubernetes.io/metadata.name: admin-ui
       ports:
         - protocol: TCP
-          port: 8117
+          port: 8443
     - from:
         - namespaceSelector:
             matchLabels:

@@ -3,12 +3,34 @@
 #
 # The shared edge (ADR-0324): one GatewayClass, one EnvoyProxy, one Gateway.
 #
-# PHASE 0 — NOTHING IS ROUTED. The Gateway exists so the controller provisions the proxy
-# Deployment and its LoadBalancer Service (the second NLB), and so the data plane can be
-# observed before any host moves. Its listener admits HTTPRoutes only from namespaces
-# carrying `openbank.io/edge-gateway: shared`, and no namespace carries that label yet.
-# A phase that moves a host adds the label to that host's namespace together with its
-# HTTPRoute and HTTPS listener — attachment is opt-in per namespace, never `from: All`.
+# PHASE 1 — the low-risk hosts (pact-broker, langfuse, rum-gateway) are routed here, but
+# DNS still points at ingress-nginx: each of their HTTPRoutes carries
+# `external-dns.kubernetes.io/controller: gateway-api-cutover-pending`, which external-dns
+# skips, so the routes are reachable only on this Gateway's own NLB address (curl
+# --resolve) until a cutover PR removes that annotation. See httproute-redirect.yaml.
+#
+# PHASE 2 — the ADR-0234 gated tools (/tools/grafana, /tools/alertmanager, /tools/pyrra on
+# admin.open-bank.tech) on listener https-admin, held out of DNS the same way
+# (observability/httproute-tools-gate.yaml). Their DNS cannot move on its own: the tools share
+# the host with the console, so admin.open-bank.tech moves in Phase 3 with the admin-ui route.
+#
+# PHASE 3 — kc.open-bank.tech (keycloak/httproute.yaml, both nginx Ingresses in one route, the
+# operator-only paths a direct 403) on listener https-keycloak, held out of DNS the same way.
+#
+# ATTACHMENT. Each HTTPS listener names ONE hostname and admits routes from ONE namespace,
+# selected by `kubernetes.io/metadata.name` — a label the API server sets and nobody can
+# put on another namespace. So a route for pact.open-bank.tech can only come from
+# pact-broker, and no namespace can claim another host's name on this Gateway. (Phase 0
+# planned a shared opt-in label instead; it would let any labelled namespace attach to any
+# listener, and `observability` has no GitOps-owned Namespace object to carry it.)
+#
+# TLS. cert-manager here runs WITHOUT Gateway API support (no --enable-gateway-api in
+# aws/envs/sandbox-platform), so the Gateway shim annotation would do nothing. The
+# listeners instead reference the Secrets the hosts' existing Ingress-shim Certificates
+# already keep renewed, across namespaces, each admitted by a ReferenceGrant that lives
+# beside its HTTPRoute. Reusing them, not minting new ones, is load-bearing for rum: the
+# mobile app pins rum.open-bank.tech's SPKI (private-key-rotation-policy: Never), and a new
+# Certificate would mean a new key.
 ---
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
@@ -27,11 +49,17 @@ spec:
 # load balancer as the first:
 #   - same in-tree cloud-provider annotations (NLB, internet-facing) — no AWS Load
 #     Balancer Controller, the only AWS coupling stays one Service annotation (ADR-0027);
-#   - externalTrafficPolicy: Cluster, NOT Envoy Gateway's default of Local, so any NLB AZ
-#     IP reaches the single proxy replica via kube-proxy, exactly as today.
-# The source-IP allow-list is not in this repo for either NLB: it lives on the NLB's
-# security group, applied outside GitOps, and must be applied to this NLB the same way
-# before a host is moved to it.
+#   - externalTrafficPolicy: Local, as ingress-nginx's Service: the NLB delivers only to
+#     nodes running a proxy replica (health-checked on the Service's healthCheckNodePort)
+#     and kube-proxy does no SNAT, so Envoy sees the real client IP. That is what makes a
+#     per-client rate limit possible at all (rum, observability/httproute-rum-gateway.yaml);
+#     under Cluster every request arrived from a node address and a per-IP bucket would
+#     have been one bucket per node.
+#   - one replica in EVERY NLB AZ, for the same reason ingress-nginx runs three: with Local
+#     and cross-zone off, an NLB address whose AZ has no proxy has no healthy target, and
+#     connections to it fail until the NLB drops that AZ from DNS (minutes, 2026-09-28).
+# No source-IP allow-list on either NLB: the sandbox edge is deliberately public, as the
+# ingress-nginx Service records, so nothing has to be applied to this NLB before a cutover.
 #
 # FinOps (ADR-0324): this is a SECOND NLB for the length of the migration, about
 # 0.025 USD/h (~$18/month) plus LCUs, on top of the ingress-nginx NLB. Steady state is
@@ -48,14 +76,41 @@ spec:
     kubernetes:
       envoyService:
         type: LoadBalancer
-        externalTrafficPolicy: Cluster
+        externalTrafficPolicy: Local
         annotations:
           service.beta.kubernetes.io/aws-load-balancer-type: nlb
           service.beta.kubernetes.io/aws-load-balancer-scheme: internet-facing
       envoyDeployment:
-        # Single replica for sandbox FinOps, as ingress-nginx. Prod raises this and adds
-        # envoyPDB.
-        replicas: 1
+        # Three replicas with REQUIRED hostname and zone spread, mirroring the ingress-nginx
+        # controller (apps/ingress-nginx.yaml) field for field: Local traffic policy needs a
+        # proxy behind every NLB AZ address, and one node or pod loss must remove one AZ, not
+        # the edge. FinOps: +2 x 50m / 64Mi requests over the Phase-0 single replica.
+        replicas: 3
+        pod:
+          topologySpreadConstraints:
+            - maxSkew: 1
+              topologyKey: kubernetes.io/hostname
+              whenUnsatisfiable: DoNotSchedule
+              # Count only the CURRENT ReplicaSet, or a terminating old pod makes its AZ
+              # look occupied during a roll and the scheduler never rebalances (2026-09-28).
+              matchLabelKeys: [pod-template-hash]
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: proxy
+                  app.kubernetes.io/managed-by: envoy-gateway
+                  gateway.envoyproxy.io/owning-gateway-name: edge
+            - maxSkew: 1
+              topologyKey: topology.kubernetes.io/zone
+              whenUnsatisfiable: DoNotSchedule
+              matchLabelKeys: [pod-template-hash]
+              # All three NLB AZs are required domains even while one has no eligible node,
+              # so Karpenter provisions there instead of the scheduler doubling up.
+              minDomains: 3
+              labelSelector:
+                matchLabels:
+                  app.kubernetes.io/component: proxy
+                  app.kubernetes.io/managed-by: envoy-gateway
+                  gateway.envoyproxy.io/owning-gateway-name: edge
         container:
           # Envoy Gateway's default proxy request is 100m / 512Mi; an idle sandbox edge
           # needs a fraction of that. Limits match the ingress-nginx controller's.
@@ -66,6 +121,10 @@ spec:
             limits:
               cpu: "1"
               memory: 256Mi
+      # Two of three keep serving through voluntary disruption (drift, consolidation,
+      # drains), as the ingress-nginx controller's PDB.
+      envoyPDB:
+        minAvailable: 2
   telemetry:
     metrics:
       # Stated explicitly: podmonitors.yaml scrapes this endpoint (:19001
@@ -81,12 +140,189 @@ metadata:
 spec:
   gatewayClassName: envoy
   listeners:
+    # Plain HTTP exists only to redirect to HTTPS (the nginx `ssl-redirect` default). Its
+    # one route is httproute-redirect.yaml, in this namespace; no host namespace attaches.
     - name: http
       protocol: HTTP
       port: 80
       allowedRoutes:
         namespaces:
+          from: Same
+    - name: https-pact-broker
+      protocol: HTTPS
+      port: 443
+      hostname: pact.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pact-edge-tls
+            namespace: pact-broker
+      allowedRoutes:
+        namespaces:
           from: Selector
           selector:
             matchLabels:
-              openbank.io/edge-gateway: shared
+              kubernetes.io/metadata.name: pact-broker
+    # pricing.open-bank.tech (ADR-0324 Phase 4, pricing/httproute.yaml). Its own Certificate
+    # `pricing-edge-tls` (no key pinning on this host), admitted by the ReferenceGrant in
+    # pricing/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-pricing
+      protocol: HTTPS
+      port: 443
+      hostname: pricing.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: pricing-edge-tls
+            namespace: pricing
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: pricing
+    - name: https-langfuse
+      protocol: HTTPS
+      port: 443
+      hostname: langfuse.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: langfuse-edge-tls
+            namespace: ai-platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: ai-platform
+    # copilot.open-bank.tech (ADR-0324 Phase 4, copilot/httproute.yaml). Its own Certificate
+    # `copilot-edge-tls` (the host is not pinned), admitted by the ReferenceGrant
+    # copilot-edge-gateway-tls, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson). `platform` also hosts agent, ap2 and mcp; the hostname pins this
+    # listener to the copilot route's host, and no other host is served from it.
+    - name: https-copilot
+      protocol: HTTPS
+      port: 443
+      hostname: copilot.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: copilot-edge-tls
+            namespace: platform
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: platform
+    - name: https-rum
+      protocol: HTTPS
+      port: 443
+      hostname: rum.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: rum-gateway-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+    # customer.open-bank.tech (ADR-0324 Phase 4, customer-edge/httproute.yaml). Serves the SAME
+    # Secret the nginx Ingress does, `customer-edge-tls`: the mobile app pins this host's SPKI
+    # (ADR-0066 S3, rotation Never), so a new certificate would break every installed app.
+    # Admitted by the ReferenceGrant in customer-edge/httproute.yaml, which landed in an EARLIER
+    # change on purpose (the Phase-1 RefNotPermitted lesson).
+    - name: https-customer-edge
+      protocol: HTTPS
+      port: 443
+      hostname: customer.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: customer-edge-tls
+            namespace: customer-edge
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: customer-edge
+    # admin.open-bank.tech (ADR-0324 Phase 2). TWO namespaces, because the host is shared: the
+    # ADR-0234 tool routes (/tools/*) live in `observability` next to the tools they front, and
+    # Phase 3 attaches the console itself from `admin-ui`. Every HTTPRoute in `observability`
+    # must carry an extAuth SecurityPolicy or an ungated-machine-callers declaration (Kyverno
+    # require-gated-or-declared-tool-httproute-cel), so this listener admits no ungated route
+    # from it. Certificate + ReferenceGrant: components/admin-ui/edge-gateway-grants.yaml,
+    # landed in an EARLIER change on purpose (the Phase-1 RefNotPermitted lesson in
+    # httproute-redirect.yaml / pact-broker/httproute.yaml).
+    - name: https-admin
+      protocol: HTTPS
+      port: 443
+      hostname: admin.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: admin-edge-tls
+            namespace: admin-ui
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchExpressions:
+              - key: kubernetes.io/metadata.name
+                operator: In
+                values: [admin-ui, observability]
+    # glitchtip.open-bank.tech (ADR-0324 Phase 4, observability/httproute-glitchtip.yaml). Its
+    # own Certificate `glitchtip-edge-tls` (not pinned), admitted by the ReferenceGrant
+    # glitchtip-edge-gateway-tls, which landed in an EARLIER change on purpose. Admits
+    # `observability`, where Kyverno requires every HTTPRoute to be extAuth-gated or to declare
+    # its ungated machine callers, as the glitchtip route does.
+    - name: https-glitchtip
+      protocol: HTTPS
+      port: 443
+      hostname: glitchtip.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: glitchtip-edge-tls
+            namespace: observability
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: observability
+    # kc.open-bank.tech (ADR-0324 Phase 3). Serves the SAME Secret the nginx Ingress does,
+    # `keycloak-tls`: the mobile app pins this host's SPKI (ADR-0066 S3, rotation Never), so a
+    # new certificate would break every installed app. Admitted by the ReferenceGrant in
+    # keycloak/httproute.yaml, which landed in an EARLIER change on purpose (the Phase-1
+    # RefNotPermitted lesson).
+    - name: https-keycloak
+      protocol: HTTPS
+      port: 443
+      hostname: kc.open-bank.tech
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: keycloak-tls
+            namespace: iam
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              kubernetes.io/metadata.name: iam

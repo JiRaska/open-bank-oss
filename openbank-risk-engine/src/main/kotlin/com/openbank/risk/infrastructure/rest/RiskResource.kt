@@ -9,6 +9,7 @@ import com.openbank.libs.security.Roles
 import com.openbank.risk.application.port.`in`.CapitalUseCase
 import com.openbank.risk.application.port.`in`.CashFlowUseCase
 import com.openbank.risk.application.port.`in`.IrrbbUseCase
+import com.openbank.risk.application.port.`in`.LimitUseCase
 import com.openbank.risk.application.port.`in`.LiquidityForecastUseCase
 import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
@@ -77,6 +78,9 @@ class RiskResource {
     @Inject
     lateinit var minReserves: MinReservesUseCase
 
+    @Inject
+    lateinit var riskLimits: LimitUseCase
+
     @POST
     @Operation(summary = "Build (or replay) the balance-sheet snapshot for an as-of date")
     @Authorize(action = "risk.snapshot.create")
@@ -139,8 +143,9 @@ class RiskResource {
 
     /**
      * IRRBB of a TIED_OUT run (ADR-0313 phase 1): repricing gap, ΔEVE under the six BCBS d368
-     * scenarios, ΔNII (parallel up/down). `tier1Capital` is optional and only ever the caller's:
-     * without it the outlier ratio is not computed. Same gates as cash flows: UNTIED → 409.
+     * scenarios, ΔNII (parallel up/down), and the gaps the figures do not capture. `curveSetId`
+     * defaults to the newest set as of the run's date. `tier1Capital` is optional: without it the
+     * run's own-funds Tier 1 (CZK) is used, as the `irrbb-eve-outlier` limit does. UNTIED → 409.
      */
     @GET
     @Path("/{id}/irrbb")
@@ -154,7 +159,8 @@ class RiskResource {
         val tier1 = tier1Capital?.takeIf { it.isNotBlank() }?.let {
             requireNotNull(it.trim().toBigDecimalOrNull()) { "query parameter 'tier1Capital' must be a decimal number" }
         }
-        return Response.ok(irrbb.analyse(id, parseCurveSetId(curveSetId), tier1).toResponse()).build()
+        val setId = curveSetId?.takeIf { it.isNotBlank() }?.let { parseCurveSetId(it) }
+        return Response.ok(irrbb.analyse(id, setId, tier1).toResponse()).build()
     }
 
     /**
@@ -217,6 +223,19 @@ class RiskResource {
     @Authorize(action = "risk.snapshot.read", resource = "#id")
     suspend fun minReserves(@PathParam("id") id: UUID): Response =
         Response.ok(minReserves.analyse(id).toResponse()).build()
+
+    /**
+     * The declarative risk limits (ADR-0313 D9) evaluated on a TIED_OUT run: per limit OK /
+     * EARLY_WARNING / BREACH, or NOT_EVALUABLE with the gap in its input. Derived on request from the
+     * same reads as /liquidity, /capital and /irrbb. Same gate as positions: UNTIED → 409.
+     */
+    @GET
+    @Path("/{id}/limits")
+    @Operation(
+        summary = "Risk-limit status (OK / EARLY_WARNING / BREACH / NOT_EVALUABLE) of a TIED_OUT run; 409 if UNTIED",
+    )
+    @Authorize(action = "risk.snapshot.read", resource = "#id")
+    suspend fun limits(@PathParam("id") id: UUID): Response = Response.ok(riskLimits.evaluate(id).toResponse()).build()
 
     private fun parseCurveSetId(curveSetId: String?): UUID {
         val raw = requireNotNull(curveSetId) { "query parameter 'curveSetId' is required" }

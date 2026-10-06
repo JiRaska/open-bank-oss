@@ -143,6 +143,20 @@ enum class CapitalFactor(val key: String, val kind: FactorKind, val citation: St
 enum class CapitalGlClass(val wire: String, val description: String) {
     CENTRAL_BANK("central-bank", "Claim on a central bank / sovereign (d424 ¶7-8)"),
     BANK("bank", "Claim on a bank, unrated: SCRA at the configured grade (d424 ¶17(b), ¶21)"),
+
+    /**
+     * A nostro: the bank's own current account at a correspondent bank. A debit balance is a claim
+     * on that bank, weighted exactly as [BANK]. A credit balance means the nostro is overdrawn —
+     * the bank OWES the correspondent (an "amount owed to credit institutions" liability), so it is
+     * no credit exposure at all, the same reading as a customer account in credit. POLICY CHOICE
+     * (#11107): the generic rule for an exposure account in credit (listed, ratios not computed)
+     * would make every capital ratio not evaluable whenever a settlement drains the nostro below
+     * zero, although no claim exists. Not netted against any other exposure (no CRM).
+     */
+    NOSTRO(
+        "nostro",
+        "Nostro at a correspondent bank: debit = claim on a bank (as bank), credit = overdraft owed, no exposure",
+    ),
     RETAIL("retail", "Loan to an individual: the configured retail treatment (d424 ¶54-58)"),
     CASH("cash", "Cash owned and held at the bank or in transit (d424 ¶96(i))"),
     CASH_ITEMS_IN_COLLECTION("cash-items-in-collection", "Cash items in the process of collection (d424 ¶97)"),

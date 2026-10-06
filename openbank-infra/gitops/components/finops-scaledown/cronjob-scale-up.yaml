@@ -25,6 +25,9 @@ metadata:
   labels:
     app.kubernetes.io/part-of: finops-scaledown
     app.kubernetes.io/component: scale-up
+  annotations:
+    # Budget for CronJobSuccessStale (prometheus-rules-jobs.yaml): two missed runs of '0 7 * * 1-5' plus slack.
+    openbank.tech/max-success-age-seconds: "352800"
 spec:
   # 07:00 Europe/Prague, Monday-Friday only (see comment above for why
   # weekends are deliberately excluded).

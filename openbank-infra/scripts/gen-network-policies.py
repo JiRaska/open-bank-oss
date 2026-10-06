@@ -5,7 +5,8 @@
 
 The allow-lists are DERIVED, never hand-edited (house rule, ADR-0029/0074/0081):
 every cross-namespace call a service makes is already declared in its Deployment
-env (`http://<svc>.<ns>.svc:<port>`), every public path in an Ingress backend,
+env (`http://<svc>.<ns>.svc:<port>`) or a service-dependencies annotation for
+runtime-secret-discovered URLs, every public path in an Ingress backend,
 every Kafka client in its bootstrap URL. This script walks
 openbank-infra/gitops/components/, extracts those edges and emits one
 `network-policies.yaml` per component DIRECTORY (each is its own ArgoCD
@@ -23,10 +24,18 @@ per directory rather than one for the namespace):
     monitor is reachable by Prometheus the moment its monitor is declared,
   - admin-ui allowed on every service HTTP port (the BFF discovers services
     dynamically via the k8s API, ADR-0051/0056 — its edges are not in env),
+  - workloads opting into `openbank.io/port-scoped-ingress: "true"` admit a
+    declared caller only on its explicit URL port; portless/secret dependencies
+    retain all HTTP ports until their actual destination can be resolved,
     EXCEPT ports named for a datastore wire protocol (INTERNAL_ONLY_PORT_NAMES,
     e.g. "redis") — those are same-namespace-only, since admin-ui never speaks
     the raw wire protocol directly,
   - ingress-nginx allowed where an Ingress backend declares it,
+  - envoy-gateway-system (the shared Gateway's Envoy proxy, ADR-0324) allowed
+    where an HTTPRoute backendRef names the Service — the Gateway API twin of
+    the Ingress rule, so a host moved off ingress-nginx stays reachable — and
+    where a SecurityPolicy's extAuth names it (the proxy calls the auth service
+    itself, e.g. the ADR-0234 tool gate on admin-ui),
   - the keda namespace (KEDA HTTP add-on interceptor) allowed on the HTTP port
     of any workload fronted by an HTTPScaledObject (T1 scale-to-zero) — the
     interceptor is the one making the actual inbound connection once the
@@ -74,6 +83,10 @@ OBSERVABILITY_NS = "observability"
 SECURITY_SCANNER_NS = "security-scanner"
 ADMIN_UI_NS = "admin-ui"
 INGRESS_NS = "ingress-nginx"
+# The shared Gateway's namespace (components/envoy-gateway). Envoy Gateway runs the
+# proxy that opens the backend connection in the Gateway's own namespace, so that is
+# the peer an HTTPRoute backend must admit (ADR-0324).
+GATEWAY_NS = "envoy-gateway-system"
 MESSAGING_NS = "messaging"
 KEDA_NS = "keda"
 
@@ -87,8 +100,11 @@ KEDA_NS = "keda"
 # still gets the management/security-scanner rules if it separately exposes a
 # port literally named "management". This is the gap behind the fraud-service
 # online-feature-store Redis fix (PR #706): any non-"management" port was
-# unconditionally treated as an admin-ui-reachable HTTP port.
-INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql"}
+# unconditionally treated as an admin-ui-reachable HTTP port. ClickHouse's
+# HTTP interface is a SQL endpoint, not an API the BFF discovers, so the
+# Langfuse ClickHouse (ADR-0328) names its ports `ch-http`/`ch-native` to land
+# here too.
+INTERNAL_ONLY_PORT_NAMES = {"redis", "postgres", "postgresql", "ch-http", "ch-native"}
 
 # Container ports belonging to a SIDECAR the app container reaches over the pod's
 # own loopback — never a cross-namespace edge. Keyed by `ports[].name`, same
@@ -186,6 +202,61 @@ def write_policies(out: str, policies: list[dict], *, dump=yaml.dump) -> None:
 
 
 
+def job_pod_template(doc: dict) -> dict:
+    """Pod template of a CronJob (spec.jobTemplate.spec.template) or a Job (spec.template)."""
+    spec = doc.get("spec", {}) or {}
+    if doc.get("kind") == "CronJob":
+        spec = ((spec.get("jobTemplate", {}) or {}).get("spec", {}) or {})
+    return spec.get("template", {}) or {}
+
+
+def httproute_backends(doc: dict) -> list[tuple[str, str, int | None]]:
+    """(namespace, service, port) for every Service backendRef of an HTTPRoute.
+
+    A backendRef with no `namespace` lives in the route's own namespace; one with a
+    non-core `group` or a `kind` other than Service (e.g. an Envoy `Backend`) is not a
+    pod the proxy dials through a Service, so it yields no allow-list edge here.
+    """
+    meta = doc.get("metadata", {}) or {}
+    route_ns = meta.get("namespace")
+    out = []
+    for rule in (doc.get("spec", {}) or {}).get("rules", []) or []:
+        for ref in (rule or {}).get("backendRefs", []) or []:
+            if (ref.get("group") or "") != "" or (ref.get("kind") or "Service") != "Service":
+                continue
+            ns = ref.get("namespace") or route_ns
+            if ns and ref.get("name"):
+                out.append((ns, ref["name"], ref.get("port")))
+    return out
+
+
+
+def securitypolicy_extauth_backends(doc: dict) -> list[tuple[str, str, int | None]]:
+    """(namespace, service, port) for every Service an Envoy Gateway SecurityPolicy's extAuth
+    names (ADR-0324 Phase 2, the ADR-0234 tool gate).
+
+    The proxy in the Gateway's namespace makes the authorization call itself, so the auth
+    service must admit that namespace exactly as an HTTPRoute backend does. Both service
+    flavours (`http`, `grpc`) and both spellings (`backendRefs`, the deprecated singular
+    `backendRef`) are read; a non-Service ref yields no edge, as for routes.
+    """
+    meta = doc.get("metadata", {}) or {}
+    pol_ns = meta.get("namespace")
+    ext = ((doc.get("spec", {}) or {}).get("extAuth") or {})
+    out = []
+    for flavour in ("http", "grpc"):
+        svc = ext.get(flavour) or {}
+        refs = list(svc.get("backendRefs") or [])
+        if svc.get("backendRef"):
+            refs.append(svc["backendRef"])
+        for ref in refs:
+            if (ref.get("group") or "") != "" or (ref.get("kind") or "Service") != "Service":
+                continue
+            ns = ref.get("namespace") or pol_ns
+            if ns and ref.get("name"):
+                out.append((ns, ref["name"], ref.get("port")))
+    return out
+
 def self_test() -> int:
     """Falsify the dependency extractors this generator's egress rules are built from.
 
@@ -198,10 +269,8 @@ def self_test() -> int:
     match less, generate less, block more. Every case below is a URL shape that really occurs
     in this fleet's application.yaml files.
 
-    SCOPE, stated plainly: this covers the extraction primitives, not main()'s whole
-    rendering. The drift gate around it (regenerate + `git diff --intent-to-add`) is what
-    proves the rendered output matches what is committed, and that half is exercised by the
-    gate itself on every PR.
+    SCOPE: the extraction primitives and a two-port fixture for opt-in per-caller
+    ingress. The drift gate separately proves the complete rendered fleet output.
     """
     fails: list[str] = []
 
@@ -211,6 +280,15 @@ def self_test() -> int:
     def case(label, got, want):
         if got != want:
             fails.append(f"{label}: expected {want}, got {got}")
+
+    # Batch workloads: the pod template sits one level deeper in a CronJob than in a Job.
+    cj = {"kind": "CronJob", "spec": {"jobTemplate": {"spec": {"template": {"spec": {
+        "containers": [{"env": [{"value": "http://keycloak.iam.svc:8080"}]}]}}}}}}
+    jb = {"kind": "Job", "spec": {"template": {"spec": {
+        "containers": [{"env": [{"value": "http://keycloak.iam.svc:8080"}]}]}}}}
+    for label, d in (("cronjob template", cj), ("job template", jb)):
+        env = job_pod_template(d)["spec"]["containers"][0]["env"][0]["value"]
+        case(label, urls(env), [("keycloak", "iam", "8080")])
 
     # The everyday shape: an in-cluster service URL with an explicit port.
     case("an http svc URL with a port is extracted",
@@ -250,6 +328,29 @@ def self_test() -> int:
     # that pattern, deliberately.
     case("a kafka bootstrap without a port is not matched",
          sorted(KAFKA_RE.findall("bootstrap: openbank-kafka-bootstrap.messaging.svc")), [])
+
+    # HTTPRoute backends (ADR-0324): the Gateway API twin of the Ingress backend rule.
+    route = {"kind": "HTTPRoute", "metadata": {"namespace": "pact-broker"}, "spec": {"rules": [
+        {"backendRefs": [{"name": "pact-broker", "port": 9292}]},
+        {"backendRefs": [{"name": "x", "namespace": "other", "port": 80}]},
+        {"backendRefs": [{"group": "gateway.envoyproxy.io", "kind": "Backend", "name": "ext"}]},
+        {"filters": [{"type": "RequestRedirect"}]},
+    ]}}
+    case("httproute backendRefs resolve namespace and skip non-Service kinds",
+         httproute_backends(route),
+         [("pact-broker", "pact-broker", 9292), ("other", "x", 80)])
+
+    # extAuth backends (ADR-0324 Phase 2): the proxy dials the auth service itself.
+    sp = {"kind": "SecurityPolicy", "metadata": {"namespace": "observability"}, "spec": {
+        "extAuth": {"http": {"backendRefs": [
+            {"name": "admin-ui", "namespace": "admin-ui", "port": 3000},
+            {"group": "gateway.envoyproxy.io", "kind": "Backend", "name": "ext"},
+        ]}, "grpc": {"backendRef": {"name": "authz", "port": 9000}}}}}
+    case("securitypolicy extAuth backends resolve namespace, read both flavours, skip non-Service",
+         securitypolicy_extauth_backends(sp),
+         [("admin-ui", "admin-ui", 3000), ("observability", "authz", 9000)])
+    case("a SecurityPolicy with no extAuth (e.g. CORS only) names no backend",
+         securitypolicy_extauth_backends({"kind": "SecurityPolicy", "spec": {"cors": {}}}), [])
 
     # The datastore-port convention: these names mark ports that must NOT be opened to the
     # whole namespace. An empty set here would quietly widen every policy that consults it.
@@ -292,12 +393,100 @@ def self_test() -> int:
         case("the complete new policy is published", "name: new" in published, True)
         case("temporary policy files are removed", os.listdir(temp_dir), ["network-policies.yaml"])
 
+    # A caller using mTLS 8443 must not inherit the legacy HTTP 8117 permission merely
+    # because both listeners belong to the same workload. A no-port declaration stays
+    # conservative: it still receives both until its actual URL is made explicit.
+    with tempfile.TemporaryDirectory() as temp_dir:
+        component = pathlib.Path(temp_dir) / "fixture"
+        component.mkdir()
+        (component / "workloads.yaml").write_text("""\
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fixture-service
+  namespace: fixture
+  annotations: {openbank.io/port-scoped-ingress: 'true'}
+spec:
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: fixture-service}
+    spec:
+      containers:
+        - name: fixture-service
+          ports:
+            - {name: http, containerPort: 8117}
+            - {name: https, containerPort: 8443}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: payment, namespace: payments}
+spec:
+  template:
+    spec:
+      containers:
+        - name: payment
+          env: [{name: TARGET_URL, value: 'https://fixture-service.fixture.svc:8443'}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: {name: scanner, namespace: security-scanner}
+spec:
+  template:
+    spec:
+      containers:
+        - name: scanner
+          env: [{name: TARGET_URL, value: 'http://fixture-service.fixture.svc:8117'}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: unknown-port
+  namespace: legacy
+  annotations: {openbank.io/service-dependencies: fixture/fixture-service}
+spec:
+  template:
+    spec:
+      containers: [{name: legacy}]
+""", encoding="utf-8")
+        previous_components, previous_argv = COMPONENTS, sys.argv
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        def allowed(namespace):
+            return sorted({port["port"] for rule in policy["spec"]["ingress"]
+                           for peer in rule.get("from", [])
+                           if peer.get("namespaceSelector", {}).get("matchLabels", {}).get(
+                               "kubernetes.io/metadata.name") == namespace
+                           for port in rule.get("ports", [])})
+        case("mTLS caller does not inherit HTTP", allowed("payments"), [8443])
+        case("HTTP scanner does not inherit mTLS", allowed("security-scanner"), [8117])
+        case("portless declaration stays conservative", allowed("legacy"), [8117, 8443])
+        source = component / "workloads.yaml"
+        source.write_text(source.read_text(encoding="utf-8").replace(
+            "  annotations: {openbank.io/port-scoped-ingress: 'true'}\n", ""), encoding="utf-8")
+        try:
+            globals()["COMPONENTS"] = temp_dir
+            sys.argv = [sys.argv[0]]
+            main()
+        finally:
+            globals()["COMPONENTS"] = previous_components
+            sys.argv = previous_argv
+        documents = yaml.safe_load_all((component / "network-policies.yaml").read_text(encoding="utf-8"))
+        policy = next(doc for doc in documents if doc["metadata"]["name"] == "fixture-service-ingress-allow-list")
+        case("non-opted workload retains both ports", allowed("payments"), [8117, 8443])
+
     if fails:
         for f in fails:
             sys.stderr.write(f"::error::self-test: {f}\n")
         sys.stderr.write(f"self-test FAILED ({len(fails)} case(s))\n")
         return 1
-    print("self-test ok: dependency extraction and atomic policy publication (17 cases)")
+    print("self-test ok: dependency extraction, atomic publication and port scoping (24 cases)")
     return 0
 
 def main():
@@ -313,10 +502,12 @@ def main():
     ns_dir = {}
     # service key: (ns, svc-name) -> {"selector": {...}, "ports": [(port, targetPort)]}
     services = {}
-    # edges: (callee_ns, callee_svc) -> set of caller namespaces; port via svc
+    # edges: (callee_ns, callee_svc) -> set of caller namespaces
     edges = defaultdict(set)
-    edge_ports = defaultdict(set)  # (callee_ns, callee_svc) -> ports
+    edge_ports = defaultdict(set)  # (callee_ns, callee_svc, caller_ns) -> service ports
+    unscoped_edges = set()  # annotations and URLs without a port retain every HTTP port
     ingress_backends = defaultdict(set)  # (ns, svc-name) -> ports
+    gateway_backends = defaultdict(set)  # (ns, svc-name) -> ports named by an HTTPRoute
     http_scaled_targets = set()  # (ns, app.kubernetes.io/name) fronted by an HTTPScaledObject
     # ns -> the broker ports that namespace's clients actually name in their bootstrap URLs.
     # The port is DERIVED rather than hardcoded (#3393): this rule used to emit a literal
@@ -344,6 +535,18 @@ def main():
         ns = meta.get("namespace")
 
         if kind in ("Deployment", "StatefulSet", "Rollout") and ns:
+            # A URL injected from a runtime Secret cannot be parsed from a tracked
+            # manifest. Declare its service identity without recording the hostname.
+            for dependency in (meta.get("annotations", {}) or {}).get("openbank.io/service-dependencies", "").split(","):
+                dependency = dependency.strip()
+                if not dependency:
+                    continue
+                if not re.fullmatch(r"[a-z0-9-]+/[a-z0-9-]+", dependency):
+                    raise ValueError(f"invalid service dependency on {path}: {dependency}")
+                callee_ns, svc = dependency.split("/", 1)
+                if callee_ns != ns:
+                    edges[(callee_ns, svc)].add(ns)
+                    unscoped_edges.add((callee_ns, svc, ns))
             tpl = doc.get("spec", {}).get("template", {}) or {}
             labels = (tpl.get("metadata", {}) or {}).get("labels", {}) or {}
             name = labels.get("app.kubernetes.io/name") or meta.get("name")
@@ -357,7 +560,14 @@ def main():
                     v = e.get("value")
                     if isinstance(v, str):
                         blob_parts.append(v)
-            workloads[(ns, name)] = {"ports": ports, "dir": os.path.dirname(path)}
+            workloads[(ns, name)] = {
+                "ports": ports,
+                "dir": os.path.dirname(path),
+                # Roll out per-caller port scoping service by service. Other multi-port
+                # workloads may have callers hidden in Secrets or runtime discovery.
+                "port_scoped": (meta.get("annotations", {}) or {}).get(
+                    "openbank.io/port-scoped-ingress") == "true",
+            }
             ns_dir.setdefault(ns, os.path.dirname(path))
             blob = "\n".join(blob_parts)
             for svc, callee_ns, port in URL_RE.findall(blob):
@@ -365,7 +575,38 @@ def main():
                     continue  # same-namespace is allowed wholesale
                 edges[(callee_ns, svc)].add(ns)
                 if port:
-                    edge_ports[(callee_ns, svc)].add(int(port))
+                    edge_ports[(callee_ns, svc, ns)].add(int(port))
+                else:
+                    unscoped_edges.add((callee_ns, svc, ns))
+            for _, kns, kport in KAFKA_RE.findall(blob):
+                if kns == MESSAGING_NS:
+                    kafka_client_ports[ns].add(int(kport))
+
+        elif kind in ("CronJob", "Job") and ns:
+            # A batch workload CALLS services exactly like a Deployment does, but it was
+            # invisible here: only Deployment/StatefulSet/Rollout env was scanned. Measured
+            # 2026-10-01: vault/secret-rotator calls http://keycloak.iam.svc:8080, no
+            # vault -> iam edge was ever generated, keycloak's derived ingress allow-list
+            # dropped the packets, and the ADR-0099 client-secret rotation had never once
+            # succeeded (openbao-config Degraded). Only the CALLER side is taken from a batch
+            # workload — it serves nothing, so it registers no workload/ports of its own.
+            tpl = job_pod_template(doc)
+            blob = "\n".join(
+                e["value"]
+                for c in ((tpl.get("spec", {}) or {}).get("containers", []) or [])
+                + ((tpl.get("spec", {}) or {}).get("initContainers", []) or [])
+                for e in (c.get("env", []) or [])
+                if isinstance(e.get("value"), str)
+            )
+            ns_dir.setdefault(ns, os.path.dirname(path))
+            for svc, callee_ns, port in URL_RE.findall(blob):
+                if callee_ns == ns:
+                    continue
+                edges[(callee_ns, svc)].add(ns)
+                if port:
+                    edge_ports[(callee_ns, svc, ns)].add(int(port))
+                else:
+                    unscoped_edges.add((callee_ns, svc, ns))
             for _, kns, kport in KAFKA_RE.findall(blob):
                 if kns == MESSAGING_NS:
                     kafka_client_ports[ns].add(int(kport))
@@ -429,6 +670,14 @@ def main():
                     if be.get("name"):
                         port = (be.get("port", {}) or {}).get("number")
                         ingress_backends[(ns, be["name"])].add(port)
+
+        elif kind == "HTTPRoute" and ns:
+            for bns, svc, port in httproute_backends(doc):
+                gateway_backends[(bns, svc)].add(port)
+
+        elif kind == "SecurityPolicy" and ns:
+            for bns, svc, port in securitypolicy_extauth_backends(doc):
+                gateway_backends[(bns, svc)].add(port)
 
         elif kind == "HTTPScaledObject" and ns:
             # ADR-0083 T1 pilot: the KEDA HTTP add-on interceptor
@@ -528,17 +777,39 @@ def main():
             resolve_pod_port(ns, wl_name, p)
             for p in ingress_backends.get((ns, wl_name), set())
         }
+        gw_ports = {
+            resolve_pod_port(ns, wl_name, p)
+            for p in gateway_backends.get((ns, wl_name), set())
+        }
 
         rules = [{"from": [{"podSelector": {}}]}]  # same-namespace
         if http_ports:
-            peers = [ns_peer(c) for c in callers if c != ADMIN_UI_NS]
-            peers.append(ns_peer(ADMIN_UI_NS))  # BFF dynamic discovery
+            port_callers = {port: {ADMIN_UI_NS} for port in http_ports}  # BFF dynamic discovery
+            for caller in callers:
+                edge = (ns, wl_name, caller)
+                declared = {resolve_pod_port(ns, wl_name, port) for port in edge_ports[edge]}
+                # An annotation or URL without a port is deliberately conservative. A port
+                # not exposed by this workload also needs the old all-port behavior rather
+                # than silently dropping a declared caller on an unresolved Service alias.
+                allowed = (set(http_ports) if not wl["port_scoped"] or edge in unscoped_edges or not declared or
+                           not declared.issubset(http_ports) else declared)
+                for port in allowed:
+                    port_callers[port].add(caller)
             if (ns, wl_name) in http_scaled_targets:
-                peers.append(ns_peer(KEDA_NS))  # HTTP add-on interceptor (ADR-0083 T1)
-            rules.append({
-                "from": peers,
-                "ports": [{"protocol": "TCP", "port": p} for p in http_ports],
-            })
+                for peers in port_callers.values():
+                    peers.add(KEDA_NS)  # HTTP add-on interceptor (ADR-0083 T1)
+            # Keep one rule when the caller set is identical across ports. Only a real
+            # per-port difference splits it, avoiding gratuitous fleet-wide drift.
+            groups = defaultdict(list)
+            for port, peers in port_callers.items():
+                ordered = tuple(sorted(peers - {ADMIN_UI_NS, KEDA_NS}) +
+                                [ADMIN_UI_NS] + ([KEDA_NS] if KEDA_NS in peers else []))
+                groups[ordered].append(port)
+            for peer_names, ports in sorted(groups.items(), key=lambda item: min(item[1])):
+                rules.append({
+                    "from": [ns_peer(name) for name in peer_names],
+                    "ports": [{"protocol": "TCP", "port": p} for p in sorted(ports)],
+                })
         # Prometheus scrape: the Quarkus management port (the fleet PodMonitor's
         # `port: management`, resolved by name above) plus any extra port a dedicated
         # Pod/ServiceMonitor targets (redis_exporter 9121, keycloak management 9000,
@@ -570,6 +841,11 @@ def main():
             rules.append({
                 "from": [ns_peer(INGRESS_NS)],
                 "ports": [{"protocol": "TCP", "port": p} for p in sorted(ing_ports)],
+            })
+        if gw_ports:
+            rules.append({
+                "from": [ns_peer(GATEWAY_NS)],
+                "ports": [{"protocol": "TCP", "port": p} for p in sorted(gw_ports)],
             })
 
         by_dir[wl.get("dir") or ns_dir.get(ns)].append({

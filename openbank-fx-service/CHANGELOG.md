@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.3...fx-service-v0.17.0) (2026-10-05)
+
+
+### Features
+
+* **fx:** ingest ČNB policy rates and minimum-reserve facts ([#12117](https://github.com/JiRaska/open-bank-oss/issues/12117)) ([35b73e9](https://github.com/JiRaska/open-bank-oss/commit/35b73e94db9d92265755e528cf0703899cb6d343))
+
+## [0.16.3](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.2...fx-service-v0.16.3) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
+## [0.16.2](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.1...fx-service-v0.16.2) (2026-10-02)
+
+
+### Bug Fixes
+
+* **fx:** convert between currencies with different minor units ([#11767](https://github.com/JiRaska/open-bank-oss/issues/11767)) ([fe17562](https://github.com/JiRaska/open-bank-oss/commit/fe175621db4b0fb70bde7cf5ae391ad020fe0283))
+
 ## [0.16.1](https://github.com/JiRaska/open-bank-oss/compare/fx-service-v0.16.0...fx-service-v0.16.1) (2026-09-26)
 
 

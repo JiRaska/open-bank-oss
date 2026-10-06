@@ -107,6 +107,50 @@ print(f"{len(keys)} rows, {fails} v1 denials, {bad} divergent")
 sys.exit(1 if bad or not fails else 0)
 PY
 
+# ── require-gated-or-declared-tool-httproute (ADR-0324 Phase 2) ──────────────────────
+# A NEW policy, not a v1 port: there is no v1 verdict to compare with, so the expected
+# verdicts are pinned here by design — five must-reject, three must-admit, and an
+# out-of-namespace route that must not be matched at all. Its own context and CRD stub
+# (context-gateway.yaml): the 1.19.1 CLI registers only the first CRD it is handed.
+# Its sibling protect-tool-httproute-gate-cel matches only UPDATE/DELETE, which the CLI
+# cannot drive; it was exercised against a real Kyverno 1.19.1 webhook instead (PR text).
+GW=$(docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$K/cel-validating-policies.yaml" \
+  -r "$T/resources-gateway.yaml" -f "$T/values.yaml" --context-file "$T/context-gateway.yaml" \
+  --crd-paths "$T/securitypolicy-crd-stub.yaml" --policy-report 2>&1 || true)
+python3 - "$GW" <<'PY'
+import sys, yaml
+txt = sys.argv[1]
+i = max(txt.find('apiVersion: wgpolicyk8s'), txt.find('apiVersion: openreports'))
+if i < 0:
+    print(txt[-2000:]); sys.exit("gateway run: no policy report in CLI output")
+got = {}
+for d in yaml.safe_load_all(txt[i:]):
+    for r in (d or {}).get('results') or []:
+        if r['policy'] == 'require-gated-or-declared-tool-httproute-cel':
+            for res in r['resources']:
+                got[(res.get('namespace', ''), res['name'])] = r['result']
+WANT = {
+    ('observability', 'route-gated'): 'pass',
+    ('observability', 'route-explicit-closed'): 'pass',
+    ('observability', 'route-fail-open'): 'fail',
+    ('observability', 'route-declared'): 'pass',
+    ('observability', 'route-ungated'): 'fail',
+    ('observability', 'route-cors-only'): 'fail',
+    ('observability', 'route-gated-by-name-only'): 'fail',
+    ('observability', 'route-empty-declaration'): 'fail',
+    ('default', 'route-ungated-elsewhere'): '-',  # not matched: admitted
+}
+bad = 0
+for k, want in WANT.items():
+    g = got.get(k, '-')
+    bad += g != want
+    print(f"{'OK  ' if g == want else 'DIFF'} require-gated-or-declared-tool-httproute  {k[0] + '/' + k[1]:42} want={want:4} got={g}")
+extra = set(got) - set(WANT)
+if extra:
+    print(f"unexpected results: {sorted(extra)}"); bad += 1
+sys.exit(1 if bad else 0)
+PY
+
 # ── Mutation parity: ecr-pull-through-rewrite (v1, pinned) vs -cel ───────────────
 # The v1 ClusterPolicy was deleted when its CEL port was enabled (#11437). Its output
 # image per (namespace, pod, list, container) is pinned in V1_IMAGES, measured with this
@@ -114,38 +158,54 @@ PY
 # the deletion. The CEL policy runs live and must produce exactly that map. It then
 # runs a second time on its own output, which must change nothing: the idempotency the
 # one-sync v1 -> CEL swap relied on, kept as a property of the policy.
+# Pod controllers (Job, CronJob, Deployment, DaemonSet) are covered too: Kyverno autogen
+# derives controller rules from the Pod policy, and 1.19.1 autogen rewrites `object.spec`
+# in matchConditions and mutations but not in variables — a variable reading
+# `object.spec.containers` errored on every controller (`no such key: containers`).
+# Their expected images are in EXPECTED_CONTROLLERS below.
 mkdir -p "$ROOT/$OUT"
-rm -f "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" "$ROOT/$OUT/cel-twice.yaml"
+rm -f "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-objs.yaml" "$ROOT/$OUT/cel-twice.yaml"
 mut() {
-  if [ "${4:-}" = allow_nonzero ]; then
-    # The fixture batch currently exits 1 despite writing complete output; the pinned
-    # 15-image comparison below checks that output rather than trusting this status.
-    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null 2>&1 || true
-  else
-    # A failed second pass proves nothing about idempotency; surface its exit status.
-    docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" >/dev/null
+  # Both passes must run clean. The first pass used to be allowed a non-zero exit
+  # ("exits 1 despite writing complete output"); that exit WAS the controller error
+  # above, and tolerating it is how the harness stayed green over it.
+  local log rc=0
+  log=$(docker run --rm -v "$ROOT:/w" -w /w "$CLI_IMAGE" apply "$1" -r "$2" -o "$3" 2>&1) || rc=$?
+  if [ "$rc" -ne 0 ] || grep -qiE '^error' <<<"$log"; then
+    grep -iE '^error|^pass:' <<<"$log" >&2 || true
+    echo "FAIL: mutation run on $2 exited $rc or reported errors" >&2
+    return 1
   fi
 }
-mut "$K/ecr-pull-through-rewrite-cel.yaml" "$T/resources.yaml" "$OUT/cel.yaml" allow_nonzero
-python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-pods.yaml" <<'PY'
+mut "$K/ecr-pull-through-rewrite-cel.yaml" "$T/resources.yaml" "$OUT/cel.yaml"
+python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-objs.yaml" <<'PY'
 import sys, yaml
-pods = {}  # the CLI emits one document per mutation; the last one carries them all
+objs = {}  # the CLI emits one document per mutation; the last one carries them all
 for d in yaml.safe_load_all(open(sys.argv[1])):
-    if d and d.get('kind') == 'Pod':
-        pods[(d['metadata'].get('namespace', ''), d['metadata']['name'])] = d
-open(sys.argv[2], 'w').write(yaml.safe_dump_all(list(pods.values())))
+    if d and d.get('kind') in ('Pod', 'Deployment', 'DaemonSet', 'Job', 'CronJob'):
+        objs[(d['kind'], d['metadata'].get('namespace', ''), d['metadata']['name'])] = d
+open(sys.argv[2], 'w').write(yaml.safe_dump_all(list(objs.values())))
 PY
-mut "$K/ecr-pull-through-rewrite-cel.yaml" "$OUT/cel-pods.yaml" "$OUT/cel-twice.yaml"
-python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-twice.yaml" "$ROOT/$OUT/cel-pods.yaml" <<'PY'
+mut "$K/ecr-pull-through-rewrite-cel.yaml" "$OUT/cel-objs.yaml" "$OUT/cel-twice.yaml"
+python3 - "$ROOT/$OUT/cel.yaml" "$ROOT/$OUT/cel-twice.yaml" "$ROOT/$OUT/cel-objs.yaml" <<'PY'
 import sys, yaml
+def podspec(d):
+    s = d.get('spec') or {}
+    if d['kind'] == 'Pod':
+        return s
+    if d['kind'] == 'CronJob':
+        s = ((s.get('jobTemplate') or {}).get('spec') or {})
+    return ((s.get('template') or {}).get('spec') or {})
 def imgs(p):
     out = {}
     for d in yaml.safe_load_all(open(p)):
-        if not d or d.get('kind') != 'Pod':
+        if not d or d.get('kind') not in ('Pod', 'Deployment', 'DaemonSet', 'Job', 'CronJob'):
             continue
+        # Pods keep the key shape V1_IMAGES was pinned in; controllers carry their kind.
+        name = d['metadata']['name'] if d['kind'] == 'Pod' else f"{d['kind']}:{d['metadata']['name']}"
         for f in ('initContainers', 'containers'):
-            for c in d['spec'].get(f) or []:
-                out[(d['metadata'].get('namespace', ''), d['metadata']['name'], f, c['name'])] = c['image']
+            for c in podspec(d).get(f) or []:
+                out[(d['metadata'].get('namespace', ''), name, f, c['name'])] = c['image']
     return out
 V1_IMAGES = {  # measured 2026-09-29 by this harness before the v1 policy was deleted (#11437)
     ('arc-runners', 'dr-in-arc', 'containers', 'c'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/docker-hub/library/busybox:1.36',
@@ -164,26 +224,47 @@ V1_IMAGES = {  # measured 2026-09-29 by this harness before the v1 policy was de
     ('kube-system', 'eks-addon', 'containers', 'k8s'): '265175468565.dkr.ecr.eu-north-1.amazonaws.com/k8s/pause:3.10',
     ('kube-system', 'eks-addon', 'containers', 'quay'): 'quay.io/foo/bar:1',
 }
+# Added 2026-09-30 with the controller fix. NOT measured against v1 (deleted): derived by
+# applying the policy's own rewrite map by hand — an image starting with an origin prefix
+# becomes <ECR host>/<pull-through prefix>/<rest>; quay.io/ is kept for kube-system
+# templates labelled eks.amazonaws.com/component=true; anything else is unchanged.
+# The v1 autogen rules rewrote request.object.spec/metadata to the pod template the same way.
+E = '265175468565.dkr.ecr.eu-north-1.amazonaws.com/'
+EXPECTED_CONTROLLERS = {
+    ('default', 'no-init', 'containers', 'ecrpub'): E + 'ecr-public/docker/library/redis:7',
+    ('default', 'Job:job-rewrite', 'initContainers', 'init-ghcr'): E + 'ghcr/cloudnative-pg/postgresql:18.1',
+    ('default', 'Job:job-rewrite', 'containers', 'hub'): E + 'docker-hub/alpine/k8s:1.34.12',
+    ('default', 'Job:job-rewrite', 'containers', 'bare'): 'busybox:1.36',
+    ('default', 'Job:job-no-template-metadata', 'containers', 'k8s'): E + 'k8s/pause:3.10',
+    ('default', 'CronJob:cron-rewrite', 'containers', 'quay'): E + 'quay/prometheus/prometheus:v3.0.0',
+    ('default', 'CronJob:cron-rewrite', 'containers', 'ecrpub'): E + 'ecr-public/docker/library/redis:7',
+    ('kube-system', 'DaemonSet:eks-addon-ds', 'containers', 'quay'): 'quay.io/foo/bar:1',
+    ('kube-system', 'DaemonSet:eks-addon-ds', 'containers', 'k8s'): E + 'k8s/pause:3.10',
+    ('default', 'Deployment:dr-deploy', 'containers', 'c'): 'busybox:1.36',
+    ('default', 'Deployment:ledger-service', 'containers', 'c'): 'busybox:1.36',
+    ('ledger', 'Deployment:ledger-service', 'containers', 'c'): 'busybox:1.36',
+    ('ledger', 'Deployment:redis', 'containers', 'c'): 'busybox:1.36',
+}
+WANT = {**V1_IMAGES, **EXPECTED_CONTROLLERS}
 cel = imgs(sys.argv[1])
 if not cel:
-    sys.exit("mutation run produced no Pods")
-# A second-pass Pod the CLI skips is not re-emitted; fall back to its first-pass copy.
-# The CLI must still emit at least one Pod. Otherwise a failed/empty run would become
-# identical to the first pass by construction and falsely prove idempotency.
+    sys.exit("mutation run produced nothing")
+# An object the second pass skips is not re-emitted; fall back to its first-pass copy.
+# The CLI must still emit something, or a failed run would prove idempotency by construction.
 second = imgs(sys.argv[2])
 if not second:
-    sys.exit("second mutation run produced no Pods")
+    sys.exit("second mutation run produced nothing")
 twice = {**imgs(sys.argv[3]), **second}
-rewritten = sum(1 for v in V1_IMAGES.values() if v.startswith('265175468565.dkr.ecr.'))
+rewritten = sum(1 for v in WANT.values() if v.startswith(E))
 bad = 0
-for k in sorted(set(V1_IMAGES) | set(cel)):
-    a, b = V1_IMAGES.get(k), cel.get(k)
+for k in sorted(set(WANT) | set(cel)):
+    a, b = WANT.get(k), cel.get(k)
     bad += a != b
-    print(f"OK   ecr-pull-through-rewrite {'/'.join(k):48} {b}" if a == b else
-          f"DIFF ecr-pull-through-rewrite {'/'.join(k):48} v1={a} cel={b}")
+    print(f"OK   ecr-pull-through-rewrite {'/'.join(k):56} {b}" if a == b else
+          f"DIFF ecr-pull-through-rewrite {'/'.join(k):56} want={a} cel={b}")
 redo = [k for k in cel if twice.get(k) != cel[k]]
 for k in redo:
     print(f"DIFF ecr-pull-through-rewrite second pass {'/'.join(k)}: {cel[k]} -> {twice.get(k)}")
-print(f"{len(cel)} images, {rewritten} rewritten by v1, {bad} divergent, {len(redo)} changed on a second pass")
+print(f"{len(cel)} images, {rewritten} expected rewritten, {bad} divergent, {len(redo)} changed on a second pass")
 sys.exit(1 if bad or redo or not rewritten else 0)
 PY

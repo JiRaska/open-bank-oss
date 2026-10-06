@@ -9,10 +9,18 @@ asyncapi: 3.0.0
 
 info:
   title: OpenBank Treasury Service — deal events
-  version: 1.3.0
+  version: 1.6.0
   description: |
     Lifecycle of the bank's own money-market deals (ADR-0315): MM placements, MM borrowings, the
     ČNB overnight deposit facility and ČNB lombard (marginal lending) borrowings.
+
+    1.6.0 (additive): `DealBooked.productLimit` (ADR-0315 D4) — the product limit the booking was
+    evaluated against at approval (decision WITHIN_LIMIT, the maximum principal in the deal's
+    currency and the maximum tenor). Null only on events emitted before this version.
+
+    1.5.0 (additive): `treasury.nostro.break-aged.v1` (ADR-0315 D7) on the same topic — an open
+    nostro reconciliation break passed the configured age and amount threshold. Keyed by the
+    break id; emitted once per break, in the same transaction that stamps it alerted.
 
     **Transactional outbox.** Events are written to `treasury_outbox` in the same transaction as
     the deal row, its timeline entry and its ledger journal reference, and dispatched afterwards
@@ -48,12 +56,16 @@ channels:
     messages:
       DealBooked:
         $ref: '#/components/messages/DealBooked'
+      DealConfirmed:
+        $ref: '#/components/messages/DealConfirmed'
       DealSettled:
         $ref: '#/components/messages/DealSettled'
       DealMatured:
         $ref: '#/components/messages/DealMatured'
       DealReversed:
         $ref: '#/components/messages/DealReversed'
+      NostroBreakAged:
+        $ref: '#/components/messages/NostroBreakAged'
 
 operations:
   publishTreasuryDealEvents:
@@ -69,6 +81,11 @@ components:
       summary: "A second person approved the deal (four-eyes). Nothing has posted yet."
       payload:
         $ref: '#/components/schemas/DealBooked'
+    DealConfirmed:
+      name: treasury.deal.confirmed.v1
+      summary: "The counterparty confirmed the booked terms (ADR-0315 D2). Nothing has posted."
+      payload:
+        $ref: '#/components/schemas/DealConfirmed'
     DealSettled:
       name: treasury.deal.settled.v1
       summary: "Principal exchanged on the value date; the settlement journal is in the ledger."
@@ -81,9 +98,14 @@ components:
         $ref: '#/components/schemas/DealMatured'
     DealReversed:
       name: treasury.deal.reversed.v1
-      summary: "A booked or settled deal was undone; a settled one by an offsetting journal."
+      summary: "A booked, confirmed or settled deal was undone; a settled one by an offsetting journal."
       payload:
         $ref: '#/components/schemas/DealReversed'
+    NostroBreakAged:
+      name: treasury.nostro.break-aged.v1
+      summary: "An open nostro reconciliation break reached the alert age and amount (ADR-0315 D7). Nothing posted."
+      payload:
+        $ref: '#/components/schemas/NostroBreakAged'
 
   schemas:
     ProductType:
@@ -122,6 +144,29 @@ components:
         sourceService: { $ref: '#/components/schemas/SourceService' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
+        productLimit:
+          type: [object, 'null']
+          description: "ADR-0315 D4: `ProductLimitApplied` — the product limit re-checked at approval."
+          properties:
+            decision: { type: string, enum: [WITHIN_LIMIT] }
+            maxPrincipal: { type: [number, 'null'], description: "In the deal's currency" }
+            maxTenorDays: { type: [integer, 'null'], description: 'Null = no tenor cap (FX_SPOT)' }
+
+    DealConfirmed:
+      type: object
+      description: "Constructor properties of `DealConfirmed` in `TreasuryEventPayloads.kt`."
+      required: [dealId, product, counterpartyId, currency, principal, valueDate, confirmedBy, simulated, occurredAt, sourceService]
+      properties:
+        dealId: { type: string, format: uuid }
+        product: { $ref: '#/components/schemas/ProductType' }
+        counterpartyId: { type: string }
+        currency: { type: string, enum: [CZK, EUR] }
+        principal: { type: number }
+        valueDate: { type: string, format: date }
+        confirmedBy: { type: string, description: 'A back-office person (never the creator or submitter), or system:simulated-market.' }
+        simulated: { type: boolean, description: 'True when the simulated counterparty set (ADR-0315 D9, sandbox only) confirmed it: a SYNTHETIC confirmation.' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }
 
     DealSettled:
       type: object
@@ -172,8 +217,27 @@ components:
         ledgerJournalId:
           type: [string, 'null']
           format: uuid
-          description: Null when reversed from BOOKED, before anything had posted.
+          description: Null when reversed from BOOKED or CONFIRMED, before anything had posted.
         occurredAt: { type: string, format: date-time }
         sourceService: { $ref: '#/components/schemas/SourceService' }
         fxSide: { $ref: '#/components/schemas/FxSide' }
         counterAmount: { $ref: '#/components/schemas/CounterAmount' }
+
+    NostroBreakAged:
+      type: object
+      description: "Constructor properties of `NostroBreakAged` in `TreasuryEventPayloads.kt`. No reference or narrative: a statement line's remittance text can name a customer."
+      required: [breakId, iban, glCode, currency, side, ourSide, amount, bookingDate, firstSeenOn, ageBusinessDays, thresholdDays, occurredAt, sourceService]
+      properties:
+        breakId: { type: string, format: uuid }
+        iban: { type: string, description: The bank's own nostro account at the correspondent }
+        glCode: { type: string }
+        currency: { type: string }
+        side: { type: string, enum: [STATEMENT, LEDGER], description: 'Which side the unmatched item is on' }
+        ourSide: { type: string, enum: [DEBIT, CREDIT], description: "From the bank's side; a statement CRDT is a DEBIT" }
+        amount: { type: number }
+        bookingDate: { type: string, format: date }
+        firstSeenOn: { type: string, format: date }
+        ageBusinessDays: { type: integer }
+        thresholdDays: { type: integer, description: 'openbank.treasury.nostro.break-alert-age-days at the time of the alert' }
+        occurredAt: { type: string, format: date-time }
+        sourceService: { $ref: '#/components/schemas/SourceService' }

@@ -5,6 +5,7 @@
 package com.openbank.risk.application
 
 import com.openbank.risk.application.port.out.LedgerPort
+import com.openbank.risk.application.port.out.LendingPort
 import com.openbank.risk.application.port.out.SnapshotNotFoundException
 import com.openbank.risk.application.port.out.SnapshotRepository
 import com.openbank.risk.application.port.out.SnapshotRunSummary
@@ -15,6 +16,7 @@ import com.openbank.risk.domain.Fixtures.BOB
 import com.openbank.risk.domain.Fixtures.sl
 import com.openbank.risk.domain.model.Instrument
 import com.openbank.risk.domain.model.LedgerInputs
+import com.openbank.risk.domain.model.LoanContract
 import com.openbank.risk.domain.model.Position
 import com.openbank.risk.domain.model.Provenance
 import com.openbank.risk.domain.model.SnapshotRun
@@ -23,6 +25,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
+import java.math.BigDecimal
 import java.time.Clock
 import java.time.Instant
 import java.time.LocalDate
@@ -74,12 +77,94 @@ class SnapshotServiceTest {
                 it.requestedBy,
             )
         }
+
+        override suspend fun listTiedOutBetween(from: LocalDate, to: LocalDate) =
+            error("not used by SnapshotService tests")
     }
 
     private val clock = Clock.fixed(Instant.parse("2026-10-01T06:00:00Z"), ZoneOffset.UTC)
     private val ledger = FakeLedger(Fixtures.tiedOut())
     private val repository = InMemoryRepository()
     private val service = SnapshotService(ledger, repository, clock, Provenance.SYNTHETIC)
+
+    private class FakeLending(val answer: suspend () -> List<LoanContract>) : LendingPort {
+        override suspend fun readLoanBook(asOf: LocalDate): List<LoanContract> = answer()
+    }
+
+    @Test
+    fun `an empty loan book while the ledger holds loans is UNTIED on 1200, never a silent tie-out`(): Unit =
+        runBlocking {
+            val svc = SnapshotService(
+                FakeLedger(Fixtures.tiedOutWithLoans(BigDecimal("6093596.08"))),
+                repository,
+                clock,
+                Provenance.SYNTHETIC,
+                lending = FakeLending { emptyList() },
+            )
+
+            val run = svc.createSnapshot(Fixtures.AS_OF).run
+
+            assertThat(run.status).isEqualTo(TieOutStatus.UNTIED)
+            assertThat(run.mismatches.single().glAccountCode).isEqualTo("1200")
+            assertThatThrownBy { runBlocking { svc.getInstruments(run.id) } }
+                .isInstanceOf(UntiedSnapshotException::class.java)
+        }
+
+    @Test
+    fun `an empty loan book against a ledger whose loans net to zero ties out`(): Unit = runBlocking {
+        // The 2026-10-01 sandbox state: every loan voided (#11487), Loans Receivable 1200 nets to 0.
+        val svc = SnapshotService(
+            FakeLedger(Fixtures.tiedOutWithLoans(BigDecimal.ZERO)),
+            repository,
+            clock,
+            Provenance.SYNTHETIC,
+            lending = FakeLending { emptyList() },
+        )
+
+        assertThat(svc.createSnapshot(Fixtures.AS_OF).run.status).isEqualTo(TieOutStatus.TIED_OUT)
+    }
+
+    @Test
+    fun `a failing loan-book read fails the snapshot and stores nothing`(): Unit = runBlocking {
+        val svc = SnapshotService(
+            FakeLedger(Fixtures.tiedOutWithLoans(BigDecimal("100.00"))),
+            repository,
+            clock,
+            Provenance.SYNTHETIC,
+            lending = FakeLending { error("lending answered 403") },
+        )
+
+        assertThatThrownBy { runBlocking { svc.createSnapshot(Fixtures.AS_OF) } }
+            .hasMessageContaining("403")
+        assertThat(repository.runs).isEmpty()
+    }
+
+    @Test
+    fun `an as-of after the current business date is rejected and nothing is stored`(): Unit = runBlocking {
+        // clock is 2026-10-01T06:00Z = 2026-10-01 in Prague
+        assertThatThrownBy { runBlocking { service.createSnapshot(LocalDate.of(2026, 10, 2)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+            .hasMessageContaining("business date")
+        assertThat(repository.runs).isEmpty()
+    }
+
+    @Test
+    fun `an as-of equal to the current business date is allowed`(): Unit = runBlocking {
+        val outcome = service.createSnapshot(LocalDate.of(2026, 10, 1))
+
+        assertThat(outcome.replayed).isFalse()
+    }
+
+    @Test
+    fun `the business date is the Prague day, not the UTC day`(): Unit = runBlocking {
+        // 22:30Z on 09-30 is already 2026-10-01 in Prague (CEST, UTC+2)
+        val lateUtc = Clock.fixed(Instant.parse("2026-09-30T22:30:00Z"), ZoneOffset.UTC)
+        val svc = SnapshotService(ledger, InMemoryRepository(), lateUtc, Provenance.SYNTHETIC)
+
+        assertThat(svc.createSnapshot(LocalDate.of(2026, 10, 1)).replayed).isFalse()
+        assertThatThrownBy { runBlocking { svc.createSnapshot(LocalDate.of(2026, 10, 2)) } }
+            .isInstanceOf(IllegalArgumentException::class.java)
+    }
 
     @Test
     fun `a tied-out run is stored with its manifest and serves its positions`(): Unit = runBlocking {

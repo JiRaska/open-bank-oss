@@ -85,7 +85,7 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
     override fun filter(ctx: ContainerRequestContext) {
         val claimed = SyntheticTaint.isTainted(ctx.getHeaderString(SyntheticTaint.KAFKA_HEADER))
         if (!claimed) {
-            ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, false)
+            markReal(ctx)
             return
         }
         val principal = ctx.securityContext?.userPrincipal?.name
@@ -99,20 +99,37 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
                     "treating the request as real. Nobody sends this header by accident.",
                 principal ?: "<anonymous>",
             )
-            ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, false)
+            markReal(ctx)
             return
         }
         ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, true)
         MDC.put(MDC_SYNTHETIC, "true")
         // This is the observability rail, not an authorization input. Only the trusted decision
-        // above may set it; accepting a browser-provided baggage value would recreate the same
-        // regulatory-evasion hole as trusting the HTTP header directly.
+        // above may set it; every other path removes an inbound value in [markReal].
         val baggage = Baggage.current().toBuilder()
             .put(SyntheticTaint.BAGGAGE_KEY, SyntheticTaint.headerValue())
             .build()
         ctx.setProperty(
             SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY,
             baggage.storeInContext(Context.current()).makeCurrent(),
+        )
+    }
+
+    /**
+     * Records the request as real. The OTel server instrumentation has already made the caller's
+     * W3C `baggage` current, and [SyntheticTaint.BAGGAGE_KEY] in it is read downstream
+     * ([com.openbank.libs.messaging.SyntheticTaintKafkaRail.currentlyTainted],
+     * [SyntheticTaintClientFilter]) — so an inbound entry the trust decision did not set is removed
+     * here, for the rest of the request. The scope is closed by [SyntheticTaintResponseFilter].
+     */
+    private fun markReal(ctx: ContainerRequestContext) {
+        ctx.setProperty(SYNTHETIC_TAINT_PROPERTY, false)
+        val inbound = Baggage.current()
+        if (inbound.getEntryValue(SyntheticTaint.BAGGAGE_KEY) == null) return
+        val cleaned = inbound.toBuilder().remove(SyntheticTaint.BAGGAGE_KEY).build()
+        ctx.setProperty(
+            SYNTHETIC_TAINT_BAGGAGE_SCOPE_PROPERTY,
+            cleaned.storeInContext(Context.current()).makeCurrent(),
         )
     }
 
@@ -143,7 +160,8 @@ class SyntheticTaintRequestFilter : ContainerRequestFilter {
 @Provider
 class SyntheticTaintResponseFilter : ContainerResponseFilter {
     override fun filter(req: ContainerRequestContext, resp: ContainerResponseContext) {
-        // The scope is created only after a trusted assertion. Closing it is as important as the
+        // The scope is created after a trusted assertion, or when an inbound baggage entry had to
+        // be removed. Closing it is as important as the
         // MDC cleanup: OTel Context is thread-local, and a leak would mark the next request's
         // trace as synthetic. A malformed/missing property is intentionally ignored; it means
         // the request was real or an earlier filter failed before context setup.

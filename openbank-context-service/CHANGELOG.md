@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.1](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.4.0...context-service-v0.4.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **context:** delay commitment relays past boot and stop timing out backups ([#12019](https://github.com/JiRaska/open-bank-oss/issues/12019)) ([3712877](https://github.com/JiRaska/open-bank-oss/commit/3712877053213d0236c0a2f9092da6005ffeb5c0))
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
+## [0.4.0](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.3.0...context-service-v0.4.0) (2026-10-02)
+
+
+### Features
+
+* **context:** investigate authority, AML, complaints and incident scope ([#11734](https://github.com/JiRaska/open-bank-oss/issues/11734)) ([ac9d433](https://github.com/JiRaska/open-bank-oss/commit/ac9d4335af112e9154d52340225ffacd89bfb813))
+
 ## [0.3.0](https://github.com/JiRaska/open-bank-oss/compare/context-service-v0.2.0...context-service-v0.3.0) (2026-09-17)
 
 

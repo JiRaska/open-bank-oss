@@ -21,7 +21,11 @@ info:
   # the four-PR queue on this one spec is exactly the shape that keeps producing the collision.
   # 1.11 -> 1.12 (#10916): additive — create documents 409 IDEMPOTENCY_KEY_REUSED (key reused
   # with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
-  version: 1.12.0
+  # 1.12 -> 1.13 (#11642): additive — create documents 400 AMOUNT_SCALE_EXCEEDED /
+  # CURRENCY_UNSUPPORTED (amount + currency are built into a kernel Money, never rounded).
+  # 1.13 -> 1.14 (#11931): additive — create documents 400 CURRENCY_NOT_ALLOWED (SCT is
+  # euro-only; any non-EUR currency is refused at the boundary).
+  version: 1.14.0
   description: >-
     SEPA credit transfer lifecycle — create, query, status transitions. On create, debtor and
     creditor names are synchronously screened against the sanctions lists (ADR-0032): a clean payment
@@ -65,6 +69,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SepaPaymentResponse'
+        '400':
+          $ref: '#/components/responses/InvalidMoney'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -301,6 +307,24 @@ components:
         format: uuid
 
   responses:
+    InvalidMoney:
+      description: >-
+        The request is invalid, distinguished by `code` (ADR-0326). `amount` + `currency` are built
+        into a kernel Money at this boundary (#11642) and never rounded, so:
+        AMOUNT_SCALE_EXCEEDED — `amount` has more decimal places than the currency's minor unit
+        (e.g. 1.005 EUR, 1.5 JPY); trailing zeros are not counted (10.500 EUR is accepted as 10.50).
+        CURRENCY_UNSUPPORTED — `currency` is not an ISO 4217 code with a minor unit (unknown codes,
+        wrong length, metals such as XAU). Case and surrounding blanks are ignored (`eur` is EUR).
+        VALIDATION_ERROR — any other invalid field, including an amount outside the supported
+        magnitude. CURRENCY_NOT_ALLOWED (#11931) — `currency` is a valid ISO 4217 code but not EUR;
+        SCT is a euro-only scheme (ISO 20022 equivalent reason AM03 NotAllowedCurrency).
+        Nothing is created and the Idempotency-Key is not consumed. The offending field
+        is named in `violations[].field` and its code in `violations[].code`; the rejected value is
+        never echoed.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
     IdempotencyConflict:
       description: >-
         Idempotency-Key conflict (#10916), distinguished by `code`.
@@ -390,6 +414,9 @@ components:
         currency:
           type: string
           example: EUR
+          description: >-
+            Must be EUR (case-insensitive) — SCT is euro-only; any other currency is a 400
+            CURRENCY_NOT_ALLOWED (#11931).
         remittanceInfo:
           type: string
         endToEndId:

@@ -51,6 +51,23 @@ spec:
     retention.ms: 2592000000
     cleanup.policy: delete
 ---
+# openbank-account-service :: channel `approval-group-revisions-in`
+# Compacted source records are replayable indefinitely; malformed/conflicting values are retained
+# here for 30 days for investigation without wedging the projection bootstrap.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.account.approval-group-revisions-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 6
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
 # openbank-account-service :: channel `party-events-in`
 # #5752. `party-events-in` is declared by eight services; account-service was the last one still
 # on the implicit `dead-letter-topic-party-events-in`. The AccountPartyEventDeadLettered alert in
@@ -376,6 +393,23 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.document.account-created-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-loyalty-service :: channel `referral-qualified-in` (ADR-0310 D3). Named in
+# openbank-loyalty-service/src/main/resources/application.yaml (nested form). Its KafkaUser grants
+# Write on this topic in components/loyalty/kafka-loyalty-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.loyalty.referral-qualified-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster
@@ -780,6 +814,24 @@ apiVersion: kafka.strimzi.io/v1
 kind: KafkaTopic
 metadata:
   name: openbank.dlq.risk-engine.fx-fixing-in
+  namespace: messaging
+  labels:
+    strimzi.io/cluster: openbank-cluster
+spec:
+  partitions: 1
+  replicas: 1
+  config:
+    retention.ms: 2592000000
+    cleanup.policy: delete
+---
+# openbank-risk-engine :: channel `cnb-policy-rate-in` (ČNB policy rates / minimum-reserve facts).
+# New channel, so nothing is parked anywhere to strand. Named explicitly in
+# openbank-risk-engine/src/main/resources/application.yaml (nested form, issue #686); Write granted
+# in components/risk/kafka-risk-engine-mtls.yaml.
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: openbank.dlq.risk-engine.cnb-policy-rate-in
   namespace: messaging
   labels:
     strimzi.io/cluster: openbank-cluster

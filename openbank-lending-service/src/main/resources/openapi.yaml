@@ -19,7 +19,11 @@ info:
   # .../voids/plan, .../voids, .../voids/{id}, .../voids/{id}/decide, .../voids/{id}/execute.
   # 1.28.0 -> 1.29.0 (#10916): additive — 409 IDEMPOTENCY_KEY_REUSED / IDEMPOTENCY_REQUEST_IN_PROGRESS
   # on both application-submit operations (key reused with a different body / still executing).
-  version: 1.29.0
+  # 1.29.0 -> 1.31.0 (#11107): additive — the loan's human contract number (UV-YYYY-NNNNNN):
+  # optional contractNumber on LoanBookEntry, and a Loan response schema carrying it on
+  # GET /loans, /loans/active and /loans/{id}. 1.30.0 is claimed by open PR #10266.
+  # 1.31.0 -> 1.32.0: additive optional limit on the loan-application list for bounded Customer 360 reads.
+  version: 1.35.0
   description: >-
     Loan origination, servicing, collateral and IFRS 9 provisioning (ADR-0028). The loan book posts
     cash events to ledger-service and never owns balances. Credit decisions and collateral
@@ -85,6 +89,11 @@ paths:
           in: query
           required: true
           schema: { type: string, format: uuid }
+        - name: limit
+          in: query
+          required: false
+          description: Return at most this many newest applications; omit for the legacy full list.
+          schema: { type: integer, minimum: 1, maximum: 200 }
       responses:
         '200':
           description: Applications for the party
@@ -627,11 +636,29 @@ paths:
         makes them mandatory. Advancement stops at READY_TO_DISBURSE — booking is the disburse
         endpoint. Legacy status names (PROPOSED/APPROVED/REJECTED) remain accepted by the
         listRecentApplications filter for compatibility; retired rows were migrated by V9.
+        Decision states are not advanced: an application in FOUR_EYES moves on only through
+        POST /applications/{id}/decision by someone other than the proposer, and advance answers
+        409 FOUR_EYES_DECISION_REQUIRED with the state unchanged. An application past the decision
+        point that carries no recorded decision does not advance either (409
+        FOUR_EYES_DECISION_MISSING).
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
         '200': { description: Application advanced to the next state }
         '404': { description: Application not found }
+        '409':
+          description: >-
+            Refused by an origination control. FOUR_EYES_DECISION_REQUIRED: the application is in
+            a decision state (FOUR_EYES); use the decision endpoint. FOUR_EYES_DECISION_MISSING:
+            the application is past the decision point with no recorded decision.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error, message]
+                properties:
+                  error: { type: string, enum: [FOUR_EYES_DECISION_REQUIRED, FOUR_EYES_DECISION_MISSING] }
+                  message: { type: string }
         '422': { description: No forward transition from the current state }
         '403':
           $ref: '#/components/responses/Forbidden'
@@ -660,7 +687,10 @@ paths:
       tags: [Lending]
       operationId: disburseLoan
       summary: Disburse an approved application, booking the loan and its schedule
-      description: Requires ROLE_LENDING_OFFICER or ROLE_ADMIN.
+      description: >-
+        Requires ROLE_LENDING_OFFICER or ROLE_ADMIN. Refused with 409 when the application carries
+        no recorded four-eyes decision (`error` FOUR_EYES_DECISION_MISSING) or when the disburser
+        proposed or approved it (`error` SEGREGATION_OF_DUTIES).
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
@@ -683,7 +713,13 @@ paths:
           description: Clamped server-side into 1..100.
           schema: { type: integer, default: 50, minimum: 1, maximum: 100 }
       responses:
-        '200': { description: Active loans }
+        '200':
+          description: Active loans
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans:
@@ -697,7 +733,13 @@ paths:
           required: true
           schema: { type: string, format: uuid }
       responses:
-        '200': { description: Loans for the party }
+        '200':
+          description: Loans for the party
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
   /api/v1/lending/loans/{id}:
@@ -708,7 +750,11 @@ paths:
       parameters:
         - $ref: '#/components/parameters/IdPath'
       responses:
-        '200': { description: The loan }
+        '200':
+          description: The loan
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loan' }
         '403':
           $ref: '#/components/responses/Forbidden'
         '404': { description: Not found }
@@ -1974,6 +2020,26 @@ components:
         remainingInstallments:
           type: array
           items: { $ref: '#/components/schemas/RemainingInstallment' }
+        contractNumber:
+          type: string
+          nullable: true
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107), e.g. UV-2026-000123 — a display reference, assigned at
+            creation and never changed. loanId stays the identity.
+    Loan:
+      type: object
+      description: >-
+        A booked loan. Only the fields this contract pins are listed; the response carries the
+        loan's other terms as well.
+      properties:
+        contractNumber:
+          type: string
+          pattern: '^UV-[0-9]{4}-[0-9]{6,}$'
+          description: >-
+            Human contract number (#11107): UV-<origination year (UTC)>-<per-year sequence,
+            zero-padded to at least six digits>. Unique, assigned at creation, immutable; the
+            sequence is gap-tolerant (a rolled-back creation may leave a hole).
     RemainingInstallment:
       type: object
       required: [number, dueDate, principal, interest]

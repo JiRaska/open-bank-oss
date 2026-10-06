@@ -41,6 +41,15 @@ describe('dealActions — role x state, with the four-eyes courtesy', () => {
     expect(dealActions({ ...pending, state: 'SETTLED' }, 'x', APPROVER)).toMatchObject({ mature: true, reverse: true })
     expect(dealActions({ ...pending, state: 'BOOKED' }, 'x', ['ROLE_ADMIN'])).toMatchObject({ settle: false, reverse: false, cancel: false })
   })
+
+  it('offers confirm on a BOOKED deal to a back-office approver who neither created nor submitted it (ADR-0315 D2)', () => {
+    const booked = { ...pending, state: 'BOOKED' as const }
+    expect(dealActions(booked, 'petr', APPROVER).confirm).toBe(true)
+    expect(dealActions(booked, 'dana', APPROVER).confirm).toBe(false)
+    expect(dealActions(booked, 'petr', DEALER).confirm).toBe(false)
+    expect(dealActions({ ...booked, state: 'CONFIRMED' }, 'petr', APPROVER)).toMatchObject({ confirm: false, settle: true, reverse: true })
+    expect(dealActions({ ...booked, state: 'SETTLED' }, 'petr', APPROVER).confirm).toBe(false)
+  })
 })
 
 describe('counterparty helpers', () => {
@@ -74,6 +83,20 @@ describe('contracts and refusals', () => {
     expect(fe).toContain('same person')
     expect(fe).not.toMatch(/422/)
     expect(refusalText({ ok: false, status: 422, kind: 'refused', code: 'LIMIT_BREACHED', message: null }, 'Approve', t)).toContain('limit breached')
+    const pl = refusalText({ ok: false, status: 422, kind: 'refused', code: 'PRODUCT_LIMIT_BREACHED', message: 'product limit breached: MM_PLACEMENT tenor 400 days exceeds the product maximum 366 days' }, 'Approve', t)
+    expect(pl).toContain('outside the product limit')
+    expect(pl).toContain('tenor 400 days exceeds the product maximum 366 days')
+    expect(pl).not.toContain('counterparty')
+  })
+
+  it('parses a CONFIRMED deal instead of treating the whole response as unavailable (ADR-0315 D2)', () => {
+    const confirmed = {
+      dealId: 'x', product: 'MM_PLACEMENT', counterpartyId: 'SIM-A', currency: 'CZK', principal: 1000, rate: 4,
+      dayCount: 'ACT/360', days: 1, interest: 0, tradeDate: '2026-09-25', valueDate: '2026-09-25', maturityDate: '2026-09-28',
+      state: 'CONFIRMED', createdBy: 'dana', createdByType: 'HUMAN', submittedBy: 'dana', approvedBy: 'adam', rationale: null,
+      limitCheck: null, createdAt: '2026-09-25T08:00:00Z', updatedAt: '2026-09-25T08:00:00Z', history: [], journals: [],
+    }
+    expect(dealSchema.safeParse(confirmed).success).toBe(true)
   })
 
   it('does not reject an unknown future product (ProductType is x-extensible, #10896)', () => {

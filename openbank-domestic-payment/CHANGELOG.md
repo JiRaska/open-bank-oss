@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.21.7](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.6...domestic-payment-v0.21.7) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** build kernel Money at the inbound boundary ([#12060](https://github.com/JiRaska/open-bank-oss/issues/12060)) ([119f830](https://github.com/JiRaska/open-bank-oss/commit/119f83064de831daa5427d5d1b3a9497ad9673f2)), closes [#11604](https://github.com/JiRaska/open-bank-oss/issues/11604)
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
+## [0.21.6](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.5...domestic-payment-v0.21.6) (2026-10-02)
+
+
+### Bug Fixes
+
+* **domestic-payment:** retry settlement until transaction-service recovers ([#11791](https://github.com/JiRaska/open-bank-oss/issues/11791)) ([c72f120](https://github.com/JiRaska/open-bank-oss/commit/c72f1207f769eab72e3f269673c6f76aeca8d46e)), closes [#11666](https://github.com/JiRaska/open-bank-oss/issues/11666)
+
 ## [0.21.5](https://github.com/JiRaska/open-bank-oss/compare/domestic-payment-v0.21.4...domestic-payment-v0.21.5) (2026-09-29)
 
 

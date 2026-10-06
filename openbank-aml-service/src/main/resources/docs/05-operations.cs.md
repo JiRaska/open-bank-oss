@@ -24,6 +24,7 @@
 | Cesta | Port | Účel |
 |---|---|---|
 | `/api/v1/aml/cases/...` | 8117 | byznysové REST API |
+| `/api/v1/aml/cases/...` | 8443 | mTLS rozhraní s privátní CA pro volající uvnitř clusteru |
 | `/api/v1/info` | 8117 | ServiceInfoResource (build metadata) |
 | `/api/docs` | 8117 | Swagger UI |
 | `/q/openbank/docs` | 8085 | **Docs-as-Service** (tato dokumentace) |
@@ -32,6 +33,8 @@
 | `/q/metrics` | 8085 | Prometheus (Micrometer) |
 
 Management rozhraní je na **samostatném portu 8085** (`quarkus.management.enabled=true`, root-path `/q`). V `%test` je vypnuté.
+
+V produkci port 8443 vyžaduje klientský certifikát důvěryhodný pro privátní CA. Serverový certifikát a svazek důvěry se připojují z Certificate `aml-service-internal-tls`; služba používá TLS 1.3. Rozhraní se nasadí dříve, než na něj přejdou volající. Port 8117 zůstává během přechodu dostupný pro dosavadní readiness a admin UI. Před přepnutím volajících ověř stav Certificate a přístup autorizovaného klienta na 8443; při selhání rozhraní ponech volající na 8117 a obnov předchozí nasazení.
 
 ## Konfigurace
 
@@ -114,3 +117,9 @@ Nikdy needituj aplikovanou migraci. Pokud checksum mismatch blokuje start, nasta
 - Unit: `AmlCaseServiceTest`, `AmlCaseTest` (stavový automat), `AmlOutboxDispatchTest`.
 - Integrační: `AmlOutboxDispatchIT` s `PostgresRedisTestResource` (Testcontainers — izolovaný Postgres + Valkey na test JVM, CI infra sweep #578). V `%test` je scheduler vypnutý, takže IT řídí `dispatchScheduledBatch()` explicitně.
 - Coverage je ratchet-only (Kover, ADR-0020) — nikdy nesnižovat.
+
+## Interní mTLS listener
+
+V produkci vyžaduje TLS listener AML služby na portu 8443 klientský certifikát. Dosavadní HTTP listener na portu 8117 zůstává zapnutý pro readiness a objevování v Admin UI; jde o oddělenou cestu od mTLS volání. Při nasazení ověřte, že volající na 8443 předkládají certifikáty důvěryhodné privátní CA a že readiness stále kontroluje 8117. Připravený pod ani úspěšná HTTP sonda nedokazují funkčnost listeneru s ověřením klienta. Požadavek na klientský certifikát je konfigurační volba Quarkusu při buildu, proto patří do produkčního profilu, ne do proměnné prostředí nasazení.
+
+Generovaná politika příchozího provozu nyní povoluje migrovaným namespace pouze port 8443. Admin UI a bezpečnostní skener si ponechávají port 8117; provoz uvnitř namespace AML zůstává povolen. Volajícího, který stále potřebuje HTTP, je třeba určit před zpřísněním jeho pravidla.

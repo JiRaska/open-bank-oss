@@ -39,7 +39,7 @@ class RiskSnapshotApiIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
         override fun start(): Map<String, String> =
-            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in")
+            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "treasury-deal-in", "cnb-policy-rate-in")
 
         override fun stop() = InMemoryConnector.clear()
     }
@@ -90,7 +90,7 @@ class RiskSnapshotApiIT {
             .body("modelVersions.capitalSetId", equalTo("eu-crr3-sa"))
             .body("modelVersions.liquiditySetId", equalTo("eu-2015-61-crr2"))
             .body("modelVersions.minReservesSetId", equalTo("cnb-pmr"))
-            .body("modelVersions.minReservesSetVersion", equalTo("2"))
+            .body("modelVersions.minReservesSetVersion", equalTo("3"))
             .body("modelVersions.irrbbShockSetVersion", startsWith("sha256:"))
             .body("modelVersions.behaviouralModelId", equalTo("nmd-linear-core"))
             .body("ledgerCutOff", not(emptyOrNullString()))
@@ -176,6 +176,16 @@ class RiskSnapshotApiIT {
         ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1500.00")))
         val changed = create("2026-03-31").then().statusCode(201).extract().path<String>("id")
         assertThat(changed).isNotEqualTo(first)
+    }
+
+    @Test
+    @TestSecurity(user = "ops", roles = ["ROLE_OPERATOR"])
+    fun `an asOf after the current business date is a 400 and today is accepted`() {
+        // The IT clock is fixed at 2030-01-01 (FixedClockForIntegrationTests).
+        val body = create("2030-01-02").then().statusCode(400).extract().asString()
+        assertThat(body).contains("business date")
+        ledger.inputs = Fixtures.tiedOut()
+        create("2030-01-01").then().statusCode(201)
     }
 
     @Test

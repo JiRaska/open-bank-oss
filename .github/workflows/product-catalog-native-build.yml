@@ -79,6 +79,7 @@ jobs:
         run: |
           docker build \
             -f openbank-product-catalog/Dockerfile.native \
+            --build-arg SOURCE_COMMIT="${GITHUB_SHA}" \
             -t product-catalog:native-ci \
             .
 

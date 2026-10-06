@@ -147,14 +147,181 @@ class MoneyTest {
     }
 
     @Nested
-    inner class Scale {
+    inner class CanonicalScale {
 
         @Test
-        fun `scales to currency fraction digits with HALF_EVEN`() {
-            val money = Money(BigDecimal("10"), CurrencyCode.CZK)
-            val scaled = money.scale()
-            assertThat(scaled.amount.scale()).isEqualTo(2)
-            assertThat(scaled.amount).isEqualByComparingTo(BigDecimal("10.00"))
+        fun `numerically equal amounts are equal and hash equally whatever scale they were built from`() {
+            val forms = listOf("1", "1.0", "1.00", "1.000", "1E+0", "0.1E+1", "10E-1").map { Money.of(it, "EUR") }
+            forms.forEach {
+                assertThat(it).isEqualTo(Money.of("1.00", "EUR"))
+                assertThat(it.hashCode()).isEqualTo(Money.of("1.00", "EUR").hashCode())
+                assertThat(it.amount.scale()).isEqualTo(2)
+                assertThat(it.toString()).isEqualTo("1.00 EUR")
+            }
+            assertThat(forms.toSet()).hasSize(1)
+        }
+
+        @Test
+        fun `zero is one value`() {
+            assertThat(Money.zero("EUR")).isEqualTo(Money.of("0", "EUR"))
+            assertThat(Money.of("0.00", "EUR") - Money.of("0", "EUR")).isEqualTo(Money.zero("EUR"))
+            assertThat(-Money.zero("EUR")).isEqualTo(Money.zero("EUR"))
+        }
+
+        @Test
+        fun `arithmetic results equal the literal`() {
+            assertThat(Money.of("0.5", "EUR") + Money.of("0.5", "EUR")).isEqualTo(Money.of("1.00", "EUR"))
+            assertThat(Money.of("1", "KWD") - Money.of("0.001", "KWD")).isEqualTo(Money.of("0.999", "KWD"))
+        }
+
+        @Test
+        fun `exponent notation is held at the currency scale`() {
+            val thousand = Money.of("1E+3", "EUR")
+            assertThat(thousand.amount.scale()).isEqualTo(2)
+            assertThat(thousand.amount.unscaledValue()).isEqualTo(java.math.BigInteger.valueOf(100_000))
+            assertThat(Money.of("1E+3", "JPY").amount.scale()).isEqualTo(0)
+        }
+
+        @Test
+        fun `the scale follows the currency - zero, two and three fraction digits`() {
+            assertThat(Money.of("7", "JPY").amount.toPlainString()).isEqualTo("7")
+            assertThat(Money.of("7", "EUR").amount.toPlainString()).isEqualTo("7.00")
+            assertThat(Money.of("7", "KWD").amount.toPlainString()).isEqualTo("7.000")
+        }
+
+        @Test
+        fun `an amount that would need rounding is rejected, never rounded`() {
+            listOf(
+                "1.005" to "EUR",
+                "1.5" to "JPY",
+                "0.0001" to "KWD",
+                "1.0000000000000001" to "EUR",
+            ).forEach { (a, c) ->
+                assertThatThrownBy { Money.of(a, c) }
+                    .describedAs("$a $c")
+                    .isInstanceOf(IllegalArgumentException::class.java)
+                    .hasMessageContaining("exceeds currency $c fraction digits")
+            }
+        }
+
+        @Test
+        fun `scale is the identity - there is nothing left to scale`() {
+            val money = Money.of("10", "CZK")
+            assertThat(money.scale()).isSameAs(money)
+        }
+
+        @Test
+        fun `round to a coarser policy changes the value and keeps the canonical scale`() {
+            // TAX_WITHHOLDING is whole units, DOWN: observable, since every HALF_* mode gives 3.
+            val rounded = Money.of("2.99", "CZK").round(RoundingPolicy.TAX_WITHHOLDING)
+            assertThat(rounded).isEqualTo(Money.of("2.00", "CZK"))
+            assertThat(rounded.amount.scale()).isEqualTo(2)
+        }
+
+        @Test
+        fun `destructures into amount and currency`() {
+            val (amount, currency) = Money.of("12.30", "EUR")
+            assertThat(amount).isEqualTo(BigDecimal("12.30"))
+            assertThat(currency).isEqualTo(CurrencyCode.EUR)
+        }
+    }
+
+    @Nested
+    inner class Magnitude {
+
+        @Test
+        fun `the widest supported amount is accepted`() {
+            val widest = "9".repeat(Money.MAX_INTEGER_DIGITS) + ".99"
+            assertThat(Money.of(widest, "EUR").amount.toPlainString()).isEqualTo(widest)
+        }
+
+        @Test
+        fun `one integer digit more is rejected`() {
+            assertThatThrownBy { Money.of("1" + "0".repeat(Money.MAX_INTEGER_DIGITS), "EUR") }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("integer digits")
+        }
+
+        @Test
+        fun `an exponent far outside the range is rejected from precision and scale alone`() {
+            // No time budget: a slow machine would make one flaky and a fast one would hide a
+            // regression. What is asserted instead is that these are REJECTED — the check reads two
+            // stored fields, and any code path that expanded the digits first could not return.
+            listOf("1E+2000000000", "-1E+2000000000", "0E+2000000000", "1E+${Int.MAX_VALUE}").forEach { text ->
+                assertThatThrownBy { Money(BigDecimal(text), CurrencyCode.EUR) }
+                    .describedAs(text)
+                    .isInstanceOf(IllegalArgumentException::class.java)
+                    .hasMessageContaining("integer digits")
+                assertThatThrownBy { Money.of(text, "EUR") }.isInstanceOf(IllegalArgumentException::class.java)
+            }
+        }
+
+        @Test
+        fun `a scale far outside the range is rejected, zero included`() {
+            listOf("1E-2000000000", "0E-2000000000", "1E-19").forEach { text ->
+                assertThatThrownBy { Money(BigDecimal(text), CurrencyCode.EUR) }
+                    .describedAs(text)
+                    .isInstanceOf(IllegalArgumentException::class.java)
+                    .hasMessageContaining("scale")
+            }
+        }
+
+        @Test
+        fun `the widest input scale normalises when the extra digits are zeros`() {
+            assertThat(Money(BigDecimal("12.340000000000000000"), CurrencyCode.EUR)).isEqualTo(Money.of("12.34", "EUR"))
+        }
+
+        @Test
+        fun `amount text longer than the limit is rejected before it is parsed`() {
+            assertThatThrownBy { Money.of("1" + "0".repeat(Money.MAX_TEXT_LENGTH), "EUR") }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("characters")
+        }
+
+        @Test
+        fun `text that is not a number is an IllegalArgumentException`() {
+            assertThatThrownBy { Money.of("ten", "EUR") }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("not a decimal number")
+        }
+
+        @Test
+        fun `arithmetic cannot leave the range`() {
+            val widest = Money.of("9".repeat(Money.MAX_INTEGER_DIGITS), "JPY")
+            assertThatThrownBy { widest + Money.of("1", "JPY") }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("integer digits")
+        }
+    }
+
+    @Nested
+    inner class Ordering {
+
+        @Test
+        fun `orders amounts of one currency`() {
+            val amounts = listOf("3.10", "-1", "3.1", "0", "12").map { Money.of(it, "EUR") }
+            assertThat(amounts.sorted().map { it.amount.toPlainString() })
+                .containsExactly("-1.00", "0.00", "3.10", "3.10", "12.00")
+            assertThat(amounts.max()).isEqualTo(Money.of("12.00", "EUR"))
+            assertThat(Money.of("1", "EUR") < Money.of("1.01", "EUR")).isTrue()
+        }
+
+        @Test
+        fun `compareTo is zero exactly when equal`() {
+            assertThat(Money.of("3.1", "EUR").compareTo(Money.of("3.10", "EUR"))).isZero()
+            assertThat(Money.of("3.1", "EUR")).isEqualTo(Money.of("3.10", "EUR"))
+        }
+
+        @Test
+        fun `comparing different currencies is rejected like any other mixed-currency operation`() {
+            assertThatThrownBy { Money.of("1", "EUR").compareTo(Money.of("1", "CZK")) }
+                .isInstanceOf(IllegalArgumentException::class.java)
+                .hasMessageContaining("Cannot operate on different currencies: EUR and CZK")
+        }
+
+        @Test
+        fun `equal amounts in different currencies are not equal`() {
+            assertThat(Money.of("1", "EUR")).isNotEqualTo(Money.of("1", "USD"))
         }
     }
 

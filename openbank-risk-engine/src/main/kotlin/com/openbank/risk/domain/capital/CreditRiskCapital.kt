@@ -21,6 +21,8 @@ data class ExposureLine(
     val riskWeight: BigDecimal,
     val factorKey: String,
     val citation: String,
+    /** IFRS 9 stage reported for a loan line; null for an account-level line or when not reported. */
+    val ifrs9Stage: String? = null,
 ) {
     val rwa: BigDecimal get() = ead.multiply(riskWeight, BigMath.MC)
 }
@@ -89,7 +91,20 @@ data class CapitalResult(
     val ratiosNotComputable: String?,
     val unclassified: List<UnclassifiedCapitalBalance>,
     val notes: List<String>,
+    /** Machine-readable form of [ratiosNotComputable], so a client can localise it. */
+    val ratiosNotComputableCode: RatiosNotComputable? = null,
 )
+
+/** Why the capital ratios were not computed; [wire] is the API code, [message] the English reason. */
+enum class RatiosNotComputable(val wire: String, val message: String) {
+    MULTI_CURRENCY("multi-currency", "multi-currency book: own funds are not converted to one currency"),
+    NO_POSITIONS("no-positions", "the snapshot has no positions"),
+    NO_OWN_FUNDS(
+        "no-own-funds",
+        "no own-funds GL account (openbank.risk.capital.sa.classification own-funds-*) is in the snapshot",
+    ),
+    ZERO_RWA("zero-rwa", "credit-risk RWA is zero: a ratio is undefined"),
+}
 
 private const val RATIO_SCALE = 6
 private const val STAGE_3 = "STAGE_3"
@@ -146,11 +161,10 @@ object CreditRiskCapital {
         val requirement = reporting.total?.totalRwa?.multiply(params[CapitalFactor.MIN_TOTAL_CAPITAL_RATIO], BigMath.MC)
         val total = currencies.singleOrNull()
         val notComputable = when {
-            currencies.size > 1 -> "multi-currency book: own funds are not converted to one currency"
-            total == null -> "the snapshot has no positions"
-            total.ownFunds == null ->
-                "no own-funds GL account (openbank.risk.capital.sa.classification own-funds-*) is in the snapshot"
-            total.totalRwa.signum() <= 0 -> "credit-risk RWA is zero: a ratio is undefined"
+            currencies.size > 1 -> RatiosNotComputable.MULTI_CURRENCY
+            total == null -> RatiosNotComputable.NO_POSITIONS
+            total.ownFunds == null -> RatiosNotComputable.NO_OWN_FUNDS
+            total.totalRwa.signum() <= 0 -> RatiosNotComputable.ZERO_RWA
             else -> null
         }
         val ratios = if (notComputable == null) ratios(total!!, params) else null
@@ -161,7 +175,8 @@ object CreditRiskCapital {
             totalNotStated = reporting.notStated,
             ownFundsRequirement = requirement,
             ratios = ratios,
-            ratiosNotComputable = notComputable,
+            ratiosNotComputable = notComputable?.message,
+            ratiosNotComputableCode = notComputable,
             unclassified = unclassified,
             notes = listOfNotNull(
                 AGGREGATION_NOTE.takeIf {
@@ -187,7 +202,7 @@ object CreditRiskCapital {
                     } else {
                         CapitalFactor.RW_SOVEREIGN_UNRATED
                     }
-            CapitalGlClass.BANK -> ExposureClass.BANK to p.classification.bankScraGrade.factor
+            CapitalGlClass.BANK, CapitalGlClass.NOSTRO -> ExposureClass.BANK to p.classification.bankScraGrade.factor
             CapitalGlClass.RETAIL ->
                 p.classification.retailTreatment.exposureClass to p.classification.retailTreatment.factor
             CapitalGlClass.CASH -> ExposureClass.CASH to CapitalFactor.RW_CASH
@@ -220,17 +235,27 @@ object CreditRiskCapital {
         val ownFunds = mutableListOf<OwnFundsLine>()
         private val cls get() = params.classification
 
-        private fun line(c: ExposureClass, label: String, p: Position, f: CapitalFactor) {
+        private fun line(c: ExposureClass, label: String, p: Position, f: CapitalFactor, stage: String? = null) {
             lines +=
-                ExposureLine(c, label, p.glAccountCode, p.instrumentId, p.amount, params[f], f.key, params.citation(f))
+                ExposureLine(
+                    c,
+                    label,
+                    p.glAccountCode,
+                    p.instrumentId,
+                    p.amount,
+                    params[f],
+                    f.key,
+                    params.citation(f),
+                    stage,
+                )
         }
 
         private fun unclassify(p: Position, reason: String) {
             unclassified += UnclassifiedCapitalBalance(p.glAccountCode, p.glAccountType, p.currency, p.amount, reason)
         }
 
-        private fun retail(label: String, p: Position) =
-            line(cls.retailTreatment.exposureClass, label, p, cls.retailTreatment.factor)
+        private fun retail(label: String, p: Position, stage: String? = null) =
+            line(cls.retailTreatment.exposureClass, label, p, cls.retailTreatment.factor, stage)
 
         /** Credit balance = a deposit (a liability, no exposure); debit = an overdraft, retail (¶55 names overdrafts). */
         fun customerAccount(p: Position) {
@@ -243,8 +268,8 @@ object CreditRiskCapital {
             when {
                 p.amount.signum() < 0 -> unclassify(p, NEGATIVE_EXPOSURE)
                 p.amount.signum() == 0 -> Unit
-                stage == STAGE_3 -> line(ExposureClass.DEFAULTED, label, p, CapitalFactor.RW_DEFAULTED)
-                else -> retail(label, p)
+                stage == STAGE_3 -> line(ExposureClass.DEFAULTED, label, p, CapitalFactor.RW_DEFAULTED, stage)
+                else -> retail(label, p, stage)
             }
         }
 
@@ -254,6 +279,8 @@ object CreditRiskCapital {
                 p.amount.signum() == 0 || c == CapitalGlClass.NOT_AN_EXPOSURE -> Unit
                 c == null -> unclassify(p, "GL account not mapped in openbank.risk.capital.sa.classification")
                 c.isOwnFunds -> ownFundsAccount(p, c)
+                // An overdrawn nostro is owed TO the correspondent: a liability, not an exposure.
+                c == CapitalGlClass.NOSTRO && p.amount.signum() < 0 -> Unit
                 p.amount.signum() < 0 -> unclassify(p, NEGATIVE_EXPOSURE)
                 else -> {
                     val (ec, f) = weightOf(c, ccy, params)

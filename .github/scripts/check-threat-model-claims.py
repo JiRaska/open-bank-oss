@@ -162,8 +162,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'occurs only inside a comment in `ledger_rest_ext.rego`; not a policy input',
     'openbank-lending-service|3. Controls in place (this slice)|lending.origination.worker.enabled':
         'renamed to the `openbank.` convention; `rules.yaml:1544` records the rename',
-    'openbank-mcp-service|0. Phase posture — read this before anything below|HTTPRoute':
-        'no HTTPRoute manifest exists in this tree; ingress is expressed otherwise',
     'openbank-mcp-service|8. Change log|StubProposalPort':
         'open PR #8419 — replaced by `UnwiredProposalPort`; only past-tense KDoc remains',
     'openbank-sanctions-service|T3|deactivateByListType':
@@ -180,10 +178,6 @@ ALLOWED_UNRESOLVED: dict[str, str] = {
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
     'openbank-sepa-instant|6. Change log|SctInstOutboxPort':
         'dropped by `V4__drop_sct_inst_outbox.sql` (#5126); only the migration comment names it',
-    'openbank-sepa-payment|**T**ampering|XMLInputFactory':
-        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
-    'openbank-sepa-payment|5a. Return path (pacs.004) — STRIDE supplement|XMLInputFactory':
-        'names the StAX API; `Pacs004Reader` IS XXE-hardened, via `DocumentBuilderFactory` (`disallow-doctype-decl`, external entities off). Control real, API name wrong',
     'openbank-sepa-payment|6. Change log|settleProcessingPayment':
         'no such function in the tree',
     'openbank-settlement-service|T1|workflowRunId':

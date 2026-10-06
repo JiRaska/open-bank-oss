@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.17.1](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.17.0...finrep-service-v0.17.1) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
+## [0.17.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.16.0...finrep-service-v0.17.0) (2026-09-30)
+
+
+### Features
+
+* **finrep:** carry the risk snapshot's provenance onto COREP templates ([#11538](https://github.com/JiRaska/open-bank-oss/issues/11538)) ([3961c7d](https://github.com/JiRaska/open-bank-oss/commit/3961c7df54357a43bddc5b9f2b1a1a92e19405ef))
+
 ## [0.16.0](https://github.com/JiRaska/open-bank-oss/compare/finrep-service-v0.15.1...finrep-service-v0.16.0) (2026-09-29)
 
 

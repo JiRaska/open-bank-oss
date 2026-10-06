@@ -11,7 +11,7 @@ const decimal = z.union([z.number(), z.string()]).transform(Number).pipe(z.numbe
 const timestamp = z.string().min(1)
 
 export const PRODUCTS = ['MM_PLACEMENT', 'MM_BORROWING', 'CNB_DEPOSIT_FACILITY', 'CNB_LOMBARD', 'FX_SPOT'] as const
-export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
+export const DEAL_STATES = ['DRAFT', 'PENDING_APPROVAL', 'BOOKED', 'CONFIRMED', 'SETTLED', 'MATURED', 'CANCELLED', 'REVERSED'] as const
 export const CURRENCIES = ['CZK', 'EUR'] as const
 export const FX_SIDES = ['BUY', 'SELL'] as const
 /** The central bank's counterparty id (Deal.CNB_COUNTERPARTY_ID). */
@@ -42,6 +42,10 @@ export const limitCheckSchema = z.object({
 export const transitionSchema = z.object({
   from: dealStateSchema.nullable(), to: dealStateSchema, actor: z.string(), actorType: z.string(),
   at: timestamp, note: z.string().nullable(),
+  // API 1.16.0: the limit figures behind a submit/approve note. Optional — an older server omits it.
+  limitSnapshot: z.object({
+    limit: decimal, currency: z.string(), exposureAfter: decimal, headroomAfter: decimal,
+  }).nullable().optional(),
 })
 
 export const journalRefSchema = z.object({
@@ -110,10 +114,18 @@ export const limitUtilisationEntrySchema = z.object({
 })
 export const limitUtilisationSchema = z.object({ limits: z.array(limitUtilisationEntrySchema) })
 
+// openapi.yaml 1.14.0: basis ACTUAL (asOf <= today, settled deals) or PROJECTED (after today,
+// concluded deals added on their contracted dates). Optional so an older service still parses.
+export const positionBasisSchema = z.enum(['ACTUAL', 'PROJECTED'])
+
 export const positionsSchema = z.object({
   asOf: z.iso.date(),
+  today: z.iso.date().optional(),
+  basis: positionBasisSchema.optional(),
+  countedStates: z.array(z.string()).optional(),
   positions: z.array(z.object({
     currency: z.string(), placed: decimal, borrowed: decimal, atCnb: decimal, net: decimal,
+    dealCount: z.number().int().optional(),
   })),
 })
 
@@ -127,9 +139,10 @@ export type Deal = z.infer<typeof dealSchema>
 export type Counterparty = z.infer<typeof counterpartySchema>
 export type LimitUtilisationEntry = z.infer<typeof limitUtilisationEntrySchema>
 export type Positions = z.infer<typeof positionsSchema>
+export type PositionBasis = z.infer<typeof positionBasisSchema>
 
 /** The service's own error codes (ExceptionMappers.kt). */
-export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
+export type TreasuryErrorCode = 'FOUR_EYES_VIOLATION' | 'LIMIT_BREACHED' | 'PRODUCT_LIMIT_BREACHED' | 'ACTOR_NOT_PERMITTED' | 'INVALID_STATE' | 'NOT_FOUND'
 
 // Nostro reconciliation (ADR-0315 D7, #10896): NostroResource + the NostroStatement* /
 // NostroReconciliation schemas in openapi.yaml (1.4.0). The ledger balances, the differences and
@@ -203,6 +216,37 @@ export const nostroReconciliationSchema = z.object({
   unmatchedLedgerLines: z.array(nostroLedgerLineSchema),
 })
 
+// ADR-0315 D7 (openapi.yaml 1.14.0): GET /nostro/{account}/breaks — every unmatched item with the
+// day it was first seen and its age in business days; `aged` = open and over both alert thresholds.
+export const breakSideSchema = z.enum(['STATEMENT', 'LEDGER'])
+
+export const nostroBreakSchema = z.object({
+  breakId: z.string(),
+  side: breakSideSchema,
+  ourSide: ledgerSideSchema,
+  amount: decimal,
+  currency: z.string(),
+  bookingDate: z.iso.date(),
+  reference: z.string().nullish(),
+  statementUuid: z.string(),
+  statementSequence: z.number().int().nullish(),
+  ledgerLineId: z.string().nullish(),
+  firstSeenOn: z.iso.date(),
+  resolvedOn: z.iso.date().nullish(),
+  ageBusinessDays: z.number().int(),
+  aged: z.boolean(),
+  alertedAt: timestamp.nullish(),
+})
+
+export const nostroBreakListSchema = z.object({
+  iban: z.string(),
+  alertAgeDays: z.number().int(),
+  alertMinAmount: decimal,
+  breaks: z.array(nostroBreakSchema),
+})
+
+export type NostroBreak = z.infer<typeof nostroBreakSchema>
+export type NostroBreakList = z.infer<typeof nostroBreakListSchema>
 export type NostroStatement = z.infer<typeof nostroStatementSchema>
 export type MatchType = z.infer<typeof matchTypeSchema>
 export type NostroStatementEntry = z.infer<typeof nostroStatementEntrySchema>

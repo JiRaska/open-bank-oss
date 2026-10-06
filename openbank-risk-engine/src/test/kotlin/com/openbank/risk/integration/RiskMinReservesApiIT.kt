@@ -23,6 +23,7 @@ import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
 import org.hamcrest.Matchers.equalTo
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -68,6 +69,9 @@ class RiskMinReservesApiIT {
 
     private val json = ObjectMapper().enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
 
+    @BeforeEach
+    fun facts() = TestDb.seedReserveFacts()
+
     @AfterEach
     fun reset() {
         lending.loans = emptyList()
@@ -81,7 +85,7 @@ class RiskMinReservesApiIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
-    fun `a tied CZK book gets base and 2 percent requirement, with holdings not stated`() {
+    fun `a tied CZK book gets base and the 4 percent requirement in effect, with holdings not stated`() {
         // the 1510 facility and the 2300 borrowing reach the engine as TREASURY_DEAL positions
         seedDeal(cnbDeal, "CNB_DEPOSIT_FACILITY", "CNB", "4000.00")
         seedDeal(borrowing, "MM_BORROWING", "BANK-A", "3000.00")
@@ -102,11 +106,16 @@ class RiskMinReservesApiIT {
         )
 
         assertThat(body["parameterSetId"].asText()).isEqualTo("cnb-pmr")
-        assertThat(body["parameterSetVersion"].asText()).isEqualTo("2")
+        assertThat(body["parameterSetVersion"].asText()).isEqualTo("3")
         val czk = body["currencies"].single()
         assertThat(czk["base"].decimalValue()).isEqualByComparingTo("1500.00") // customer deposits only
-        assertThat(czk["rate"].decimalValue()).isEqualByComparingTo("0.02")
-        assertThat(body["requirement"].decimalValue()).isEqualByComparingTo("30.00")
+        // the ratio in effect on 2026-05-28 is the ČNB fact (4 % from 2025-01-02), not a constant
+        assertThat(czk["rate"].decimalValue()).isEqualByComparingTo("0.04")
+        assertThat(body["requirement"].decimalValue()).isEqualByComparingTo("60.00")
+        val facts = body["assumptions"]["rateFacts"].associateBy { it["instrument"].asText() }
+        assertThat(facts.keys).containsExactlyInAnyOrder("MIN_RESERVE_RATIO", "MIN_RESERVE_REMUNERATION")
+        assertThat(facts.getValue("MIN_RESERVE_RATIO")["effectiveFrom"].asText()).isEqualTo("2025-01-02")
+        assertThat(facts.getValue("MIN_RESERVE_RATIO")["sourceUrl"].asText()).endsWith("PMR_historie_zmen.xlsx")
         // no GL is the ČNB current account (1510 is the deposit facility): not stated, never a zero
         assertThat(body["holdings"].isNull).isTrue()
         assertThat(body["totalHoldings"].isNull).isTrue()
@@ -148,6 +157,18 @@ class RiskMinReservesApiIT {
 
     @Test
     @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `with no reserve ratio in effect the requirement is NOT_EVALUABLE, never a default`() {
+        TestDb.execute("DELETE FROM cnb_policy_rate_fact WHERE instrument = 'MIN_RESERVE_RATIO'")
+        val id = snapshot("2026-05-26", "TIED_OUT")
+        given().`when`().get("/api/v1/risk/snapshots/$id/min-reserves")
+            .then().statusCode(424)
+            .body("error", equalTo("NOT_EVALUABLE"))
+            .body("asOf", equalTo("2026-05-26"))
+            .body("reason", org.hamcrest.Matchers.containsString("MIN_RESERVE_RATIO"))
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
     fun `an untied run answers 409`() {
         ledger.inputs = Fixtures.tiedOut().copy(subLedger = listOf(sl(Fixtures.ALICE, "CZK", "0", "1000.00")))
         val untied = snapshot("2026-01-29", "UNTIED")
@@ -160,6 +181,49 @@ class RiskMinReservesApiIT {
     fun `an unknown run answers 404`() {
         given().`when`().get("/api/v1/risk/snapshots/00000000-0000-7000-8000-0000000000fe/min-reserves")
             .then().statusCode(404)
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `period averaging under the shipped config - holdings and requirement not stated, coverage stated`() {
+        // Shipped config maps no ČNB current account, and no run exists on the 2026-10-31 base date.
+        snapshot("2026-11-01", "TIED_OUT")
+        snapshot("2026-11-02", "TIED_OUT")
+        val body: JsonNode = json.readTree(
+            given().queryParam("asOf", "2026-11-03").`when`().get("/api/v1/risk/min-reserves/periods/2026-11")
+                .then().statusCode(200).extract().asString(),
+        )
+
+        assertThat(body["calendarStatus"].asText()).isEqualTo("sample-unverified")
+        assertThat(body["notes"].map { it.asText() }.any { it.startsWith("SAMPLE / UNVERIFIED") }).isTrue()
+        assertThat(body["requirement"].isNull).isTrue()
+        assertThat(body["requirementNotStated"].asText()).contains("2026-10-31")
+        assertThat(body["averageHoldings"].isNull).isTrue() // never a stand-in zero
+        assertThat(body["averageNotStated"].asText()).contains("current account at the ČNB")
+        assertThat(body["daysWithData"].asInt()).isEqualTo(2)
+        assertThat(body["daysElapsed"].asInt()).isEqualTo(3)
+        assertThat(body["missingDays"].map { it.asText() }).containsExactly("2026-11-03")
+        assertThat(body["proposal"].isNull).isTrue()
+
+        val listed: JsonNode = json.readTree(
+            given().queryParam("asOf", "2026-11-15").`when`().get("/api/v1/risk/min-reserves/periods")
+                .then().statusCode(200).extract().asString(),
+        )
+        assertThat(listed["periods"].map { it["id"].asText() }).containsExactly("2026-11")
+        assertThat(listed["calendarStatus"].asText()).isEqualTo("sample-unverified")
+    }
+
+    @Test
+    @TestSecurity(user = "risk", roles = ["ROLE_RISK"])
+    fun `an unknown period is 404 and a malformed asOf is 400`() {
+        given().`when`().get("/api/v1/risk/min-reserves/periods/1999-01").then().statusCode(404)
+        given().queryParam("asOf", "tomorrow").`when`().get("/api/v1/risk/min-reserves/periods/2026-11")
+            .then().statusCode(400)
+    }
+
+    @Test
+    fun `an unauthenticated caller cannot read a maintenance period`() {
+        given().`when`().get("/api/v1/risk/min-reserves/periods/2026-11").then().statusCode(401)
     }
 
     @Test

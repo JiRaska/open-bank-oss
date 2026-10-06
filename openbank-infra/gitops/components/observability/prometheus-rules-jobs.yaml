@@ -1,0 +1,195 @@
+# Job / CronJob failure alerts with LATEST-RUN semantics.
+#
+# Replaces kubernetes-mixin's KubeJobFailed (disabled in apps/kube-prometheus-
+# stack.yaml). That rule alerts on the existence of any failed Job object; a
+# CronJob keeps its last failed runs (failedJobsHistoryLimit) beside the
+# successful ones that came after, so it stayed lit for days on crons that had
+# recovered. Measured 2026-09-30: 7 firing, 6 already green on their next run.
+# The one that was really broken (cloud-finops-collector, every run failing
+# because ClickHouse's disk was full) looked exactly like the six.
+#
+# CronJobLatestRunFailed: the newest Job a CronJob created has failed. Resolves
+# by itself on the next successful run, which is what an operator means by
+# "the cron is broken". JobFailed: a Job no CronJob owns (a migration, a one-
+# off apply) failed — those have no "next run", so existence IS the signal.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: openbank-job-alerts
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  groups:
+    - name: openbank.platform.jobs
+      rules:
+        # Newest Job per CronJob: join kube_job_created to its owner, take the max
+        # creation time per (namespace, cronjob), keep the Job that equals it.
+        - record: openbank:cronjob_latest_job_created
+          expr: |
+            max by (namespace, owner_name) (
+              kube_job_created{job="kube-state-metrics"}
+              * on (namespace, job_name) group_left (owner_name)
+              kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            )
+        - alert: CronJobLatestRunFailed
+          expr: |
+            (
+              (kube_job_status_failed{job="kube-state-metrics"} > 0)
+              * on (namespace, job_name) group_left (owner_name)
+              kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+            )
+            and on (namespace, job_name)
+            (
+              (
+                kube_job_created{job="kube-state-metrics"}
+                * on (namespace, job_name) group_left (owner_name)
+                kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+              )
+              == on (namespace, owner_name) group_left ()
+              openbank:cronjob_latest_job_created
+            )
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.owner_name }}: latest run failed"
+            description: >-
+              The most recent Job of this CronJob ({{ $labels.job_name }}) failed and no newer
+              run exists yet. Resolves on the next successful run. Read the pod:
+              kubectl -n {{ $labels.namespace }} logs job/{{ $labels.job_name }} --all-containers
+        - alert: JobFailed
+          expr: |
+            kube_job_status_failed{job="kube-state-metrics"} > 0
+              unless on (namespace, job_name)
+            kube_job_owner{job="kube-state-metrics", owner_kind="CronJob"}
+          for: 10m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "Job {{ $labels.namespace }}/{{ $labels.job_name }} failed"
+            description: >-
+              A Job with no CronJob owner has failed; it will not run again on its own.
+              kubectl -n {{ $labels.namespace }} describe job {{ $labels.job_name }}
+    # ---- has this CronJob SUCCEEDED recently enough? ----
+    # CronJobLatestRunFailed answers "did the last run fail". It cannot see a CronJob
+    # that has stopped producing successes WITHOUT a failed Job to point at: suspended,
+    # never scheduled (startingDeadlineSeconds missed), Jobs GC'd by ttlSecondsAfterFinished,
+    # a run hanging until activeDeadlineSeconds, or one that alternates fail/succeed.
+    # Several CronJobs here are CONTROLS (drift scanners, sync verifier, synthetic
+    # probes), and a dead control looks exactly like a quiet one.
+    #
+    # Each CronJob declares its own budget as the annotation
+    #   openbank.tech/max-success-age-seconds: "<tier>"
+    # which kube-state-metrics exports (metricAnnotationsAllowList in
+    # apps/kube-prometheus-stack.yaml) as a LABEL on kube_cronjob_annotations. PromQL
+    # cannot turn a label into a number, so the budget is restricted to the tiers below
+    # and each tier is one arm of the recording rule. A value that is not a tier, or no
+    # annotation at all, makes the CronJob unmonitored, and CronJobMaxSuccessAgeUndeclared
+    # fires for it. That alert also fires for EVERY CronJob if the KSM allowlist flag is
+    # lost, so the staleness rule cannot go quiet without saying so.
+    # The tier set is read from this file by .github/scripts/check-cronjob-max-success-age.py,
+    # which fails CI on a CronJob with no annotation, a non-tier value, or a value no larger
+    # than the longest gap between its scheduled runs.
+    - name: openbank.platform.cronjob-liveness
+      rules:
+        - record: openbank:cronjob_max_success_age_seconds
+          expr: |
+            max by (namespace, cronjob) (
+                  900 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="900"}
+              or 1800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="1800"}
+              or 3600 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="3600"}
+              or 7200 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="7200"}
+              or 32400 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="32400"}
+              or 46800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="46800"}
+              or 180000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="180000"}
+              or 352800 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="352800"}
+              or 1296000 * kube_cronjob_annotations{job="kube-state-metrics", annotation_openbank_tech_max_success_age_seconds="1296000"}
+            )
+        # Age of the last success. A CronJob that has NEVER succeeded has no
+        # last_successful_time series at all, so it falls back to its own creation time
+        # (it has been failing to succeed for that long). The `> 0` drops a zero
+        # timestamp, which would otherwise read as ~56 years.
+        - record: openbank:cronjob_success_age_seconds
+          expr: |
+            (
+              time() - max by (namespace, cronjob) (
+                kube_cronjob_status_last_successful_time{job="kube-state-metrics"} > 0
+              )
+            )
+            or
+            (
+              time() - max by (namespace, cronjob) (kube_cronjob_created{job="kube-state-metrics"})
+            )
+        - alert: CronJobSuccessStale
+          expr: |
+            openbank:cronjob_success_age_seconds
+              > on (namespace, cronjob)
+            openbank:cronjob_max_success_age_seconds
+          for: 15m
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} has not succeeded for {{ $value | humanizeDuration }}"
+            description: >-
+              Its declared budget (annotation openbank.tech/max-success-age-seconds) is exceeded.
+              The latest run may have failed, hung, been skipped or never been scheduled, or the
+              CronJob may be suspended. If it is a control (a drift scanner, verifier or probe),
+              nothing it guards has been checked for that long. Start with
+              kubectl -n {{ $labels.namespace }} get cronjob {{ $labels.cronjob }} -o wide
+              and kubectl -n {{ $labels.namespace }} get jobs --sort-by=.status.startTime
+        - alert: CronJobMaxSuccessAgeUndeclared
+          expr: |
+            max by (namespace, cronjob, annotation_openbank_tech_max_success_age_seconds) (
+              kube_cronjob_annotations{job="kube-state-metrics"}
+            )
+              unless on (namespace, cronjob)
+            openbank:cronjob_max_success_age_seconds
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "CronJob {{ $labels.namespace }}/{{ $labels.cronjob }} is not covered by CronJobSuccessStale"
+            description: >-
+              It has no openbank.tech/max-success-age-seconds annotation, or the value
+              ("{{ $labels.annotation_openbank_tech_max_success_age_seconds }}") is not one of
+              the tiers in prometheus-rules-jobs.yaml, so nobody would notice if it stopped
+              succeeding. If EVERY CronJob reports this at once, kube-state-metrics has lost
+              its metricAnnotationsAllowList flag.
+    # ---- alerts that nobody acts on ----
+    # Measured 2026-09-30: PushChannelSilent had fired for 22 days, the ledger's
+    # accounting day 2026-07-31 had sat in CUTOFF since 2026-08-27, three KYC
+    # orphan parties were 76 days old and domestic payments ~100 days stranded —
+    # every one of them a correct alert, all of them wallpaper, because a firing
+    # alert that nobody resolves looks exactly like one that was just raised. This
+    # meta-alert makes the AGE of a firing alert a signal of its own. It reads
+    # ALERTS_FOR_STATE (the activeAt timestamp Prometheus persists across its own
+    # restarts). Caveat worth knowing: an alert that carries a `pod` label starts a
+    # new series on every rollout, so its age resets on deploy — this rule then
+    # under-reports it, never over-reports.
+    - name: openbank.platform.alert-hygiene
+      rules:
+        - alert: AlertFiringTooLong
+          expr: |
+            (
+              time()
+                -
+              min by (alertname, severity, namespace) (
+                ALERTS_FOR_STATE{alertname!~"Watchdog|InfoInhibitor|AlertFiringTooLong"}
+              )
+            ) > 7 * 86400
+          for: 1h
+          labels:
+            severity: warning
+            team: platform
+          annotations:
+            summary: "{{ $labels.alertname }} ({{ $labels.severity }}) has been firing for {{ $value | humanizeDuration }} without being resolved"
+            description: >-
+              A correct alert that fires for a week unattended trains everyone to ignore it,
+              and hides the next real one behind it. Either fix the condition, fix the rule
+              (false positive), or silence it in Alertmanager with an owner and an expiry.
+              Never leave it firing.

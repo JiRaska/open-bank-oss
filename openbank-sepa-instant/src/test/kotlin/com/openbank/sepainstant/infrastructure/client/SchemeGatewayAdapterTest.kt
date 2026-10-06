@@ -4,6 +4,7 @@
 
 package com.openbank.sepainstant.infrastructure.client
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.iso20022.Pacs002Builder
 import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
@@ -15,7 +16,6 @@ import io.smallrye.mutiny.Uni
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
@@ -34,7 +34,7 @@ class SchemeGatewayAdapterTest {
         creditorIban = "FR1420041010050500013M02606",
         creditorName = "Bob Creditor",
         creditorBic = creditorBic,
-        amount = BigDecimal("12.34"),
+        amount = Money.of("12.34", "EUR"),
         remittanceInfo = "Invoice 1",
         endToEndId = "E2E-0001",
         executionTimeoutAt = null,

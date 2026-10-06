@@ -9,6 +9,7 @@ import com.openbank.balance.application.port.`in`.AccountBookedChange
 import com.openbank.balance.application.port.`in`.LedgerProjectionUseCase
 import kotlinx.coroutines.runBlocking
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertThrows
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.math.BigDecimal
@@ -74,18 +75,48 @@ class LedgerProjectionConsumerTest {
         assertEquals(accountId, change.accountId)
         assertEquals(journalEntryId, change.journalEntryId)
         assertEquals(transactionId, change.transactionId)
-        assertEquals(0, change.delta.compareTo(BigDecimal("-40.00")))
+        assertEquals(0, change.delta.amount.compareTo(BigDecimal("-40.00")))
         assertEquals("CZK", change.currency)
     }
 
     @Test
-    fun `swallows an unparseable payload without applying`(): Unit = runBlocking {
+    fun `malformed messages propagate and a later valid event still projects`() {
         val projection = RecordingProjection()
         val consumer = LedgerProjectionConsumer(projection, mapper, projectionEnabled = true)
 
-        consumer.consume("{ not json")
-
+        assertThrows(Exception::class.java) {
+            runBlocking { consumer.consume("{ not json") }
+        }
         assertTrue(projection.applied.isEmpty())
+
+        val malformedBookedEvent = mapper.writeValueAsString(
+            mapOf("eventType" to "AccountBookedChanged", "aggregateId" to "not-a-uuid"),
+        )
+        assertThrows(Exception::class.java) {
+            runBlocking { consumer.consume(malformedBookedEvent) }
+        }
+        assertTrue(projection.applied.isEmpty())
+
+        runBlocking { consumer.consume(bookedChangedJson()) }
+        assertEquals(1, projection.applied.size)
+    }
+
+    @Test
+    fun `projection persistence failures propagate`() {
+        val consumer = LedgerProjectionConsumer(
+            projection = object : LedgerProjectionUseCase {
+                override suspend fun apply(change: AccountBookedChange) {
+                    error("projection persistence failed")
+                }
+            },
+            objectMapper = mapper,
+            projectionEnabled = true,
+        )
+
+        val failure = assertThrows(IllegalStateException::class.java) {
+            runBlocking { consumer.consume(bookedChangedJson()) }
+        }
+        assertEquals("projection persistence failed", failure.message)
     }
 
     private class RecordingProjection : LedgerProjectionUseCase {

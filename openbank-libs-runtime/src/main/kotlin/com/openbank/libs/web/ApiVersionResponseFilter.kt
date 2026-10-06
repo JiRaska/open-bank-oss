@@ -10,7 +10,6 @@ import jakarta.ws.rs.container.ContainerResponseFilter
 import jakarta.ws.rs.ext.Provider
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.util.Optional
-import java.util.UUID
 
 @Provider
 class ApiVersionResponseFilter(
@@ -47,16 +46,19 @@ class ApiVersionResponseFilter(
             putSingleHeader("X-API-Version", "v${pathMajor(req.uriInfo.path) ?: apiVersion}")
             putSingleHeader("X-Service-Version", serviceVersion)
             putSingleHeader("X-Service-Name", serviceName)
+            // Echo the ids CorrelationIdRequestFilter settled on, so the response header, the log
+            // line and the error body all carry the same value. The request header is consulted
+            // only when that filter did not run (a request aborted before matching), and goes
+            // through the same shape check — a caller-supplied value is never echoed verbatim.
             putSingleHeader(
-                "X-Request-ID",
-                req.getHeaderString("X-Request-ID")
-                    ?: UUID.randomUUID().toString(),
+                HEADER_REQUEST_ID,
+                acceptedInboundId(req.getProperty(MDC_REQUEST_ID) as? String)
+                    ?: inboundIdOrFresh(req.getHeaderString(HEADER_REQUEST_ID)),
             )
             putSingleHeader(
-                "X-Correlation-ID",
-                req.getHeaderString("X-Correlation-ID")
-                    ?: req.getProperty(CORRELATION_ID_KEY)?.toString()
-                    ?: UUID.randomUUID().toString(),
+                HEADER_CORRELATION_ID,
+                acceptedInboundId(req.getProperty(CORRELATION_ID_KEY) as? String)
+                    ?: inboundIdOrFresh(req.getHeaderString(HEADER_CORRELATION_ID)),
             )
             if (isDeprecatedPath(req.uriInfo.path)) {
                 val currentMajor = pathMajor(req.uriInfo.path) ?: apiVersion

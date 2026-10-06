@@ -125,9 +125,8 @@ class AuditResourceSecurityTest {
 
     /**
      * ROLE_OPERATOR is also held by real staff, so the widened @RolesAllowed is only safe because
-     * OPA narrows it: the action must stay DISTINCT from the auditor-facing `audit.read`, whose
-     * rest.rego grant (operator-read-any, matching the `.read` suffix) would otherwise admit any
-     * operator to a customer's trail.
+     * OPA narrows it: the action must stay DISTINCT from the auditor-facing `audit.trail.inspect`, whose
+     * audit_rest_ext.rego grant would otherwise admit any auditor to a customer's trail.
      */
     @Test
     fun `the customer access log carries its own authz action, not the auditor-facing audit read`() {
@@ -135,6 +134,22 @@ class AuditResourceSecurityTest {
 
         assertThat(action).isEqualTo("audit.customerRead")
         assertThat(action).doesNotEndWith(".read")
+    }
+
+    /**
+     * Base rest.rego's operator-read-any / compliance-read-any grant every `*.read` / `*.list` to
+     * any HUMAN-classified ROLE_OPERATOR / ROLE_COMPLIANCE holder, and a Keycloak service account
+     * is classified HUMAN. The trail reads must therefore use a verb outside that set, so that
+     * audit_rest_ext.rego's oversight rule (which excludes `service-account-*`) is the only OPA
+     * permit path — not @RolesAllowed alone.
+     */
+    @Test
+    fun `the audit trail reads use an action base read grants cannot reach`() {
+        listOf(getAuditTrail, getActorTrail).forEach { method ->
+            val action = method.getAnnotation(Authorize::class.java).action
+            assertThat(action).describedAs(method.name).isEqualTo("audit.trail.inspect")
+            assertThat(action).describedAs(method.name).doesNotEndWith(".read").doesNotEndWith(".list")
+        }
     }
 
     @Test

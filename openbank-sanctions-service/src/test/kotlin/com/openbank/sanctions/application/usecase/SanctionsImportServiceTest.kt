@@ -181,6 +181,21 @@ class SanctionsImportServiceTest {
     }
 
     @Test
+    fun `an OFAC feed carrying a DTD is refused and the existing list is kept`(): Unit = runBlocking {
+        val url = serveOnce(
+            "<?xml version=\"1.0\"?><!DOCTYPE sdnList [<!ENTITY e SYSTEM \"file:///etc/hosts\">]>" +
+                "<sdnList><sdnEntry><uid>1</uid><lastName>&e;</lastName></sdnEntry></sdnList>",
+            "application/xml",
+        )
+
+        val result = service.importList(SanctionsListType.OFAC_SDN, url)
+
+        assertThat(result.outcome).isEqualTo(ListImportOutcome.FAILED_KEPT_EXISTING)
+        assertThat(result.detail).contains("DOCTYPE")
+        coVerify(exactly = 0) { entryRepo.upsertAll(any()) }
+    }
+
+    @Test
     fun `importList reports FAILED_KEPT_EXISTING when the download fails`(): Unit = runBlocking {
         val result = service.importList(SanctionsListType.OFAC_SDN, "http://127.0.0.1:1/does-not-exist")
 
