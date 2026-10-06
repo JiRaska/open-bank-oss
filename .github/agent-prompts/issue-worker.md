@@ -194,7 +194,10 @@ The body must state: what was wrong, what you changed, **how you proved it** (na
 say what it does when the fix is reverted), what you could NOT verify here, and what you
 deliberately did not do. Write the body to a FILE and pass `--body-file` — never inline a body
 containing backticks, because the shell executes them and the published text silently loses the
-words you meant to write.
+words you meant to write. Before `gh pr create`, run
+`python3 .github/scripts/append-security-checklist.py <body-file>` on that file. This copies the
+current template section and leaves every box unticked. For a money-path diff, substantiate and
+complete any required boxes yourself; if you cannot, keep the draft blocked for human review.
 
 If CI goes red: fix it if it is yours. If it is `agent-pr-guard`, you picked a protected issue —
 say so plainly, leave the draft for a human, and do not route around the gate.

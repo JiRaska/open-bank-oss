@@ -158,10 +158,15 @@ jobs:
             echo "MTTR is not reported; see .github/scripts/alert-rca-ledger.py. Refs #5869"
           } > commit-msg.txt
           git commit -s -F commit-msg.txt
+          # The runbook is tracked content; prepare a separate PR body so the checklist
+          # helper cannot silently change the committed evidence document.
+          body_file="${RUNNER_TEMP}/alert-rca-pr-body.md"
+          cp "docs/runbooks/alert-rca/$(date -u +%Y-%m).md" "$body_file"
+          python3 .github/scripts/append-security-checklist.py "$body_file"
           git push origin "$branch"
           gh pr create --base main --head "$branch" \
             --title "chore(governance): weekly critical-alert RCA log" \
-            --body-file "docs/runbooks/alert-rca/$(date -u +%Y-%m).md"
+            --body-file "$body_file"
 
       # A control that reports healthy because it structurally cannot report anything
       # else is the defect this whole workflow exists to prevent, so the run must go

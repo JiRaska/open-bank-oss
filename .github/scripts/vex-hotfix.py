@@ -145,6 +145,29 @@ def self_test() -> int:
         print("self-test FAIL: BOM-managed alias must refuse the bump"); bad += 1
     except ValueError:
         pass
+    # Exercise the PR producer boundary, not only the checklist helper itself: the
+    # body passed to gh must already contain the real template's unticked section.
+    with tempfile.TemporaryDirectory() as tmp:
+        body_path = Path(tmp) / "body.md"
+        body_path.write_text("## What\n\nDependency repair.\n", encoding="utf-8")
+        submitted: list[str] = []
+
+        def fake_gh(command: list[str], check: bool) -> None:
+            if not check or command[:3] != ["gh", "pr", "create"]:
+                raise AssertionError("unexpected PR submission command")
+            if command[command.index("--body-file") + 1] != str(body_path):
+                raise AssertionError("PR did not use the prepared body file")
+            submitted.append(body_path.read_text(encoding="utf-8"))
+
+        create_hotfix_pr("fix(security): repair dependency", body_path, fake_gh)
+        if len(submitted) != 1 or submitted[0].count("## Security checklist") != 1 or \
+                re.search(r"^- \[[xX]\]", submitted[0], re.M):
+            print("self-test FAIL: PR producer omitted or pre-ticked the checklist"); bad += 1
+        existing = "## What\n\nDependency repair.\n\n## Security checklist\n\n- [ ] Author review pending.\n"
+        body_path.write_text(existing, encoding="utf-8")
+        create_hotfix_pr("fix(security): repair dependency", body_path, fake_gh)
+        if len(submitted) != 2 or submitted[1] != existing:
+            print("self-test FAIL: PR producer changed an existing checklist"); bad += 1
     print("vex-hotfix self-test: " + ("clean" if not bad else f"{bad} failure(s)"))
     return 1 if bad else 0
 
@@ -185,6 +208,14 @@ def run_git(*args: str) -> None:
     subprocess.run(["git", *args], check=True, capture_output=True, text=True)
 
 
+def create_hotfix_pr(title: str, body_path: Path, create_runner=subprocess.run) -> None:
+    """Prepare the body before the gh create boundary; never attest for the author."""
+    helper = Path(__file__).resolve().with_name("append-security-checklist.py")
+    subprocess.run([sys.executable, str(helper), str(body_path)], check=True)
+    create_runner(["gh", "pr", "create", "--title", title, "--body-file", str(body_path),
+                   "--base", "main", "--label", "security", "--label", KEV_LABEL], check=True)
+
+
 def open_hotfix_pr(cve: str, issue: dict, module: str, alias: str, pinned: str, fixed: str,
                    dry: bool) -> None:
     branch = f"{BRANCH_PREFIX}-{cve.lower()}"
@@ -215,11 +246,8 @@ def open_hotfix_pr(cve: str, issue: dict, module: str, alias: str, pinned: str, 
     with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as bf:
         bf.write(body)
         path = bf.name
-    subprocess.run(["gh", "pr", "create", "--title",
-                    f"fix(security): bump {module.split(':')[1]} to {fixed} — {cve} (KEV)",
-                    "--body-file", path, "--base", "main",
-                    "--label", "security", "--label", KEV_LABEL],
-                   check=True)
+    create_hotfix_pr(f"fix(security): bump {module.split(':')[1]} to {fixed} — {cve} (KEV)",
+                     Path(path))
     print(f"opened hotfix PR for {cve}: {module} {pinned} -> {fixed}")
 
 
