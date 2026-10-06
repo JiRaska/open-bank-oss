@@ -130,14 +130,14 @@ class PaymentRailProjectionConsumer(
         }
     }
 
-    private fun upsertNode(session: Mutiny.Session, node: RailNode): Uni<Int> = mutation(
+    private fun upsertNode(session: Mutiny.Session, node: RailNode): Uni<Int> = upsertContextNode(
         session,
         """INSERT INTO context_nodes
             (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
              source_ref, display_label, classification, valid_from, valid_to, recorded_at, source_version)
             VALUES (:rowId, :key, :bankScope, :generation, 'COMPLAINT', :type, :source,
                     :sourceRef, :label, 'RESTRICTED', :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (bank_scope, projection_generation, node_key) DO UPDATE SET
+            ON CONFLICT (node_row_id) DO UPDATE SET
               node_type = EXCLUDED.node_type, source_ref = EXCLUDED.source_ref,
               display_label = EXCLUDED.display_label, valid_from = EXCLUDED.valid_from,
               recorded_at = EXCLUDED.recorded_at, source_version = EXCLUDED.source_version

@@ -2,6 +2,7 @@
 package com.openbank.context.integration
 
 import com.openbank.context.infrastructure.AssignmentAdministrationService
+import com.openbank.context.infrastructure.ComplaintProjectionConsumer
 import com.openbank.context.infrastructure.ContextAuditCommitment
 import com.openbank.context.infrastructure.ContextReadAuditEntity
 import com.openbank.context.infrastructure.IncidentProjectionConsumer
@@ -34,6 +35,8 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.UUID
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CountDownLatch
 import jakarta.enterprise.inject.Any as AnyQualifier
 
 @QuarkusTest
@@ -42,6 +45,8 @@ import jakarta.enterprise.inject.Any as AnyQualifier
     initArgs = [ResourceArg(name = "db", value = "openbank_context_it")],
 )
 @QuarkusTestResource(ContextMessagingTestResource::class)
+// The end-to-end graph fixtures are shared by authorization and concurrent projection assertions.
+@Suppress("LargeClass")
 class ContextApiIT {
     @Inject
     @AnyQualifier
@@ -52,6 +57,9 @@ class ContextApiIT {
 
     @Inject
     lateinit var incidentProjection: IncidentProjectionConsumer
+
+    @Inject
+    lateinit var complaintProjection: ComplaintProjectionConsumer
 
     @Test
     @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
@@ -158,6 +166,102 @@ class ContextApiIT {
             )
             .extract().asString()
         assertThat(response).doesNotContain(unrelatedComplaint)
+    }
+
+    @Test
+    @TestSecurity(user = ACTOR, roles = ["ROLE_COMPLIANCE"])
+    fun `concurrent domestic and clearing channels retain both events and authorized graph evidence`() {
+        val paymentId = UUID.randomUUID()
+        val itemId = UUID.randomUUID()
+        val reference = "CMP-RACE-${UUID.randomUUID()}"
+        val domestic = connector.source<String>("domestic-payment-events-in").runOnVertxContext(true)
+        val clearing = connector.source<String>("clearing-events-in").runOnVertxContext(true)
+        val release = CountDownLatch(1)
+
+        connection().use { lock ->
+            lock.autoCommit = false
+            lock.createStatement().use { it.execute("LOCK TABLE context_nodes IN SHARE MODE") }
+            try {
+                val first = CompletableFuture.runAsync {
+                    release.await()
+                    domestic.send(domesticPaymentEvent(paymentId, 1, "RECEIVED"))
+                }
+                val second = CompletableFuture.runAsync {
+                    release.await()
+                    clearing.send(clearingItemSettledEvent(itemId, UUID.randomUUID(), paymentId))
+                }
+                release.countDown()
+                awaitBlockedNodeWriters(2)
+                lock.rollback()
+                CompletableFuture.allOf(first, second).join()
+            } finally {
+                lock.rollback()
+            }
+        }
+
+        awaitCount("context_projection_events", "aggregate_ref", "transaction:$paymentId", 1)
+        awaitCount("context_projection_events", "aggregate_ref", "clearing-item:$itemId", 1)
+        assertThat(stringValue("context_nodes", "source_system", "node_key", "transaction:$paymentId"))
+            .isEqualTo("domestic-payment")
+
+        val complaint = connector.source<String>("dispute-events-in").runOnVertxContext(true)
+        complaint.send(
+            complaintEvent(
+                UUID.randomUUID(),
+                reference,
+                UUID.randomUUID(),
+                paymentId,
+                UUID.randomUUID(),
+                NOW.epochSecond * 1_000_000_000 + NOW.nano,
+            ),
+        )
+        awaitCount("context_projection_events", "aggregate_ref", "complaint:$reference", 1)
+        seedAssignment(CASE, PURPOSE, "complaint:$reference")
+        given().header("X-Investigation-Case-Id", CASE).header("X-Investigation-Purpose", PURPOSE)
+            .`when`().get("/api/v1/context/complaints/$reference").then().statusCode(200)
+            .body("nodes.key", org.hamcrest.Matchers.hasItems("transaction:$paymentId", "clearing-item:$itemId"))
+            .body("edges.relation", org.hamcrest.Matchers.hasItems("CREATED", "SUBMITTED_TO", "SETTLED"))
+    }
+
+    @Test
+    fun `node row ID collision fails closed without recording a projected event`() {
+        val reference = "CMP-COLLISION-${UUID.randomUUID()}"
+        val rowId = UUID.nameUUIDFromBytes("openbank-cz|1|complaint:$reference".toByteArray())
+        val foreignKey = "complaint:other-${UUID.randomUUID()}"
+        seedNodeWithId(rowId, foreignKey)
+        val payload = complaintEvent(
+            UUID.randomUUID(),
+            reference,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            NOW.epochSecond * 1_000_000_000 + NOW.nano,
+        )
+
+        assertThatThrownBy { onVertxContext { complaintProjection.consume(payload) } }
+            .hasStackTraceContaining("context node row identity mismatch")
+        assertThat(count("context_projection_events", "aggregate_ref = ?", "complaint:$reference")).isZero()
+        assertThat(stringValue("context_nodes", "node_key", "node_row_id", rowId)).isEqualTo(foreignKey)
+    }
+
+    @Test
+    fun `conflicting natural node identity fails closed without recording a projected event`() {
+        val reference = "CMP-IDENTITY-${UUID.randomUUID()}"
+        seedNode("complaint:$reference", "COMPLAINT", "Pre-existing identity")
+        val payload = complaintEvent(
+            UUID.randomUUID(),
+            reference,
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            UUID.randomUUID(),
+            NOW.epochSecond * 1_000_000_000 + NOW.nano,
+        )
+
+        assertThatThrownBy { onVertxContext { complaintProjection.consume(payload) } }
+            .hasStackTraceContaining("context_nodes_bank_scope_projection_generation_node_key_key")
+        assertThat(count("context_projection_events", "aggregate_ref = ?", "complaint:$reference")).isZero()
+        assertThat(stringValue("context_nodes", "display_label", "node_key", "complaint:$reference"))
+            .isEqualTo("Pre-existing identity")
     }
 
     @Test
@@ -432,6 +536,20 @@ class ContextApiIT {
         NOW,
     )
 
+    private fun seedNodeWithId(rowId: UUID, key: String) = execute(
+        """INSERT INTO context_nodes
+            (node_row_id, node_key, bank_scope, projection_generation, namespace, node_type, source_system,
+             source_ref, display_label, classification, valid_from, recorded_at, source_version)
+            VALUES (?, ?, 'openbank-cz', 1, 'COMPLAINT', 'COMPLAINT', 'test', ?, ?, 'INTERNAL', ?, ?, 1)
+        """.trimIndent(),
+        rowId,
+        key,
+        key,
+        key,
+        NOW.minusSeconds(60),
+        NOW,
+    )
+
     private fun seedEdge(from: String, to: String, relation: String, namespace: String = "COMPLAINT") = execute(
         """INSERT INTO context_edges
             (edge_id, bank_scope, projection_generation, namespace, from_key, to_key, relation_type, source_system, evidence_ref,
@@ -568,6 +686,29 @@ class ContextApiIT {
             Thread.sleep(25)
         }
         assertThat(count(table, "$column = ?", value)).isEqualTo(expected)
+    }
+
+    private fun awaitBlockedNodeWriters(expected: Int) {
+        val deadline = System.nanoTime() + java.time.Duration.ofSeconds(4).toNanos()
+        while (System.nanoTime() < deadline) {
+            if (blockedNodeWriters() >= expected) return
+            Thread.yield()
+        }
+        error("$expected context node writers did not reach the PostgreSQL lock")
+    }
+
+    private fun blockedNodeWriters(): Int = connection().use { connection ->
+        connection.prepareStatement(
+            """SELECT count(*) FROM pg_stat_activity
+               WHERE datname = current_database() AND pid <> pg_backend_pid()
+                 AND wait_event_type = 'Lock' AND query ILIKE '%context_nodes%'
+            """.trimIndent(),
+        ).use { statement ->
+            statement.executeQuery().use { rows ->
+                rows.next()
+                rows.getInt(1)
+            }
+        }
     }
 
     private fun complaintEvent(
@@ -718,7 +859,10 @@ class ContextMessagingTestResource : QuarkusTestResourceLifecycleManager {
         "ledger-events-in",
         "clearing-events-in",
         "sepa-payment-events-in",
-    ) + mapOf("openbank.context.require-strict-revisions" to "true")
+    ) + mapOf(
+        "openbank.context.require-strict-revisions" to "true",
+        "openbank.context.query-timeout-ms" to "5000",
+    )
 
     override fun stop() = InMemoryConnector.clear()
 }
