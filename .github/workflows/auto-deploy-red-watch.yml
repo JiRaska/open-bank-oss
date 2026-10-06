@@ -7,8 +7,9 @@
 #   workflow_dispatch / its own chaining, so no push event exists to fire on.
 #   Measured 2026-09-07/08: four consecutive auto-deploy failures over seven
 #   hours (pact REGRESSION blocks on sdd/vop/swift) surfaced only because a human
-#   went looking for whether two fixes had reached sandbox. A red run every 40
-#   minutes with nobody addressed is a broken pipeline reading as background
+#   went looking for whether two fixes had reached sandbox. Red runs were then
+#   roughly 40 minutes apart, with nobody addressed: a broken pipeline
+#   reading as background
 #   noise — and because deploys still PARTIALLY land, the estate looks healthy
 #   while three services sit pinned.
 #
@@ -40,8 +41,8 @@ name: auto-deploy red watch
 
 on:
   schedule:
-    # Off-peak minutes by convention; auto-deploy ticks roughly every 40 min,
-    # so ~30 min here sees a stuck pipeline within one tick of the threshold.
+    # Off-peak minutes by convention. Auto-deploy now schedules every three
+    # hours; this watcher checks twice an hour and rejects old verdicts.
     - cron: '11,41 * * * *'
   workflow_dispatch:
 
