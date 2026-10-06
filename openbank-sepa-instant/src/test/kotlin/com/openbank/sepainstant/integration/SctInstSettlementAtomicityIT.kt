@@ -85,6 +85,65 @@ class SctInstSettlementAtomicityIT {
 
     @Test
     @TestSecurity(user = "operator-atomicity", roles = ["ROLE_OPERATOR"])
+    fun `recall commits changed payment and event together without duplicate on retry`() {
+        val key = UUID.randomUUID().toString()
+        val paymentId = given()
+            .contentType(ContentType.JSON)
+            .header("Idempotency-Key", key)
+            .body(
+                """{"idempotencyKey":"$key","debtorAccountId":"${UUID.randomUUID()}","debtorIban":"CZ6508000000192000145399","debtorName":"Test Debtor","creditorIban":"DE89370400440532013000","creditorName":"Test Creditor","creditorBic":"COBADEFFXXX","amount":99.99,"currency":"EUR","endToEndId":"E2E-$key"}""",
+            )
+            .`when`().post("/api/v1/sepa-instant")
+            .then().statusCode(201).body("status", equalTo("SETTLED"))
+            .extract().path<String>("paymentId")
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"reason":"Customer requested"}""")
+            .`when`().post("/api/v1/sepa-instant/$paymentId/recall")
+            .then().statusCode(200).body("status", equalTo("RECALLED"))
+
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT p.xmin::text, o.xmin::text, p.recalled_at IS NOT NULL, p.recall_reason, " +
+                    "o.status, o.payload FROM sct_inst_payments p JOIN sct_inst_outbox o " +
+                    "ON o.aggregate_id = p.payment_id " +
+                    "WHERE p.payment_id = ?::uuid AND o.event_type = 'SctInstPaymentRecalled'",
+            ).use { statement ->
+                statement.setString(1, paymentId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getString(2)).isEqualTo(rows.getString(1))
+                    assertThat(rows.getBoolean(3)).isTrue()
+                    assertThat(rows.getString(4)).isEqualTo("Customer requested")
+                    assertThat(rows.getString(5)).isEqualTo("PENDING")
+                    assertThat(rows.getString(6)).contains("\"paymentId\":\"$paymentId\"")
+                    assertThat(rows.next()).isFalse()
+                }
+            }
+        }
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("""{"reason":"Customer requested"}""")
+            .`when`().post("/api/v1/sepa-instant/$paymentId/recall")
+            .then().statusCode(400)
+        dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM sct_inst_outbox WHERE aggregate_id = ?::uuid " +
+                    "AND event_type = 'SctInstPaymentRecalled'",
+            ).use { statement ->
+                statement.setString(1, paymentId)
+                statement.executeQuery().use { rows ->
+                    assertThat(rows.next()).isTrue()
+                    assertThat(rows.getInt(1)).isEqualTo(1)
+                }
+            }
+        }
+    }
+
+    @Test
+    @TestSecurity(user = "operator-atomicity", roles = ["ROLE_OPERATOR"])
     fun `failed settled event insert rolls back the settled transition`() {
         dataSource.connection.use { connection ->
             connection.createStatement().use { statement ->
