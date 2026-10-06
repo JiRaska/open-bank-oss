@@ -667,9 +667,10 @@ change_requirements:
       - "<service>/version.txt bumped per commit type"
       - "test added/updated for new behavior"
     gate: version-bump
+    ci_producer: .github/scripts/check-test-evidence-change.py  # advisory test-diff signal; semantic review remains human (#11692)
     enforced: advisory
-    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
-    blocked_on: "the version-bump half is effectively covered by release-please + check-app-version-override.sh; 'test added for new behavior' has no automated diff-aware detector (not yet written) — may get redefined to lean on the coverage ratchet gate instead of a literal test-added check"
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01; test-diff signal needs calibration (#11692)
+    blocked_on: "the version-bump half is covered by release-please + check-app-version-override.sh; the diff-aware test-evidence producer is advisory because a changed test cannot prove it tests new behavior and a refactor may need no test. Measure warning quality and retain human review before enforcing; the Kover floor is separate and cannot prove behavior coverage (#11692)"
   release_scope_mismatch:
     # Release-please requires BOTH a releasing type and a package path outside its
     # exclude-paths. Many packages exclude src/test (and admin-ui also excludes e2e),
@@ -823,9 +824,10 @@ change_requirements:
       - "openbank-admin-ui/package.json version == version.txt"
       - "test added/updated for new behavior"
     gate: version-bump
+    ci_producer: .github/scripts/check-test-evidence-change.py  # same component-scoped advisory producer (#11692)
     enforced: advisory
-    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01: no diff-aware test-added detector exists (#11692)
-    blocked_on: "the version.txt==package.json half is already enforced (check-admin-ui-version-sync.sh, ci.yml); 'test added for new behavior' has no automated detector, same gap as service_code_change"
+    target_enforce_date: "2026-12-31"   # ADR-0144; moved 2026-10-01; test-diff signal needs calibration (#11692)
+    blocked_on: "the version.txt==package.json half is enforced (check-admin-ui-version-sync.sh, ci.yml); the diff-aware test-evidence producer is advisory until its warning quality is measured and human review decides whether each changed UI behavior has an adequate test (#11692)"
   admin_ui_docs_currency:
     # Documentation must stay current. Any change to a process or an admin-ui
     # section must update that section's documentation in the SAME PR — applies

@@ -1662,6 +1662,26 @@ gates:
       python3 openbank-infra/scripts/check-release-scope-mismatch.py \
         --title "${PR_TITLE}" --body "${PR_BODY}" --base "${PR_DIFF_BASE}"
 
+  # rules.yaml service_code_change / admin_ui_code_change: a changed application
+  # source file with no changed test in that component needs review. This is an
+  # advisory signal: a diff cannot prove whether behavior is new or a test is
+  # adequate, and the Kover floor alone does not prove either condition (#11692).
+  - id: test-evidence-change-gate
+    name: "test evidence for changed application source (issue #11692, advisory)"
+    group: supplychain
+    mode: advisory
+    budget_seconds: 10
+    min_subjects: 50
+    rationale: "Coverage floors permit untested new behavior while application source still changes; the per-component diff signal exposes PRs with no changed test for review, without claiming that changed tests prove behavior."
+    review_after: "2026-12-31"
+    when: pull_request
+    needs_base: required
+    selftest_inputs: [".github/scripts/check-test-evidence-change.py"]
+    selftest: python3 .github/scripts/check-test-evidence-change.py --self-test
+    selftest_expect: pass
+    run: |
+      python3 .github/scripts/check-test-evidence-change.py --base "${PR_DIFF_BASE}"
+
   # admin-ui version sync guard (ADR-0029 release_invariant). release-please bumps version.txt
   # but its package.json extra-file updater is replace-based and silently desyncs after a one-off
   # drift — which otherwise only surfaces at deploy (build-push-admin-ui.sh fails post-merge).
