@@ -567,12 +567,38 @@ class Psd2ServicesTest {
     }
 
     @Test
+    fun `DOMESTIC_CZ rejects EUR before asking consent or initiating a payment`(): Unit = runBlocking {
+        val payment = DomesticCzPayment(
+            endToEndIdentification = null,
+            debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
+            instructedAmount = ObAmount("EUR", BigDecimal("10.00")),
+            creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
+            creditorName = "Acme CZ",
+            variableSymbol = null,
+            specificSymbol = null,
+            constantSymbol = null,
+            remittanceInformationUnstructured = null,
+            requestedExecutionDate = null,
+        )
+
+        assertThatThrownBy {
+            runBlocking {
+                paymentInitiationService.initiatePayment(
+                    InitiatePaymentCommand("tpp-1", "consent-1", PaymentProduct.DOMESTIC_CZ, payment, "idem-eur"),
+                )
+            }
+        }.isInstanceOf(Psd2RequestFormatException::class.java).hasMessageContaining("requires CZK")
+        coVerify(exactly = 0) { consentClient.validateConsent(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { transactionClient.initiatePayment(any(), any(), any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `initiatePayment for DOMESTIC_CZ joins VS SS KS into remittance info and uses the DOMESTIC scope`(): Unit =
         runBlocking {
             val payment = DomesticCzPayment(
                 endToEndIdentification = "e2e-cz",
                 debtorAccount = sampleAccountRef("CZ6508000000192000145399"),
-                instructedAmount = ObAmount("CZK", BigDecimal("250.00")),
+                instructedAmount = ObAmount(" czk ", BigDecimal("250.00")),
                 creditorAccount = sampleAccountRef("CZ1234567890123456789012"),
                 creditorName = "Acme CZ",
                 variableSymbol = "123",
