@@ -16,12 +16,22 @@ import sys
 import time
 
 DELAYS = (0, 60, 120, 240, 480, 600, 300)  # 30 minutes, seven probes
+# The fleet producer commonly completes around minute 15. A probe at minute 15
+# followed by minute 25 can miss that completion by seconds and add ten idle
+# minutes to every dependency review. Keep the same 30-minute budget, but bound
+# producer-observation gaps to five minutes (ten probes total).
+PRODUCER_DELAYS = (0, 60, 120, 240, 300, 240, 180, 240, 240, 180)
+FINAL_DELAYS = (0, 10, 30, 60)  # indexing can briefly regress after the first ready response
 WARNING = "x-github-dependency-graph-snapshot-warnings"
 PRODUCER = "Submit fleet dependency graph"
 
 
 class TerminalBaseGraphError(RuntimeError):
     """The immutable comparison base has no successful graph producer."""
+
+
+class TerminalHeadGraphError(RuntimeError):
+    """The PR-head producer finished without submitting a successful graph."""
 
 
 def _gh(*args: str) -> str:
@@ -106,6 +116,44 @@ def _base_producer_verdict(response: str) -> str:
     return "terminal" if matches else "unknown"
 
 
+def wait_for_head_producer(query, sleep=time.sleep, delays=PRODUCER_DELAYS) -> bool:
+    """Wait for graph submission before spending the snapshot-indexing window.
+
+    A separate workflow builds the Gradle graph. Starting the 30-minute indexing
+    clock while that workflow is queued or building spent ten minutes of it on
+    #11497 before GitHub had any head graph to index.
+    """
+    terminal_seen = 0
+    for delay in delays:
+        if delay:
+            sleep(delay)
+        try:
+            verdict = _base_producer_verdict(query())
+            if verdict == "success":
+                return True
+            if verdict == "terminal":
+                # A rerun can be requested while the previous failed check is still the
+                # only visible one. Confirm terminal state at the next sparse probe.
+                terminal_seen += 1
+                if terminal_seen == 2:
+                    raise TerminalHeadGraphError(
+                        "PR-head producer finished without a successful dependency graph"
+                    )
+            else:
+                terminal_seen = 0
+        except TerminalHeadGraphError:
+            raise
+        except RuntimeError as exc:
+            if "quota is exhausted" in str(exc):
+                raise
+            terminal_seen = 0
+            print(f"::warning::{exc}; will retry producer check within bounded window", flush=True)
+        except (ValueError, TypeError) as exc:
+            terminal_seen = 0
+            print(f"::warning::{exc}; will retry producer check within bounded window", flush=True)
+    return False
+
+
 def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None) -> bool:
     for delay in delays:
         if delay:
@@ -138,6 +186,10 @@ def wait_for_snapshot(query, sleep=time.sleep, delays=DELAYS, base_verdict=None)
 
 
 def main() -> int:
+    final_check = sys.argv[1:] == ["--final-check"]
+    if sys.argv[1:] and not final_check:
+        print("usage: wait_dependency_review_snapshot.py [--final-check]", file=sys.stderr)
+        return 2
     repo = os.environ["GITHUB_REPOSITORY"]
     base, head = os.environ["BASE_SHA"], os.environ["HEAD_SHA"]
     try:
@@ -151,16 +203,32 @@ def main() -> int:
         base_verdict = lambda: _base_producer_verdict(
             _gh("--paginate", f"repos/{repo}/commits/{merge_base}/check-runs?per_page=100")
         )
-        if wait_for_snapshot(query, base_verdict=base_verdict):
+        if not final_check:
+            head_verdict = lambda: _gh(
+                "--paginate", f"repos/{repo}/commits/{head}/check-runs?per_page=100"
+            )
+            if not wait_for_head_producer(head_verdict):
+                print(
+                    "::error title=Dependency producer unavailable::PR-head graph was not "
+                    "submitted within 30 minutes.",
+                    file=sys.stderr,
+                )
+                return 1
+        if wait_for_snapshot(
+            query,
+            delays=FINAL_DELAYS if final_check else DELAYS,
+            base_verdict=None if final_check else base_verdict,
+        ):
             print(
-                "Both dependency snapshots are indexed; running the full policy review."
+                "Both dependency snapshots are indexed; the comparison has a valid basis."
             )
             return 0
     except (KeyError, ValueError, TypeError, RuntimeError) as exc:
         print(f"::error title=Dependency basis unavailable::{exc}", file=sys.stderr)
         return 1
     print(
-        "::error title=Dependency basis unavailable::Snapshots were not indexed within 30 minutes.",
+        "::error title=Dependency basis unavailable::Snapshots were not indexed within "
+        f"{'the final 100-second check' if final_check else '30 minutes'}.",
         file=sys.stderr,
     )
     return 1

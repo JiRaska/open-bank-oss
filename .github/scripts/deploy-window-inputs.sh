@@ -16,8 +16,8 @@ gh api "repos/${repo}/commits?sha=main&per_page=50" \
   --jq '[.[] | {message: .commit.message, epoch: (.commit.committer.date | fromdateiso8601)}]' \
   > "$out/commits.json"
 gh pr list --repo "$repo" --state open --limit 200 \
-  --json number,headRefName,createdAt,autoMergeRequest,isCrossRepository \
-  --jq '[.[] | select(.isCrossRepository | not)
+  --json number,headRefName,createdAt,autoMergeRequest,isCrossRepository,isDraft \
+  --jq '[.[] | select(.isCrossRepository | not) | select(.isDraft | not)
              | select(.headRefName | startswith("chore/gitops-auto-deploy-") or startswith("chore/admin-ui-deploy-"))
              | {number, head: .headRefName, created_at: .createdAt, armed: (.autoMergeRequest != null)}]' \
   > "$out/prs.json"

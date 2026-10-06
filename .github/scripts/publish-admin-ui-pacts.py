@@ -17,6 +17,16 @@ CONSUMER = "openbank-admin-ui"
 PROVIDER = re.compile(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 
+class PublicationFailure(ValueError):
+    """A fixed, non-sensitive stage label for a failed publication invariant."""
+
+    def __init__(self, stage, provider=None, status=None):
+        self.stage = stage
+        self.provider = provider
+        self.status = status if isinstance(status, int) and 100 <= status <= 599 else None
+        super().__init__(stage)
+
+
 def source(root, sha):
     actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if actual != sha:
@@ -82,12 +92,12 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def publish(body, env):
     if env.get("GITHUB_EVENT_NAME") != "push" or env.get("GITHUB_REF") != "refs/heads/main":
-        raise ValueError("Publication requires a trusted main push")
+        raise PublicationFailure("trusted-main")
     url, username, password = (env.get(key, "") for key in
                                ("PACT_BROKER_URL", "PACT_BROKER_USERNAME", "PACT_BROKER_PASSWORD"))
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment or not username or not password:
-        raise ValueError("HTTPS broker URL and credentials are required")
+        raise PublicationFailure("broker-config")
     auth = base64.b64encode(f"{username}:{password}".encode()).decode()
     opener = urllib.request.build_opener(NoRedirect())
     headers = {"Authorization": "Basic " + auth, "Accept": "application/hal+json, application/json"}
@@ -96,9 +106,14 @@ def publish(body, env):
         headers={**headers, "Content-Type": "application/json"}, method="POST",
     )
     # Do not forward credentials across redirects or print broker responses containing private data.
-    with opener.open(request, timeout=60) as response:
-        if not 200 <= response.status < 300:
-            raise ValueError("Broker did not accept the publication")
+    try:
+        with opener.open(request, timeout=60) as response:
+            if not 200 <= response.status < 300:
+                raise PublicationFailure("broker-write", status=response.status)
+    except urllib.error.HTTPError as error:
+        raise PublicationFailure("broker-write", status=error.code) from None
+    except (urllib.error.URLError, OSError):
+        raise PublicationFailure("broker-write-network") from None
     # The publish endpoint's 2xx only acknowledges a write. Read the exact consumer version
     # back for every provider before downstream verification is allowed to start.
     for contract in body["contracts"]:
@@ -107,17 +122,25 @@ def publish(body, env):
                 "/consumer/" + CONSUMER + "/version/" +
                 urllib.parse.quote(body["pacticipantVersionNumber"], safe=""))
         request = urllib.request.Request(url.rstrip("/") + path, headers=headers, method="GET")
-        with opener.open(request, timeout=60) as response:
-            if not 200 <= response.status < 300:
-                raise ValueError("Published contract is not readable")
-            received = json.load(response)
+        try:
+            with opener.open(request, timeout=60) as response:
+                if not 200 <= response.status < 300:
+                    raise PublicationFailure("broker-readback", provider, response.status)
+                try:
+                    received = json.load(response)
+                except ValueError as error:
+                    raise PublicationFailure("readback-json", provider) from error
+        except urllib.error.HTTPError as error:
+            raise PublicationFailure("broker-readback", provider, error.code) from None
+        except (urllib.error.URLError, OSError):
+            raise PublicationFailure("broker-readback-network", provider) from None
         expected = json.loads(base64.b64decode(contract["content"], validate=True))
         # Broker HAL links are transport metadata, not part of the generated contract.
         if not isinstance(received, dict):
-            raise ValueError("Published contract has invalid content")
+            raise PublicationFailure("readback-shape", provider)
         received.pop("_links", None)
         if received != expected:
-            raise ValueError("Published contract differs from the generated contract")
+            raise PublicationFailure("readback-mismatch", provider)
     return sorted(contract["providerName"] for contract in body["contracts"])
 
 
@@ -143,11 +166,12 @@ def main():
             if args.providers_output is not None:
                 args.providers_output.write_text(json.dumps(providers) + "\n")
             print(f"Published {len(body['contracts'])} admin UI contracts at {sha}")
-    except urllib.error.HTTPError as error:
-        parser.exit(1, f"Pact publication rejected: HTTP {error.code}\n")
     except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
         # Do not render network exceptions: they may contain the broker URL.
-        parser.exit(1, f"Pact publication failed ({type(error).__name__}); no success recorded\n")
+        stage = error.stage if isinstance(error, PublicationFailure) else "artifact-validation"
+        provider = f" provider={error.provider}" if isinstance(error, PublicationFailure) and error.provider else ""
+        status = f" HTTP {error.status}" if isinstance(error, PublicationFailure) and error.status else ""
+        parser.exit(1, f"Pact publication failed at {stage}{provider}{status}; no success recorded\n")
 
 
 if __name__ == "__main__":
