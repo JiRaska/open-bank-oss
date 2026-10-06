@@ -335,7 +335,7 @@ def self_test() -> int:
     at_1650 = datetime(2026, 10, 6, 16, 50, tzinfo=timezone.utc)
     omitted_green = [_run(8, "push", "success"), _run(7, "schedule", "failure"),
                      _run(6, "schedule", "failure"), _run(5, "schedule", "failure")]
-    for run, stamp in zip(omitted_green, ["16:40", "12:44", "09:36", "06:50"]):
+    for run, stamp in zip(omitted_green, ["16:40", "12:44", "09:36", "06:50"], strict=True):
         run["created_at"] = f"2026-10-06T{stamp}:00Z"
     check("Oct 6 16:50: fresh push plus stale red lane cannot reopen #9419",
           evaluate(omitted_green)["stuck"] and rejected(omitted_green, at_1650))
