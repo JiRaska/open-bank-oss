@@ -109,7 +109,7 @@ class CommunicationStyleServiceTest {
     // @Test and does return a value, but the guard reads shape rather than intent, and a shape
     // that is unsafe on the tests next to it is not worth defending here (mirrors
     // SpendReservationServiceTest's `reserve()` helper).
-    private fun draft(maker: String = "editor-a"): StyleVersion {
+    private fun draft(maker: String = "editor-a", uiMessages: Map<String, String> = emptyMap()): StyleVersion {
         val command = DraftStyleVersionCommand(
             personaKey = persona.key,
             tone = "warm",
@@ -120,8 +120,35 @@ class CommunicationStyleServiceTest {
             forbiddenTerms = emptyList(),
             signature = "Vaše banka",
             maker = maker,
+            uiMessages = uiMessages,
         )
         return runBlocking { service.draft(command) }
+    }
+
+    @Test
+    fun `approved UI messages survive publication and draft cannot alter published copy`() {
+        val copy = mapOf("cs.status.loading" to "Už hledám.", "en.status.loading" to "Checking for you.")
+        val first = draft(uiMessages = copy)
+        runBlocking {
+            service.submit(first.id, "editor-a")
+            service.publish(first.id, "checker-b")
+        }
+        draft(uiMessages = mapOf("cs.status.loading" to "Nový koncept."))
+        assertThat(runBlocking { service.published(persona.key) }.uiMessages).isEqualTo(copy)
+        assertThat(events.published!!.uiMessages).isEqualTo(copy)
+    }
+
+    @Test
+    fun `invalid UI copy never persists`() {
+        listOf(
+            mapOf("cs.balance" to "0"),
+            mapOf("cs.status.loading" to "<b>Text</b>"),
+            mapOf("cs.status.loading" to " "),
+            mapOf("cs.status.loading" to "x".repeat(241)),
+        ).forEach { copy ->
+            assertThatThrownBy { draft(uiMessages = copy) }.isInstanceOf(IllegalArgumentException::class.java)
+        }
+        assertThat(styleVersions.rows).isEmpty()
     }
 
     @Test

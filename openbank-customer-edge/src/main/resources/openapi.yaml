@@ -98,6 +98,27 @@ tags:
   - name: Complaints
 
 paths:
+  /app-copy:
+    get:
+      operationId: getAppCopy
+      summary: Approved non-personal app messages; bundled client copy remains the fallback
+      security: []
+      responses:
+        '200':
+          description: Published copy; version zero and empty messages explicitly clear overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, messages]
+                properties:
+                  version: {type: integer, minimum: 0}
+                  messages:
+                    type: object
+                    maxProperties: 20
+                    additionalProperties: {type: string, maxLength: 240}
+        '502': {description: Invalid upstream document}
+        '503': {description: Copy service unavailable; retain local fallback}
   /external-disclosures/{id}/verify-otp:
     post:
       tags: [External disclosures]
