@@ -24,8 +24,10 @@ class Psd2DomesticCurrencyContractTest {
         assertThat(berlin.path("requestBody").path("description").asText()).contains("domestic-cz requires CZK")
         assertThat(berlin.path("responses").path("400").path("description").asText())
             .contains("FORMAT_ERROR", "non-CZK")
-        assertThat(bespoke.path("requestBody").path("content").path("application/json")
-            .path("schema").path("\$ref").asText()).isEqualTo("#/components/schemas/PisCzechPaymentRequest")
+        assertThat(
+            bespoke.path("requestBody").path("content").path("application/json")
+                .path("schema").path("\$ref").asText(),
+        ).isEqualTo("#/components/schemas/PisCzechPaymentRequest")
         assertThat(bespoke.path("responses").path("400").path("description").asText())
             .contains("FORMAT_ERROR", "CZK only")
         assertThat(currency.path("description").asText()).contains("domestic-cz accepts CZK only")
