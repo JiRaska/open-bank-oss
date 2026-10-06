@@ -22,12 +22,14 @@ ROOT = Path(__file__).resolve().parents[2]
 VEX_DIR = ROOT / "openbank-libs/governance/vex"
 BASELINE = ROOT / ".github/scripts/vex-incomplete-baseline.json"
 FIXTURE_PURL = "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final?type=jar"
+WRONG_VERSION_PURL = "pkg:maven/org.hibernate.reactive/hibernate-reactive-core@3.4.2.Final-other?type=jar"
 FIXTURE_CVE = "CVE-2025-14969"
 PURL = re.compile(r"^pkg:[A-Za-z][A-Za-z0-9.+-]*/[^\s]+$")
+RFC3339 = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$")
 
 
 def valid_time(value: object) -> bool:
-    if not isinstance(value, str):
+    if not isinstance(value, str) or not RFC3339.fullmatch(value):
         return False
     try:
         parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -107,6 +109,11 @@ def audit() -> list[str]:
 
 
 def self_test() -> None:
+    assert valid_time("2026-10-05T21:00:00Z")
+    assert valid_time("2026-10-05T21:00:00.123+02:00")
+    assert not valid_time("2026-10-05 21:00:00+00:00")
+    assert not valid_time("2026-10-05T21:00:00+0000")
+    assert not valid_time("2026-10-05T21:00:00")
     base = {"timestamp": "2026-10-05T21:00:00Z", "statements": [{
         "vulnerability": {"name": FIXTURE_CVE},
         "products": [{"@id": FIXTURE_PURL}], "status": "not_affected",
@@ -154,10 +161,12 @@ def scanner_self_test() -> None:
                "statements": [{"vulnerability": {"name": FIXTURE_CVE},
                                "status": "not_affected", "justification": "vulnerable_code_not_present"}]}
         counts = []
-        for mode in ("productless", "exact-product"):
+        for mode in ("productless", "wrong-version", "exact-product"):
             fixture = json.loads(json.dumps(doc))
             if mode == "exact-product":
                 fixture["statements"][0]["products"] = [{"@id": FIXTURE_PURL}]
+            elif mode == "wrong-version":
+                fixture["statements"][0]["products"] = [{"@id": WRONG_VERSION_PURL}]
             vex_path = root / f"{mode}.openvex.json"
             vex_path.write_text(json.dumps(fixture))
             output = root / f"{mode}.scan.json"
@@ -170,9 +179,9 @@ def scanner_self_test() -> None:
             ids = [v["VulnerabilityID"] for result in scan.get("Results", [])
                    for v in result.get("Vulnerabilities", []) or []]
             counts.append(ids.count(FIXTURE_CVE))
-        if counts != [1, 0]:
-            raise AssertionError(f"Trivy VEX product matching changed: expected [1, 0], got {counts}")
-    print("Trivy VEX scanner-effect self-test: productless=1 exact-product=0")
+        if counts != [1, 1, 0]:
+            raise AssertionError(f"Trivy VEX product matching changed: expected [1, 1, 0], got {counts}")
+    print("Trivy VEX scanner-effect self-test: productless=1 wrong-version=1 exact-product=0")
 
 
 def main() -> int:
