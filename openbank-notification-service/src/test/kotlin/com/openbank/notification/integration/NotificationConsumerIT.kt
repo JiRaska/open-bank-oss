@@ -67,6 +67,7 @@ import java.util.function.Supplier
 @QuarkusTest
 @QuarkusTestResource(NotificationConsumerIT.InMemoryKafkaResource::class)
 @QuarkusTestResource(com.openbank.notification.it.PostgresTestResource::class)
+@Suppress("LargeClass") // One real-DB consumer fixture keeps all ack, persistence, and delivery assertions together.
 class NotificationConsumerIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
