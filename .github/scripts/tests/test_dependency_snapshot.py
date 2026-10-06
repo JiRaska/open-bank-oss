@@ -15,7 +15,7 @@ import dependency_snapshot as subject
 SHA = '1' * 40
 IDENTITY = {'version': 0, 'sha': SHA, 'ref': 'refs/heads/example',
                 'job': {'id': '123', 'correlator': 'Dependency submission-submit'},
-                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.4.2',
+                'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
                               'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
 
 
@@ -147,10 +147,12 @@ class RunnerTests(unittest.TestCase):
                     (coverage / f'{index}.json').write_text(json.dumps(receipt))
                 reports = Path(child_env['DEPENDENCY_GRAPH_REPORT_DIR'])
                 part = snapshot()
-                if case == 'updated-detector' or (case == 'mixed-detector' and len(calls) == 2):
-                    part['detector']['version'] = '1.5.0'
+                if case == 'mixed-detector' and len(calls) == 2:
+                    part['detector']['version'] = '1.5.1'
                 if case == 'wrong-snapshot':
                     part['sha'] = '2' * 40
+                if case == 'wrong-detector':
+                    part['detector']['version'] = 'unexpected'
                 (reports / 'snapshot.json').write_text(json.dumps(part))
                 if case == 'duplicate-snapshot':
                     (reports / 'other.json').write_text(json.dumps(part))
@@ -161,11 +163,9 @@ class RunnerTests(unittest.TestCase):
                      if case == 'budget-expired' else nullcontext())
             with patch.object(subject, 'run_bounded', side_effect=execute), \
                     patch('subprocess.check_output', return_value=SHA+'\n'), clock:
-                if case in ('success', 'budget-truncated', 'updated-detector'):
+                if case in ('success', 'budget-truncated'):
                     result = subject.generate(root, output, env)
                     self.assertEqual(result['sha'], SHA)
-                    if case == 'updated-detector':
-                        self.assertEqual(result['detector']['version'], '1.5.0')
                     self.assertEqual(len(calls), 2)
                     self.assertEqual(timeouts, [240, 10] if case == 'budget-truncated' else [240, 180])
                     self.assertTrue((output / 'merged.json').is_file())
@@ -174,6 +174,8 @@ class RunnerTests(unittest.TestCase):
                     with self.assertRaises((ValueError, RuntimeError)):
                         subject.generate(root, output, env)
                     self.assertFalse((output / 'merged.json').exists())
+                    if case in ('wrong-snapshot', 'wrong-detector'):
+                        self.assertEqual(len(calls), 1, 'reject the first bad shard before resolving the fleet')
                     if case == 'budget-expired':
                         self.assertEqual(len(calls), 1)
                         self.assertEqual(timeouts, [240])
@@ -194,7 +196,6 @@ class RunnerTests(unittest.TestCase):
 
     def test_complete_generation(self):
         self.run_case('success')
-        self.run_case('updated-detector')
 
     def test_serial_shards_share_one_deadline(self):
         self.run_case('budget-truncated')
@@ -202,8 +203,8 @@ class RunnerTests(unittest.TestCase):
 
     def test_failed_or_incomplete_generation_never_publishes_candidate(self):
         for case in ('second-fails', 'wrong-checkout', 'filtered', 'missing-receipt',
-                     'wrong-receipt', 'wrong-snapshot', 'duplicate-snapshot', 'merge-ref',
-                     'mixed-detector'):
+                     'wrong-receipt', 'wrong-snapshot', 'wrong-detector',
+                     'duplicate-snapshot', 'merge-ref', 'mixed-detector'):
             with self.subTest(case=case):
                 self.run_case(case)
 

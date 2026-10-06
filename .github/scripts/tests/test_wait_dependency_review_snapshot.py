@@ -151,6 +151,10 @@ class SnapshotWaitTests(unittest.TestCase):
         self.assertEqual(len(calls), 7)
         self.assertEqual(sum(MODULE.DELAYS), 1800)
 
+    def test_single_missing_snapshot_warning_is_classified(self):
+        self.assertEqual(MODULE._snapshot_state(missing_response("base")), "missing_base")
+        self.assertEqual(MODULE._snapshot_state(missing_response("head")), "missing_head")
+
     def test_unknown_or_malformed_response_is_not_success(self):
         for reply in [
             "HTTP/2.0 503\n\n[]",

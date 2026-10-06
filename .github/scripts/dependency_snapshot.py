@@ -201,7 +201,9 @@ def generate(repo, output, env, extra_arguments=()):
     (output / 'inventory.json').write_text(json.dumps(modules, indent=2))
     expected = [f'shard-{i // 4:02}' for i in range(0, len(modules), 4)]
     identity = {'version': 0, 'sha': sha, 'ref': env['GITHUB_DEPENDENCY_GRAPH_REF'],
-                    'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator}}
+                    'job': {'id': env['GITHUB_DEPENDENCY_GRAPH_JOB_ID'], 'correlator': correlator},
+                    'detector': {'name': 'GitHub Dependency Graph Gradle Plugin', 'version': '1.5.0',
+                                  'url': 'https://github.com/gradle/github-dependency-graph-gradle-plugin'}}
     parts, receipts = {}, []
     for i in range(0, len(modules), 4):
         shard = output / expected[i // 4]
@@ -233,10 +235,8 @@ def generate(repo, output, env, extra_arguments=()):
             raise ValueError('expected one fresh snapshot per shard')
         part = load_snapshot(snapshots[0])
         validate_snapshot(part)
-        if 'detector' not in identity:
-            # setup-gradle pins the producer by action SHA; its plugin version may
-            # change on an action upgrade. Require every shard to report the same one.
-            identity['detector'] = part['detector']
+        if any(part.get(key) != identity.get(key) for key in IDENTITY):
+            raise ValueError('snapshot identity mismatch: ' + shard.name)
         parts[shard.name] = part
         receipts.append({'shard': shard.name, 'projects': projects,
                              'seconds': round(time.monotonic() - started, 2)})
