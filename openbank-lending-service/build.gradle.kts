@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -59,6 +60,18 @@ dependencies {
     testImplementation(libs.pact.consumer)
     // Provider replay of risk-engine's loan-book pact (ADR-0314 D4) from the git-pact folder.
     testImplementation(libs.pact.provider)
+}
+
+// A credit offer must fail closed on missing consent or borrower-distress evidence. This
+// policy is pure and has a direct decision-table test; it is a useful mutation target (#8349).
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.lending.domain.model.CreditOfferEligibility")
+    targetTests = setOf("com.openbank.lending.domain.CreditOfferEligibilityTest")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
 
 kover {
