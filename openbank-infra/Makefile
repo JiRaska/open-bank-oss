@@ -56,7 +56,7 @@ health:
 	@echo "=== PostgreSQL ===" && $(COMPOSE) exec postgres pg_isready -U openbank && echo "OK"
 	@echo "=== Kafka ===" && docker inspect openbank-kafka --format='{{.State.Health.Status}}' | grep -q healthy && echo "OK"
 	@echo "=== Schema Registry ===" && curl -sf http://localhost:8081/apis/registry/v2/search/artifacts && echo "OK"
-	@echo "=== Valkey ===" && docker exec openbank-valkey valkey-cli -a $${VALKEY_PASSWORD} ping
+	@echo "=== Valkey ===" && docker inspect openbank-valkey --format='{{.State.Health.Status}}' | grep -q healthy && echo "OK"
 	@echo "=== Vault ===" && curl -sf http://localhost:8200/v1/sys/health | python3 -c "import sys,json; d=json.load(sys.stdin); print('OK' if not d.get('sealed') else 'SEALED')"
 	@echo "=== Keycloak ===" && curl -sf http://localhost:8080/realms/master > /dev/null && echo "OK"
 	@echo "=== Prometheus ===" && curl -sf http://localhost:9090/-/healthy && echo "OK"
