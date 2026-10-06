@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -102,6 +103,19 @@ kover {
 // 512m test heap (measured at >98% old generation with repeated full GC). Scope this to tests.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
+}
+
+// Target the Temporal saga's money movement and compensation decisions (#8349). Measured
+// 19/25 mutants killed (76%); the six survivors affect Kotlin null checks or unused lambda
+// return values. Keep them in the denominator and ratchet from a 70% floor.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf("com.openbank.settlement.application.workflow.SettlementWorkflowImpl")
+    targetTests = setOf("com.openbank.settlement.application.workflow.SettlementWorkflowImplTest")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
 
 // SettlementFourEyesFlowIT runs the GENERATED deployment policy in the deployment's own OPA image,

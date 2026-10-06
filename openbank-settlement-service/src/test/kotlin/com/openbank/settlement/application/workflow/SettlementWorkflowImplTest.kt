@@ -156,6 +156,21 @@ class SettlementWorkflowImplTest {
         assertThat(calls.rejectSettlement.get()).isZero()
     }
 
+    @Test
+    fun `a refused payer refund remains non-terminal while ledger compensation still runs`() {
+        val calls = RecordingActivities(failBookToLedger = true, failReverseDebit = true)
+        worker.registerActivitiesImplementations(calls)
+        env.start()
+
+        val result = newWorkflow().settle(UUID.randomUUID())
+
+        assertThat(result).isEqualTo(SettlementStatus.REVERSAL_FAILED)
+        assertThat(calls.reverseCredit.get()).isEqualTo(1)
+        assertThat(calls.reverseDebit.get()).isEqualTo(1)
+        assertThat(calls.reverseBookToLedger.get()).isEqualTo(1)
+        assertThat(calls.rejectSettlement.get()).isZero()
+    }
+
     /**
      * The money-path assertion of issue #6286.
      *
@@ -333,6 +348,7 @@ class SettlementWorkflowImplTest {
         private val failAfterCredit: Boolean = false,
         private val failCreditPayee: Boolean = false,
         private val failBookToLedger: Boolean = false,
+        private val failReverseDebit: Boolean = false,
         private val failReverseCredit: Boolean = false,
         private val failReverseBookToLedger: Boolean = false,
         private val reverseBookToLedgerFailureType: String = "LedgerReversalUnsupported",
@@ -382,6 +398,7 @@ class SettlementWorkflowImplTest {
         override fun reverseDebit(settlementId: UUID) {
             order += "reverseDebit"
             reverseDebit.incrementAndGet()
+            if (failReverseDebit) throw ApplicationFailure.newNonRetryableFailure("refund down", "BalanceError")
             payerBalance.addAndGet(100)
         }
 
