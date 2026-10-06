@@ -4,7 +4,7 @@ Tato stránka zatím popisuje jen životní cyklus outboxu; zbytek datového mod
 
 ## Retence outboxu (řádky SENT)
 
-`incentive_outbox` je doručovací buffer, ne záznam. Důkazem každého přechodu nabídky a rezervace je `incentive_audit_event` (typ události, **aktér**, čas), zapsaný ve stejné transakci jako řádek outboxu, spolu se stavem v `incentive_offer` / `promo_reservation`. Každé pole, které nese payload outboxu, je uloženo i tam. Poznámka migrace V2, že řádky „zůstávají platným auditním důkazem“, se týká jejího rollbacku, ne jejich retence (#11902).
+`incentive_outbox` je doručovací buffer, ne záznam obchodního přechodu. `incentive_audit_event` zaznamenává typ, **aktéra** a čas každého přechodu ve stejné transakci jako řádek outboxu; `incentive_offer` / `promo_reservation` uchovávají aktuální obchodní údaje. Nabídka, atribuce, klient, produkt a stav rezervace zůstávají dohledatelné i po smazání doručeného řádku. Generované `eventId` outboxu z těchto tabulek obnovit nelze; `correlationId` se rovná uchovanému ID agregátu. Poznámka migrace V2, že řádky „zůstávají platným auditním důkazem“, se týká jejího rollbacku, ne jejich retence (#11902).
 
 Doručené řádky (`status = 'SENT'`) se proto mažou, jakmile je jejich **`published_at`** starší než `openbank.outbox.retention.sent-days` (výchozí **7**), sdíleným jobem `OutboxSentRetentionJob` z libs-runtime (ADR-0329). Tabulka je starší než jednotný tvar outboxu: doručení zapisuje do `published_at` (ne `sent_at`) a řadí podle `occurred_at`, což `OutboxTableShape(sentAtColumn = "published_at", orderColumn = "occurred_at")` vyjádří bez migrace.
 
