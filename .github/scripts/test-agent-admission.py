@@ -36,6 +36,24 @@ class AdmissionTest(unittest.TestCase):
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
 
+    def test_denied_services_pr_never_diffs_docs_in_base_only_checkout(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())
+        steps = workflow['jobs']['changes']['steps']
+        admitted = "steps.admit.outputs.proceed == 'true'"
+        admission_index = next(i for i, step in enumerate(steps) if step.get('id') == 'admit')
+        head_checkout_index = next(i for i, step in enumerate(steps)
+                                   if step.get('uses', '').startswith('actions/checkout@')
+                                   and step.get('if') == admitted)
+        docs_index = next(i for i, step in enumerate(steps)
+                          if step.get('name') == 'Require service documentation with production changes')
+        self.assertLess(admission_index, head_checkout_index)
+        self.assertLess(head_checkout_index, docs_index)
+        self.assertEqual(steps[docs_index]['if'], "github.event_name == 'pull_request' && " + admitted)
+        self.assertIn('git diff', steps[docs_index]['run'])
+        all_green = workflow['jobs']['all-green']['steps'][0]['run']
+        self.assertIn('needs.changes.outputs.admission', all_green)
+        self.assertIn('exit 1', all_green)
+
     def test_empty_queue(self):
         self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))
 
