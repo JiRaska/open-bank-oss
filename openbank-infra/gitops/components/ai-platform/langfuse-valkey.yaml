@@ -12,7 +12,8 @@
 # missing traces. The maxmemory value stays below the container limit so Valkey refuses writes
 # before the kernel OOM-kills it.
 #
-# No AUTH, like every fleet Valkey: the generated NetworkPolicy admits same-namespace callers only.
+# Require authentication: the BullMQ queue contains trace payloads before ingestion.
+# The NetworkPolicy also limits network reachability.
 #
 # Placement: `stateful` NodePool (see langfuse-clickhouse.yaml for why).
 apiVersion: apps/v1
@@ -66,6 +67,14 @@ spec:
             - 160mb
             - --maxmemory-policy
             - noeviction
+            - --requirepass
+            - $(VALKEY_PASSWORD)
+          env:
+            - name: VALKEY_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
           ports:
             - name: redis
               containerPort: 6379
@@ -100,6 +109,12 @@ spec:
         - name: exporter
           image: docker.io/oliver006/redis_exporter:v1.92.1@sha256:7fbc93d30f0f91eed1b2fe6968a956259cc5d260a984dd9071f1d1e9c2692ecd
           args: ["--redis.addr=redis://localhost:6379"]
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: langfuse-valkey-auth
+                  key: VALKEY_PASSWORD
           ports:
             - name: redis-metrics
               containerPort: 9121
