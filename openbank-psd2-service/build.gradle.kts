@@ -4,6 +4,7 @@
 
 plugins {
     id("openbank.quarkus-service")
+    id("info.solidsoft.pitest") version "1.19.0"
 }
 
 dependencies {
@@ -90,4 +91,20 @@ kover {
 // see its comment for why this is not a fleet default.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "2g"
+}
+
+// Mutation target for the consent and payment decision paths (#8349). The first measured run
+// killed 34/36 mutants (94%): one status-mapping conditional survived and one compiler-generated
+// index-overflow guard had no coverage. Keep both in the denominator and ratchet from a 70% floor.
+pitest {
+    junit5PluginVersion = "1.2.3"
+    targetClasses = setOf(
+        "com.openbank.psd2.application.usecase.ConsentManagementService",
+        "com.openbank.psd2.application.usecase.PaymentInitiationService",
+    )
+    targetTests = setOf("com.openbank.psd2.application.usecase.Psd2ServicesTest")
+    mutationThreshold = 70
+    outputFormats = setOf("XML", "HTML")
+    timestampedReports = false
+    threads = 4
 }
