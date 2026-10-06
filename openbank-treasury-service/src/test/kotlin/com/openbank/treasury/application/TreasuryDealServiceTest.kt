@@ -124,6 +124,20 @@ class TreasuryDealServiceTest {
     }
 
     @Test
+    fun `settlement retry after ledger post must complete without double reserving cash`(): Unit = runBlocking {
+        val key = Triple("1001", "CZK", monday)
+        fundingRead.balances[key] = BigDecimal("100000.00")
+        val booked = book()
+        service.confirm(booked.id, null, DealFixtures.approver)
+        ledger.afterPost = { fundingRead.balances[key] = BigDecimal.ZERO }
+        deals.failNextSettledSave = true
+        assertThatThrownBy { runBlocking { service.settle(booked.id, DealFixtures.approver) } }
+            .isInstanceOf(IllegalStateException::class.java)
+        assertThat(deals.findById(booked.id)!!.state).isEqualTo(DealState.CONFIRMED)
+        assertThat(service.settle(booked.id, DealFixtures.approver).state).isEqualTo(DealState.SETTLED)
+    }
+
+    @Test
     fun `a placement equal to the funding balance is bookable but one minor unit more is refused`(): Unit =
         runBlocking {
             fundingRead.balances[Triple("1001", "CZK", monday)] = BigDecimal("100000.00")

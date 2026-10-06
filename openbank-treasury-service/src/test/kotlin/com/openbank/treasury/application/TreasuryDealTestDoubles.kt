@@ -26,10 +26,12 @@ internal class RecordingLedger : LedgerPostingPort {
     val posted = mutableListOf<JournalSpec>()
     val entryDates = mutableMapOf<String, LocalDate>()
     var failFor: UUID? = null
+    var afterPost: (() -> Unit)? = null
     override suspend fun post(spec: JournalSpec, entryDate: LocalDate, description: String): UUID {
         if (spec.dealId == failFor) error("ledger unavailable")
         posted += spec
         entryDates[spec.idempotencyKey] = entryDate
+        afterPost?.invoke()
         return UUID.nameUUIDFromBytes(spec.idempotencyKey.toByteArray())
     }
 }
@@ -54,8 +56,13 @@ internal class InMemoryDeals :
     val events = mutableListOf<DealEvent>()
 
     val commands = mutableMapOf<String, CommandKey>()
+    var failNextSettledSave = false
 
     override suspend fun save(deal: Deal, journal: LedgerJournalRef?, event: DealEvent?, command: CommandKey?): Deal {
+        if (deal.state == DealState.SETTLED && failNextSettledSave) {
+            failNextSettledSave = false
+            error("simulated treasury database commit failure")
+        }
         rows[deal.id] = deal
         journal?.let { journals += it }
         event?.let { events += it }
