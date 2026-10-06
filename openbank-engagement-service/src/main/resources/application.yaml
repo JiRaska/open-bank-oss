@@ -44,6 +44,10 @@ quarkus:
     level: INFO
 
 openbank:
+  authz:
+    # Enforced @Authorize routes need a CDI PDP as well as the deployed OPA sidecar.
+    opa-pdp-producer:
+      enabled: true
   engagement:
     marketing-grantee: party-service:marketing-comms
     impression-budget-per-window: 1
@@ -167,5 +171,9 @@ mp:
     oidc-client:
       enabled: false
   openbank:
+    authz:
+      # Contract tests have no OPA sidecar; production builds keep this enabled.
+      opa-pdp-producer:
+        enabled: false
     outbox:
       dispatch-enabled: false
