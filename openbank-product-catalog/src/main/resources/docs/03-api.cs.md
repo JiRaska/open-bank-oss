@@ -120,7 +120,7 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Chybový model
 
-Legacy 404 odpovědi zachovávají `{ "error": "<zpráva>" }` kvůli existujícímu Paktu. Validační, lifecycle a konfliktní chyby používají fleet obálku `ApiError` s `traceId`, `status`, `code`, `message` a `timestamp`.
+Legacy 404 odpovědi pro nenalezený produkt zachovávají `{ "error": "<zpráva>" }` kvůli existujícímu Paktu. Pokud je bankovní kompatibilita vypnutá, stejné v1 trasy vracejí 404 z centrálního mapperu ve tvaru `ApiError` s `traceId`, `status`, `code`, `message` a `timestamp`. Dokumentované v1 odpovědi 404 připouštějí oba tvary. Validační, lifecycle a konfliktní chyby používají obálku `ApiError`.
 
 ## Verzování
 
