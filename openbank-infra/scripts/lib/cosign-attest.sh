@@ -303,25 +303,8 @@ cosign_attest_slsa_provenance() {
   attest_out="$(mktemp "${TMPDIR:-/tmp}/cosign-slsa-attest.XXXXXX")"
   if ! COSIGN_YES=true "$bin" attest --key "$COSIGN_KEY" --type slsaprovenance \
        --predicate "$predicate" "$image" >"$attest_out" 2>&1; then
-    # Immutable-tag ECR repositories (ecr_immutable_repositories) reject the push of the
-    # sha256-<digest>.att tag once the cyclonedx attestation has created it: cosign's legacy
-    # attestation model APPENDS to that one tag, so the second (SLSA) attestation dies with
-    # `TAG_INVALID ... tag is immutable` (#8981). That is a registry constraint, not a missing
-    # attestation capability. No admission policy currently checks SLSA (removed, #9805 item
-    # 4), so an image without the SLSA envelope still deploys (signature + SBOM policies are
-    # Enforce and stay fatal above). NOTE: while the Audit SLSA policy existed this premise was
-    # FALSE — Kyverno v1.12.5 let an Audit failure deny ~75 % of Pod creates. Re-examine this
-    # tolerance before that policy returns. Tolerate exactly this signature; every other
-    # failure is fatal.
-    if grep -q 'TAG_INVALID' "$attest_out" && grep -qi 'immutable' "$attest_out"; then
-      echo "WARNING: SLSA attestation for ${image} rejected by the immutable-tag repository" >&2
-      echo "         (TAG_INVALID: the .att tag already exists from the SBOM attestation and" >&2
-      echo "         cosign legacy attest must append to it). Tolerated: the kyverno SLSA" >&2
-      echo "         provenance policy is Audit-only, so deploy is not gated on this envelope;" >&2
-      echo "         signature + SBOM attestations landed and remain enforced. Tracked as #8981." >&2
-      rm -f "$attest_out"
-      return 0
-    fi
+    # An immutable .att tag can reject this second predicate after CycloneDX landed.
+    # Fail the producer so the image is not promoted without its SLSA envelope (#12176).
     echo "ERROR: cosign attest (slsaprovenance) failed for ${image}." >&2
     cat "$attest_out" >&2
     rm -f "$attest_out"
