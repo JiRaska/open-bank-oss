@@ -83,6 +83,18 @@ def readback_difference_paths(expected, received, limit=8):
     return "; ".join(differences)
 
 
+def contract_readback(received):
+    """Drop only fields added by the pinned broker's versioned Pact response."""
+    received.pop("_links", None)
+    received.pop("createdAt", None)
+    interactions = received.get("interactions")
+    if isinstance(interactions, list):
+        for interaction in interactions:
+            if isinstance(interaction, dict):
+                interaction.pop("_id", None)
+    return received
+
+
 def source(root, sha):
     actual = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
     if actual != sha:
@@ -191,11 +203,11 @@ def publish(body, env):
         except (urllib.error.URLError, OSError):
             raise PublicationFailure("broker-readback-network", provider) from None
         expected = json.loads(base64.b64decode(contract["content"], validate=True))
-        # Broker HAL links are transport metadata, not part of the generated contract.
+        # The pinned broker adds HAL links, creation time, and per-interaction IDs.
+        # Compare every contract field after removing only that broker-owned metadata.
         if not isinstance(received, dict):
             raise PublicationFailure("readback-shape", provider)
-        received.pop("_links", None)
-        if received != expected:
+        if contract_readback(received) != expected:
             raise PublicationFailure("readback-mismatch", provider,
                                      details=readback_difference_paths(expected, received))
     return sorted(contract["providerName"] for contract in body["contracts"])

@@ -158,6 +158,8 @@ class PublicationTest(unittest.TestCase):
                             f"/{x['providerName']}/" in request.full_url)
             expected = json.loads(base64.b64decode(contract["content"]))
             expected["_links"] = {"self": {"href": "broker-added"}}
+            expected["createdAt"] = "broker-added"
+            expected["interactions"][0]["_id"] = "broker-added"
             return Response(json.dumps(expected).encode())
         opener = MagicMock()
         opener.open.side_effect = open_request
@@ -166,6 +168,21 @@ class PublicationTest(unittest.TestCase):
         self.assertEqual(providers, sorted(x["providerName"] for x in body["contracts"]))
         self.assertEqual([r.method for r in requests], ["POST"] + ["GET"] * 5)
         self.assertTrue(all(f"/version/{self.sha}" in r.full_url for r in requests[1:]))
+
+    def test_readback_strips_only_observed_broker_metadata(self):
+        expected = {"consumer": {"name": "openbank-admin-ui"},
+                    "interactions": [{"description": "bill", "response": {"status": 200}}]}
+        received = copy.deepcopy(expected)
+        received.update({"_links": {"self": {}}, "createdAt": "broker-added"})
+        received["interactions"][0]["_id"] = "broker-added"
+        self.assertEqual(publisher.contract_readback(received), expected)
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["response"]["status"] = 500
+        received["interactions"][0]["_id"] = "broker-added"
+        self.assertNotEqual(publisher.contract_readback(received), expected)
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["unexpected"] = "broker-added"
+        self.assertNotEqual(publisher.contract_readback(received), expected)
 
     def test_mismatched_readback_fails_closed(self):
         opener = MagicMock()
