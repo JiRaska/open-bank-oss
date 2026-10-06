@@ -85,7 +85,9 @@ jobs:
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          # Admission policy and pinned requirements must come from the current
+          # trusted base branch; base.sha is frozen for older pull requests.
+          ref: ${{ github.event.pull_request.base.ref }}
           persist-credentials: false
       - id: admit
         env:

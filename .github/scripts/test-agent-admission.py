@@ -37,6 +37,15 @@ class AdmissionTest(unittest.TestCase):
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
 
+    def test_services_ci_admission_reads_current_trusted_base(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())
+        steps = workflow['jobs']['changes']['steps']
+        checkout = steps[0]
+        admission = steps[1]
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
+        self.assertIs(checkout['with']['persist-credentials'], False)
+        self.assertIn('public-readiness.txt', admission['run'])
+
     def test_empty_queue(self):
         self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))
 
