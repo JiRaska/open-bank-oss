@@ -402,10 +402,10 @@ jobs:
             echo "any=true" >> "$GITHUB_OUTPUT"
           fi
 
+      # Admission rejection leaves the trusted base in a depth-1 checkout. The
+      # all-green job fails closed on admission=false; do not run a PR diff here
+      # until the full PR checkout above has actually happened.
       - name: Require service documentation with production changes
-        # Admission rejection leaves the trusted base in a depth-1 checkout. The
-        # all-green job fails closed on admission=false; do not run a PR diff here
-        # until the full PR checkout above has actually happened.
         if: github.event_name == 'pull_request' && steps.admit.outputs.proceed == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
