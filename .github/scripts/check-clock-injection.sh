@@ -61,6 +61,36 @@ if [ "${1:-}" = "--self-test" ]; then
   reset; put "$K/domain/Money.kt" 'class Money { fun at() = "https://example.invalid" to System.currentTimeMillis() }\n'
   expect "a wall-clock call after a URL literal is FLAGGED" 1 "VIOLATION"
 
+  reset; put "$K/domain/Money.kt" 'class Money { val docs = "https://example.invalid/Instant.now()" }\n'
+  expect "a clock-call spelling inside a URL literal is clean" 0 "OK: no direct wall-clock"
+
+  reset; put "$K/domain/Money.kt" 'class Money { val docs = "literal \\" Instant.now()" }\n'
+  expect "an escaped quote does not expose string text" 0 "OK: no direct wall-clock"
+
+  # Kotlin interpolation is literal test data.
+  reset
+  # shellcheck disable=SC2016
+  put "$K/domain/Money.kt" 'class Money { val time = "${Instant.now()}" }\n'
+  expect "a clock call inside ordinary string interpolation is FLAGGED" 1 "VIOLATION"
+
+  reset; put "$K/domain/Money.kt" 'class Money { val docs = """text\nInstant.now()\ntext""" }\n'
+  expect "clock-call spelling inside a multiline raw string is clean" 0 "OK: no direct wall-clock"
+
+  # Kotlin interpolation is literal test data.
+  reset
+  # shellcheck disable=SC2016
+  put "$K/domain/Money.kt" 'class Money { val time = """${Instant.now()}""" }\n'
+  expect "a clock call inside raw string interpolation is FLAGGED" 1 "VIOLATION"
+
+  reset; put "$K/domain/Money.kt" '/* comment */ fun at() = System.currentTimeMillis()\n'
+  expect "code after a same-line block comment is FLAGGED" 1 "VIOLATION"
+
+  reset; put "$K/domain/Money.kt" '/* comment\n */ fun at() = System.currentTimeMillis()\n'
+  expect "code after a multiline block comment is FLAGGED" 1 "VIOLATION"
+
+  reset; put "$K/domain/Money.kt" 'fun at() = System.currentTimeMillis() /* comment */\n'
+  expect "code before a same-line block comment is FLAGGED" 1 "VIOLATION"
+
   # The documented fix must be clean, or the gate blocks the shape ADR-0100 requires.
   reset; put "$K/domain/Money.kt" 'class Money(private val clock: Clock) { fun at() = Instant.now(clock) }\n'
   expect "Instant.now(clock) is clean" 0 "OK: no direct wall-clock"
@@ -84,6 +114,18 @@ if [ "${1:-}" = "--self-test" ]; then
   reset; put "$K/domain/Money.kt" 'class Money {\n  /* never call Instant.now() here */\n  fun at() = Instant.now(clock)\n}\n'
   expect "the call named in a block-comment opener is not a hit" 0 "OK: no direct wall-clock"
 
+  reset; put "$K/domain/Money.kt" '/* Instant.now() */ fun at() = Instant.now(clock)\n'
+  expect "a comment-only clock call beside injected code is clean" 0 "OK: no direct wall-clock"
+
+  reset; put "$K/domain/Money.kt" '/* first line\n * Instant.now() is forbidden here\n */ fun at() = Instant.now(clock)\n'
+  expect "a multiline comment-only clock call beside injected code is clean" 0 "OK: no direct wall-clock"
+
+  reset; put "$K/domain/Money.kt" '/* outer /* inner */ Instant.now() */ fun at() = Instant.now(clock)\n'
+  expect "a nested block comment with a clock-call spelling is clean" 0 "OK: no direct wall-clock"
+
+  reset; put "$K/domain/Money.kt" 'fun at() = Instant.now(clock) /* not System.currentTimeMillis() */\n'
+  expect "a trailing comment-only clock call is clean" 0 "OK: no direct wall-clock"
+
   # DERIVATION: an empty money_path_services must fail, not silently scan nothing. This is the
   # defect the derivation replaced — a short list read as a clean fleet.
   printf 'money_path_services: []\n' > "$td/openbank-libs/governance/rules.yaml"
@@ -94,7 +136,7 @@ if [ "${1:-}" = "--self-test" ]; then
   printf 'money_path_services:\n  - openbank-fixture-service\n' > "$td/openbank-libs/governance/rules.yaml"
 
   if [ "$fails" -gt 0 ]; then echo "self-test FAILED ($fails case(s))" >&2; exit 1; fi
-  echo "self-test ok: clock-injection gate is falsifiable (10 cases, scope derived from rules.yaml)"
+  echo "self-test ok: clock-injection gate is falsifiable (22 cases, scope derived from rules.yaml)"
   exit 0
 fi
 
@@ -131,9 +173,6 @@ fi
 # Layers that must never call wall-clock APIs directly
 TARGET_LAYERS=(domain application)
 
-# Pattern — matches any of the banned direct clock calls
-PATTERN='Instant[.]now[(][)]\|LocalDateTime[.]now[(][)]\|LocalDate[.]now[(][)]\|System[.]currentTimeMillis[(][)]'
-
 VIOLATIONS=0
 SCANNED=0
 
@@ -152,9 +191,73 @@ for svc in "${MONEY_PATH_SERVICES[@]}"; do
         continue
       fi
 
-      # Discard comment LINES only. Unanchored `*` and `//` filters discard valid
-      # arithmetic or a URL literal beside `System.currentTimeMillis()` (#6253).
-      matches=$(grep -n "$PATTERN" "$file" | grep -vE '^[0-9]+:[[:space:]]*(//|/\*|\*)' || true)
+      # Strip comments and quoted text, but retain executable string templates.
+      # Keep the raw-string state across lines and code after `*/` on a line.
+      matches=$(awk '
+        function executable_code(line,    out, i, c, next_c, three) {
+          out = ""
+          escaped = 0
+          for (i = 1; i <= length(line); i++) {
+            c = substr(line, i, 1)
+            next_c = substr(line, i + 1, 1)
+            three = substr(line, i, 3)
+            if (block_comment > 0) {
+              if (c == "/" && next_c == "*") { block_comment++; i++ }
+              else if (c == "*" && next_c == "/") { block_comment--; i++ }
+              continue
+            }
+            if (string_mode != "") {
+              if (string_mode == "normal") {
+                if (escaped) { escaped = 0; continue }
+                if (c == "\\") { escaped = 1; continue }
+              }
+              if (c == "$" && next_c == "{") {
+                template_level++
+                template_depth[template_level] = 1
+                template_return[template_level] = string_mode
+                string_mode = ""
+                out = out " "
+                i++
+                continue
+              }
+              if (string_mode == "raw" && three == "\"\"\"") {
+                string_mode = ""
+                out = out " "
+                i += 2
+              } else if (string_mode == "normal" && c == "\"") {
+                string_mode = ""
+                out = out " "
+              }
+              continue
+            }
+            if (three == "\"\"\"") { string_mode = "raw"; out = out " "; i += 2; continue }
+            if (c == "\"") { string_mode = "normal"; out = out " "; continue }
+            if (c == "/" && next_c == "*") { block_comment = 1; i++; continue }
+            if (c == "/" && next_c == "/") break
+            if (template_level > 0) {
+              if (c == "{") template_depth[template_level]++
+              if (c == "}") {
+                template_depth[template_level]--
+                if (template_depth[template_level] == 0) {
+                  string_mode = template_return[template_level]
+                  delete template_depth[template_level]
+                  delete template_return[template_level]
+                  template_level--
+                  out = out " "
+                  continue
+                }
+              }
+            }
+            out = out c
+          }
+          return out
+        }
+        {
+          code = executable_code($0)
+          if (code ~ /(Instant|LocalDateTime|LocalDate)[.]now[(][)]|System[.]currentTimeMillis[(][)]/)
+            print FNR ":" $0
+        }
+      ' "$file")
       SCANNED=$((SCANNED + 1))
       if [ -n "$matches" ]; then
         echo "VIOLATION [$svc/$layer] $file"
