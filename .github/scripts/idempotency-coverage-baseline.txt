@@ -114,7 +114,7 @@ openbank-vop-service POST /api/v1/vop/verify  # lifecycle/action endpoint on an 
 # an authorisation decision was being scored by the lenient rule. Burn-down: #8845.
 openbank-card-issuance-service POST /api/v1/cards/outbox/requeue  # operator replay of DEAD outbox rows (ROLE_ADMIN) — a second run moves 0 rows because the first left none DEAD; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/activate  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
-openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # decision endpoint that persists nothing — CardAuthorizationPolicy is pure and the handler only reads the card and its rules, so a replay recomputes the same answer; verify in burn-down #8351
+openbank-card-issuance-service POST /api/v1/cards/{id}/authorizations  # documented exception #8845: read-only decision, not a command; CardAuthorizationReplayTest proves a retry rereads card/rules without writes and reflects a subsequent block rather than replaying a stale approval
 openbank-card-issuance-service POST /api/v1/cards/{id}/block  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/cancel  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
 openbank-card-issuance-service POST /api/v1/cards/{id}/resume  # lifecycle/action endpoint on an addressed resource — replay guarded by aggregate state; verify in burn-down #8351
