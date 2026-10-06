@@ -12,7 +12,9 @@ import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
 import au.com.dius.pact.provider.junitsupport.loader.PactBroker
 import io.quarkus.test.junit.QuarkusTest
+import io.quarkus.test.security.TestIdentityAssociation
 import io.quarkus.test.security.TestSecurity
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.TestTemplate
@@ -44,10 +46,12 @@ import org.junit.jupiter.api.extension.ExtendWith
 @QuarkusTest
 @TestSecurity(user = "rail", roles = ["ROLE_API"])
 @Provider("openbank-clearing-simulator")
-@PactBroker
+@PactBroker()
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class ClearingSimulatorPactBrokerProviderVerificationTest {
+
+    @Inject lateinit var testIdentityAssociation: TestIdentityAssociation
 
     @ConfigProperty(name = "quarkus.http.test-port", defaultValue = "8081")
     lateinit var testPort: String
@@ -61,7 +65,15 @@ class ClearingSimulatorPactBrokerProviderVerificationTest {
     @TestTemplate
     @ExtendWith(PactVerificationInvocationContextProvider::class)
     fun verifyPacts(context: PactVerificationContext?) {
+        if (context != null && context.interaction.providerStates.any { it.name == NEGATIVE_AUTH_STATE }) {
+            testIdentityAssociation.setTestIdentity(null)
+        }
         context?.verifyInteraction()
+    }
+
+    @State(NEGATIVE_AUTH_STATE)
+    fun stateNoValidM2mIdentity() {
+        // The broker replay removes @TestSecurity's identity for this interaction.
     }
 
     @State("the clearing simulator is available")
