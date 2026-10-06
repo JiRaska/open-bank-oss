@@ -176,6 +176,30 @@ class PublicationTest(unittest.TestCase):
             publisher.publish(self.body(), self.env)
         self.assertEqual(failure.exception.stage, "readback-mismatch")
         self.assertRegex(failure.exception.provider, publisher.PROVIDER)
+        self.assertEqual(failure.exception.details, "/consumer object/missing; "
+                         "/interactions/0 object/missing; /provider object/missing")
+
+    def test_readback_diagnostic_uses_only_bounded_schema_paths_and_types(self):
+        secret = "do-not-log-token-or-url"
+        expected = {"interactions": [{"request": {"headers": {"Authorization": secret},
+                                                  "body": {"private-id": secret}},
+                                      "response": {"status": 200}}],
+                    "metadata": {secret: {"private-id": secret}}}
+        received = copy.deepcopy(expected)
+        received["interactions"][0]["request"]["headers"]["Authorization"] = "other-secret"
+        received["interactions"][0]["request"]["body"]["private-id"] = "other-secret"
+        received["interactions"][0]["response"]["status"] = 201
+        received["metadata"][secret]["private-id"] = "other-secret"
+        details = publisher.readback_difference_paths(expected, received)
+        self.assertEqual(details, "/interactions/0/request/body object/object; "
+                         "/interactions/0/request/headers object/object; "
+                         "/interactions/0/response/status number/number; "
+                         "/metadata/<field> object/object")
+        self.assertNotIn(secret, details)
+        many = {f"private-{i}": secret for i in range(20)}
+        bounded = publisher.readback_difference_paths(many, {})
+        self.assertLessEqual(len(bounded.split("; ")), 8)
+        self.assertNotIn("private-", bounded)
 
     def test_malformed_broker_body_reports_only_safe_stage_and_provider(self):
         opener = MagicMock()

@@ -15,16 +15,72 @@ import urllib.request
 
 CONSUMER = "openbank-admin-ui"
 PROVIDER = re.compile(r"openbank-[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+# Only fixed Pact schema names may appear in CI diagnostics. Application data,
+# header names and arbitrary JSON keys must never become log output.
+SAFE_PATH_KEYS = frozenset({
+    "consumer", "provider", "interactions", "metadata", "name", "description",
+    "providerStates", "request", "response", "method", "path", "query",
+    "headers", "body", "status", "matchingRules", "generators",
+    "pactSpecification", "version", "pact-js", "pactRust",
+})
+OPAQUE_KEYS = frozenset({"body", "headers", "query", "matchingRules", "generators"})
 
 
 class PublicationFailure(ValueError):
     """A fixed, non-sensitive stage label for a failed publication invariant."""
 
-    def __init__(self, stage, provider=None, status=None):
+    def __init__(self, stage, provider=None, status=None, details=""):
         self.stage = stage
         self.provider = provider
         self.status = status if isinstance(status, int) and 100 <= status <= 599 else None
+        self.details = details
         super().__init__(stage)
+
+
+def readback_difference_paths(expected, received, limit=8):
+    """Return bounded structural diagnostics without any broker or Pact values."""
+    missing = object()
+    differences = []
+
+    def kind(value):
+        if value is missing:
+            return "missing"
+        if value is None:
+            return "null"
+        if isinstance(value, bool):
+            return "boolean"
+        if isinstance(value, dict):
+            return "object"
+        if isinstance(value, list):
+            return "array"
+        if isinstance(value, str):
+            return "string"
+        return "number"
+
+    def visit(left, right, path=(), opaque=False):
+        if left == right or len(differences) >= limit:
+            return
+        if (not opaque and len(path) < 5 and isinstance(left, dict) and
+                isinstance(right, dict)):
+            for key in sorted(left.keys() | right.keys(), key=str):
+                segment = key if isinstance(key, str) and key in SAFE_PATH_KEYS else "<field>"
+                visit(left.get(key, missing), right.get(key, missing),
+                      (*path, segment), key in OPAQUE_KEYS or segment == "<field>")
+                if len(differences) >= limit:
+                    break
+        elif not opaque and len(path) < 5 and isinstance(left, list) and isinstance(right, list):
+            for index in range(max(len(left), len(right))):
+                visit(left[index] if index < len(left) else missing,
+                      right[index] if index < len(right) else missing,
+                      (*path, str(index)))
+                if len(differences) >= limit:
+                    break
+        else:
+            pointer = "/" + "/".join(path)
+            differences.append(f"{pointer} {kind(left)}/{kind(right)}")
+
+    visit(expected, received)
+    return "; ".join(differences)
 
 
 def source(root, sha):
@@ -140,7 +196,8 @@ def publish(body, env):
             raise PublicationFailure("readback-shape", provider)
         received.pop("_links", None)
         if received != expected:
-            raise PublicationFailure("readback-mismatch", provider)
+            raise PublicationFailure("readback-mismatch", provider,
+                                     details=readback_difference_paths(expected, received))
     return sorted(contract["providerName"] for contract in body["contracts"])
 
 
@@ -171,7 +228,8 @@ def main():
         stage = error.stage if isinstance(error, PublicationFailure) else "artifact-validation"
         provider = f" provider={error.provider}" if isinstance(error, PublicationFailure) and error.provider else ""
         status = f" HTTP {error.status}" if isinstance(error, PublicationFailure) and error.status else ""
-        parser.exit(1, f"Pact publication failed at {stage}{provider}{status}; no success recorded\n")
+        details = f" paths/types: {error.details}" if isinstance(error, PublicationFailure) and error.details else ""
+        parser.exit(1, f"Pact publication failed at {stage}{provider}{status}{details}; no success recorded\n")
 
 
 if __name__ == "__main__":
