@@ -24,77 +24,45 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  watch:
+  classify:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      actions: write        # POST actions/runs/{id}/cancel and /force-cancel on a stalled run
-      issues: write         # gh issue create for each cancellation (fleet-health)
-      pull-requests: read   # live PR state before cancelling a PR run
+      actions: read
+      pull-requests: read
     timeout-minutes: 10
+    outputs:
+      has_candidates: ${{ steps.candidates.outputs.has_candidates }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Self-test classifier
         run: |
           python3 .github/scripts/check-stuck-service-build.py --self-test
           python3 .github/scripts/check-superseded-pr-runs.py --self-test
-      - name: Force-cancel only superseded queued PR runs
+          python3 .github/scripts/check-stall-watch-handoff.py --self-test
+      - name: Classify superseded queued PR runs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
-          # Runs first, then PRs: a PR opened between the snapshots is present in the latter
-          # and therefore cannot be mistaken for a closed PR. Every candidate is re-read
-          # immediately before mutation as a second guard against reopen/update races.
+          # Runs first, then PRs: a PR opened between snapshots cannot be mistaken for closed.
           gh api --paginate --slurp "repos/${REPO}/actions/runs?status=queued&per_page=100" \
             | jq 'map(.workflow_runs[])' > /tmp/queued-pr-runs.json
           gh api --paginate --slurp "repos/${REPO}/pulls?state=open&per_page=100" \
             | jq 'map(.[] | {number, head: {sha: .head.sha}})' > /tmp/open-pr-heads.json
           python3 .github/scripts/check-superseded-pr-runs.py \
             --runs /tmp/queued-pr-runs.json --pulls /tmp/open-pr-heads.json --limit 25 \
-            > /tmp/superseded-pr-runs.json
-          jq -c '.[]' /tmp/superseded-pr-runs.json | while IFS= read -r candidate; do
-            run_id=$(jq -r '.runId' <<<"$candidate")
-            pr_number=$(jq -r '.pr' <<<"$candidate")
-            stale_sha=$(jq -r '.headSha' <<<"$candidate")
-            # Fail closed: an API/read failure aborts before force-cancel. A newly current
-            # head is retained even if the earlier snapshots called it stale.
-            live=$(gh api "repos/${REPO}/pulls/${pr_number}")
-            live_state=$(jq -r '.state' <<<"$live")
-            live_sha=$(jq -r '.head.sha' <<<"$live")
-            if [ "$live_state" = open ] && [ "$live_sha" = "$stale_sha" ]; then
-              echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"
-              continue
-            fi
-            if [ "$DRY_RUN" = true ]; then
-              echo "would force-cancel superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
-              continue
-            fi
-            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/force-cancel" 2>&1); then
-              # A queued run may finish after the snapshots. That is already the desired
-              # terminal state; every other mutation failure remains fatal and visible.
-              live_run_status=$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')
-              if [ "$live_run_status" = completed ]; then
-                echo "retaining run ${run_id}: it completed before force-cancel"
-                continue
-              fi
-              echo "$cancel_error" >&2
-              exit 1
-            fi
-            echo "force-cancelled superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
-          done
-      - name: Find and cancel only proved stalled service CI jobs
+            > superseded-pr-runs.json
+      - name: Classify proved stalled service CI jobs
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
         run: |
           set -euo pipefail
           now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           gh api "repos/${REPO}/actions/runs?status=in_progress&per_page=100" --jq '[.workflow_runs[] | select(.name == "Services CI") | {id,run_attempt,html_url}]' > /tmp/service-runs.json
-          printf '[]' > /tmp/stalled.json
+          printf '[]' > stalled.json
           jq -c '.[]' /tmp/service-runs.json | while IFS= read -r run; do
             run_id=$(jq -r '.id' <<<"$run")
             attempt=$(jq -r '.run_attempt' <<<"$run")
@@ -103,11 +71,113 @@ jobs:
             candidates=$(python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/jobs.json --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 5)
             jq -c --arg runId "$run_id" --arg attempt "$attempt" --arg runUrl "$run_url" '.[] + {runId:$runId,attempt:$attempt,runUrl:$runUrl}' <<<"$candidates" \
               | while IFS= read -r candidate; do
-                  jq --argjson candidate "$candidate" '. + [$candidate]' /tmp/stalled.json > /tmp/stalled.next && mv /tmp/stalled.next /tmp/stalled.json
+                  jq --argjson candidate "$candidate" '. + [$candidate]' stalled.json > stalled.next && mv stalled.next stalled.json
                 done
           done
-          jq -c '.[]' /tmp/stalled.json | while IFS= read -r candidate; do
+      - name: Expose bounded candidate handoff
+        id: candidates
+        run: |
+          set -euo pipefail
+          count=$(python3 .github/scripts/check-stall-watch-handoff.py \
+            --queued superseded-pr-runs.json --stalled stalled.json)
+          if [ "$count" -gt 0 ]; then echo 'has_candidates=true' >> "$GITHUB_OUTPUT"; else echo 'has_candidates=false' >> "$GITHUB_OUTPUT"; fi
+      - name: Report dry-run candidates without write credentials
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: |
+          jq -r '.[] | "would force-cancel superseded run \(.runId) for PR #\(.pr)"' superseded-pr-runs.json
+          jq -r '.[] | "::warning title=CI stalled-build dry run::CI stalled service build: \(.job)"' stalled.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.candidates.outputs.has_candidates == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+        with:
+          name: service-build-stall-candidates
+          path: |
+            superseded-pr-runs.json
+            stalled.json
+          retention-days: 1
+
+  mutate:
+    needs: classify
+    if: needs.classify.outputs.has_candidates == 'true' && !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: service-build-stall-candidates
+      - name: Validate handoff before any mutation
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/check-stall-watch-handoff.py \
+            --queued superseded-pr-runs.json --stalled stalled.json
+      - name: Force-cancel only still-superseded queued PR runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          jq -c '.[]' superseded-pr-runs.json | while IFS= read -r candidate; do
             run_id=$(jq -r '.runId' <<<"$candidate")
+            pr_number=$(jq -r '.pr' <<<"$candidate")
+            stale_sha=$(jq -r '.headSha' <<<"$candidate")
+            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
+            if ! jq -e --arg sha "$stale_sha" --argjson pr "$pr_number" \
+              '.event == "pull_request" and .head_sha == $sha and any(.pull_requests[]; .number == $pr)' \
+              <<<"$live_run" >/dev/null; then
+              echo "retaining run ${run_id}: run identity changed"; continue
+            fi
+            if [ "$(jq -r '.status' <<<"$live_run")" != queued ]; then
+              echo "retaining run ${run_id}: no longer queued"; continue
+            fi
+            live=$(gh api "repos/${REPO}/pulls/${pr_number}")
+            if [ "$(jq -r '.state' <<<"$live")" = open ] && [ "$(jq -r '.head.sha' <<<"$live")" = "$stale_sha" ]; then
+              echo "retaining run ${run_id}: PR #${pr_number} now points at ${stale_sha}"; continue
+            fi
+            if [ "$DRY_RUN" = true ]; then
+              echo "would force-cancel superseded run ${run_id} for PR #${pr_number} (${stale_sha})"; continue
+            fi
+            if ! cancel_error=$(gh api --method POST "repos/${REPO}/actions/runs/${run_id}/force-cancel" 2>&1); then
+              live_run_status=$(gh api "repos/${REPO}/actions/runs/${run_id}" --jq '.status')
+              if [ "$live_run_status" = completed ]; then
+                echo "retaining run ${run_id}: it completed before force-cancel"; continue
+              fi
+              echo "$cancel_error" >&2; exit 1
+            fi
+            echo "force-cancelled superseded run ${run_id} for PR #${pr_number} (${stale_sha})"
+          done
+      - name: Cancel only still-stalled service CI jobs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run || 'false' }}
+        run: |
+          set -euo pipefail
+          jq -c '.[]' stalled.json | while IFS= read -r candidate; do
+            run_id=$(jq -r '.runId' <<<"$candidate")
+            attempt=$(jq -r '.attempt' <<<"$candidate")
+            job_id=$(jq -r '.jobId' <<<"$candidate")
+            live_run=$(gh api "repos/${REPO}/actions/runs/${run_id}")
+            if [ "$(jq -r '.status' <<<"$live_run")" != in_progress ] || \
+               [ "$(jq -r '.run_attempt' <<<"$live_run")" != "$attempt" ]; then
+              echo "retaining run ${run_id}: no longer on the classified attempt"; continue
+            fi
+            gh api "repos/${REPO}/actions/runs/${run_id}/attempts/${attempt}/jobs?per_page=100" > /tmp/live-jobs.json
+            now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+            python3 .github/scripts/check-stuck-service-build.py --jobs-json /tmp/live-jobs.json \
+              --now "$now" --timeout-minutes 45 --no-step-timeout-minutes 5 > /tmp/live-stalled.json
+            if ! jq -e --arg id "$job_id" 'any(.[]; .jobId == $id)' /tmp/live-stalled.json >/dev/null; then
+              echo "retaining run ${run_id}: job ${job_id} is no longer classified stalled"; continue
+            fi
+            candidate=$(jq -c --arg id "$job_id" --arg runId "$run_id" --arg attempt "$attempt" \
+              --arg runUrl "$(jq -r '.html_url' <<<"$live_run")" \
+              'map(select(.jobId == $id))[0] + {runId:$runId, attempt:$attempt, runUrl:$runUrl}' \
+              /tmp/live-stalled.json)
             title="CI stalled service build: $(jq -r '.job' <<<"$candidate")"
             body=$(jq -r '"<!-- service-build-stall:" + .runId + ":" + .jobId + " -->\n\n## Service CI job was cancelled after no progress\n\n| | |\n|---|---|\n| workflow run | [run " + .runId + " attempt " + .attempt + "](" + .runUrl + ") |\n| stalled job | [" + .job + "](" + .url + ") |\n| stalled step | `" + .step + "` |\n| classifier | `" + .reason + "` |\n| started | `" + .startedAt + "` |\n| observed age | `" + .ageMinutes + " minutes` |\n\nThe watchdog acts only on three bounded shapes: the mandatory `Build + test` step itself exceeding 45 minutes, every substantive step completing and a `Post Run …` action alone exceeding 45 minutes, or the job recording `started_at` while every step stays queued (no first step) for 5 minutes. It never cancels Kover, envelope creation or artifact publication while those steps are active. The cancellation preserves GitHub attempt diagnostics and does **not** create a green verdict. Inspect and rerun through the normal CI path.\n\n_Automated by Service build stall watch (issue #7477)._"' <<<"$candidate")
             if [ "$DRY_RUN" = "true" ]; then
