@@ -99,10 +99,24 @@ def mounted_override_names(directory):
             if not isinstance(doc, dict) or doc.get("kind") not in ("Deployment", "Rollout"):
                 continue
             pod = (((doc.get("spec") or {}).get("template") or {}).get("spec") or {})
-            volumes = {
-                volume.get("name"): (volume.get("configMap") or {}).get("name")
-                for volume in pod.get("volumes") or [] if isinstance(volume, dict)
-            }
+            volumes = {}
+            for volume in pod.get("volumes") or []:
+                if not isinstance(volume, dict) or not isinstance(volume.get("configMap"), dict):
+                    continue
+                config_map = volume["configMap"]
+                items = config_map.get("items")
+                # A projected ConfigMap may omit or rename override.properties. The file named
+                # in CONFIG_LOCATIONS exists only when the projection keeps that exact path.
+                projects_override = items is None or (
+                    isinstance(items, list) and any(
+                        isinstance(item, dict)
+                        and item.get("key") == "override.properties"
+                        and item.get("path") == "override.properties"
+                        for item in items
+                    )
+                )
+                if projects_override:
+                    volumes[volume.get("name")] = config_map.get("name")
             for container in pod.get("containers") or []:
                 if not isinstance(container, dict):
                     continue
@@ -435,6 +449,20 @@ def self_test():
         deployment.unlink()
         bad, _ = scan(str(root))
         override_cases.append(("unmounted ConfigMap is not coverage", any("channel 'covered-in'" in f for f in bad)))
+        deployment.write_text(manifest, encoding="utf-8")
+        projection = "            name: demo-covered-service-msg-override\n"
+        excluded = projection + "            items:\n              - key: other.properties\n                path: other.properties\n"
+        deployment.write_text(manifest.replace(projection, excluded), encoding="utf-8")
+        bad, _ = scan(str(root))
+        override_cases.append(("projected ConfigMap without override.properties is not coverage", any("channel 'covered-in'" in f for f in bad)))
+        renamed = projection + "            items:\n              - key: override.properties\n                path: renamed.properties\n"
+        deployment.write_text(manifest.replace(projection, renamed), encoding="utf-8")
+        bad, _ = scan(str(root))
+        override_cases.append(("renamed override.properties projection is not coverage", any("channel 'covered-in'" in f for f in bad)))
+        included = projection + "            items:\n              - key: override.properties\n                path: override.properties\n"
+        deployment.write_text(manifest.replace(projection, included), encoding="utf-8")
+        good, _ = scan(str(root))
+        override_cases.append(("explicit override.properties projection is coverage", not any("channel 'covered-in'" in f for f in good)))
         deployment.write_text(manifest, encoding="utf-8")
 
     flagged = {ch for ch in SELF_TEST_EXPECT if any(f"channel '{ch}'" in f for f in findings)}
