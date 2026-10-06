@@ -170,7 +170,7 @@ class IncidentProjectionConsumer(
              source_ref, display_label, classification, valid_from, recorded_at, source_version)
             VALUES (:id, :key, :bankScope, :generation, 'INCIDENT', :type, :source, :sourceRef, :label,
                     'INTERNAL', :validFrom, :recordedAt, :version)
-            ON CONFLICT (bank_scope, projection_generation, node_key) DO UPDATE SET
+            ON CONFLICT (node_row_id) DO UPDATE SET
               display_label = EXCLUDED.display_label, valid_from = EXCLUDED.valid_from,
               recorded_at = EXCLUDED.recorded_at, source_version = EXCLUDED.source_version
             WHERE context_nodes.source_version < EXCLUDED.source_version

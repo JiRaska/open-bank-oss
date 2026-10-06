@@ -115,7 +115,7 @@ class ComplaintProjectionConsumer(
              classification, valid_from, valid_to, recorded_at, source_version)
             VALUES (:rowId, :key, :bankScope, :generation, 'COMPLAINT', :type, :source, :sourceRef, :label,
                     :classification, :validFrom, NULL, :recordedAt, :version)
-            ON CONFLICT (bank_scope, projection_generation, node_key) DO UPDATE SET
+            ON CONFLICT (node_row_id) DO UPDATE SET
               node_type = EXCLUDED.node_type,
               source_system = EXCLUDED.source_system,
               source_ref = EXCLUDED.source_ref,
