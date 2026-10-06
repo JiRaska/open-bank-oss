@@ -97,8 +97,17 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
       expect(readFileSync(output, 'utf8')).toBe(original)
 
       writeFileSync(deployment, 'kind: NetworkPolicy\nimage: example:second\n')
+      git(['add', deployment], '2026-01-01T00:00:00Z')
+      git(['-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
+        'commit', '-qm', 'declare network policy'], '2026-01-01T00:00:00Z')
       expect(() => run(['--check'])).toThrow()
       expect(readFileSync(output, 'utf8')).toBe(original)
+      run([])
+      const refreshed = JSON.parse(readFileSync(output, 'utf8'))
+      expect(refreshed.generatedAt).toBe('2026-01-01T00:00:00.000Z')
+      expect(refreshed.counts.networkPolicies).toBe(1)
+      expect(refreshed.inputFingerprint).not.toBe(JSON.parse(original).inputFingerprint)
+      expect(() => run(['--check'])).not.toThrow()
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
