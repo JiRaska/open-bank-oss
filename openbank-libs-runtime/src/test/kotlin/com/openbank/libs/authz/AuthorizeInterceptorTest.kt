@@ -718,6 +718,7 @@ class AuthorizeInterceptorTest {
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "agent:reviewer"
             every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
         }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
@@ -743,6 +744,7 @@ class AuthorizeInterceptorTest {
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "customer-subject-42"
             every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
         }
         val store = InMemoryApprovalStore()
         wirePdpAndStore(store)
@@ -764,6 +766,7 @@ class AuthorizeInterceptorTest {
         every { identity.principal } returns mockk<JsonWebToken> {
             every { subject } returns "human-subject-id"
             every { getClaim<String>("azp") } returns null
+            every { getClaim<String>("preferred_username") } returns null
         }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
@@ -800,13 +803,26 @@ class AuthorizeInterceptorTest {
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
+        every { identity.principal } returns mockk<JsonWebToken> {
+            every { subject } returns "human-subject-id"
+            every { getClaim<String>("preferred_username") } returns "service-account-openbank-test"
+            every { getClaim<String>("azp") } returns null
+        }
+        catchThrowableOfType(WebApplicationException::class.java) {
+            interceptor.authorize(makeCtx(annotatedMethod))
+        }
         every { identity.principal } returns JavaPrincipal { "service-account-unverified" }
         catchThrowableOfType(WebApplicationException::class.java) {
             interceptor.authorize(makeCtx(annotatedMethod))
         }
 
         assertThat(store.created.map { it.makerActorKind })
-            .containsExactly(MakerActorKind.HUMAN, MakerActorKind.HUMAN, MakerActorKind.UNKNOWN)
+            .containsExactly(
+                MakerActorKind.HUMAN,
+                MakerActorKind.UNKNOWN,
+                MakerActorKind.UNKNOWN,
+                MakerActorKind.UNKNOWN,
+            )
     }
 
     @Test
