@@ -499,6 +499,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
+        self._stub_memo: dict[str, str | None] = {}
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -618,7 +619,10 @@ class Corpus:
         lines fleet-wide and one of them, in an unrelated service, carries a TODO — matching
         that reports a phantom defect and teaches people the gate is noise.
         """
+        if sym in self._stub_memo:
+            return self._stub_memo[sym]
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
+            self._stub_memo[sym] = None
             return None
         decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
         for f, b in self.main.items():
@@ -629,7 +633,10 @@ class Corpus:
                 if not decl.search(line):
                     continue
                 if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    return f"{f}:{n + 1}"
+                    site = f"{f}:{n + 1}"
+                    self._stub_memo[sym] = site
+                    return site
+        self._stub_memo[sym] = None
         return None
 
 
@@ -924,7 +931,7 @@ def self_test() -> int:
     class _FakeCorpus(Corpus):
         def __init__(self, blobs):  # test double: no git, no filesystem
             self.files, self.names, self.paths = [], set(), set()
-            self.blobs, self._memo = blobs, {}
+            self.blobs, self._memo, self._stub_memo = blobs, {}, {}
             self.main = {}
             self.config_keys = set()
             for _f, _b in blobs.items():
