@@ -4,7 +4,9 @@ const labels = {
 }
 
 function verifiedDocument(value, now = Date.now()) {
-  if (!value || value.schema_version !== 1 || !value.checks || !value.observed_at || !value.expires_at) return false
+  if (!value || value.schema_version !== 1 || !value.checks || !value.observed_at || !value.expires_at ||
+      !Array.isArray(value.history) || !Array.isArray(value.incidents) ||
+      !['OPERATIONAL', 'DEGRADED'].includes(value.state)) return false
   const observed = Date.parse(value.observed_at)
   const expiry = Date.parse(value.expires_at)
   if (!Number.isFinite(observed) || !Number.isFinite(expiry) || observed > now || expiry <= now || expiry - observed > 600_000) return false
@@ -42,10 +44,12 @@ function renderHistory(id, hours, history, now) {
 
 function render(value, now = Date.now()) {
   const valid = verifiedDocument(value, now)
+  const activeIncident = valid && Array.isArray(value.incidents) && value.incidents.some(incident => !incident.resolved_at)
   const state = document.getElementById('state')
-  state.className = 'state ' + (valid ? (value.state === 'OPERATIONAL' && Object.values(value.checks).every(check => check.ok) ? 'state-operational' : 'state-degraded') : 'state-unknown')
-  state.textContent = !valid ? 'Current status unverified' : state.classList.contains('state-operational') ? 'All public checks responding' : 'One or more public checks failing'
+  state.className = 'state ' + (valid ? (value.state === 'OPERATIONAL' && !activeIncident && Object.values(value.checks).every(check => check.ok) ? 'state-operational' : 'state-degraded') : 'state-unknown')
+  state.textContent = !valid ? 'Current status unverified' : activeIncident ? 'Confirmed incident in progress' : state.classList.contains('state-operational') ? 'All public checks responding' : 'One or more public checks failing'
   document.body.classList.toggle('degraded', valid && !state.classList.contains('state-operational'))
+  document.body.classList.toggle('incident-active', activeIncident)
   document.getElementById('observed').textContent = valid ? `Observed ${new Date(value.observed_at).toLocaleString()}` : 'Evidence is missing, malformed, or stale. Please do not treat an earlier green state as current.'
   const checks = document.getElementById('checks')
   checks.replaceChildren()

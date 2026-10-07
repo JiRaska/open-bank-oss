@@ -137,6 +137,13 @@ def load_previous(path: Path | None) -> object:
     return previous
 
 
+def with_incidents(document: dict[str, object], incidents: list[dict[str, object]]) -> dict[str, object]:
+    document["incidents"] = incidents
+    if any("resolved_at" not in incident for incident in incidents):
+        document["state"] = "DEGRADED"
+    return document
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--previous", type=Path)
@@ -145,8 +152,10 @@ def main() -> None:
     args = parser.parse_args()
     previous = load_previous(args.previous)
     observations = {name: probe(name, target) for name, target in TARGETS.items()}
-    document = build_document(datetime.now(timezone.utc), previous, observations)
-    document["incidents"] = confirmed_incidents(json.loads(args.incidents.read_text()))
+    document = with_incidents(
+        build_document(datetime.now(timezone.utc), previous, observations),
+        confirmed_incidents(json.loads(args.incidents.read_text())),
+    )
     args.output.write_text(json.dumps(document, separators=(",", ":"), sort_keys=True) + "\n")
 
 

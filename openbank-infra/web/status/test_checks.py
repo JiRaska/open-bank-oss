@@ -70,6 +70,13 @@ class StatusEvidenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 checks.load_previous(path)
 
+    def test_open_confirmed_incident_prevents_green_headline(self):
+        document = checks.build_document(self.now, None, self.green)
+        self.assertEqual(document["state"], "OPERATIONAL")
+        incident = checks.confirmed_incidents([{"id": "incident-1", "summary": "Interruption",
+            "started_at": "2026-10-07T11:00:00Z", "confirmed": True}])
+        self.assertEqual(checks.with_incidents(document, incident)["state"], "DEGRADED")
+
 
 if __name__ == "__main__":
     unittest.main()

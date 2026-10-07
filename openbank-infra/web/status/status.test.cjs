@@ -10,6 +10,8 @@ const fresh = {
   expires_at: '2026-10-07T12:09:00Z',
   state: 'OPERATIONAL',
   checks: Object.fromEntries(names.map(name => [name, { ok: true }])),
+  history: [],
+  incidents: [],
 }
 
 test('status is unverified when evidence expires or a required check disappears', () => {
@@ -17,6 +19,7 @@ test('status is unverified when evidence expires or a required check disappears'
   assert.equal(verifiedDocument(fresh, now + 10 * 60_000), false)
   assert.equal(verifiedDocument({ ...fresh, checks: { dns: { ok: true } } }, now), false)
   assert.equal(verifiedDocument({ ...fresh, observed_at: '2026-10-07T12:01:00Z' }, now), false)
+  assert.equal(verifiedDocument({ ...fresh, incidents: undefined }, now), false)
 })
 
 test('observed availability does not imply 24-hour coverage', () => {
