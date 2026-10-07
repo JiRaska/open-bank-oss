@@ -40,6 +40,8 @@ import com.openbank.treasury.domain.model.JournalSpec
 import com.openbank.treasury.domain.model.LimitCheck
 import com.openbank.treasury.domain.model.PostingEvent
 import com.openbank.treasury.domain.model.PostingRules
+import com.openbank.treasury.domain.model.ProductLimitApplied
+import com.openbank.treasury.domain.model.ProductLimitPolicy
 import com.openbank.treasury.domain.model.ProductType
 import java.math.BigDecimal
 import java.time.Clock
@@ -72,6 +74,11 @@ class TreasuryDealService(
     private val confirmationRequired: Boolean = true,
     /** ADR-0315 D9: when set and enabled, a simulated counterparty confirms only deals struck at its quote. */
     private val simulatedQuotes: SimulatedQuoteService? = null,
+    /**
+     * ADR-0315 D4 product limits (`openbank.treasury.product-limits`). Required, no default: a
+     * service constructed without a mandate must not book as though every product were permitted.
+     */
+    private val productLimits: ProductLimitPolicy,
 ) : TreasuryDealUseCase {
 
     override suspend fun draft(command: DraftDealCommand, actor: Actor, key: String?): Deal {
@@ -110,14 +117,19 @@ class TreasuryDealService(
     override suspend fun submit(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, SUBMIT, dealId)?.let { return it } }
         val deal = load(dealId)
-        return deals.save(deal.submit(actor, limitCheck(deal), clock.instant()), command = cmd(key, SUBMIT, dealId))
+        return deals.save(
+            deal.submit(actor, limitCheck(deal), clock.instant(), productLimits.evaluate(deal)),
+            command = cmd(key, SUBMIT, dealId),
+        )
     }
 
     override suspend fun approve(dealId: UUID, actor: Actor, key: String?): Deal {
         key?.let { k -> replay(k, APPROVE, dealId)?.let { return it } }
         val deal = load(dealId)
-        // Re-checked at approval: exposure may have moved since submission.
-        val booked = deal.approve(actor, limitCheck(deal), clock.instant())
+        // Re-checked at approval: exposure may have moved, and the product mandate may have been
+        // tightened, since submission (ADR-0315 D4).
+        val productCheck = productLimits.evaluate(deal)
+        val booked = deal.approve(actor, limitCheck(deal), clock.instant(), productCheck)
         val event = DealEvent(
             DealBooked.EVENT_TYPE,
             objectMapper.writeValueAsString(
@@ -135,6 +147,7 @@ class TreasuryDealService(
                     occurredAt = booked.updatedAt,
                     fxSide = booked.fx?.side,
                     counterAmount = booked.fx?.counterAmount,
+                    productLimit = productCheck.limit?.let { ProductLimitApplied.of(it, booked.currency) },
                 ),
             ),
         )

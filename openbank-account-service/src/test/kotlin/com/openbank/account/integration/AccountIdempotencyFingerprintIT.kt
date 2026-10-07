@@ -6,6 +6,7 @@ package com.openbank.account.integration
 
 import com.openbank.account.application.port.`in`.AccountUseCase
 import com.openbank.account.application.usecase.AccountService
+import com.openbank.libs.idempotency.IdempotencyScope
 import com.openbank.libs.idempotency.IdempotencyStore
 import com.openbank.libs.idempotency.ReserveResult
 import com.openbank.libs.idempotency.impl.RedisIdempotencyStore
@@ -151,8 +152,9 @@ class AccountIdempotencyFingerprintIT {
         QuarkusMock.installMockForType(failingUseCase, AccountUseCase::class.java)
 
         val flakyRelease = mockk<RedisIdempotencyStore>(relaxed = true)
-        coEvery { flakyRelease.reserve(any(), any(), any()) } returns ReserveResult.Reserved
-        coEvery { flakyRelease.release(any(), any()) } throws IllegalStateException("redis unavailable")
+        coEvery { flakyRelease.reserve(any<IdempotencyScope>(), any(), any(), any()) } returns ReserveResult.Reserved
+        coEvery { flakyRelease.release(any<IdempotencyScope>(), any(), any()) } throws
+            IllegalStateException("redis unavailable")
         QuarkusMock.installMockForType(flakyRelease, IdempotencyStore::class.java)
 
         // The open failure (422, from the use case's IllegalStateException) must surface — not the
@@ -191,7 +193,9 @@ class AccountIdempotencyFingerprintIT {
     }
 
     private fun evictRedis(key: String) {
-        redis.key().del("idempotency:$key").await().indefinitely()
+        // The record lives under the caller's scope; deleting exactly one key proves the resource wrote it there.
+        val scoped = "idempotency:" + IdempotencyScope("account-service", OPERATOR).storeKey(key)
+        assertThat(redis.key().del(scoped).await().indefinitely()).isEqualTo(1)
     }
 
     private fun open(key: String, json: String): Response = RestAssured.given()

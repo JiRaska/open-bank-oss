@@ -16,6 +16,24 @@ erDiagram
     timestamptz created_at "DEFAULT NOW(), nemenne"
     timestamptz updated_at "DEFAULT NOW(), meni se pri kazdem prechodu"
   }
+  SETTLEMENT_OPERATOR_APPROVALS {
+    uuid id PK "approval id returned in the 202 body"
+    text action "settlement.create"
+    text maker_id "operator who parked the request"
+    varchar status "PENDING|APPROVED|REJECTED|EXECUTED"
+    timestamptz expires_at "authorization deadline"
+    text decided_by "checker, never the maker (CHECK)"
+    timestamptz claimed_at "set once when the approved retry executes"
+    varchar request_fingerprint "SHA-256 of the exact bound request"
+    varchar summary "redacted rendering shown to the checker"
+  }
+  SETTLEMENT_OUTBOX {
+    bigint id PK
+    uuid aggregate_id "settlement or approval id"
+    varchar event_type "SETTLEMENT_STATE_CHANGED or SETTLEMENT_OPERATOR_APPROVAL_CHANGED"
+    uuid settlement_ref FK "generated, set only for state events"
+  }
+  SETTLEMENTS ||--o{ SETTLEMENT_OUTBOX : "state events"
 ```
 
 Měnitelné jsou pouze `status` a `updated_at` — ostatní sloupce mají v `SettlementEntity` `updatable = false`, protože strany a částka settlementu jsou dané při vzniku a mění se jen jeho životní cyklus.
@@ -31,6 +49,7 @@ Flyway, nemměnné historické skripty, pouze dopředu (`migrate-at-start=true`)
 | Skript | Co dělá | Rollback poznámka |
 |---|---|---|
 | `V1__create_settlements.sql` | Tabulka `settlements`: UUID PK přiřazované aplikací, id účtů plátce/příjemce, částka `NUMERIC(19,4)`, ISO-4217 valuta, `status` životního cyklu, `created_at`/`updated_at` s `DEFAULT NOW()` | `DROP TABLE settlements;` — tabulka stojí samostatně (žádné FK ani jedním směrem, žádné sekvence, žádné závislé view), takže drop je úplný a nepotřebuje pořadí. Zničí celou historii settlementů: nejdřív logický dump (`pg_dump -t settlements`), protože tyto řádky jsou jediný záznam o tom, které nohy platby byly zaúčtovány, a platí pro ně sedmiletá `retentionPolicy`. |
+| `V6__durable_operator_approvals.sql` | Tabulka `settlement_operator_approvals` (trvalá schválení čtyř očí, vazba na požadavek, indexy pro pending/tvůrce/retenci); `settlement_outbox` dostává generovaný FK `settlement_ref` a CHECK typu události a ruší prostý FK `aggregate_id`, aby šlo ukládat události schválení | **Nedropovat**: tabulka a její outbox události jsou důkaz autorizace. Rollback = `AUTHZ_FOUR_EYES_ENFORCE=false` a nechat živá schválení vypršet. Staré pody claimují outbox přes `RETURNING *`, proto před migrací pozastavit jejich dispatch. |
 
 ## Indexy
 
@@ -41,10 +60,38 @@ Flyway, nemměnné historické skripty, pouze dopředu (`migrate-at-start=true`)
 | Tabulka | Retence | Důvod |
 |---|---|---|
 | `settlements` | 7 let (deklarovaná `retentionPolicy`) | retence platebních záznamů; řádek je důkaz, že noha settlementu byla zaúčtována |
+| `settlement_operator_approvals` | 1826 dní po `expires_at` (`openbank.settlement.approval-retention-days`) | důkaz autorizace (AMLD čl. 40); maže denně `OperatorApprovalPurgeScheduler` po omezených dávkách, v libovolném stavu po vypršení; živé schválení nikdy |
+| `settlement_outbox` události schválení | nemažou se | zachovaný důkaz o tvůrci, schvalovateli a uplatnění i po smazání řádku schválení |
 
 `evidenceExported: true` v `governance.yaml` — události životního cyklu settlementu jdou jako audit evidence přes Kafku do `audit-service`.
 
-> V tomto schématu **není outbox tabulka**. Služba publikuje audit události přímo, nikoli přes transakční outbox (ADR-0050), takže změna stavu a její událost se necommitují atomicky: pád mezi nimi událost ztratí bez retry a nikdo to nenahlásí. Orchestrace settlementu běží na Temporalu (`SettlementWorkflow`), což pokrývá retry na úrovni workflow, ale ne tohle konkrétní okno dvojího zápisu.
+> Přechody stavu a jejich události se commitují **atomicky** přes transakční outbox `settlement_outbox` (`SettlementAuditWriter`, odesílá `SettlementOutboxDispatcher` do `openbank.settlement.events`). Stejný outbox nese `SETTLEMENT_OPERATOR_APPROVAL_CHANGED`, zapsanou v transakci každého přechodu schválení.
+
+## Schvalování operátorů (čtyři oči)
+
+`settlement.create` je v `rules.yaml` `four_eyes.actions`. Při `AUTHZ_FOUR_EYES_ENFORCE=true` (výchozí `false`) interceptor odloží operátorův `POST /api/v1/settlements` s **202** a PENDING řádkem v `settlement_operator_approvals`, svázaným s přesnou instrukcí přes `request_fingerprint`; nic se nevytvoří. Jiný operátor čte `GET /api/v1/settlements/approvals` (fronta) nebo `GET /api/v1/settlements/approvals/{id}` (libovolný stav, se `summary`) a rozhodne přes `PATCH /api/v1/settlements/approvals/{id}`. Tvůrce zopakuje identický požadavek s `X-Approval-Id`; provede se jednou. Změněná instrukce se odloží znovu. Každý přechod zapíše outbox událost `SETTLEMENT_OPERATOR_APPROVAL_CHANGED`.
+
+Čtení a rozhodování fronty je **jen pro lidské operátory**: OPA politika zamítá každý `service-account-*` principal na `settlement.approval.*` a `settlement.create` už service accountům povolen není.
+
+```mermaid
+sequenceDiagram
+  participant M as Maker (operator)
+  participant S as settlement-service
+  participant C as Checker (operator)
+  M->>S: POST /api/v1/settlements
+  S-->>M: 202 approvalId (PENDING, nothing created)
+  C->>S: GET /api/v1/settlements/approvals/{id}
+  C->>S: PATCH /api/v1/settlements/approvals/{id} approve=true
+  S-->>C: 200 APPROVED
+  M->>S: POST /api/v1/settlements with X-Approval-Id
+  S-->>M: 201 settlement (approval EXECUTED, single use)
+  M->>S: GET /api/v1/settlements/{id}
+  S-->>M: 200 uložený stav (jen čtení, no-store)
+```
+
+### Dotaz na stav settlementu
+
+`GET /api/v1/settlements/{id}` vrací uložený settlement pro rekonciliaci a nikdy nespouští, neobnovuje ani neopakuje workflow. Používá stejný slovník stavů v1 jako založení: dokončení potvrzuje jen `BOOKED` a nejistý pohyb zůstatku se čte jako `PENDING` s `recoveryRequired=true` (`recoveryReason=BALANCE_STATE_UNKNOWN`). `amount` je přesný desetinný text a odpověď má `Cache-Control: no-store`. Přístup mají `ROLE_OPERATOR`/`ROLE_ADMIN` s OPA akcí `settlement.read` (sdílené `operator-read-any`); každý `service-account-*` principal resource odmítne s 403. Chybný identifikátor je 400, neznámý 404 a 404 nedokazuje, že založení, které vypršelo, nemělo účinek. Použijte identifikátor převodu z odpovědi na založení, ne `approvalId`. Admin UI ho zpřístupňuje na `/settlements` (`settlements:view`).
 
 ## PII polia (GDPR)
 

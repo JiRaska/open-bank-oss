@@ -9,6 +9,7 @@ import com.openbank.domestic.domain.model.DomesticPayment
 import com.openbank.domestic.domain.model.DomesticPaymentPriority
 import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticTransferScope
+import com.openbank.libs.domain.money.Money
 import com.openbank.libs.iso20022.Pacs002Builder
 import com.openbank.libs.iso20022.PaymentStatus
 import com.openbank.libs.iso20022.PaymentStatusReport
@@ -80,7 +81,7 @@ class SchemeGatewayAdapterTest {
         debtorAccountNumber = "1234567890", debtorBankCode = "2000",
         debtorName = "Alice", creditorAccountNumber = "9876543210",
         creditorBankCode = "0800", creditorName = "Bob",
-        amount = BigDecimal("100.00"), currency = "CZK",
+        amount = Money.of(BigDecimal("100.00"), "CZK"),
         variableSymbol = "123", specificSymbol = null, constantSymbol = null,
         messageForPayee = null, priority = DomesticPaymentPriority.STANDARD,
         transferScope = DomesticTransferScope.INTERNAL_CLIENT,

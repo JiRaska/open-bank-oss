@@ -97,6 +97,8 @@ on:
     paths:
       - ".github/workflows/**"
       - ".github/scripts/check-main-red-watch.py"
+      - ".github/scripts/main-red-watch-order.cjs"
+      - ".github/scripts/test-main-red-watch-order.cjs"
   workflow_dispatch:
     inputs:
       run_id:
@@ -110,9 +112,15 @@ permissions:
   contents: read
 
 concurrency:
-  # Serialise per watched workflow so two completions cannot race the same issue.
-  # O(1) in the fleet size: a group name is not a place to carry data (#3082).
-  group: main-red-watch-${{ github.event.workflow_run.name || github.ref }}
+  # Serialise real verdicts per watched workflow so two completions cannot race
+  # the same issue. GitHub replaces an older PENDING run in a group even with
+  # cancel-in-progress=false; a cancelled/skipped/neutral source event must not
+  # evict a pending red or green verdict. Those events get a separate group and
+  # skip the watch job without allocating a runner.
+  group: >-
+    main-red-watch-${{ github.event.workflow_run.name || github.ref }}-${{
+    contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion)
+    && 'ignored' || 'verdict' }}
   cancel-in-progress: false
 
 jobs:
@@ -127,7 +135,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: bash .github/scripts/install-pyyaml-hash-pinned.sh
       - name: Self-test the watcher
-        run: python3 .github/scripts/check-main-red-watch.py --self-test
+        run: |
+          python3 .github/scripts/check-main-red-watch.py --self-test
+          node .github/scripts/test-main-red-watch-order.cjs
       - name: Every push-on-main workflow is watched or declared
         run: python3 .github/scripts/check-main-red-watch.py --check-declaration
 
@@ -140,7 +150,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event.workflow_run.head_branch == 'main' &&
-       github.event.workflow_run.event == 'push')
+       github.event.workflow_run.event == 'push' &&
+       !contains(fromJSON('["cancelled","skipped","neutral"]'), github.event.workflow_run.conclusion))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -203,6 +214,7 @@ jobs:
         with:
           script: |
             const fs = require('fs')
+            const { eventIsSuperseded } = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/main-red-watch-order.cjs`)
             const v = JSON.parse(fs.readFileSync('/tmp/main-red.json', 'utf8'))
             const LABEL = 'main-red'
             const slug = (v.workflow || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -219,22 +231,45 @@ jobs:
               return issues.find(i => (i.body || '').includes(marker))
             }
 
-            if (v.status !== 'red') {
-              // Green (or not a verdict) closes this workflow's issue. Only THIS
+            // Completion order differs from commit order. A slow old CI run may finish
+            // after a newer green one and reopen an already-healed main-red issue.
+            // Query only when an issue would change, to spare the installation API quota.
+            if (v.status !== 'red' && v.status !== 'green') {
+              core.info(`${v.workflow} concluded ${v.status}; leaving issue state unchanged.`)
+              return
+            }
+            const openIssue = v.status === 'green' ? await findByMarker('open') : null
+            if (v.status === 'green' && !openIssue) {
+              core.info(`${v.workflow} green on main; nothing open.`)
+              return
+            }
+            const workflowId = context.payload.workflow_run?.workflow_id
+            if (!Number.isSafeInteger(workflowId) || workflowId < 1) {
+              throw new Error('workflow_run has no valid workflow_id; refusing issue mutation')
+            }
+            const completed = await github.rest.actions.listWorkflowRuns({
+              ...context.repo, workflow_id: workflowId, branch: 'main', event: 'push',
+              status: 'completed', per_page: 10,
+            })
+            const latest = (completed.data.workflow_runs || []).reduce(
+              (newest, run) => !newest || run.id > newest.id ? run : newest, null,
+            )
+            if (eventIsSuperseded(v, latest)) {
+              core.info(`Ignoring superseded ${v.workflow} run ${v.run_id} attempt ${v.attempt}; latest completed is ${latest.id} attempt ${latest.run_attempt}.`)
+              return
+            }
+
+            if (v.status === 'green') {
+              // Green closes this workflow's issue. Only THIS
               // workflow's — Services CI going green says nothing about Trivy.
-              const open = await findByMarker('open')
-              if (open) {
-                await github.rest.issues.createComment({
-                  ...context.repo, issue_number: open.number,
-                  body: `\`${v.workflow}\` is green again on main at \`${(v.head_sha||'').slice(0,9)}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
-                })
-                await github.rest.issues.update({
-                  ...context.repo, issue_number: open.number, state: 'closed',
-                })
-                core.info(`closed #${open.number}`)
-              } else {
-                core.info(`${v.workflow} green on main; nothing open.`)
-              }
+              await github.rest.issues.createComment({
+                ...context.repo, issue_number: openIssue.number,
+                body: `\`${v.workflow}\` is green again on main at \`${(v.head_sha||'').slice(0,9)}\` — closing. _(\`${context.workflow}\` run ${context.runId})_`,
+              })
+              await github.rest.issues.update({
+                ...context.repo, issue_number: openIssue.number, state: 'closed',
+              })
+              core.info(`closed #${openIssue.number}`)
               return
             }
 

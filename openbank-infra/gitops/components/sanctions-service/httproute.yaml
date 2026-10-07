@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+#
+# api.open-bank.tech (/api/v1/sanctions) on the shared Gateway (ADR-0324 Phase 4), the Gateway API
+# translation of the `sanctions-api` Ingress in ingress.yaml. The services validate the bearer token
+# themselves (OIDC); the edge never authenticated these requests and does not start now.
+#
+# ONE HOST, FOUR NAMESPACES. api.open-bank.tech is served by four routes (accounts, balances,
+# payments, sanctions), each beside the Services it targets, exactly as the four nginx Ingresses
+# were. They attach to ONE listener, https-api (envoy-gateway/gateway.yaml), which admits only
+# those four namespaces and serves ONE Secret, `api-edge-tls` (envoy-gateway/api-edge-tls.yaml):
+# a listener carries one certificate per hostname, where nginx picked one of four per-Ingress
+# Secrets. The host is NOT key-pinned by the mobile app (ADR-0086 pins customer and kc only).
+#
+# HELD OUT OF DNS. The route carries `external-dns.kubernetes.io/controller:
+# gateway-api-cutover-pending`, which external-dns skips, so api.open-bank.tech keeps resolving
+# to ingress-nginx. Three steps, each its own change: (1) the four routes, their policies and
+# the api-edge-tls Certificate; (2) the https-api listener and its ClientTrafficPolicy;
+# (3) the DNS cutover, which moves ALL FOUR routes in one change — external-dns would otherwise
+# publish one host from two load balancers.
+#
+# Annotation mapping from ingress.yaml:
+#   ssl-redirect              -> the Gateway's http listener redirects every host (301)
+#   limit-rps 20 x burst 3    -> local rate limit PER CLIENT IP (sourceCIDR Distinct), 20/s, one
+#                                bucket set per route as nginx kept one zone per Ingress. Envoy's
+#                                local bucket size equals its refill, so the burst is 20 where nginx
+#                                allowed 60; the sustained rate is the same. Like nginx's, the
+#                                bucket is per proxy replica.
+#   limit-connections 10      -> NO per-client equivalent exists in Envoy Gateway. Replaced by
+#                                three coarser bounds (owner decision, ADR-0324 Phase 4 amendment):
+#                                the per-client RATE limit above; a listener-wide connectionLimit
+#                                (envoy-gateway/gateway.yaml ClientTrafficPolicy api-edge); and the
+#                                per-backend circuitBreaker below. Residual risk: one client can
+#                                hold more than 10 concurrent connections, bounded only by the
+#                                listener total; recorded in ADR-0324 and the threat models.
+#   controller HSTS (2y, includeSubDomains, preload), nosniff, hide-headers X-Powered-By
+#                             -> ResponseHeaderModifier below, same values
+#   (nginx default) client_max_body_size 1m, proxy_read_timeout 60s
+#                             -> requestBuffer 1Mi, requestTimeout 60s
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: sanctions-api
+  namespace: sanctions
+  annotations:
+    # Held out of DNS until the cutover change (step 3 above).
+    external-dns.kubernetes.io/controller: gateway-api-cutover-pending
+spec:
+  parentRefs:
+    - name: edge
+      namespace: envoy-gateway-system
+      sectionName: https-api
+  hostnames:
+    - api.open-bank.tech
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v1/sanctions
+      filters:
+        - type: ResponseHeaderModifier
+          responseHeaderModifier:
+            set:
+              - name: Strict-Transport-Security
+                value: "max-age=63072000; includeSubDomains; preload"
+              - name: X-Content-Type-Options
+                value: nosniff
+            remove:
+              - X-Powered-By
+      backendRefs:
+        - name: sanctions-service
+          port: 8123
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: BackendTrafficPolicy
+metadata:
+  name: sanctions-api
+  namespace: sanctions
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: sanctions-api
+  requestBuffer:
+    limit: 1Mi
+  timeout:
+    http:
+      requestTimeout: 60s
+  # Per backend, per proxy replica: bounds what any mix of clients can pile onto one service
+  # (the part of limit-connections that protected the BACKEND). Sized far above the measured
+  # peak (~1 req/s on the whole host over Prometheus' ~3.8-day retention, 2026-10-04) so it
+  # trips only on abuse, never on legitimate use.
+  circuitBreaker:
+    maxConnections: 200
+    maxPendingRequests: 100
+    maxParallelRequests: 200
+  rateLimit:
+    local:
+      rules:
+        # One bucket per distinct client address. No rule without clientSelectors, so there is
+        # no route-wide ceiling: a shared bucket would let one noisy client starve every other.
+        - clientSelectors:
+            - sourceCIDR:
+                type: Distinct
+                value: 0.0.0.0/0
+          limit:
+            requests: 20
+            unit: Second

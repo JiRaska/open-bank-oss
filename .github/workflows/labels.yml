@@ -19,7 +19,6 @@ on:
 # must be stated for actions/checkout, alongside the `issues: write` the sync needs.
 permissions:
   contents: read
-  issues: write
 
 concurrency:
   group: label-sync
@@ -27,6 +26,9 @@ concurrency:
 
 jobs:
   sync:
+    permissions:
+      contents: read
+      issues: write  # labels are repo metadata under the issues scope
     name: Sync labels
     # Only depends on `curl` (present everywhere, incl. ubuntu-latest) and a version-pinned
     # `yq` fetched into RUNNER_TEMP — no self-hosted-pool-specific tooling. Public repo =

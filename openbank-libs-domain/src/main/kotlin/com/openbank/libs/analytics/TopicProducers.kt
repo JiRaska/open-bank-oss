@@ -36,6 +36,7 @@ package com.openbank.libs.analytics
 object TopicProducers {
 
     private val TOPIC_TO_SERVICE = mapOf(
+        "openbank.settlement.events" to "settlement-service",
         "openbank.accounts.account.created" to "account-service",
         "openbank.transactions.transaction.initiated" to "transaction-service",
         "openbank.balance.events" to "balance-service",
@@ -55,6 +56,7 @@ object TopicProducers {
         "openbank.sepa.instant.events" to "sepa-instant",
         "openbank.fx.conversion.completed" to "fx-service",
         "openbank.fx.fixing.published" to "fx-service",
+        "openbank.fx.cnb-policy-rate.published" to "fx-service",
         "openbank.documents.document.event" to "document-service",
         "openbank.payments.swift.event" to "swift-service",
         "openbank.lending.events" to "lending-service",

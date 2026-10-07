@@ -123,6 +123,35 @@ data class TreasuryDealEvent(
     val maturityDate: LocalDate?,
 )
 
+/**
+ * One ČNB policy-rate / minimum-reserve fact as received from fx-service
+ * (`fx.cnb-policy-rate.published.v1`). [rate] is a fraction.
+ */
+data class CnbPolicyRateFactRow(
+    val instrument: String,
+    val effectiveFrom: LocalDate,
+    val rate: BigDecimal,
+    val sourceUrl: String,
+    val fetchedAt: Instant,
+    val contentSha256: String,
+    val note: String?,
+    val revised: Boolean,
+    val receivedAt: Instant,
+)
+
+enum class FactUpsert { INSERTED, REVISED, DUPLICATE }
+
+interface CnbPolicyRateFactRepository {
+    /**
+     * Idempotent on (instrument, effectiveFrom): the same rate again is [FactUpsert.DUPLICATE]; a
+     * different rate for a stored key is fx-service's revision and is applied ([FactUpsert.REVISED]).
+     */
+    suspend fun upsert(fact: CnbPolicyRateFactRow): FactUpsert
+
+    /** The fact of [instrument] with the latest effectiveFrom <= [asOf], or null — never a default. */
+    suspend fun effectiveAt(instrument: String, asOf: LocalDate): CnbPolicyRateFactRow?
+}
+
 interface FxFixingRepository {
     /** Inserts each rate unless (source, fixingDate, currency) exists. Returns how many were new. */
     suspend fun insertIfAbsent(rates: List<FxFixingRate>): Int
@@ -142,11 +171,17 @@ class UntiedSnapshotException(val runId: UUID, val mismatches: List<TieOutMismat
     RuntimeException("snapshot run $runId did not tie out to the ledger (${mismatches.size} mismatches)")
 
 interface CurveSetRepository {
-    /** The [limit] most recently recorded curve sets, newest first. */
-    suspend fun listRecent(limit: Int): List<CurveSetSummary>
+    /** The [limit] most recently recorded curve sets, newest first; only those as of [asOf] when given. */
+    suspend fun listRecent(limit: Int, asOf: LocalDate? = null): List<CurveSetSummary>
 
     /** Stores the set, its input quotes and its bootstrapped pillars in one transaction. */
     suspend fun save(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>)
+
+    /**
+     * Like [save], but a set whose id is already stored is left untouched and `false` is returned —
+     * the idempotent write for sets with a deterministic id (the sandbox reference set).
+     */
+    suspend fun saveIfAbsent(set: CurveSet, quotes: Map<CurveIndex, List<MoneyMarketQuote>>): Boolean
 
     suspend fun findById(id: UUID): CurveSet?
 

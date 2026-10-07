@@ -4,6 +4,7 @@
 
 package com.openbank.libs.domain.money
 
+import com.openbank.libs.domain.error.requireParam
 import java.math.BigDecimal
 import java.math.BigInteger
 import java.math.RoundingMode
@@ -181,6 +182,55 @@ class Money private constructor(val amount: BigDecimal, val currency: CurrencyCo
 
         fun of(amount: String, currencyCode: String): Money = invoke(parseAmount(amount), CurrencyCode.of(currencyCode))
 
+        /**
+         * Builds a [Money] from a request's `amount` and `currency` at the API boundary.
+         *
+         * The currency is trimmed and then validated case-insensitively, so `" eur"` means EUR. A
+         * missing value is a `ValidationFailure` naming the field; every refusal of the value itself
+         * is an [InvalidMoneyException] carrying its [InvalidMoneyReason] and the field it came from,
+         * which libs-runtime renders as `AMOUNT_SCALE_EXCEEDED`, `CURRENCY_UNSUPPORTED` or
+         * `VALIDATION_ERROR` (ADR-0326). The rejected value is never part of the client message.
+         *
+         * [requirePositive] (off by default, so existing callers are unchanged) additionally refuses
+         * an amount that is zero or negative as [InvalidMoneyReason.NOT_POSITIVE] →
+         * `AMOUNT_NOT_POSITIVE`, attributed to [amountField]. A payment or credit amount is almost
+         * always required to be strictly positive; asking the kernel for it gives every service the
+         * same code and shape instead of a service-local check. JPY `0` is zero like EUR `0.00`.
+         */
+        fun parseInbound(
+            amount: BigDecimal?,
+            currency: String?,
+            amountField: String = "amount",
+            currencyField: String = "currency",
+            requirePositive: Boolean = false,
+        ): Money {
+            val presentAmount = requireParam(amount, amountField)
+            val presentCurrency = requireParam(currency, currencyField)
+            val code = try {
+                CurrencyCode.of(presentCurrency.trim())
+            } catch (e: InvalidMoneyException) {
+                throw e.forField(currencyField)
+            }
+            val money = try {
+                invoke(presentAmount, code)
+            } catch (e: InvalidMoneyException) {
+                throw e.forField(amountField)
+            }
+            if (requirePositive) requirePositive(money, amountField)
+            return money
+        }
+
+        private fun requirePositive(money: Money, field: String) {
+            if (money.amount.signum() <= 0) {
+                throw InvalidMoneyException(
+                    InvalidMoneyReason.NOT_POSITIVE,
+                    "Amount must be greater than zero",
+                    clientMessage = "Amount must be greater than zero",
+                    field = field,
+                )
+            }
+        }
+
         fun zero(currencyCode: String): Money = invoke(BigDecimal.ZERO, CurrencyCode.of(currencyCode))
 
         /**
@@ -209,13 +259,19 @@ class Money private constructor(val amount: BigDecimal, val currency: CurrencyCo
         private fun requireInRange(amount: BigDecimal) {
             val scale = amount.scale()
             val integerDigits = amount.precision().toLong() - scale.toLong()
-            require(integerDigits <= MAX_INTEGER_DIGITS) {
-                "Amount has $integerDigits integer digits; at most $MAX_INTEGER_DIGITS are supported"
+            if (integerDigits > MAX_INTEGER_DIGITS) {
+                throw outOfRange("Amount has $integerDigits integer digits; at most $MAX_INTEGER_DIGITS are supported")
             }
-            require(scale <= MAX_INPUT_SCALE) {
-                "Amount scale $scale exceeds the supported maximum of $MAX_INPUT_SCALE"
+            if (scale > MAX_INPUT_SCALE) {
+                throw outOfRange("Amount scale $scale exceeds the supported maximum of $MAX_INPUT_SCALE")
             }
         }
+
+        private fun outOfRange(message: String) = InvalidMoneyException(
+            InvalidMoneyReason.AMOUNT_OUT_OF_RANGE,
+            message,
+            clientMessage = "Amount is out of the supported range",
+        )
 
         private fun canonical(amount: BigDecimal, currency: CurrencyCode): BigDecimal {
             requireInRange(amount)
@@ -224,9 +280,11 @@ class Money private constructor(val amount: BigDecimal, val currency: CurrencyCo
             return try {
                 amount.setScale(digits, RoundingMode.UNNECESSARY)
             } catch (e: ArithmeticException) {
-                throw IllegalArgumentException(
+                throw InvalidMoneyException(
+                    InvalidMoneyReason.SCALE_EXCEEDED,
                     "Amount scale ${amount.scale()} exceeds currency ${currency.code} fraction digits $digits",
-                    e,
+                    clientMessage = "Amount must have at most $digits decimal places for ${currency.code}",
+                    cause = e,
                 )
             }
         }

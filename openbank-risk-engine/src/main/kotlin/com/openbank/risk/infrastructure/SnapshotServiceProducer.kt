@@ -14,6 +14,7 @@ import com.openbank.risk.application.port.`in`.LiquidityUseCase
 import com.openbank.risk.application.port.`in`.MinReservesPeriodUseCase
 import com.openbank.risk.application.port.`in`.MinReservesUseCase
 import com.openbank.risk.application.port.`in`.SnapshotUseCase
+import com.openbank.risk.application.port.out.CnbPolicyRateFactRepository
 import com.openbank.risk.application.port.out.CurveSetRepository
 import com.openbank.risk.application.port.out.FxFixingRepository
 import com.openbank.risk.application.port.out.LedgerPort
@@ -29,17 +30,21 @@ import com.openbank.risk.application.usecase.LiquidityForecastService
 import com.openbank.risk.application.usecase.LiquidityService
 import com.openbank.risk.application.usecase.MinReservesPeriodService
 import com.openbank.risk.application.usecase.MinReservesService
+import com.openbank.risk.application.usecase.ReferenceCurveSetSeeder
+import com.openbank.risk.application.usecase.ReportingFixings
 import com.openbank.risk.application.usecase.SnapshotService
 import com.openbank.risk.domain.cashflow.BehaviouralModel
 import com.openbank.risk.domain.irrbb.IrrbbParameters
 import com.openbank.risk.domain.irrbb.PostShockFloor
 import com.openbank.risk.domain.irrbb.ShockSizes
+import com.openbank.risk.domain.limits.LimitMetric
 import com.openbank.risk.domain.model.ModelVersions
 import com.openbank.risk.domain.model.Provenance
 import io.quarkus.runtime.StartupEvent
 import jakarta.enterprise.context.ApplicationScoped
 import jakarta.enterprise.event.Observes
 import jakarta.enterprise.inject.Produces
+import jakarta.inject.Inject
 import org.eclipse.microprofile.config.inject.ConfigProperty
 import java.time.Clock
 import java.util.Optional
@@ -56,6 +61,11 @@ import java.util.Optional
 @Suppress("TooManyFunctions")
 @ApplicationScoped
 class SnapshotServiceProducer {
+
+    // Field-injected (detekt LongParameterList on the IRRBB producer): the declared limit set, so the
+    // IRRBB read's outlier test uses the same `irrbb-eve-outlier` limit as GET .../limits.
+    @Inject
+    lateinit var limitsConfig: LimitsConfig
 
     @ConfigProperty(name = "openbank.risk.provenance", defaultValue = "synthetic")
     lateinit var provenance: String
@@ -132,6 +142,15 @@ class SnapshotServiceProducer {
     fun curveSetUseCase(repository: CurveSetRepository, clock: Clock): CurveSetUseCase =
         CurveSetService(repository, clock)
 
+    /** The sandbox reference curves; refuses to seed under `production` provenance (ADR-0313 D13). */
+    @Produces
+    @ApplicationScoped
+    fun referenceCurveSetSeeder(
+        repository: CurveSetRepository,
+        snapshots: SnapshotUseCase,
+        clock: Clock,
+    ): ReferenceCurveSetSeeder = ReferenceCurveSetSeeder(repository, snapshots, Provenance.parse(provenance), clock)
+
     /** The behavioural model is code, not config: a parameter change is a new model version. */
     @Produces
     @ApplicationScoped
@@ -142,8 +161,7 @@ class SnapshotServiceProducer {
      * IRRBB parameters (ADR-0313 phase 1) — CONFIGURATION, never code defaults:
      *  - `openbank.risk.irrbb.shock-sizes`: `CCY=parallel/short/long` in bp, `;`-separated. A
      *    currency absent here gets no scenarios and is reported "not configured". application.yaml
-     *    ships EUR only, from BCBS d368 Annex 2 Table 1. CZK is not in that table; its calibration
-     *    must be taken from the EBA supervisory-outlier-test RTS by the operator.
+     *    ships CZK and EUR from Delegated Regulation (EU) 2024/856 Annex Part A (see there).
      *  - `openbank.risk.irrbb.shock-source`: the citation reported with every result.
      *  - `openbank.risk.irrbb.post-shock-floor`: `atZeroBp/slopeBpPerYear`. d368 leaves floors to
      *    national supervisors (not above zero); unset means NO floor, and the response says so.
@@ -157,11 +175,17 @@ class SnapshotServiceProducer {
         @ConfigProperty(name = "openbank.risk.irrbb.shock-source") shockSource: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor") floor: Optional<String>,
         @ConfigProperty(name = "openbank.risk.irrbb.post-shock-floor-source") floorSource: Optional<String>,
+        fixings: FxFixingRepository,
+        capital: CapitalUseCase,
     ): IrrbbUseCase = IrrbbService(
         snapshots,
         curveSets,
         BehaviouralModel.NMD_PHASE0,
         irrbbParameters(shockSizes, shockSource, floor, floorSource),
+        ReportingFixings(fixings),
+        capital,
+        // The outlier test on the IRRBB read uses the SAME declared limit as GET .../limits.
+        limitsConfig.toLimitSet().limits.firstOrNull { it.metric == LimitMetric.IRRBB_EVE_OUTLIER },
     )
 
     /**
@@ -229,8 +253,11 @@ class SnapshotServiceProducer {
      */
     @Produces
     @ApplicationScoped
-    fun minReservesUseCase(snapshots: SnapshotUseCase, config: MinReservesConfig): MinReservesUseCase =
-        MinReservesService(snapshots, config.toParameters())
+    fun minReservesUseCase(
+        snapshots: SnapshotUseCase,
+        config: MinReservesConfig,
+        facts: CnbPolicyRateFactRepository,
+    ): MinReservesUseCase = MinReservesService(snapshots, config.toParameters(), facts)
 
     /** Maintenance-period averaging (ADR-0315 D8) under `openbank.risk.min-reserves.maintenance-calendar`. */
     @Produces
@@ -239,7 +266,9 @@ class SnapshotServiceProducer {
         snapshots: SnapshotUseCase,
         config: MinReservesConfig,
         clock: Clock,
-    ): MinReservesPeriodUseCase = MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock)
+        facts: CnbPolicyRateFactRepository,
+    ): MinReservesPeriodUseCase =
+        MinReservesPeriodService(snapshots, config.toParameters(), config.toCalendar(), clock, facts)
 
     /** Same reason as [validateLiquidityParameters]: a bad rate or calendar must fail the deploy, not a request. */
     @Suppress("UnusedParameter") // the event only schedules the call

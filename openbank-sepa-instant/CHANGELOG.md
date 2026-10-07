@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.11.3](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.2...sepa-instant-v0.11.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.11.2](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.1...sepa-instant-v0.11.2) (2026-10-04)
+
+
+### Bug Fixes
+
+* **domestic-payment:** report an unrecognised fraud verdict as UNKNOWN, not ALLOW ([#11614](https://github.com/JiRaska/open-bank-oss/issues/11614)) ([f6676f5](https://github.com/JiRaska/open-bank-oss/commit/f6676f5f31f058d939c58cd7a4321e8053e3d994))
+
+## [0.11.1](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.11.0...sepa-instant-v0.11.1) (2026-10-03)
+
+
+### Bug Fixes
+
+* **sepa-instant:** refuse non-EUR submissions ([#11933](https://github.com/JiRaska/open-bank-oss/issues/11933)) ([7f8e7c1](https://github.com/JiRaska/open-bank-oss/commit/7f8e7c10b28a062a177e72e442c02eb3421cfd8c)), closes [#11913](https://github.com/JiRaska/open-bank-oss/issues/11913)
+
+## [0.11.0](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.5...sepa-instant-v0.11.0) (2026-10-03)
+
+
+### Features
+
+* **sepa-instant:** validate SCT Inst amount and currency as kernel Money ([#11912](https://github.com/JiRaska/open-bank-oss/issues/11912)) ([5d753fa](https://github.com/JiRaska/open-bank-oss/commit/5d753fa9aaad5bd1c9e9b758e10afdb031c945c7))
+
 ## [0.10.5](https://github.com/JiRaska/open-bank-oss/compare/sepa-instant-v0.10.4...sepa-instant-v0.10.5) (2026-09-29)
 
 

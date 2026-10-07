@@ -10,6 +10,7 @@ import com.openbank.domestic.domain.model.DomesticPaymentStatus
 import com.openbank.domestic.domain.model.DomesticRejectReason
 import com.openbank.domestic.domain.model.DomesticTransferScope
 import com.openbank.domestic.infrastructure.persistence.entity.DomesticPaymentEntity
+import com.openbank.libs.domain.money.Money
 
 fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.paymentId = id
@@ -22,7 +23,7 @@ fun DomesticPayment.toEntity() = DomesticPaymentEntity().also {
     it.creditorAccountNumber = creditorAccountNumber
     it.creditorBankCode = creditorBankCode
     it.creditorName = creditorName
-    it.amount = amount
+    it.amount = amount.amount
     it.currency = currency
     it.variableSymbol = variableSymbol
     it.specificSymbol = specificSymbol
@@ -58,8 +59,10 @@ fun DomesticPaymentEntity.toDomain() = DomesticPayment(
     creditorAccountNumber = creditorAccountNumber,
     creditorBankCode = creditorBankCode,
     creditorName = creditorName,
-    amount = amount,
-    currency = currency,
+    // NUMERIC(20,6) column, kernel Money in the domain (#11604): a stored value always has at most
+    // the currency's minor-unit digits (every write came through the inbound Money boundary), so
+    // this is an exact rescale — 100.500000 CZK reads back as 100.50 CZK, numerically equal.
+    amount = Money.of(amount, currency),
     variableSymbol = variableSymbol,
     specificSymbol = specificSymbol,
     constantSymbol = constantSymbol,

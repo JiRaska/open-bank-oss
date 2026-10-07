@@ -42,22 +42,34 @@ class CurrencyCode private constructor(val code: String, val defaultFractionDigi
 
         /**
          * Validates and normalises [code]: exactly three ASCII letters in either case, known to
-         * ISO 4217, with a defined minor unit. Throws [IllegalArgumentException] otherwise.
+         * ISO 4217, with a defined minor unit. Throws [InvalidMoneyException]
+         * ([InvalidMoneyReason.CURRENCY_UNSUPPORTED], an [IllegalArgumentException]) otherwise.
          */
         fun of(code: String): CurrencyCode {
-            require(code.length == CODE_LENGTH && code.all { it in 'A'..'Z' || it in 'a'..'z' }) {
-                "Currency code must be 3 letters (ISO 4217): '${code.take(ECHO_LIMIT)}'"
+            if (code.length != CODE_LENGTH || !code.all { it in 'A'..'Z' || it in 'a'..'z' }) {
+                throw unsupported("Currency code must be 3 letters (ISO 4217): '${code.take(ECHO_LIMIT)}'")
             }
             val normalised = code.uppercase(Locale.ROOT)
-            val currency = try {
-                Currency.getInstance(normalised)
-            } catch (e: IllegalArgumentException) {
-                throw IllegalArgumentException("Unknown ISO 4217 currency code: $normalised", e)
-            }
-            require(currency.defaultFractionDigits >= 0) {
-                "Currency $normalised has no minor unit (ISO 4217) and cannot denominate a monetary amount"
+            val currency = isoCurrency(normalised)
+            if (currency.defaultFractionDigits < 0) {
+                throw unsupported(
+                    "Currency $normalised has no minor unit (ISO 4217) and cannot denominate a monetary amount",
+                )
             }
             return CurrencyCode(normalised, currency.defaultFractionDigits)
         }
+
+        private fun isoCurrency(normalised: String): Currency = try {
+            Currency.getInstance(normalised)
+        } catch (e: IllegalArgumentException) {
+            throw unsupported("Unknown ISO 4217 currency code: $normalised", e)
+        }
+
+        private fun unsupported(message: String, cause: Throwable? = null) = InvalidMoneyException(
+            InvalidMoneyReason.CURRENCY_UNSUPPORTED,
+            message,
+            clientMessage = "Currency must be an ISO 4217 code with a minor unit",
+            cause = cause,
+        )
     }
 }

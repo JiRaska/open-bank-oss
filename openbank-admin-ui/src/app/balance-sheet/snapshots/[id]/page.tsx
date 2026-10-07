@@ -14,6 +14,8 @@
 //     not expand are counted with the engine's own reason — neither is ever drawn as a zero.
 //   - A risk limit the engine could not evaluate is NOT_EVALUABLE with the engine's reason: no
 //     figure, and never a green badge (ADR-0313 D9).
+//   - The IRRBB summary lists every data gap the engine reports (flat curve extrapolation,
+//     behavioural simplifications) next to the figures, never only on the detail page.
 
 'use client'
 
@@ -34,6 +36,7 @@ import {
 } from '@/components/balance-sheet/contracts'
 import { ladderRows } from '@/components/balance-sheet/model'
 import { InstrumentsPanel } from '@/components/balance-sheet/InstrumentsPanel'
+import { IrrbbSummaryPanel } from '@/components/balance-sheet/IrrbbSummaryPanel'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 // Recharts loads only once a TIED_OUT run has flows to draw; the placeholder reserves the height.
@@ -206,6 +209,11 @@ function SnapshotDetail({ id }: { id: string }) {
             ) : limits ? (
               <LimitsPanel limits={limits} locale={locale} />
             ) : null}
+          </div>
+
+          <div className="card" style={{ marginBottom: 16, overflowX: 'auto' }}>
+            <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{t('Úrokové riziko bankovní knihy (IRRBB)', 'Interest-rate risk in the banking book (IRRBB)')}</h2>
+            <IrrbbSummaryPanel runId={run.id} />
           </div>
 
           <div className="card" style={{ marginBottom: 16 }}>

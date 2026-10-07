@@ -12,6 +12,8 @@
 //     showing a silent zero.
 //   - The engine's assumptions — including what is NOT modelled — are listed with the figures, and
 //     provenance is on the page (synthetic data labelled).
+//   - A curve set IS required: floating-rate loans project their interest from it, and the engine
+//     refuses a set of another date — so only sets as of the run's own date are offered.
 
 'use client'
 
@@ -22,11 +24,20 @@ import { AuthGuard } from '@/components/auth/AuthGuard'
 import { DataUnavailable, type UnavailableKind } from '@/components/feedback/DataUnavailable'
 import { PageHeader, StatusBadge } from '@/components/ui'
 import { ProvenanceBadge } from '@/components/balance-sheet/ProvenanceBadge'
+import { CurveSetPicker, RunSubtitle, useCurveSets, useRun } from '@/components/balance-sheet/RunContext'
 import { getJson, riskUrl } from '@/components/balance-sheet/api'
-import { curveSetListSchema, liquidityForecastSchema, type CurveSetSummary, type LiquidityForecast } from '@/components/balance-sheet/contracts'
+import { liquidityForecastSchema, type LiquidityForecast } from '@/components/balance-sheet/contracts'
+import { formatDate, formatMoney } from '@/components/balance-sheet/model'
 import { useLanguage } from '@/lib/i18n/LanguageContext'
 
 const HORIZONS = [30, 90, 180, 365] as const
+
+/** Czech count of days: 1 den, 2–4 dny, otherwise dní. */
+function daysCs(n: number): string {
+  if (n === 1) return '1 den'
+  if (n >= 2 && n <= 4) return `${n} dny`
+  return `${n} dní`
+}
 
 export default function SnapshotLiquidityForecastPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
@@ -39,23 +50,18 @@ export default function SnapshotLiquidityForecastPage({ params }: { params: Prom
 
 function SnapshotLiquidityForecast({ id }: { id: string }) {
   const { t, language } = useLanguage()
-  const locale = language === 'cs' ? 'cs-CZ' : 'en-GB'
-  const money = (v: number) => v.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-  const [curveSets, setCurveSets] = useState<CurveSetSummary[]>([])
-  const [curveSetId, setCurveSetId] = useState('')
+  const { run, loaded: runLoaded } = useRun(id)
+  const { sets: curveSetsOrNull, kind: setsKind } = useCurveSets(run, runLoaded)
+  const curveSets = curveSetsOrNull ?? []
+  const [chosenSetId, setChosenSetId] = useState('')
+  const curveSetId = curveSets.some(s => s.id === chosenSetId) ? chosenSetId : (curveSets[0]?.id ?? '')
   const [horizon, setHorizon] = useState<number>(90)
   const [data, setData] = useState<LiquidityForecast | null>(null)
   const [kind, setKind] = useState<UnavailableKind | null>(null)
-  const [setsKind, setSetsKind] = useState<UnavailableKind | null>(null)
-
-  useEffect(() => {
-    void (async () => {
-      const sets = await getJson(riskUrl('/api/v1/risk/curve-sets', { limit: '25' }), curveSetListSchema)
-      if (!sets.ok) { setSetsKind(sets.kind); return }
-      setCurveSets(sets.data.curveSets)
-      if (sets.data.curveSets.length > 0) setCurveSetId(prev => prev || sets.data.curveSets[0].id)
-    })()
-  }, [])
+  // The forecast's one scenario is its behavioural model (deposit run-off, no new business).
+  const scenario = data
+    ? { cs: `„behaviorální model ${data.model.id} v${data.model.version}“`, en: `"behavioural model ${data.model.id} v${data.model.version}"` }
+    : { cs: '', en: '' }
 
   useEffect(() => {
     if (!curveSetId) return
@@ -81,22 +87,19 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
     <div>
       <PageHeader
         title={t('Prognóza likvidity a horizont přežití', 'Liquidity forecast and survival horizon')}
-        subtitle={t(`Běh ${id}`, `Run ${id}`)}
+        subtitle={<RunSubtitle id={id} run={run} />}
         icon={<Droplets size={20} aria-hidden="true" />}
         actions={back}
       />
 
       <div className="card" style={{ marginBottom: 16, display: 'flex', gap: 12, alignItems: 'end', flexWrap: 'wrap' }}>
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
-          {t('Sada křivek', 'Curve set')}
-          <select className="input" value={curveSetId} onChange={e => setCurveSetId(e.target.value)} aria-label={t('Sada výnosových křivek', 'Yield-curve set')}>
-            {curveSets.map(s => <option key={s.id} value={s.id}>{`${s.asOf} · ${s.source} · ${s.provenance}`}</option>)}
-          </select>
-        </label>
+        {curveSetsOrNull !== null && (
+          <CurveSetPicker sets={curveSets} value={curveSetId} onChange={setChosenSetId} asOf={run?.asOf ?? null} />
+        )}
         <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12 }}>
           {t('Horizont (dny)', 'Horizon (days)')}
           <select className="input" value={horizon} onChange={e => setHorizon(Number(e.target.value))} aria-label={t('Horizont prognózy', 'Forecast horizon')}>
-            {HORIZONS.map(h => <option key={h} value={h}>{h}</option>)}
+            {HORIZONS.map(h => <option key={h} value={h}>{t(`${h} dní`, `${h} days`)}</option>)}
           </select>
         </label>
         {data && <ProvenanceBadge provenance={data.provenance} />}
@@ -104,9 +107,7 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
 
       {setsKind ? (
         <DataUnavailable kind={setsKind} service="risk-engine" feature={t('sady výnosových křivek', 'curve sets')} lang={language} />
-      ) : curveSets.length === 0 ? (
-        <DataUnavailable kind="no_data" service="risk-engine" feature={t('sady výnosových křivek — nahrajte sadu v sekci Výnosové křivky', 'curve sets — upload one under Curve sets')} lang={language} />
-      ) : kind ? (
+      ) : curveSetsOrNull === null || curveSets.length === 0 ? null : kind ? (
         <DataUnavailable kind={kind} service="risk-engine" feature={t('prognóza likvidity', 'liquidity forecast')} lang={language} />
       ) : data ? (
         <>
@@ -116,23 +117,24 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
               <section key={c.currency} className="card" style={{ marginBottom: 16, overflowX: 'auto' }} aria-label={t(`Prognóza ${c.currency}`, `Forecast ${c.currency}`)}>
                 <h2 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>{c.currency}</h2>
                 <p data-testid={`survival-${c.currency}`} style={{ fontSize: 13, marginBottom: 4 }}>
-                  {t('Horizont přežití', 'Survival horizon')}:{' '}
                   {survival !== null ? (
                     <>
-                      <strong>{t(`${survival}. den`, `day ${survival}`)}</strong> ({c.survivalDate}){' '}
+                      <strong>{t(`Banka vydrží ${daysCs(survival - 1)} při scénáři ${scenario.cs}`, `The bank survives ${survival - 1} day(s) under the ${scenario.en} scenario`)}</strong>
+                      {t(`: ${survival}. den (${formatDate(c.survivalDate ?? '', 'cs')}) klesne kumulativní likvidní pozice pod nulu. `, `: on day ${survival} (${formatDate(c.survivalDate ?? '', 'en')}) the cumulative liquidity position turns negative. `)}
                       <StatusBadge status="BREACH" tone="danger" label={t('Kumulativní pozice záporná', 'Cumulative position negative')} />
                     </>
                   ) : (
                     <>
-                      <strong>{t(`bez výpadku do ${data.horizonDays} dnů`, `no shortfall within ${data.horizonDays} days`)}</strong>{' '}
+                      <strong>{t(`Banka vydrží celý horizont při scénáři ${scenario.cs}`, `The bank survives the whole horizon under the ${scenario.en} scenario`)}</strong>
+                      {t(` — bez výpadku do ${data.horizonDays} dnů. `, ` — no shortfall within ${data.horizonDays} days. `)}
                       <StatusBadge status="SURVIVES" tone="success" label={t('Přežije horizont', 'Survives the horizon')} />
                     </>
                   )}
                 </p>
                 <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
-                  {t('Počáteční likvidita (HQLA jako v LCR)', 'Opening liquidity (HQLA as in the LCR)')}: {money(c.openingLiquidity)}
+                  {t('Počáteční likvidita (HQLA jako v LCR)', 'Opening liquidity (HQLA as in the LCR)')}: {formatMoney(c.openingLiquidity, c.currency, language)}
                   {!c.hqla && ` — ${t('měna nemá žádná HQLA', 'no HQLA held in this currency')}`}
-                  {' · '}{t('Minimum kumulativní pozice', 'Minimum cumulative position')}: {money(c.minimumCumulative)}
+                  {' · '}{t('Minimum kumulativní pozice', 'Minimum cumulative position')}: {formatMoney(c.minimumCumulative, c.currency, language)}
                   {c.flowsBeyondHorizon > 0 && ` · ${t(`${c.flowsBeyondHorizon} toků za horizontem`, `${c.flowsBeyondHorizon} flows beyond the horizon`)}`}
                 </p>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -157,13 +159,13 @@ function SnapshotLiquidityForecast({ id }: { id: string }) {
                         <tr key={r.fromDay} data-negative={negative ? 'true' : undefined} style={negative ? { background: 'var(--danger-bg, transparent)' } : undefined}>
                           <td>{r.fromDay === r.toDay ? r.fromDay : `${r.fromDay}–${r.toDay}`}</td>
                           <td>{r.to}</td>
-                          <td style={{ textAlign: 'right' }}>{money(r.contractualInflows)}</td>
-                          <td style={{ textAlign: 'right' }}>{money(r.contractualOutflows)}</td>
-                          <td style={{ textAlign: 'right' }}>{money(r.behaviouralInflows)}</td>
-                          <td style={{ textAlign: 'right' }}>{money(r.behaviouralOutflows)}</td>
-                          <td style={{ textAlign: 'right' }}>{money(r.net)}</td>
-                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{money(r.cumulative)}</td>
-                          <td style={{ textAlign: 'right' }} data-testid={`min-cumulative-${c.currency}-${r.fromDay}`}>{money(r.minCumulative)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatMoney(r.contractualInflows, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatMoney(r.contractualOutflows, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatMoney(r.behaviouralInflows, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatMoney(r.behaviouralOutflows, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right' }}>{formatMoney(r.net, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right', fontWeight: 600 }}>{formatMoney(r.cumulative, c.currency, language)}</td>
+                          <td style={{ textAlign: 'right' }} data-testid={`min-cumulative-${c.currency}-${r.fromDay}`}>{formatMoney(r.minCumulative, c.currency, language)}</td>
                         </tr>
                       )
                     })}

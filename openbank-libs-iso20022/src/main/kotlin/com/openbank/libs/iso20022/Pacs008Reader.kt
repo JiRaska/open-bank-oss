@@ -4,13 +4,11 @@
 
 package com.openbank.libs.iso20022
 
+import com.openbank.libs.xml.SecureXml
 import org.w3c.dom.Element
 import org.xml.sax.SAXException
-import java.io.ByteArrayInputStream
 import java.io.IOException
 import java.math.BigDecimal
-import javax.xml.XMLConstants
-import javax.xml.parsers.DocumentBuilderFactory
 
 /** The fields of an inbound `pacs.008` that the scheme simulator needs to decide and to notify. */
 data class ReceivedCreditTransfer(
@@ -39,19 +37,8 @@ class Pacs008ParseException(message: String, cause: Throwable? = null) : Runtime
  */
 class Pacs008Reader {
     fun read(xml: String): ReceivedCreditTransfer {
-        // XXE hardening as plain imperative calls (not `.apply {}`) so static analysis can trace
-        // the sanitizing calls straight to the factory that builds the parser below.
-        val factory = DocumentBuilderFactory.newInstance()
-        factory.isNamespaceAware = true
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
-        factory.setFeature("http://xml.org/sax/features/external-general-entities", false)
-        factory.setFeature("http://xml.org/sax/features/external-parameter-entities", false)
-        factory.setFeature("http://apache.org/xml/features/nonvalidating/load-external-dtd", false)
-        factory.isXIncludeAware = false
-        factory.isExpandEntityReferences = false
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "")
-        factory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "")
-        val doc = parseDocument(factory, xml)
+        // Untrusted wire input: parsed only through the fleet-wide hardened factory (SecureXml).
+        val doc = parseDocument(xml)
         doc.documentElement.normalize()
 
         val root = doc.documentElement
@@ -77,8 +64,8 @@ class Pacs008Reader {
     // must surface as the typed Pacs008ParseException, not a raw SAXParseException/IOException —
     // callers catch the former to return a clean 4xx; an unwrapped throwable becomes a 500.
     // (Found by fuzzing: empty/'<'/truncated input leaked SAXParseException.)
-    private fun parseDocument(factory: DocumentBuilderFactory, xml: String) = try {
-        factory.newDocumentBuilder().parse(ByteArrayInputStream(xml.toByteArray(Charsets.UTF_8)))
+    private fun parseDocument(xml: String) = try {
+        SecureXml.parse(xml)
     } catch (e: SAXException) {
         throw Pacs008ParseException("pacs.008 is not well-formed XML: ${e.message}", e)
     } catch (e: IOException) {

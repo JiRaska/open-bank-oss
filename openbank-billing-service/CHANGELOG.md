@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.7](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.6...billing-service-v0.13.7) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
+## [0.13.6](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.5...billing-service-v0.13.6) (2026-10-04)
+
+
+### Bug Fixes
+
+* **docs:** keep every runnable service documentation current ([#11989](https://github.com/JiRaska/open-bank-oss/issues/11989)) ([88b6e08](https://github.com/JiRaska/open-bank-oss/commit/88b6e087386cd885badf22f75cc4694faa0f30bd))
+
 ## [0.13.5](https://github.com/JiRaska/open-bank-oss/compare/billing-service-v0.13.4...billing-service-v0.13.5) (2026-10-02)
 
 

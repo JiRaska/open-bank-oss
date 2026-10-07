@@ -4,9 +4,9 @@
 
 package com.openbank.sepainstant.domain.model
 
+import com.openbank.libs.domain.money.Money
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.jupiter.api.Test
-import java.math.BigDecimal
 import java.time.OffsetDateTime
 import java.util.UUID
 
@@ -29,8 +29,7 @@ class SctInstPaymentTest {
             creditorIban = "FR7630006000011234567890189",
             creditorName = "Bob Creditor",
             creditorBic = "AGRIFRPP",
-            amount = BigDecimal("123.45"),
-            currency = "EUR",
+            amount = Money.of("123.45", "EUR"),
             remittanceInfo = "Invoice 42",
             endToEndId = "E2E-123",
             executionTimeoutAt = now,
@@ -41,7 +40,7 @@ class SctInstPaymentTest {
             rejectDetail = "Invalid beneficiary",
             submittedAt = now.minusMinutes(1),
             createdAt = now.minusHours(1),
-            updatedAt = now
+            updatedAt = now,
         )
 
         assertThat(payment.id).isEqualTo(42)
@@ -54,7 +53,7 @@ class SctInstPaymentTest {
         assertThat(payment.creditorIban).isEqualTo("FR7630006000011234567890189")
         assertThat(payment.creditorName).isEqualTo("Bob Creditor")
         assertThat(payment.creditorBic).isEqualTo("AGRIFRPP")
-        assertThat(payment.amount).isEqualByComparingTo("123.45")
+        assertThat(payment.amount).isEqualTo(Money.of("123.45", "EUR"))
         assertThat(payment.currency).isEqualTo("EUR")
         assertThat(payment.remittanceInfo).isEqualTo("Invoice 42")
         assertThat(payment.endToEndId).isEqualTo("E2E-123")

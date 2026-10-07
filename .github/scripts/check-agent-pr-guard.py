@@ -16,7 +16,8 @@
 #
 #   So the rule moves to where it runs regardless of who is driving: a required check.
 #   A red required check cannot be cleared by the agent that tripped it, cannot be cleared
-#   by `--auto`, and takes a deliberate human action to override.
+#   by `--auto`. Protected changes require an explicit owner decision on the current head.
+#   Trust-chain changes remain blocked and require separate maintainer adoption.
 #
 # WHAT IT IS AND IS NOT
 #   IS:     a guard against the unattended-accident — an agent quietly landing a change on
@@ -77,6 +78,7 @@
 #   2  could not determine author / branch / file list — NOT a clean verdict
 
 import argparse
+from pathlib import Path
 import fnmatch
 import json
 import os
@@ -272,11 +274,132 @@ def verdict(author, is_bot, branch, files, cfg, added=frozenset()):
         lines.append(f"    matched: {' '.join(sorted(matched)[:3])}")
     lines.append("")
     lines.append(
-        "An autonomous agent does not land these paths unattended. Hand this PR to a human "
-        "reviewer; do NOT reach for an administrative override flag — a refusal here is the "
+        "An autonomous agent does not land these paths unattended. Obtain explicit owner approval on the current head; "
+        "review-policy changes require separate maintainer adoption; do NOT reach for an administrative override flag — a refusal here is the "
         "correct final state."
     )
     return 1, "\n".join(lines)
+
+
+# The review route cannot authorize modifications to its own trust chain.
+REVIEW_POLICY_PATHS = {
+    ".github/scripts/check-agent-pr-guard.py",
+    ".github/scripts/test-agent-pr-review.py",
+    ".github/scripts/gatelib.py",
+    ".github/scripts/run-gates.py",
+    ".github/workflows/ci.yml",
+    ".github/workflows/agent-review-refresh.yml",
+    ".github/gates/gates.yaml",
+    "openbank-libs/governance/rules.yaml",
+    ".github/CODEOWNERS",
+}
+
+
+def approved_reviewers(reviews, author, head, excluded):
+    """Use each person's latest decisive review; comments do not revoke approval."""
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise Undetermined("missing or malformed current PR head SHA")
+    latest = {}
+    for review in sorted(reviews, key=lambda r: r["id"]):
+        user = review.get("user") or {}
+        login = user.get("login", "").lower()
+        if (not login or login == author.lower() or user.get("type") != "User"
+                or login.endswith("[bot]") or login in excluded):
+            continue
+        if review.get("state") in {"APPROVED", "CHANGES_REQUESTED", "DISMISSED"}:
+            latest[login] = review
+    # Outstanding change requests fail closed, including requests on an older commit.
+    if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
+        return []
+    return [login for login, r in latest.items()
+            if r["state"] == "APPROVED" and r.get("commit_id") == head]
+
+
+def human_review_allows(n, files, cfg):
+    if any(f in REVIEW_POLICY_PATHS for f in files):
+        return False
+    pr = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    head = pr["head"]["sha"]
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path:
+        try:
+            event = json.loads(Path(event_path).read_text())
+            if event.get("pull_request", {}).get("head", {}).get("sha") != head:
+                raise Undetermined("workflow event is not for the current PR head")
+        except (OSError, ValueError) as exc:
+            raise Undetermined("cannot read workflow head identity") from exc
+    if pr.get("state") != "open" or pr.get("draft"):
+        return False
+    pages = _gh(["api", f"repos/{REPO}/pulls/{n}/reviews?per_page=100",
+                 "--paginate", "--slurp"])
+    excluded = {login.lower() for login in
+                cfg.get("agent_accounts", []) + cfg.get("automation_accounts", [])}
+    candidates = approved_reviewers([r for page in pages for r in page],
+                                    pr["user"]["login"], head, excluded)
+    qualified = []
+    for login in candidates:
+        permission = _gh(["api", f"repos/{REPO}/collaborators/{login}/permission"])
+        if permission.get("permission") in {"admin", "maintain", "write"}:
+            qualified.append(login)
+    # Conservative: two independent reviewers for every protected change.
+    if len(qualified) < 2:
+        return False
+    current = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    if current["head"]["sha"] != head or current.get("state") != "open":
+        raise Undetermined("PR changed during review evaluation")
+    return True
+
+
+OWNER_DECISION = re.compile(r"^/agent-pr (approve|revoke) ([0-9]+) ([0-9a-f]{40})$")
+
+
+def owner_decision_allows(comments, owner, n, head, head_created_at):
+    """The last exact owner command for this PR and head controls the verdict."""
+    decisions = []
+    for comment in comments:
+        user = comment.get("user") or {}
+        if user.get("login", "").lower() != owner.lower() or user.get("type") != "User":
+            continue
+        match = OWNER_DECISION.fullmatch((comment.get("body") or "").strip())
+        if not match or int(match.group(2)) != n or match.group(3) != head:
+            continue
+        if (comment.get("created_at") or "") < head_created_at:
+            continue
+        decisions.append((comment["id"], match.group(1)))
+    return bool(decisions) and max(decisions)[1] == "approve"
+
+
+def owner_approval_allows(n, files):
+    # This route cannot introduce or amend its own authorization code.
+    if any(f in REVIEW_POLICY_PATHS for f in files):
+        return False
+    pr = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    head = pr["head"]["sha"]
+    if not re.fullmatch(r"[0-9a-f]{40}", head or ""):
+        raise Undetermined("missing or malformed current PR head SHA")
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if event_path:
+        try:
+            event = json.loads(Path(event_path).read_text())
+            if event.get("pull_request", {}).get("head", {}).get("sha") != head:
+                raise Undetermined("workflow event is not for the current PR head")
+        except (OSError, ValueError) as exc:
+            raise Undetermined("cannot read workflow head identity") from exc
+    if pr.get("state") != "open" or pr.get("draft"):
+        return False
+    owner = _gh(["api", f"repos/{REPO}"])["owner"]["login"]
+    if not owner or owner.lower() in {"", "null"}:
+        raise Undetermined("repository owner is unavailable")
+    commits = _gh(["api", f"repos/{REPO}/commits/{head}"])
+    head_created_at = commits["commit"]["committer"]["date"]
+    pages = _gh(["api", f"repos/{REPO}/issues/{n}/comments?per_page=100",
+                 "--paginate", "--slurp"])
+    if not owner_decision_allows([c for page in pages for c in page], owner, n, head, head_created_at):
+        return False
+    current = _gh(["api", f"repos/{REPO}/pulls/{n}"])
+    if current["head"]["sha"] != head or current.get("state") != "open":
+        raise Undetermined("PR changed during owner approval evaluation")
+    return True
 
 
 # --------------------------------------------------------------------------- enumeration
@@ -670,6 +793,8 @@ def main():
             return 0
         author, is_bot, branch, files, added = fetch_pr(n)
         code, msg = verdict(author, is_bot, branch, files, cfg, added)
+        if code == 1 and owner_approval_allows(n, files):
+            code, msg = 0, "protected changes explicitly approved by repository owner on current head"
     except Undetermined as e:
         # Third state: the verdict could not be computed. The floor must not then convert an
         # unreachable API into a lost-corpus red one layer up.

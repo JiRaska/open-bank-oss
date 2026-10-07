@@ -12,11 +12,11 @@ make two independently verifiable commitments:
 * an outbox writer that accepts ``OutboxMessage`` copies the message field into the persisted
   entity.
 
-This deliberately scopes itself to the shared Panache outbox.  Agent audit rows and other bespoke
+This deliberately scopes itself to the shared Panache outbox, including its v2 entity base. Agent audit rows and other bespoke
 tables are not instances of that contract, and treating their similarly named tables as evidence
 would turn an unrelated persistence mechanism into a false pass.
 
-The corpus is derived from the ``PanacheOutboxEntity`` declarations themselves, over every
+The corpus is derived from the ``PanacheOutboxEntity`` and ``PanacheOutboxEntityV2`` declarations, over every
 ``openbank-*`` module.  It used to be globbed as ``openbank-*-service``, which is a naming
 convention rather than the contract: ``openbank-sepa-payment``,
 ``openbank-domestic-payment`` and ``openbank-case-coordinator-agent`` each extend
@@ -35,7 +35,7 @@ import pathlib
 import re
 import tempfile
 
-ENTITY = re.compile(r"class\s+\w*OutboxEntity\s*:\s*PanacheOutboxEntity\s*\(")
+ENTITY = re.compile(r"class\s+\w*OutboxEntity\s*:\s*PanacheOutboxEntity(?:V2)?\s*\(")
 MIGRATION = re.compile(
     r"ALTER\s+TABLE\s+\w+_outbox\s+ADD\s+COLUMN\s+synthetic\s+BOOLEAN\s+NOT\s+NULL\s+DEFAULT\s+FALSE\s*;",
     re.IGNORECASE,
@@ -166,6 +166,16 @@ def self_test() -> int:
         ),
     }
     failures: list[str] = []
+    with tempfile.TemporaryDirectory() as temp:
+        root = pathlib.Path(temp)
+        write(root, "openbank-v2-service/src/main/kotlin/Outbox.kt", "class V2OutboxEntity : PanacheOutboxEntityV2()\nfun map(message: OutboxMessage) { synthetic = message.synthetic }")
+        findings, subjects = check(root)
+        if subjects != 1 or not findings:
+            failures.append(f"v2 entity without taint migration must be in scope: {findings} subjects={subjects}")
+        write(root, "openbank-v2-service/src/main/resources/db/migration/V1__synthetic_outbox_taint.sql", valid_migration)
+        findings, subjects = check(root)
+        if subjects != 1 or findings:
+            failures.append(f"v2 entity with taint migration and writer must pass: {findings} subjects={subjects}")
     for label, (migration, writer, expect_finding, module) in suffixless.items():
         findings, subjects = fixture(migration, writer, module)
         if bool(findings) != expect_finding or subjects != 1:

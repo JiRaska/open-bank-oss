@@ -119,6 +119,38 @@ the reason the controller was run at `Critical` risk.
   headers to `add-headers` ConfigMap entries now if that is feasible, so that the risk
   level can drop back to its default before the migration finishes.
 
+### Phase 4 amendment (2026-10-04): `limit-connections` and glitchtip's body cap
+
+Two nginx controls in Phase 4 have no exact Envoy Gateway counterpart. The table above
+mapped them loosely; this records what each actually becomes and the residual risk.
+
+- **`limit-connections: 10` (accounts, balances, payments and sanctions on
+  api.open-bank.tech).** nginx capped concurrent connections *per client IP*. Envoy Gateway
+  has no per-client concurrency limit. It is replaced by three coarser bounds:
+  - the per-client-IP request **rate** limit (`BackendTrafficPolicy.rateLimit.local`,
+    `sourceCIDR: Distinct`, 20/s, one bucket set per route as nginx kept one zone per
+    Ingress);
+  - a listener-wide `ClientTrafficPolicy.connection.connectionLimit` on `https-api`, sized
+    from the measured peak: 107 active connections on ingress-nginx across *all* hosts and
+    52 on a single Envoy replica, over Prometheus' ~3.8-day retention on 2026-10-04;
+  - a per-backend `circuitBreaker` (`maxConnections`, `maxPendingRequests`,
+    `maxParallelRequests`) on each route's BackendTrafficPolicy.
+
+  **Residual risk.** One client can now hold more than 10 concurrent connections. Its
+  request rate is still capped, the listener total bounds the host, and the circuit breaker
+  bounds each service. A client that holds many idle or slow connections could exhaust the
+  listener's budget for every other api.open-bank.tech client, where nginx confined it to
+  ten. This was accepted because keeping an archived, unpatched controller on the
+  money-path edge is the larger risk. Revisit if Envoy Gateway gains a per-client
+  connection limit.
+- **glitchtip `proxy-body-size: 64m`.** Envoy Gateway's only body cap (`requestBuffer`)
+  holds the whole body in proxy memory, and 64 MiB per request against the proxies' 256Mi
+  limit would let a few concurrent uploads OOM the shared edge. The route therefore sets
+  **no edge body cap** and Envoy streams the body. The limits are GlitchTip's own: chunk
+  uploads are refused above 32 MiB (`CHUNK_UPLOAD_BLOB_SIZE`) and other request bodies above
+  15 MiB (Django `DATA_UPLOAD_MAX_MEMORY_SIZE`), both read from the running image on
+  2026-10-04. Neither value is set in the manifests.
+
 ## Alternatives considered
 
 - **AWS Load Balancer Controller (Gateway API).** It maps Gateways to AWS-managed ALBs and

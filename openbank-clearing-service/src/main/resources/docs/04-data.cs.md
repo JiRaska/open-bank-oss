@@ -16,6 +16,7 @@
 | `V2__create_clearing_outbox.sql` | tabulka transakčního outboxu `clearing_outbox` + indexy |
 | `V3__hibernate_sequences.sql` | `clearing_outbox_seq` (INCREMENT BY 50) — nutné, protože Hibernate Reactive alokuje id ze `<table>_seq`, zatímco `generation=none` |
 | `V4__amount_check_constraints.sql` | CHECK constrainty na kladnou částku u položek a totalů dávek |
+| `V12__clearing_item_rail_and_cycle_id_width.sql` | `clearing_items.rail` (nullable, bez výchozí hodnoty) + parciální index `idx_clearing_items_pending_rail`; `cycle_id` rozšířen na VARCHAR(64) v `clearing_batches` i `settlement_positions` (#12004, #12005) |
 
 > **Disciplína migrací (CLAUDE.md):** nikdy needituj aplikovanou migraci. `V3` existuje právě proto, že chybějící `<table>_seq` by selhal každý INSERT za běhu — jeho rollback poznámka je `DROP SEQUENCE clearing_outbox_seq;`.
 
@@ -33,8 +34,9 @@ Zúčtovací cyklus pro jeden rail.
 | `status` | enum `clearing_status` | výchozí PENDING |
 | `total_debit` / `total_credit` / `net_position` | NUMERIC(20,4) | CHECK `total_debit >= 0`, `total_credit >= 0` (V4) |
 | `currency` | CHAR(3) | výchozí EUR |
+| `rail` | enum `payment_rail` | rail, pro který byla platba předána (V12, #12004); cyklus vybírá jen položky svého railu. NULL jen u řádků před V12: nevybere je **žádný** cyklus, nikdy se nedoplňuje výchozí hodnota |
 | `item_count` | INT | výchozí 0 |
-| `cycle_id` | VARCHAR(32) | nullable |
+| `cycle_id` | VARCHAR(64) (V12, #12005) | nullable |
 | `settlement_date` | DATE | nullable |
 | `settled_at` | TIMESTAMPTZ | nullable |
 | `created_at` / `updated_at` | TIMESTAMPTZ | výchozí NOW() |
@@ -71,7 +73,7 @@ Indexy: `idx_clearing_items_batch`, `idx_clearing_items_payment`, `idx_clearing_
 | `id` | UUID PK | `gen_random_uuid()` |
 | `participant_bic` | VARCHAR(11) | |
 | `currency` | CHAR(3) | výchozí EUR |
-| `cycle_id` | VARCHAR(32) | |
+| `cycle_id` | VARCHAR(64) (V12, #12005) | |
 | `gross_debit` / `gross_credit` / `net_position` | NUMERIC(20,4) | výchozí 0 |
 | `settled` | BOOLEAN | výchozí FALSE |
 | `settled_at` | TIMESTAMPTZ | nullable |

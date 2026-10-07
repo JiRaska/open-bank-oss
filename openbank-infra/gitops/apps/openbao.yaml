@@ -28,7 +28,7 @@ spec:
   source:
     repoURL: https://openbao.github.io/openbao-helm
     chart: openbao
-    targetRevision: 0.28.3
+    targetRevision: 0.30.2
     helm:
       releaseName: openbao
       valuesObject:
@@ -40,13 +40,13 @@ spec:
         injector:
           enabled: false
         server:
-          # Pin the OpenBao binary. NB: quay publishes `2.5.5` (no `v`); the chart
-          # default tag is the appVersion `v2.5.x`, which does NOT exist on quay ->
+          # Pin the OpenBao binary. NB: quay publishes `2.7.1` (no `v`); the chart
+          # default tag is the appVersion `v2.7.x`, which does NOT exist on quay ->
           # would ImagePullBackOff. Pin the real tag explicitly.
           image:
             registry: quay.io
             repository: openbao/openbao
-            tag: "2.5.5"
+            tag: "2.7.1"
           # OWN the `vault` ServiceAccount so it survives the Vault app being pruned
           # (runbook 0005 step 7). The (vault/vault) EKS Pod Identity association keys
           # on namespace+SA NAME, so keeping the name `vault` preserves OpenBao's KMS
@@ -80,6 +80,21 @@ spec:
 
                 storage "raft" {
                   path = "/openbao/data"
+                }
+
+                # OpenBao 2.7 removed the BUILT-IN awskms seal ("unknown wrapper: awskms"
+                # at startup with the seal stanza below and no plugin). It ships as an
+                # external KMS plugin, and a `plugin "kms"` stanza is the ONLY way to
+                # register one (it must exist while sealed). Pinned by OCI digest,
+                # downloaded once into the raft PVC and reused on every later start
+                # ("plugin is cached on disk, skipping download"). The plugin subprocess
+                # inherits the pod env, so EKS Pod Identity credentials reach it unchanged.
+                # Bump the digest deliberately, never by tag alone.
+                plugin_directory     = "/openbao/data/plugins"
+                plugin_auto_download = true
+
+                plugin "kms" "awskms" {
+                  image = "ghcr.io/openbao/openbao-plugin-kms-aws:v0.1.0@sha256:fe9fb94872048c9474156c044ea8852bb5c2e968fc9304a3725e4d434b488541"
                 }
 
                 # Auto-unseal via AWS KMS — the SAME key Vault uses. A restored

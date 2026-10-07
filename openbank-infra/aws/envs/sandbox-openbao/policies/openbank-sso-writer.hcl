@@ -21,3 +21,10 @@ path "openbank/data/keycloak/*" {
 path "openbank/data/delegation-disclosure-service" {
   capabilities = ["create", "update", "read"]
 }
+
+# Langfuse (ADR-0328, #11960): operator-seeded secrets only, e.g. CLICKHOUSE_PASSWORD. `patch`
+# adds one property without rewriting the others (NEXTAUTH_SECRET, SALT, ENCRYPTION_KEY, which
+# the v2 and v3 deployments must share).
+path "openbank/data/langfuse" {
+  capabilities = ["create", "update", "read", "patch"]
+}

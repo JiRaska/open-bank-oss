@@ -13,7 +13,7 @@ The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0
 | `GET` | `/api/v1/clearing/batches/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Get a batch by id (`404` if absent) |
 | `GET` | `/api/v1/clearing/batches/{id}/items` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | List items in a batch |
 | `POST` | `/api/v1/clearing/batches/{id}/settle` | `PAYMENTS`, `ADMIN` + `@Authorize(clearingBatch.settle)` | Settle a batch → status SETTLED, emits batch-settled |
-| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Trigger a clearing cycle for a rail |
+| `POST` | `/api/v1/clearing/cycle/trigger?rail=SEPA_SCT` | `PAYMENTS`, `ADMIN` | Trigger a clearing cycle for a rail; responds with a `ClearingCycleResult` holding one batch per currency (#11974) |
 | `GET` | `/api/v1/clearing/positions/{cycleId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Settlement positions for a cycle |
 | `GET` | `/api/v1/clearing/items/{id}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | Get a clearing item by id (`404` if absent) |
 | `GET` | `/api/v1/clearing/items/by-payment/{paymentId}` | `SERVICE`, `VIEWER`, `OPERATOR`, `PAYMENTS`, `ADMIN` | List clearing items for a payment |
@@ -31,9 +31,9 @@ The REST contract is defined in [`openapi.yaml`](../openapi.yaml) (OpenAPI 3.1.0
 | `debtorIban` | string | yes (code) | up to 34 chars |
 | `creditorIban` | string | yes (code) | up to 34 chars |
 | `debtorBic` / `creditorBic` | string | no | up to 11 chars |
-| `amount` | number (BigDecimal) | yes | must be `> 0` (DB CHECK) |
-| `currency` | string (CHAR(3)) | no | default `EUR` |
-| `rail` | enum | no | default `SEPA_SCT` |
+| `amount` | number (BigDecimal) | yes | must be `> 0` (DB CHECK); at most the currency's minor-unit decimals, never rounded (#11604) |
+| `currency` | string (CHAR(3)) | no | default `EUR`; any ISO 4217 code with a minor unit, case-insensitive (`eur` is stored as `EUR`) |
+| `rail` | enum | **yes** | no default (#12004): an absent `rail` is a 400 and no item is written — a default would clear the payment on a rail its caller did not choose |
 | `valueDate` | date | no | defaults to today if omitted |
 | `endToEndId` | string | no | up to 35 chars |
 | `remittanceInfo` | string | no | up to 140 chars |
@@ -51,6 +51,15 @@ The resource returns reactive `Uni<Response>`:
 - `201 Created` — successful `submit`.
 - `200 OK` — successful reads, `settle`, `cycle/trigger`.
 - `404 Not Found` — `getBatch` / `getItem` when the id does not exist.
+- `400 Bad Request` on submit — the `amount` + `currency` pair cannot be a kernel `Money` (#11604). It is refused at
+  the boundary, before the `paymentId` (the submit's idempotency key, ADR-0298) is looked up, so no clearing item is
+  created and a corrected retry with the same `paymentId` succeeds. The body is the platform RFC 9457 `ProblemDetail`
+  with a `violations[]` entry naming the field; the rejected value is never echoed:
+  - `AMOUNT_SCALE_EXCEEDED` — more decimals than the currency allows (e.g. `100.505 EUR`, `1000.5 JPY`, `1.2345 KWD`);
+  - `CURRENCY_UNSUPPORTED` — not an ISO 4217 code with a minor unit (e.g. `XYZ`, `EURO`, `XAU`, blank);
+  - `VALIDATION_ERROR` — amount absent or out of range (more than 19 integer digits).
+  The `POST` response carries the amount at the currency's scale (`100.50` for a request of `100.5`); reads come
+  from the `NUMERIC(20,4)` column as before.
 - `500` with body `{ "error": "<message>" }` — failures on `submit`, `settle`, `triggerCycle` are recovered into a server-error response carrying the exception message (`onFailure().recoverWithItem`). A typed RFC-7807 problem+json model is **not yet** in place here.
 
 ## Versioning

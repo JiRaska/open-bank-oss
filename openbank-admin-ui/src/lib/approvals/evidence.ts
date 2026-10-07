@@ -34,10 +34,11 @@ export const APPROVAL_DOMAINS = [
   'lending', 'sanctions', 'transaction', 'domestic-payment', 'clearing', 'fx', 'ledger', 'swift',
   'sepa-payment', 'sepa-instant', 'notification', 'party', 'account', 'consent', 'balance', 'billing',
   'delegation', 'agent', 'communication', 'treasury', 'ledger-backfill',
-  'compliance-pack', 'campaign', 'audience', 'identity-case',
+  'compliance-pack', 'campaign', 'audience', 'identity-case', 'sca', 'settlement',
 ] as const
 const DOMAIN_SET = new Set<string>(APPROVAL_DOMAINS)
 const SOURCE_STATES = new Set<ApprovalSourceState>(['ok', 'forbidden', 'unavailable', 'not-configured'])
+const MAKER_ACTOR_KINDS = new Set(['HUMAN', 'AI_AGENT', 'SERVICE_ACCOUNT', 'CUSTOMER_PARTY', 'UNKNOWN'])
 
 function nonEmpty(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0
@@ -89,9 +90,10 @@ function parseInboxItem(value: unknown): ApprovalInboxItem | null {
   if (
     !nonEmpty(item.id) || !nonEmpty(item.domain) || !DOMAIN_SET.has(item.domain) ||
     !nonEmpty(item.action) || !nullableString(item.resourceId) || !nullableString(item.maker) ||
-    !nullableString(item.proposedAt) || (item.proposedAt !== null && !instant(item.proposedAt))
+    !nullableString(item.proposedAt) || (item.proposedAt !== null && !instant(item.proposedAt)) ||
+    (item.makerActorKind !== undefined && !MAKER_ACTOR_KINDS.has(String(item.makerActorKind)))
   ) return null
-  return item as unknown as ApprovalInboxItem
+  return { ...item, makerActorKind: item.makerActorKind ?? 'UNKNOWN' } as ApprovalInboxItem
 }
 
 export function parseApprovalInbox(value: unknown): ApprovalInbox | null {

@@ -13,27 +13,44 @@ import javax.sql.DataSource
 /** Provider-state data only; every fixture uses a separate aggregate so Pact order is irrelevant. */
 @ApplicationScoped
 class CatalogPactProviderFixtures(private val dataSource: DataSource) {
-    fun specificationCodeIsAvailable() = Unit
+    fun specificationCodeIsAvailable() = dataSource.connection.use { connection ->
+        connection.prepareStatement("DELETE FROM catalog_specifications WHERE code = ?").use { statement ->
+            statement.setString(1, "PACT_STUDIO_SPEC")
+            statement.executeUpdate()
+        }
+    }
 
     fun offeringPrerequisiteExists() = dataSource.connection.use { connection ->
         insertSpecification(connection, OFFERING_SPECIFICATION_ID, "PACT_OFFERING_PREREQUISITE")
+        connection.prepareStatement("DELETE FROM catalog_offerings WHERE code = ?").use { statement ->
+            statement.setString(1, "PACT_STUDIO_OFFER")
+            statement.executeUpdate()
+        }
     }
 
     fun draftPrerequisiteOfferingExists() = dataSource.connection.use { connection ->
         insertSpecification(connection, DRAFT_SPECIFICATION_ID, "PACT_DRAFT_PREREQUISITE")
         insertOffering(connection, DRAFT_OFFERING_ID, DRAFT_SPECIFICATION_ID, "PACT_DRAFT_OFFERING")
+        deleteRevisionsForOffering(connection, DRAFT_OFFERING_ID)
     }
 
     fun editableDraftExists() = dataSource.connection.use { connection ->
         insertSpecification(connection, UPDATE_SPECIFICATION_ID, "PACT_UPDATE_PREREQUISITE")
         insertOffering(connection, UPDATE_OFFERING_ID, UPDATE_SPECIFICATION_ID, "PACT_UPDATE_OFFERING")
+        deleteRevisionsForOffering(connection, UPDATE_OFFERING_ID)
         insertDraft(connection, UPDATE_REVISION_ID, UPDATE_OFFERING_ID, "pact-original-author")
     }
 
-    fun independentlyCheckableDraftExists() = dataSource.connection.use { connection ->
+    fun independentlyCheckableDraftExists(): Map<String, Any> = dataSource.connection.use { connection ->
+        // Broker verification may replay this interaction. A published revision cannot be
+        // deleted or turned back into a draft, so give each replay its own aggregate.
+        val offeringId = UUID.randomUUID()
+        val revisionId = UUID.randomUUID()
         insertSpecification(connection, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_PREREQUISITE")
-        insertOffering(connection, PUBLISH_OFFERING_ID, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_OFFERING")
-        insertDraft(connection, PUBLISH_REVISION_ID, PUBLISH_OFFERING_ID, "pact-independent-author")
+        val offeringCode = "PACT_PUBLISH_OFFERING_${offeringId.toString().replace("-", "").uppercase()}"
+        insertOffering(connection, offeringId, PUBLISH_SPECIFICATION_ID, offeringCode)
+        insertDraft(connection, revisionId, offeringId, "pact-independent-author")
+        mapOf("publishOfferingId" to offeringId.toString(), "publishRevisionId" to revisionId.toString())
     }
 
     /** Immutable fixed-rate banking revision consumed by interest-service's catalog adapter Pact. */
@@ -160,6 +177,13 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
             statement.setString(5, makerId)
             statement.setObject(6, now)
             statement.setObject(7, now)
+            statement.executeUpdate()
+        }
+    }
+
+    private fun deleteRevisionsForOffering(connection: Connection, offeringId: UUID) {
+        connection.prepareStatement("DELETE FROM catalog_revisions WHERE offering_id = ?").use { statement ->
+            statement.setObject(1, offeringId)
             statement.executeUpdate()
         }
     }

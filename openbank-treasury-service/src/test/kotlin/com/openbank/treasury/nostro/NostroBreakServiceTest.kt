@@ -73,7 +73,8 @@ class NostroBreakServiceTest {
     private val breakRepo = InMemoryBreaks()
     private val accounts = mapOf(NostroFixtures.IBAN to "1001")
     private var today = LocalDate.parse("2026-09-25")
-    private val clock get() = Clock.fixed(today.atTime(10, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
+    private var at: Instant? = null
+    private val clock get() = Clock.fixed(at ?: today.atTime(10, 0).toInstant(ZoneOffset.UTC), ZoneOffset.UTC)
     private val mapper = ObjectMapper().registerModule(JavaTimeModule())
 
     private fun reconciliation() = NostroReconciliationService(statements, ledger, accounts, clock)
@@ -144,6 +145,40 @@ class NostroBreakServiceTest {
         val r = service().sweep(today)
         assertThat(r.failures).hasSize(1)
         assertThat(r.open).isZero()
+    }
+
+    @Test
+    fun `a break observed after 22 00 UTC in summer is first seen on the Prague day`() = runBlocking<Unit> {
+        // 22:30 UTC on 24 September is 00:30 CEST on the 25th.
+        assertFirstSeenOnPragueDay(Instant.parse("2026-09-24T22:30:00Z"), "2026-09-25")
+    }
+
+    @Test
+    fun `a break observed after 23 00 UTC in winter is first seen on the Prague day`() = runBlocking<Unit> {
+        // 23:30 UTC on 2 November is 00:30 CET on the 3rd.
+        assertFirstSeenOnPragueDay(Instant.parse("2026-11-02T23:30:00Z"), "2026-11-03")
+    }
+
+    @Test
+    fun `after 22 00 UTC the listing ages a break to the Prague day`() = runBlocking<Unit> {
+        NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
+        upload()
+        service().sweep(today) // first seen Friday 2026-09-25
+        // 22:30 UTC on Tuesday the 29th is Wednesday the 30th in Prague: 3 business days, aged.
+        at = Instant.parse("2026-09-29T22:30:00Z")
+        val big = service().breaks(NostroFixtures.IBAN, includeResolved = false)
+            .single { it.brk.amount.compareTo(BigDecimal("5000.00")) == 0 }
+        assertThat(big.ageBusinessDays).isEqualTo(3)
+        assertThat(big.aged).isTrue()
+    }
+
+    private suspend fun assertFirstSeenOnPragueDay(instant: Instant, pragueDay: String) {
+        NostroFixtures.ledgerLines().forEach { ledger.lines += "1001" to it }
+        val stored = upload()
+        at = instant
+        service().observe(stored.id)
+        assertThat(breakRepo.rows).isNotEmpty
+        assertThat(breakRepo.rows.map { it.firstSeenOn }).containsOnly(LocalDate.parse(pragueDay))
     }
 
     @Test

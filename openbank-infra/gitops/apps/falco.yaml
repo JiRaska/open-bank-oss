@@ -32,7 +32,7 @@ spec:
   source:
     repoURL: https://falcosecurity.github.io/charts
     chart: falco
-    targetRevision: 9.1.0   # Falco 0.44.1
+    targetRevision: 9.2.0   # Falco 0.45.0
     helm:
       releaseName: falco
       valuesObject:
@@ -48,12 +48,12 @@ spec:
         image:
           registry: public.ecr.aws/d7v4f3x6
           repository: falco
-          tag: "0.44.1"
+          tag: "0.45.0"
         falcoctl:
           image:
             registry: public.ecr.aws/d7v4f3x6
             repository: falcoctl
-            tag: "0.13.0"
+            tag: "0.14.2"
 
         driver:
           kind: modern_ebpf

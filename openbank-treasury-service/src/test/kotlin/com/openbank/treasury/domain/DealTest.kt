@@ -35,7 +35,12 @@ class DealTest {
 
     private fun booked(): Deal {
         val d = placement()
-        return d.submit(dealer, withinLimit(d), NOW).approve(approver, withinLimit(d), NOW)
+        return d.submit(
+            dealer,
+            withinLimit(d),
+            NOW,
+            DealFixtures.withinProduct,
+        ).approve(approver, withinLimit(d), NOW, DealFixtures.withinProduct)
     }
 
     /** ADR-0315 D2: the back office records the counterparty's confirmation. */
@@ -63,7 +68,12 @@ class DealTest {
         @Test
         fun `a rejection returns the deal to DRAFT with the reason on its timeline`() {
             val d = placement()
-            val rejected = d.submit(dealer, withinLimit(d), NOW).reject(approver, "rate off-market", NOW)
+            val rejected = d.submit(
+                dealer,
+                withinLimit(d),
+                NOW,
+                DealFixtures.withinProduct,
+            ).reject(approver, "rate off-market", NOW)
             assertThat(rejected.state).isEqualTo(DealState.DRAFT)
             assertThat(rejected.history.last().note).contains("rate off-market")
             assertThat(rejected.submittedBy).isNull()
@@ -82,7 +92,12 @@ class DealTest {
                 d.id, d.product, d.counterpartyId, d.currency, d.principal, d.rate,
                 MONDAY, FRIDAY, null, dealer, NOW,
             )
-            val b = future.submit(dealer, withinLimit(future), NOW).approve(approver, withinLimit(future), NOW)
+            val b = future.submit(
+                dealer,
+                withinLimit(future),
+                NOW,
+                DealFixtures.withinProduct,
+            ).approve(approver, withinLimit(future), NOW, DealFixtures.withinProduct)
                 .confirm(approver, NOW)
             assertThatThrownBy { b.settle(approver, MONDAY, NOW) }.isInstanceOf(IllegalStateException::class.java)
             val settled = confirmed().settle(approver, MONDAY, NOW)
@@ -105,7 +120,7 @@ class DealTest {
         fun `approving a DRAFT that was never submitted is refused`() {
             val d = placement()
             assertThatThrownBy {
-                d.approve(approver, withinLimit(d), NOW)
+                d.approve(approver, withinLimit(d), NOW, DealFixtures.withinProduct)
             }.isInstanceOf(IllegalStateException::class.java)
         }
     }
@@ -131,7 +146,7 @@ class DealTest {
         @Test
         fun `only a BOOKED deal can be confirmed`() {
             val d = placement()
-            val pending = d.submit(dealer, withinLimit(d), NOW)
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
             listOf(d, pending, confirmed(), confirmed().settle(approver, MONDAY, NOW), d.cancel(dealer, NOW)).forEach {
                 assertThatThrownBy { it.confirm(approver, NOW) }
                     .describedAs("confirm from ${it.state}")
@@ -145,8 +160,13 @@ class DealTest {
                 .isInstanceOf(FourEyesViolationException::class.java)
                 .hasMessageContaining("creator")
             val d = placement()
-            val submittedByOther = d.submit(Actor("sara.dealer", ActorType.HUMAN), withinLimit(d), NOW)
-                .approve(approver, withinLimit(d), NOW)
+            val submittedByOther = d.submit(
+                Actor("sara.dealer", ActorType.HUMAN),
+                withinLimit(d),
+                NOW,
+                DealFixtures.withinProduct,
+            )
+                .approve(approver, withinLimit(d), NOW, DealFixtures.withinProduct)
             assertThatThrownBy { submittedByOther.confirm(Actor("sara.dealer", ActorType.HUMAN), NOW) }
                 .isInstanceOf(FourEyesViolationException::class.java)
                 .hasMessageContaining("submitter")
@@ -180,7 +200,7 @@ class DealTest {
         @Test
         fun `the relaxed flag opens BOOKED only - nothing earlier settles either way`() {
             val d = placement()
-            listOf(d, d.submit(dealer, withinLimit(d), NOW)).forEach { early ->
+            listOf(d, d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)).forEach { early ->
                 listOf(true, false).forEach { required ->
                     assertThatThrownBy { early.settle(approver, MONDAY, NOW, required) }
                         .isInstanceOf(IllegalStateException::class.java)
@@ -208,8 +228,8 @@ class DealTest {
         @Test
         fun `the creator cannot approve their own deal`() {
             val d = placement(by = dealer)
-            val pending = d.submit(dealer, withinLimit(d), NOW)
-            assertThatThrownBy { pending.approve(dealer, withinLimit(d), NOW) }
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
+            assertThatThrownBy { pending.approve(dealer, withinLimit(d), NOW, DealFixtures.withinProduct) }
                 .isInstanceOf(FourEyesViolationException::class.java)
                 .hasMessageContaining("creator")
         }
@@ -218,8 +238,8 @@ class DealTest {
         fun `the submitter cannot approve either`() {
             val d = placement(by = dealer)
             val colleague = Actor("carl.colleague", ActorType.HUMAN)
-            val pending = d.submit(colleague, withinLimit(d), NOW)
-            assertThatThrownBy { pending.approve(colleague, withinLimit(d), NOW) }
+            val pending = d.submit(colleague, withinLimit(d), NOW, DealFixtures.withinProduct)
+            assertThatThrownBy { pending.approve(colleague, withinLimit(d), NOW, DealFixtures.withinProduct) }
                 .isInstanceOf(FourEyesViolationException::class.java)
                 .hasMessageContaining("submitter")
         }
@@ -271,8 +291,8 @@ class DealTest {
         @Test
         fun `an AI agent can never approve, even a deal a human created and submitted`() {
             val d = placement(by = dealer)
-            val pending = d.submit(dealer, withinLimit(d), NOW)
-            assertThatThrownBy { pending.approve(agent, withinLimit(d), NOW) }
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
+            assertThatThrownBy { pending.approve(agent, withinLimit(d), NOW, DealFixtures.withinProduct) }
                 .isInstanceOf(ActorNotPermittedException::class.java)
         }
 
@@ -280,7 +300,7 @@ class DealTest {
         fun `an AI agent can never submit, settle, mature or reverse`() {
             val d = placement(by = agent)
             assertThatThrownBy {
-                d.submit(agent, withinLimit(d), NOW)
+                d.submit(agent, withinLimit(d), NOW, DealFixtures.withinProduct)
             }.isInstanceOf(ActorNotPermittedException::class.java)
             val b = confirmed()
             assertThatThrownBy { b.settle(agent, MONDAY, NOW) }.isInstanceOf(ActorNotPermittedException::class.java)
@@ -294,8 +314,8 @@ class DealTest {
         fun `a service account can neither draft nor approve`() {
             assertThatThrownBy { placement(by = serviceAccount) }.isInstanceOf(ActorNotPermittedException::class.java)
             val d = placement()
-            val pending = d.submit(dealer, withinLimit(d), NOW)
-            assertThatThrownBy { pending.approve(serviceAccount, withinLimit(d), NOW) }
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
+            assertThatThrownBy { pending.approve(serviceAccount, withinLimit(d), NOW, DealFixtures.withinProduct) }
                 .isInstanceOf(ActorNotPermittedException::class.java)
         }
 
@@ -312,11 +332,11 @@ class DealTest {
         @Test
         fun `a breach at approval blocks booking`() {
             val d = placement(principal = "600000.00")
-            val pending = d.submit(dealer, withinLimit(d), NOW)
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
             val breach = LimitCheck.of(bankA, d, BigDecimal("500000.00"))
             assertThat(breach.breached).isTrue()
             assertThatThrownBy {
-                pending.approve(approver, breach, NOW)
+                pending.approve(approver, breach, NOW, DealFixtures.withinProduct)
             }.isInstanceOf(LimitBreachedException::class.java)
         }
 
@@ -329,7 +349,7 @@ class DealTest {
 
         private fun breachedPending(): Pair<com.openbank.treasury.domain.model.Deal, LimitCheck> {
             val d = placement(principal = "600000.00")
-            val pending = d.submit(dealer, withinLimit(d), NOW)
+            val pending = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
             return pending to LimitCheck.of(bankA, d, BigDecimal("500000.00"))
         }
 
@@ -340,7 +360,7 @@ class DealTest {
             assertThat(overridden.limitOverride!!.by).isEqualTo(senior)
             assertThat(overridden.limitOverride!!.coversExposureUpTo).isEqualByComparingTo("1100000.00")
             assertThat(overridden.history.last().note).contains("limit override").contains("ALCO-approved")
-            val booked = overridden.approve(approver, breach, NOW)
+            val booked = overridden.approve(approver, breach, NOW, DealFixtures.withinProduct)
             assertThat(booked.state).isEqualTo(com.openbank.treasury.domain.model.DealState.BOOKED)
         }
 
@@ -357,7 +377,7 @@ class DealTest {
                     overridden.limitCurrency
             }
             assertThat(overridden.holdsActiveLimitOverride(cp, other)).isFalse()
-            val booked = overridden.approve(approver, breach, NOW)
+            val booked = overridden.approve(approver, breach, NOW, DealFixtures.withinProduct)
             assertThat(booked.holdsActiveLimitOverride(cp, booked.limitCurrency)).isFalse()
         }
 
@@ -365,7 +385,7 @@ class DealTest {
         fun `the senior who overrode cannot also book the deal`() {
             val (pending, breach) = breachedPending()
             val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
-            assertThatThrownBy { overridden.approve(senior, breach, NOW) }
+            assertThatThrownBy { overridden.approve(senior, breach, NOW, DealFixtures.withinProduct) }
                 .isInstanceOf(com.openbank.treasury.domain.model.FourEyesViolationException::class.java)
         }
 
@@ -375,14 +395,14 @@ class DealTest {
             val overridden = pending.overrideLimit(senior, "reason", breach, NOW)
             val grown = LimitCheck.of(bankA, placement(principal = "600000.00"), BigDecimal("600000.00"))
             assertThatThrownBy {
-                overridden.approve(approver, grown, NOW)
+                overridden.approve(approver, grown, NOW, DealFixtures.withinProduct)
             }.isInstanceOf(LimitBreachedException::class.java)
         }
 
         @Test
         fun `no override without a breach, without a reason, by the dealer, or by a machine`() {
             val d = placement(principal = "100000.00")
-            val within = d.submit(dealer, withinLimit(d), NOW)
+            val within = d.submit(dealer, withinLimit(d), NOW, DealFixtures.withinProduct)
             assertThatThrownBy { within.overrideLimit(senior, "reason", withinLimit(d), NOW) }
                 .isInstanceOf(IllegalStateException::class.java)
             val (pending, breach) = breachedPending()

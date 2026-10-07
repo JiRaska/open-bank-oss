@@ -161,9 +161,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # This job is always GitHub-hosted now — the Actions cache is network-internal
           # and free there, and there is no in-cluster remote build cache to fall back on
@@ -173,51 +173,6 @@ jobs:
           # per-service home caches on PR branches would churn the Actions cache quota.
           cache-read-only: true
           gradle-home-cache-strict-match: false
-
-      # ORDER IS LOAD-BEARING: this runs AFTER setup-gradle, never before it.
-      #
-      # setup-gradle refuses to touch a Gradle User Home that already exists ("Gradle User
-      # Home already exists: will not restore from cache" / "Caching was skipped"). This step
-      # invokes ./gradlew, which CREATES that home -- so while it ran first it silently
-      # disabled the very restore the default-home choice above exists to enable, and then
-      # did the same work by hand, slower. Measured 2026-08-22 on 3 of 3 sampled PR builds:
-      # the warm step took 120s and setup-gradle took 2s doing nothing, against 9s for the
-      # identical restore in fleet-lint on the same runner class (nine entries, including an
-      # 832 MB gradle-dependencies-v2 written from main). Build-cache hit rate in those
-      # builds was ~2%: "52 actionable tasks: 45 executed, 1 from cache, 6 up-to-date".
-      #
-      # Nothing about the heal contract changes by moving it. The corrupted entry it guards
-      # against can arrive in the RESTORED cache just as easily as in a persistent home, and
-      # healing it here still keeps the retry out of "Build + test" -- which must run exactly
-      # once, because it re-runs `test` differently depending on PUBLISH_RESULTS (the #1009
-      # Pact-publish hazard). It is now healing a warm cache instead of populating a cold one.
-      - name: Warm Gradle dependency cache (self-heal corrupted entries)
-        continue-on-error: true
-        run: |
-          set +e
-          # This advisory command is allowed to time out.  It must not leave a Gradle
-          # daemon writing test/Kover files while the mandatory build begins (#6614).
-          # `quarkusDependenciesBuild` writes dependent projects' build/libs JARs. A timeout
-          # can leave one truncated, which Gradle then treats as up-to-date in the mandatory
-          # build. `dependencies` resolves the same cache without producing project outputs.
-          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
-          warmup_status=$?
-          if [ $warmup_status -eq 124 ]; then
-            echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory Build + test"
-            cat /tmp/gradle-warmup.log
-          elif [ $warmup_status -ne 0 ]; then
-            cat /tmp/gradle-warmup.log
-            if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
-              echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain
-              retry_status=$?
-              if [ $retry_status -eq 124 ]; then
-                echo "::warning::dependency warm-up retry timed out after 120s; continuing to mandatory Build + test"
-              fi
-            else
-              echo "::warning::dependency warm-up failed for a reason other than cache corruption — leaving it to the real Build step to report"
-            fi
-          fi
 
       # No `-Dpactbroker.*` flags here at all (unlike the pre-split single job): this job
       # never has a broker URL to forward, so the @PactBroker-gated provider-verification
@@ -257,7 +212,11 @@ jobs:
             wait "${docker_events_pid}" 2>/dev/null || true
           }
           trap cleanup_test_evidence EXIT
-          ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
+          # Cache healing replays this command only if verification fails before
+          # the first Gradle task; tests and build outputs are never replayed.
+          bash .github/scripts/retry-testcontainers-ebusy.sh -- \
+            bash .github/scripts/retry-gradle-verification-cache.sh -- \
+            ./gradlew :${{ inputs.service }}:build --build-cache --console=plain --stacktrace \
             -Dquarkus.smallrye-openapi.store-schema-directory="build/openapi-generated"
 
       # A Docker Hub pull failure surfaces as NAMED TEST FAILURES, ~900 lines above the actual
@@ -269,8 +228,8 @@ jobs:
           python3 .github/scripts/check-testcontainers-registry-failure.py \
             --service "${{ inputs.service }}"
 
-      # rules.yaml: openapi_request_schema_conformance (advisory).
-      - name: "openapi request-schema conformance (advisory)"
+      # rules.yaml: openapi_request_schema_conformance (enforced).
+      - name: "openapi request-schema conformance"
         run: |
           SPEC="${{ inputs.service }}/src/main/resources/openapi.yaml"
           if [ ! -f "$SPEC" ]; then
@@ -279,7 +238,8 @@ jobs:
           fi
           python3 .github/scripts/check-openapi-request-schema-conformance.py \
             --service "${{ inputs.service }}" \
-            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml"
+            --generated "${{ inputs.service }}/build/openapi-generated/openapi.yaml" \
+            --enforce
 
       # Coverage upload is tokenless for this public repository. It is advisory only —
       # never gates the build — and deliberately must not regain an OIDC token in this
@@ -392,8 +352,30 @@ jobs:
 
       # Compatibility projection for the image build: the latest envelope remains
       # separate from immutable attempts above, so a re-run cannot erase history.
-      - name: Upload Test Intelligence evidence
+      # A failed advisory collector may still leave JUnit/Kover files. Uploading those
+      # under the compatibility name makes the deploy select an incomplete newest
+      # artifact and fail even when an older complete main artifact exists (#11850).
+      - name: Check Test Intelligence compatibility evidence
+        id: test-intelligence-compatibility
         if: always()
+        env:
+          SERVICE: ${{ inputs.service }}
+          EXPECTED_BRANCH: ${{ github.head_ref || github.ref_name }}
+        run: |
+          if python3 .github/scripts/check-test-intelligence-compatibility.py \
+            "${SERVICE}/build/test-intelligence/run.json" \
+            --component "${SERVICE}" \
+            --commit "${GITHUB_SHA}" \
+            --branch "${EXPECTED_BRANCH}" \
+            --run-id "${GITHUB_RUN_ID}" \
+            --attempt "${GITHUB_RUN_ATTEMPT}"; then
+            echo "ready=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "::warning::Skipping incomplete Test Intelligence compatibility artifact"
+          fi
+
+      - name: Upload Test Intelligence evidence
+        if: always() && steps.test-intelligence-compatibility.outputs.ready == 'true'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -453,7 +435,11 @@ jobs:
           set -euo pipefail
           cp provider-proof-source/.github/scripts/prove-pact-provider-version.sh \
             "$RUNNER_TEMP/prove-pact-provider-version.sh"
-          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh"
+          # The equivalence proof the runner calls must be the trusted one too: P's own copy may
+          # predate --own-test-overlay, and P must never get to judge its own equivalence.
+          cp provider-proof-source/.github/scripts/pact-version-tree-equivalent.sh \
+            "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
+          chmod 700 "$RUNNER_TEMP/prove-pact-provider-version.sh" "$RUNNER_TEMP/pact-version-tree-equivalent.sh"
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -492,7 +478,7 @@ jobs:
           git checkout --detach --quiet "$RESOLVED_REF"
           echo "$RESOLVED_REF is on main — publishing the verification against it."
 
-      - name: Check out P and overlay the one approved Ledger provider fixture from F
+      - name: Check out P and overlay the provider test tree from F (equivalence-proven)
         env:
           SERVICE: ${{ inputs.service }}
           REQUESTED_FIXTURE_REF: ${{ inputs.ref }}
@@ -507,8 +493,10 @@ jobs:
             FIXTURE_REF="${REQUESTED_FIXTURE_REF:-$GITHUB_SHA}"
             git fetch --quiet origin main "$FIXTURE_REF"
             FIXTURE_VERSION="$(bash "$PROOF_RUNNER" --resolve "$FIXTURE_REF")"
-            # The script proves P/F/main ancestry, requires this checkout to be P, and writes
-            # exactly LedgerPactBrokerProviderVerificationTest.kt from F into the P worktree.
+            # The script proves P/F/main ancestry and requires this checkout to be P. If P and F
+            # are byte-identical in every production build input of SERVICE, it replaces
+            # SERVICE/src/test (only) with F's; otherwise it refuses — except Ledger and Balance,
+            # whose single approved provider fixture from F is kept as the fallback (#11597).
             bash "$PROOF_RUNNER" --prepare-overlay \
               "$SERVICE" "$PROVIDER_VERSION" "$FIXTURE_VERSION" origin/main
           else
@@ -651,9 +639,9 @@ jobs:
           AWS_DEFAULT_REGION: eu-north-1
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           # Self-hosted: disable the GitHub Actions cache for Gradle home (FinOps — see the
           # original single-job file's history for the NAT-cost analysis) and rely on the
@@ -687,7 +675,9 @@ jobs:
           # `quarkusDependenciesBuild` writes dependent projects' build/libs JARs. A timeout
           # can leave one truncated, which Gradle then treats as up-to-date in the mandatory
           # build. `dependencies` resolves the same cache without producing project outputs.
-          timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
+          # Keep the contract warm-up scoped to this module as in the build job.
+          # The mandatory Gradle task below still uses full configuration.
+          timeout --kill-after=10s 120s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:dependencies --console=plain > /tmp/gradle-warmup.log 2>&1
           warmup_status=$?
           if [ $warmup_status -eq 124 ]; then
             echo "::warning::dependency warm-up timed out after 120s; skipping advisory cache healing and continuing to mandatory step"
@@ -696,7 +686,7 @@ jobs:
             cat /tmp/gradle-warmup.log
             if .github/scripts/heal-gradle-verification-failure.sh /tmp/gradle-warmup.log; then
               echo "retrying dependency warm-up after healing corrupted cache entries"
-              timeout --kill-after=10s 120s ./gradlew --no-daemon :${{ inputs.service }}:dependencies --console=plain
+              timeout --kill-after=10s 120s ./gradlew --no-daemon --configure-on-demand :${{ inputs.service }}:dependencies --console=plain
               retry_status=$?
               if [ $retry_status -eq 124 ]; then
                 echo "::warning::dependency warm-up retry timed out after 120s; continuing"
@@ -846,17 +836,15 @@ jobs:
           echo "Pact Broker preflight for ${SERVICE}: HTTP $http_code, valid HAL/JSON — proceeding to provider verification."
 
       # ADR-0250 Phase 2: provider verification runs as its OWN Test task (providerPactTest,
-      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. `--rerun-tasks`
-      # unconditionally: publishing the verification result is a network SIDE-EFFECT (a POST
-      # to the Pact Broker) that Gradle's up-to-date/build-cache machinery cannot observe, so a
-      # cached providerPactTest would silently skip the publish (#1964's original reason,
-      # narrowed here to a task this job ALONE runs — no PR-lane cache to protect).
+      # build-logic/src/main/kotlin/openbank.quarkus-service.gradle.kts), not `test`. The task
+      # itself is never up-to-date or cacheable: publishing a verification result is a network
+      # side effect that Gradle cannot observe. Its compile/model prerequisites remain cacheable.
       - name: Provider verification (:${{ inputs.service }}:providerPactTest)
         if: ${{ steps.provider_pact_task.outputs.available == 'true' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
-          ./gradlew :${{ inputs.service }}:providerPactTest --rerun-tasks --build-cache \
+          ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
             -Dpactbroker.auth.username="${PACT_BROKER_USERNAME:-}" \

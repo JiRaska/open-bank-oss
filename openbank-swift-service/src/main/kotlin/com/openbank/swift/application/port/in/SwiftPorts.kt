@@ -4,6 +4,7 @@
 
 package com.openbank.swift.application.port.`in`
 
+import com.openbank.libs.domain.money.Money
 import com.openbank.swift.domain.model.SwiftMessage
 import com.openbank.swift.domain.model.SwiftMessageType
 import com.openbank.swift.domain.model.SwiftPriority
@@ -18,8 +19,8 @@ data class SendSwiftCommand(
     val transactionReference: String,
     val relatedReference: String?,
     val valueDate: String,
-    val currency: String,
-    val amountMinorUnits: Long,
+    /** Built at the REST boundary by `Money.parseInbound` (#11604), before any idempotency lookup. */
+    val amount: Money,
     val orderingCustomerAccount: String?,
     /** Internal account UUID for the ordering customer — required for MT103 settlement booking (ADR-0108). */
     val orderingCustomerAccountId: UUID?,

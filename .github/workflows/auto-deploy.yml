@@ -157,6 +157,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install reconcile hold parser
+        if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true')
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       - id: detect
         env:
           INPUT_CODEPLOY: ${{ github.event.inputs.codeploy }}
@@ -228,6 +235,17 @@ jobs:
             # analytics-sink has no version.txt (it owns no OLTP database and cuts no release —
             # ADR-0022). That blindness is fixed in the same PR; this line is the gap it found.
             ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-card-processing-service openbank-document-renderer'
+
+          reconcile_candidates() {
+            # Scheduled and on-demand reconcile must use the hold on LIVE main.
+            # Filter before the probe's oldest-first cap and before any build work.
+            git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || return 1
+            local held
+            held="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
+              .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)" || return 1
+            RECONCILE_SERVICES="$ALL_SERVICES" RECONCILE_HOLDS="$held" \
+              bash .github/scripts/auto-deploy-reconcile-lag.sh
+          }
 
           # Which files changed in this push (compare to the parent commit). We compute this
           # early because the workflow_dispatch guard below also needs to know which services
@@ -301,8 +319,7 @@ jobs:
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
-              SERVICES_JSON="$(RECONCILE_SERVICES="$ALL_SERVICES" \
-                bash .github/scripts/auto-deploy-reconcile-lag.sh)"
+              SERVICES_JSON="$(reconcile_candidates)"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
                 echo "Reconcile: every deployable service is up to date."
                 echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -394,8 +411,7 @@ jobs:
           # then flows through the identical build-push -> can-i-deploy -> gitops-pr path, so
           # a still-blocked service simply stays blocked this tick — the gate is unchanged.
           if [ "${{ github.event_name }}" = "schedule" ]; then
-            SERVICES_JSON="$(RECONCILE_SERVICES="$ALL_SERVICES" \
-              bash .github/scripts/auto-deploy-reconcile-lag.sh)"
+            SERVICES_JSON="$(reconcile_candidates)"
             if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
               echo "Reconcile: every deployable service is up to date."
               echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -487,7 +503,7 @@ jobs:
       contents: write
       pull-requests: write
       id-token: write  # GitHub OIDC → assume the build runner role (webhook-independent AWS auth)
-    timeout-minutes: 90
+    timeout-minutes: 120
     env:
       # This line, not gradle.properties, is what sizes the daemon for this job (#9832). A
       # `-Dorg.gradle.jvmargs` in GRADLE_OPTS takes precedence over the file, so editing
@@ -538,9 +554,9 @@ jobs:
             25
 
       - name: Validate Gradle wrapper
-        uses: gradle/actions/wrapper-validation@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+        uses: gradle/actions/wrapper-validation@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
 
-      - uses: gradle/actions/setup-gradle@9c971963bec38e04b3d30dcc455b5382be2fdbfb # v6.3.0
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
         with:
           cache-read-only: false   # deploy jobs update the cache too
 
@@ -646,7 +662,7 @@ jobs:
               bash "${GITHUB_WORKSPACE}/.github/scripts/ensure-ecr-repository.sh" "${svc}" \
                 2>&1 | sed "s/^/[${svc}] /" || return 1
               echo "==> [${svc}] self-built docker push → ${ECR_REGISTRY}/${svc}:${TAG}"
-              docker buildx build --platform linux/arm64 --provenance=false \
+              docker buildx build --platform linux/arm64 --provenance=false --sbom=false \
                 -f "${svc}/Dockerfile" -t "${ECR_REGISTRY}/${svc}:${TAG}" --push \
                 "${svc}" 2>&1 | sed "s/^/[${svc}] /" || return 1
               return 0 ;;
@@ -705,6 +721,7 @@ jobs:
             docker buildx build \
               --platform linux/arm64 \
               --provenance=false \
+              --sbom=false \
               -t "${image}" \
               --push \
               "${ctx}" 2>&1 | sed "s/^/[${svc}] /" || return 1
@@ -888,7 +905,10 @@ jobs:
       # An unattested image cannot be admitted, so a deploy that "succeeds" while producing one
       # is not a successful deploy — it is a time bomb with a green check. Fail here instead.
       - name: Attest image SBOMs + SLSA provenance (cosign + KMS)
-        timeout-minutes: 15
+        # A full-fleet docs rebuild attests every pushed image in sequence. The
+        # previous 15-minute cap stopped after successful image pushes, leaving
+        # the remaining images unattested and preventing the GitOps rollout.
+        timeout-minutes: 30
         run: |
           set -uo pipefail
           SERVICES='${{ steps.scan.outputs.deployable }}'
@@ -1154,6 +1174,12 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install deploy-hold parser
+        run: |
+          python3 -m venv "${RUNNER_TEMP}/deploy-hold-venv"
+          "${RUNNER_TEMP}/deploy-hold-venv/bin/python" -m pip install --quiet --require-hashes \
+            -r .github/scripts/pyyaml-requirements.txt
+
       # GitHub signs API-created commits for GitHub *App* tokens (and the web UI's web-flow
       # key) — never for a user PAT. The old GITOPS_PR_TOKEN was a user PAT, so `sign-commits:
       # true` below faithfully routed the commit through the API and GitHub declined to sign it:
@@ -1186,10 +1212,21 @@ jobs:
           #
           # Safe because the rewrite is deterministic — pin each image: to the tag just built —
           # so recomputing against a newer main is always correct.
-          git fetch origin main
+          git fetch --depth=100 origin main
           git reset --hard origin/main
           IMAGE_TAGS='${{ needs.build-push.outputs.image_tags }}'
+          # Read the hold from the newly fetched main, before assembling a bot PR.
+          # Filter per service so a held sanctions image cannot strand unrelated
+          # images in the same deploy batch. A malformed or unknown hold fails this
+          # step closed. The required Validate manifests gate also checks the final
+          # PR diff, including hand edits and successor bot PRs (issue #11503).
+          IMAGE_TAGS="$(printf '%s' "$IMAGE_TAGS" | \
+            "${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
+              .github/scripts/check-deploy-holds.py --root . --filter-tags)"
+          # A held image remains at its old pin. The scheduled reconcile derives
+          # lag from that pin, so it re-offers the service after the hold is removed.
           UPDATED=()
+          CARRIED_PRS=()
 
           # FAIL CLOSED when the contract gate ran but crashed before emitting a verdict
           # (GATE_RAN=true, DEPLOYABLE_SERVICES empty). Without this the empty verdict was read
@@ -1237,7 +1274,7 @@ jobs:
             done
           done
 
-          # Deploy window (deploy-window.py): carry forward the pins of every open, UNARMED
+          # Deploy window (deploy-window.py): carry forward the pins of open, non-draft, UNARMED
           # older gitops deploy PR, so this PR covers every pending service and
           # supersede-deploy-prs.sh below closes the older ones. Several pushes inside one window
           # then land as ONE commit on main instead of one each. A pin is carried only while main
@@ -1245,17 +1282,29 @@ jobs:
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
           if [ -n "${GH_TOKEN:-}" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
+            # Re-read the live hold after the main reset. Filtering this run's tags alone
+            # is insufficient: an older unarmed PR may contain a held image pin.
+            HELD_SERVICES="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
+              .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)"
+            HELD_IMAGES="$(for service in $HELD_SERVICES; do printf '%s/%s ' "$ECR_REGISTRY" "$service"; done)"
             for n in $( (gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
-                         --json number,headRefName,autoMergeRequest,isCrossRepository \
-                         --jq '.[] | select((.isCrossRepository | not) and .autoMergeRequest == null
+                         --json number,headRefName,autoMergeRequest,isCrossRepository,isDraft \
+                         --jq '.[] | select((.isCrossRepository | not) and (.isDraft | not) and .autoMergeRequest == null
                                  and (.headRefName | startswith("chore/gitops-auto-deploy-"))) | .number') || true); do
               carried="$(gh pr diff "$n" --repo "$GITHUB_REPOSITORY" \
-                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES")" \
+                | python3 .github/scripts/deploy-window.py carry --root . --skip-images "$OWN_IMAGES $HELD_IMAGES")" \
                 || { echo "::warning::could not read deferred PR #${n}; it stays open and the flusher arms it"; continue; }
               [ -z "$carried" ] && continue
+              CARRIED_PRS+=("#${n}")
               echo "  carried from deferred PR #${n}:"; echo "$carried"
               while IFS= read -r f; do UPDATED+=("$f"); done < <(echo "$carried" | sed -E 's/.* in //')
             done
+          fi
+
+          if [ "${#CARRIED_PRS[@]}" -gt 0 ]; then
+            (IFS=,; echo "carried_prs=${CARRIED_PRS[*]}") >> "$GITHUB_OUTPUT"
+          else
+            echo "carried_prs=none" >> "$GITHUB_OUTPUT"
           fi
 
           # Prune the placeholder allowlist in the SAME commit that retires a placeholder pin.
@@ -1344,10 +1393,15 @@ jobs:
           body: |
             Automated gitops image-tag update triggered by commit ${{ github.sha }}.
 
-            **Deployed services:** ${{ needs.build-push.outputs.deployable_services }}
+            **Built and scanned in this run:** ${{ needs.build-push.outputs.deployable_services }}
 
-            Each image tag was updated to `sandbox-${{ github.sha }}` (the short SHA of the
-            triggering commit). ArgoCD syncs automatically after merge.
+            **Contract-approved in this run:** ${{ needs.can-i-deploy.outputs.deployable || 'not evaluated' }}
+
+            **Pending image pins carried from earlier PRs:** ${{ steps.rewrite.outputs.carried_prs }}
+
+            Images built in this run use the short SHA of the triggering commit. Carried pins
+            retain their own build tags. The Files changed tab is the proposed deployment set;
+            ArgoCD syncs after merge.
 
             ## Linked issues
 
@@ -1355,6 +1409,20 @@ jobs:
           labels: |
             chore
             gitops
+
+      # A deferred PR may carry images from an older source commit. Check every proposed pin
+      # against the current main build inputs before the PR can close older proposals or arm
+      # auto-merge. This also catches a source commit that aged while the image was building.
+      - name: Verify GitOps image source freshness
+        if: steps.gitops_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.gitops_pr.outputs.pull-request-number }}
+        run: |
+          set -euo pipefail
+          gh pr diff "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            | python3 .github/scripts/deploy-window.py verify --root .
 
       # Close every OLDER open deploy PR now that this one exists. A deploy PR rewrites an image tag
       # to the newest build, so two are never additive and both edit the same manifest line — left
@@ -1371,73 +1439,8 @@ jobs:
         run: |
           bash .github/scripts/supersede-deploy-prs.sh \
             'chore/gitops-auto-deploy-' '${{ steps.gitops_pr.outputs.pull-request-number }}'
-      # peter-evans/create-pull-request has no auto-merge input (the old `auto-merge: squash`
-      # was silently ignored). Enable it explicitly. Only effective when the App token is
-      # minted — otherwise the GITHUB_TOKEN PR's required checks never run and there is nothing
-      # to merge against (an admin merges it by hand, as today).
-      # github-script (octokit), NOT gh — the openbank-build runner image has no gh CLI.
-      # enablePullRequestAutoMerge is rejected ("Pull request is in clean status") until the
-      # PR's required check runs register, which lags PR creation, so retry until it sticks.
-      # Runs BEFORE the signature guard on purpose: arming auto-merge is what lets a manual
-      # re-sign land by itself, so it must happen even on the run where the guard then fails.
-      # Deploy window: at most one bot deploy commit reaches main per window, because each one
-      # makes every open PR `behind` under the strict up-to-date rule and restarts its checks.
-      # A manual workflow_dispatch always arms immediately; otherwise the first deploy after a
-      # quiet window arms at once and later ones stay open, unarmed, until
-      # deploy-window-flush.yml arms the oldest at the window. See deploy-window.py.
-      - name: Deploy window decision
-        id: window
-        if: steps.gitops_pr.outputs.pull-request-number != ''
-        env:
-          GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          EVENT_NAME: ${{ github.event_name }}
-        run: |
-          set -euo pipefail
-          d="$RUNNER_TEMP/deploy-window"
-          # Unreadable inputs arm immediately — the pre-window behaviour, never a stranded PR.
-          if ! bash .github/scripts/deploy-window-inputs.sh "$d"; then
-            echo "::warning::deploy window inputs unreadable — arming immediately"
-            echo "decision=ARM" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          armed="$(jq 'any(.[]; .armed)' "$d/prs.json")"
-          python3 .github/scripts/deploy-window.py decide --event "$EVENT_NAME" \
-            --armed-open "$armed" --commits-json "$d/commits.json" --now "$(date -u +%s)" >> "$GITHUB_OUTPUT"
-      - name: Enable auto-merge
-        if: steps.gitops_pr.outputs.pull-request-number != '' && steps.window.outputs.decision == 'ARM'
-        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
-        with:
-          github-token: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
-          script: |
-            const pull_number = Number('${{ steps.gitops_pr.outputs.pull-request-number }}');
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner, repo: context.repo.repo, pull_number,
-            });
-            const mutation = `mutation($id: ID!) {
-              enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-                pullRequest { number }
-              }
-            }`;
-            for (let i = 1; i <= 8; i++) {
-              try {
-                await github.graphql(mutation, { id: pr.node_id });
-                core.info(`auto-merge enabled (attempt ${i})`);
-                return;
-              } catch (e) {
-                core.info(`attempt ${i}/8 not ready: ${e.message}`);
-                await new Promise(r => setTimeout(r, 12000));
-              }
-            }
-            // setFailed, NOT notice (issue #6231): a deploy PR with auto-merge unarmed never
-            // merges, so the deploy silently does not happen — and a notice leaves the job, the
-            // workflow and `Deploy signal` all green, with the only evidence one line in a job
-            // nobody opens. That is the repo's "green run that deployed nothing" shape. The PR
-            // itself is left open and rescuable; what changes is that the run now says so.
-            core.setFailed(
-              `auto-merge could not be enabled on PR #${pull_number} after 8 attempts, so this deploy ` +
-              `will NOT land on its own — the PR stays open until someone merges it. Check the App ` +
-              `token (GITOPS_APP_ID/GITOPS_APP_PRIVATE_KEY) and branch protection.`
-            );
+      # deploy-window-flush.yml is the sole auto-merge writer. Its workflow_run trigger
+      # admits this PR after this workflow completes; its schedule retries missed triggers.
 
       # The failure this guards against is silent by construction: create-pull-request logs
       # "Commit verified: false; reason: unsigned" and exits 0, the PR opens with every check

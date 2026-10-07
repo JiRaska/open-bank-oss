@@ -97,6 +97,13 @@ quarkus:
   # Same override, same reason, as openbank-aml-service's %test profile.
   authz:
     enforce: "false"
+  # The tests assert transactional outbox rows, not broker delivery. Avoid a producer that
+  # retries localhost:29092 for the whole suite when no Kafka broker is present.
+  mp:
+    messaging:
+      outgoing:
+        sanctions-events-out:
+          connector: smallrye-in-memory
 
 kafka:
   bootstrap:
@@ -141,6 +148,11 @@ authz:
     enforce: "${AUTHZ_FOUR_EYES_ENFORCE:false}"
 
 openbank:
+  # First-request warm-up (#11890, libs-runtime StartupWarmup): the unauthenticated self-call
+  # hits a real @RolesAllowed endpoint, so the 401 path runs the same security filters a
+  # customer request does.
+  warmup:
+    protected-path: /api/v1/sanctions/pending
   # Opt in to the libs-runtime OPA sidecar PolicyDecisionPoint producer (replaces the
   # per-service AuthzProducer; same opa.url / opa.path / opa.timeout-ms keys and defaults).
   authz:
