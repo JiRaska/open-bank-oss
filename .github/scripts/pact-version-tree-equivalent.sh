@@ -5,6 +5,9 @@
 #
 # ---------------------------------------------------------------------------------------
 # Are two commits BYTE-IDENTICAL in everything that builds one service's image? (issue #3432)
+# --contract-inputs answers the narrower can-i-deploy question: the service's Pact inputs
+# remain identical when release-please changes only version.txt / CHANGELOG.md (#12228).
+# It never authorizes an image pin: deploy-window.py still uses the default strict mode.
 #
 # THE DEADLOCK THIS OPENS, WITHOUT WEAKENING THE GATE
 # Pacts are published by each service's own services-ci PUSH lane. A `workflow_dispatch`
@@ -92,7 +95,7 @@
 # still be the same git object. One definition of "production build input", not a second copy.
 #
 # Usage:
-#   pact-version-tree-equivalent.sh [--own-test-overlay] <service> <pact_sha> <dispatch_sha>
+#   pact-version-tree-equivalent.sh [--own-test-overlay|--contract-inputs] <service> <pact_sha> <dispatch_sha>
 #   pact-version-tree-equivalent.sh --self-test
 #
 # Prints one TAB-separated line: EQUIVALENT|DIFFERENT<TAB><human reason>.
@@ -190,6 +193,15 @@ children_at_either() {
 # `<svc>` and of `<svc>/src` EXCEPT `<svc>/src/test`, so that subtree alone may differ.
 own_scope() {
   local svc="$1" a="$2" b="$3" c
+  if [ "${CONTRACT_INPUTS_ONLY:-0}" = 1 ]; then
+    # A release changes the image version, but version.txt and CHANGELOG.md do not
+    # generate Pact artefacts. Keep every other file, including this service's tests.
+    for c in $(children_at_either "$svc" "$a" "$b"); do
+      case "$c" in "$svc/version.txt"|"$svc/CHANGELOG.md") continue ;; esac
+      printf '%s\n' "$c"
+    done
+    return
+  fi
   if [ "${OWN_TEST_OVERLAY:-0}" != 1 ]; then printf '%s\n' "$svc"; return; fi
   for c in $(children_at_either "$svc" "$a" "$b"); do
     [ "$c" = "$svc/src" ] && continue
@@ -249,6 +261,9 @@ equivalent() {
     if [ "${OWN_TEST_OVERLAY:-0}" = 1 ]; then
       case "$p" in "$svc"/src/test/*) continue ;; esac
     fi
+    if [ "${CONTRACT_INPUTS_ONLY:-0}" = 1 ]; then
+      case "$p" in "$svc/version.txt"|"$svc/CHANGELOG.md") continue ;; esac
+    fi
     case "$p" in */*) top="${p%%/*}" ;; *) top="" ;; esac
     if [ -z "$top" ]; then
       # A root-level file. Default is IN SCOPE, so a build-config file cannot slip past; step 1
@@ -276,8 +291,13 @@ equivalent() {
     differs "changed path ${p} is in neither the build inputs of ${svc} nor the justified known-irrelevant set — refusing rather than guessing what a new top-level directory does"
   done <<< "$changed"
 
-  verdict EQUIVALENT \
-    "${svc} and every build input of it are byte-identical at ${pact_sha:0:8} and ${dispatch_sha:0:8} (same git tree objects), and ${pact_sha:0:8} is an ancestor — the published verdict is about the same source, so it is not a verdict about a different commit"
+  if [ "${CONTRACT_INPUTS_ONLY:-0}" = 1 ]; then
+    verdict EQUIVALENT \
+      "${svc} Pact inputs are byte-identical at ${pact_sha:0:8} and ${dispatch_sha:0:8} (release metadata excluded), and ${pact_sha:0:8} is an ancestor — the published contract verdict applies to this image's contract"
+  else
+    verdict EQUIVALENT \
+      "${svc} and every build input of it are byte-identical at ${pact_sha:0:8} and ${dispatch_sha:0:8} (same git tree objects), and ${pact_sha:0:8} is an ancestor — the published verdict is about the same source, so it is not a verdict about a different commit"
+  fi
   exit 0
 }
 
@@ -440,7 +460,29 @@ selftest() {
   local o7; o7="$(_commit 'svc-a/Prod Config.txt' changed)"
   _expect "overlay: production file with a spaced name is refused" DIFFERENT --own-test-overlay svc-a "$o6" "$o7"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 25 cases (17 + 8 --own-test-overlay) on real git trees — identical, unrelated-elsewhere, own-source, own tests, shared-libs src/main (declared and not), a shared module's governance data and tests, root build config, baked-in Dockerfile, unrelated workflow, unknown directory, both missing shas, reversed ancestry, and a usage error; verdict and exit code asserted to agree in both directions."
+  # Contract identity is narrower than image identity: release-please metadata changes
+  # the image version, not the consumer/provider Pact artefacts. Deployment freshness
+  # still uses the default strict image comparison above.
+  local c0 c1 c2 c3 c4 c5 c6 c7
+  c0="$(_commit svc-a/src/main/A.kt contract-base)"
+  c1="$(_commit svc-a/version.txt 1.2.3)"
+  _expect "release version changes image input" DIFFERENT svc-a "$c0" "$c1"
+  _expect "release version leaves Pact inputs unchanged" EQUIVALENT --contract-inputs svc-a "$c0" "$c1"
+  c2="$(_commit svc-a/CHANGELOG.md release-note)"
+  _expect "release changelog changes image input" DIFFERENT svc-a "$c1" "$c2"
+  _expect "release changelog leaves Pact inputs unchanged" EQUIVALENT --contract-inputs svc-a "$c1" "$c2"
+  c3="$(_commit svc-a/src/test/T.kt contract-test-changed)"
+  _expect "contract mode still counts own tests" DIFFERENT --contract-inputs svc-a "$c2" "$c3"
+  c4="$(_commit svc-a/src/main/A.kt contract-code-changed)"
+  _expect "contract mode still counts own production code" DIFFERENT --contract-inputs svc-a "$c3" "$c4"
+  c5="$(_commit openbank-libs-domain/src/main/D.kt contract-libs-changed)"
+  _expect "contract mode still counts shared libraries" DIFFERENT --contract-inputs svc-a "$c4" "$c5"
+  c6="$(_commit settings.gradle.kts contract-build-changed)"
+  _expect "contract mode still counts root build configuration" DIFFERENT --contract-inputs svc-a "$c5" "$c6"
+  c7="$(_commit future-contract-input/thing.txt unclassified)"
+  _expect "contract mode still refuses an unknown top-level path" DIFFERENT --contract-inputs svc-a "$c6" "$c7"
+
+  [ "$fail" -eq 0 ] && echo "selftest OK: 34 cases (19 default + 8 --own-test-overlay + 7 --contract-inputs) on real git trees — release metadata changes only contract scope, while source, test, shared-library, root-build, ancestry and unknown-path guards remain fail-closed."
   return "$fail"
 }
 
@@ -450,7 +492,9 @@ if [ "${1:-}" = "--self-test" ] || [ "${1:-}" = "--selftest" ]; then
 fi
 
 OWN_TEST_OVERLAY=0
+CONTRACT_INPUTS_ONLY=0
 if [ "${1:-}" = "--own-test-overlay" ]; then OWN_TEST_OVERLAY=1; shift; fi
+if [ "${1:-}" = "--contract-inputs" ]; then CONTRACT_INPUTS_ONLY=1; shift; fi
 
 if [ $# -ne 3 ]; then
   verdict DIFFERENT "usage: $0 <service> <pact_sha> <dispatch_sha> — refusing rather than assuming equivalence"

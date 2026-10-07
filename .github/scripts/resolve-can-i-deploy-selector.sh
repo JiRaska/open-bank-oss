@@ -64,8 +64,8 @@
 #       yes     → 200, a version exists for THIS commit
 #       equivalent:<sha>
 #               → no version for THIS commit, but the probe PROVED from git that <sha> — the
-#                 commit that does have one — is byte-identical in every build input of this
-#                 service (#3432). Not a fallback: a narrower, justified question.
+#                 commit that does have one — is byte-identical in every Pact input of this
+#                 service (#3432). Release metadata may differ; image freshness is separate.
 #       no      → 404 on the version, but the pacticipant EXISTS: this commit has published nothing yet
 #       absent  → the broker does not know the pacticipant AT ALL (no contracts either way)
 #       unknown → the probe itself failed (broker unreachable / non-2xx-non-404)
@@ -108,15 +108,15 @@ case "$PRESENT" in
   equivalent:*)
     # #3432. The probe could not find a version for THIS sha, but it proved — from git tree
     # objects, via pact-version-tree-equivalent.sh — that the commit which DOES have one is
-    # byte-identical to this one in every input this service's image is built from, and is an
-    # ancestor of it. So this is not the #3318 case at all: there is no "different commit" here
-    # in any sense that can reach the artifact, and asking by version number is more precise than
+    # byte-identical to this one in every Pact input, and is an ancestor of it. So this is not
+    # the #3318 case: release metadata may differ in the image, but cannot change the contract.
+    # Asking by version number is more precise than
     # the `--latest main` that a push would have used. Without this the manual/reconcile path can
     # deploy NOTHING, ever — 54 of 54 refused on run 30761923908 — which is the state the whole
     # fleet lands in exactly when a reconcile is needed. The refusal below is untouched for every
     # case where the equivalence could NOT be proved, including a broker the probe could not read.
     emit "--version ${PRESENT#equivalent:}" \
-      "no pact version for ${SHA}, but ${PRESENT#equivalent:} is byte-identical to it in every build input of ${SVC} (git tree objects, ancestor) — asking about that version by number is a question about the same source, not about a different commit (#3432, #3318)"
+      "no pact version for ${SHA}, but ${PRESENT#equivalent:} is byte-identical to it in every Pact input of ${SVC} (git tree objects, ancestor) — asking about that version by number is a question about the same contract, not about an unverified change (#3432, #3318)"
     ;;
   yes)
     # The precise question, and the one the broker's own warning asks for: can THIS commit
