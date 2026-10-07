@@ -69,7 +69,10 @@ def missing_updates(repo: Path, paths: dict[str, str], head_files: set[str]) -> 
             for path in head_files
         ):
             failures.append(module)
-    shared_sources = ("openbank-libs/", "openbank-libs-domain/", "openbank-libs-runtime/")
+    shared_sources = (
+        "openbank-libs/", "openbank-libs-domain/", "openbank-libs-runtime/",
+        "openbank-libs-lending/", "openbank-libs-iso20022/", "openbank-libs-testing/",
+    )
     shared_changed = any(
         p.startswith(f"{prefix}src/main/") or p == f"{prefix}build.gradle.kts"
         for prefix in shared_sources for p in paths
