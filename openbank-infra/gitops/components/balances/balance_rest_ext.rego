@@ -165,14 +165,14 @@ allowed_reasons contains "service-balance-m2m" if {
 # The resource rechecks account-service ownership. These actions change only an optional alert
 # preference; they confer no ability to move or reserve money.
 allowed_reasons contains "edge-owned-balance-alert" if {
-	input.principal.type == "HUMAN"
-	input.principal.id == "service-account-openbank-edge"
-	input.action in {"balance.alert.read", "balance.alert.update"}
+    input.principal.type == "HUMAN"
+    input.principal.id == "service-account-openbank-edge"
+    input.action in {"balance.alert.read", "balance.alert.update"}
 }
 
 prohibited if {
-	input.action in {"balance.alert.read", "balance.alert.update"}
-	input.principal.id != "service-account-openbank-edge"
+    input.action in {"balance.alert.read", "balance.alert.update"}
+    input.principal.id != "service-account-openbank-edge"
 }
 
 # Fail-closed veto for the customer-edge M2M identity on every balance write (#3734). The
