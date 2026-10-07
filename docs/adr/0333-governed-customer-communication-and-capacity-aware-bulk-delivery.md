@@ -205,15 +205,23 @@ Notification-service's marketing ContactPolicyGate now reads the same live conse
 suppression list as campaign-service. A matching entry denies before counters or consent; an
 unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count
 contacts locally, so this does not satisfy D2's atomic cross-origin reservation.
-The local notification counter has a second defect that a query-only change cannot safely fix:
-the consumer persists its own `PENDING` row before checking the gate, then counts every recent
-marketing row, including that row and terminal suppressions. Filtering to accepted rows alone
-would stop counting ambiguous provider handoffs and permit a cap overrun under concurrency.
-D2 must reserve before handoff under a per-party database serialization point, exclude the
-current intent from its prior-contact count, and keep unresolved handoffs reserved. A definitive
-pre-handoff denial or failure releases the reservation; replay of the same intent returns its
-recorded decision. Prove the cap with concurrent campaign and operator intents at the boundary,
-plus denial, timeout and replay cases against PostgreSQL before replacing local counters.
+The former local notification counter had a second defect that a query-only change could not
+safely fix: the consumer persisted its own `PENDING` row before checking the gate, then counted
+every recent marketing row, including that row and terminal suppressions. Filtering only
+accepted rows would have stopped counting ambiguous handoffs and allowed concurrent cap overruns.
+Notification-service now adds a PostgreSQL reservation for outbound MARKETING email and push
+after the live suppression/quiet-hours/consent gate and before provider handoff. An advisory
+transaction lock per party serializes concurrent requests; a unique notification id is the
+reservation key. Only reserved rows in PENDING, SENT or BOUNCED state consume the rolling cap;
+a known FAILED or SUPPRESSED outcome releases its slot, while an ambiguous PENDING handoff
+continues to consume it. The former notification-local read-only counter is removed so a newly
+persisted PENDING row cannot deny itself. All campaign, operator or agent requests using the
+notification MARKETING template meet this same authority. Campaign's earlier local gate remains
+an additional conservative check; promotional impressions still use their separate engagement
+budget. This is a partial D2 cutover: cross-channel parity, an operator decision projection and
+reconciliation of ambiguous provider handoffs still require proof before mass activation.
+Database replay of an already reserved notification is held for reconciliation by the existing
+PENDING deduplication guard; the reservation store also refuses a second reservation for its id.
 Notification dispatch now treats GATE_UNAVAILABLE as a retryable dependency failure rather than a
 terminal customer suppression. Its committed notification row remains PENDING, no provider is
 called and the Kafka record fails to the configured dead-letter path for reconciliation. The

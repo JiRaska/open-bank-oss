@@ -15,6 +15,7 @@ import com.openbank.notification.domain.model.NotificationOutcomeEvent
 import com.openbank.notification.domain.model.NotificationRequest
 import com.openbank.notification.domain.model.NotificationTemplate
 import com.openbank.notification.infrastructure.persistence.repository.NotificationRepository
+import io.agroal.api.AgroalDataSource
 import io.quarkus.hibernate.reactive.panache.Panache
 import io.quarkus.mailer.MockMailbox
 import io.quarkus.test.common.QuarkusTestResource
@@ -60,6 +61,9 @@ class MarketingGateIT {
 
     @Inject
     lateinit var repository: NotificationRepository
+
+    @Inject
+    lateinit var dataSource: AgroalDataSource
 
     @Inject
     lateinit var notificationConsumer: NotificationConsumer
@@ -138,6 +142,18 @@ class MarketingGateIT {
         // ...and because the mailer is the mock, nothing left the process, so the record says so.
         assertThat(statusFor(request.partyId)).isEqualTo("SUPPRESSED")
         assertThat(reasonFor(request.partyId)).isEqualTo(NotificationOutcomeEvent.REASON_MAILER_MOCKED)
+        val reservations = dataSource.connection.use { connection ->
+            connection.prepareStatement(
+                "SELECT count(*) FROM marketing_contact_reservations WHERE party_id = ?",
+            ).use { statement ->
+                statement.setObject(1, request.partyId)
+                statement.executeQuery().use { rows ->
+                    rows.next()
+                    rows.getLong(1)
+                }
+            }
+        }
+        assertThat(reservations).isEqualTo(1L)
     }
 
     @Test

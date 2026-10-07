@@ -45,6 +45,8 @@ import com.openbank.notification.domain.model.PushSendOutcome
 import com.openbank.notification.domain.model.TemplateSensitivity
 import com.openbank.notification.infrastructure.client.PartyContactClient
 import com.openbank.notification.infrastructure.client.PartyMergeResolver
+import com.openbank.notification.infrastructure.contact.MarketingContactReservationStore
+import com.openbank.notification.infrastructure.contact.MarketingReservationDecision
 import com.openbank.notification.infrastructure.persistence.NotificationDeduplication
 import com.openbank.notification.infrastructure.persistence.PgManagedTemplateStore
 import com.openbank.notification.infrastructure.persistence.entity.NotificationEntity
@@ -228,6 +230,8 @@ class NotificationConsumer @Inject constructor(
     @Inject lateinit var audit: AuditEventPublisher
 
     @Inject lateinit var contactGate: ContactPolicyGate
+
+    @Inject lateinit var marketingReservations: MarketingContactReservationStore
 
     @Inject lateinit var managedTemplates: PgManagedTemplateStore
 
@@ -566,9 +570,9 @@ class NotificationConsumer @Inject constructor(
     /**
      * The ADR-0219 D4 contact gate (#2749) — this service's own `consentServiceClient` call was
      * the choke point ADR-0219 D4 names outright ("its consent call becomes this gate call"): one
-     * `ContactPolicyGate.check(...)` now wraps suppression list -> send cap -> quiet hours ->
-     * live consent pull, in the gate's ordering (same composition campaign-service and
-     * engagement-service already reuse), instead of a bespoke consent-only check.
+     * `ContactPolicyGate.check(...)` wraps live suppression, quiet hours and consent. The
+     * send cap is enforced immediately afterward by a PostgreSQL reservation transaction;
+     * a read-only local count could admit concurrent over-cap sends or count this row itself.
      *
      * Bridged into this `Uni` chain via `CoroutineScope(Dispatchers.Unconfined).async {
      * }.asUni()` — the same suspend-into-Uni idiom `CampaignJourneyActivitiesImpl` uses (the
@@ -577,8 +581,9 @@ class NotificationConsumer @Inject constructor(
      * Fail-closed in every deny reason. `NO_CONSENT` is a terminal policy refusal;
      * `GATE_UNAVAILABLE` is a dependency outage and leaves the committed row PENDING, with the
      * Kafka record failed to its DLQ. It must not be counted as a customer suppression. The
-     * stale-PENDING gauge makes the required reconciliation visible. `SEND_CAP_REACHED`,
-     * `QUIET_HOURS` and `SUPPRESSED_LIST` remain distinct terminal reasons.
+     * stale-PENDING gauge makes the required reconciliation visible. A reservation-store error
+     * also leaves PENDING with no provider handoff. `SEND_CAP_REACHED`, `QUIET_HOURS` and
+     * `SUPPRESSED_LIST` remain distinct terminal reasons.
      *
      * The check is per send, never cached (ADR-0198). `notification_preference`'s columns
      * (`payments_push` / `product_push` / `marketing_push`) remain a per-channel mute *within* a
@@ -597,10 +602,8 @@ class NotificationConsumer @Inject constructor(
         }.asUni()
         return decisionUni.chain { decision ->
             if (decision.allowed) {
-                when (req.channel) {
-                    NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
-                    NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
-                    NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
+                marketingReservations.reserve(entity.notificationId, req.partyId).chain { reservation ->
+                    dispatchReservedMarketing(req, subject, body, entity, reservation)
                 }
             } else {
                 if (decision.denyReason == ContactDenyReason.GATE_UNAVAILABLE) {
@@ -631,6 +634,29 @@ class NotificationConsumer @Inject constructor(
                     .invoke { _ -> auditMarketingSuppressed(req, reason) }
             }
         }
+    }
+
+    private fun dispatchReservedMarketing(
+        req: NotificationRequest,
+        subject: String,
+        body: String,
+        entity: NotificationEntity,
+        reservation: MarketingReservationDecision,
+    ): Uni<Void> = when (reservation) {
+        MarketingReservationDecision.RESERVED -> when (req.channel) {
+            NotificationChannel.EMAIL -> sendEmail(req, subject, body, entity)
+            NotificationChannel.PUSH -> maybeSendPush(req, subject, entity)
+            NotificationChannel.INBOX -> error("marketing inbox is rejected before dispatch")
+        }
+        MarketingReservationDecision.CAP_REACHED -> markStatus(
+            req,
+            entity,
+            NotificationOutcome.SUPPRESSED,
+            NotificationOutcomeEvent.REASON_SEND_CAP_REACHED,
+        ).invoke { _ -> auditMarketingSuppressed(req, NotificationOutcomeEvent.REASON_SEND_CAP_REACHED) }
+        MarketingReservationDecision.ALREADY_RESERVED -> Uni.createFrom().failure(
+            IllegalStateException("marketing contact reservation is already in doubt"),
+        )
     }
 
     /**
