@@ -319,6 +319,7 @@ NOT_PROBED = [
     ("https://github.com/kubernetes-sigs/controller-tools/issues", "upstream issue link in a vendored CRD comment; never fetched"),
     ("https://github.com/JiRaska/open-bank-oss/blob", "runbook deep-link in an alert annotation; read by a human, not by a workload"),
     ("https://open-bank.tech/", "OAuth redirect/claimed-HTTPS identifier in a Keycloak client; not a feed"),
+    ("https://www.open-bank.tech/", "our own public website; covered by the strict synthetic-public-site probe, not an external data feed"),
     ("https://flagd.dev", "flagd JSON-schema URI in a feature-flag ConfigMap; an identifier"),
     ("https://go.temporal.io", "Go module path in a Temporal chart value; not an HTTP fetch"),
     #
