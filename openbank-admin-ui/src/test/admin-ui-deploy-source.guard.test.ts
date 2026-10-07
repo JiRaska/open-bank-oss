@@ -21,6 +21,9 @@ function createRepository() {
   git(repository, 'config', 'user.name', 'Admin UI deploy guard test')
   git(repository, 'config', 'commit.gpgsign', 'false')
   commitFile(repository, 'openbank-admin-ui/src/app/page.tsx', 'initial\n', 'feat(admin-ui): seed source')
+  commitFile(repository, 'openbank-admin-ui/src/lib/infra-lifecycle/registry.json',
+    '{"components": []}\n', 'chore(test): seed registry')
+  commitFile(repository, manifest, 'image: example.invalid/openbank-admin-ui:sandbox-old\n', 'chore(test): seed manifest')
   return repository
 }
 
@@ -54,7 +57,7 @@ describe('Admin UI deploy source authorization', () => {
     const main = commitFile(
       repository,
       manifest,
-      'image: admin-ui:sandbox-source\n',
+      'image: example.invalid/openbank-admin-ui:sandbox-source\n',
       'chore(admin-ui): deploy sandbox-source (#1)',
     )
 
@@ -78,12 +81,33 @@ describe('Admin UI deploy source authorization', () => {
     const repository = createRepository()
     const source = git(repository, 'rev-parse', 'HEAD')
     mkdirSync(join(repository, 'openbank-infra/gitops/components/admin-ui'), { recursive: true })
-    writeFileSync(join(repository, manifest), 'image: admin-ui:sandbox-source\n')
+    writeFileSync(join(repository, manifest), 'image: example.invalid/openbank-admin-ui:sandbox-source\n')
     writeFileSync(join(repository, 'openbank-admin-ui/README.md'), 'unexpected\n')
     git(repository, 'add', '--', manifest, 'openbank-admin-ui/README.md')
     git(repository, 'commit', '-qm', 'chore(admin-ui): deploy spoofed')
     const main = git(repository, 'rev-parse', 'HEAD')
 
+    expect(authorize(repository, source, main)).toBe('false')
+  })
+
+  it('rejects a deploy-looking commit that changes another manifest field', () => {
+    const repository = createRepository()
+    const source = git(repository, 'rev-parse', 'HEAD')
+    const main = commitFile(repository, manifest,
+      'image: example.invalid/openbank-admin-ui:sandbox-source\nreplicas: 2\n',
+      'chore(admin-ui): deploy spoofed')
+    expect(authorize(repository, source, main)).toBe('false')
+  })
+
+  it('rejects its own pin when lifecycle or Grype displays that image', () => {
+    const repository = createRepository()
+    commitFile(repository, 'openbank-admin-ui/src/lib/infra-lifecycle/registry.json',
+      '{"components": [{"versionSource": "gitops", "imageGrep": "openbank-admin-ui"}]}\n',
+      'chore(test): display admin image')
+    const source = git(repository, 'rev-parse', 'HEAD')
+    const main = commitFile(repository, manifest,
+      'image: example.invalid/openbank-admin-ui:sandbox-source\n',
+      'chore(admin-ui): deploy sandbox-source')
     expect(authorize(repository, source, main)).toBe('false')
   })
 
@@ -95,7 +119,7 @@ describe('Admin UI deploy source authorization', () => {
     const generated = commitFile(
       repository,
       manifest,
-      'image: admin-ui:sandbox-source\n',
+      'image: example.invalid/openbank-admin-ui:sandbox-source\n',
       'chore(admin-ui): deploy sandbox-source',
     )
     expect(authorize(repository, generated, generated)).toBe('false')

@@ -48,6 +48,11 @@ DEFAULT_WINDOW_SECONDS = 1800
 DEPLOY_PREFIXES = ("chore/gitops-auto-deploy-", "chore/admin-ui-deploy-")
 DEPLOY_SUBJECTS = ("chore(gitops): auto-deploy ", "chore(admin-ui): deploy ")
 PIN_RE = re.compile(r"(?P<image>[A-Za-z0-9.-]+/openbank-[A-Za-z0-9._/-]+):(?P<tag>sandbox-[A-Za-z0-9._-]+)")
+ADMIN_UI_MANIFEST = "openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
+ADMIN_UI_PIN_RE = re.compile(
+    r"^\s*image:\s*(?P<image>[A-Za-z0-9.-]+/openbank-admin-ui):"
+    r"sandbox-[A-Za-z0-9._-]+\s*$"
+)
 
 
 def decide(event: str, now: int, last_deploy: int | None, armed_open: bool, window: int) -> tuple[str, str]:
@@ -178,26 +183,75 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
     return equivalent.returncode == 0
 
 
-def admin_ui_image_inputs_unchanged(root: str, source: str) -> bool:
-    """Conservative source comparison for the root-context Admin UI Docker build.
+def admin_ui_image_inputs_unchanged(root: str, source: str, head: str = "HEAD") -> bool:
+    """Admit only this workflow's own image-only pin commits after an Admin UI source.
 
-    The Dockerfile's collectors use `COPY . /repo`; prebuild generators also read
-    files across the repository. Therefore every tracked change is potentially an
-    image input. The three committed generators now omit inert image-only pins
-    from their source dates, but the image build also fetches an external lifecycle
-    feed and can run an optional Grype scan. Until their exact build inputs and
-    output digests are captured in verifiable image provenance, this guard cannot
-    prove byte equivalence even for the Admin UI's own GitOps pin. A changed
-    Dockerfile, .dockerignore, build script,
-    changelog or OpenAPI is consequently rejected by default as well.
+    The Admin UI image includes repository-wide docs, contracts and generated
+    snapshots, so an arbitrary tracked change cannot be assumed inert. Its own
+    GitOps pin does not change the generated facts: topology ignores image refs,
+    and lifecycle/Grype registry images do not include Admin UI. This compares
+    repository inputs only; external EOL and Grype provenance remains uncaptured.
     """
-    result = subprocess.run(
-        ["git", "diff", "--name-only", "--no-renames", "-z", source, "HEAD"],
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source, head],
         cwd=root, capture_output=True, check=False,
     )
-    if result.returncode != 0:
+    if ancestor.returncode != 0:
         return False
-    return not result.stdout
+    commits = subprocess.run(
+        ["git", "rev-list", "--reverse", f"{source}..{head}"],
+        cwd=root, capture_output=True, text=True, check=False,
+    )
+    if commits.returncode != 0:
+        return False
+    pending = commits.stdout.splitlines()
+    registry_greps: list[str] = []
+    if pending:
+        # These generators display and scan every registry-selected GitOps image.
+        # If this pin ever matches the registry, it becomes a real input.
+        registry = os.path.join(root, "openbank-admin-ui/src/lib/infra-lifecycle/registry.json")
+        try:
+            with open(registry, encoding="utf-8") as registry_file:
+                components = json.load(registry_file)["components"]
+            registry_greps = [c["imageGrep"] for c in components
+                              if c.get("versionSource") == "gitops" and c.get("imageGrep")]
+        except (OSError, ValueError, KeyError, TypeError):
+            return False
+    for commit in pending:
+        subject = subprocess.run(
+            ["git", "log", "-1", "--format=%s", commit],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if subject.returncode != 0 or not subject.stdout.startswith("chore(admin-ui): deploy "):
+            return False
+        paths = subprocess.run(
+            ["git", "diff-tree", "--first-parent", "--no-commit-id", "--name-only", "-r", "-z", commit],
+            cwd=root, capture_output=True, check=False,
+        )
+        if paths.returncode != 0 or paths.stdout.split(b"\0") != [ADMIN_UI_MANIFEST.encode(), b""]:
+            return False
+        before = subprocess.run(
+            ["git", "show", f"{commit}^:{ADMIN_UI_MANIFEST}"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        after = subprocess.run(
+            ["git", "show", f"{commit}:{ADMIN_UI_MANIFEST}"],
+            cwd=root, capture_output=True, text=True, check=False,
+        )
+        if before.returncode != 0 or after.returncode != 0:
+            return False
+        old_lines, new_lines = before.stdout.splitlines(), after.stdout.splitlines()
+        if len(old_lines) != len(new_lines):
+            return False
+        changes = [(old, new) for old, new in zip(old_lines, new_lines) if old != new]
+        if len(changes) != 1:
+            return False
+        old_pin, new_pin = (ADMIN_UI_PIN_RE.fullmatch(line) for line in changes[0])
+        if not old_pin or not new_pin or old_pin["image"] != new_pin["image"]:
+            return False
+        if any(grep in line for grep in registry_greps for line in changes[0]):
+            return False
+    return True
 
 
 def carry(root: str, diff: str, skip_images: set[str],
@@ -383,32 +437,55 @@ def self_test() -> int:
             with open(path, "w", encoding="utf-8") as out:
                 out.write(value)
 
-        def commit(rel, value):
+        def commit(rel, value, subject="fixture"):
             write(rel, value)
             git("add", "--", rel)
-            git("commit", "-m", "fixture")
+            git("commit", "-m", subject)
 
         git("init", "-q")
         git("config", "user.name", "Fixture")
         git("config", "user.email", "fixture@example.invalid")
         git("config", "commit.gpgsign", "false")
         commit("openbank-admin-ui/Dockerfile", "FROM scratch\n")
+        registry = "openbank-admin-ui/src/lib/infra-lifecycle/registry.json"
+        commit(registry, '{"components": []}\n')
+        manifest = ADMIN_UI_MANIFEST
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-old\n")
         source = git("rev-parse", "HEAD")
         image = "example.invalid/openbank-admin-ui"
         tag = f"sandbox-{source[:8]}"
         check("Admin UI source tag resolves to current main", image_source_is_current(d, image, tag))
         check("unknown Admin UI source fails closed",
               not image_source_is_current(d, image, "sandbox-deadbeef"))
-        commit("openbank-infra/gitops/components/admin-ui/admin-ui.yaml",
-               "image: example.invalid/openbank-admin-ui:sandbox-new\n")
-        check("GitOps-only pin lacks complete captured image provenance and remains stale",
-              not image_source_is_current(d, image, tag))
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-new\n",
+               "chore(admin-ui): deploy sandbox-new")
+        check("own image-only pin preserves Admin UI source eligibility",
+              image_source_is_current(d, image, tag))
+        check("producer and flusher share the own-pin decision",
+              subprocess.run([sys.executable, __file__, "admin-ui-source-current", "--root", d,
+                              "--source", source, "--main", "HEAD"], capture_output=True).returncode == 0)
+        producer_guard = os.path.join(os.path.dirname(__file__), "authorize-admin-ui-deploy-source.sh")
+        check("producer admits the same own image-only pin",
+              subprocess.run(["bash", producer_guard, source, git("rev-parse", "HEAD")],
+                             cwd=d, capture_output=True, text=True).stdout.strip() == "true")
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-next\n",
+               "chore(admin-ui): deploy sandbox-next")
+        check("multiple own image-only pins preserve eligibility", image_source_is_current(d, image, tag))
         source = git("rev-parse", "HEAD")
         tag = f"sandbox-{source[:8]}"
         commit("openbank-infra/gitops/components/payments/deployment.yaml",
                "image: example.invalid/openbank-payments:sandbox-new\n")
         check("unrelated GitOps pin lacks complete captured image provenance and remains stale",
               not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-new\nreplicas: 2\n",
+               "chore(admin-ui): deploy spoofed")
+        check("deploy-looking semantic manifest change is stale",
+              not image_source_is_current(d, image, tag))
+        check("producer also refuses semantic manifest change",
+              subprocess.run(["bash", producer_guard, source, git("rev-parse", "HEAD")],
+                             cwd=d, capture_output=True, text=True).stdout.strip() == "false")
         source = git("rev-parse", "HEAD")
         tag = f"sandbox-{source[:8]}"
         commit("openbank-notification-service/CHANGELOG.md", "## new release\n")
@@ -419,6 +496,14 @@ def self_test() -> int:
         check("retry image tag resolves to exact source", image_source_is_current(d, image, tag))
         commit("openbank-admin-ui/Dockerfile", "FROM busybox\n")
         check("changed Dockerfile makes Admin UI image stale",
+              not image_source_is_current(d, image, tag))
+        commit(registry, '{"components": [{"versionSource": "gitops", '
+                         '"imageGrep": "openbank-admin-ui"}]}\n')
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit(manifest, "image: example.invalid/openbank-admin-ui:sandbox-final\nreplicas: 2\n",
+               "chore(admin-ui): deploy sandbox-final")
+        check("own pin displayed by lifecycle registry is stale",
               not image_source_is_current(d, image, tag))
 
     if fails:
@@ -445,6 +530,10 @@ def main() -> int:
     c.add_argument("--skip-images", default="", help="space-separated images this run pins itself")
     v = sub.add_parser("verify")
     v.add_argument("--root", default=".")
+    au = sub.add_parser("admin-ui-source-current")
+    au.add_argument("--root", default=".")
+    au.add_argument("--source", required=True)
+    au.add_argument("--main", required=True)
     for p in (d, f):
         p.add_argument("--now", type=int, required=True)
         p.add_argument("--window", type=int, default=int(os.environ.get("DEPLOY_WINDOW_SECONDS", DEFAULT_WINDOW_SECONDS)))
@@ -475,6 +564,8 @@ def main() -> int:
         for pin in stale:
             print(f"::error::stale GitOps image pin: {pin}", file=sys.stderr)
         return 1 if stale else 0
+    if a.cmd == "admin-ui-source-current":
+        return 0 if admin_ui_image_inputs_unchanged(a.root, a.source, a.main) else 1
     ap.print_help()
     return 2
 
