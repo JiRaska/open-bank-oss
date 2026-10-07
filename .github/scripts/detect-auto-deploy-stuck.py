@@ -83,9 +83,13 @@ THRESHOLD = 3
 # dispatch, in-progress and cancelled runs before applying R1 locally; never paginate.
 PER_PAGE = 50
 MAX_PAGE_AGE = timedelta(hours=6)
-# A verdict older than the three-hour cron interval may omit a newer tick. GitHub can
-# delay the schedule; until that tick arrives the watch errors rather than mutating an issue.
-MAX_LANE_AGE = timedelta(hours=3)
+# The three-hour cron is not a three-hour delivery guarantee. Scheduled runs were
+# observed 281 minutes apart on 2026-10-07 (the 00:23 tick arrived at 01:11).
+# A verdict older than one interval is not safe for issue mutations: an omitted newer
+# success/failure could reverse the decision. Defer that decision until five hours, then
+# fail the watch if the schedule is still missing. Ordinary jitter stays visible as a warning.
+MAX_ACTIONABLE_LANE_AGE = timedelta(hours=3)
+MAX_LANE_AGE = timedelta(hours=5)
 
 
 # --------------------------------------------------------------------------- pure logic
@@ -137,8 +141,8 @@ def _slim(r: dict) -> dict:
     }
 
 
-def require_current_population(runs: list[dict], now: datetime) -> None:
-    """Do not turn a stale/truncated API page into a false red or false green verdict."""
+def require_current_population(runs: list[dict], now: datetime) -> bool:
+    """Validate the page; return whether its newest scheduled verdict is actionable."""
     if not runs:
         raise RuntimeError("workflow-runs page is empty")
 
@@ -158,6 +162,7 @@ def require_current_population(runs: list[dict], now: datetime) -> None:
         raise RuntimeError(f"unfiltered page has only {len(verdicts)} scheduled verdicts; need {THRESHOLD}")
     if age(verdicts[0]) > MAX_LANE_AGE:
         raise RuntimeError("newest completed scheduled verdict is stale")
+    return age(verdicts[0]) <= MAX_ACTIONABLE_LANE_AGE
 
 
 # --------------------------------------------------------------------------- online lane
@@ -192,6 +197,10 @@ def check_declaration(root: Path) -> list[str]:
         problems.append(f"{WORKFLOW}: does not invoke `python3 .github/scripts/{me} --evaluate`")
     if not re.search(rf"python3\s+\.github/scripts/{re.escape(me)}\s+--self-test", code):
         problems.append(f"{WORKFLOW}: does not run `{me} --self-test` before trusting a verdict")
+    if not re.search(r"(?m)^\s*3\)\s+echo\b", code):
+        problems.append(f"{WORKFLOW}: does not accept the delayed-verdict exit code")
+    if not re.search(r"(?m)^\s*if:\s*steps\.verdict\.outputs\.code\s*!=\s*['\"]3['\"]", code):
+        problems.append(f"{WORKFLOW}: may mutate an issue for a delayed verdict")
     if "listWorkflowRuns" in code:
         problems.append(
             f"{WORKFLOW}: carries an inline `listWorkflowRuns` — the population decision "
@@ -309,6 +318,12 @@ def self_test() -> int:
 
     def rejected(page: list[dict], at: datetime = now) -> bool:
         try:
+            return not require_current_population(page, at)
+        except RuntimeError:
+            return True
+
+    def beyond_grace(page: list[dict], at: datetime = now) -> bool:
+        try:
             require_current_population(page, at)
         except RuntimeError:
             return True
@@ -324,14 +339,22 @@ def self_test() -> int:
                     if r["event"] == "schedule" else r for r in current]
     check("freshness: a delayed scheduled tick within three hours remains usable",
           not rejected(delayed_tick))
+    delayed_by_github = [dict(r, created_at="2026-10-06T14:27:00Z")
+                         if r["event"] == "schedule" else r for r in current]
+    check("freshness: a 3h33m-old scheduled verdict defers issue mutation during cron jitter",
+          require_current_population(delayed_by_github, now) is False)
+    delayed_further = [dict(r, created_at="2026-10-06T13:19:00Z")
+                       if r["event"] == "schedule" else r for r in current]
+    check("freshness: a 4h41m-old verdict still defers after observed schedule jitter",
+          require_current_population(delayed_further, now) is False)
     missed_one = [dict(r, created_at="2026-10-06T12:44:00Z")
                   if r["event"] == "schedule" else r for r in current]
     check("freshness: one missing three-hour tick cannot close or reopen",
-          rejected(missed_one))
+          beyond_grace(missed_one))
     missed_two = [dict(r, created_at="2026-10-06T09:36:00Z")
                   if r["event"] == "schedule" else r for r in current]
     check("freshness: two missing three-hour ticks cannot close or reopen",
-          rejected(missed_two))
+          beyond_grace(missed_two))
     at_1650 = datetime(2026, 10, 6, 16, 50, tzinfo=timezone.utc)
     omitted_green = [_run(8, "push", "success"), _run(7, "schedule", "failure"),
                      _run(6, "schedule", "failure"), _run(5, "schedule", "failure")]
@@ -356,9 +379,14 @@ def self_test() -> int:
         wf.parent.mkdir(parents=True)
         me = Path(__file__).name
         good = (f"run: python3 .github/scripts/{me} --self-test\n"
-                f"run: python3 .github/scripts/{me} --evaluate --repo x\n")
+                f"run: python3 .github/scripts/{me} --evaluate --repo x\n"
+                "  3) echo delayed ;;\n"
+                "if: steps.verdict.outputs.code != '3'\n")
         wf.write_text(good)
         check("declaration: the committed shape passes", check_declaration(root) == [])
+        wf.write_text(good.replace("if: steps.verdict.outputs.code != '3'\n", ""))
+        check("declaration: delayed verdict cannot mutate the issue",
+              any("delayed verdict" in p for p in check_declaration(root)))
         wf.write_text(good + "script: |\n  github.rest.actions.listWorkflowRuns({})\n")
         check("declaration: re-inlined listWorkflowRuns is rejected",
               any("listWorkflowRuns" in p for p in check_declaration(root)))
@@ -411,12 +439,16 @@ def main() -> int:
             return 1
         try:
             runs = fetch_runs(a.repo)
-            require_current_population(runs, datetime.now(timezone.utc))
+            actionable = require_current_population(runs, datetime.now(timezone.utc))
         except (subprocess.CalledProcessError, TypeError, ValueError, RuntimeError) as e:
             err = getattr(e, "stderr", "") or str(e)
             print(f"::error::the watch could not read the {LANE} lane of {WORKFLOW_ID}: "
                   f"{err.strip()[:400]}", file=sys.stderr)
             return 1
+        if not actionable:
+            print("::warning::scheduled auto-deploy verdict is older than one cron interval; "
+                  "deferring issue mutation while GitHub may deliver a delayed tick")
+            return 3
         v = evaluate(runs)
         text = json.dumps(v, indent=2)
         print(text)

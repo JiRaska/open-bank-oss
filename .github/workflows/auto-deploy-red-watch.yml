@@ -86,6 +86,7 @@ jobs:
           case "$code" in
             0) echo "scheduled auto-deploy lane not stuck." ;;
             2) echo "::warning::scheduled auto-deploy lane is stuck red — escalating." ;;
+            3) echo "::warning::scheduled verdict is delayed; wait for a fresh tick before changing the issue." ;;
             1) echo "::error::The watch could not read the scheduled lane. That is a"
                echo "::error::failure of THIS WATCH, not a 'not stuck' verdict."
                exit 1 ;;
@@ -93,6 +94,7 @@ jobs:
           esac
 
       - name: Escalate or stand down
+        if: steps.verdict.outputs.code != '3'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
           script: |
