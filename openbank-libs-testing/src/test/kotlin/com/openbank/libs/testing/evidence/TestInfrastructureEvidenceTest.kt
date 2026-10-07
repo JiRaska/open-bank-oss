@@ -143,4 +143,14 @@ class TestInfrastructureEvidenceTest {
         assertThat(emitted.map { it.substringAfter("\"lifecycle\":\"").substringBefore("\"") })
             .containsExactly("started", "stopped", "started")
     }
+
+    @Test
+    fun `transient container identity is retained only in the local raw recorder`() {
+        val containerId = "a".repeat(64)
+        TestInfrastructureEvidence.record("postgres", "postgres:18.6-alpine", "started", containerId = containerId)
+        TestInfrastructureEvidence.record("postgres", "postgres:18.6-alpine", "stopped", containerId = containerId)
+
+        assertThat(lines()).hasSize(2)
+        assertThat(lines()).allSatisfy { line -> assertThat(line).contains("\"containerId\":\"$containerId\"") }
+    }
 }

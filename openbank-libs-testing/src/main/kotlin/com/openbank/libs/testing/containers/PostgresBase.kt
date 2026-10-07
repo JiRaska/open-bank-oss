@@ -41,7 +41,13 @@ abstract class PostgresBase(
             .withPassword("openbank_secret")
             .withDatabaseName(dbName)
         pg.start()
-        TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "started", resourceScopeId)
+        TestInfrastructureEvidence.record(
+            "postgres",
+            POSTGRES_IMAGE,
+            "started",
+            resourceScopeId,
+            containerId = pg.containerId,
+        )
         postgres = pg
         return pg
     }
@@ -59,8 +65,17 @@ abstract class PostgresBase(
     }
 
     override fun stop() {
-        postgres?.stop()
-        if (postgres != null) TestInfrastructureEvidence.record("postgres", POSTGRES_IMAGE, "stopped", resourceScopeId)
+        postgres?.let { pg ->
+            val containerId = pg.containerId
+            pg.stop()
+            TestInfrastructureEvidence.record(
+                "postgres",
+                POSTGRES_IMAGE,
+                "stopped",
+                resourceScopeId,
+                containerId = containerId,
+            )
+        }
     }
 
     companion object {
