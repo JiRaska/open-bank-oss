@@ -145,7 +145,9 @@ function gitopsWorkloadNamespaces(): Set<string> {
       if (!/^kind:\s*(Deployment|Rollout)\s*$/m.test(doc)) continue
       const name = doc.match(/^\s{2}name:\s*(\S+)/m)?.[1]
       const ns = doc.match(/^\s{2}namespace:\s*(\S+)/m)?.[1]
-      if (name?.startsWith('openbank-') || /-service$/.test(name ?? '')) {
+      // The control agents and analytics sink are runnable docs publishers too.
+      // Requiring a -service suffix missed their dedicated namespaces entirely.
+      if (name?.startsWith('openbank-') || /-(service|agent|auditor|sentinel|steward|hunter|sink)$/.test(name ?? '')) {
         if (ns) namespaces.add(ns)
       }
     }

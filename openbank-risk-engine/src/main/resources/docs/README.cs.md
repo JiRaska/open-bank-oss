@@ -4,6 +4,8 @@
 
 Tuto dokumentaci publikuje služba na management endpointu `/q/openbank/docs` (Docs-as-Service, ADR 0019).
 
+[Kapitola architektury](./02-architecture.cs.md) popisuje zdroje snapshotu, kontrolu návaznosti na ledger a projekce. Generovaná kapitola **API surface** se při každém buildu image obnovuje z `openapi.yaml`; úplný kontrakt zůstává na `/q/openapi`.
+
 ## TL;DR
 
 - **Technologie:** Kotlin / Quarkus 3.x / PostgreSQL (migrace Flyway `V1`..)
