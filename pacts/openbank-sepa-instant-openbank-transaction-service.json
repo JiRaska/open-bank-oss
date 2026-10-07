@@ -30,8 +30,15 @@
       },
       "response": {
         "body": {
+          "amount": 500.0,
+          "currencyCode": "EUR",
           "id": "e2490de5-5bd3-43d5-b7c4-526e33f71304",
-          "status": "COMPLETED"
+          "instructionType": "ONE_OFF",
+          "rail": "SEPA_INST",
+          "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+          "status": "COMPLETED",
+          "type": "DEBIT",
+          "valueDate": "2026-01-20"
         },
         "generators": {
           "body": {
@@ -45,6 +52,14 @@
         },
         "matchingRules": {
           "body": {
+            "$.amount": {
+              "combine": "AND",
+              "matchers": [
+                {
+                  "match": "decimal"
+                }
+              ]
+            },
             "$.id": {
               "combine": "AND",
               "matchers": [

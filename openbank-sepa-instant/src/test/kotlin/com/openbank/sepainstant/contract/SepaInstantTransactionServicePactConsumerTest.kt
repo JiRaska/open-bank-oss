@@ -20,8 +20,9 @@ import org.junit.jupiter.api.extension.ExtendWith
 /**
  * Consumer-driven contract for the settlement call sepa-instant makes once the scheme returns
  * ACSC ([com.openbank.sepainstant.infrastructure.client.SettlementAdapter.settleWithResilience],
- * ADR-0108, issue #468 edge 1). The consumer posts POST /api/v1/transactions and expects
- * {id, status}. The provider verification lives in TransactionPactProviderVerificationTest
+ * ADR-0108, issue #468 edge 1). The consumer posts POST /api/v1/transactions and checks
+ * the booked transaction's identity, amount, rail and status before reporting settlement.
+ * The provider verification lives in TransactionPactProviderVerificationTest
  * (transaction-service) — same provider as domestic-payment and sepa-payment's contracts, hence
  * the shared "a valid source account exists" state.
  *
@@ -71,6 +72,13 @@ class SepaInstantTransactionServicePactConsumerTest {
                 // made all four replays green about it for the life of the contracts.
                 // stringValue, NOT stringType: this is the field the consumer branches on.
                 o.stringValue("status", "COMPLETED")
+                o.stringValue("type", "DEBIT")
+                o.stringValue("sourceAccountId", "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+                o.decimalType("amount", 500.00)
+                o.stringValue("currencyCode", "EUR")
+                o.stringValue("rail", "SEPA_INST")
+                o.stringValue("instructionType", "ONE_OFF")
+                o.stringValue("valueDate", "2026-01-20")
             }.build(),
         )
         .toPact()
@@ -89,5 +97,12 @@ class SepaInstantTransactionServicePactConsumerTest {
 
         assertThat(body.getString("id")).isNotBlank()
         assertThat(body.getString("status")).isEqualTo("COMPLETED")
+        assertThat(body.getString("type")).isEqualTo("DEBIT")
+        assertThat(body.getString("sourceAccountId")).isEqualTo("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+        assertThat(body.getDouble("amount")).isEqualTo(500.00)
+        assertThat(body.getString("currencyCode")).isEqualTo("EUR")
+        assertThat(body.getString("rail")).isEqualTo("SEPA_INST")
+        assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
+        assertThat(body.getString("valueDate")).isEqualTo("2026-01-20")
     }
 }
