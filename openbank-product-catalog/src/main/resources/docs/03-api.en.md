@@ -133,8 +133,12 @@ GET /api/v1/fees?productCode=CURRENT_PERSONAL
 
 ## Error model
 
-Legacy v1 wire shapes remain compatible with the existing Pacts. v2 returns `ApiError`; schema
-validation uses 422 with ordered `{instancePath,schemaPath,keyword,message}` violations.
+Legacy v1 product-not-found responses retain `{ "error": "<message>" }` for existing Pacts.
+When banking compatibility is disabled, the six documented product detail, update, code lookup,
+activation, deactivation, and per-product fee 404 responses come from the shared mapper as
+`ApiError` (`traceId`, `status`, `code`, `message`, `timestamp`). Those six responses accept both
+bodies. V2 returns `ApiError`; schema validation uses 422 with ordered
+`{instancePath,schemaPath,keyword,message}` violations.
 
 ## Versioning
 
