@@ -32,4 +32,4 @@ Pravidla hlášená v `breaches[]` jsou `PRODUCT_NOT_PERMITTED`, `CURRENCY_NOT_P
 
 ## Kontrakt
 
-Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity jsou aditivní: 1.18.0, s odpovědí 422 u `submit` a `approve`.
+Kontrakt API je `openapi.yaml` (`info.version` se řídí ADR-0048). Produktové limity byly aditivní ve verzi 1.18.0, s odpovědí 422 u `submit` a `approve`. Verze 1.19.0 opravuje popis validační odpovědi HTTP 400 na sdílený `ProblemDetail`; obchodní zamítnutí si ponechávají tělo `Error`.
