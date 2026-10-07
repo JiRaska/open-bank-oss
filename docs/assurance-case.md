@@ -49,7 +49,7 @@ The platform's trust boundaries, each with its enforcement mechanism:
 |---|----------|-------------|
 | B1 | Internet → edge | TLS everywhere; OIDC via Keycloak; PSD2 SCA flows (sca-service) |
 | B2 | Between principal types (USER / OPERATOR / AI_AGENT / SERVICE) | Central **deny-by-default OPA policy** for both REST and MCP surfaces ([ADR-0034](adr/0034-unified-opa-authz-mcp-and-rest.md)); per-service Rego with CI coverage reporting |
-| B3 | Service → service | Kubernetes NetworkPolicies generated from declared config (default-deny); mTLS in-cluster; per-service DB credentials (no shared schemas) |
+| B3 | Service → service | Kubernetes NetworkPolicies generated from declared config (default-deny); selected dedicated private-CA mTLS listeners and Kafka mTLS, but no fleet-wide mesh mTLS (#1914); per-service DB credentials (no shared schemas) |
 | B4 | Inbound clearing files → domain | Typed parsers with totality guarantees; **fuzzed continuously** (Jazzer targets for `Pacs008Reader`, identity parsers — `fuzz/ossfuzz/`, ClusterFuzzLite on PRs) |
 | B5 | Event bus | Outbox pattern (no dual writes), versioned backward-compatible schemas (rule #4 in [CONTRIBUTING.md](../CONTRIBUTING.md)) |
 | B6 | Source → production (supply chain) | Signed commits (ruleset-enforced), PR-only merges, SLSA provenance + cosign-signed SBOM per release, digest-pinned images |

@@ -67,9 +67,9 @@ decisioning is the only entry that becomes high-risk, and it is unbuilt.
 
 ## Obligation coverage (Art. 9–15) for a high-risk system
 
-The controls below already exist and satisfy each obligation *in substance* for the day
-a high-risk system (credit decisioning) ships. What is open is the article-by-article
-*evidence*, not the mechanism.
+The controls below are current or planned. Each obligation needs article-by-article
+evidence before a high-risk system (credit decisioning) ships; Art. 15 still has an
+unbuilt workload-identity control (#1914).
 
 | Obligation | Existing control | Status |
 |---|---|---|
@@ -79,10 +79,10 @@ a high-risk system (credit decisioning) ships. What is open is the article-by-ar
 | Art. 12 Record-keeping / logging | AI-attributed AuditEvent per action with model_id/model_version/prompt_hash (ADR-0031 D5, ADR-0086 chain). | control exists; evidence pack open |
 | Art. 13 Transparency to deployers | Charter + prompt registry (ADR-0148) make each agent's inputs/behaviour inspectable. | control exists; evidence pack open |
 | Art. 14 Human oversight | requires_human on every write; approver_must_differ_from author (segregation of duties). | control exists; evidence pack open |
-| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt; SPIFFE identity. | control exists; evidence pack open |
+| Art. 15 Accuracy, robustness, cybersecurity | Prompt-injection guard; evals gate (ADR-0148) blocks a regressing model/prompt. SPIFFE/SPIRE workload identity is deferred (#1914); no credit is taken for it. | partial; evidence pack open |
 
-> No high-risk system is declared today, so the obligations are pre-satisfied in
-> substance and tracked here in advance. The first `HIGH-RISK` row that appears in the
+> No high-risk system is declared today. The obligations are tracked in advance,
+> but Art. 15 is incomplete (#1914). The first `HIGH-RISK` row that appears in the
 > inventory above (via a new/changed charter) flips every status to APPLIES NOW.
 
 ## LLM provider egress (Art. 10 / GDPR data governance)
