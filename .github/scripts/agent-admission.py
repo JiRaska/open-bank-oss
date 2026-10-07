@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 RULES = Path("openbank-libs/governance/rules.yaml")
+PAGE_SIZE = 100  # Matches the per_page value in every admission workflow.
 
 
 def parse_utc(value, name):
@@ -44,16 +45,23 @@ def load_policy(path=RULES):
 def validate_snapshot(pages):
     if not isinstance(pages, list) or not pages or any(not isinstance(p, list) for p in pages):
         raise ValueError('expected paginated REST pull-request arrays')
+    # A short non-final page, an empty page amid results, or an oversized page means the
+    # pagination snapshot is incomplete or malformed. Never count it as spare capacity.
+    for index, page in enumerate(pages):
+        if len(page) > PAGE_SIZE or (len(pages) > 1 and not page):
+            raise ValueError('invalid PR page size')
+        if index < len(pages) - 1 and len(page) != PAGE_SIZE:
+            raise ValueError('incomplete non-final PR page')
     numbers = set()
     for page in pages:
         for pr in page:
-            if not isinstance(pr, dict) or not isinstance(pr.get('number'), int):
+            if not isinstance(pr, dict) or type(pr.get('number')) is not int or pr['number'] < 1:
                 raise ValueError('invalid PR identity')
             if pr['number'] in numbers:
                 raise ValueError('duplicate PR in pagination; retry the snapshot')
             numbers.add(pr['number'])
             head = pr.get('head')
-            if not isinstance(head, dict) or not isinstance(head.get('ref'), str):
+            if not isinstance(head, dict) or not isinstance(head.get('ref'), str) or not head['ref']:
                 raise ValueError('missing PR head ref')
             if pr.get('state') != 'open':
                 raise ValueError('snapshot must contain only open PRs')

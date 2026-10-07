@@ -54,11 +54,16 @@ class AdmissionTest(unittest.TestCase):
         self.assertEqual(admission.admit([[pr(1), pr(2, 'codex/fix'), pr(3)]], self.prefixes, self.limit), (False, 3))
 
     def test_pagination_drafts_and_other_branches(self):
-        self.assertEqual(admission.admit([[pr(1, draft=True), pr(2, 'codex/fix')],
-                                          [pr(3), pr(4, 'fix/human')]], self.prefixes, self.limit), (False, 3))
+        first_page = [pr(n, 'fix/human') for n in range(1, 99)] + [pr(99, draft=True), pr(100, 'codex/fix')]
+        self.assertEqual(admission.admit([first_page, [pr(101), pr(102, 'fix/human')]],
+                                         self.prefixes, self.limit), (False, 3))
 
     def test_invalid_snapshot_fails_closed(self):
         for pages in (None, {}, [], [None], [[{}]], [[pr(1), pr(1)]],
+                      [[pr(True)]], [[pr(0)]], [[pr(1, '')]], [[pr(1)], []],
+                      [[pr(n) for n in range(1, 101)], []],
+                      [[pr(n) for n in range(1, 102)]],
+                      [[pr(1)], [pr(2)]],
                       [[{'number': 1, 'state': 'closed', 'head': {'ref': 'agent/x'}}]]):
             with self.subTest(pages=pages), self.assertRaises(ValueError):
                 admission.admit(pages, self.prefixes, self.limit)
@@ -97,7 +102,7 @@ class AdmissionTest(unittest.TestCase):
         self.assertIn('usage:', result.stderr)
 
     def test_current_pr_first_three_win_even_with_concurrent_openings(self):
-        pages = [[pr(10, draft=True), pr(11, 'codex/fix')], [pr(12), pr(13)]]
+        pages = [[pr(10, draft=True), pr(11, 'codex/fix'), pr(12), pr(13)]]
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 12, self.cutoff), (True, 3))
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 13, self.cutoff), (False, 4))
 
