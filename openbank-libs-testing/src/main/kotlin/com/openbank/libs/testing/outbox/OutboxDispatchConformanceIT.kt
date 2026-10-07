@@ -88,6 +88,13 @@ abstract class OutboxDispatchConformanceIT {
     protected open fun eventType(suggested: String): String = suggested
 
     /**
+     * Opt in only for an existing wire contract that deliberately sends null Kafka keys.
+     * All other publishers retain the strict aggregate-key assertion below. The header,
+     * persistence and replay checks still run unchanged for a legacy producer.
+     */
+    protected open val legacyUnkeyedProducer: Boolean = false
+
+    /**
      * Reactive Panache needs a Vert.x duplicated context; the JUnit thread is not one. Every
      * concrete [seed]/[findEntry] implementation should run its Panache call through this.
      */
@@ -99,8 +106,8 @@ abstract class OutboxDispatchConformanceIT {
         return String((md.headers.lastHeader(name) ?: error("missing header $name")).value(), StandardCharsets.UTF_8)
     }
 
-    private fun key(message: Message<String>): String =
-        message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow().key as String
+    private fun key(message: Message<String>): Any? =
+        message.getMetadata(OutgoingKafkaRecordMetadata::class.java).orElseThrow().key
 
     @Suppress("UNCHECKED_CAST")
     private fun received(): List<Message<String>> =
@@ -128,8 +135,13 @@ abstract class OutboxDispatchConformanceIT {
         }
         assertThat(mine).hasSize(2)
 
-        // N2: every record for this aggregate is keyed by the aggregate id.
-        assertThat(mine.map { key(it) }).containsOnly(aggregateId.toString())
+        // N2 stays strict by default. A named legacy producer may preserve an established
+        // unkeyed wire contract, but must prove every emitted record actually remains unkeyed.
+        if (legacyUnkeyedProducer) {
+            assertThat(mine.map { key(it) }).containsOnlyNulls()
+        } else {
+            assertThat(mine.map { key(it) }).containsOnly(aggregateId.toString())
+        }
 
         // N3: ce-id / idempotency-key carry the event id; ce-type carries the event type.
         val byEventId = mine.associateBy { headerValue(it, OutboxKafkaHeaders.HEADER_EVENT_ID) }
