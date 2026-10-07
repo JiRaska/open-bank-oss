@@ -16,6 +16,10 @@ on:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
       - "openbank-admin-ui/**"
+      # The pull-based customer-app dossier is derived display data; PactJS and JVM
+      # consumer tests do not read it. Exclude dossier-only refreshes from all four
+      # JVM shards while still running this workflow when another Pact input changes.
+      - "!openbank-admin-ui/app-status.json"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
       - "openbank-product-catalog/**"
@@ -42,6 +46,10 @@ on:
       - "pacts/**"
       - "**/src/test/kotlin/**/contract/*PactConsumerTest.kt"
       - "openbank-admin-ui/**"
+      # The pull-based customer-app dossier is derived display data; PactJS and JVM
+      # consumer tests do not read it. Exclude dossier-only refreshes from all four
+      # JVM shards while still running this workflow when another Pact input changes.
+      - "!openbank-admin-ui/app-status.json"
       - "openbank-case-coordinator-agent/**"
       - "openbank-flaky-test-hunter/**"
       - "openbank-product-catalog/**"

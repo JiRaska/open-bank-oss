@@ -34,6 +34,8 @@ def job(name, *, status="completed", conclusion="success"):
 class FakeAPI:
     def __init__(self):
         self.ui_sha = SHA
+        self.ui_commits = None
+        self.commit_files = {}
         self.runs = {
             "ci.yml": [run("ci.yml")],
             "pact-drift-check.yml": [run("pact-drift-check.yml", run_id=2)],
@@ -45,7 +47,13 @@ class FakeAPI:
 
     def __call__(self, path):
         if "/commits?" in path:
+            if self.ui_commits is not None:
+                return self.ui_commits
             return [{"sha": self.ui_sha}] if self.ui_sha else []
+        if "/commits/" in path:
+            sha = path.split("/commits/", 1)[1].split("?", 1)[0]
+            return {"sha": sha, "files": self.commit_files.get(
+                sha, [{"filename": "openbank-admin-ui/src/page.ts", "status": "modified"}])}
         if "/workflows/" in path:
             workflow = path.split("/workflows/", 1)[1].split("/runs?", 1)[0]
             return {"workflow_runs": self.runs[workflow]}
@@ -67,6 +75,41 @@ class SourceValidationTest(unittest.TestCase):
         self.api.ui_sha = OTHER_SHA
         self.api.runs["pact-drift-check.yml"] = [run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
         self.verify()
+
+    def test_dossier_only_refresh_uses_prior_pact_relevant_ui_commit(self):
+        self.api.ui_commits = [{"sha": SHA}, {"sha": OTHER_SHA}]
+        self.api.commit_files[SHA] = [
+            {"filename": "openbank-admin-ui/app-status.json", "status": "modified"}]
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
+        self.verify()
+
+    def test_multiple_dossier_refreshes_use_prior_pact_relevant_ui_commit(self):
+        middle_sha = "c" * 40
+        self.api.ui_commits = [{"sha": SHA}, {"sha": middle_sha}, {"sha": OTHER_SHA}]
+        for sha in (SHA, middle_sha):
+            self.api.commit_files[sha] = [
+                {"filename": "openbank-admin-ui/app-status.json", "status": "modified"}]
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
+        self.verify()
+
+    def test_dossier_plus_other_file_requires_exact_source_pact(self):
+        self.api.ui_commits = [{"sha": SHA}, {"sha": OTHER_SHA}]
+        self.api.commit_files[SHA] = [
+            {"filename": "openbank-admin-ui/app-status.json", "status": "modified"},
+            {"filename": "openbank-admin-ui/src/page.ts", "status": "modified"}]
+        self.api.runs["pact-drift-check.yml"] = [
+            run("pact-drift-check.yml", sha=OTHER_SHA, run_id=2)]
+        with self.assertRaises(TimeoutError):
+            self.verify()
+
+    def test_dossier_refresh_without_prior_pact_input_fails_closed(self):
+        self.api.ui_commits = [{"sha": SHA}]
+        self.api.commit_files[SHA] = [
+            {"filename": "openbank-admin-ui/app-status.json", "status": "modified"}]
+        with self.assertRaises(RuntimeError):
+            self.verify()
 
     def test_later_main_pact_publication_substitutes_for_missing_ancestor_run(self):
         self.api.ui_sha = OTHER_SHA

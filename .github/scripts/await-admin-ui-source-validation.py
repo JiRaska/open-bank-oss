@@ -46,14 +46,31 @@ def check_workflow(fetch, repository, sha, workflow):
 
 
 def latest_ui_change(fetch, repository, source_sha):
-    query = urllib.parse.urlencode({"sha": source_sha, "path": "openbank-admin-ui/", "per_page": 1})
-    commits = fetch(f"repos/{repository}/commits?{query}")
-    if not isinstance(commits, list) or len(commits) != 1:
-        raise RuntimeError(f"Cannot identify the latest Admin UI ancestor of {source_sha}")
-    ui_sha = commits[0].get("sha")
-    if not isinstance(ui_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", ui_sha):
-        raise RuntimeError("Latest Admin UI ancestor has no canonical commit SHA")
-    return ui_sha
+    # app-status.json is derived display data and cannot change a consumer Pact. Its
+    # standalone refresh does not trigger pact-drift-check.yml, so select the most
+    # recent *Pact-relevant* UI ancestor. Inspect the whole commit: a mixed change
+    # must retain its exact-source Pact requirement even if it touches the dossier.
+    for page in range(1, 6):
+        query = urllib.parse.urlencode({"sha": source_sha, "path": "openbank-admin-ui/",
+                                        "per_page": 100, "page": page})
+        commits = fetch(f"repos/{repository}/commits?{query}")
+        if not isinstance(commits, list):
+            raise RuntimeError("Admin UI commit inventory is malformed")
+        for commit in commits:
+            ui_sha = commit.get("sha") if isinstance(commit, dict) else None
+            if not isinstance(ui_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", ui_sha):
+                raise RuntimeError("Admin UI ancestor has no canonical commit SHA")
+            detail = fetch(f"repos/{repository}/commits/{ui_sha}?per_page=300")
+            files = detail.get("files") if isinstance(detail, dict) else None
+            if not isinstance(detail, dict) or detail.get("sha") != ui_sha or \
+                    not isinstance(files, list) or not files:
+                raise RuntimeError(f"Cannot verify changed files for {ui_sha}")
+            dossier_only = len(files) == 1 and files[0].get("filename") ==                 "openbank-admin-ui/app-status.json" and files[0].get("status") == "modified"
+            if not dossier_only:
+                return ui_sha
+        if len(commits) < 100:
+            break
+    raise RuntimeError(f"Cannot identify a Pact-relevant Admin UI ancestor of {source_sha}")
 
 
 def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
@@ -61,7 +78,7 @@ def wait_for_validation(fetch, repository, sha, *, clock=time.monotonic,
     deadline = clock() + max_wait
     # A governance-only push can rebuild UI code introduced by an earlier main commit.
     # Prefer a successful Pact run for the exact image source when one exists. Only fall
-    # back to the latest UI-changing ancestor when that source did not trigger Pact drift.
+    # back to the latest Pact-relevant UI ancestor when that source did not trigger Pact drift.
     # A pending or failed exact-source run must never be bypassed by older evidence.
     ui_sha = latest_ui_change(fetch, repository, sha)
     while True:
