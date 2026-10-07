@@ -59,6 +59,9 @@
 #   FLEET_ATTEST_JSON=out.json ...                           # also emit a JSON report
 #   VERIFY_ATTEMPTS=3 VERIFY_RETRY_SLEEP=5 ...               # bounded retry (defaults)
 #   .github/scripts/check-fleet-attestations.sh --selftest   # prove the classifier both ways
+#   .github/scripts/check-fleet-attestations.sh --slsa-inventory
+#       read-only SLSA v0.2 inventory against the admission policy's pinned public key;
+#       includes the digest-pinned ARC runner, and does not apply the SBOM placeholder allowlist
 #
 # Exit codes: 0 = every declared image attested; 1 = a real gap (UNATTESTED and/or ABSENT);
 #             2 = the check COULD NOT RUN for at least one image (registry/credential/tool
@@ -175,8 +178,25 @@ main.go:74: error during command execution: no matching attestations:'
 # fails the way its name declares. Deliberately writes to stderr, as the real one does.
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
+if [[ " $* " == *" --type https://slsa.dev/provenance/v0.2 "* ]]; then
+  args=("$@")
+  for ((i=0; i<${#args[@]}; i++)); do
+    if [ "${args[$i]}" = --key ]; then
+      key="${args[$((i+1))]}"
+      if ! grep -q -- '-----BEGIN PUBLIC KEY-----' "$key"; then
+        echo "Error: SLSA audit did not use the policy-pinned public key" >&2; exit 1
+      fi
+    fi
+  done
+  case "$img" in
+    *fixture-slsa-bare*) echo "Error: no matching attestations:" >&2; exit 1 ;;
+    *fixture-slsa-flaky*) echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
+  esac
+fi
 case "$img" in
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
+  *fixture-slsa-bare* | *fixture-slsa-flaky*)
+                    echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
   *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
   *fixture-flaky*)  echo "Error: TOOMANYREQUESTS: Rate exceeded" >&2; exit 1 ;;
@@ -211,7 +231,7 @@ STUB
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
            SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
-           bash "$SELF" 2>&1)"
+           bash "$SELF" "${fixture_mode:-}" 2>&1)"
     code=$?
     # Both failure branches print what the run ACTUALLY produced, not only what was wanted.
     # Everything needed to explain a failure exists in $out at this moment and nowhere after it:
@@ -339,6 +359,22 @@ STUB
   run_fixture "all attested -> exit 0" 0 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
+  fixture_mode=--slsa-inventory \
+  run_fixture "SLSA audit verifies the policy key and both inventory sources" 0 \
+    "SLSA INVENTORY: PASS" "openbank-fixture-ok:t"
+  fixture_mode=--slsa-inventory \
+  run_fixture "a missing SLSA predicate is an inventory finding" 1 \
+    "SLSA INVENTORY: FAIL" "openbank-fixture-slsa-bare:t"
+  cases=$((cases + 1))
+  if grep -qF 'openbank-fixture-slsa-bare:t' <<< "$LAST_OUT"; then
+    printf '  FAIL: SLSA inventory leaked an exact image reference to its output\n'
+    failures=$((failures + 1))
+  else
+    printf '  ok: SLSA inventory reports ordinal subjects without exact image references\n'
+  fi
+  fixture_mode=--slsa-inventory \
+  run_fixture "an uncheckable SLSA predicate is incomplete" 2 \
+    "SLSA INVENTORY: INCOMPLETE" "openbank-fixture-slsa-flaky:t"
   # A real gap -> 1. Both fatal classes, so the summary carries each count.
   run_fixture "unattested + absent -> exit 1" 1 \
     "2 attested / 1 unattested / 1 absent / 0 allowlisted placeholder / 0 unknown" \
@@ -499,6 +535,11 @@ case "${1:-}" in
   --vocabulary-control)
     MODE=vocabulary-control
     ;;
+  # Inventory the same GitOps and ARC subjects, but check the SLSA predicate that the
+  # producer emits. This is an audit only: the current admission policy requires CycloneDX.
+  --slsa-inventory)
+    MODE=slsa-inventory
+    ;;
   # Staleness only: needs GITOPS_DIR and nothing else — no cosign, no ECR credentials — so
   # it is reachable on an ordinary PR, which is the whole point (see check_placeholder_staleness).
   --check-placeholders)
@@ -507,7 +548,7 @@ case "${1:-}" in
   "") ;;
   *)
     echo "ERROR: unknown argument: $1" >&2
-    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control|--check-placeholders]" >&2
+    echo "       usage: $0 [--selftest|--self-test|--vocabulary-control|--check-placeholders|--slsa-inventory]" >&2
     exit 1
     ;;
 esac
@@ -559,7 +600,11 @@ fi
 echo "==> Enumerating openbank-* images declared in ${GITOPS_DIR}"
 if [ "$MODE" != check-placeholders ]; then
   echo "    cosign:   $("$COSIGN_BIN_RESOLVED" version 2>/dev/null | awk '/GitVersion/{print $2}')"
-  echo "    key:      ${COSIGN_KEY}"
+  if [ "$MODE" = slsa-inventory ]; then
+    echo "    key:      public key pinned in the image admission policy"
+  else
+    echo "    key:      ${COSIGN_KEY}"
+  fi
 fi
 echo
 
@@ -652,6 +697,28 @@ if [ "${#PREDICATE_TYPES[@]}" -eq 0 ]; then
   echo "ERROR: no predicateType / intoto.type found under ${KYVERNO_DIR} — the derivation is broken." >&2
   echo "       (Failing closed: verifying nothing would otherwise 'pass' vacuously.)" >&2
   exit 1
+fi
+
+if [ "$MODE" = slsa-inventory ]; then
+  # Verify against the public key pinned in the admission policy, not a KMS alias whose
+  # current target could differ. Refuse a missing or ambiguous trust root.
+  policy="$KYVERNO_DIR/cel-image-validating-sbom-attestation.yaml"
+  if [ ! -f "$policy" ] || [ "$(grep -c -- '-----BEGIN PUBLIC KEY-----' "$policy" 2>/dev/null)" -ne 1 ] ||
+     [ "$(grep -c -- '-----END PUBLIC KEY-----' "$policy" 2>/dev/null)" -ne 1 ]; then
+    echo "ERROR: expected exactly one pinned public key in ${policy}." >&2
+    exit 2
+  fi
+  audit_key="$(mktemp "${TMPDIR:-/tmp}/fleet-slsa-key.XXXXXX")" || exit 2
+  trap 'rm -f "$audit_key"' EXIT
+  awk '/-----BEGIN PUBLIC KEY-----/{copy=1} copy {sub(/^[[:space:]]*/, ""); print} /-----END PUBLIC KEY-----/{exit}' "$policy" > "$audit_key"
+  if ! grep -qx -- '-----END PUBLIC KEY-----' "$audit_key"; then
+    echo "ERROR: could not extract the pinned public key from ${policy}." >&2
+    exit 2
+  fi
+  COSIGN_KEY="$audit_key"
+  PREDICATE_TYPES=(https://slsa.dev/provenance/v0.2)
+  # A future public workflow must not publish exact registry references or cosign stderr.
+  FLEET_ATTEST_JSON=""
 fi
 
 # Read into an array without `mapfile` — this script must also run on macOS's bash 3.2
@@ -780,13 +847,14 @@ is_allowed_placeholder() {
   grep -vE '^[[:space:]]*(#|$)' "$PLACEHOLDER_FILE" | grep -qxF "$1"
 }
 
-echo "==> Placeholder allowlist staleness (${PLACEHOLDER_FILE})"
-if ! check_placeholder_staleness; then
-  STALE_PLACEHOLDERS=1
-else
-  STALE_PLACEHOLDERS=0
+STALE_PLACEHOLDERS=0
+if [ "$MODE" != slsa-inventory ]; then
+  echo "==> Placeholder allowlist staleness (${PLACEHOLDER_FILE})"
+  if ! check_placeholder_staleness; then
+    STALE_PLACEHOLDERS=1
+  fi
+  echo
 fi
-echo
 
 if [ "$MODE" = check-placeholders ]; then
   [ "$STALE_PLACEHOLDERS" -eq 0 ] || exit 1
@@ -815,11 +883,14 @@ SYSTEMIC_UNKNOWN_THRESHOLD="${SYSTEMIC_UNKNOWN_THRESHOLD:-5}"
 
 BY_DIGEST=0
 BY_TAG=0
+SUBJECT_NUMBER=0
 for image in "${IMAGES[@]}"; do
+  SUBJECT_NUMBER=$((SUBJECT_NUMBER + 1))
   ref="$(probe_ref "$image")"
   mode="$(probe_mode "$image")"
   if [ "$mode" = digest ]; then BY_DIGEST=$((BY_DIGEST + 1)); else BY_TAG=$((BY_TAG + 1)); fi
   short="${ref#"${ECR_REGISTRY}"/} [${mode}]"
+  if [ "$MODE" = slsa-inventory ]; then short="subject ${SUBJECT_NUMBER} [${mode}]"; fi
 
   # Bounded retry, then classify. A verdict (OK / ABSENT / UNATTESTED) is final on the first
   # attempt that produces one; only an UNKNOWN — which is precisely the transient class — is
@@ -869,26 +940,28 @@ for image in "${IMAGES[@]}"; do
       PASS=$((PASS + 1))
       ;;
     ABSENT)
-      if is_allowed_placeholder "$image"; then
+      if [ "$MODE" != slsa-inventory ] && is_allowed_placeholder "$image"; then
         printf '  PLACEHOLDER %s  (allowlisted: never built, cannot be admitted)\n' "$short"
         ALLOWED=$((ALLOWED + 1))
       else
         printf '  ABSENT      %s  <-- declared in gitops but NOT in the registry\n' "$short"
-        print_classified_stderr "$err"
+        if [ "$MODE" != slsa-inventory ]; then print_classified_stderr "$err"; fi
         ABSENT=$((ABSENT + 1))
         ABSENT_IMAGES+=("$image")
       fi
       ;;
     UNATTESTED)
       printf '  UNATTESTED  %s  <-- no valid attestation for %s\n' "$short" "${missing_type:-?}"
-      print_classified_stderr "$err"
+      if [ "$MODE" != slsa-inventory ]; then print_classified_stderr "$err"; fi
       UNATTESTED=$((UNATTESTED + 1))
       UNATTESTED_IMAGES+=("$image")
       ;;
     *)
       printf '  UNKNOWN     %s  <-- probe failed %s time(s), NO verdict about this image\n' \
         "$short" "$VERIFY_ATTEMPTS"
-      printf '%s\n' "$err" | sed 's/^/                  | /' | tail -5
+      if [ "$MODE" != slsa-inventory ]; then
+        printf '%s\n' "$err" | sed 's/^/                  | /' | tail -5
+      fi
       UNKNOWN=$((UNKNOWN + 1))
       UNKNOWN_IMAGES+=("$image")
       ;;
@@ -945,7 +1018,12 @@ if [ -n "$FLEET_ATTEST_JSON" ] && command -v jq >/dev/null 2>&1; then
   echo "    JSON report: ${FLEET_ATTEST_JSON}"
 fi
 
-if [ "$UNATTESTED" -gt 0 ]; then
+if [ "$UNATTESTED" -gt 0 ] && [ "$MODE" = slsa-inventory ]; then
+  echo
+  echo "MISSING SLSA (${UNATTESTED}) — these pinned subjects have no verifiable SLSA v0.2 attestation."
+  echo "  This is an inventory finding; the current admission policy does not require SLSA."
+fi
+if [ "$UNATTESTED" -gt 0 ] && [ "$MODE" != slsa-inventory ]; then
   echo
   echo "UNATTESTED (${UNATTESTED}) — pushed and signed, but missing a predicate the policies require:"
   for image in "${UNATTESTED_IMAGES[@]}"; do
@@ -958,7 +1036,7 @@ if [ "$UNATTESTED" -gt 0 ]; then
   echo "    openbank-infra/scripts/build-push-service.sh <svc>   # attests via lib/cosign-attest.sh"
 fi
 
-if [ "$ABSENT" -gt 0 ]; then
+if [ "$ABSENT" -gt 0 ] && [ "$MODE" != slsa-inventory ]; then
   echo
   echo "ABSENT (${ABSENT}) — declared in gitops but not present in the registry:"
   for image in "${ABSENT_IMAGES[@]}"; do
@@ -970,7 +1048,7 @@ if [ "$ABSENT" -gt 0 ]; then
   echo "  in ${PLACEHOLDER_FILE}."
 fi
 
-if [ "$UNKNOWN" -gt 0 ]; then
+if [ "$UNKNOWN" -gt 0 ] && [ "$MODE" != slsa-inventory ]; then
   echo
   echo "UNKNOWN (${UNKNOWN}) — the probe could not reach a verdict after ${VERIFY_ATTEMPTS} attempt(s):"
   for image in "${UNKNOWN_IMAGES[@]}"; do
@@ -994,6 +1072,10 @@ if [ "$STALE_PLACEHOLDERS" -gt 0 ] && [ "$FAIL" -eq 0 ]; then
 fi
 
 if [ "$FAIL" -gt 0 ]; then
+  if [ "$MODE" = slsa-inventory ]; then
+    echo "SLSA INVENTORY: FAIL — ${FAIL} of ${#IMAGES[@]} subjects lack verifiable provenance or are absent."
+    exit 1
+  fi
   echo
   echo "FLEET ATTESTATION GATE: FAIL — ${FAIL} of ${#IMAGES[@]} declared image(s) not deployable."
   echo
@@ -1007,12 +1089,20 @@ if [ "$FAIL" -gt 0 ]; then
 fi
 
 if [ "$UNKNOWN" -gt 0 ]; then
+  if [ "$MODE" = slsa-inventory ]; then
+    echo "SLSA INVENTORY: INCOMPLETE — ${UNKNOWN} subject(s) could not be checked."
+    exit 2
+  fi
   echo
   echo "FLEET ATTESTATION GATE: INCOMPLETE — ${PASS} verified, ${UNKNOWN} could not be checked."
   echo "  Exit 2 = 'could not run', NOT a verdict. Callers must not treat it as a fleet gap."
   exit 2
 fi
 
+if [ "$MODE" = slsa-inventory ]; then
+  echo "SLSA INVENTORY: PASS — every declared subject has verifiable SLSA provenance."
+  exit 0
+fi
 echo
 echo "FLEET ATTESTATION GATE: PASS — every declared openbank-* image is attested."
 [ "$ALLOWED" -gt 0 ] && echo "  (${ALLOWED} allowlisted placeholder(s) skipped — see ${PLACEHOLDER_FILE})"
