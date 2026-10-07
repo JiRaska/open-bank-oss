@@ -36,7 +36,8 @@ info:
   # 1.18.0: additive — product limits (ADR-0315 D4): per-product allowed currencies, maximum
   #         principal and maximum tenor, declared in configuration. Enforced at submit and
   #         re-checked at approval: 422 PRODUCT_LIMIT_BREACHED with Error.breaches. Not overridable.
-  version: 1.18.0
+  # 1.19.0: correction — validation 400s from libs-runtime use ProblemDetail, not Error.
+  version: 1.19.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -448,7 +449,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
         '503':
@@ -493,7 +494,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -533,7 +534,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -710,6 +711,51 @@ components:
                 enum: [PRODUCT_NOT_PERMITTED, CURRENCY_NOT_PERMITTED, MAX_PRINCIPAL, MAX_TENOR]
               limit: { type: string, description: 'The declared limit, e.g. "2000000000.00 CZK" or "366"' }
               actual: { type: string, description: "The deal's figure in the same unit" }
+    ProblemDetail:
+      type: object
+      description: >-
+        Shared libs-runtime validation body. ApiError always has the five required fields;
+        the ADR-0326 problem form may add the RFC 9457 fields below. Unlike the treasury
+        business Error body, validation responses have no `error` member.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        code: { type: string }
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue:
+          description: Always null; rejected input is not echoed.
     DraftDealRequest:
       type: object
       required: [product, counterpartyId, principal, rate]
