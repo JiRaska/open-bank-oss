@@ -7,6 +7,7 @@ package com.openbank.audit.application
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.openbank.audit.domain.model.AuditEntry
 import com.openbank.audit.infrastructure.persistence.AuditRepository
+import com.openbank.libs.persistence.outbox.OutboxKafkaHeaders
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
 import io.mockk.coEvery
 import io.mockk.every
@@ -76,6 +77,16 @@ class AuditDurabilityTest {
     }
 
     @Test
+    fun `outbox ce-id deduplicates a retried send at a new Kafka offset`(): Unit = runBlocking {
+        val id = UUID.randomUUID()
+        val entries = mutableListOf<AuditEntry>()
+        coEvery { repository.save(capture(entries)) } returns Unit
+        consumer.consume(message(payload, offset = 7, ceId = id))
+        consumer.consume(message(payload, offset = 8, ceId = id))
+        assertThat(entries.map { it.id }).containsExactly(id, id)
+    }
+
+    @Test
     fun `failed nack propagates and never acknowledges the unstored record`() {
         coEvery { repository.save(any()) } throws IllegalStateException("store unavailable")
         val message = message(payload)
@@ -105,9 +116,12 @@ class AuditDurabilityTest {
         verify(exactly = 1) { message.nack(any()) }
     }
 
-    private fun message(body: String, offset: Long = 0): Message<String> {
+    private fun message(body: String, offset: Long = 0, ceId: UUID? = null): Message<String> {
         val message = mockk<Message<String>>()
         val record = ConsumerRecord("openbank.party.events", 0, offset, null as String?, body)
+        if (ceId != null) {
+            record.headers().add(OutboxKafkaHeaders.HEADER_EVENT_ID, ceId.toString().toByteArray(Charsets.UTF_8))
+        }
         val metadata = IncomingKafkaRecordMetadata(record, "audit-events-in")
         every { message.payload } returns body
         every { message.getMetadata(IncomingKafkaRecordMetadata::class.java) } returns Optional.of(metadata)
