@@ -176,6 +176,15 @@ main.go:74: error during command execution: no matching attestations:'
 if [ "$1" = version ]; then echo "GitVersion: v2.4.3"; exit 0; fi
 img="${!#}"
 case "$img" in
+  *fixture-parallel*)
+    if [ "$1" = verify ]; then own=signature; peer=predicate
+    else own=predicate; peer=signature; fi
+    touch "${FLEET_PARALLEL_MARKER}.${own}"
+    for ((n=0; n<50; n++)); do
+      [ -f "${FLEET_PARALLEL_MARKER}.${peer}" ] && exit 0
+      sleep 0.05
+    done
+    echo "signature and predicate probes did not overlap" >&2; exit 1 ;;
   *fixture-ok*)     echo "Verification for $img -- The signatures were verified"; exit 0 ;;
   *fixture-gone*)   echo "Error: MANIFEST_UNKNOWN: manifest unknown" >&2; exit 1 ;;
   *fixture-bare*)   echo "Error: no matching attestations:" >&2; exit 1 ;;
@@ -210,6 +219,7 @@ STUB
     out="$(GITOPS_DIR="$tmp/gitops" COSIGN_BIN="$stub" PLACEHOLDER_FILE="$tmp/none.txt" \
            ARC_RUNNERS_TF="${fixture_arc_tf:-$tmp/arc-ok.tf}" \
            VERIFY_ATTEMPTS=2 VERIFY_RETRY_SLEEP=0 FLEET_ATTEST_JSON="" \
+           FLEET_PARALLEL_MARKER="${fixture_parallel_marker:-}" \
            SYSTEMIC_UNKNOWN_THRESHOLD="${fixture_threshold:-99}" \
            bash "$SELF" 2>&1)"
     code=$?
@@ -278,6 +288,10 @@ STUB
   run_fixture "the ARC runner pin is verified alongside gitops -> 2 subjects" 0 \
     "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
     "openbank-fixture-ok:t"
+  fixture_parallel_marker="$tmp/probe-overlap" \
+  run_fixture "signature and predicate probes overlap" 0 \
+    "2 attested / 0 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
+    "openbank-fixture-parallel:t"
   fixture_arc_tf="$tmp/arc-bad.tf" \
   run_fixture "an UNATTESTED runner image is a finding, not an invisible one -> exit 1" 1 \
     "1 attested / 1 unattested / 0 absent / 0 allowlisted placeholder / 0 unknown" \
@@ -834,25 +848,39 @@ for image in "${IMAGES[@]}"; do
     verdict=OK
     err=""
     missing_type=""
-    # The image SIGNATURE first: the policy's first validation is verifyImageSignatures, and a
-    # signed attestation does not imply a signed image.
-    if ! _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
-                 --key "$COSIGN_KEY" "$ref" 2>&1)"; then
-      err="$_e"
+    # Independent registry reads run together. Collect every child before inspecting results;
+    # signature remains the first verdict, followed by predicates in policy order. Thus the
+    # existing fail-closed classification, per-image retry and systemic outage accounting stay
+    # deterministic while healthy images avoid serial registry round trips.
+    probe_dir="$(mktemp -d)"
+    probe_pids=()
+    probe_ok=()
+    COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify \
+      --key "$COSIGN_KEY" "$ref" >"$probe_dir/0" 2>&1 &
+    probe_pids+=("$!")
+    for _i in "${!PREDICATE_TYPES[@]}"; do
+      COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
+        --key "$COSIGN_KEY" --type "${PREDICATE_TYPES[$_i]}" "$ref" \
+        >"$probe_dir/$((_i + 1))" 2>&1 &
+      probe_pids+=("$!")
+    done
+    for _i in "${!probe_pids[@]}"; do
+      if wait "${probe_pids[$_i]}"; then probe_ok+=(1); else probe_ok+=(0); fi
+    done
+    if [ "${probe_ok[0]}" -eq 0 ]; then
+      err="$(cat "$probe_dir/0")"
       verdict="$(classify_failure "$err")"
       missing_type="signature"
+    else
+      for _i in "${!PREDICATE_TYPES[@]}"; do
+        [ "${probe_ok[$((_i + 1))]}" -eq 1 ] && continue
+        err="$(cat "$probe_dir/$((_i + 1))")"
+        verdict="$(classify_failure "$err")"
+        missing_type="${PREDICATE_TYPES[$_i]}"
+        break
+      done
     fi
-    for _pt in "${PREDICATE_TYPES[@]}"; do
-      [ "$verdict" = OK ] || break
-      if _e="$(COSIGN_YES=true "$COSIGN_BIN_RESOLVED" verify-attestation \
-                 --key "$COSIGN_KEY" --type "$_pt" "$ref" 2>&1)"; then
-        continue
-      fi
-      err="$_e"
-      verdict="$(classify_failure "$err")"
-      missing_type="$_pt"
-      break
-    done
+    rm -rf "$probe_dir"
     [ "$verdict" = OK ] && break
     [ "$verdict" != "UNKNOWN" ] && break
     [ "$RETRIES_DISABLED" -eq 1 ] && break
