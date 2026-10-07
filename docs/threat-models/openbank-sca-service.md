@@ -62,6 +62,12 @@ is the **authentication assurance gate** for payments and consent — defeating 
 
 ## 6. Change log
 
+- **2026-10-06** — SCA approval GET and pending-list responses expose `makerActorKind` from
+  the durable approval record (#11588). The `ROLE_OPERATOR`/`ROLE_ADMIN` and
+  `scaChallenge.approval.read` checks are unchanged. This is informational maker provenance,
+  not a new permission or a substitute for the maker/checker identity comparison; old records
+  return `UNKNOWN` rather than inferring a human or agent from a display name. The real-HTTP
+  durability test reads an `AI_AGENT` record through GET as well as PostgreSQL and the outbox.
 - **2026-10-03** — **Operator approvals publish what they bind (`summary`).** `GET
   /api/v1/sca/approvals` and `/{id}` now return a `summary` rendered by `ScaApprovalSummaryRenderer`
   (through the new optional libs-runtime `ApprovalSummaryRenderer` hook) from the same arguments the
