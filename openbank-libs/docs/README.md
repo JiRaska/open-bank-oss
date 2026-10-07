@@ -1,6 +1,6 @@
 # openbank-libs — Documentation
 
-> **Co to je:** rodina sdílených knihoven OpenBank. `openbank-libs-domain` obsahuje doménové primitivy bez frameworku, `openbank-libs-runtime` adaptéry Quarkus a endpoint pro vlastní dokumentaci. `openbank-libs` je kompatibilitní zastřešení obou modulů. Nejde o běžící službu.
+> **Co to je:** rodina sdílených knihoven OpenBank. Moduly domain, runtime, lending a ISO 20022 poskytují znovupoužitelný kód; `openbank-libs` je kompatibilitní zastřešení. Nejde o běžící službu.
 
 Tato složka se kopíruje do image Admin UI jako snímek. Běžící služby publikují dokumentaci ze svého buildu na `/q/openbank/docs`; ručně psané kapitoly patří do `src/main/resources/docs/` jednotlivých služeb. Verze a commit běžící služby jsou v jejím indexu dokumentace. Počet služeb se odvozuje z katalogu buildu, nikoli z tohoto textu.
 
@@ -21,9 +21,12 @@ Tato složka se kopíruje do image Admin UI jako snímek. Běžící služby pub
 |---|---|
 | `openbank-libs-domain` | Sdílené doménové hodnoty a porty bez importů Quarkus nebo CDI |
 | `openbank-libs-runtime` | Adaptéry Quarkus, webové resource, observabilita a `/q/openbank/docs` |
+| `openbank-libs-lending` | Výpočty úvěrů, rozhodovací politika, stav originace a vyhodnocení compliance pravidel |
+| `openbank-libs-iso20022` | Typované platební dráhy a sestavení, čtení a validace zpráv ISO 20022 |
+| `openbank-libs-testing` | Sdílená podpora kontraktních a dalších testů; není runtime závislostí |
 | `openbank-libs` | Kompatibilitní zastřešení exportující domain a runtime |
 
-U konkrétní služby ukazují běžící `/q/openbank/docs` a `/api/v1/info` skutečně nasazený build. Pro aktuální balíčky a API knihoven jsou autoritativní zdrojové kódy obou modulů výše.
+U konkrétní služby ukazují běžící `/q/openbank/docs` a `/api/v1/info` skutečně nasazený build. Index knihoven v Admin UI uvádí commit image, ze kterého se tento snímek převzal. Pro aktuální balíčky a závislosti jsou autoritativní zdrojové kódy a build soubory modulů.
 
 ## Související dokumenty
 

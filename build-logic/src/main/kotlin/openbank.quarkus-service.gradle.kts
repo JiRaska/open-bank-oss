@@ -92,6 +92,37 @@ val generateServiceDocs by tasks.registering {
             appendLine()
             appendLine("The running build and its Git commit are reported by `/q/openbank/docs` and `/api/v1/info`. The API contract is published at `/q/openapi` where enabled.")
         })
+        if (openapiFile.asFile.isFile) {
+            // Regenerate this index from the committed contract on every build.
+            // Authored chapters explain behaviour; this page cannot drift when
+            // an endpoint is added, removed or renamed in openapi.yaml.
+            val pathLine = Regex("^  (/\\S+):\\s*$")
+            val operationLine = Regex("^    (get|post|put|patch|delete|options|head):\\s*$")
+            var currentPath: String? = null
+            var inPaths = false
+            val operations = mutableListOf<Pair<String, String>>()
+            for (line in openapiFile.asFile.readLines()) {
+                if (line == "paths:") { inPaths = true; continue }
+                if (inPaths && line.isNotBlank() && !line.startsWith(" ") && !line.startsWith("#")) break
+                if (!inPaths) continue
+                pathLine.matchEntire(line)?.let { currentPath = it.groupValues[1] }
+                operationLine.matchEntire(line)?.let { match ->
+                    currentPath?.let { operations += match.groupValues[1].uppercase() to it }
+                }
+            }
+            docs.resolve("00-api-surface.md").writeText(buildString {
+                appendLine("# API surface — $module")
+                appendLine()
+                appendLine("Generated from this build's committed `openapi.yaml` at `$gitCommit`.")
+                appendLine("Contract version: ${apiVersion?.let { "`$it`" } ?: "not declared"}.")
+                appendLine("For request and response schemas, use the full contract at `/q/openapi` where enabled.")
+                appendLine()
+                appendLine("| Method | Path |")
+                appendLine("|---|---|")
+                for ((method, endpoint) in operations) appendLine("| $method | `$endpoint` |")
+                if (operations.isEmpty()) appendLine("| — | No operations declared in the committed contract |")
+            })
+        }
         if (authoredDocs.none { it.name == "README.md" || it.name == "README.en.md" || it.name == "README.cs.md" }) {
             docs.resolve("README.md").writeText(buildString {
                 appendLine("# $module")
@@ -120,6 +151,8 @@ val verifyServiceDocs by tasks.registering {
         check(appJars.size == 1) { "${project.name}: expected one Quarkus application JAR" }
         ZipFile(appJars.single()).use { jar ->
             val facts = jar.getEntry("docs/00-build.md")?.let { jar.getInputStream(it).bufferedReader().readText() }
+            val apiSurface = jar.getEntry("docs/00-api-surface.md")
+                ?.let { jar.getInputStream(it).bufferedReader().readText() }
             val properties = jar.getEntry("openbank-service-build.properties")
                 ?.let { jar.getInputStream(it).bufferedReader().readText() }
             val commit = properties
@@ -127,6 +160,11 @@ val verifyServiceDocs by tasks.registering {
             check(facts != null && facts.contains(project.version.toString())
                 && commit != null && facts.contains(commit) && commit == sourceCommit.get().trim()) {
                 "${project.name}: current build facts were not packaged in the Quarkus application JAR"
+            }
+            if (layout.projectDirectory.file("src/main/resources/openapi.yaml").asFile.isFile) {
+                check(apiSurface != null && apiSurface.contains(commit)) {
+                    "${project.name}: current API surface was not packaged in the Quarkus application JAR"
+                }
             }
         }
     }
