@@ -1730,6 +1730,7 @@ gates:
     mode: enforced
     run: |
       bash .github/scripts/test-auto-deploy-reconcile-lag.sh
+      bash .github/scripts/test-select-reconcile-services.sh
 
   # Offline audit-anchor verifier self-test (ADR-0031 D5, issue #5838). The gate this
   # falsifies is not a CI check on the repo — it is the tool a THIRD PARTY runs, on their own
