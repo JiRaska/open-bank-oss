@@ -91,4 +91,24 @@ class BoundedBodyHandlersTest {
         assertThat(cancelled).isTrue()
         assertThat(requests).containsExactly(1L, 1L)
     }
+
+    @Test
+    fun `an over-limit body fails even if cancellation completes synchronously`() {
+        val info = object : HttpResponse.ResponseInfo {
+            override fun statusCode() = 200
+            override fun headers(): HttpHeaders = HttpHeaders.of(emptyMap<String, List<String>>()) { _, _ -> true }
+            override fun version() = HttpClient.Version.HTTP_1_1
+        }
+        val subscriber = BoundedBodyHandlers.ofString(5).apply(info)
+        subscriber.onSubscribe(object : Flow.Subscription {
+            override fun request(n: Long) = Unit
+            override fun cancel() = subscriber.onComplete()
+        })
+
+        subscriber.onNext(listOf(ByteBuffer.wrap("oversized".toByteArray())))
+
+        assertThatThrownBy { subscriber.getBody().toCompletableFuture().join() }
+            .hasCauseInstanceOf(IOException::class.java)
+            .hasMessageContaining("exceeds 5 bytes")
+    }
 }
