@@ -3,6 +3,7 @@
 # Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 """Bound new autonomous work; a full queue is backpressure, unreadable data is failure."""
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -99,26 +100,38 @@ def main():
         prefixes, limit, cutoff = load_policy()
         pages = json.loads(Path(args[0]).read_text())
         if len(args) == 1:
-            proceed, count = admit(pages, prefixes, limit)
-            current_mode = False
+            proceed, total = admit(pages, prefixes, limit)
+            rank = None
         elif len(args) == 3 and args[1] == '--current-pr':
             number = int(args[2])
             if number < 1:
                 raise ValueError("current PR number must be positive")
-            proceed, count = admit_current_pr(pages, prefixes, limit, number, cutoff)
-            current_mode = True
+            proceed, rank = admit_current_pr(pages, prefixes, limit, number, cutoff)
+            _, total = admit(pages, prefixes, limit)
         else:
             raise ValueError("usage: agent-admission.py SNAPSHOT [--current-pr NUMBER]")
     except (ValueError, OSError, IndexError) as error:
         print(f'::error::Agent admission could not verify the queue: {error}', file=sys.stderr)
         return 1
     print(f'proceed={str(proceed).lower()}')
-    if current_mode and proceed and count > limit:
+    print(f'autonomous_open={total}')
+    print(f'autonomous_limit={limit}')
+    if rank is not None:
+        print(f'admission_rank={rank}')
+    if rank == 0:
+        reason = 'non-agent branch is outside the autonomous cap'
+    elif rank is not None and proceed and total > limit:
         reason = 'grandfathered existing PR may finish'
     else:
         reason = 'capacity available' if proceed else 'finish existing work before opening another PR'
-    print(f'Agent PRs: {count}/{limit}; ' +
-          reason, file=sys.stderr)
+    detail = f'Agent PRs: {total}/{limit}'
+    if rank is not None:
+        detail += f'; current rank={rank}'
+    print(f'{detail}; {reason}', file=sys.stderr)
+    summary_path = os.environ.get('GITHUB_STEP_SUMMARY')
+    if summary_path:
+        with open(summary_path, 'a', encoding='utf-8') as summary:
+            summary.write(f'### Agent PR admission\n\n{detail}; {reason}.\n')
     return 0
 
 

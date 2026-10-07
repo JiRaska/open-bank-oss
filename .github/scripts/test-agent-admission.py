@@ -4,8 +4,10 @@
 """Exercise admission boundaries and workflow wiring without credentials or network."""
 import importlib.util
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -105,6 +107,26 @@ class AdmissionTest(unittest.TestCase):
         pages = [[pr(10, draft=True), pr(11, 'codex/fix'), pr(12), pr(13)]]
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 12, self.cutoff), (True, 3))
         self.assertEqual(admission.admit_current_pr(pages, self.prefixes, self.limit, 13, self.cutoff), (False, 4))
+
+    def test_current_rank_is_not_reported_as_total_open_prs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            snapshot = Path(directory) / 'snapshot.json'
+            summary = Path(directory) / 'summary.md'
+            snapshot.write_text(json.dumps([[pr(1, created_at='2026-10-03T18:00:00Z'),
+                                              pr(2), pr(3), pr(4)]]))
+            result = subprocess.run(
+                [sys.executable, str(Path(__file__).with_name('agent-admission.py')),
+                 str(snapshot), '--current-pr', '1'],
+                capture_output=True, text=True, check=False,
+                env={**os.environ, 'GITHUB_STEP_SUMMARY': str(summary)},
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('proceed=true', result.stdout)
+            self.assertIn('autonomous_open=4', result.stdout)
+            self.assertIn('autonomous_limit=3', result.stdout)
+            self.assertIn('admission_rank=1', result.stdout)
+            self.assertIn('Agent PRs: 4/3; current rank=1', result.stderr)
+            self.assertIn('Agent PRs: 4/3; current rank=1', summary.read_text())
 
     def test_current_pr_can_proceed_after_an_older_pr_closes(self):
         pages = [[pr(10), pr(11, 'codex/fix'), pr(13)]]
