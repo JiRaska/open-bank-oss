@@ -17,7 +17,7 @@ import { readFileSync, readdirSync, writeFileSync, existsSync } from 'fs'
 import { createHash } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, fallback) => {
@@ -247,7 +247,8 @@ const out = {
   planVsReality,
 }
 
-const rendered = JSON.stringify(out, null, 2)
+const stable = preserveDerivedTimestamp(OUT, out, 'generatedAt')
+const rendered = JSON.stringify(stable, null, 2)
 if (process.argv.includes('--check')) {
   const committed = read(OUT)
   let expected = rendered

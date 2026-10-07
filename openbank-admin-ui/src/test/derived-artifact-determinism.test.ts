@@ -10,7 +10,7 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 
 // @ts-expect-error - plain .mjs build script, no type declarations by design
-import { sourceDate } from '../../scripts/lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from '../../scripts/lib/source-date.mjs'
 
 // Regression guard for issue #2621.
 //
@@ -95,6 +95,10 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
       expect(sourceDate(dir, ['openbank-infra/gitops'])).toBe('2025-01-01T00:00:00.000Z')
       expect(() => run(['--check'])).not.toThrow()
       expect(readFileSync(output, 'utf8')).toBe(original)
+      // The deploy build invokes the normal generator, not --check. A pin-only
+      // commit must therefore leave the bytes baked into the image unchanged.
+      run([])
+      expect(readFileSync(output, 'utf8')).toBe(original)
 
       writeFileSync(deployment, 'kind: NetworkPolicy\nimage: example:second\n')
       git(['add', deployment], '2026-01-01T00:00:00Z')
@@ -117,6 +121,23 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
     expect(() => execFileSync('node', [
       path.join(ADMIN_UI, 'scripts', 'generate-cluster-topology.mjs'), '--repo', REPO, '--check',
     ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })).not.toThrow()
+  })
+
+  it('retains lifecycle and scan provenance only while the baked facts remain identical', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'derived-provenance-'))
+    try {
+      for (const field of ['generatedAt', 'scannedAt']) {
+        const output = path.join(dir, `${field}.json`)
+        const old = { schema: 'example/v1', [field]: '2024-01-01T00:00:00.000Z', facts: [{ id: 'a', value: 1 }] }
+        writeFileSync(output, JSON.stringify(old))
+        const sameFacts = { ...old, [field]: '2025-01-01T00:00:00.000Z' }
+        expect(preserveDerivedTimestamp(output, sameFacts, field)).toEqual(old)
+        const changedFacts = { ...sameFacts, facts: [{ id: 'a', value: 2 }] }
+        expect(preserveDerivedTimestamp(output, changedFacts, field)).toEqual(changedFacts)
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   it(

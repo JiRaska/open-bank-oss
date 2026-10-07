@@ -16,7 +16,7 @@ import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from '
 import path from 'path'
 import { execSync } from 'child_process'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -120,7 +120,7 @@ function main() {
     skipped,
     images,
   }
-  writeFileSync(OUT, JSON.stringify(out, null, 2))
+  writeFileSync(OUT, JSON.stringify(preserveDerivedTimestamp(OUT, out, 'scannedAt'), null, 2))
   console.log(`[infra-vulns] ${Object.keys(images).length} scanned, ${skipped.length} skipped → ${OUT}`)
 }
 

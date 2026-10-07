@@ -16,7 +16,7 @@
 import { readdirSync, statSync, readFileSync, writeFileSync, existsSync } from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
-import { sourceDate } from './lib/source-date.mjs'
+import { sourceDate, preserveDerivedTimestamp } from './lib/source-date.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const arg = (flag, def) => {
@@ -150,7 +150,7 @@ async function main() {
     generatedAt: sourceDate(REPO, INPUTS),
     components,
   }
-  writeFileSync(OUT, JSON.stringify(out, null, 2))
+  writeFileSync(OUT, JSON.stringify(preserveDerivedTimestamp(OUT, out, 'generatedAt'), null, 2))
   console.log(`[infra-lifecycle] ${components.length} components (${eolHits} with lifecycle feed) → ${OUT}`)
   // Fail loud if NOTHING resolved — a snapshot with no lifecycle feeds at all means the
   // upstream fetch is broken, and we must not bake a hollow file (the governance lesson).
