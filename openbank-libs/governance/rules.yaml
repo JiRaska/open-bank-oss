@@ -17,6 +17,17 @@ schema_version: 1
 source_of_truth: true
 related_adrs: [ADR-0005, ADR-0014, ADR-0020, ADR-0029, ADR-0030, ADR-0031, ADR-0040, ADR-0043, ADR-0052, ADR-0053, ADR-0054, ADR-0060, ADR-0082, ADR-0088]
 
+# A hold blocks only image pins for the named service. It does not freeze source,
+# other services, or unrelated GitOps edits. Remove a hold in a separately reviewed
+# PR after its release condition is met; the gate also reads the base rules so a
+# single PR cannot remove a hold and advance the image together.
+deploy_holds:
+  services:
+    openbank-sanctions-service:
+      issue: "#11492"
+      reason: "Pause deployment while the sanctions image and review evidence are resolved."
+      release_condition: "Verify the fixed image and required reviews for #11492, then remove this hold in a separate PR."
+
 # ---------------------------------------------------------------------------------------
 # Conventional Commits — the vocabulary (mirrors CONTRIBUTING.md, authoritative here).
 # ---------------------------------------------------------------------------------------

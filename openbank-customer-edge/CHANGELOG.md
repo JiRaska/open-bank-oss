@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.88.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.87.0...customer-edge-v0.88.0) (2026-10-07)
+
+
+### Features
+
+* **notification-service:** page party history with exact unread count ([#12217](https://github.com/JiRaska/open-bank-oss/issues/12217)) ([04834e0](https://github.com/JiRaska/open-bank-oss/commit/04834e04dacbc8b6ec7737f4b3fea7e6c4b22335))
+
 ## [0.87.0](https://github.com/JiRaska/open-bank-oss/compare/customer-edge-v0.86.0...customer-edge-v0.87.0) (2026-10-04)
 
 
