@@ -59,6 +59,7 @@ class ScaOidcApprovalIT {
         decide(checker, approval, 200)
         given().auth().oauth2(checker).get("/api/v1/sca/approvals/$approval").then().statusCode(200)
             .body("makerId", equalTo("sca-oidc-maker"))
+            .body("makerActorKind", equalTo("HUMAN"))
             .body("decidedBy", equalTo("sca-oidc-checker"))
         given().auth().oauth2(maker).header("X-Approval-Id", approval).contentType("application/json")
             .body(request + ("credentialId" to "changed-${UUID.randomUUID()}"))

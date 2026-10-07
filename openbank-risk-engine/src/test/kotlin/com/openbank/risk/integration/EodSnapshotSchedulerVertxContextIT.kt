@@ -44,7 +44,8 @@ import java.time.ZonedDateTime
 class EodSnapshotSchedulerVertxContextIT {
 
     class InMemoryKafkaResource : QuarkusTestResourceLifecycleManager {
-        override fun start(): Map<String, String> = InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in")
+        override fun start(): Map<String, String> =
+            InMemoryConnector.switchIncomingChannelsToInMemory("fx-fixing-in", "cnb-policy-rate-in")
 
         override fun stop() = InMemoryConnector.clear()
     }

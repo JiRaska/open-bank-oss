@@ -306,6 +306,12 @@ HOOK
   if [ "$rc" -ne 0 ]; then
     echo "SELF-TEST FAIL case 2: ordinary supersede exited $rc; got: $out"; ok=1; dump_out "$out"
   elif ! printf '%s' "$out" | grep -q 'would close #6225'; then
+    # Capture PIPESTATUS before echo/dump_out overwrites it: the 139-byte recurrence in #6618
+    # contained the sought text, but did not show whether printf or grep failed under pipefail.
+    local -a match_status=("${PIPESTATUS[@]}")
+    printf '        matcher: printf=%s grep=%s bash=%s\n' \
+      "${match_status[0]}" "${match_status[1]}" "$BASH_VERSION"
+    grep --version 2>&1 | head -n 1 || true
     echo "SELF-TEST FAIL case 2: the older PR was not closed; got: $out"; ok=1; dump_out "$out"
   else
     echo "self-test case 2 OK (ordinary supersede -> rc=$rc, older PR closed)"

@@ -3,6 +3,7 @@
 openapi: 3.1.0
 info:
   title: Notification Service API
+  # 1.10 -> 1.11 (#11588): additive verified makerActorKind on approval responses.
   version: 1.12.0
   description: Notification delivery management — query sent/pending notifications, manage push device tokens.
   license:
@@ -906,6 +907,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           format: date-time
