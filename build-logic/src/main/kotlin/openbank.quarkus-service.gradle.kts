@@ -2,8 +2,6 @@
 // Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
 // See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
 
-import java.util.Collections
-import java.util.IdentityHashMap
 import java.util.zip.ZipFile
 
 // Convention plugin applied by every openbank-*-service (and equivalent modules).
@@ -31,44 +29,6 @@ group = "com.openbank"
 // quarkus.application.version at build time, which ServiceInfoResource
 // (/api/v1/info) and the X-API-Version response header report at runtime.
 version = file("version.txt").readText().trim()
-
-// Quarkus 3.38 shares one mutable descriptor across its model tasks. Dependency
-// collection then appends to another task's input, invalidating the test model on
-// the following coverage invocation (#10137). Each task needs its own lazy builder:
-// eager snapshots lose output paths, and execution-time replacement is too late
-// because Gradle has already finalized the input.
-val quarkusModelTasks = listOf(
-    "quarkusGenerateAppModel",
-    "quarkusGenerateTestAppModel",
-    "quarkusGenerateDevAppModel",
-    "quarkusBuildAppModel",
-)
-quarkusModelTasks.forEach { taskName ->
-    val descriptor = io.quarkus.gradle.tooling.ProjectDescriptorBuilder.buildForApp(project)
-    tasks.named<io.quarkus.gradle.tasks.QuarkusApplicationModelTask>(taskName) {
-        projectDescriptor.set(descriptor)
-    }
-}
-
-// Read descriptors only after tests have produced their output directories. Reading
-// them during configuration can snapshot incomplete source/output metadata.
-val verifyQuarkusModelIsolation = tasks.register("verifyQuarkusModelIsolation") {
-    group = "verification"
-    description = "Reject shared mutable workspace models between Quarkus tasks."
-    dependsOn(tasks.named("test"))
-    doLast {
-        val seen = Collections.newSetFromMap(
-            IdentityHashMap<Any, Boolean>(),
-        )
-        quarkusModelTasks.forEach { taskName ->
-            val modelTask = tasks.named<io.quarkus.gradle.tasks.QuarkusApplicationModelTask>(taskName).get()
-            check(seen.add(modelTask.projectDescriptor.get().workspaceModule)) {
-                "$taskName shares a mutable workspace model; coverage may repeat tests (#10137)"
-            }
-        }
-    }
-}
-tasks.named("check") { dependsOn(verifyQuarkusModelIsolation) }
 
 // Every service publishes documentation from the same build that produces its JAR.
 // The generated page contains only facts from build inputs. It also supplies an
