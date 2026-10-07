@@ -788,6 +788,11 @@ def json_records(results) -> list[dict]:
     return out
 
 
+def schedule_gates(gates):
+    """Start expensive independent gates first without changing verdict order."""
+    return sorted(gates, key=lambda gate: -(gate.get("budget_seconds") or 0))
+
+
 def select(gates, args):
     sel = gates
     if args.group:
@@ -887,7 +892,10 @@ def main(argv=None):
     os.environ[PARSE_CACHE_ENV] = cache
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as ex:
-            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed): g["id"] for g in sel}
+            # Declaration budgets are a stable cost estimate. Starting the long gates
+            # first reduces the shard tail; results below stay in manifest order.
+            futs = {ex.submit(execute, g, root, is_pr, args.timeout, index, changed): g["id"]
+                    for g in schedule_gates(sel)}
             done = {}
             # Emit a line PER GATE as it finishes, rather than nothing until the end
             # (#6068). Combined with unbuffer() this is what makes a run that is killed
@@ -1045,6 +1053,17 @@ def self_test():
         os.environ["CI"] = "true"  # budgets are enforced on the runner only
         results = [execute(g, tmp, is_pr=False, timeout=2) for g in gates]
         bad = []
+        scheduled = schedule_gates([
+            {"id": "short", "budget_seconds": 5},
+            {"id": "long", "budget_seconds": 90},
+            {"id": "medium-a", "budget_seconds": 30},
+            {"id": "medium-b", "budget_seconds": 30},
+            {"id": "unknown"},
+        ])
+        if [gate["id"] for gate in scheduled] != [
+            "long", "medium-a", "medium-b", "short", "unknown"
+        ]:
+            bad.append("budget scheduling is not descending and stable")
         for r in results:
             want = EXPECTED[r.id]
             mark = "ok " if r.status == want else "BAD"
