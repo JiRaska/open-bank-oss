@@ -66,6 +66,16 @@ Otevření AML případu je **best-effort** (`openCaseQuietly`): výpadek case s
 
 Zdrojový kandidát #12181 ukládá každý přechod platby s událostí a její outbox řádek v jedné PostgreSQL transakci. `SctInstOutboxDispatcher` pak řádek vyzvedne a opakuje doručení přes `KafkaSctInstEventPublisher` do `openbank.sepa.instant.events`. Doručení je at-least-once: potvrzení brokerem následované selháním před `markSent` může stejnou událost zopakovat. Dosavadní čtyřpolový Kafka payload a záznam bez klíče se nemění; standardní outbox hlavičky nesou trvalé `ce-id` při každém pokusu. Audit-service použije toto ID před Kafka offsetem, pokud tělo nemá `eventId`, a proto musí být auditní konzument nasazen před producentem. Jde o popis zdrojového kódu, nikoli o důkaz schválení, merge či nasazení kandidáta.
 
+| Přechod platby | Dosavadní doménová událost | Záruka v kandidátu |
+| --- | --- | --- |
+| Nová platba do `PROCESSING` | `SctInstPaymentSubmitted` | Platba a řádek události se potvrdí spolu; relay opakuje odeslání až do úspěchu nebo viditelného `DEAD`. |
+| Nová platba do `REJECTED` (screening nebo schéma) | `SctInstPaymentRejected` | Platba a řádek události se potvrdí spolu; stejná politika opakování. |
+| `PROCESSING` do `SETTLED` | `SctInstPaymentSettled` | Stav a událost se potvrdí spolu pod zámkem platby; stejná politika opakování. |
+| `SETTLED` do `RECALLED` | `SctInstPaymentRecalled` | Stav a událost se potvrdí spolu pod zámkem platby; stejná politika opakování. |
+| Nová platba zadržená ve `PENDING` | V dosavadním schématu není doménová událost platby | Řádek platby je trvalý, založení samostatného AML případu zůstává best effort. Doručení události platby zde není slíbeno. |
+
+Idempotentní opakování existujícího podání vrátí uloženou platbu bez druhé události. Tato migrace zpětně nevytváří historické přechody; případná chybějící auditní fakta vyžadují samostatnou schválenou rekonciliaci.
+
 ## Odolnost a rate limiting
 
 Konfigurováno pod `openbank.resilience` / `openbank.rate-limit` (SmallRye Fault Tolerance): circuit breaker (volume 20, failure ratio 0.3, success threshold 10, 5 s delay), retry (max 2, 100 ms delay, 50 ms jitter), timeout (10 s) a strop souběhu (`max-concurrent-requests: 500`).
