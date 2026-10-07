@@ -67,7 +67,8 @@ info:
   #         ROLE_TREASURY_BACK_OFFICE) and saved blotter filters (/views/deal-filters).
   # 1.24.0: additive — POST /deals/{id}/posting-intent/close (operator close of a lifecycle posting
   #         intent that cannot complete; ADR-0344 / #13883 intent-first posting).
-  version: 1.24.0
+  # 1.25.0: correction — validation 400s from libs-runtime use ProblemDetail, not Error (#12078).
+  version: 1.25.0
   description: |
     The bank's own money-market deals (ADR-0315). A deal moves
     `DRAFT → PENDING_APPROVAL → BOOKED → CONFIRMED → SETTLED → MATURED`, or to `CANCELLED` (before
@@ -593,7 +594,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/InvalidState' }
         '503':
@@ -638,7 +639,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -678,7 +679,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                $ref: '#/components/schemas/ProblemDetail'
         '403':
           $ref: '#/components/responses/Forbidden'
         '409':
@@ -1888,6 +1889,51 @@ components:
           type: array
           description: REFERENCE_NOT_EFFECTIVE only — each `kind:key` with no ACTIVE version on the trade date.
           items: { type: string }
+    ProblemDetail:
+      type: object
+      description: >-
+        Shared libs-runtime validation body. ApiError always has the five required fields;
+        the ADR-0326 problem form may add the RFC 9457 fields below. Unlike the treasury
+        business Error body, validation responses have no `error` member.
+      required: [status, code, message, traceId, timestamp]
+      additionalProperties: false
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        code: { type: string }
+        correlationId: { type: string }
+        retryable: { type: boolean }
+        violations:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProblemViolation'
+        traceId: { type: string }
+        message: { type: string }
+        timestamp: { type: string, format: date-time }
+        details:
+          type: array
+          items:
+            $ref: '#/components/schemas/FieldError'
+    ProblemViolation:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        code: { type: string }
+    FieldError:
+      type: object
+      required: [field, message]
+      additionalProperties: false
+      properties:
+        field: { type: string }
+        message: { type: string }
+        rejectedValue:
+          description: Always null; rejected input is not echoed.
     DraftDealRequest:
       type: object
       required: [product, counterpartyId, principal, rate]
