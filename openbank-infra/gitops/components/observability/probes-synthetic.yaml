@@ -34,6 +34,50 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: Probe
 metadata:
+  name: synthetic-public-site
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-public-site
+  interval: 60s
+  scrapeTimeout: 12s
+  module: http_public_site
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://open-bank.tech/
+        - https://www.open-bank.tech/
+      labels:
+        tier: public-site
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-public-dns
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-public-dns
+  interval: 60s
+  scrapeTimeout: 12s
+  module: dns_public_site
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - 1.1.1.1:53
+        - 8.8.8.8:53
+      labels:
+        tier: public-site-dns
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
   name: synthetic-edge-reachability
   namespace: observability
   labels:
