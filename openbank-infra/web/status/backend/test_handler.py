@@ -84,9 +84,11 @@ class PublicApiContractTests(unittest.TestCase):
             state = handler.update_state(state, failing, self.now + (i + 1) * 120)
         self.now += 360
         self.assertEqual(self.call("/api/v1/health", state)["statusCode"], 503)
+        self.assertEqual(self.call("/api/v1/freshness", state)["statusCode"], 200)
         self.now += handler.STALE_SECONDS + 1
         body = json.loads(self.call("/api/v1/health", state)["body"])
         self.assertEqual(body["status"], "unknown")
+        self.assertEqual(self.call("/api/v1/freshness", state)["statusCode"], 503)
 
 
 if __name__ == "__main__":

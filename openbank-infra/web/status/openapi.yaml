@@ -88,8 +88,29 @@ paths:
                 properties:
                   status: {type: string, const: ok}
                   service: {type: string, const: openbank-public-status-api}
+  /api/v1/freshness:
+    get:
+      summary: Scheduled checker freshness, independent of upstream service state
+      operationId: getCheckerFreshness
+      responses:
+        '200':
+          description: Latest scheduled result is recent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Freshness'}
+        '503':
+          description: Result is stale or unavailable.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Freshness'}
 components:
   schemas:
+    Freshness:
+      type: object
+      required: [status, checkedAt]
+      properties:
+        status: {type: string, enum: [fresh, stale]}
+        checkedAt: {type: [string, 'null'], format: date-time}
     Component:
       type: object
       required: [id, name, description, coverage, status, lastResult]

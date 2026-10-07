@@ -20,6 +20,8 @@ two minutes. The site remains **Unable to verify** until that sample arrives.
 - `GET /api/v1/incidents` returns the latest confirmed incident timeline.
 - `GET /api/v1/healthz` checks the status API itself, independent of upstream
   service state.
+- `GET /api/v1/freshness` returns 200 only while scheduled results are fresh,
+  regardless of whether monitored services are up or down.
 - `/openapi.yaml` is the public OpenAPI 3.1 contract.
 
 The website check requires both names to resolve via Cloudflare and Google DNS,

@@ -176,16 +176,21 @@ def history(samples, now, duration, bucket_count):
     return {"availabilityPercent": round(100 * success / total, 4) if total else None, "totalSamples": total, "successfulSamples": success, "buckets": buckets}
 
 
+def snapshot_is_fresh(state, now):
+    check_time = state.get("checkedAt")
+    if not check_time:
+        return False
+    try:
+        checked_epoch = datetime.fromisoformat(check_time.replace("Z", "+00:00")).timestamp()
+        return -60 <= now - checked_epoch <= STALE_SECONDS
+    except ValueError:
+        return False
+
+
 def public_state(state, now):
     components = state.get("components") or {}
     check_time = state.get("checkedAt")
-    stale = True
-    if check_time:
-        try:
-            checked_epoch = datetime.fromisoformat(check_time.replace("Z", "+00:00")).timestamp()
-            stale = now - checked_epoch > STALE_SECONDS or checked_epoch - now > 60
-        except ValueError:
-            pass
+    stale = not snapshot_is_fresh(state, now)
     statuses = [components.get(key, {}).get("status", "unknown") for key in COMPONENTS]
     if stale or not statuses:
         overall = "unknown"
@@ -228,12 +233,16 @@ def handler(event, context):
     path = event.get("rawPath", "")
     if path == "/api/v1/healthz":
         return response(200, {"status": "ok", "service": "openbank-public-status-api"})
-    if path not in {"/api/v1/status", "/api/v1/health", "/api/v1/history", "/api/v1/incidents"}:
+    if path not in {"/api/v1/status", "/api/v1/health", "/api/v1/history", "/api/v1/incidents", "/api/v1/freshness"}:
         return response(404, {"error": "Not found"})
     try:
-        public = public_state(load_state(s3), now)
+        state = load_state(s3)
+        public = public_state(state, now)
     except Exception:
         return response(503, {"status": "unknown", "error": "Status data unavailable"})
+    if path == "/api/v1/freshness":
+        fresh = snapshot_is_fresh(state, now)
+        return response(200 if fresh else 503, {"status": "fresh" if fresh else "stale", "checkedAt": public["checkedAt"]})
     if path == "/api/v1/health":
         body = {key: public[key] for key in ("schemaVersion", "checkedAt", "status", "components", "measurement")}
         return response(200 if public["status"] == "operational" else 503, body)
