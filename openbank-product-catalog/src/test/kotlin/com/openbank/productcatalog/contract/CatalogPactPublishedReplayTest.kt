@@ -31,12 +31,15 @@ class CatalogPactPublishedReplayTest {
     @Test
     fun `published Product Studio pact state can be replayed without deleting the first revision`() {
         val first = fixtures.independentlyCheckableDraftExists()
+        given().get("/api/v2/offerings/$LEGACY_OFFERING_ID/revisions/$LEGACY_REVISION_ID")
+            .then().statusCode(200).body("state", equalTo("DRAFT"))
         publishFixture(first)
         val second = fixtures.independentlyCheckableDraftExists()
         assertNotEquals(first["publishOfferingId"], second["publishOfferingId"])
         assertNotEquals(first["publishRevisionId"], second["publishRevisionId"])
         publishFixture(second)
         given().get(fixtureRevisionPath(first)).then().statusCode(200).body("state", equalTo("PUBLISHED"))
+        publishPath("/api/v2/offerings/$LEGACY_OFFERING_ID/revisions/$LEGACY_REVISION_ID")
     }
 
     @Test
@@ -46,14 +49,23 @@ class CatalogPactPublishedReplayTest {
     }
 
     private fun publishFixture(state: Map<String, Any>) {
+        publishPath(fixtureRevisionPath(state))
+    }
+
+    private fun publishPath(path: String) {
         given().contentType("application/json")
             .header("If-Match", "\"0\"")
             .body("""{"reason":"independent commercial approval"}""")
-            .post("${fixtureRevisionPath(state)}/publish")
+            .post("$path/publish")
             .then().statusCode(200)
             .body("state", equalTo("PUBLISHED"))
     }
 
     private fun fixtureRevisionPath(state: Map<String, Any>): String =
         "/api/v2/offerings/${state["publishOfferingId"]}/revisions/${state["publishRevisionId"]}"
+
+    private companion object {
+        const val LEGACY_OFFERING_ID = "20000000-0000-0000-0000-000000000003"
+        const val LEGACY_REVISION_ID = "30000000-0000-0000-0000-000000000002"
+    }
 }

@@ -47,6 +47,10 @@ class CatalogPactProviderFixtures(private val dataSource: DataSource) {
         val offeringId = UUID.randomUUID()
         val revisionId = UUID.randomUUID()
         insertSpecification(connection, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_PREREQUISITE")
+        // Published broker versions before path generators still address these fixed IDs.
+        // Keep their draft available while new Pact replays use fresh immutable revisions.
+        insertOffering(connection, PUBLISH_OFFERING_ID, PUBLISH_SPECIFICATION_ID, "PACT_PUBLISH_OFFERING")
+        insertDraft(connection, PUBLISH_REVISION_ID, PUBLISH_OFFERING_ID, "pact-independent-author")
         val offeringCode = "PACT_PUBLISH_OFFERING_${offeringId.toString().replace("-", "").uppercase()}"
         insertOffering(connection, offeringId, PUBLISH_SPECIFICATION_ID, offeringCode)
         insertDraft(connection, revisionId, offeringId, "pact-independent-author")
