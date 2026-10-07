@@ -44,7 +44,8 @@ info:
   # 1.74.0 -> 1.75.0 (#10016): additive — GET /capabilities (ADR-0310 D5).
   # 1.75.0 -> 1.76.0 (#11966): additive — /holdings, the customer write side of the declared
   # holdings that GET /net-worth reads (ADR-0301 D1).
-  version: 1.77.0
+  # 1.77.0 -> 1.78.0 (#12216): document the existing notification page response schema.
+  version: 1.78.0
   description: >-
     Customer-facing edge proxy (ADR-0065). Single internet-facing entry point for the
     retail customer app. Validates JWTs from the openbank-customers Keycloak realm,
@@ -1188,6 +1189,10 @@ paths:
       responses:
         '200':
           description: Party-scoped notification page with total and exact unreadCount
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CustomerNotificationPage'
 
   /notifications/{id}/read:
     patch:
@@ -6190,6 +6195,34 @@ components:
         totalCount:
           type: integer
           nullable: true
+
+    CustomerNotificationPage:
+      type: object
+      description: Party-scoped notification history; counts cover the whole selected party, not just this page.
+      required: [items, total, unreadCount, page, size]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CustomerNotificationSummary'
+        total: {type: integer, format: int64, minimum: 0}
+        unreadCount: {type: integer, format: int64, minimum: 0}
+        page: {type: integer, minimum: 0}
+        size: {type: integer, minimum: 1, maximum: 100}
+
+    CustomerNotificationSummary:
+      type: object
+      properties:
+        id: {type: string, format: uuid}
+        partyId: {type: string, format: uuid}
+        channel: {type: string}
+        template: {type: string}
+        recipient: {type: string}
+        subject: {type: string, nullable: true}
+        status: {type: string}
+        sentAt: {type: string, format: date-time, nullable: true}
+        readAt: {type: string, format: date-time, nullable: true}
+        createdAt: {type: string, format: date-time}
 
     # Mirrors notification-service's NotificationPreferenceDto. No stored row defaults every
     # channel to true.
