@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.35.2](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.1...notification-service-v0.35.2) (2026-10-07)
+
+
+### Bug Fixes
+
+* **approval:** preserve verified maker actor kind ([#12159](https://github.com/JiRaska/open-bank-oss/issues/12159)) ([74cba34](https://github.com/JiRaska/open-bank-oss/commit/74cba348b75c0b318902c033bf81356ddba32393))
+
 ## [0.35.1](https://github.com/JiRaska/open-bank-oss/compare/notification-service-v0.35.0...notification-service-v0.35.1) (2026-10-03)
 
 
