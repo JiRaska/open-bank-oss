@@ -135,7 +135,7 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
       # script-src blocks the widget from ever rendering, connect-src blocks the POST, and
       # frame-src (falling back to default-src) blocks the captcha iframe.
       # Everything else stays deny-by-default. See web/landing/README-testflight.md.
-      content_security_policy = join("; ", [
+      content_security_policy = coalesce(var.content_security_policy, join("; ", [
         "default-src 'self'",
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://*.hcaptcha.com",
         "font-src 'self' https://fonts.gstatic.com",
@@ -151,7 +151,7 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
         "form-action 'self' https://api.web3forms.com",
         "frame-ancestors 'none'",
         "upgrade-insecure-requests",
-      ])
+      ]))
     }
   }
 
@@ -183,7 +183,7 @@ resource "aws_cloudfront_response_headers_policy" "sec" {
 resource "aws_cloudfront_distribution" "cdn" {
   enabled             = true
   is_ipv6_enabled     = true
-  comment             = "open-bank.tech static landing"
+  comment             = var.comment
   default_root_object = "index.html"
   aliases             = var.aliases
   price_class         = "PriceClass_100" # NA + EU edges only = cheapest
@@ -206,6 +206,20 @@ resource "aws_cloudfront_distribution" "cdn" {
     response_headers_policy_id = aws_cloudfront_response_headers_policy.sec.id
   }
 
+  dynamic "ordered_cache_behavior" {
+    for_each = var.uncached_api ? [1] : []
+    content {
+      path_pattern               = "/api/*"
+      target_origin_id           = "s3-site"
+      viewer_protocol_policy     = "https-only"
+      allowed_methods            = ["GET", "HEAD"]
+      cached_methods             = ["GET", "HEAD"]
+      compress                   = true
+      cache_policy_id            = aws_cloudfront_cache_policy.api[0].id
+      response_headers_policy_id = aws_cloudfront_response_headers_policy.sec.id
+    }
+  }
+
   # Pretty 404 -> serve index (SPA-style is not needed; keep explicit 404 page if added later)
   custom_error_response {
     error_code            = 403
@@ -222,6 +236,19 @@ resource "aws_cloudfront_distribution" "cdn" {
     acm_certificate_arn      = aws_acm_certificate_validation.cert.certificate_arn
     ssl_support_method       = "sni-only"
     minimum_protocol_version = "TLSv1.2_2021"
+  }
+}
+
+resource "aws_cloudfront_cache_policy" "api" {
+  count       = var.uncached_api ? 1 : 0
+  name        = "${replace(var.domain, ".", "-")}-status-api-no-cache"
+  min_ttl     = 0
+  default_ttl = 0
+  max_ttl     = 0
+  parameters_in_cache_key_and_forwarded_to_origin {
+    cookies_config { cookie_behavior = "none" }
+    headers_config { header_behavior = "none" }
+    query_strings_config { query_string_behavior = "none" }
   }
 }
 

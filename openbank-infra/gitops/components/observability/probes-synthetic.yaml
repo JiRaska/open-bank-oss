@@ -56,6 +56,70 @@ spec:
 apiVersion: monitoring.coreos.com/v1
 kind: Probe
 metadata:
+  name: synthetic-status-page
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-status-page
+  interval: 60s
+  scrapeTimeout: 12s
+  module: http_status_page
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://status.open-bank.tech/
+      labels:
+        tier: public-status
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-status-api
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-status-api
+  interval: 60s
+  scrapeTimeout: 12s
+  module: http_status_api
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - https://status.open-bank.tech/api/status.json
+      labels:
+        tier: public-status
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
+  name: synthetic-status-dns
+  namespace: observability
+  labels:
+    app.kubernetes.io/part-of: observability
+spec:
+  jobName: synthetic-status-dns
+  interval: 60s
+  scrapeTimeout: 12s
+  module: dns_status_page
+  prober:
+    url: blackbox-exporter:9115
+  targets:
+    staticConfig:
+      static:
+        - 1.1.1.1:53
+        - 8.8.8.8:53
+      labels:
+        tier: public-status-dns
+---
+apiVersion: monitoring.coreos.com/v1
+kind: Probe
+metadata:
   name: synthetic-public-dns
   namespace: observability
   labels:

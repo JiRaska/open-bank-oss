@@ -1,4 +1,5 @@
 import importlib.util
+import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,9 +48,10 @@ class StatusEvidenceTests(unittest.TestCase):
     def test_website_and_oidc_require_content_not_just_http_200(self):
         with patch.object(checks, "_http", return_value=(False, 200, 1)) as http:
             self.assertFalse(checks.probe("website", checks.TARGETS["website"])["ok"])
-            self.assertEqual(http.call_args.kwargs["marker"], b"<title>OpenBank")
+            self.assertEqual(http.call_args.kwargs["markers"], (b"<title>OpenBank",))
             self.assertFalse(checks.probe("customer_sign_in", checks.TARGETS["customer_sign_in"])["ok"])
-            self.assertEqual(http.call_args.kwargs["marker"], b'"issuer"')
+            self.assertEqual(http.call_args.kwargs["markers"],
+                             (b'"issuer"', b'"token_endpoint"', b'"authorization_endpoint"', b'"jwks_uri"'))
 
     def test_only_confirmed_incidents_with_valid_recovery_are_published(self):
         incident = {"id": "maintenance-1", "summary": "Service interruption",
@@ -60,6 +62,13 @@ class StatusEvidenceTests(unittest.TestCase):
             checks.confirmed_incidents([{**incident, "confirmed": False}])
         with self.assertRaises(ValueError):
             checks.confirmed_incidents([{**incident, "resolved_at": "2026-10-07T11:00:00Z"}])
+
+    def test_malformed_existing_history_fails_instead_of_starting_over(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "previous.json"
+            path.write_text('{"schema_version":1,"history":"missing"}')
+            with self.assertRaises(ValueError):
+                checks.load_previous(path)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,97 @@
+name: Public status evidence
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: 'Allow an empty history on the first status deployment only'
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+    paths:
+      - 'openbank-infra/web/status/**'
+      - '.github/workflows/public-status.yml'
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: public-status-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      STATUS_BUCKET: ${{ vars.STATUS_PUBLIC_BUCKET }}
+      STATUS_DISTRIBUTION_ID: ${{ vars.STATUS_DISTRIBUTION_ID }}
+      STATUS_ROLE_ARN: ${{ vars.STATUS_PUBLISH_ROLE_ARN }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate status renderer and probe logic
+        run: |
+          set -euo pipefail
+          PYTHONDONTWRITEBYTECODE=1 python3 -m unittest openbank-infra/web/status/test_checks.py
+          node --test openbank-infra/web/status/status.test.cjs
+          node --check openbank-infra/web/status/status.js
+
+      - name: Require independent publisher configuration
+        run: |
+          set -euo pipefail
+          for name in STATUS_BUCKET STATUS_DISTRIBUTION_ID STATUS_ROLE_ARN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::${name} must be configured before public status can publish"
+              exit 1
+            fi
+          done
+
+      - name: Configure AWS credentials for status origin
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          role-to-assume: ${{ vars.STATUS_PUBLISH_ROLE_ARN }}
+          aws-region: eu-north-1
+
+      - name: Load prior observations
+        run: |
+          set -euo pipefail
+          if ! aws s3 cp "s3://${STATUS_BUCKET}/api/status.json" "$RUNNER_TEMP/previous-status.json"; then
+            if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ '${{ inputs.bootstrap }}' = true ]; then
+              echo '::notice::explicit first-publication bootstrap; history starts empty'
+            else
+              echo '::error::prior status history unavailable; refusing to erase the observed window'
+              exit 1
+            fi
+          fi
+
+      - name: Collect current public evidence
+        run: |
+          set -euo pipefail
+          python3 openbank-infra/web/status/checks.py \
+            --previous "$RUNNER_TEMP/previous-status.json" \
+            --incidents openbank-infra/web/status/incidents.json \
+            --output "$RUNNER_TEMP/status.json"
+
+      - name: Publish static page and read-only API
+        run: |
+          set -euo pipefail
+          site=openbank-infra/web/status
+          aws s3 cp "$site/index.html" "s3://${STATUS_BUCKET}/index.html" \
+            --content-type 'text/html; charset=utf-8' --cache-control 'public, max-age=0, must-revalidate'
+          aws s3 cp "$site/status.css" "s3://${STATUS_BUCKET}/status.css" \
+            --content-type 'text/css; charset=utf-8' --cache-control 'public, max-age=300'
+          aws s3 cp "$site/status.js" "s3://${STATUS_BUCKET}/status.js" \
+            --content-type 'text/javascript; charset=utf-8' --cache-control 'public, max-age=300'
+          aws s3 cp "$site/openbank-mark.svg" "s3://${STATUS_BUCKET}/openbank-mark.svg" \
+            --content-type 'image/svg+xml' --cache-control 'public, max-age=300'
+          aws s3 cp "$RUNNER_TEMP/status.json" "s3://${STATUS_BUCKET}/api/status.json" \
+            --content-type 'application/json; charset=utf-8' --cache-control 'no-store, max-age=0'
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            aws cloudfront create-invalidation --distribution-id "$STATUS_DISTRIBUTION_ID" \
+              --paths '/index.html' '/status.css' '/status.js' '/openbank-mark.svg' >/dev/null
+          fi

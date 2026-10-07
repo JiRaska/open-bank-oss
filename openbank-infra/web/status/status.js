@@ -18,9 +18,17 @@ function historySummary(history, now, hours) {
     return Number.isFinite(at) && at <= now && at >= now - hours * 3_600_000 &&
       sample.checks && Object.keys(labels).every(name => typeof sample.checks[name] === 'boolean')
   }) : []
-  const healthy = samples.filter(sample => Object.values(sample.checks).every(Boolean)).length
-  const coverage = Math.min(samples.length / expected, 1)
-  return { observed: samples.length, expected, coverage, availability: samples.length ? healthy / samples.length : null }
+  // Manual reruns can produce several records in one five-minute slot. Count each
+  // slot once, and keep a failure if any check in that slot failed.
+  const slots = new Map()
+  for (const sample of samples) {
+    const slot = Math.floor(Date.parse(sample.at) / 300_000)
+    const healthy = Object.values(sample.checks).every(Boolean)
+    slots.set(slot, (slots.get(slot) ?? true) && healthy)
+  }
+  const healthy = [...slots.values()].filter(Boolean).length
+  const coverage = Math.min(slots.size / expected, 1)
+  return { observed: slots.size, expected, coverage, availability: slots.size ? healthy / slots.size : null }
 }
 
 function renderHistory(id, hours, history, now) {

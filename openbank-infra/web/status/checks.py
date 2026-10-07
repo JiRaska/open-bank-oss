@@ -28,20 +28,20 @@ MAX_HISTORY_DAYS = 30
 MAX_INPUT_AGE_SECONDS = 600
 
 
-def _http(url: str, *, require_200: bool, marker: bytes | None = None) -> tuple[bool, int | None, float]:
+def _http(url: str, *, require_200: bool, markers: tuple[bytes, ...] = ()) -> tuple[bool, int | None, float]:
     started = time.monotonic()
     try:
         with urlopen(Request(url, headers={"User-Agent": "OpenBankStatus/1.0"}), timeout=8) as response:
             status = response.status
-            body = response.read(64_000) if marker else b""
+            body = response.read(64_000) if markers else b""
     except HTTPError as exc:
         status = exc.code
         body = b""
     except (OSError, URLError):
         return False, None, round((time.monotonic() - started) * 1000)
     ok = status == 200 if require_200 else 200 <= status < 500
-    if marker is not None:
-        ok = ok and marker in body
+    if markers:
+        ok = ok and all(marker in body for marker in markers)
     return ok, status, round((time.monotonic() - started) * 1000)
 
 
@@ -61,11 +61,11 @@ def probe(name: str, target: str) -> dict[str, object]:
                 "latency_ms": round((time.monotonic() - started) * 1000),
                 "certificate_expires_at": datetime.fromtimestamp(expiry, timezone.utc).isoformat(),
             }
-        marker = {
-            "customer_sign_in": b'"issuer"',
-            "website": b"<title>OpenBank",
-        }.get(name)
-        ok, status, latency = _http(target, require_200=name != "api_edge", marker=marker)
+        markers = {
+            "customer_sign_in": (b'"issuer"', b'"token_endpoint"', b'"authorization_endpoint"', b'"jwks_uri"'),
+            "website": (b"<title>OpenBank",),
+        }.get(name, ())
+        ok, status, latency = _http(target, require_200=name != "api_edge", markers=markers)
         return {"ok": ok, "http_status": status, "latency_ms": latency}
     except (OSError, KeyError, ValueError, ssl.SSLError):
         return {"ok": False, "latency_ms": None}
@@ -128,18 +128,22 @@ def confirmed_incidents(raw: object) -> list[dict[str, object]]:
     return result
 
 
+def load_previous(path: Path | None) -> object:
+    if path is None or not path.exists():
+        return None  # explicit first-publication bootstrap only
+    previous = json.loads(path.read_text())
+    if not isinstance(previous, dict) or previous.get("schema_version") != 1 or not isinstance(previous.get("history"), list):
+        raise ValueError("existing status history is malformed; refusing to erase it")
+    return previous
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--previous", type=Path)
     parser.add_argument("--incidents", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    previous: object = None
-    if args.previous and args.previous.exists():
-        try:
-            previous = json.loads(args.previous.read_text())
-        except (OSError, ValueError):
-            pass
+    previous = load_previous(args.previous)
     observations = {name: probe(name, target) for name, target in TARGETS.items()}
     document = build_document(datetime.now(timezone.utc), previous, observations)
     document["incidents"] = confirmed_incidents(json.loads(args.incidents.read_text()))

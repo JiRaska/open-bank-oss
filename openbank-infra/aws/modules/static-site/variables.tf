@@ -22,3 +22,21 @@ variable "tags" {
   type    = map(string)
   default = {}
 }
+
+variable "content_security_policy" {
+  description = "Optional stricter CSP for a second static site; null preserves the landing site policy."
+  type        = string
+  default     = null
+}
+
+variable "comment" {
+  description = "CloudFront distribution description."
+  type        = string
+  default     = "OpenBank static landing"
+}
+
+variable "uncached_api" {
+  description = "Serve /api/* from the private S3 origin without CDN caching."
+  type        = bool
+  default     = false
+}

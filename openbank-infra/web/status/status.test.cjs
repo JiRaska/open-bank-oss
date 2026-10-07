@@ -38,3 +38,14 @@ test('failed samples lower availability and missing samples do not count healthy
   assert.equal(summary.observed, 2)
   assert.equal(summary.availability, .5)
 })
+
+test('duplicate reruns cannot inflate coverage or erase a failure', () => {
+  const green = Object.fromEntries(names.map(name => [name, true]))
+  const failed = { ...green, dns: false }
+  const summary = historySummary([
+    { at: '2026-10-07T11:55:00Z', checks: green },
+    { at: '2026-10-07T11:56:00Z', checks: failed },
+  ], now, 24)
+  assert.equal(summary.observed, 1)
+  assert.equal(summary.availability, 0)
+})
