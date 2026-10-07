@@ -95,7 +95,9 @@ function isInertImagePinCommit(repo, commit, registryImageGreps) {
 export function sourceDateForSemanticInputs(repo, paths, registryImageGreps = []) {
   if (process.env.SOURCE_DATE_EPOCH) return sourceDate(repo, paths)
   let revision = 'HEAD'
-  for (let i = 0; i < 200; i++) {
+  // Walk the complete available history. A finite cap would eventually treat a
+  // long run of deploy pins as a semantic change and advance provenance falsely.
+  while (true) {
     let commit
     try {
       commit = git(repo, ['log', '-1', '--format=%H', revision, '--', ...paths])
@@ -112,5 +114,4 @@ export function sourceDateForSemanticInputs(repo, paths, registryImageGreps = []
       return sourceDate(repo, paths)
     }
   }
-  return sourceDate(repo, paths)
 }

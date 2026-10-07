@@ -5,16 +5,16 @@
 #
 # Prints exactly `true` when an Admin UI deploy source may enter the privileged build job.
 # A source that is no longer the main tip is normally stale. The sole exception is when every
-# newer commit is this workflow's own GitOps image bump: those commits change no build input, and
-# rejecting the waiting source would leave its Admin UI changes permanently undeployed.
+# newer commit changes only this workflow's own GitOps image pin. Keep this decision identical
+# to deploy-window.py's deferred image freshness check.
 set -euo pipefail
 
 SOURCE_SHA="${1:?source SHA is required}"
 MAIN_SHA="${2:?main SHA is required}"
 EVENT_NAME="${3:-unknown}"
 OPEN_DEPLOY_PR_EXISTS="${4:-false}"
-ADMIN_UI_MANIFEST="openbank-infra/gitops/components/admin-ui/admin-ui.yaml"
 DEPLOY_SUBJECT_PREFIX="chore(admin-ui): deploy "
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 reject() {
   echo "$1" >&2
@@ -45,20 +45,9 @@ if [ "$SOURCE_SHA" = "$MAIN_SHA" ]; then
   exit 0
 fi
 
-git merge-base --is-ancestor "$SOURCE_SHA" "$MAIN_SHA" 2>/dev/null \
-  || reject "Skipping stale source ${SOURCE_SHA}; it is not an ancestor of main ${MAIN_SHA}."
-
-while IFS= read -r commit_sha; do
-  subject="$(git log -1 --format=%s "$commit_sha")"
-  if [[ "$subject" != "${DEPLOY_SUBJECT_PREFIX}"* ]]; then
-    reject "Skipping stale source ${SOURCE_SHA}; newer build-relevant main commit ${commit_sha} owns deployment."
-  fi
-
-  changed_paths="$(git diff-tree --first-parent --no-commit-id --name-only -r "$commit_sha")"
-  if [ "$changed_paths" != "$ADMIN_UI_MANIFEST" ]; then
-    reject "Skipping stale source ${SOURCE_SHA}; deploy-looking commit ${commit_sha} changed more than the Admin UI image pin."
-  fi
-done < <(git rev-list --reverse "${SOURCE_SHA}..${MAIN_SHA}")
+python3 "$SCRIPT_DIR/deploy-window.py" admin-ui-source-current \
+  --root . --source "$SOURCE_SHA" --main "$MAIN_SHA" \
+  || reject "Skipping stale source ${SOURCE_SHA}; main changed beyond this workflow's own image pins."
 
 echo "Allowing ${SOURCE_SHA}; main advanced only through self-generated Admin UI image bumps." >&2
 echo true
