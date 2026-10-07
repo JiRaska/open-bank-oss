@@ -35,18 +35,33 @@ class AdmissionTest(unittest.TestCase):
         checkout = steps[0]
         admission = steps[1]
         self.assertIn('pull_request_review', checkout['if'])
-        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
         self.assertIn("= 'push'", admission['run'])
         self.assertIn('--current-pr "$PR_NUMBER"', admission['run'])
 
-    def test_services_ci_admission_reads_current_trusted_base(self):
+    def test_services_ci_admission_reads_current_default_branch(self):
         workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/services-ci.yml').read_text())
         steps = workflow['jobs']['changes']['steps']
         checkout = steps[0]
         admission = steps[1]
-        self.assertEqual(checkout['with']['ref'], '${{ github.event.pull_request.base.ref }}')
+        self.assertEqual(checkout['with']['ref'], '${{ github.event.repository.default_branch }}')
         self.assertIs(checkout['with']['persist-credentials'], False)
         self.assertIn('public-readiness.txt', admission['run'])
+
+    def test_security_scan_admits_before_expensive_jobs(self):
+        workflow = yaml.safe_load((Path(__file__).parents[1] / 'workflows/security.yml').read_text())
+        jobs = workflow['jobs']
+        steps = jobs['agent-admission']['steps']
+        self.assertEqual(workflow['permissions'], {'contents': 'read'})
+        self.assertEqual(jobs['agent-admission']['permissions']['pull-requests'], 'read')
+        self.assertEqual(steps[0]['with']['ref'], '${{ github.event.repository.default_branch }}')
+        self.assertIs(steps[0]['with']['persist-credentials'], False)
+        self.assertIn("!= 'pull_request'", steps[1]['run'])
+        self.assertIn('--current-pr "$PR_NUMBER"', steps[1]['run'])
+        for name in ('detect-deps', 'trivy'):
+            self.assertEqual(jobs[name]['needs'], 'agent-admission')
+            self.assertEqual(jobs[name]['if'], "needs.agent-admission.outputs.proceed == 'true'")
+        self.assertEqual(jobs['codeql']['needs'], 'detect-deps')
 
     def test_empty_queue(self):
         self.assertEqual(admission.admit([[]], self.prefixes, self.limit), (True, 0))

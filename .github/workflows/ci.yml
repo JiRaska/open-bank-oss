@@ -35,9 +35,9 @@ jobs:
       - if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # base.sha is frozen on older PRs; admission reads policy and pinned requirements
-          # from the current trusted base branch, never from the untrusted PR head.
-          ref: ${{ github.event.pull_request.base.ref }}
+          # Stacked PR bases can be agent-controlled; read admission policy from
+          # the current default branch, never from the PR head or its base.
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - id: admit
         env:

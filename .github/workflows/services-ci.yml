@@ -81,13 +81,12 @@ jobs:
       verification-modules-json: ${{ steps.detect.outputs.verification-modules-json }}
       admin-ui-pact-changed: ${{ steps.detect.outputs.admin-ui-pact-changed }}
     steps:
-      # Read admission policy from the trusted base before checking out PR code.
+      # Read admission policy from the trusted default branch before PR code.
       - if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          # Admission policy and pinned requirements must come from the current
-          # trusted base branch; base.sha is frozen for older pull requests.
-          ref: ${{ github.event.pull_request.base.ref }}
+          # A stacked PR's base may be agent-controlled; never take policy there.
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
       - id: admit
         env:
