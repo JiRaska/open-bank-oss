@@ -1336,6 +1336,21 @@ gates:
       # --enforce is required alongside `mode: enforced` (without it findings exit 0).
       python3 openbank-infra/scripts/check-db-backup-prefix-scope.py --enforce
 
+  - id: pact-broker-db-connection-validation
+    name: "Pact Broker validates pooled DB connections after failover"
+    group: gitops
+    mode: enforced
+    budget_seconds: 5
+    rationale: >-
+      The broker's provider selector is a required contract gate. A pooled connection left
+      dead by database failover must be checked before it is handed to that request (#7376).
+    review_after: "2027-04-07"
+    min_subjects: 1
+    selftest_inputs: [".github/scripts/check-pact-broker-db-validation.py"]
+    selftest: python3 .github/scripts/check-pact-broker-db-validation.py --self-test
+    selftest_expect: pass
+    run: python3 .github/scripts/check-pact-broker-db-validation.py
+
   # ADR-0325 (incident 2026-09-28): a fleet-wide CNPG minor bump restarted every primary IN
   # PLACE -- no Cluster set primaryUpdateMethod, and CNPG's default is `restart` -- while a
   # drifted node wedged 22 EBS volumes. card-issuance-db, money-path, was `instances: 1`
