@@ -46,6 +46,7 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 try:
@@ -129,7 +130,8 @@ def _get(url: str, timeout: float = 5.0) -> str | None:
         return None
 
 
-def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, str]:
+def load_into_ruler(bodies: dict[str, str], quiet: bool = False, *,
+                    container: str = CONTAINER, port: int = PORT) -> tuple[bool, str]:
     """-> (accepted, detail). accepted is False when the ruler lists fewer groups than we gave it."""
     tmp = Path(tempfile.mkdtemp())
     rules_dir = tmp / "rules" / "fake"
@@ -141,9 +143,9 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
         doc = yaml.safe_load(body) or {}
         expected_groups += len(doc.get("groups") or [])
 
-    subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", container], capture_output=True)
     run = subprocess.run(
-        ["docker", "run", "-d", "--name", CONTAINER, "-p", f"{PORT}:3100",
+        ["docker", "run", "-d", "--name", container, "-p", f"{port}:3100",
          "-v", f"{tmp / 'config.yaml'}:/etc/loki/local-config.yaml",
          "-v", f"{tmp / 'rules'}:/rules", LOKI_IMAGE,
          "-config.file=/etc/loki/local-config.yaml"],
@@ -153,7 +155,7 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
     try:
         deadline = time.monotonic() + 120
         while time.monotonic() < deadline:
-            if (_get(f"http://localhost:{PORT}/ready") or "").strip().startswith("ready"):
+            if (_get(f"http://localhost:{port}/ready") or "").strip().startswith("ready"):
                 break
             time.sleep(2)
         else:
@@ -163,7 +165,7 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
         deadline = time.monotonic() + 60
         loaded: list[str] = []
         while time.monotonic() < deadline:
-            raw = _get(f"http://localhost:{PORT}/prometheus/api/v1/rules")
+            raw = _get(f"http://localhost:{port}/prometheus/api/v1/rules")
             if raw:
                 groups = (json.loads(raw).get("data") or {}).get("groups") or []
                 loaded = [g["name"] for g in groups]
@@ -172,7 +174,7 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
             time.sleep(2)
 
         if len(loaded) < expected_groups:
-            logs = subprocess.run(["docker", "logs", CONTAINER], capture_output=True, text=True)
+            logs = subprocess.run(["docker", "logs", container], capture_output=True, text=True)
             err = [ln for ln in (logs.stderr + logs.stdout).splitlines()
                    if "unable to list rules" in ln or "error parsing" in ln]
             return False, (
@@ -184,7 +186,7 @@ def load_into_ruler(bodies: dict[str, str], quiet: bool = False) -> tuple[bool, 
             print(f"  ruler accepted {len(loaded)} group(s): {', '.join(sorted(loaded))}")
         return True, ""
     finally:
-        subprocess.run(["docker", "rm", "-f", CONTAINER], capture_output=True)
+        subprocess.run(["docker", "rm", "-f", container], capture_output=True)
 
 
 def run_gate() -> int:
@@ -209,8 +211,9 @@ def self_test(since: str | None = None) -> int:
     """A gate that has only ever passed is unfalsified. Feed it a file it MUST reject.
 
     Scoped by --since for the same reason the gate itself is, and measured the same way: the
-    self-test boots Loki TWICE (a case it must pass, a case it must flag), which cost 1m46s on the
-    first main run after it shipped, against 0s for the enforced step it sits in front of. Scoping
+    self-test boots two isolated Loki rulers concurrently (a case it must pass, a case it must flag).
+    Before concurrency, those two boots cost 1m46s on the first main run after the gate shipped,
+    against 0s for the enforced step it sits in front of. Scoping
     only the enforced half — as the first version of this did — moved the cheap step and left the
     expensive one charging every PR in the fleet. Found by reading the step timings CI printed, not
     from the design.
@@ -269,16 +272,23 @@ def self_test(since: str | None = None) -> int:
     bad = dict(good, bad='groups:\n  - name: selftest.bad\n    rules:\n      - alert: SelfTestBad\n'
                          '        expr: sum by (namespace ( count_over_time({namespace=~".+"} |= "x" [15m])\n')
 
+    # Each case needs its own tenant rule directory and a fresh ruler. Run the two
+    # independent boots together; both verdicts remain mandatory.
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        good_result = executor.submit(load_into_ruler, good, container=f"{CONTAINER}-good", port=PORT)
+        bad_result = executor.submit(load_into_ruler, bad, quiet=True,
+                                     container=f"{CONTAINER}-bad", port=PORT + 1)
+        ok, detail = good_result.result()
+        bad_ok, _ = bad_result.result()
+
     print("self-test: the case the gate MUST pass")
-    ok, detail = load_into_ruler(good)
     print(f"  {'ok  ' if ok else 'FAIL'} a valid rule file is accepted" + ("" if ok else f" — {detail}"))
     if not ok:
         failures.append("valid rule rejected")
 
     print("self-test: the case the gate MUST flag")
-    ok, _ = load_into_ruler(bad, quiet=True)
-    print(f"  {'ok  ' if not ok else 'FAIL'} a file with unparseable LogQL is rejected")
-    if ok:
+    print(f"  {'ok  ' if not bad_ok else 'FAIL'} a file with unparseable LogQL is rejected")
+    if bad_ok:
         failures.append("broken rule accepted")
 
     if failures:
