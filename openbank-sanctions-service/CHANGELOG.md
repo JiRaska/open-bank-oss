@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.15.3](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.2...sanctions-service-v0.15.3) (2026-10-07)
+
+
+### Bug Fixes
+
+* **sanctions:** fence list publication across pods ([#11558](https://github.com/JiRaska/open-bank-oss/issues/11558)) ([6a30656](https://github.com/JiRaska/open-bank-oss/commit/6a3065680e62cbb2f0445a6b5632fde992ddbe7e))
+
 ## [0.15.2](https://github.com/JiRaska/open-bank-oss/compare/sanctions-service-v0.15.1...sanctions-service-v0.15.2) (2026-10-04)
 
 

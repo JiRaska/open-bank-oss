@@ -173,7 +173,7 @@ jobs:
           # here moved the tag onto an image the CVE gate then refused, so the tag named an
           # unattested digest and the fleet attestation gate went red for every PR (2026-10-04,
           # openbank-litellm:v1.99.4 -> a rebuild blocked on CVE-2026-102268).
-          docker buildx build --platform "$PLATFORM" --provenance=false \
+          docker buildx build --platform "$PLATFORM" --provenance=false --sbom=false \
             --metadata-file "$RUNNER_TEMP/meta.json" \
             --output "type=image,name=${repo},push-by-digest=true,name-canonical=true,push=true" \
             "$CONTEXT"

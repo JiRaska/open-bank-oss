@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.276.1](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.276.0...admin-ui-v0.276.1) (2026-10-07)
+
+
+### Security
+
+* **admin-ui:** remediate source-map-js and refresh CI actions ([ac03f98](https://github.com/JiRaska/open-bank-oss/commit/ac03f98211e8b5bdc68ecb19dc2c092403081d06))
+
 ## [0.276.0](https://github.com/JiRaska/open-bank-oss/compare/admin-ui-v0.275.0...admin-ui-v0.276.0) (2026-10-04)
 
 
