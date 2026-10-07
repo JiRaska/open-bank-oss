@@ -90,6 +90,8 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             throw SettlementUnavailableException("Settlement response has no numeric amount")
         }
         val amount = amountNode.decimalValue()
+        // The provider resolves valueDate to a business day; a completed booking may legitimately
+        // have a later valueDate than this request, including on idempotent cross-day replay.
         val matchesRequest = listOf(
             tx.path("type").asText() == request.type,
             tx.path("sourceAccountId").asText() == request.sourceAccountId.toString(),
@@ -97,7 +99,6 @@ class SettlementAdapter(@RestClient private val client: TransactionServiceClient
             tx.path("currencyCode").asText() == request.currencyCode,
             tx.path("rail").asText() == request.rail,
             tx.path("instructionType").asText() == request.instructionType,
-            tx.path("valueDate").asText() == request.valueDate,
         ).all { it }
         if (!matchesRequest) {
             throw SettlementUnavailableException("Settlement response does not match payment ${payment.paymentId}")

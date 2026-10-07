@@ -78,7 +78,6 @@ class SepaInstantTransactionServicePactConsumerTest {
                 o.stringValue("currencyCode", "EUR")
                 o.stringValue("rail", "SEPA_INST")
                 o.stringValue("instructionType", "ONE_OFF")
-                o.stringValue("valueDate", "2026-01-20")
             }.build(),
         )
         .toPact()
@@ -103,6 +102,5 @@ class SepaInstantTransactionServicePactConsumerTest {
         assertThat(body.getString("currencyCode")).isEqualTo("EUR")
         assertThat(body.getString("rail")).isEqualTo("SEPA_INST")
         assertThat(body.getString("instructionType")).isEqualTo("ONE_OFF")
-        assertThat(body.getString("valueDate")).isEqualTo("2026-01-20")
     }
 }

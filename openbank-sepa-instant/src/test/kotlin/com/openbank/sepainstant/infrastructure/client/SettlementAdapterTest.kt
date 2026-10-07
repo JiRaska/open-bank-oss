@@ -65,8 +65,19 @@ class SettlementAdapterTest {
         updatedAt = fixedNow,
     )
 
-    private fun completedBody(id: UUID, status: String = "COMPLETED", amount: String = "99.50") =
-        """{"id":"$id","status":"$status","type":"DEBIT","sourceAccountId":"00000000-0000-0000-0000-000000000001","amount":$amount,"currencyCode":"EUR","rail":"SEPA_INST","instructionType":"ONE_OFF","valueDate":"2026-01-01"}"""
+    private fun completedBody(
+        id: UUID,
+        status: String = "COMPLETED",
+        amount: String = "99.50",
+        valueDate: String = "2026-01-01",
+    ): String = """
+        {
+          "id":"$id","status":"$status","type":"DEBIT",
+          "sourceAccountId":"00000000-0000-0000-0000-000000000001",
+          "amount":$amount,"currencyCode":"EUR","rail":"SEPA_INST",
+          "instructionType":"ONE_OFF","valueDate":"$valueDate"
+        }
+    """.trimIndent()
 
     @Test
     fun `HTTP 201 with matching COMPLETED body returns settled=true`() {
@@ -92,6 +103,16 @@ class SettlementAdapterTest {
 
         assertThat(outcome.settled).isTrue()
         assertThat(outcome.transactionId).isEqualTo(txId)
+    }
+
+    @Test
+    fun `provider-adjusted value date does not hide a completed booking`() {
+        val txId = UUID.randomUUID()
+        val response = Response.created(URI.create("/api/v1/transactions/$txId"))
+            .entity(completedBody(txId, valueDate = "2026-01-05")).build()
+        every { client.initiateTransaction(any(), any()) } returns Uni.createFrom().item(response)
+
+        assertThat(adapter.settle(payment()).await().indefinitely().settled).isTrue()
     }
 
     @Test

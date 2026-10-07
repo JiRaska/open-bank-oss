@@ -37,8 +37,7 @@
           "rail": "SEPA_INST",
           "sourceAccountId": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
           "status": "COMPLETED",
-          "type": "DEBIT",
-          "valueDate": "2026-01-20"
+          "type": "DEBIT"
         },
         "generators": {
           "body": {
