@@ -43,7 +43,7 @@ RUN chmod +x gradlew && \
 # NOTE for whoever bumps this: .github/scripts/verify-image-native-libs.py reads the base out of
 # Dockerfile.deploy ONLY, so it will not tell you whether this file drifted. The check is that
 # the two digests are equal.
-FROM eclipse-temurin:25-jre@sha256:f19dbf0a22d0b3658fda48ce7d7181df05ad14bda151dd5ad12cc09d1451c70e
+FROM eclipse-temurin:25-jre@sha256:fcd7fd7b387f94bb2ac461478a7436ad8e349924c374ea8313919624dceae636
 WORKDIR /app
 
 # groupadd/useradd, not busybox `adduser -S` — the glibc base has no busybox. uid 100 / gid 101
