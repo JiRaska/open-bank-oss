@@ -61,6 +61,18 @@ class RedisIdempotencyStoreTest {
     }
 
     @Test
+    fun `response at the byte limit remains replayable but one byte over does not`(): Unit = runBlocking {
+        val small = RedisIdempotencyStore(redis(), clock, maxResponseBytes = 8)
+
+        small.save("exact", first, 201, "12345678")
+        assertThat(small.lookup("exact", first)!!.responseBody).isEqualTo("12345678")
+
+        small.save("over", first, 201, "123456789")
+        assertThat(small.reserve("over", first)).isEqualTo(ReserveResult.Mismatch)
+        assertThat(backing["idempotency:over"]).doesNotContain("123456789")
+    }
+
+    @Test
     fun `same key with a different payload is refused`(): Unit = runBlocking {
         store.save("k1", first, 201, """{"id":"p1"}""")
 
