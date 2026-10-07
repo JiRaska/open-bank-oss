@@ -152,6 +152,12 @@ class SourceValidationTest(unittest.TestCase):
         self.assertIn("actions: read", source)
         self.assertIn("steps.source.outputs.proceed == 'true'", source)
         self.assertIn("await-admin-ui-source-validation.py", source)
+        self.assertLess(source.index("- id: early_source"),
+                        source.index("- name: Coalesce evidence-only merge bursts"))
+        self.assertLess(source.index("- name: Coalesce evidence-only merge bursts"),
+                        source.index("- id: source"))
+        self.assertIn("steps.early_source.outputs.proceed == 'true'", source)
+        self.assertEqual(source.count("authorize-admin-ui-deploy-source.sh"), 2)
         self.assertIn("needs: deploy-source", workflow.split("  build-push:", 1)[1])
 
     def test_image_pin_only_main_advance_and_duplicate_source(self):
@@ -183,9 +189,9 @@ class SourceValidationTest(unittest.TestCase):
             git("commit", "-qm", "chore(admin-ui): deploy verified image")
             main_sha = git("rev-parse", "HEAD")
 
-            def admit(source, duplicate):
+            def admit(source, duplicate, current_main=main_sha):
                 result = subprocess.run(
-                    ("bash", str(guard), source, main_sha, "workflow_run", duplicate),
+                    ("bash", str(guard), source, current_main, "workflow_run", duplicate),
                     cwd=root, env=git_env, capture_output=True, text=True, check=True,
                 )
                 return result.stdout.strip()
@@ -193,6 +199,14 @@ class SourceValidationTest(unittest.TestCase):
             self.assertEqual(admit(source_sha, "false"), "true")
             self.assertEqual(admit(source_sha, "true"), "false")
             self.assertEqual(admit(main_sha, "false"), "false")
+
+            other = root / "openbank-infra/gitops/components/payments/payments-services.yaml"
+            other.parent.mkdir(parents=True)
+            other.write_text("image: newer-service-pin\n")
+            git("add", "openbank-infra/gitops/components/payments/payments-services.yaml")
+            git("commit", "-qm", "chore(gitops): advance a different build input")
+            newer_main = git("rev-parse", "HEAD")
+            self.assertEqual(admit(source_sha, "false", newer_main), "false")
 
 
 if __name__ == "__main__":
