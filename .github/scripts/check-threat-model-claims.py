@@ -432,6 +432,7 @@ CODEISH = (".kt", ".java", ".py", ".rego", ".sql", ".ts", ".tsx", ".sh", ".yaml"
            ".json", ".gradle", ".kts", ".xml", ".properties", ".tf", ".conf")
 
 STUB_WINDOW = 8  # lines of a declaration's body inspected for a stub marker
+DECLARATION_NAME = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+([A-Za-z_][A-Za-z0-9_]*)\b")
 STUB_MARK = re.compile(r"\bstub\b\s*:|\bTODO\b|\bFIXME\b|not implemented|NotImplemented",
                        re.IGNORECASE)
 
@@ -499,7 +500,7 @@ class Corpus:
         self.blobs: dict[str, str] = {}
         self.code: dict[str, str] = {}
         self._memo: dict[str, bool] = {}
-        self._stub_memo: dict[str, str | None] = {}
+        self._stub_sites: dict[str, str] | None = None
         for f in self.files:
             if f.endswith(DOCISH) or not f.endswith(CODEISH) or not is_backend(f):
                 continue
@@ -619,25 +620,20 @@ class Corpus:
         lines fleet-wide and one of them, in an unrelated service, carries a TODO — matching
         that reports a phantom defect and teaches people the gate is noise.
         """
-        if sym in self._stub_memo:
-            return self._stub_memo[sym]
         if not (CAMEL.match(sym) or LOWERCAMEL.match(sym)):
-            self._stub_memo[sym] = None
             return None
-        decl = re.compile(r"\b(?:class|object|interface|fun|val|var)\s+" + re.escape(sym) + r"\b")
-        for f, b in self.main.items():
-            if sym not in b:
-                continue
-            lines = b.splitlines()
-            for n, line in enumerate(lines):
-                if not decl.search(line):
-                    continue
-                if STUB_MARK.search("\n".join(lines[n:n + STUB_WINDOW])):
-                    site = f"{f}:{n + 1}"
-                    self._stub_memo[sym] = site
-                    return site
-        self._stub_memo[sym] = None
-        return None
+        if self._stub_sites is None:
+            sites: dict[str, str] = {}
+            for f, b in self.main.items():
+                lines = b.splitlines()
+                for n, line in enumerate(lines):
+                    for match in DECLARATION_NAME.finditer(line):
+                        name = match.group(1)
+                        if name not in sites and STUB_MARK.search(
+                                "\n".join(lines[n:n + STUB_WINDOW])):
+                            sites[name] = f"{f}:{n + 1}"
+            self._stub_sites = sites
+        return self._stub_sites.get(sym)
 
 
 # ---------------------------------------------------------------- self-reference
@@ -931,7 +927,7 @@ def self_test() -> int:
     class _FakeCorpus(Corpus):
         def __init__(self, blobs):  # test double: no git, no filesystem
             self.files, self.names, self.paths = [], set(), set()
-            self.blobs, self._memo, self._stub_memo = blobs, {}, {}
+            self.blobs, self._memo, self._stub_sites = blobs, {}, None
             self.main = {}
             self.config_keys = set()
             for _f, _b in blobs.items():
@@ -954,6 +950,14 @@ def self_test() -> int:
     sub = _FakeCorpus({"openbank-x/src/test/kotlin/B.kt": "class BalanceSecurityContractTest {"})
     case("a SUFFIX of a real class does not resolve", sub.resolve("SecurityContractTest"), False)
     case("the real class still resolves", sub.resolve("BalanceSecurityContractTest"), True)
+    stub = _FakeCorpus({
+        "openbank-x/src/main/kotlin/StubControl.kt": "class StubControl {\n  // TODO: implement\n}",
+        "openbank-x/src/main/kotlin/RealControl.kt": "class RealControl {\n  fun run() = true\n}",
+    })
+    stub.main = stub.blobs
+    case("a declaration with a stub marker is indexed",
+         stub.stub_site("StubControl"), "openbank-x/src/main/kotlin/StubControl.kt:1")
+    case("a real declaration is not marked as a stub", stub.stub_site("RealControl"), None)
 
     # (3b) EMBEDDED .rego. A `gen-*opa-bundle*.sh` generator writes its source `.rego` blob into
     #      a ConfigMap under a `<name>.rego: |` key instead of checking it in as its own file
