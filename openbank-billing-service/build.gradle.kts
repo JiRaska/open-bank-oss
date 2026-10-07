@@ -61,6 +61,8 @@ dependencies {
     testImplementation(libs.testcontainers)
     testImplementation(libs.testcontainers.junit)
     testImplementation(libs.testcontainers.postgresql)
+    // Standalone Flyway upgrade tests run outside Quarkus bootstrap, which installs this plugin.
+    testRuntimeOnly("org.flywaydb:flyway-database-postgresql")
     testImplementation(project(":openbank-libs-testing"))
     // Consumer-driven contract for the ledger-service postJournal call (ADR-0063, issue #468).
     testImplementation(libs.pact.consumer)
