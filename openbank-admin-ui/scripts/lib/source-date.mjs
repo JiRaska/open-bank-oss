@@ -56,3 +56,61 @@ export function sourceDate(repo, paths = []) {
   const d = new Date(raw)
   return Number.isNaN(d.getTime()) ? null : d.toISOString()
 }
+
+function git(repo, args) {
+  return execFileSync('git', ['-C', repo, ...args],
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()
+}
+
+// All three generators walk GitOps. A commit changing only image: lines cannot
+// alter topology's kinds/namespaces/security context. The lifecycle and Grype
+// projections additionally read image refs named in the registry: those pins
+// remain semantic inputs and must advance provenance.
+function isInertImagePinCommit(repo, commit, registryImageGreps) {
+  const parent = `${commit}^`
+  const files = git(repo, ['diff', '--name-only', '-z', parent, commit]).split('\0').filter(Boolean)
+  if (!files.length || files.some(f => !f.startsWith('openbank-infra/gitops/') || !/\.ya?ml$/.test(f))) {
+    return false
+  }
+  const imageLine = /^\s*image:\s*\S+\s*$/
+  for (const file of files) {
+    const before = git(repo, ['show', `${parent}:${file}`]).split('\n')
+    const after = git(repo, ['show', `${commit}:${file}`]).split('\n')
+    if (before.length !== after.length) return false
+    const edits = before.map((line, i) => [line, after[i]]).filter(([a, b]) => a !== b)
+    if (!edits.length || edits.some(([a, b]) => !imageLine.test(a) || !imageLine.test(b))) {
+      return false
+    }
+    if (edits.some(([a, b]) => registryImageGreps.some(grep => a.includes(grep) || b.includes(grep)))) {
+      return false
+    }
+  }
+  return true
+}
+
+/** Date of the newest semantic repository input, skipping proven inert image pins.
+ * Never trust a committed generatedAt/scannedAt field: derived JSON may be stale
+ * or edited. If history is unavailable, retain the conservative latest-input date.
+ */
+export function sourceDateForSemanticInputs(repo, paths, registryImageGreps = []) {
+  if (process.env.SOURCE_DATE_EPOCH) return sourceDate(repo, paths)
+  let revision = 'HEAD'
+  for (let i = 0; i < 200; i++) {
+    let commit
+    try {
+      commit = git(repo, ['log', '-1', '--format=%H', revision, '--', ...paths])
+      if (!commit) return null
+      let inert = false
+      try { inert = isInertImagePinCommit(repo, commit, registryImageGreps) } catch { /* root or shallow history */ }
+      if (!inert) {
+        const raw = git(repo, ['show', '-s', '--format=%cI', commit])
+        const parsed = new Date(raw)
+        return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+      }
+      revision = `${commit}^`
+    } catch {
+      return sourceDate(repo, paths)
+    }
+  }
+  return sourceDate(repo, paths)
+}
