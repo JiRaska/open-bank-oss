@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>OpenBank Status</title>
+  <meta name="description" content="Independently observed availability and confirmed incidents for OpenBank public services.">
+  <link rel="stylesheet" href="status.css">
+  <script src="status.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="header">
+      <a class="brand" href="https://open-bank.tech/" aria-label="OpenBank home">
+        <span class="brand-mark" aria-hidden="true">◉</span><span>OpenBank</span>
+      </a>
+      <span class="eyebrow">Public service status</span>
+    </header>
+
+    <section class="hero" aria-labelledby="heading">
+      <div>
+        <p class="kicker">Independently observed</p>
+        <h1 id="heading">The state of OpenBank</h1>
+        <p class="intro">External checks show whether our public entry points answer now. An unverified result is never shown as healthy.</p>
+        <p id="state" class="state state-unknown" role="status" aria-live="polite">Checking current evidence…</p>
+        <p id="observed" class="observed">No verified observation yet.</p>
+      </div>
+      <div class="mascot" role="img" aria-label="OpenBank lion watching over service status">
+        <svg viewBox="0 0 240 220" aria-hidden="true" focusable="false">
+          <circle class="mane" cx="120" cy="116" r="79"/>
+          <path class="ear" d="M59 60 41 34q-6 35 13 53M181 60l18-26q6 35-13 53"/>
+          <path class="face" d="M68 78q52-38 104 0l8 71q-15 42-60 42t-60-42z"/>
+          <ellipse cx="95" cy="111" rx="5" ry="7"/><ellipse cx="145" cy="111" rx="5" ry="7"/>
+          <path class="nose" d="m109 137 11 9 11-9z"/><path class="mouth" d="M120 146v12m0 0q-15 14-28 2m28-2q15 14 28 2"/>
+          <path class="helmet" d="M69 83q0-55 51-55t51 55H69zm-12 0h126"/>
+        </svg>
+      </div>
+    </section>
+
+    <section aria-labelledby="checks-heading">
+      <div class="section-heading"><h2 id="checks-heading">Public checks</h2><p>Observed from outside the banking cluster</p></div>
+      <ul id="checks" class="checks"><li>Waiting for evidence</li></ul>
+    </section>
+
+    <section aria-labelledby="history-heading">
+      <div class="section-heading"><h2 id="history-heading">Observed history</h2><p>Coverage is shown beside availability; missing samples never count as healthy.</p></div>
+      <div class="history-grid"><p id="history-24h" class="history-card">24 hours: awaiting evidence</p><p id="history-30d" class="history-card">30 days: awaiting evidence</p></div>
+    </section>
+
+    <section aria-labelledby="incidents-heading">
+      <div class="section-heading"><h2 id="incidents-heading">Confirmed incidents</h2><p>Updates appear only after confirmation, with recovery time when known.</p></div>
+      <ol id="incidents" class="incidents"><li>No confirmed incident data loaded.</li></ol>
+    </section>
+
+    <section class="terms" aria-labelledby="terms-heading">
+      <h2 id="terms-heading">How to read this page</h2>
+      <dl>
+        <div><dt>SLI</dt><dd>A measured indicator, such as a successful public check or response latency.</dd></div>
+        <div><dt>SLO</dt><dd>An internal target for an SLI over a stated period; a target is not an observed result.</dd></div>
+        <div><dt>SLA</dt><dd>A contractual availability commitment, if one applies to a service.</dd></div>
+        <div><dt>Latency</dt><dd>Time between an external request and its response.</dd></div>
+        <div><dt>Recovery target</dt><dd>The intended time to restore a service; actual recovery is recorded in incidents.</dd></div>
+        <div><dt>Error budget</dt><dd>The permitted gap from an SLO during its measurement window.</dd></div>
+      </dl>
+    </section>
+    <footer><a href="/api/status.json">Read-only status API</a><span>External observations · no customer data</span></footer>
+  </main>
+</body>
+</html>
