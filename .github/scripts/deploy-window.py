@@ -146,7 +146,7 @@ def global_build_inputs_unchanged(root: str, source: str) -> bool:
 def image_source_is_current(root: str, image: str, tag: str) -> bool:
     """Only carry an image when its source still builds the same service artifact."""
     service = image.rsplit("/", 1)[-1]
-    match = re.fullmatch(r"sandbox-([0-9a-f]{8})", tag)
+    match = re.fullmatch(r"sandbox-([0-9a-f]{8,40})(?:-run[0-9]+)?", tag)
     if not service.startswith("openbank-") or not match:
         return False
     source = subprocess.run(
@@ -155,6 +155,19 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
     )
     if source.returncode != 0:
         return False
+    source_sha = source.stdout.strip()
+    # A short tag is a source identifier only when it resolves uniquely and is an
+    # ancestor of the checked-out main. Missing history (shallow fetch) fails closed.
+    if not source_sha.startswith(match[1]):
+        return False
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", source_sha, "HEAD"],
+        cwd=root, capture_output=True, check=False,
+    )
+    if ancestor.returncode != 0:
+        return False
+    if service == "openbank-admin-ui":
+        return admin_ui_image_inputs_unchanged(root, source_sha)
     if not global_build_inputs_unchanged(root, source.stdout.strip()):
         return False
     equivalent = subprocess.run(
@@ -163,6 +176,28 @@ def image_source_is_current(root: str, image: str, tag: str) -> bool:
         cwd=root, capture_output=True, text=True, check=False,
     )
     return equivalent.returncode == 0
+
+
+def admin_ui_image_inputs_unchanged(root: str, source: str) -> bool:
+    """Conservative source comparison for the root-context Admin UI Docker build.
+
+    The Dockerfile's collectors use `COPY . /repo`; prebuild generators also read
+    files across the repository. Therefore every tracked change is potentially an
+    image input. The three committed generators now omit inert image-only pins
+    from their source dates, but the image build also fetches an external lifecycle
+    feed and can run an optional Grype scan. Until their exact build inputs and
+    output digests are captured in verifiable image provenance, this guard cannot
+    prove byte equivalence even for the Admin UI's own GitOps pin. A changed
+    Dockerfile, .dockerignore, build script,
+    changelog or OpenAPI is consequently rejected by default as well.
+    """
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "--no-renames", "-z", source, "HEAD"],
+        cwd=root, capture_output=True, check=False,
+    )
+    if result.returncode != 0:
+        return False
+    return not result.stdout
 
 
 def carry(root: str, diff: str, skip_images: set[str],
@@ -333,6 +368,58 @@ def self_test() -> int:
         check("verify refuses stale GitOps pins", len(verify_pins(older, lambda image, tag: False)) == 1)
         check("verify accepts current GitOps pins", verify_pins(older, lambda image, tag: True) == [])
         check("verify refuses a diff without image pins", verify_pins("", lambda image, tag: True) != [])
+
+    # Admin UI is built from the root Docker context, with service changelogs and
+    # other repository paths copied into collector stages. Exercise real Git
+    # ancestry and tag resolution rather than mocking the path comparator.
+    with tempfile.TemporaryDirectory() as d:
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=d, capture_output=True,
+                                  text=True, check=True).stdout.strip()
+
+        def write(rel, value):
+            path = os.path.join(d, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as out:
+                out.write(value)
+
+        def commit(rel, value):
+            write(rel, value)
+            git("add", "--", rel)
+            git("commit", "-m", "fixture")
+
+        git("init", "-q")
+        git("config", "user.name", "Fixture")
+        git("config", "user.email", "fixture@example.invalid")
+        git("config", "commit.gpgsign", "false")
+        commit("openbank-admin-ui/Dockerfile", "FROM scratch\n")
+        source = git("rev-parse", "HEAD")
+        image = "example.invalid/openbank-admin-ui"
+        tag = f"sandbox-{source[:8]}"
+        check("Admin UI source tag resolves to current main", image_source_is_current(d, image, tag))
+        check("unknown Admin UI source fails closed",
+              not image_source_is_current(d, image, "sandbox-deadbeef"))
+        commit("openbank-infra/gitops/components/admin-ui/admin-ui.yaml",
+               "image: example.invalid/openbank-admin-ui:sandbox-new\n")
+        check("GitOps-only pin lacks complete captured image provenance and remains stale",
+              not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit("openbank-infra/gitops/components/payments/deployment.yaml",
+               "image: example.invalid/openbank-payments:sandbox-new\n")
+        check("unrelated GitOps pin lacks complete captured image provenance and remains stale",
+              not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}"
+        commit("openbank-notification-service/CHANGELOG.md", "## new release\n")
+        check("service CHANGELOG change makes Admin UI image stale",
+              not image_source_is_current(d, image, tag))
+        source = git("rev-parse", "HEAD")
+        tag = f"sandbox-{source[:8]}-run123"
+        check("retry image tag resolves to exact source", image_source_is_current(d, image, tag))
+        commit("openbank-admin-ui/Dockerfile", "FROM busybox\n")
+        check("changed Dockerfile makes Admin UI image stale",
+              not image_source_is_current(d, image, tag))
 
     if fails:
         print(f"self-test: FAILED ({len(fails)})")

@@ -4,13 +4,13 @@
 
 import { describe, expect, it } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import path from 'path'
 import { fileURLToPath } from 'url'
 
 // @ts-expect-error - plain .mjs build script, no type declarations by design
-import { sourceDate } from '../../scripts/lib/source-date.mjs'
+import { sourceDate, sourceDateForSemanticInputs } from '../../scripts/lib/source-date.mjs'
 
 // Regression guard for issue #2621.
 //
@@ -101,6 +101,41 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
     // already renders as "unknown". Falling back to the clock here would quietly restore
     // the non-determinism for exactly the builds that have no git context.
     expect(sourceDate(REPO, ['no/such/path/ever'])).toBeNull()
+  })
+
+  it('keeps provenance across image-only GitOps pins but advances for displayed facts', () => {
+    const repo = mkdtempSync(path.join(tmpdir(), 'semantic-source-date-'))
+    const git = (args: string[], date?: string) => execFileSync('git', ['-C', repo, ...args], {
+      encoding: 'utf8',
+      env: date ? { ...process.env, GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date } : process.env,
+    }).trim()
+    const manifest = 'openbank-infra/gitops/components/admin-ui/admin-ui.yaml'
+    const write = (value: string) => {
+      mkdirSync(path.dirname(path.join(repo, manifest)), { recursive: true })
+      writeFileSync(path.join(repo, manifest), value)
+      git(['add', '--', manifest])
+    }
+    const input = ['openbank-infra/gitops']
+    try {
+      git(['init', '-q'])
+      git(['config', 'user.name', 'Fixture'])
+      git(['config', 'user.email', 'fixture@example.invalid'])
+      git(['config', 'commit.gpgsign', 'false'])
+      write('kind: Deployment\nimage: example.invalid/openbank-admin-ui:sandbox-11111111\n')
+      git(['commit', '-qm', 'initial'], '2026-10-01T10:00:00Z')
+      const initial = sourceDateForSemanticInputs(repo, input)
+      write('kind: Deployment\nimage: example.invalid/openbank-admin-ui:sandbox-22222222\n')
+      git(['commit', '-qm', 'pin only'], '2026-10-02T10:00:00Z')
+      expect(sourceDateForSemanticInputs(repo, input)).toBe(initial)
+      // An image listed in a generator's registry is itself a displayed fact.
+      expect(sourceDateForSemanticInputs(repo, input, ['openbank-admin-ui']))
+        .toBe('2026-10-02T10:00:00.000Z')
+      write('kind: NetworkPolicy\nimage: example.invalid/openbank-admin-ui:sandbox-22222222\n')
+      git(['commit', '-qm', 'semantic change'], '2026-10-03T10:00:00Z')
+      expect(sourceDateForSemanticInputs(repo, input)).toBe('2026-10-03T10:00:00.000Z')
+    } finally {
+      rmSync(repo, { recursive: true, force: true })
+    }
   })
 
   it('no generator of a committed artifact reads the wall clock', () => {
