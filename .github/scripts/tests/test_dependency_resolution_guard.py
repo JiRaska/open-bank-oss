@@ -1,11 +1,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Exercise the real Gradle guard, including on cold governance CI runners."""
+import errno
 import json
 import os
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest import mock
 from zipfile import ZipFile
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -70,7 +73,16 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        cls._home.cleanup()
+        # Gradle's single-use daemon can finish a late write after the wrapper exits.
+        # Retry only that directory-removal race; all other cleanup errors still fail.
+        for attempt in range(5):
+            try:
+                cls._home.cleanup()
+                return
+            except OSError as error:
+                if error.errno != errno.ENOTEMPTY or attempt == 4:
+                    raise
+                time.sleep(0.1 * (attempt + 1))
 
     def run_case(self, version, resolver=False):
         with tempfile.TemporaryDirectory() as directory:
@@ -132,6 +144,33 @@ class BuildscriptFreeMarkerTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertLess(result.stdout.index(':VerifyBuildscriptFreeMarker SKIPPED'),
                         result.stdout.index(':ForceDependencyResolutionPlugin_resolveProjectDependencies SKIPPED'))
+
+
+class GradleHomeCleanupTests(unittest.TestCase):
+    def test_late_daemon_write_is_retried(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = [OSError(errno.ENOTEMPTY, 'Directory not empty'), None]
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+            BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(home.cleanup.call_count, 2)
+
+    def test_unrelated_cleanup_error_still_fails(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = OSError(errno.EACCES, 'Permission denied')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+            with self.assertRaises(OSError) as error:
+                BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(error.exception.errno, errno.EACCES)
+        home.cleanup.assert_called_once()
+
+    def test_persistent_late_writes_still_fail(self):
+        home = mock.Mock()
+        home.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
+        with mock.patch.object(BuildscriptFreeMarkerTests, '_home', home, create=True), mock.patch('time.sleep'):
+            with self.assertRaises(OSError) as error:
+                BuildscriptFreeMarkerTests.tearDownClass()
+        self.assertEqual(error.exception.errno, errno.ENOTEMPTY)
+        self.assertEqual(home.cleanup.call_count, 5)
 
 
 # Needs the graph plugin setup-gradle injects; dependency-submission.yml runs it and fails
