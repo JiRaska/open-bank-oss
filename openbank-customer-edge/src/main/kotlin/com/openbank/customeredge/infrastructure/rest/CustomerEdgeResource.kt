@@ -2372,22 +2372,114 @@ class CustomerEdgeResource(
         @QueryParam("offset") @DefaultValue("0") offset: Int,
     ): Response {
         val customer = customer()
-        val accountId = accountIdOrNull ?: return badRequest("Missing required query parameter 'accountId'")
         val query = queryOrNull?.trim().orEmpty()
-        if (query.length !in 2..80 || query.count(Char::isLetterOrDigit) < 2 || query.any(Char::isISOControl)) {
+        if (query.length !in 2..SEARCH_QUERY_MAX_LENGTH ||
+            query.count(Char::isLetterOrDigit) < 2 ||
+            query.any(Char::isISOControl)
+        ) {
             return badRequest("query must contain 2 to 80 characters and at least two letters or digits")
         }
-        if (!mayReadAccount(accountId, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")) {
+        if (accountIdOrNull != null &&
+            !mayReadAccount(accountIdOrNull, customer.partyId, "ACCOUNT_READ_TRANSACTIONS")
+        ) {
             return forbidden("Account does not belong to caller")
+        }
+        val boundedLimit = limit.coerceIn(1, SEARCH_PAGE_LIMIT)
+        val boundedOffset = offset.coerceIn(
+            0,
+            if (accountIdOrNull == null) SEARCH_PROFILE_MAX_OFFSET else SEARCH_ACCOUNT_MAX_OFFSET,
+        )
+        val accounts = if (accountIdOrNull != null) {
+            listOf(accountIdOrNull)
+        } else {
+            searchableProfileAccounts(customer.partyId)
+                ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).build()
+        }
+        if (accounts.size > SEARCH_PROFILE_MAX_ACCOUNTS) {
+            return badRequest("Profile search supports at most 20 readable accounts")
         }
         val compact = query.filterNot(Char::isWhitespace).uppercase()
         val field = if (IBAN_SEARCH_PATTERN.matches(compact)) "iban" else "counterparty"
         val term = if (field == "iban") compact else query
-        val url = "$transactionServiceUrl/api/v1/transactions/search?accountId=$accountId" +
-            "&$field=${java.net.URLEncoder.encode(term, Charsets.UTF_8)}" +
-            "&limit=${limit.coerceIn(1, 100)}&offset=${offset.coerceIn(0, 10_000)}"
-        val resp = upstream.get(url, customer.partyId.toString())
-        return enrichWithCounterpartyIban(resp, accountId, customer.partyId)
+        if (accountIdOrNull != null) {
+            val url = "$transactionServiceUrl/api/v1/transactions/search?accountId=$accountIdOrNull" +
+                "&$field=${java.net.URLEncoder.encode(term, Charsets.UTF_8)}" +
+                "&limit=$boundedLimit&offset=$boundedOffset"
+            return enrichWithCounterpartyIban(
+                upstream.get(url, customer.partyId.toString()),
+                accountIdOrNull,
+                customer.partyId,
+            )
+        }
+        return searchProfileTransactions(accounts, customer.partyId, field, term, boundedLimit, boundedOffset)
+    }
+
+    @Suppress("LongParameterList")
+    private fun searchProfileTransactions(
+        accounts: List<UUID>,
+        partyId: UUID,
+        field: String,
+        term: String,
+        limit: Int,
+        offset: Int,
+    ): Response {
+        val candidates = mutableListOf<JsonNode>()
+        for (accountId in accounts) {
+            val url = "$transactionServiceUrl/api/v1/transactions/search?accountId=$accountId" +
+                "&$field=${java.net.URLEncoder.encode(term, Charsets.UTF_8)}" +
+                "&limit=${limit + offset}&offset=0"
+            val response = upstream.get(url, partyId.toString())
+            if (response.status != Response.Status.OK.statusCode) {
+                return Response.status(Response.Status.SERVICE_UNAVAILABLE).build()
+            }
+            val enriched = enrichWithCounterpartyIban(response, accountId, partyId)
+            val data = runCatching { objectMapper.readTree(enriched.entity?.toString() ?: "").path("data") }
+                .getOrNull()?.takeIf { it.isArray }
+                ?: return Response.status(Response.Status.SERVICE_UNAVAILABLE).build()
+            data.forEach { candidates.add(it) }
+        }
+        // An internal transfer can match both account searches; expose it once in the profile.
+        val sorted = candidates.distinctBy { it.path("id").asText() }.sortedWith(
+            compareByDescending<JsonNode> { it.path("initiatedAt").asText("") }
+                .thenBy { it.path("id").asText("") },
+        )
+        val result = objectMapper.createObjectNode()
+        val page = result.putArray("data")
+        sorted.drop(offset).take(limit).forEach { page.add(it) }
+        result.put("count", page.size())
+        result.put("limit", limit)
+        result.put("offset", offset)
+        return Response.ok(objectMapper.writeValueAsString(result)).type(MediaType.APPLICATION_JSON).build()
+    }
+
+    /** Resolve the entire active profile before searching; a partial list cannot be a truthful result. */
+    private fun searchableProfileAccounts(partyId: UUID): List<UUID>? {
+        val own = runCatching {
+            upstream.get("$accountServiceUrl/api/v1/accounts?partyId=$partyId", partyId.toString())
+        }.getOrNull() ?: return null
+        if (own.status != 200) return null
+        val ownRows = runCatching { objectMapper.readTree(own.entity?.toString() ?: "") }
+            .getOrNull()?.takeIf { it.isArray } ?: return null
+        val grantsResponse = runCatching {
+            upstream.get("$delegationServiceUrl/api/v1/delegations/grantee/$partyId", partyId.toString())
+        }.getOrNull() ?: return null
+        if (grantsResponse.status != 200) return null
+        val grants = runCatching { objectMapper.readTree(grantsResponse.entity?.toString() ?: "") }
+            .getOrNull()?.takeIf { it.isArray } ?: return null
+        val owned = ownRows.mapNotNull { row ->
+            if (row.path("partyId").asText() != partyId.toString()) return@mapNotNull null
+            runCatching { UUID.fromString(row.path("id").asText()) }.getOrNull()
+        }
+        val delegated = grants.mapNotNull { grant ->
+            if (grant.path("status").asText() != "ACTIVE" ||
+                grant.path("resourceType").asText() != "ACCOUNT" ||
+                !grant.path("capabilities").any { it.asText() == "ACCOUNT_READ_TRANSACTIONS" }
+            ) {
+                return@mapNotNull null
+            }
+            runCatching { UUID.fromString(grant.path("resourceId").asText()) }.getOrNull()
+        }.distinct().filter { hasGrant(partyId, "ACCOUNT", it, "ACCOUNT_READ_TRANSACTIONS") }
+        return (owned + delegated).distinct().sortedBy(UUID::toString)
     }
 
     /**
@@ -5684,6 +5776,11 @@ class CustomerEdgeResource(
         parseCreditorAccount(raw) ?: czechIbanToBban(raw)
 
     companion object {
+        private const val SEARCH_QUERY_MAX_LENGTH = 80
+        private const val SEARCH_PAGE_LIMIT = 100
+        private const val SEARCH_PROFILE_MAX_OFFSET = 100
+        private const val SEARCH_ACCOUNT_MAX_OFFSET = 10_000
+        private const val SEARCH_PROFILE_MAX_ACCOUNTS = 20
 
         private val CURRENCY_CODE = Regex("^[A-Z]{3}$")
 
