@@ -24,6 +24,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.runBlocking
 import org.assertj.core.api.Assertions.assertThat
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import java.time.Duration
 import java.time.Instant
@@ -77,6 +78,8 @@ class LendingOutboxClaimIT {
 
     @Test
     fun `two concurrent claims never return the same row`() {
+        assertThat(ConfigProvider.getConfig().getValue("quarkus.kafka.devservices.enabled", String::class.java))
+            .isEqualTo("false")
         clearOutbox()
         val seeded = seedPending(50)
         val seededIds = seeded.map { it.eventId }.toSet()

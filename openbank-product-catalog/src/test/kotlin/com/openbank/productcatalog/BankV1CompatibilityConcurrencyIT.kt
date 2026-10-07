@@ -15,6 +15,7 @@ import io.quarkus.test.security.TestSecurity
 import jakarta.inject.Inject
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatCode
+import org.eclipse.microprofile.config.ConfigProvider
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CyclicBarrier
 import java.util.concurrent.Executors
@@ -59,6 +60,8 @@ class BankV1CompatibilityConcurrencyIT {
 
     @Test
     fun `concurrent reconcilers map every legacy product exactly once`() {
+        assertThat(ConfigProvider.getConfig().getValue("quarkus.kafka.devservices.enabled", String::class.java))
+            .isEqualTo("false")
         stripCompatibilityProjection()
         val products = scalar("SELECT COUNT(*) FROM products")
         assertThat(products)
