@@ -11,7 +11,8 @@ info:
   # never rounded).
   # 1.7 -> 1.8 (#11913): additive — submit documents 400 CURRENCY_NOT_ALLOWED (SCT Inst is
   # euro-only; any non-EUR currency is refused at the boundary).
-  version: 1.8.0
+  # 1.8 -> 1.9 (#11588): additive verified makerActorKind on approval responses.
+  version: 1.9.0
   description: >-
     SEPA Instant Credit Transfer — sub-10s settlement, recall support. On submit, debtor and creditor
     names are synchronously screened against the sanctions lists (ADR-0032): a clean payment proceeds
@@ -374,6 +375,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           description: >-

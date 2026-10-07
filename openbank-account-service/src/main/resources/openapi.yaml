@@ -16,7 +16,8 @@ info:
   # reused with a different request) and 409 IDEMPOTENCY_REQUEST_IN_PROGRESS (same request in flight).
   # 1.19 -> 1.20 (#9430): additive — proposal responses expose the immutable approval-group
   # snapshot and canonical approve/reject SCA references. Existing clients may ignore them.
-  version: 1.20.0
+  # 1.20 -> 1.21 (#11588): additive — approval responses expose verified makerActorKind.
+  version: 1.21.0
   description: BIAN-aligned account lifecycle management — open, query, freeze, close accounts.
   contact:
     name: OpenBank Platform
@@ -1248,6 +1249,10 @@ components:
         makerId:
           type: string
           nullable: true
+        makerActorKind:
+          type: string
+          enum: [HUMAN, AI_AGENT, SERVICE_ACCOUNT, CUSTOMER_PARTY, UNKNOWN]
+          description: Origin captured at creation; UNKNOWN for legacy records.
         createdAt:
           type: string
           format: date-time
