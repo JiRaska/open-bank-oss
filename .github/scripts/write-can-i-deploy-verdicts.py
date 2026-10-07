@@ -25,7 +25,9 @@ BLOCK_CLASSES = {
 
 
 def produce(services: list[str], deployable: list[str], classes: dict[str, str],
-            money_path: set[str], head_sha: str, run_id: int) -> dict:
+            money_path: set[str], head_sha: str, run_id: int,
+            blockers: dict[str, list[dict]] | None = None) -> dict:
+    blockers = blockers or {}
     if not SHA.fullmatch(head_sha) or run_id <= 0:
         raise ValueError("invalid head SHA or run ID")
     if len(services) != len(set(services)) or not all(SERVICE.fullmatch(s) for s in services):
@@ -38,6 +40,22 @@ def produce(services: list[str], deployable: list[str], classes: dict[str, str],
         raise ValueError("missing per-service verdict")
     if not set(classes.values()) <= BLOCK_CLASSES:
         raise ValueError("unrecognized block class")
+    if not set(blockers) <= set(classes):
+        raise ValueError("blocker identity outside blocked services")
+    for service, pairs in blockers.items():
+        if not isinstance(pairs, list) or not 0 < len(pairs) <= 100:
+            raise ValueError("invalid blocker list")
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {"consumer", "provider", "verification_id"}:
+                raise ValueError("invalid blocker fields")
+            if not all(isinstance(pair[k], str) and SERVICE.fullmatch(pair[k])
+                       for k in ("consumer", "provider")):
+                raise ValueError("invalid blocker participant")
+            if service not in (pair["consumer"], pair["provider"]):
+                raise ValueError("blocker does not involve blocked service")
+            ident = pair["verification_id"]
+            if ident is not None and (type(ident) is not int or ident <= 0):
+                raise ValueError("invalid verification id")
     return {
         "schema_version": 1,
         "head_sha": head_sha,
@@ -46,7 +64,7 @@ def produce(services: list[str], deployable: list[str], classes: dict[str, str],
             {
                 "service": service,
                 "class": "DEPLOYABLE" if service in deployable else classes[service],
-                "blocked_on": None,
+                "blocked_on": blockers.get(service),
                 "money_path": service in money_path,
                 "head_sha": head_sha,
                 "run_id": run_id,
@@ -64,6 +82,20 @@ def self_test() -> None:
     assert got["services"][0]["money_path"] is True
     assert got["services"][0]["class"] == "REGRESSION"
     assert got["services"][1]["class"] == "DEPLOYABLE"
+    evidence = {"openbank-account-service": [{"consumer": "openbank-account-service",
+                 "provider": "openbank-card-service", "verification_id": 42}]}
+    got = produce(["openbank-account-service"], [], {"openbank-account-service": "REGRESSION"},
+                  set(), sha, 42, evidence)
+    assert got["services"][0]["blocked_on"] == evidence["openbank-account-service"]
+    leaked = {"openbank-account-service": [dict(evidence["openbank-account-service"][0],
+                                                href="https://broker.example/verification-results/42")]}
+    try:
+        produce(["openbank-account-service"], [], {"openbank-account-service": "REGRESSION"},
+                set(), sha, 42, leaked)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("unallowlisted broker URL accepted in artifact")
     for selected, passed, blocked in [
         (["openbank-account-service"], [], {}),
         (["openbank-account-service"], ["openbank-account-service"],
@@ -85,6 +117,7 @@ def main() -> None:
     parser.add_argument("--services")
     parser.add_argument("--deployable")
     parser.add_argument("--classes-file", type=Path)
+    parser.add_argument("--blockers-file", type=Path)
     parser.add_argument("--money-path-file", type=Path)
     parser.add_argument("--head-sha")
     parser.add_argument("--run-id", type=int)
@@ -99,9 +132,16 @@ def main() -> None:
         if service in classes:
             raise ValueError("duplicate class for service")
         classes[service] = cls
+    blockers = {}
+    if args.blockers_file:
+        for line in args.blockers_file.read_text().splitlines():
+            service, raw = line.split("\t", 1)
+            if service in blockers:
+                raise ValueError("duplicate blocker identity for service")
+            blockers[service] = json.loads(raw)
     result = produce(json.loads(args.services), json.loads(args.deployable), classes,
                      set(args.money_path_file.read_text().splitlines()),
-                     args.head_sha, args.run_id)
+                     args.head_sha, args.run_id, blockers)
     args.output.write_text(json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n")
 
 

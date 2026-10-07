@@ -52,6 +52,7 @@ SERVICES="${SERVICES:?}"
 arch="$(uname -m)"; case "$arch" in aarch64|arm64) a=arm64 ;; *) a=x86_64 ;; esac
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"; case "$os" in darwin) o=osx ;; *) o=linux ;; esac
 CLI="/tmp/pact/pact/bin/pact-broker"
+VERDICT_BLOCKERS_FILE="$(mktemp)"
 # Download only on a cache miss (the "Cache pact standalone CLI" step restores /tmp/pact
 # on a hit). This removes the flaky github.com release download — the single point of
 # failure that fail-closes the whole gate (issue #1348/#1009) — from every run after the
@@ -303,6 +304,29 @@ for svc in $(echo "$SERVICES" | jq -r '.[]'); do
       cls_why="$(cut -f2- <<< "$cls_line")"
       block_class["$svc"]="$cls"
       block_reason["$svc"]="$cls_why"
+      # The normal table verdict remains authoritative for deployment and class.
+      # A second read-only JSON query may add a bounded pair/result identity to
+      # the watch artifact. If the matrix changed or cannot be parsed, leave it
+      # unknown; never copy raw JSON (URLs/credentials) into the artifact.
+      case "$cls" in
+        REGRESSION|UNVERIFIABLE|PROVIDER_UNVERIFIED)
+          # Only durable blocks need the extra query. Keep it bounded so this
+          # optional watch evidence cannot delay the deployment gate.
+          cid_json="$(timeout 20s "$CLI" can-i-deploy \
+               --pacticipant "$svc" "${CID_SELECTOR[@]}" \
+               --to-environment sandbox --output json \
+               --broker-base-url "$PACT_BROKER_URL" \
+               --broker-username "$PACT_BROKER_USERNAME" \
+               --broker-password "$PACT_BROKER_PASSWORD" \
+               2>/dev/null || true)"
+          if blockers_json="$(printf '%s' "$cid_json" | python3 \
+               .github/scripts/extract-can-i-deploy-blockers.py \
+               --service "$svc" --class "$cls" \
+               --table-file <(printf '%s' "$cid_out") 2>/dev/null)"; then
+            printf '%s\t%s\n' "$svc" "$blockers_json" >> "$VERDICT_BLOCKERS_FILE"
+          fi
+          ;;
+      esac
       echo "::error::can-i-deploy: ${svc} NOT deployable [${cls}] — ${cls_why} (ADR-0092, #2549)"
       # Class too: derive-codeploy-set.py rejects transient blocks (#1985).
       printf '===SERVICE %s\t%s\n%s\n' "$svc" "$cls" "$cid_out" >> "$BLOCKS_FILE"
@@ -419,7 +443,8 @@ for svc in $(echo "$BLOCKED_JSON" | jq -r '.[]'); do
 done
 python3 .github/scripts/write-can-i-deploy-verdicts.py \
   --services "$SERVICES" --deployable "$deployable_json" \
-  --classes-file "$VERDICT_CLASSES_FILE" --money-path-file "$VERDICT_MONEY_PATH_FILE" \
+  --classes-file "$VERDICT_CLASSES_FILE" --blockers-file "$VERDICT_BLOCKERS_FILE" \
+  --money-path-file "$VERDICT_MONEY_PATH_FILE" \
   --head-sha "$GITHUB_SHA" --run-id "$GITHUB_RUN_ID" \
   --output "$RUNNER_TEMP/can-i-deploy-verdicts.json" || exit 1
 # On a scheduled reconcile tick an ordinary (non money-path) service still blocked by

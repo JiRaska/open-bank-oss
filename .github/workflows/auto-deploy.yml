@@ -1095,6 +1095,7 @@ jobs:
         id: check
         if: ${{ vars.PACT_BROKER_URL != '' }}
         run: |
+          python3 .github/scripts/extract-can-i-deploy-blockers.py --self-test
           python3 .github/scripts/write-can-i-deploy-verdicts.py --self-test
           # Extracted to .github/scripts/can-i-deploy-gate.sh (#4086). It sat at 18955 chars
           # against a 19000 ceiling whose breach makes the WHOLE workflow unparseable, so the
