@@ -4,13 +4,13 @@
   const refreshMs = 60_000;
   const staleMs = 10 * 60_000;
   const labels = {
-    operational: ['All monitored checks pass', 'Latest external checks passed.', '✓'],
+    operational: ['All monitored checks pass', 'Latest monitored checks passed.', '✓'],
     degraded: ['Some checks are degraded', 'Confirmed impact under investigation.', '!'],
     partial_outage: ['Partial service outage', 'Confirmed impact under investigation.', '!'],
     major_outage: ['Major service outage', 'Confirmed impact under investigation.', '!'],
     unknown: ['Unable to verify service status', 'Fresh monitoring data is unavailable.', '?']
   };
-  const icons = { website: '◎', customer_login: '◈', api_edge: '↗' };
+  const icons = { website: '◎', customer_login: '◈', api_edge: '↗', core_services: '▣', payment_services: '◇' };
   const $ = id => document.getElementById(id);
   let currentWindow = '24h';
   let latest = null;

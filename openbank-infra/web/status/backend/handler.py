@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 BUCKET = os.environ.get("STATUS_DATA_BUCKET", "")
 KEY = "state.json"
+INTERNAL_KEY = "internal-aggregate.json"
 INTERVAL_SECONDS = 120
 STALE_SECONDS = 600
 RETENTION_SECONDS = 30 * 86400
@@ -32,6 +33,18 @@ COMPONENTS = {
         "name": "API edge",
         "description": "Public edge reachability and TLS. Transactions are not tested.",
         "coverage": "Edge reachability only",
+    },
+}
+INTERNAL_COMPONENTS = {
+    "core_services": {
+        "name": "Core banking services",
+        "description": "Core targets respond. Customer journeys untested.",
+        "coverage": "Internal targets",
+    },
+    "payment_services": {
+        "name": "Payment services",
+        "description": "Payment targets respond. Completion untested.",
+        "coverage": "Internal targets",
     },
 }
 
@@ -130,6 +143,31 @@ def load_state(s3):
         raise
 
 
+def load_internal(s3, now):
+    """Accept only fresh, allowlisted verdicts; never relay Prometheus data or labels."""
+    try:
+        raw = s3.get_object(Bucket=BUCKET, Key=INTERNAL_KEY)["Body"].read(4096)
+        report = json.loads(raw)
+        if report.get("schemaVersion") != 1:
+            return None
+        checked_at = report.get("checkedAt")
+        age = now - datetime.fromisoformat(checked_at.replace("Z", "+00:00")).timestamp()
+        if not -60 <= age <= STALE_SECONDS:
+            return None
+        verdicts = report.get("components")
+        if set(verdicts) != set(INTERNAL_COMPONENTS):
+            return None
+        if any(value not in {"operational", "outage", "unknown"} for value in verdicts.values()):
+            return None
+        return verdicts
+    except (KeyError, TypeError, ValueError, AttributeError):
+        return None
+    except Exception as error:
+        if getattr(error, "response", {}).get("Error", {}).get("Code") == "NoSuchKey":
+            return None
+        raise
+
+
 def update_state(state, observed, now):
     state = dict(state)
     previous = state.get("components") or {}
@@ -146,13 +184,18 @@ def update_state(state, observed, now):
         status = "outage" if is_bad else "pending" if pending or recovering else "operational"
         components[key] = {"status": status, "consecutiveFailures": failures, "consecutiveSuccesses": successes, "lastResult": "Pass" if good else "Fail"}
         if is_bad and not was_bad:
-            incidents.insert(0, {"id": f"{key}-{now}", "component": key, "title": COMPONENTS[key]["name"] + " interruption", "summary": "External checks confirmed an interruption. We are investigating.", "startedAt": timestamp(now), "resolvedAt": None})
+            name = (COMPONENTS | INTERNAL_COMPONENTS)[key]["name"]
+            source = "External checks" if key in COMPONENTS else "Internal service monitoring"
+            incidents.insert(0, {"id": f"{key}-{now}", "component": key, "title": name + " interruption", "summary": source + " confirmed an interruption. We are investigating.", "startedAt": timestamp(now), "resolvedAt": None})
         if was_bad and not is_bad:
             for incident in incidents:
                 if incident.get("component") == key and not incident.get("resolvedAt"):
                     incident["resolvedAt"] = timestamp(now)
-                    incident["summary"] = "External checks recovered and remained successful."
+                    incident["summary"] = "Monitoring recovered and remained successful."
                     break
+    for key in INTERNAL_COMPONENTS:
+        if key not in components and key in previous:
+            components[key] = previous[key]
     state["components"] = components
     state["checkedAt"] = timestamp(now)
     samples = [sample for sample in state.get("samples", []) if sample[0] >= now - RETENTION_SECONDS]
@@ -187,11 +230,12 @@ def snapshot_is_fresh(state, now):
         return False
 
 
-def public_state(state, now):
+def public_state(state, now, internal=None):
     components = state.get("components") or {}
     check_time = state.get("checkedAt")
     stale = not snapshot_is_fresh(state, now)
     statuses = [components.get(key, {}).get("status", "unknown") for key in COMPONENTS]
+    statuses.extend((internal or {}).get(key, "unknown") for key in INTERNAL_COMPONENTS)
     if stale or not statuses:
         overall = "unknown"
     elif any(status == "outage" for status in statuses):
@@ -204,16 +248,19 @@ def public_state(state, now):
     for key, definition in COMPONENTS.items():
         entry = components.get(key) or {}
         exposed.append({"id": key, **definition, "status": "unknown" if stale else entry.get("status", "unknown"), "lastResult": entry.get("lastResult", "Unverified")})
+    for key, definition in INTERNAL_COMPONENTS.items():
+        verdict = (internal or {}).get(key, "unknown")
+        exposed.append({"id": key, **definition, "status": "unknown" if stale else verdict, "lastResult": "Unverified" if stale else "Pass" if verdict == "operational" else "Fail" if verdict == "outage" else "Unverified"})
     samples = state.get("samples") or []
     return {
         "schemaVersion": 1,
         "checkedAt": check_time,
         "status": overall,
-        "message": "A failed check is being verified." if overall == "unknown" and not stale else None,
+        "message": "A check or data source is unverified." if overall == "unknown" and not stale else None,
         "components": exposed,
         "history": {"24h": history(samples, now, 86400, 48), "30d": history(samples, now, RETENTION_SECONDS, 30)},
         "incidents": state.get("incidents") or [],
-        "measurement": {"intervalSeconds": INTERVAL_SECONDS, "staleAfterSeconds": STALE_SECONDS, "timeZone": "UTC", "scope": "External website, customer login discovery, and API edge checks"},
+        "measurement": {"intervalSeconds": INTERVAL_SECONDS, "staleAfterSeconds": STALE_SECONDS, "timeZone": "UTC", "scope": "External web, login and API-edge checks; internal reachability for selected banking services. No end-to-end payment or mobile-app measurement."},
     }
 
 
@@ -227,9 +274,13 @@ def handler(event, context):
     s3 = boto3.client("s3")
     now = int(time.time())
     if event.get("source") == "aws.events":
-        state = update_state(load_state(s3), run_checks(), now)
+        internal = load_internal(s3, now)
+        observed = run_checks()
+        if internal:
+            observed.update({key: verdict == "operational" for key, verdict in internal.items() if verdict != "unknown"})
+        state = update_state(load_state(s3), observed, now)
         s3.put_object(Bucket=BUCKET, Key=KEY, Body=json.dumps(state, separators=(",", ":")).encode(), ContentType="application/json", ServerSideEncryption="AES256")
-        return {"checkedAt": state["checkedAt"], "status": public_state(state, now)["status"]}
+        return {"checkedAt": state["checkedAt"], "status": public_state(state, now, internal)["status"]}
     path = event.get("rawPath", "")
     if path == "/api/v1/healthz":
         return response(200, {"status": "ok", "service": "openbank-public-status-api"})
@@ -237,11 +288,12 @@ def handler(event, context):
         return response(404, {"error": "Not found"})
     try:
         state = load_state(s3)
-        public = public_state(state, now)
+        internal = load_internal(s3, now)
+        public = public_state(state, now, internal)
     except Exception:
         return response(503, {"status": "unknown", "error": "Status data unavailable"})
     if path == "/api/v1/freshness":
-        fresh = snapshot_is_fresh(state, now)
+        fresh = snapshot_is_fresh(state, now) and internal is not None and all(status != "unknown" for status in internal.values())
         return response(200 if fresh else 503, {"status": "fresh" if fresh else "stale", "checkedAt": public["checkedAt"]})
     if path == "/api/v1/health":
         body = {key: public[key] for key in ("schemaVersion", "checkedAt", "status", "components", "measurement")}
