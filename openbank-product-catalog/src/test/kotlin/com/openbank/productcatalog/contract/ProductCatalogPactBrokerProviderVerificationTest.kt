@@ -4,9 +4,11 @@
 
 package com.openbank.productcatalog.contract
 
+import au.com.dius.pact.core.model.UrlPactSource
 import au.com.dius.pact.provider.junit5.HttpTestTarget
 import au.com.dius.pact.provider.junit5.PactVerificationContext
 import au.com.dius.pact.provider.junit5.PactVerificationInvocationContextProvider
+import au.com.dius.pact.provider.junitsupport.AllowOverridePactUrl
 import au.com.dius.pact.provider.junitsupport.IgnoreNoPactsToVerify
 import au.com.dius.pact.provider.junitsupport.Provider
 import au.com.dius.pact.provider.junitsupport.State
@@ -53,6 +55,7 @@ import org.junit.jupiter.api.extension.ExtendWith
 @TestSecurity(user = "pact-verifier", roles = ["ROLE_OPERATOR"])
 @Provider("openbank-product-catalog")
 @PactBroker
+@AllowOverridePactUrl
 @IgnoreNoPactsToVerify(ignoreIoErrors = "true")
 @EnabledIfSystemProperty(named = "pactbroker.url", matches = ".+")
 class ProductCatalogPactBrokerProviderVerificationTest {
@@ -65,6 +68,20 @@ class ProductCatalogPactBrokerProviderVerificationTest {
 
     @BeforeEach
     fun configureTarget(context: PactVerificationContext?) {
+        System.getenv("HISTORICAL_PACT_URL")?.let { expectedUrl ->
+            check(System.getProperty("pact.filter.pacturl") == expectedUrl) {
+                "Historical Pact URL was not forwarded to the test JVM"
+            }
+            check(System.getProperty("pact.filter.consumers") == "openbank-admin-ui") {
+                "Historical Pact consumer filter was not forwarded to the test JVM"
+            }
+            val pact = requireNotNull(context?.pact) { "Historical Pact verification has no Pact context" }
+            val source = requireNotNull(pact.source as? UrlPactSource) {
+                "Historical Pact verification did not load a URL source"
+            }
+            check(source.url == expectedUrl) { "Historical Pact verification loaded an unexpected URL" }
+            check(pact.consumer.name == "openbank-admin-ui") { "Historical Pact has an unexpected consumer" }
+        }
         context?.target = HttpTestTarget("localhost", testPort.toInt())
     }
 

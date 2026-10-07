@@ -279,6 +279,8 @@ tasks.withType<Test>().configureEach {
         "pact.provider.version",
         "pact.provider.branch",
         "pact.provider.tag",
+        "pact.filter.pacturl",
+        "pact.filter.consumers",
     ).forEach { key -> System.getProperty(key)?.let { systemProperty(key, it) } }
 }
 

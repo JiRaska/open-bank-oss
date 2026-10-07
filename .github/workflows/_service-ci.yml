@@ -64,6 +64,11 @@ on:
         required: false
         default: ""
         type: string
+      historical_admin_ui_version:
+        description: "Validated one-off admin-ui version for product-catalog; blank keeps normal selection."
+        required: false
+        default: ""
+        type: string
       require_provider_pact_test:
         # A targeted historical provider re-verification has a different contract from an
         # ordinary fleet build: success must mean a provider result was actually published.
@@ -505,6 +510,15 @@ jobs:
           fi
           echo "PACT_PROVIDER_VERSION=$PROVIDER_VERSION" >> "$GITHUB_ENV"
 
+      - name: Validate historical admin-ui Pact request
+        if: ${{ inputs.historical_admin_ui_version != '' }}
+        env:
+          SERVICE: ${{ inputs.service }}
+          REQUESTED_REF: ${{ inputs.ref }}
+          REQUESTED_PROVIDER_VERSION: ${{ inputs.provider_version }}
+          HISTORICAL_ADMIN_UI_VERSION: ${{ inputs.historical_admin_ui_version }}
+        run: python3 .github/scripts/historical-admin-ui-pact.py configure
+
       # Resolve GRADLE_USER_HOME. This job is ALWAYS self-hosted now, so it always takes the
       # per-service isolated-home branch — one job's `gradle --stop` post-action can't kill a
       # sibling job's daemon on the shared persistent registry (the documented "1-of-28-fails
@@ -810,8 +824,12 @@ jobs:
       # exists to tell the two apart at a glance. Secret-free by construction: only structural
       # facts (HTTP status, Content-Type, whether the body parses as JSON, whether the expected
       # HAL keys are present) are ever echoed — never the response body or the pact content.
+      - name: Preflight exact historical admin-ui Pact
+        if: ${{ inputs.historical_admin_ui_version != '' }}
+        run: python3 .github/scripts/historical-admin-ui-pact.py preflight
+
       - name: "Preflight Pact Broker selector/HAL response"
-        if: ${{ steps.provider_pact_task.outputs.available == 'true' && env.PACT_BROKER_URL != '' }}
+        if: ${{ steps.provider_pact_task.outputs.available == 'true' && env.PACT_BROKER_URL != '' && inputs.historical_admin_ui_version == '' }}
         env:
           SERVICE: ${{ inputs.service }}
         run: |
@@ -844,6 +862,10 @@ jobs:
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
         run: |
+          pact_url_arg=()
+          if [ -n "${HISTORICAL_PACT_URL:-}" ]; then
+            pact_url_arg=(-Dpact.filter.pacturl="${HISTORICAL_PACT_URL}" -Dpact.filter.consumers=openbank-admin-ui)
+          fi
           ./gradlew :${{ inputs.service }}:providerPactTest --build-cache \
             --console=plain --stacktrace \
             -Dpactbroker.url="${PACT_BROKER_URL:-}" \
@@ -854,7 +876,12 @@ jobs:
             -Dpact.verifier.publishResults=true \
             -Dpact.provider.version="${PACT_PROVIDER_VERSION}" \
             -Dpact.provider.branch="${BRANCH}" \
-            -Dpact.provider.tag="${BRANCH}"
+            -Dpact.provider.tag="${BRANCH}" \
+            "${pact_url_arg[@]}"
+
+      - name: Require historical broker verifier interactions
+        if: ${{ inputs.historical_admin_ui_version != '' }}
+        run: python3 .github/scripts/historical-admin-ui-pact.py check-result
 
       - name: "Explain a Docker registry pull failure (diagnostic)"
         if: failure()
