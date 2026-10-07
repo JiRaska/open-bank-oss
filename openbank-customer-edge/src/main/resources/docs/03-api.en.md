@@ -47,7 +47,7 @@ All paths are under `/customer/v1`. Scopes are the OAuth scopes declared in `ope
 | `GET /transactions?accountId=&limit=&cursor=` | `accounts:read` | ownership-enforced; `cursor` URL-encoded |
 | `GET /statements/{accountId}` | `accounts:read` | period-close list |
 | `GET /statements/{accountId}/{currency}/{legalSequence}?format=` | `accounts:read` | render camt.053 / MT940 / PDF; format & currency allow-listed |
-| `GET /notifications?limit=` | `accounts:read` | party-scoped feed |
+| `GET /notifications?limit=&page=` | `accounts:read` | party-scoped page, total and exact unread count |
 | `GET /profile` | `accounts:read` | the caller's own party profile |
 | `POST /domestic-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |
 | `POST /sepa-payments` | `payments:initiate` | enriched; `Idempotency-Key` required |

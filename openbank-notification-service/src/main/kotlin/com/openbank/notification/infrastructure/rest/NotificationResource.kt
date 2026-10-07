@@ -44,10 +44,13 @@ class NotificationResource {
         @QueryParam("size") @DefaultValue("20") size: Int,
         @QueryParam("partyId") partyId: UUID?,
     ): Response {
-        val (items, total) = if (partyId != null) {
-            repo.pageByParty(partyId, page, size.coerceIn(1, 100))
+        val boundedPage = page.coerceAtLeast(0)
+        val boundedSize = size.coerceIn(1, 100)
+        val (items, total, unreadCount) = if (partyId != null) {
+            repo.pageByParty(partyId, boundedPage, boundedSize)
         } else {
-            repo.pageAll(page, size.coerceIn(1, 100))
+            val (allItems, allTotal) = repo.pageAll(boundedPage, boundedSize)
+            Triple(allItems, allTotal, null)
         }
         return Response.ok(
             mapOf(
@@ -68,8 +71,9 @@ class NotificationResource {
                     )
                 },
                 "total" to total,
-                "page" to page,
-                "size" to size,
+                "page" to boundedPage,
+                "size" to boundedSize,
+                "unreadCount" to unreadCount,
             ),
         ).build()
     }
