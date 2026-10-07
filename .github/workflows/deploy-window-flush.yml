@@ -68,11 +68,19 @@ jobs:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
         run: |
           set -euo pipefail
+          # Capture main before the decision reads commit history. A later main update
+          # invalidates this selection even if the selected PR itself did not move.
+          selected_main="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/main" --jq .object.sha)"
+          echo "selected_main=$selected_main" >> "$GITHUB_OUTPUT"
           d="$RUNNER_TEMP/deploy-window"
           bash .github/scripts/deploy-window-inputs.sh "$d"
           python3 .github/scripts/deploy-window.py flush --prs-json "$d/prs.json" \
             --commits-json "$d/commits.json" --event-json "$GITHUB_EVENT_PATH" \
             --now "$(date -u +%s)" | tee -a "$GITHUB_OUTPUT"
+          arm="$(sed -n 's/^arm=//p' "$GITHUB_OUTPUT" | tail -1)"
+          if [ -n "$arm" ]; then
+            echo "selected_head=$(gh pr view "$arm" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Verify deferred GitOps image source freshness
         if: steps.pick.outputs.arm != '' && startsWith(steps.pick.outputs.arm_head, 'chore/gitops-auto-deploy-')
@@ -101,18 +109,14 @@ jobs:
           esac
           bash .github/scripts/supersede-deploy-prs.sh "$prefix" "$ARM"
 
-      - name: Enable auto-merge
+      - name: Arm or merge the verified deploy PR
         if: steps.pick.outputs.arm != ''
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token }}
           ARM: ${{ steps.pick.outputs.arm }}
+          SELECTED_MAIN: ${{ steps.pick.outputs.selected_main }}
+          SELECTED_HEAD: ${{ steps.pick.outputs.selected_head }}
         run: |
           set -euo pipefail
-          id="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${ARM}" --jq .node_id)"
-          # shellcheck disable=SC2016  # $id is a GraphQL variable, not a shell one
-          gh api graphql -f query='mutation($id: ID!) {
-            enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: SQUASH }) {
-              pullRequest { number }
-            }
-          }' -f id="$id" >/dev/null
-          echo "auto-merge armed on deferred deploy PR #${ARM}"
+          python3 .github/scripts/deploy-window-mutate.py --number "$ARM" \
+            --selected-main "$SELECTED_MAIN" --selected-head "$SELECTED_HEAD"
