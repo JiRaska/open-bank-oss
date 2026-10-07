@@ -130,6 +130,11 @@ describe('committed derived artifacts are a pure function of their inputs (#2621
       // An image listed in a generator's registry is itself a displayed fact.
       expect(sourceDateForSemanticInputs(repo, input, ['openbank-admin-ui']))
         .toBe('2026-10-02T10:00:00.000Z')
+      for (let n = 0; n < 201; n++) {
+        write(`kind: Deployment\nimage: example.invalid/openbank-admin-ui:sandbox-${n.toString(16).padStart(8, '0')}\n`)
+        git(['commit', '-qm', `image pin ${n}`], '2026-10-02T10:00:00Z')
+      }
+      expect(sourceDateForSemanticInputs(repo, input)).toBe(initial)
       write('kind: NetworkPolicy\nimage: example.invalid/openbank-admin-ui:sandbox-22222222\n')
       git(['commit', '-qm', 'semantic change'], '2026-10-03T10:00:00Z')
       expect(sourceDateForSemanticInputs(repo, input)).toBe('2026-10-03T10:00:00.000Z')
