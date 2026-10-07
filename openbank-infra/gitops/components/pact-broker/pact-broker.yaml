@@ -58,6 +58,10 @@ spec:
               value: pact-broker-db-rw.pact-broker.svc
             - name: PACT_BROKER_DATABASE_PORT
               value: "5432"
+            # Validate each pooled connection before use (#7376). A database failover can
+            # otherwise leave a dead connection in the pool for the next selector request.
+            - name: PACT_BROKER_DATABASE_CONNECTION_VALIDATION_TIMEOUT
+              value: "-1"
             - name: PACT_BROKER_DATABASE_NAME
               value: pact_broker
             - name: PACT_BROKER_DATABASE_USERNAME
