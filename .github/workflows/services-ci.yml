@@ -454,7 +454,8 @@ jobs:
       fail-fast: false
       # Cap concurrent matrix jobs. Each matrix entry now fans out into _service-ci.yml's
       # `build` job (ubuntu-latest, EVERY event including main-push, ADR-0250 Phase 2, #4414)
-      # plus, on main-push only, a `contract` job on the self-hosted `openbank-build` ARC pool.
+      # plus, on main pushes and manual main runs, a `contract` job on the self-hosted
+      # `openbank-build` ARC pool.
       #
       # The governing constraint for `build` is GitHub's 20-concurrent-hosted-job cap, shared
       # ACCOUNT-WIDE with every other repo and workflow — not the old self-hosted-pool AIO
@@ -464,16 +465,22 @@ jobs:
       # is the event that changed. It is NOT stale for `contract`, which is still self-hosted
       # and still bounded by the same ARC pool (12 runners, Phase 1, #4319) — max-parallel is
       # a single number governing the WHOLE matrix, so it bounds both jobs' concurrency at
-      # once. Eight stays below the 12-runner ARC pool, leaving four slots for targeted
-      # verification/deploy work when contract jobs can run.
+      # once. The nightly audit has no contract jobs and keeps its hosted-build fan-out
+      # at eight; main-push and manual ten leave two ARC slots for targeted work.
       # On PRs the contract job is skipped, so twelve matrix lanes use hosted runners only
-      # and leave eight of the account's twenty hosted slots for other workflows. On main,
-      # schedules and manual runs, retain eight lanes to preserve ARC capacity.
+      # and leave eight of the account's twenty hosted slots for other workflows.
+      # Keep eight lanes for the nightly fleet audit. A build-relevant main push gets ten:
+      # full-fleet run 37591269041 used 664.8 runner-minutes across 158 build/contract
+      # jobs, with all eight slots busy for 62% of its 91.9-minute matrix span. Runner
+      # queue p90 was only 4s (build) / 20s (contract), so the matrix cap dominated.
+      # Ten lanes lower the work-only floor from 83.1 to 66.5 minutes while retaining
+      # two of the twelve ARC slots for targeted work. Measure actual wall time and
+      # targeted-work queue delay before widening further or applying it to the audit.
       #
       # Full-fleet PR run 37403901088: 79 hosted builds used 603 runner-minutes; eight
       # lanes stayed occupied for almost all of the 79-minute build span. Twelve lanes
       # lower the work floor from ~75 to ~50 minutes; hosted timing still needs measurement.
-      max-parallel: ${{ github.event_name == 'pull_request' && 12 || 8 }}
+      max-parallel: ${{ github.event_name == 'pull_request' && 12 || github.event_name == 'schedule' && 8 || 10 }}
       matrix:
         service: ${{ fromJSON(needs.changes.outputs.services) }}
     uses: ./.github/workflows/_service-ci.yml
