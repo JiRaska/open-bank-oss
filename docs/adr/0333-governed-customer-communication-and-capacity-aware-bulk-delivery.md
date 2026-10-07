@@ -201,6 +201,11 @@ holds a running run before the next page. These values are still operator-suppli
 for the target environment, and live saturation does not yet trigger an automatic hold. Multi-step
 journeys can exceed the one-message lower bound. This is a fail-closed necessary-condition check,
 not D4 capacity proof or authority to enable the mass flag.
+Each leased page now recalculates the time left from the run's creation timestamp. An expired run
+is held, and admission uses remaining recipients against whole remaining one-minute slots. The
+provider lower bound conservatively uses the full audience because admission is not proof of
+provider acceptance. An operator resume does not reset the clock. This protects the configured
+deadline from being silently extended by a hold, but it still cannot guarantee completion.
 Notification-service's marketing ContactPolicyGate now reads the same live consent-service
 suppression list as campaign-service. A matching entry denies before counters or consent; an
 unavailable list yields GATE_UNAVAILABLE and no marketing dispatch. The two services still count

@@ -279,6 +279,36 @@ class BulkAdmissionServiceTest {
     }
 
     @Test
+    fun `expired completion deadline holds a prepared run before admission`(): Unit = runBlocking {
+        val service = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
+        store.run = service.start(campaignId, "maker").copy(
+            createdAt = Instant.now().minusSeconds(11 * 60),
+            audienceCount = 2,
+        )
+
+        service.tick()
+
+        assertThat(store.run?.state).isEqualTo(BulkRunState.HELD)
+        assertThat(store.run?.lastError).isEqualTo("COMPLETION_DEADLINE_EXPIRED")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `elapsed time makes remaining admission infeasible`(): Unit = runBlocking {
+        val service = configuredService(campaigns, enrolment, store, 2, true, deadline = 10)
+        store.run = service.start(campaignId, "maker").copy(
+            createdAt = Instant.now().minusSeconds(8 * 60),
+            audienceCount = 4,
+        )
+
+        service.tick()
+
+        assertThat(store.run?.state).isEqualTo(BulkRunState.HELD)
+        assertThat(store.run?.lastError).isEqualTo("ADMISSION_DEADLINE_INFEASIBLE")
+        coVerify(exactly = 0) { enrolment.enrolParties(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `small-run capacity does not unlock mass activation`(): Unit = runBlocking {
         val service = configuredService(campaigns, enrolment, store, 2)
 

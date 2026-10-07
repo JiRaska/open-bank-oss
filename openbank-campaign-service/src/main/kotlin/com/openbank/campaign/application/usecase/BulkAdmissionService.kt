@@ -198,19 +198,24 @@ class BulkAdmissionService @Inject constructor(
         }
     }
 
-    private fun capacityHoldReason(run: BulkRun): String? = when {
-        pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || run.pageSize > pageSize -> "CAPACITY_BUDGET_REDUCED"
-        maxBulkAudience !in 1..MAX_BULK_AUDIENCE -> "AUDIENCE_LIMIT_INVALID"
-        (run.audienceCount ?: 0) > maxBulkAudience -> "AUDIENCE_LIMIT_REDUCED"
-        deadlineMinutes <= 0 -> "DEADLINE_NOT_CONFIGURED"
-        !capacityPlanConfigured() -> "CAPACITY_PLAN_NOT_CONFIGURED"
-        run.audienceCount != null && admissionSlots(run.audienceCount, run.pageSize.toLong()) > deadlineMinutes ->
-            "ADMISSION_DEADLINE_INFEASIBLE"
-        run.audienceCount != null && admissionSlots(run.audienceCount, dispatchCapacityPerMinute) > deadlineMinutes ->
-            "DISPATCH_DEADLINE_INFEASIBLE"
-        run.pageSize.toDouble() / SECONDS_PER_MINUTE * clickFraction * clickBurstFactor > landingCapacityRps ->
-            "LANDING_BURST_INFEASIBLE"
-        else -> null
+    private fun capacityHoldReason(run: BulkRun): String? {
+        val remainingMinutes = remainingCapacityMinutes(run, deadlineMinutes)
+        return when {
+            pageSize !in 1..SegmentPage.MAX_PAGE_SIZE || run.pageSize > pageSize -> "CAPACITY_BUDGET_REDUCED"
+            maxBulkAudience !in 1..MAX_BULK_AUDIENCE -> "AUDIENCE_LIMIT_INVALID"
+            (run.audienceCount ?: 0) > maxBulkAudience -> "AUDIENCE_LIMIT_REDUCED"
+            deadlineMinutes <= 0 -> "DEADLINE_NOT_CONFIGURED"
+            remainingMinutes <= 0 -> "COMPLETION_DEADLINE_EXPIRED"
+            !capacityPlanConfigured() -> "CAPACITY_PLAN_NOT_CONFIGURED"
+            admissionDeadlineInfeasible(run, remainingMinutes) ->
+                "ADMISSION_DEADLINE_INFEASIBLE"
+            run.audienceCount != null &&
+                admissionSlots(run.audienceCount, dispatchCapacityPerMinute) > remainingMinutes ->
+                "DISPATCH_DEADLINE_INFEASIBLE"
+            run.pageSize.toDouble() / SECONDS_PER_MINUTE * clickFraction * clickBurstFactor > landingCapacityRps ->
+                "LANDING_BURST_INFEASIBLE"
+            else -> null
+        }
     }
 
     private fun capacityPlanConfigured(): Boolean = dispatchCapacityPerMinute > 0 &&
@@ -221,9 +226,6 @@ class BulkAdmissionService @Inject constructor(
         clickFraction <= 1 &&
         clickBurstFactor.isFinite() &&
         clickBurstFactor >= 1
-
-    private fun admissionSlots(audienceCount: Long, capacityPerMinute: Long): Long =
-        audienceCount / capacityPerMinute + if (audienceCount % capacityPerMinute == 0L) 0 else 1
 
     private suspend fun prepareAudience(claim: ClaimedBulkRun) {
         val campaign = campaigns.findById(claim.run.campaignId) ?: throw CampaignNotFoundException(claim.run.campaignId)
@@ -245,3 +247,15 @@ class BulkAdmissionService @Inject constructor(
 }
 
 private class AudienceLimitExceededException : IllegalStateException("bulk audience exceeds the configured limit")
+
+private fun admissionDeadlineInfeasible(run: BulkRun, remainingMinutes: Long): Boolean = run.audienceCount != null &&
+    admissionSlots((run.audienceCount - run.admitted).coerceAtLeast(0), run.pageSize.toLong()) > remainingMinutes
+
+private fun admissionSlots(audienceCount: Long, capacityPerMinute: Long): Long =
+    audienceCount / capacityPerMinute + if (audienceCount % capacityPerMinute == 0L) 0 else 1
+
+private fun remainingCapacityMinutes(run: BulkRun, deadlineMinutes: Long): Long = if (deadlineMinutes > 0) {
+    Duration.between(Instant.now(), run.createdAt.plus(Duration.ofMinutes(deadlineMinutes))).toMinutes()
+} else {
+    0
+}
