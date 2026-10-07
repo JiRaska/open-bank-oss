@@ -75,8 +75,10 @@ on:
         description: >-
           Space-separated module(s) to rebuild, e.g. 'openbank-party-service'. Must be services
           that changed in the current HEAD (or are dependents of a changed shared library).
-          Leave blank only when reconcile=true; a blank manual dispatch of the full fleet is
-          not allowed because it creates NOT_ASKED / missing-pact failures (#3318).
+          With reconcile=true, this instead limits recovery to the listed stale services;
+          leave blank to use the normal capped reconcile rotation. A blank manual dispatch
+          without reconcile=true is not allowed because it creates NOT_ASKED / missing-pact
+          failures (#3318).
         required: false
         default: ""
       codeploy:
@@ -102,10 +104,10 @@ on:
       reconcile:
         description: >-
           Run the scheduled reconcile logic immediately (issue #2020). Instead of building the
-          listed services at the current HEAD, re-drive every stranded service to the correct
-          per-service commit, using the same logic as the every-3h schedule tick. This is the
-          safe way to recover stale gitops tags when the current HEAD did not change those
-          services. When reconcile is true, `services` is ignored and `codeploy` is not used.
+          listed services at the current HEAD, re-drive stale services to the correct
+          per-service commit, using the same contract gates as the every-3h schedule tick.
+          Supply `services` to restrict the recovery; leave it blank for the normal capped
+          rotation. `codeploy` is not used.
         type: boolean
         required: false
         default: false
@@ -237,13 +239,17 @@ jobs:
             ALL_SERVICES='openbank-account-service openbank-ledger-service openbank-transaction-service openbank-pid-service openbank-balance-service openbank-consent-service openbank-psd2-service openbank-tpp-registry-service openbank-agent-service openbank-copilot-service openbank-sca-service openbank-party-service openbank-notification-service openbank-audit-service openbank-kyc-service openbank-document-service openbank-sepa-payment openbank-domestic-payment openbank-aml-service openbank-card-issuance-service openbank-fx-service openbank-standing-order-service openbank-swift-service openbank-sanctions-service openbank-fraud-service openbank-security-scanner openbank-product-catalog openbank-clearing-service openbank-interest-service openbank-dispute-service openbank-engagement-service openbank-sepa-instant openbank-lending-service openbank-statement-service openbank-sdd-service openbank-customer-edge openbank-onboarding-service openbank-settlement-service openbank-finops-agent openbank-devops-agent openbank-billing-service openbank-anacredit-service openbank-control-liveness-sentinel openbank-governance-auditor openbank-release-steward openbank-docs-truth-agent openbank-authz-policy-auditor openbank-flaky-test-hunter openbank-clearing-simulator openbank-vop-service openbank-finrep-service openbank-mcp-service openbank-ap2-service openbank-campaign-service openbank-referral-service openbank-delegation-service openbank-kyb-service openbank-case-coordinator-agent openbank-analytics-sink openbank-incentive-service openbank-communication-service openbank-wealth-service openbank-context-service openbank-risk-engine openbank-loyalty-service openbank-treasury-service openbank-card-processing-service openbank-document-renderer'
 
           reconcile_candidates() {
+            local allowed="$ALL_SERVICES"
+            if [ -n "${1:-}" ]; then
+              allowed="$(bash .github/scripts/select-reconcile-services.sh "$ALL_SERVICES" "$1")" || return 1
+            fi
             # Scheduled and on-demand reconcile must use the hold on LIVE main.
             # Filter before the probe's oldest-first cap and before any build work.
             git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || return 1
             local held
             held="$("${RUNNER_TEMP}/deploy-hold-venv/bin/python" \
               .github/scripts/check-deploy-holds.py --root . --list-holds --rules-ref origin/main)" || return 1
-            RECONCILE_SERVICES="$ALL_SERVICES" RECONCILE_HOLDS="$held" \
+            RECONCILE_SERVICES="$allowed" RECONCILE_HOLDS="$held" \
               bash .github/scripts/auto-deploy-reconcile-lag.sh
           }
 
@@ -319,7 +325,7 @@ jobs:
             # Reconcile on demand: use the same logic as the schedule tick, which picks the
             # correct per-service commit instead of forcing everything onto the current HEAD.
             if [ "${{ github.event.inputs.reconcile }}" = "true" ]; then
-              SERVICES_JSON="$(reconcile_candidates)"
+              SERVICES_JSON="$(reconcile_candidates "$INPUT_SERVICES")"
               if [ "$SERVICES_JSON" = "[]" ] || [ -z "$SERVICES_JSON" ]; then
                 echo "Reconcile: every deployable service is up to date."
                 echo "services=[]" >> "$GITHUB_OUTPUT"
@@ -1201,6 +1207,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          TARGETED_RECONCILE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true' && github.event.inputs.services != '' }}
         run: |
           set -euo pipefail
           # Recompute against LIVE main (#3194). Same exposure admin-ui-deploy.yml has: the
@@ -1280,7 +1287,8 @@ jobs:
           # then land as ONE commit on main instead of one each. A pin is carried only while main
           # still holds the tag that PR replaced, so a service main has moved since is never
           # rewound; this run's own pins always win. An ARMED PR is left alone (already landing).
-          if [ -n "${GH_TOKEN:-}" ]; then
+          # A targeted recovery must not absorb unrelated deferred image pins.
+          if [ -n "${GH_TOKEN:-}" ] && [ "$TARGETED_RECONCILE" != "true" ]; then
             OWN_IMAGES="$(echo "$IMAGE_TAGS" | jq -r --arg r "$ECR_REGISTRY" 'keys[] | "\($r)/\(.)"' | tr '\n' ' ')"
             # Re-read the live hold after the main reset. Filtering this run's tags alone
             # is insufficient: an older unarmed PR may contain a held image pin.
@@ -1432,7 +1440,7 @@ jobs:
       # reached 7 of the repo's 23 open PRs. Runs BEFORE the signature guard so a run that later
       # fails the guard still leaves exactly one current deploy PR behind, not a growing pile.
       - name: Close superseded deploy PRs
-        if: steps.gitops_pr.outputs.pull-request-number != ''
+        if: steps.gitops_pr.outputs.pull-request-number != '' && !(github.event_name == 'workflow_dispatch' && github.event.inputs.reconcile == 'true' && github.event.inputs.services != '')
         env:
           GH_TOKEN: ${{ steps.app_token.outputs.token || secrets.GITHUB_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
