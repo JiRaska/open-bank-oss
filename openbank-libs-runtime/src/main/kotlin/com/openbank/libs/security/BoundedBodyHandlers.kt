@@ -59,8 +59,8 @@ object BoundedBodyHandlers {
             if (result.isDone) return
             for (bb in item) {
                 if (bb.remaining() > maxBytes - buffer.size()) {
-                    subscription?.cancel()
                     result.completeExceptionally(IOException("response body exceeds $maxBytes bytes"))
+                    subscription?.cancel()
                     return
                 }
                 val bytes = ByteArray(bb.remaining())
