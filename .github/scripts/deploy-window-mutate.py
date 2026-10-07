@@ -81,6 +81,8 @@ def action(pr: dict, head: str, base: str, required: list[str], reviews: int) ->
 
 
 def verify_source(repo: str, number: int, head_name: str, selected_main: str) -> None:
+    if head_name.startswith(DEPLOY_PREFIXES[1]):
+        raise ValueError("Admin UI image source provenance is not verified; see #12211")
     run("git", "fetch", "--depth=100", "origin", "main")
     if run("git", "rev-parse", "origin/main") != selected_main:
         raise ValueError("main changed before source verification; retry selection")
@@ -114,6 +116,14 @@ def self_test() -> None:
     assert action(pr, sha, base, checks, reviews) == "MERGE"  # CLEAN never arms
     assert action({**pr, "mergeStateStatus": "BLOCKED"}, sha, base, checks, reviews) == "ARM"
     assert action({**pr, "mergeStateStatus": "PENDING"}, sha, base, checks, reviews) == "ARM"
+    admin_pr = {**pr, "headRefName": DEPLOY_PREFIXES[1] + base}
+    assert action(admin_pr, sha, base, checks, reviews) == "MERGE"
+    try:
+        verify_source("example/open-bank", 1, admin_pr["headRefName"], base)
+    except ValueError as exc:
+        assert "#12211" in str(exc)
+    else:
+        raise AssertionError("Admin UI deploy with unverified image provenance accepted")
     assert action({**pr, "mergeStateStatus": "CLEAN", "reviewDecision": "APPROVED"},
                   sha, base, checks, 1) == "MERGE"
     for bad, h, b, r in [
