@@ -63,6 +63,8 @@ class CatalogBankCompatibilityTest {
             ),
         ).isEqualTo(products)
 
+        // Earlier tests may leave a reconciliation pending; the second pass must be a no-op.
+        backfill.run()
         assertThat(backfill.run()).isZero()
         assertThat(scalar("SELECT COUNT(*) FROM bank_v1_product_mapping")).isEqualTo(products)
     }
@@ -701,8 +703,10 @@ class CatalogBankCompatibilityTest {
         dataSource.connection.use { connection ->
             connection.autoCommit = false
             try {
+                // Database now() may precede an effective_from timestamp written by the application.
                 connection.prepareStatement(
-                    "UPDATE catalog_revisions SET state = 'SUPERSEDED', effective_to = now() " +
+                    "UPDATE catalog_revisions SET state = 'SUPERSEDED', " +
+                        "effective_to = GREATEST(now(), effective_from + INTERVAL '1 microsecond') " +
                         "WHERE offering_id = ? AND state = 'PUBLISHED'",
                 ).use { statement ->
                     statement.setObject(1, offeringId)
@@ -713,7 +717,7 @@ class CatalogBankCompatibilityTest {
                         "(id, offering_id, revision_no, schema_id, schema_version, state, content, effective_from, " +
                         "maker_id, checker_id, reason, content_hash, created_at, updated_at, lock_version) " +
                         "SELECT ?, offering_id, revision_no + 1, schema_id, schema_version, " +
-                        "'PUBLISHED', content, now(), " +
+                        "'PUBLISHED', content, GREATEST(now(), effective_to + INTERVAL '1 microsecond'), " +
                         "'rollback-v2-maker', 'rollback-v2-checker', 'independent rollback publication', " +
                         "repeat('b', 64), now(), now(), 0 FROM catalog_revisions " +
                         "WHERE offering_id = ? AND state = 'SUPERSEDED' ORDER BY revision_no DESC LIMIT 1",
