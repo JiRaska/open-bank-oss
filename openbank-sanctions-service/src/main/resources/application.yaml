@@ -97,6 +97,13 @@ quarkus:
   # Same override, same reason, as openbank-aml-service's %test profile.
   authz:
     enforce: "false"
+  # The tests assert transactional outbox rows, not broker delivery. Avoid a producer that
+  # retries localhost:29092 for the whole suite when no Kafka broker is present.
+  mp:
+    messaging:
+      outgoing:
+        sanctions-events-out:
+          connector: smallrye-in-memory
 
 kafka:
   bootstrap:
