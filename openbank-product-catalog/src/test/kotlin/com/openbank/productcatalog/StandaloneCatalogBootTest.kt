@@ -21,6 +21,7 @@ import org.hamcrest.Matchers.equalTo
 import org.hamcrest.Matchers.everyItem
 import org.hamcrest.Matchers.hasItem
 import org.junit.jupiter.api.Test
+import org.yaml.snakeyaml.Yaml
 import javax.sql.DataSource
 
 abstract class StandaloneCatalogBootContract {
@@ -67,6 +68,49 @@ class EmptyStandaloneCatalogBootTest : StandaloneCatalogBootContract() {
             .statusCode(404)
         given().get("/api/v1/fees").then().statusCode(404)
         assertNoBankCompatibilityData()
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST")
+    fun `disabled v1 documented 404s conform to the published ApiError alternative`() {
+        val spec = Thread.currentThread().contextClassLoader.getResourceAsStream("openapi.yaml")!!
+            .use { Yaml().load<Map<String, Any?>>(it) }
+        val paths = spec["paths"] as Map<String, Map<String, Any?>>
+        val schemas = ((spec["components"] as Map<String, Any?>)["schemas"] as Map<String, Map<String, Any?>>)
+        val apiError = schemas.getValue("ApiError")
+        val required = apiError["required"] as List<String>
+        val properties = apiError["properties"] as Map<String, Any?>
+        val documented404s = listOf(
+            Triple("get", "/api/v1/products/{id}", "/api/v1/products/does-not-exist"),
+            Triple("put", "/api/v1/products/{id}", "/api/v1/products/does-not-exist"),
+            Triple("get", "/api/v1/products/by-code/{code}", "/api/v1/products/by-code/DOES_NOT_EXIST"),
+            Triple("post", "/api/v1/products/{id}/activate", "/api/v1/products/does-not-exist/activate"),
+            Triple("post", "/api/v1/products/{id}/deactivate", "/api/v1/products/does-not-exist/deactivate"),
+            Triple("get", "/api/v1/products/{id}/fees", "/api/v1/products/does-not-exist/fees"),
+        )
+        documented404s.forEach { (method, specPath, requestPath) ->
+            val response = when (method) {
+                "get" -> given().get(requestPath)
+                "post" -> given().post(requestPath)
+                else -> given().contentType("application/json")
+                    .body("""{"code":"TEST_PROD","name":"Test","type":"SAVINGS","currency":"EUR"}""")
+                    .put(requestPath)
+            }.then().statusCode(404)
+            val body = response.extract().jsonPath().getMap<String, Any?>("")
+            val operation = paths.getValue(specPath)[method] as Map<String, Any?>
+            val responses = operation["responses"] as Map<String, Map<String, Any?>>
+            val content = responses.getValue("404")["content"] as Map<String, Map<String, Any?>>
+            val json = content.getValue("application/json")["schema"] as Map<String, Any?>
+            val refs = (json["oneOf"] as List<Map<String, String>>).map { it.getValue("\$ref").substringAfterLast('/') }
+
+            assertThat(refs).describedAs("%s %s", method, specPath)
+                .containsExactlyInAnyOrder("LegacyError", "ApiError")
+            assertThat(body.keys).describedAs("%s %s body", method, requestPath)
+                .containsAll(required).doesNotContain("error")
+            assertThat(body.keys).allMatch(properties::containsKey)
+            assertThat(body["status"]).isEqualTo(404)
+            assertThat(body["code"]).isEqualTo("NOT_FOUND")
+        }
     }
 }
 
