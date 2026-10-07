@@ -1,0 +1,250 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright (c) OpenBank contributors. Licensed under the Apache License, Version 2.0.
+// See LICENSE in the repository root or https://www.apache.org/licenses/LICENSE-2.0 for details.
+
+package com.openbank.domestic.infrastructure.rest
+
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.domestic.application.usecase.CzechDomesticIban
+import com.openbank.domestic.infrastructure.persistence.entity.BusinessPaymentBatchDraftEntity
+import io.quarkus.hibernate.reactive.panache.Panache
+import io.quarkus.hibernate.reactive.panache.kotlin.PanacheRepository
+import io.smallrye.mutiny.coroutines.awaitSuspending
+import jakarta.annotation.security.RolesAllowed
+import jakarta.enterprise.context.ApplicationScoped
+import jakarta.inject.Inject
+import jakarta.persistence.LockModeType
+import jakarta.ws.rs.Consumes
+import jakarta.ws.rs.ForbiddenException
+import jakarta.ws.rs.GET
+import jakarta.ws.rs.HeaderParam
+import jakarta.ws.rs.POST
+import jakarta.ws.rs.PUT
+import jakarta.ws.rs.Path
+import jakarta.ws.rs.PathParam
+import jakarta.ws.rs.Produces
+import jakarta.ws.rs.QueryParam
+import jakarta.ws.rs.core.MediaType
+import jakarta.ws.rs.core.Response
+import org.eclipse.microprofile.jwt.JsonWebToken
+import java.security.MessageDigest
+import java.time.Instant
+import java.util.UUID
+
+/** Draft-only aggregate. It has no submit endpoint and cannot dispatch money. */
+@Path("/api/v1/business-payment-batches")
+@Produces(MediaType.APPLICATION_JSON)
+@Consumes(MediaType.APPLICATION_JSON)
+@RolesAllowed("ROLE_OPERATOR", "ROLE_PAYMENTS")
+class BusinessPaymentBatchDraftResource(
+    private val store: BusinessPaymentBatchDraftStore,
+    private val mapper: ObjectMapper,
+) {
+    @Inject
+    lateinit var jwt: JsonWebToken
+
+    private fun trustedEdge() {
+        if (jwt.getClaim<String>("preferred_username") != "service-account-openbank-edge" ||
+            jwt.getClaim<String>("azp") != "openbank-edge"
+        ) {
+            throw ForbiddenException("trusted edge required")
+        }
+    }
+
+    data class Item(
+        val itemId: UUID,
+        val creditorAccountNumber: String,
+        val creditorBankCode: String,
+        val creditorName: String,
+        val amountMinor: Long,
+        val currency: String,
+        val variableSymbol: String? = null,
+        val messageForPayee: String? = null,
+    )
+
+    data class Create(val debtorAccountId: UUID, val items: List<Item> = emptyList())
+    data class Replace(val items: List<Item>)
+
+    @POST
+    suspend fun create(
+        request: Create,
+        @HeaderParam("X-Customer-Party-Id") entity: UUID?,
+        @HeaderParam("X-Actor-Party-Id") actor: UUID?,
+        @HeaderParam("Idempotency-Key") key: String?,
+    ): Response {
+        trustedEdge()
+        val party = requireNotNull(entity) { "company context required" }
+        val human = requireNotNull(actor) { "human actor required" }
+        val retryKey = requireNotNull(key?.takeIf { it.isNotBlank() && it.length <= 128 }) {
+            "Idempotency-Key required (1..128)"
+        }
+        val summary = validate(request.items)
+        val hash = sha256(mapper.writeValueAsBytes(request))
+        val (saved, replayed) = store.create(party, human, retryKey, hash, request, summary)
+        return Response.status(if (replayed) 200 else 201).entity(view(saved, 0)).build()
+    }
+
+    @GET
+    suspend fun list(
+        @HeaderParam("X-Customer-Party-Id") entity: UUID?,
+        @QueryParam("page") page: Int?,
+        @QueryParam("size") size: Int?,
+    ): Response {
+        trustedEdge()
+        val party = requireNotNull(entity) { "company context required" }
+        val p = page ?: 0
+        val s = size ?: 20
+        require(p in 0..1000 && s in 1..20) { "page or size out of range" }
+        val body = mapOf("data" to store.list(party, p, s).map { view(it, null) }, "page" to p, "size" to s)
+        return Response.ok(body).build()
+    }
+
+    @GET
+    @Path("/{id}")
+    suspend fun get(
+        @HeaderParam("X-Customer-Party-Id") entity: UUID?,
+        @PathParam("id") id: UUID,
+        @QueryParam("page") page: Int?,
+    ): Response {
+        trustedEdge()
+        val party = requireNotNull(entity) { "company context required" }
+        val p = page ?: 0
+        require(p in 0..4) { "page out of range" }
+        val saved = store.get(party, id) ?: return Response.status(404).build()
+        return Response.ok(view(saved, p)).build()
+    }
+
+    @PUT
+    @Path("/{id}/items")
+    suspend fun replace(
+        @HeaderParam("X-Customer-Party-Id") entity: UUID?,
+        @PathParam("id") id: UUID,
+        @HeaderParam("If-Match") ifMatch: String?,
+        request: Replace,
+    ): Response {
+        trustedEdge()
+        val party = requireNotNull(entity) { "company context required" }
+        val expected = ifMatch?.trim('"')?.toLongOrNull() ?: return Response.status(428).build()
+        val summary = validate(request.items)
+        val saved = store.replace(party, id, expected, mapper.writeValueAsString(request.items), summary)
+            ?: return Response.status(404).build()
+        return Response.ok(view(saved, 0)).build()
+    }
+
+    private fun view(row: BusinessPaymentBatchDraftEntity, page: Int?): Map<String, Any?> {
+        val items = if (page == null) null else mapper.readTree(row.itemsJson).drop(page * 20).take(20)
+        return mapOf(
+            "id" to row.id, "state" to "DRAFT", "debtorAccountId" to row.debtorAccountId,
+            "itemCount" to row.itemCount, "totalAmountMinor" to row.amountMinor,
+            "currency" to "CZK", "revision" to row.revision,
+            "createdAt" to row.createdAt, "updatedAt" to row.updatedAt, "items" to items,
+        )
+    }
+
+    data class Summary(val count: Int, val total: Long)
+
+    internal fun validate(items: List<Item>): Summary {
+        require(items.size <= 100) { "at most 100 items" }
+        require(items.map { it.itemId }.toSet().size == items.size) { "itemId must be unique" }
+        var total = 0L
+        items.forEach { item ->
+            require(item.amountMinor > 0) { "amountMinor must be positive" }
+            total = try {
+                Math.addExact(total, item.amountMinor)
+            } catch (_: ArithmeticException) {
+                throw IllegalArgumentException("batch total exceeds supported range")
+            }
+            require(item.currency == "CZK") { "only CZK is supported" }
+            require(CzechDomesticIban.fromAccountNumber(item.creditorAccountNumber, item.creditorBankCode) != null) {
+                "invalid Czech creditor account"
+            }
+            require(item.creditorName.isNotBlank() && item.creditorName.length <= 140) { "invalid creditor name" }
+            require(item.variableSymbol == null || item.variableSymbol.matches(Regex("[0-9]{1,10}"))) {
+                "invalid variable symbol"
+            }
+            require(item.messageForPayee == null || item.messageForPayee.length <= 140) { "message too long" }
+        }
+        return Summary(items.size, total)
+    }
+
+    private fun sha256(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256")
+        .digest(bytes).joinToString("") { "%02x".format(it) }
+}
+
+@ApplicationScoped
+class BusinessPaymentBatchDraftStore(private val mapper: ObjectMapper) :
+    PanacheRepository<BusinessPaymentBatchDraftEntity> {
+    suspend fun create(
+        entity: UUID, actor: UUID, key: String, hash: String,
+        request: BusinessPaymentBatchDraftResource.Create,
+        summary: BusinessPaymentBatchDraftResource.Summary,
+    ): Pair<BusinessPaymentBatchDraftEntity, Boolean> {
+        val existing = find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult().awaitSuspending()
+        if (existing != null) {
+            if (existing.requestHash != hash || existing.actorPartyId != actor) throw BatchDraftConflict()
+            return existing to true
+        }
+        val now = Instant.now()
+        val row = BusinessPaymentBatchDraftEntity().apply {
+            id = UUID.randomUUID()
+            entityPartyId = entity
+            actorPartyId = actor
+            idempotencyKey = key
+            requestHash = hash
+            debtorAccountId = request.debtorAccountId
+            itemsJson = mapper.writeValueAsString(request.items)
+            itemCount = summary.count
+            amountMinor = summary.total
+            createdAt = now
+            updatedAt = now
+        }
+        return try {
+            Panache.withTransaction { persist(row).replaceWith(row) }.awaitSuspending() to false
+        } catch (e: RuntimeException) {
+            if (!e.isBatchKeyViolation()) throw e
+            val winner = find("entityPartyId = ?1 and idempotencyKey = ?2", entity, key).firstResult().awaitSuspending()
+                ?: throw e
+            if (winner.requestHash != hash || winner.actorPartyId != actor) throw BatchDraftConflict()
+            winner to true
+        }
+    }
+
+    private fun Throwable.isBatchKeyViolation(): Boolean =
+        generateSequence(this) { cause -> cause.cause.takeIf { it !== cause } }.any { cause ->
+            val constraint = (cause as? org.hibernate.exception.ConstraintViolationException)?.constraintName
+            constraint == "uq_business_batch_idempotency" ||
+                cause.message?.contains("uq_business_batch_idempotency") == true
+        }
+
+    suspend fun get(entity: UUID, id: UUID): BusinessPaymentBatchDraftEntity? =
+        find("entityPartyId = ?1 and id = ?2", entity, id).firstResult().awaitSuspending()
+
+    suspend fun list(entity: UUID, page: Int, size: Int): List<BusinessPaymentBatchDraftEntity> =
+        find("entityPartyId = ?1 order by createdAt desc, id desc", entity)
+            .page(page, size).list().awaitSuspending()
+
+    suspend fun replace(
+        entity: UUID, id: UUID, expected: Long, itemsJson: String,
+        summary: BusinessPaymentBatchDraftResource.Summary,
+    ): BusinessPaymentBatchDraftEntity? = Panache.withTransaction {
+        find("entityPartyId = ?1 and id = ?2", entity, id)
+            .withLock(LockModeType.PESSIMISTIC_WRITE).firstResult().onItem().transform { row ->
+                if (row == null) return@transform null
+                if (row.revision != expected) throw BatchDraftConflict()
+                row.itemsJson = itemsJson
+                row.itemCount = summary.count
+                row.amountMinor = summary.total
+                row.updatedAt = Instant.now()
+                row
+            }
+    }.awaitSuspending()
+}
+
+class BatchDraftConflict : RuntimeException("Draft revision or idempotency key conflicts")
+
+@jakarta.ws.rs.ext.Provider
+class BatchDraftConflictMapper : jakarta.ws.rs.ext.ExceptionMapper<BatchDraftConflict> {
+    override fun toResponse(exception: BatchDraftConflict): Response = Response.status(409)
+        .entity(mapOf("code" to "BATCH_DRAFT_CONFLICT", "error" to exception.message))
+        .build()
+}
