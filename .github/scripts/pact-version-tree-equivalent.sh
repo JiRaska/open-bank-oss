@@ -48,13 +48,14 @@
 #                    excluded is that it is not a build input, not that excluding it is
 #                    convenient. Runtime CONFIG has never been within can-i-deploy's scope on any
 #                    path, push included; this does not narrow the gate.
-#   .github/         CI definitions. The two files that DO reach the image — Dockerfile.deploy
-#                    and auto-deploy.yml, which carries the Gradle flags — are in scope by name.
-#   docs/ pacts/ perf/ fuzz/ scripts/ LICENSES/ .security/ .devcontainer/ .clusterfuzzlite/
-#                    documentation, committed pact artefacts, load tests, fuzz harnesses,
-#                    operator scripts, licence texts — none is read by `:<svc>:quarkusBuild`.
-#                    (A `pacts/` change for THIS service always rides with a `<svc>/src/test`
-#                    change, which is in scope.)
+#   .github/         CI definitions. Dockerfile.deploy reaches the image and is in scope.
+#                    In --contract-inputs mode, _service-ci.yml and its Pact publish/proof
+#                    helpers are also in scope because they govern the contract verdict.
+#   docs/ perf/ fuzz/ scripts/ LICENSES/ .security/ .devcontainer/ .clusterfuzzlite/
+#                    documentation, load tests, fuzz harnesses, operator scripts, licence
+#                    texts — none is read by `:<svc>:quarkusBuild`. `pacts/` is irrelevant
+#                    to the image but IN SCOPE for --contract-inputs: a committed Pact may
+#                    change without a corresponding test-source change.
 #   openbank-admin-ui/ openbank-api-gateway/ openbank-developer-portal/
 #   openbank-document-renderer/
 #                    not Gradle modules; separate build + deploy pipelines.
@@ -122,6 +123,15 @@ GITHUB_IN_SCOPE=(.github/workflows/Dockerfile.deploy)
 
 # Non-module directories that ARE build inputs for every module.
 GLOBAL_IN_SCOPE_DIRS=(gradle config build-logic)
+
+# Contract publication/verification inputs beyond the service's Gradle tree. Keep pacts/
+# conservative across services: a renamed or newly committed consumer Pact must never be
+# waved through just because its source test did not move. The scripts listed here are the
+# helpers _service-ci.yml invokes for publishing and provider-version proof. The comparator
+# itself is intentionally not a historical Pact input: its new mode is what can prove an
+# otherwise unchanged release-only transition after this fix lands.
+CONTRACT_EXTRA_SCOPE=(pacts .github/workflows/_service-ci.yml \
+  .github/scripts/pact-broker-post.sh .github/scripts/prove-pact-provider-version.sh)
 
 # Which subpaths of a DEPENDENCY module are compile inputs. Not a new opinion: this is the repo's
 # own definition, from libs-change-dependents.sh (`^<module>/(src/main|build.gradle.kts)` plus the
@@ -237,6 +247,9 @@ equivalent() {
     for d in "${DEP_SUBPATHS[@]}"; do scope="$scope"$'\n'"$m/$d"; done
   done
   for d in "${GLOBAL_IN_SCOPE_DIRS[@]}" "${GITHUB_IN_SCOPE[@]}"; do scope="$scope"$'\n'"$d"; done
+  if [ "${CONTRACT_INPUTS_ONLY:-0}" = 1 ]; then
+    for d in "${CONTRACT_EXTRA_SCOPE[@]}"; do scope="$scope"$'\n'"$d"; done
+  fi
 
   # 2. Each of them must be the same git object at both commits. A tree object id is a recursive
   #    hash of the whole subtree, so this is byte-equality of every file under it — including mode
@@ -473,6 +486,8 @@ selftest() {
   _expect "release changelog leaves Pact inputs unchanged" EQUIVALENT --contract-inputs svc-a "$c1" "$c2"
   c3="$(_commit svc-a/src/test/T.kt contract-test-changed)"
   _expect "contract mode still counts own tests" DIFFERENT --contract-inputs svc-a "$c2" "$c3"
+  _expect "overlay plus contract mode cannot skip changed Pact tests" DIFFERENT --own-test-overlay --contract-inputs svc-a "$c2" "$c3"
+  _expect "contract plus overlay mode cannot skip changed Pact tests" DIFFERENT --contract-inputs --own-test-overlay svc-a "$c2" "$c3"
   c4="$(_commit svc-a/src/main/A.kt contract-code-changed)"
   _expect "contract mode still counts own production code" DIFFERENT --contract-inputs svc-a "$c3" "$c4"
   c5="$(_commit openbank-libs-domain/src/main/D.kt contract-libs-changed)"
@@ -481,8 +496,16 @@ selftest() {
   _expect "contract mode still counts root build configuration" DIFFERENT --contract-inputs svc-a "$c5" "$c6"
   c7="$(_commit future-contract-input/thing.txt unclassified)"
   _expect "contract mode still refuses an unknown top-level path" DIFFERENT --contract-inputs svc-a "$c6" "$c7"
+  local c8 c9
+  c8="$(_commit pacts/svc-a-provider.json changed)"
+  _expect "committed Pact change does not alter image input" EQUIVALENT svc-a "$c7" "$c8"
+  _expect "contract mode refuses a committed Pact change" DIFFERENT --contract-inputs svc-a "$c7" "$c8"
+  c9="$(_commit .github/workflows/_service-ci.yml changed)"
+  _expect "contract mode refuses a Pact workflow change" DIFFERENT --contract-inputs svc-a "$c8" "$c9"
+  local c10; c10="$(_commit .github/scripts/pact-broker-post.sh changed)"
+  _expect "contract mode refuses a Pact publish helper change" DIFFERENT --contract-inputs svc-a "$c9" "$c10"
 
-  [ "$fail" -eq 0 ] && echo "selftest OK: 34 cases (19 default + 8 --own-test-overlay + 7 --contract-inputs) on real git trees — release metadata changes only contract scope, while source, test, shared-library, root-build, ancestry and unknown-path guards remain fail-closed."
+  [ "$fail" -eq 0 ] && echo "selftest OK: 40 cases (20 default + 8 --own-test-overlay + 10 --contract-inputs + 2 incompatible-mode refusals) on real git trees — release metadata changes only contract scope, while source, test, shared-library, committed Pact, workflow, root-build, ancestry and unknown-path guards remain fail-closed."
   return "$fail"
 }
 
@@ -493,8 +516,23 @@ fi
 
 OWN_TEST_OVERLAY=0
 CONTRACT_INPUTS_ONLY=0
-if [ "${1:-}" = "--own-test-overlay" ]; then OWN_TEST_OVERLAY=1; shift; fi
-if [ "${1:-}" = "--contract-inputs" ]; then CONTRACT_INPUTS_ONLY=1; shift; fi
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --own-test-overlay)
+      if [ "$OWN_TEST_OVERLAY" = 1 ] || [ "$CONTRACT_INPUTS_ONLY" = 1 ]; then
+        verdict DIFFERENT "--own-test-overlay and --contract-inputs are mutually exclusive — refusing to skip Pact inputs"
+        exit 2
+      fi
+      OWN_TEST_OVERLAY=1; shift ;;
+    --contract-inputs)
+      if [ "$CONTRACT_INPUTS_ONLY" = 1 ] || [ "$OWN_TEST_OVERLAY" = 1 ]; then
+        verdict DIFFERENT "--own-test-overlay and --contract-inputs are mutually exclusive — refusing to skip Pact inputs"
+        exit 2
+      fi
+      CONTRACT_INPUTS_ONLY=1; shift ;;
+    *) break ;;
+  esac
+done
 
 if [ $# -ne 3 ]; then
   verdict DIFFERENT "usage: $0 <service> <pact_sha> <dispatch_sha> — refusing rather than assuming equivalence"
