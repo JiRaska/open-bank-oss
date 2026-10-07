@@ -159,10 +159,18 @@ class CustomerTransactionSearchContractTest {
             Response.ok("""[{"id":"$second","partyId":"$party"},{"id":"$first","partyId":"$party"}]""").build()
         every { upstream.get("http://delegation/api/v1/delegations/grantee/$party", party.toString()) } returns
             Response.ok("[]").build()
+        val transferJson = """
+            {"data":[{
+              "id":"transfer",
+              "sourceAccountId":"$first",
+              "targetAccountId":"$second",
+              "initiatedAt":"2026-01-01T00:00:00Z"
+            }]}
+        """.trimIndent()
         every { upstream.get(match { it.contains("accountId=$first") }, party.toString()) } returns
-            Response.ok("""{"data":[{"id":"transfer","sourceAccountId":"$first","targetAccountId":"$second","initiatedAt":"2026-01-01T00:00:00Z"}]}""").build()
+            Response.ok(transferJson).build()
         every { upstream.get(match { it.contains("accountId=$second") }, party.toString()) } returns
-            Response.ok("""{"data":[{"id":"transfer","sourceAccountId":"$first","targetAccountId":"$second","initiatedAt":"2026-01-01T00:00:00Z"}]}""").build()
+            Response.ok(transferJson).build()
 
         val response = resource(upstream, party).searchTransactions(null, "Alza", 20, 0)
 
