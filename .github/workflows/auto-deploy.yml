@@ -857,7 +857,7 @@ jobs:
               rm -f "${report}"
               continue
             fi
-            if ! trivy convert --format table --severity CRITICAL,HIGH \
+            if ! trivy convert --format table --scanners vuln --severity CRITICAL,HIGH \
                  "${report}" 2>&1 | sed "s/^/[${svc}] /"; then
               echo "[${svc}] Trivy report error — blocking deploy"
               BLOCKED+=("$svc"); FAILED=1
@@ -867,7 +867,7 @@ jobs:
 
             # Exit code 1 means a fixable CRITICAL is present. Conversion errors
             # also fail closed; either way this image cannot be deployed.
-            if ! trivy convert --format table --severity CRITICAL \
+            if ! trivy convert --format table --scanners vuln --severity CRITICAL \
                  --exit-code 1 "${report}" >/dev/null 2>&1; then
               echo "[${svc}] fixable CRITICAL CVEs (or scan error) — blocking deploy"
               BLOCKED+=("$svc"); FAILED=1
