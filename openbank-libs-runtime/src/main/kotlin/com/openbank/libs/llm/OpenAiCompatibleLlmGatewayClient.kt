@@ -8,13 +8,13 @@ import com.fasterxml.jackson.annotation.JsonInclude
 import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
+import com.openbank.libs.security.BoundedBodyHandlers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.jboss.logging.Logger
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -119,7 +119,7 @@ class OpenAiCompatibleLlmGatewayClient(
                 .build()
             // Blocking send off the event loop.
             val resp = withContext(Dispatchers.IO) {
-                http.send(request, HttpResponse.BodyHandlers.ofString())
+                http.send(request, BoundedBodyHandlers.ofString())
             }
             if (resp.statusCode() !in OK_RANGE) {
                 log.warnf("LLM backend %s returned HTTP %d", baseUrl, resp.statusCode())

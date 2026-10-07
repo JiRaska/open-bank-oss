@@ -5,12 +5,12 @@
 package com.openbank.libs.authz
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.openbank.libs.security.BoundedBodyHandlers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
@@ -51,7 +51,7 @@ class OpaSidecarPolicyDecisionPoint(
             .POST(HttpRequest.BodyPublishers.ofString(mapper.writeValueAsString(mapOf("input" to query.toInput()))))
             .build()
 
-        val response = runCatching { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+        val response = runCatching { http.send(request, BoundedBodyHandlers.ofString()) }
             .getOrElse { throw PolicyDecisionException("OPA call failed: ${it.message}", it) }
 
         if (response.statusCode() !in 200..299) {
