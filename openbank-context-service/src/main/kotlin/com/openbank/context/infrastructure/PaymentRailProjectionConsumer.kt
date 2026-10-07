@@ -141,7 +141,10 @@ class PaymentRailProjectionConsumer(
               node_type = EXCLUDED.node_type, source_ref = EXCLUDED.source_ref,
               display_label = EXCLUDED.display_label, valid_from = EXCLUDED.valid_from,
               recorded_at = EXCLUDED.recorded_at, source_version = EXCLUDED.source_version
-            WHERE context_nodes.source_system = EXCLUDED.source_system
+            WHERE context_nodes.node_key = EXCLUDED.node_key
+              AND context_nodes.bank_scope = EXCLUDED.bank_scope
+              AND context_nodes.projection_generation = EXCLUDED.projection_generation
+              AND context_nodes.source_system = EXCLUDED.source_system
               AND context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         node.values(bankScope, projectionGeneration, clock.instant()),

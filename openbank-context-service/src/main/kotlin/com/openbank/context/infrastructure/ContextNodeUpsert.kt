@@ -14,6 +14,7 @@ internal fun upsertContextNode(session: Mutiny.Session, sql: String, values: Map
     val mutation = session.createNativeMutationQuery(sql)
     values.forEach { (name, value) -> mutation.setParameter(name, value) }
     return mutation.executeUpdate().flatMap { changed ->
+        if (changed != 0) return@flatMap Uni.createFrom().item(changed)
         session.createNativeQuery(
             """SELECT EXISTS (SELECT 1 FROM context_nodes
                WHERE node_row_id = :rowId AND node_key = :key

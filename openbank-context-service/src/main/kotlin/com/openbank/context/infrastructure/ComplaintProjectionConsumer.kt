@@ -125,7 +125,10 @@ class ComplaintProjectionConsumer(
               valid_to = NULL,
               recorded_at = EXCLUDED.recorded_at,
               source_version = EXCLUDED.source_version
-            WHERE context_nodes.source_version < EXCLUDED.source_version
+            WHERE context_nodes.node_key = EXCLUDED.node_key
+              AND context_nodes.bank_scope = EXCLUDED.bank_scope
+              AND context_nodes.projection_generation = EXCLUDED.projection_generation
+              AND context_nodes.source_version < EXCLUDED.source_version
               AND NOT (EXCLUDED.node_type = 'TRANSACTION' AND context_nodes.source_system = 'domestic-payment')
         """.trimIndent(),
         mapOf(

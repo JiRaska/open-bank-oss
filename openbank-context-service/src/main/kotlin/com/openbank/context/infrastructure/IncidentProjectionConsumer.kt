@@ -173,7 +173,10 @@ class IncidentProjectionConsumer(
             ON CONFLICT (node_row_id) DO UPDATE SET
               display_label = EXCLUDED.display_label, valid_from = EXCLUDED.valid_from,
               recorded_at = EXCLUDED.recorded_at, source_version = EXCLUDED.source_version
-            WHERE context_nodes.source_version < EXCLUDED.source_version
+            WHERE context_nodes.node_key = EXCLUDED.node_key
+              AND context_nodes.bank_scope = EXCLUDED.bank_scope
+              AND context_nodes.projection_generation = EXCLUDED.projection_generation
+              AND context_nodes.source_version < EXCLUDED.source_version
         """.trimIndent(),
         mapOf(
             "id" to incidentStableId("$bankScope|$projectionGeneration|$key"),

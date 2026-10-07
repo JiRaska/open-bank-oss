@@ -107,8 +107,11 @@ class DomesticPaymentProjectionConsumer(
               valid_to = NULL,
               recorded_at = EXCLUDED.recorded_at,
               source_version = EXCLUDED.source_version
-            WHERE context_nodes.source_system <> EXCLUDED.source_system
-               OR context_nodes.source_version < EXCLUDED.source_version
+            WHERE context_nodes.node_key = EXCLUDED.node_key
+              AND context_nodes.bank_scope = EXCLUDED.bank_scope
+              AND context_nodes.projection_generation = EXCLUDED.projection_generation
+              AND (context_nodes.source_system <> EXCLUDED.source_system
+                   OR context_nodes.source_version < EXCLUDED.source_version)
         """.trimIndent(),
         mapOf(
             "rowId" to stableId("$bankScope|$projectionGeneration|${node.key}"),
